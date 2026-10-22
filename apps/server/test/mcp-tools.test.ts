@@ -850,6 +850,7 @@ describe("ask_operator", () => {
         runId: RUN,
         text: "Lanes per customer, or one global list?",
         at: NOW,
+        passedAt: null,
       },
     ]);
     expect(emitted).toContain("attention");

@@ -104,7 +104,7 @@ export interface Engine {
   /** After a poll: every active looped run of the repo. */
   reconcileRepo(repoId: RepoId): Promise<void>;
   /** The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes. */
-  onOperatorMessage(runId: string): Promise<void>;
+  onOperatorMessage(runId: string, by?: "CAPCOM" | "FLIGHT"): Promise<void>;
   status(): { on: boolean; note: string | null };
   /** How many CI excerpts are held for a busy seat (a test seam). */
   excerptsHeld(): number;
@@ -899,7 +899,7 @@ export function createEngine(deps: EngineDeps): Engine {
       await Promise.all(runs.map((r) => reconcileRun(r.id)));
     },
 
-    onOperatorMessage(runId) {
+    onOperatorMessage(runId, by = "CAPCOM") {
       if (!live()) return Promise.resolve();
       return onChain(runId, async () => {
         const run = store.run(runId);
@@ -946,7 +946,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
-        store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, "resumed by CAPCOM", at);
+        store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
         await pass(run.id);
       });

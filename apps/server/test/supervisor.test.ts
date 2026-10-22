@@ -1335,7 +1335,14 @@ describe("startWatch", () => {
     expect(argv[argv.indexOf("--tools") + 1]).toBe(READONLY_BUILTINS.join(","));
     expect(
       argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--disallowedTools")),
-    ).toEqual([...READONLY_TOOLS, "mcp__mc__log_decision"]);
+    ).toEqual([
+      ...READONLY_TOOLS,
+      "mcp__mc__log_decision",
+      "mcp__mc__read_ticket",
+      "mcp__mc__answer_question",
+      "mcp__mc__start_seat",
+      "mcp__mc__message_seat",
+    ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
 

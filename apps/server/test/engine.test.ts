@@ -892,6 +892,15 @@ describe("The operator's message", () => {
     expect(noteKeys()).toEqual([`blocked:${RUN}:1`]);
   });
 
+  it("FLIGHT's un-park records resumed by FLIGHT", async () => {
+    await parkOnCi();
+    clock += MIN;
+    await h.engine.onOperatorMessage(RUN, "FLIGHT");
+    expect(loopOf().parked).toBeNull();
+    expect(loopTexts()).toContain("resumed by FLIGHT");
+    expect(loopTexts()).not.toContain("resumed by CAPCOM");
+  });
+
   it("a parked run whose push is on origin with its PR open goes back to ci, from now", async () => {
     await parkOnCi();
     clock += 40 * MIN;

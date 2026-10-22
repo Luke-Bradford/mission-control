@@ -42,7 +42,13 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 };
 
 /** The mc tools only the FLIGHT seat (a `watch` role) holds; later FLIGHT tickets append to it. */
-export const FLIGHT_TOOLS: readonly McToolName[] = [MC_TOOL_NAMES.logDecision];
+export const FLIGHT_TOOLS: readonly McToolName[] = [
+  MC_TOOL_NAMES.logDecision,
+  MC_TOOL_NAMES.readTicket,
+  MC_TOOL_NAMES.answerQuestion,
+  MC_TOOL_NAMES.startSeat,
+  MC_TOOL_NAMES.messageSeat,
+];
 
 /**
  * The mc tools each mode has. `base`: every seat of the mode (`*_TOOLS` below lists the same);

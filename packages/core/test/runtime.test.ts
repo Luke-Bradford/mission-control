@@ -221,6 +221,10 @@ describe("the allowlist in phase 2b", () => {
       reportFindings: "mcp__mc__report_findings",
       reportPlan: "mcp__mc__report_plan",
       logDecision: "mcp__mc__log_decision",
+      readTicket: "mcp__mc__read_ticket",
+      answerQuestion: "mcp__mc__answer_question",
+      startSeat: "mcp__mc__start_seat",
+      messageSeat: "mcp__mc__message_seat",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit]);
   });
@@ -377,7 +381,7 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "watch",
-        tools: ["log_decision"],
+        tools: ["log_decision", "read_ticket", "answer_question", "start_seat", "message_seat"],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
     });
@@ -441,7 +445,13 @@ describe("mc tool grants", () => {
   });
 
   it("a read-only seat may be granted FLIGHT's tools, and no git write", () => {
-    expect(FLIGHT_TOOLS).toEqual(["log_decision"]);
+    expect(FLIGHT_TOOLS).toEqual([
+      "log_decision",
+      "read_ticket",
+      "answer_question",
+      "start_seat",
+      "message_seat",
+    ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
     expect(MC_TOOL_GRANTS.writer.grantable).not.toContain("log_decision");

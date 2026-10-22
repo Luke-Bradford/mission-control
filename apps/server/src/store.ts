@@ -213,6 +213,8 @@ export interface SeatQuestion {
   runId: string;
   text: string;
   at: number;
+  /** When FLIGHT passed it to the operator, else null. */
+  passedAt: number | null;
 }
 
 /** An mc tool failure the operator is told of. */
@@ -470,6 +472,15 @@ const queueRow = (r: Row): QueueRow => ({
   takenAt: r.taken_at as number | null,
 });
 
+const toQuestion = (r: Row): SeatQuestion => ({
+  id: r.id as number,
+  agentId: r.agent_id as string,
+  runId: r.run_id as string,
+  text: r.text as string,
+  at: r.at as number,
+  passedAt: r.passed_at as number | null,
+});
+
 const seatRow = (r: Row): SeatSessionRow => ({
   seatId: r.seat_id as string,
   runId: r.run_id as string | null,
@@ -591,6 +602,8 @@ export class Store {
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("board_items", "item_id", "TEXT");
     this.addColumn("board_items", "project_id", "TEXT");
+    // When FLIGHT passed the question to the operator (it stays open until they answer).
+    this.addColumn("seat_questions", "passed_at", "INTEGER");
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
     this.addColumn("pull_requests", "head_sha", "TEXT");
@@ -2144,7 +2157,7 @@ export class Store {
   }
 
   /** Records a seat's question; returns its id. */
-  addQuestion(q: Omit<SeatQuestion, "id">): number {
+  addQuestion(q: Omit<SeatQuestion, "id" | "passedAt">): number {
     const r = this.db
       .prepare("INSERT INTO seat_questions (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
       .run(q.agentId, q.runId, q.text, q.at);
@@ -2156,13 +2169,25 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM seat_questions WHERE answered_at IS NULL ORDER BY id ASC")
       .all() as Row[];
-    return rows.map((r) => ({
-      id: r.id as number,
-      agentId: r.agent_id as string,
-      runId: r.run_id as string,
-      text: r.text as string,
-      at: r.at as number,
-    }));
+    return rows.map(toQuestion);
+  }
+
+  /** One question by id, answered or not; null when there is none. */
+  question(id: number): (SeatQuestion & { answeredAt: number | null }) | null {
+    const r = this.db.prepare("SELECT * FROM seat_questions WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return r ? { ...toQuestion(r), answeredAt: r.answered_at as number | null } : null;
+  }
+
+  /** Marks an open question passed to the operator; true only when it was open and not yet passed. */
+  passQuestion(id: number, at: number): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE seat_questions SET passed_at = ? WHERE id = ? AND answered_at IS NULL AND passed_at IS NULL",
+      )
+      .run(at, id);
+    return Number(r.changes) > 0;
   }
 
   /** Marks every open question of the seat answered at `at`. */

@@ -1554,6 +1554,22 @@ describe("liveSeatRuns and branchCommitSpan", () => {
   });
 });
 
+describe("passQuestion", () => {
+  it("is true once, and false after the question is answered", () => {
+    const id = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "q?", at: 1 });
+    expect(store.question(id)).toMatchObject({ passedAt: null, answeredAt: null });
+    expect(store.passQuestion(id, 5)).toBe(true);
+    expect(store.passQuestion(id, 6)).toBe(false);
+    expect(store.question(id)).toMatchObject({ passedAt: 5 });
+    expect(store.openQuestions()).toMatchObject([{ id, passedAt: 5 }]);
+    const other = store.addQuestion({ agentId: "guido-2", runId: "r2", text: "q?", at: 1 });
+    store.answerQuestions("guido-2", 7);
+    expect(store.passQuestion(other, 8)).toBe(false);
+    expect(store.question(other)?.answeredAt).toBe(7);
+    expect(store.question(999)).toBeNull();
+  });
+});
+
 describe("flight decisions", () => {
   const dec = (over: Partial<FlightDecision> = {}): Omit<FlightDecision, "id"> => ({
     at: 1000,
