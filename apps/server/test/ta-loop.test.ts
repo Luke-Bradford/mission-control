@@ -586,6 +586,51 @@ describe("stable ids and reconciliation", () => {
     expect(rows[0]).toMatchObject({ id: "shop-app-ta:t1792227912.11", status: "running" });
   });
 
+  it("keeps each process's runs apart when the loop restarts within a minute", async () => {
+    const t2222 = "iteration-20261022T100036Z-2222.1.log";
+    writeFileSync(join(stateDir, t2222), "{}\n");
+    rmSync(join(stateDir, "status.md"));
+    writeFileSync(
+      log(),
+      [
+        "2026-10-22T10:00:00Z === ta_loop start (worktree=/w, max=0, cooldown=120s, pid=1111) ===",
+        "2026-10-22T10:00:01Z --- iteration 1 start",
+        "2026-10-22T10:00:20Z --- iteration 1 FAILED rc=1 result_ok=0 (failures in a row: 3)",
+        "2026-10-22T10:00:35Z === ta_loop start (worktree=/w, max=0, cooldown=120s, pid=2222) ===",
+        "2026-10-22T10:00:36Z --- iteration 1 start",
+        `2026-10-22T10:09:00Z --- iteration 1 OK (transcript: ${t2222})`,
+        "",
+      ].join("\n"),
+    );
+    await collectTaLoop(loop, store, NOW, newTaState(), alive);
+    const rows = byId();
+    expect([...rows.keys()].sort()).toEqual(["shop-app-ta:1111.1", "shop-app-ta:2222.1"]);
+    expect(rows.get("shop-app-ta:1111.1")).toMatchObject({
+      status: "failed",
+      endedAt: Date.parse("2026-10-22T10:00:20Z"),
+    });
+    expect(rows.get("shop-app-ta:1111.1")?.transcriptPath).not.toContain(t2222);
+    expect(rows.get("shop-app-ta:2222.1")).toMatchObject({
+      status: "ok",
+      startedAt: Date.parse("2026-10-22T10:00:36Z"),
+      endedAt: Date.parse("2026-10-22T10:09:00Z"),
+      transcriptPath: join(stateDir, t2222),
+    });
+  });
+
+  it("starts an end-only run when its transcript started", async () => {
+    const name = "iteration-20261022T100036Z-2222.1.log";
+    rmSync(join(stateDir, "status.md"));
+    writeFileSync(log(), `2026-10-22T10:09:00Z --- iteration 1 OK (transcript: ${name})\n`);
+    await collectTaLoop(loop, store, NOW, newTaState(), alive);
+    const rows = store.runs("shop-app-ta", 10);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      startedAt: Date.parse("2026-10-22T10:00:36Z"),
+      endedAt: Date.parse("2026-10-22T10:09:00Z"),
+    });
+  });
+
   it("gives pid-less starts with the same seq at different times distinct ids", async () => {
     writeFileSync(
       log(),
