@@ -631,21 +631,24 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
                 text: readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
               });
             }
-          } else if (
-            gv.touches !== null &&
-            gv.touches.paths.length > 0 &&
-            gv.gate?.hubOnly === true &&
-            gv.gate.strays.every((p) => gv.touches?.paths.includes(p))
-          ) {
-            notes.set(readyNoteKey(runId, rv.P), {
-              noteKind: "ready",
-              text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
-            });
-          } else if (gv.clear && gv.gate !== null && !gv.gate.containsMain) {
-            notes.set(behindNoteKey(runId, rv.P), {
-              noteKind: "flag",
-              text: behindMainText(ticket.ref, n, gv.gate.mainSha),
-            });
+          } else {
+            // only hard-rule files hold it: the operator merges, once the branch has current main
+            const hardOnly =
+              gv.touches !== null &&
+              gv.touches.paths.length > 0 &&
+              gv.gate?.hubOnly === true &&
+              gv.gate.strays.every((p) => gv.touches?.paths.includes(p));
+            if ((gv.clear || hardOnly) && gv.gate !== null && !gv.gate.containsMain) {
+              notes.set(behindNoteKey(runId, rv.P), {
+                noteKind: "flag",
+                text: behindMainText(ticket.ref, n, gv.gate.mainSha),
+              });
+            } else if (hardOnly && gv.touches !== null) {
+              notes.set(readyNoteKey(runId, rv.P), {
+                noteKind: "ready",
+                text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
+              });
+            }
           }
           // otherwise the gate passes or its reads are due: the operator has nothing to do
         }

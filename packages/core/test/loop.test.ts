@@ -2130,6 +2130,23 @@ describe("merge workspace", () => {
     );
   });
 
+  it("a hard-rule touch behind main: the behind note, not the hard-rule ready note", () => {
+    const r = reconcile(
+      merge(
+        {},
+        {
+          touches: { sha: SHA, paths: ["CLAUDE.md"] },
+          gate: gateOf({ strays: ["CLAUDE.md"], containsMain: false }),
+        },
+      ),
+    );
+    noMerge(r);
+    expect(r.actions).toContainEqual(
+      expect.objectContaining({ key: `behind:r1:${SHA}`, noteKind: "flag" }),
+    );
+    expect(r.actions).not.toContainEqual(expect.objectContaining({ key: readyKey }));
+  });
+
   it("the head moved off the pushed sha: no merge", () => {
     noMerge(reconcile(merge({ pr: pr({ ci: "passing", headSha: SHA2 }) })));
     noMerge(reconcile(merge({ headCommit: SHA2 })));
