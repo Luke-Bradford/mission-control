@@ -413,21 +413,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const started = lastHour(["start"], at);
     if (started >= flightStartCap(config)) return fail(capText("started tickets", started));
-    // a planner start and a developer start on one ticket are separate jobs: each counts only its own kind
-    const sameKind = (flightSeat(config)?.session.seats ?? []).filter(
-      (s) => (seatDef(s).loop === "plan") === planner,
+    // A planner start and a developer start on one ticket are separate jobs, so a start by a seat
+    // known to be of the other kind does not count. Fail closed: every other start on the ticket
+    // counts, including one by a seat no longer in the config.
+    const since = at - FLIGHT_TICKET_RESTART_MS;
+    const otherKind = (flightSeat(config)?.session.seats ?? []).filter(
+      (s) => (seatDef(s).loop === "plan") !== planner,
     );
-    const again = sameKind.reduce(
-      (n, s) =>
-        n +
-        store.countFlightDecisions({
-          kinds: ["start"],
-          since: at - FLIGHT_TICKET_RESTART_MS,
-          ref,
-          seatId: s.id,
-        }),
-      0,
-    );
+    const again =
+      store.countFlightDecisions({ kinds: ["start"], since, ref }) -
+      otherKind.reduce(
+        (n, s) => n + store.countFlightDecisions({ kinds: ["start"], since, ref, seatId: s.id }),
+        0,
+      );
     if (again > 0) return fail(restartRefusedText(ref));
     const card = store.board(repo.id).find((i) => i.issueNumber === issue);
     if (card === undefined) return fail(notOnBoardText(ref));

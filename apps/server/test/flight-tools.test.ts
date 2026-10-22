@@ -907,6 +907,15 @@ describe("start_seat planner", () => {
     expect((await plan()).text).toContain("no done_when or size");
   });
 
+  it("a start by a seat no longer in the config still holds back a restart", async () => {
+    addDecision({ at: nowMs - 60 * 60_000, kind: "start", seatId: "guido-9", ref: "mc#7" });
+    expect(await plan()).toEqual(
+      refused(
+        "Not started: you started mc#7 in the last 24 hours; ask the operator before starting it again.",
+      ),
+    );
+  });
+
   it("refuses a ticket with no Size even when the repo does not need one", async () => {
     const mc = cfg.repos[0];
     if (mc === undefined) throw new Error("no repo");
