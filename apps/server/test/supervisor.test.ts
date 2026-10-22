@@ -345,6 +345,21 @@ describe("the CLI update hold", () => {
     expect(store.runs("fao-1", 1)).toHaveLength(1);
   });
 
+  it("refuses a start the hold caught during its checkout, and records no run", async () => {
+    const hold = new CliHold();
+    const { sup } = make({
+      cliHold: hold,
+      cliVersion: async () => {
+        hold.hold("x");
+        return "2.0.0";
+      },
+    });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect([e.status, e.message]).toEqual([409, "x"]);
+    expect(store.runs("guido-1", 1)).toEqual([]);
+  });
+
   it("resumes nothing while held, then resumes the run when the hold is released", async () => {
     const first = make();
     first.sup.start();
@@ -1511,6 +1526,19 @@ describe("startWatch", () => {
     return make({ rolesDir, extraSeat: FLIGHT });
   };
   const BRIEF = watchBrief({ call: "FLIGHT-1", repo: "o/mc" });
+
+  it("is refused while the CLI is held, and starts no run", async () => {
+    const hold = new CliHold();
+    hold.hold("held for the CLI");
+    const rolesDir = join(dir, "roles");
+    mkdirSync(rolesDir, { recursive: true });
+    writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
+    const { sup } = make({ rolesDir, extraSeat: FLIGHT, cliHold: hold });
+    sup.start();
+    const e = await refusal(sup.startWatch("flight-1"));
+    expect([e.status, e.message]).toEqual([409, "held for the CLI"]);
+    expect(store.runs("flight-1", 1)).toEqual([]);
+  });
 
   it("runs with no ticket and no branch, in a detached worktree", async () => {
     const { sup, fetchTicket } = flightMake();
@@ -2978,6 +3006,18 @@ describe("startReview", () => {
     expect(fs.denyRead).toContain(join(root, "guido-1-42"));
   });
 
+  it("startReview is refused while the CLI is held, and starts no run", async () => {
+    const r = reviewOfPush();
+    const hold = new CliHold();
+    hold.hold("held for the CLI");
+    const { sup } = make({ scratchRetro: true, cliHold: hold });
+    sup.start();
+    const e = await refusal(sup.startReview("retro", r.reviewId));
+    expect([e.status, e.message]).toEqual([409, "held for the CLI"]);
+    expect(store.runs("retro", 1)).toEqual([]);
+    expect(existsSync(scratch(r.reviewId))).toBe(false);
+  });
+
   it("startReview refuses an unwanted review", async () => {
     const { sup } = make({ scratchRetro: true });
     sup.start();
@@ -3114,6 +3154,21 @@ describe("a run set aside in review", () => {
     expect(await sup.setAside("guido-1:nonesuch")).toBeNull();
     await sup.endRunByEngine(runId);
     expect(await sup.setAside(runId)).toBeNull();
+  });
+
+  it("wakeRun is refused while the CLI is held, and the run stays aside", async () => {
+    const hold = new CliHold();
+    const m = make({ cliHold: hold });
+    m.sup.start();
+    const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await m.sup.setAside(runId);
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+    hold.hold("held for the CLI");
+    const e = await refusal(m.sup.wakeRun(runId));
+    expect([e.status, e.message]).toEqual([409, "held for the CLI"]);
+    expect(m.sup.seatFacts("guido-1")).toBeNull();
+    expect(store.run(runId)).toMatchObject({ endedAt: null });
   });
 
   it("wakeRun resumes the same session in place", async () => {

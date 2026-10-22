@@ -517,16 +517,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * The run's `cliVersion` field: the version it starts on, else nothing. Called just before the
-   * run is created, so it also refuses a start the hold caught during the checkout.
+   * run is created, so it also refuses a start the hold caught during the checkout or the read.
    */
   async function startedOn(): Promise<{ cliVersion?: string }> {
     refuseWhileHeld();
+    let v: string | null = null;
     try {
-      const v = await (deps.cliVersion ?? probeClaudeVersion)();
-      return v === null ? {} : { cliVersion: v };
+      v = await (deps.cliVersion ?? probeClaudeVersion)();
     } catch {
-      return {};
+      // the run starts without a recorded version
     }
+    refuseWhileHeld();
+    return v === null ? {} : { cliVersion: v };
   }
 
   /** The seat's call sign in every message and commit (`guido-1` → `GUIDO-1`). */

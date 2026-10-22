@@ -246,7 +246,8 @@ async function main(): Promise<void> {
     supervisor,
     enabled: engineOn,
     // a seat with a pending change is not started until it settles; the reloader exists below
-    blocked: (seatId) => crewReloader.status().pending.some((p) => p.seatId === seatId),
+    blocked: (seatId) =>
+      cliHold.reason !== null || crewReloader.status().pending.some((p) => p.seatId === seatId),
     log: (line) => log(line),
   });
 

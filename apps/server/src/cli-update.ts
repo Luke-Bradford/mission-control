@@ -16,6 +16,12 @@ export type CliUpdates = (typeof CLI_UPDATES)[number];
 export const CLI_COLLECTOR = "cli:claude";
 /** Needs-you note key while the CLI fails its smoke test. */
 export const CLI_NOTE_KEY = "cli:claude";
+/** Needs-you note key while the upgrade fails but the installed CLI still passes. */
+/** The start of `CliCheck.brewProblem` when `brew upgrade` failed. */
+export const CLI_UPGRADE_FAILED = "brew upgrade failed";
+export const CLI_UPGRADE_NOTE_KEY = "cli:claude:upgrade";
+/** While new runs are held, the check is repeated this often (a limit or a network blip passes). */
+export const CLI_RETRY_MS = 15 * 60_000;
 export const CLI_UPDATE_INTERVAL_MS = 6 * 60 * 60_000;
 export const BREW_COMMAND = "brew";
 export const BREW_CASK = "claude-code";
@@ -26,6 +32,7 @@ const VERSION_TIMEOUT_MS = 30_000;
 const SMOKE_TIMEOUT_MS = 2 * 60_000;
 const SMOKE_PROMPT = "Reply with OK";
 const SMOKE_ANSWER = "OK";
+const SMOKE_PASS = /^\W*ok\W*$/i;
 const MAX_LINE = 200;
 /** `.../Caskroom/claude-code/<version>/claude`: where Homebrew keeps the cask's files. */
 const CASK_PATH = /[\\/]Caskroom[\\/]claude-code[\\/]/;
@@ -109,7 +116,8 @@ async function smoke(
     timeoutMs: SMOKE_TIMEOUT_MS,
     env,
   });
-  if (ask.code === 0 && ask.stdout.trim() === SMOKE_ANSWER) return { version, failure: null };
+  // "OK", "ok." and "OK!" all pass: the model's punctuation is not the CLI's fault
+  if (ask.code === 0 && SMOKE_PASS.test(ask.stdout.trim())) return { version, failure: null };
   const said = ask.code === 0 ? ask.stdout : ask.stderr || ask.stdout;
   return { version, failure: firstLine(said) || `no ${SMOKE_ANSWER} in its answer` };
 }
@@ -118,7 +126,12 @@ async function smoke(
  * One check: outdated → upgrade → smoke test. Changes nothing when `claude` is not the Homebrew
  * cask. Never throws. `env` is the one `brew` and `claude` run with (default: the hub's).
  */
-export async function checkCli(deps: { exec: ExecFn; env?: NodeJS.ProcessEnv }): Promise<CliCheck> {
+export async function checkCli(deps: {
+  exec: ExecFn;
+  env?: NodeJS.ProcessEnv;
+  /** Called just before `brew upgrade`: the symlink may move to the new version from then on. */
+  beforeUpgrade?: () => void;
+}): Promise<CliCheck> {
   const { exec, env } = deps;
   let target: string | null = null;
   try {
@@ -148,12 +161,13 @@ export async function checkCli(deps: { exec: ExecFn; env?: NodeJS.ProcessEnv }):
     }
   }
   if (isOutdated) {
+    deps.beforeUpgrade?.();
     const up = await exec(BREW_COMMAND, ["upgrade", "--cask", BREW_CASK], {
       timeoutMs: UPGRADE_TIMEOUT_MS,
       env,
     });
     if (up.code === 0) upgraded = true;
-    else brewProblem = `brew upgrade failed: ${firstLine(up.stderr) || `exit ${up.code}`}`;
+    else brewProblem = `${CLI_UPGRADE_FAILED}: ${firstLine(up.stderr) || `exit ${up.code}`}`;
   }
   const s = await smoke(exec, env);
   return { cask: true, version: s.version, upgraded, brewProblem, smokeFailure: s.failure };

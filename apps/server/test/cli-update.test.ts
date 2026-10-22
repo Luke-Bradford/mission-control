@@ -10,14 +10,17 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import {
   CLI_COLLECTOR,
   CLI_NOTE_KEY,
+  CLI_RETRY_MS,
+  CLI_UPGRADE_NOTE_KEY,
   CliHold,
   checkCli,
   cliFailedText,
+  type ExecFn,
   NOT_A_CASK,
   realExec,
 } from "../src/cli-update.ts";
@@ -46,6 +49,7 @@ function installVersion(version: string): string {
   --version) echo "${version} (Claude Code)" ;;
   -p)
     if [ -f "${bin}/smoke-fail-${version}" ]; then echo "boom: ${version} cannot start" >&2; echo "second line" >&2; exit 1; fi
+    if [ -f "${bin}/smoke-dot" ]; then echo "OK."; exit 0; fi
     echo OK ;;
 esac`,
   );
@@ -109,6 +113,12 @@ describe("checkCli", () => {
     ]);
   });
 
+  it("accepts an answer of OK. as a pass", async () => {
+    fakeBrew();
+    writeFileSync(join(bin, "smoke-dot"), "");
+    expect(await run()).toMatchObject({ cask: true, smokeFailure: null });
+  });
+
   it("does not upgrade a current cask, and still smoke-tests it", async () => {
     const brew = fakeBrew();
     expect(await run()).toMatchObject({ cask: true, version: "1.0.0", upgraded: false });
@@ -156,6 +166,15 @@ describe("the cli job", () => {
     poll: { usageMinutes: 30, githubSeconds: 60 },
     updates: { cli },
   });
+  /** The hold's reason at each `brew upgrade`. */
+  let heldDuringUpgrade: (string | null)[];
+  const spy: ExecFn = (file, args, opts) => {
+    if (args[0] === "upgrade") heldDuringUpgrade.push(hold.reason);
+    return realExec(file, args, opts);
+  };
+  beforeEach(() => {
+    heldDuringUpgrade = [];
+  });
   const make = (cli: "off" | "between_runs", over: Partial<Collectors> = {}) => {
     const topics: string[] = [];
     const bus = new ChangeBus();
@@ -165,7 +184,10 @@ describe("the cli job", () => {
       store,
       bus,
       cliHold: hold,
-      collectors: { cli: () => checkCli({ exec: realExec, env: env() }), ...over },
+      collectors: {
+        cli: (beforeUpgrade) => checkCli({ exec: spy, env: env(), beforeUpgrade }),
+        ...over,
+      },
     });
     return { scheduler, topics };
   };
@@ -206,6 +228,111 @@ describe("the cli job", () => {
     expect(note()).toBeUndefined();
     expect(row()).toMatchObject({ ok: true, error: "claude 1.0.0" });
     expect(released).toEqual([1]);
+    await scheduler.stop();
+  });
+
+  it("holds new starts from the upgrade on, and releases them when the new version passes", async () => {
+    fakeBrew();
+    writeFileSync(join(bin, "outdated"), "");
+    const { scheduler } = make("between_runs");
+    await scheduler.tick("cli");
+    expect(heldDuringUpgrade).toEqual([expect.stringContaining("upgrading")]);
+    expect(hold.reason).toBeNull();
+    await scheduler.stop();
+  });
+
+  it("keeps the hold when the upgraded version fails its smoke test", async () => {
+    fakeBrew();
+    writeFileSync(join(bin, "outdated"), "");
+    writeFileSync(join(bin, "smoke-fail-2.0.0"), "");
+    const { scheduler } = make("between_runs");
+    await scheduler.tick("cli");
+    expect(hold.reason).toContain("claude CLI 2.0.0 failed its smoke test");
+    await scheduler.stop();
+  });
+
+  it("starts held when a smoke-test note was left open before a restart; clears it when off", () => {
+    store.raiseNote({
+      key: CLI_NOTE_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "claude CLI 1.0.0 failed its smoke test: x; no new runs start until it passes",
+      at: 1,
+    });
+    make("between_runs");
+    expect(hold.reason).toBe(note()?.text);
+    const off = new CliHold();
+    hold = off;
+    make("off");
+    expect(off.reason).toBeNull();
+    expect(note()).toBeUndefined();
+  });
+
+  it("ends an earlier hold and its note when claude is no longer the Homebrew cask", async () => {
+    fakeBrew();
+    writeFileSync(join(bin, "smoke-fail-1.0.0"), "");
+    const { scheduler } = make("between_runs");
+    await scheduler.tick("cli");
+    expect(hold.reason).not.toBeNull();
+    const elsewhere = join(dir, "npm", "claude");
+    mkdirSync(join(dir, "npm"));
+    script(elsewhere, 'echo "3.0.0"');
+    point(elsewhere);
+    await scheduler.tick("cli");
+    expect(hold.reason).toBeNull();
+    expect(note()).toBeUndefined();
+    expect(row()).toMatchObject({ error: NOT_A_CASK });
+    await scheduler.stop();
+  });
+
+  it("checks again within CLI_RETRY_MS while held", async () => {
+    vi.useFakeTimers();
+    try {
+      const cli = vi
+        .fn<Collectors["cli"]>()
+        .mockResolvedValueOnce({
+          cask: true,
+          version: "1.0.0",
+          upgraded: false,
+          brewProblem: null,
+          smokeFailure: "rate limited",
+        })
+        .mockResolvedValue({
+          cask: true,
+          version: "1.0.0",
+          upgraded: false,
+          brewProblem: null,
+          smokeFailure: null,
+        });
+      const { scheduler } = make("between_runs", { cli });
+      await scheduler.tick("cli");
+      expect(hold.reason).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(CLI_RETRY_MS);
+      expect(cli).toHaveBeenCalledTimes(2);
+      expect(hold.reason).toBeNull();
+      await vi.advanceTimersByTimeAsync(CLI_RETRY_MS * 2);
+      expect(cli).toHaveBeenCalledTimes(2); // no retry once it passes
+      await scheduler.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("raises one note, and no hold, when the upgrade fails but the installed CLI passes", async () => {
+    fakeBrew({ upgradeFails: true });
+    writeFileSync(join(bin, "outdated"), "");
+    const { scheduler } = make("between_runs");
+    await scheduler.tick("cli");
+    await scheduler.tick("cli");
+    const notes = store.notes().filter((n) => n.key === CLI_UPGRADE_NOTE_KEY);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.text).toBe(
+      "claude CLI upgrade failed: brew upgrade failed: Error: download failed; runs stay on 1.0.0",
+    );
+    expect(hold.reason).toBeNull();
+    expect(note()).toBeUndefined();
     await scheduler.stop();
   });
 

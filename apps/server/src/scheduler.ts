@@ -25,7 +25,10 @@ import type { ChangeBus, Topic } from "./bus.ts";
 import {
   CLI_COLLECTOR,
   CLI_NOTE_KEY,
+  CLI_RETRY_MS,
   CLI_UPDATE_INTERVAL_MS,
+  CLI_UPGRADE_FAILED,
+  CLI_UPGRADE_NOTE_KEY,
   type CliCheck,
   CliHold,
   checkCli,
@@ -143,7 +146,7 @@ export interface Collectors {
   /** The one-off rewrite of past crew runs' summaries. */
   rewriteSummaries: typeof rewriteCrewSummaries;
   /** One CLI update check (`updates.cli: between_runs`): brew outdated, upgrade, smoke test. */
-  cli: () => Promise<CliCheck>;
+  cli: (beforeUpgrade: () => void) => Promise<CliCheck>;
   /** The one-off fill of past crew runs' missing ticket titles, read from GitHub. */
   fillTitles: typeof fillTicketTitles;
   claude: (acct: AccountId, onError: OnError, now: number) => Promise<UsageSample[]>;
@@ -210,7 +213,7 @@ export function realCollectors(config: CcConfig): Collectors {
     flow: collectFlow,
     backfill: backfillRuns,
     rewriteSummaries: rewriteCrewSummaries,
-    cli: () => checkCli({ exec: realExec }),
+    cli: (beforeUpgrade) => checkCli({ exec: realExec, beforeUpgrade }),
     fillTitles: fillTicketTitles,
     claude: (acct, onError, now) =>
       sampleClaude(
@@ -264,6 +267,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let titlesDone = false;
   let engine: EngineHooks | null = null;
   const cliHold = deps.cliHold ?? new CliHold();
+  /** The re-check armed while new runs are held. */
+  let cliRetry: NodeJS.Timeout | null = null;
+  // A hold from before a restart stands until a check passes: the supervisor's resume runs next.
+  const heldNote = store.notes().find((n) => n.key === CLI_NOTE_KEY);
+  if (heldNote !== undefined) {
+    if (config.updates?.cli === "between_runs") cliHold.hold(heldNote.text);
+    else store.clearNote(CLI_NOTE_KEY, now());
+  }
 
   /** Each agent's HUD state at its last recorded change or last look; seeded so a restart is no change. */
   const lastStates = new Map<AgentId, HudState>(store.latestAgentStates());
@@ -535,11 +546,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     },
     cli: async () => {
       if (config.updates?.cli !== "between_runs") return;
-      const r = await c.cli();
+      // runs must not start on a version the smoke test has not passed: held from the upgrade on
+      const r = await c.cli(() =>
+        cliHold.hold("claude CLI is upgrading; no new runs start until it passes its smoke test"),
+      );
       if (!r.cask) {
-        // nothing is changed, and a CLI we do not manage holds no run
+        // nothing is changed, and a CLI we do not manage holds no run (an earlier hold ends)
         recordStatus(CLI_COLLECTOR, false, r.found ? NOT_A_CASK : "claude is not on PATH");
-        emit("health");
+        store.clearNote(CLI_NOTE_KEY, now());
+        cliHold.release();
+        emit("health", "attention");
         return;
       }
       const problems = [r.brewProblem].filter((p) => p !== null);
@@ -548,6 +564,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         const notes = [`${version}${r.upgraded ? ", upgraded" : ""}`, ...problems];
         recordStatus(CLI_COLLECTOR, problems.length === 0, notes.join("; "));
         store.clearNote(CLI_NOTE_KEY, now());
+        if (r.brewProblem?.startsWith(CLI_UPGRADE_FAILED)) {
+          store.raiseNote({
+            key: CLI_UPGRADE_NOTE_KEY,
+            kind: "blocked",
+            runId: null,
+            seatId: null,
+            repoId: null,
+            text: `claude CLI upgrade failed: ${r.brewProblem}; runs stay on ${r.version ?? "the installed version"}`,
+            at: now(),
+          });
+        } else {
+          store.clearNote(CLI_UPGRADE_NOTE_KEY, now());
+        }
+        if (cliRetry !== null) clearTimeout(cliRetry);
+        cliRetry = null;
         cliHold.release();
       } else {
         const text = cliFailedText(r.version, r.smokeFailure);
@@ -562,6 +593,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           at: now(),
         });
         cliHold.hold(text);
+        // a usage limit or a network blip passes sooner than the next 6-hourly check
+        if (cliRetry === null) {
+          cliRetry = setTimeout(() => {
+            cliRetry = null;
+            void tick("cli");
+          }, CLI_RETRY_MS);
+          cliRetry.unref();
+        }
       }
       emit("health", "attention");
     },
@@ -746,6 +785,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const t of timers.splice(0)) clearTimeout(t); // also clears intervals
       unsubscribeCrew?.();
       unsubscribeCrew = null;
+      if (cliRetry !== null) clearTimeout(cliRetry);
+      cliRetry = null;
       if (crewTimer !== null) clearTimeout(crewTimer);
       crewTimer = null;
       await Promise.all([...inFlight.values()]);
