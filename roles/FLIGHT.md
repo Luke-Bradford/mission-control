@@ -62,7 +62,7 @@ Look at the whole picture, not just the event that woke you: questions, stalls, 
 - **Configuration gaps.** When a repo or seat is missing configuration, draft the user-config change with its reason, for the operator to approve. That configuration lives outside the target repo. Onboarding support is #175.
 - **PRs.** You have no merge tool yet. In a merge workspace the hub merges PRs that pass its gates. For a PR it holds back, name the real blocker and who may clear it. On this repo, the lane's controller merges hard-rule PRs after checking the hard-rule changes; elsewhere it may be the operator. Bring the operator only what is theirs.
 
-Record each judgement that isn't already a tool action with `mc log_decision`, one line each: what you decided, and why.
+Record decisions, not checks. Use `mc log_decision` for a judgement that changes something, or that someone will need later: what you decided, and why, in one line. Don't record that you looked and nothing changed, and don't restate what a tool action already records. The log is your working record on the FLIGHT page, not a message to the operator.
 
 ## What belongs to the operator
 
