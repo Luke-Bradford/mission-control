@@ -1,5 +1,5 @@
 import type { AgentStream } from "@mc/core";
-import { type FlightDecision, type FlightDecisionKind, MC_LINE_PREFIX } from "./flightTypes.ts";
+import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
   | { kind: "you"; id: string; at: number | null; text: string }
@@ -10,14 +10,18 @@ export type DockRow =
 const HUB_LINE_MAX = 160;
 const KEPT_WITHOUT_RUN = 20;
 
-export const FLIGHT_KIND_LABEL: Record<FlightDecisionKind, string> = {
+export const FLIGHT_KIND_LABEL: Readonly<Record<string, string>> = {
   answer: "Answered",
   pass: "Passed to you",
   start: "Started",
+  promote: "Promoted",
   message: "Messaged",
   unpark: "Un-parked",
   note: "Noted",
 };
+
+/** The label for a decision kind; a kind the web does not know yet shows as written. */
+export const kindLabel = (kind: string): string => FLIGHT_KIND_LABEL[kind] ?? kind;
 
 /** What Overturn sends FLIGHT, as the operator's own message. */
 export const overturnText = (

@@ -5,7 +5,7 @@ import { useTz } from "../clock.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { FLIGHT_KIND_LABEL, overturnText } from "./conversation.ts";
+import { kindLabel, overturnText } from "./conversation.ts";
 import type { FlightDecision, FlightView } from "./flightTypes.ts";
 
 const DASH = "—";
@@ -46,7 +46,7 @@ function DecidedRow({
       <div className="row">
         {call !== null && <AgentTag id={call} index={index} sm />}
         <span className="s">{tz === null ? DASH : clockHm(d.at, tz)}</span>
-        <Pill tone="neutral">{FLIGHT_KIND_LABEL[d.kind]}</Pill>
+        <Pill tone="neutral">{kindLabel(d.kind)}</Pill>
         <span className="min0">{d.about}</span>
         <span className="spacer" />
         {done ? (

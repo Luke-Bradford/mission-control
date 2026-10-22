@@ -78,14 +78,14 @@ Where a ticket comes from and where it goes
 
 | Status | Who puts a card here | What happens next |
 |---|---|---|
-| Backlog | The operator, FLIGHT (tickets it raises), tech-debt issues | FLIGHT triages (§8.3): promote to Ready, or to Refinement with a question |
-| Refinement | FLIGHT, when a ticket lacks what a seat needs | The operator (or the reporter) answers; FLIGHT re-triages |
+| Backlog | The operator, FLIGHT (tickets it raises), tech-debt issues | FLIGHT triages (§8.3): promote to Ready, or to Refinement with a question. Not built yet (#70); today a person moves the card |
+| Refinement | FLIGHT, when a ticket lacks what a seat needs. Today a person moves an unclear card back here when a seat asks; no code does it yet | The operator (or the reporter) answers; FLIGHT re-triages |
 | Ready | The operator, or FLIGHT within the repo's rules | The next free seat whose focus matches takes it, by Priority then age |
 | In progress | the engine, when a run starts | the run's template drives it |
 | In review | the engine, when the draft PR opens and verify has passed | RETRO review; fix rounds; merge gate |
 | Blocked | the engine, when a run parks; the operator | Needs-you item with the reason; FLIGHT's Watch list tracks it |
-| Ready for QA | unused at home (`merge` workspace); kept for work repos | — |
-| Done | the engine, on merge (issue closed) | — |
+| Ready for QA | unused: nothing moves a card here | — |
+| Done | the engine, on merge (issue closed). Decided 22 Oct; to be built by #50. GitHub's "Item closed" workflow is off on this board, so until then a person moves it | — |
 
 Per-repo rules live in the repo, in a `## Mission Control` section of its `CLAUDE.md`, as prose plus
 one fenced `yaml` block the hub parses. Prose is for FLIGHT and the seats; the block is for the
@@ -112,6 +112,11 @@ mc:
   always_ask: []                # labels that force a go/no-go ask to CAPCOM
 ```
 
+What the engine reads today: `areas` and `hard_rules`. `pick_from`, `promote_backlog` and
+`always_ask` are parsed but nothing reads them yet: the queue deals only from Ready whatever
+`pick_from` says, `promote_backlog` waits for FLIGHT's `promote` (#70), and `always_ask` for
+the gate nodes and FLIGHT's asks. `needs`, `templates` and `ci` are accepted and ignored.
+
 A repo with no section gets these defaults with `promote_backlog: false`. The permissions ceiling
 (spec §8c) sits above all of this: a `reference` repo yields no runs.
 
@@ -123,10 +128,22 @@ either. Backlog tickets never go straight to a seat; FLIGHT promotes them first,
 "then backlog" means "FLIGHT triages the backlog when Ready runs dry". A seat with an empty queue
 is idle and says so ("Nothing assigned · FLIGHT fills this from the focus").
 
+**Plans (FAO).** A ticket may carry one `## Plan` section, the step-by-step build a dev seat
+follows, written by a person or by the FAO planner seat. A planner run gets a detached, read-only
+checkout of the default branch, writes the plan with `report_plan` (which appends `## Plan` to the
+issue body once, and refuses where a plan exists or the body has an unclosed code fence), and
+ends. It moves no card. Today a person starts it from the ticket's panel; #71 lets FLIGHT start it
+for a complete ticket of Size M or larger with no plan. Only the Ready column is dealt to dev seats.
+In a `draft` repo FLIGHT's `start_seat` also starts a Backlog or Refinement ticket that has a
+`## Plan` or the `ready` label.
+
 ## 5. Runs and the loop engine
 
-A **run** is one ticket on one seat: its own branch (`branchFor`), worktree, draft PR, template and
-step records. It is created when a seat takes the ticket and ends when the PR closes. The run row
+A **run** is one ticket: its own branch (`branchFor`), worktree, draft PR, template and step
+records. It is created when a seat takes the ticket. When its PR goes to review the run is set
+aside and its seat takes the next ticket; rework from the review wakes the run back on that seat,
+which takes it before any new ticket. The run ends when its PR merges; a PR closed without
+merging parks it. The run row
 gains: `template`, `node`, `attempt`, `round`, `parked_reason`, `tokens_used`; `run_steps` records
 `[step, try, outcome, tokens, minutes, started_at, ended_at, failure]`; `run_checks` records each
 check's `[kind, text, status pass|fail|run|wait, detail, at]` for the current node.
@@ -282,22 +299,30 @@ branch **contains current `main`**; and the PR is still the run's own branch wit
 commits (`run_commits`, Plan 6). Any push resets all six.
 
 Behind `main`: branch protection is not available on this repo, so the engine enforces it. When
-`main` moves, the engine merges `main` into the branch in the clone (an engine-made merge commit,
+`main` moves, the engine merges `main` into the branch inside the run's own worktree (moving the
+branch ref in the clone would leave that worktree's index stale, and the seat's next commit would
+undo `main`'s changes) (an engine-made merge commit,
 recorded in `run_commits`; Plan 6's push rule becomes "no merge commit unless it is in
 `run_commits`"), pushes, and verify runs again on the new sha. A conflict becomes a `fix` step:
 the engine leaves the conflicted files with their markers in the seat's worktree, the brief names
 them, and the seat resolves and calls `mc commit`. The commit tool knows a merge is in progress
-(`MERGE_HEAD` exists for that worktree): it diffs the index against **both** parents, allows a
-path outside the seat's area only when the index matches `main`'s side of it exactly, refuses any
-other out-of-area path as today, and commits with the merge's two parents. The push rule becomes
+(`MERGE_HEAD` exists for that worktree): it diffs the index against **both** parents, allows any
+path whose index entry matches `main`'s side of it exactly (outside the seat's area or protected
+alike), refuses any other out-of-area or protected path as today, and commits with the merge's two
+parents. The push's secret scan reads a merge commit with `--remerge-diff`, since `git log -p`
+shows no diff for one. The push rule becomes
 "no merge commit unless it is in `run_commits`". If the fix fails its tries the run parks like any
 other. Then, in order: mark ready, merge (merge commit, never force), close the issue, move the
-card to Done, delete the remote and local branch, remove the worktree, end the run, and let the seat
-take its next ticket. Each step is an Activity row; a failure part-way parks the run with the step
-name (never a half state the next tick cannot see).
+card to Done, delete the remote branch (with a lease on the merged tip), end the run (which
+removes its worktree), delete the local branch (git refuses to delete a branch a worktree still
+has checked out), and let the seat take its next ticket. Each step is an Activity row; a failure part-way parks the run with the step
+name (never a half state the next tick cannot see), except a failed local-branch delete, which
+comes after the run has ended and raises a cleanup note instead. A waived review or the operator's ruling on a
+CI failure is not a clean pass: those PRs are left for the operator to merge. A PR the operator
+merges by hand still gets the steps after the merge. (Decided 22 Oct; #66, #68, #69.)
 
-In a `draft` workspace the gate stops at "ready for a human": the card goes to Ready for QA and the
-PR stays a draft (spec §4.2).
+In a `draft` workspace the gate stops at "ready for a human": the PR stays a draft and the card is
+not moved, since the hub never moves a draft repo's card (§12).
 
 ## 8. FLIGHT
 
@@ -331,6 +356,8 @@ Read: `board` (cards with the overlay), `crew` (seats, runs, steps), `runs` (ste
 
 FLIGHT never: stops a run (the operator's button, CAT §5.5), merges or marks ready (the engine), posts
 comments (drafts only), changes templates or rules (a PR), or starts a new seat (an ask, spec §8a.3).
+Its `start_seat` (FLIGHT 2) starts a ticket's run on a seat that is already configured and free, in
+a `draft` repo only; adding a seat stays an ask.
 
 ### 8.3 Triage (the `watch` loop)
 
@@ -417,7 +444,8 @@ writes exist (each one an Activity row with its basis):
   moves the card for it; (8) a planner (FAO) run **appends its `## Plan`** to the ticket's issue
   body, once — the plan a dev seat then follows; FAO refuses where a plan already exists.
 - Still approval-gated: Priority changes, comments on anything, labels on existing issues,
-  starting/stopping seats, switching accounts.
+  adding or stopping seats (FLIGHT's `start_seat` starts runs on configured seats in `draft` repos,
+  §8.2), switching accounts.
 - **FLIGHT reads untrusted text** (issue bodies, PR text, seat messages) and holds write tools
   (`raise`, `promote`, `message`, `assign`). That is an injection surface: the tools act only within
   the repo's rules and the always-ask list, every act is recorded with its basis and overturnable,

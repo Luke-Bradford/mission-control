@@ -14,6 +14,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { FOLD_WINDOW_MS } from "../src/collectors/common.ts";
+import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
 import type { RateLimits } from "../src/collectors/rate-limit.ts";
 import type { CcConfig } from "../src/config.ts";
 import * as hud from "../src/hud.ts";
@@ -341,6 +342,30 @@ describe("scheduler", () => {
     expect(githubToken).toHaveBeenCalledTimes(3);
     expect(c.makeGql).toHaveBeenCalledTimes(1);
     expect(c.github).toHaveBeenCalledTimes(2);
+  });
+
+  it("a missing-scope poll drops the cached client so a refreshed token is read on the next tick", async () => {
+    const githubToken = vi
+      .fn<() => Promise<string>>()
+      .mockResolvedValueOnce("old")
+      .mockResolvedValueOnce("new");
+    const github = vi
+      .fn<Collectors["github"]>()
+      .mockRejectedValueOnce(
+        new Error(`${MISSING_SCOPE_PREFIX}read:project scope: run gh auth refresh -s project`),
+      )
+      .mockImplementation(async (repo) => {
+        store.setStatus(`github:${repo.id}`, true, null); // the real collector records its own success
+        return { boards: false, escalations: false };
+      });
+    const c = stubs({ githubToken, github });
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
+    await s.tick("github");
+    expect(row("github:shop-app")).toMatchObject({ ok: false });
+    await s.tick("github");
+    expect(githubToken).toHaveBeenCalledTimes(2);
+    expect(c.makeGql).toHaveBeenLastCalledWith("new", expect.any(Object));
+    expect(row("github:shop-app")).toMatchObject({ ok: true });
   });
 
   it("a failing githubToken is a GitHub collector error; the other jobs keep running", async () => {
