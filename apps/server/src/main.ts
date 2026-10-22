@@ -37,7 +37,7 @@ import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
-import { moveCard } from "./github-board.ts";
+import { type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { RunTokens } from "./mcp/tokens.ts";
@@ -165,20 +165,21 @@ async function main(): Promise<void> {
   };
   /** Each seat's consecutive transient take failures; one map for the hub's life. */
   const transientTakes = new Map<string, number>();
+  const engineBoard = {
+    move: async (m: Move) => {
+      const moved = await moveCard({ gql: makeGql(await githubToken()), store, config }, m);
+      // a card that moved shows on the boards now, not at the next poll
+      if (moved.ok && moved.changed) void scheduler.tick("github");
+      return moved;
+    },
+  };
   const engine = createEngine({
     config,
     store,
     bus,
     supervisor,
     publisher: createPublisher(mcDeps),
-    board: {
-      move: async (m) => {
-        const moved = await moveCard({ gql: makeGql(await githubToken()), store, config }, m);
-        // a card that moved shows on the boards now, not at the next poll
-        if (moved.ok && moved.changed) void scheduler.tick("github");
-        return moved;
-      },
-    },
+    board: engineBoard,
     rules: engineRules,
     refillQueues: () =>
       refillQueues({
@@ -226,6 +227,7 @@ async function main(): Promise<void> {
     login: hubLogin,
     engine,
     rules: engineRules,
+    board: engineBoard,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
   });
 

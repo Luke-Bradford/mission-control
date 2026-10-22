@@ -34,6 +34,7 @@ const WEB = "inco-1";
 const RULES: RepoRules = freezeRules({
   pickFrom: ["Ready"],
   promoteBacklog: false,
+  needs: ["done_when", "size"],
   areas: {
     "area:server": ["apps/server/**"],
     "area:web": ["apps/web/**"],

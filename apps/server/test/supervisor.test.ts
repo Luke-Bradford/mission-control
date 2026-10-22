@@ -1410,6 +1410,7 @@ describe("startWatch", () => {
       "mcp__mc__start_seat",
       "mcp__mc__message_seat",
       "mcp__mc__flight_state",
+      "mcp__mc__promote",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
