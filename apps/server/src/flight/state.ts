@@ -1,16 +1,35 @@
 /**
  * The FLIGHT seat as the rest of the hub sees it: which seat it is, whether it is running, and
- * what `GET /api/flight` shows (the seat and the last day's decisions).
+ * what `GET /api/flight` shows (the seat and the last day's decisions); and the crew as FLIGHT
+ * reads it (`flightState`, the wake digest and the `flight_state` tool).
  */
 import {
+  clockHm,
+  FLIGHT_HOUR_MS,
+  FLIGHT_MESSAGES_PER_HOUR,
+  FLIGHT_RECENT_LISTED,
+  FLIGHT_STARTABLE,
+  FLIGHT_STARTS_PER_HOUR,
+  FLIGHT_TICKETS_LISTED,
+  FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
+  type FlightSeatState,
+  type FlightState,
   type FlightView,
+  hudColumnOf,
+  PRIORITIES,
+  READY_LABEL,
   seatCallSign,
   seatDef,
 } from "@mc/core";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import { accountAtStop } from "../engine/queue.ts";
+import { crew, NO_LOCK } from "../hud.ts";
+import type { SeatBusy } from "../runtime/supervisor.ts";
+import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
+import { seatFree } from "./tools.ts";
 
 /** The watch seat (the first seat whose seatDef loop is "watch") and its session, else null. */
 export function flightSeat(
@@ -47,4 +66,199 @@ export function flightView(config: CcConfig, store: Store, now: number): FlightV
           },
     decisions: store.flightDecisions(now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
   };
+}
+
+const priorityRank = (p: string | null): number => {
+  const i = PRIORITIES.findIndex((x) => x === p);
+  return i === -1 ? PRIORITIES.length : i;
+};
+
+/** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
+export function flightState(i: {
+  config: CcConfig;
+  store: Store;
+  busy: readonly SeatBusy[];
+  now: number;
+}): FlightState {
+  const { config, store, busy, now } = i;
+  const tz = config.operator.timezone;
+  const found = flightSeat(config);
+  const since = now - FLIGHT_HOUR_MS;
+  const limits = {
+    startsLeft: Math.max(
+      0,
+      FLIGHT_STARTS_PER_HOUR - store.countFlightDecisions({ kinds: ["start"], since }),
+    ),
+    messagesLeft: Math.max(
+      0,
+      FLIGHT_MESSAGES_PER_HOUR -
+        store.countFlightDecisions({ kinds: ["answer", "message", "unpark"], since }),
+    ),
+  };
+  const recent = store.flightDecisions(0, FLIGHT_RECENT_LISTED).map((d) => ({
+    time: clockHm(d.at, tz),
+    kind: d.kind,
+    about: d.about,
+    decision: d.decision,
+  }));
+  if (found === null) {
+    return {
+      time: clockHm(now, tz),
+      repo: "",
+      seats: [],
+      questions: [],
+      tickets: [],
+      prs: [],
+      recent,
+      limits,
+    };
+  }
+  const { session } = found;
+  const board = store.board(session.repoId);
+  const stalled = new Set(
+    crew(config, store, now, NO_LOCK, () => null)
+      .rows.filter((r) => r.hudState === "stalled")
+      .map((r) => r.id),
+  );
+  const mine = session.seats.filter((s) => s.id !== found.seat.id);
+  const unended = (seatId: string) => {
+    const runId = store.seatSession(seatId)?.runId ?? null;
+    const run = runId === null ? null : store.run(runId);
+    return run !== null && run.endedAt === null ? run : null;
+  };
+  const open = store.openQuestions();
+
+  const seats = mine.map((s): FlightSeatState => {
+    const row = store.seatSession(s.id);
+    const run = unended(s.id);
+    const loop = run?.loop ?? null;
+    const t = run?.ticket == null ? null : parseTicket(run.ticket);
+    const last = row?.lastTurnEndedAt ?? null;
+    return {
+      id: s.id,
+      call: seatCallSign(s.id),
+      role: s.role,
+      loop: seatDef(s).loop,
+      area: s.area,
+      state: row?.state ?? null,
+      free: seatFree(store, busy, s.id),
+      ticket: run?.ticket ?? null,
+      title: t === null ? null : (board.find((b) => b.issueNumber === t.number)?.title ?? null),
+      phase: loop?.phase ?? null,
+      parked:
+        loop?.phase === "parked"
+          ? { kind: loop.parked?.kind ?? "", reason: loop.parked?.reason ?? "" }
+          : null,
+      stalled: stalled.has(s.id),
+      idleMin:
+        run !== null && row?.state === "idle" && last !== null
+          ? Math.floor((now - last) / 60_000)
+          : null,
+      openQuestion: open.some((q) => q.agentId === s.id),
+      atStop: accountAtStop(config, store, s.accountId, now),
+    };
+  });
+
+  const questions = open
+    .filter(
+      (q) =>
+        q.passedAt === null &&
+        mine.some((s) => s.id === q.agentId) &&
+        unended(q.agentId)?.id === q.runId,
+    )
+    .sort((a, b) => a.at - b.at || a.id - b.id)
+    .map((q) => ({
+      id: q.id,
+      seat: q.agentId,
+      ticket: unended(q.agentId)?.ticket ?? null,
+      text: q.text,
+      ageMin: Math.floor((now - q.at) / 60_000),
+    }));
+
+  const active = store.activeTickets();
+  const tickets = board
+    .filter(
+      (b) =>
+        !b.closed &&
+        FLIGHT_STARTABLE.includes(hudColumnOf(b)) &&
+        !active.has(`${b.repoId}#${b.issueNumber}`) &&
+        !b.blockedBy.some((x) => !x.closed),
+    )
+    .sort(
+      (a, b) =>
+        priorityRank(a.priority) - priorityRank(b.priority) ||
+        a.createdAt - b.createdAt ||
+        a.issueNumber - b.issueNumber,
+    )
+    .slice(0, FLIGHT_TICKETS_LISTED)
+    .map((b) => {
+      const column = hudColumnOf(b);
+      return {
+        ref: `${b.repoId}#${b.issueNumber}`,
+        title: b.title,
+        column,
+        priority: b.priority,
+        labels: b.labels,
+        ready: column === "Ready" || b.labels.includes(READY_LABEL),
+        blockedBy: b.blockedBy.filter((x) => x.closed).map((x) => x.ref),
+      };
+    });
+
+  const ready = new Set(store.notes().flatMap((n) => (n.kind === "ready" ? [n.runId] : [])));
+  const prs = store
+    .loopRuns(now)
+    .filter(
+      (r) =>
+        r.endedAt === null &&
+        r.loop?.phase === "review" &&
+        r.loop.prNumber !== null &&
+        mine.some((s) => s.id === r.agentId),
+    )
+    .map((r) => ({
+      ref: r.ticket ?? "",
+      pr: r.loop?.prNumber ?? 0,
+      seat: r.agentId,
+      ready: ready.has(r.id),
+    }));
+
+  return {
+    time: clockHm(now, tz),
+    repo: session.repoId,
+    seats,
+    questions,
+    tickets,
+    prs,
+    recent,
+    limits,
+  };
+}
+
+/** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
+export function wakeFacts(s: FlightState): string {
+  const free =
+    s.tickets.length > 0
+      ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
+      : [];
+  return JSON.stringify({
+    q: s.questions.map((q) => q.id).sort((a, b) => a - b),
+    free: free.sort(),
+    t: free.length > 0 ? s.tickets.map((t) => t.ref) : [],
+    parked: s.seats
+      .filter((x) => x.parked !== null)
+      .map((x) => `${x.id}:${x.ticket}:${x.parked?.kind}`)
+      .sort(),
+    prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}`).sort(),
+  });
+}
+
+/** Something still waits on FLIGHT: a question, a free build seat with a listed ticket, or a park in FLIGHT_UNPARK_KINDS. */
+export function pending(s: FlightState): boolean {
+  return (
+    s.questions.length > 0 ||
+    (s.tickets.length > 0 && s.seats.some((x) => x.loop === "build" && x.free)) ||
+    s.seats.some(
+      (x) =>
+        x.parked !== null && (FLIGHT_UNPARK_KINDS as readonly string[]).includes(x.parked.kind),
+    )
+  );
 }

@@ -1292,6 +1292,62 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     expect(items(c)).toEqual([]);
   });
 
+  it("FLIGHT holds a question for 20 minutes", () => {
+    const base = withCrew();
+    const session = base.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const c: CcConfig = {
+      ...base,
+      crew: {
+        ...base.crew,
+        worktrees: join(dir, "crew-wt"),
+        maxSeats: 4,
+        sessions: [
+          {
+            ...session,
+            seats: [
+              ...session.seats,
+              { id: "FLIGHT-1", role: "FLIGHT", accountId: "claude-main", model: "opus", area: [] },
+            ],
+          },
+        ],
+      },
+    };
+    const asked = (agentId: string, runId: string) =>
+      store.addQuestion({ agentId, runId, text: "Lanes?", at: NOW - 5 * MIN });
+    const keys = (at: number) =>
+      attentionItems(c, store, at)
+        .filter((i) => i.kind === "question")
+        .map((i) => i.key);
+    store.upsertRun(run({ id: "f1", agentId: "FLIGHT-1", repoId: "shop-app" }));
+    const flightRow = (over: Partial<SeatSessionRow>) =>
+      store.setSeatSession({
+        seatId: "FLIGHT-1",
+        runId: "f1",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+        ...over,
+      });
+    flightRow({});
+    const id = asked("GUIDO-1", "c1");
+    const own = asked("FLIGHT-1", "f1");
+    // younger than 20 minutes while FLIGHT is live: held back; its own is shown
+    expect(keys(NOW)).toEqual([`ask:${own}`]);
+    // 20 minutes old: shown
+    expect(keys(NOW + 15 * MIN)).toEqual([`ask:${id}`, `ask:${own}`]);
+    // passed: shown at once
+    store.passQuestion(id, NOW);
+    expect(keys(NOW)).toEqual([`ask:${id}`, `ask:${own}`]);
+    // FLIGHT stopped: shown
+    const held = asked("GUIDO-1", "c1");
+    expect(keys(NOW)).not.toContain(`ask:${held}`);
+    flightRow({ runId: null, state: "stopped" });
+    expect(keys(NOW)).toContain(`ask:${held}`);
+  });
+
   it("lists an unacked crew error as an error item", () => {
     const c = withCrew();
     const id = store.addCrewError({
