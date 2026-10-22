@@ -368,7 +368,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(accountStoppedText(call, cfg.accountId));
     }
     const started = lastHour(["start"], at);
-    if (started >= FLIGHT_STARTS_PER_HOUR) return fail(capText("started tickets", started));
+    // The cap guards against a runaway FLIGHT, so it grows with the seats there are to start.
+    const devSeats = (flightSeat(config)?.session.seats ?? []).filter(
+      (s) => seatDef(s).loop === "build",
+    ).length;
+    if (started >= FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats)) {
+      return fail(capText("started tickets", started));
+    }
     const again = store.countFlightDecisions({
       kinds: ["start"],
       since: at - FLIGHT_TICKET_RESTART_MS,

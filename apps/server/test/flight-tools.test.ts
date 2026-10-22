@@ -730,7 +730,22 @@ describe("start_seat", () => {
     );
   });
 
-  it("5: caps starts at 4 an hour", async () => {
+  it("5: caps starts at 4 an hour per developer seat (8 with two)", async () => {
+    for (let i = 0; i < 7; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
+    expect((await start()).isError).toBeUndefined();
+    expect(await start({ issue: 6 })).toEqual(
+      refused(
+        "Not done: you started tickets 8 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+  });
+
+  it("5: keeps the cap at 4 an hour with one developer seat", async () => {
+    const seats = cfg.crew?.sessions[0]?.seats ?? [];
+    seats.splice(
+      seats.findIndex((s) => s.id === "inco-1"),
+      1,
+    );
     for (let i = 0; i < 4; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
     expect(await start()).toEqual(
       refused(
