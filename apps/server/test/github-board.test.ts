@@ -34,7 +34,9 @@ const config = {
 } as unknown as CcConfig;
 
 /** A fake GitHub: one project with a Status field, and one issue card on it (or none yet). */
-function fakeBoard(opts: { options?: typeof STATUS_OPTIONS; itemStatus?: string | null } = {}) {
+function fakeBoard(
+  opts: { options?: typeof STATUS_OPTIONS; itemStatus?: string | null; ownerType?: string } = {},
+) {
   const state = {
     options: opts.options ?? STATUS_OPTIONS,
     /** The card's current Status option id; `undefined`: the card is not on the board. */
@@ -82,7 +84,8 @@ function fakeBoard(opts: { options?: typeof STATUS_OPTIONS; itemStatus?: string 
       };
     }
     return {
-      user: {
+      repositoryOwner: {
+        __typename: opts.ownerType ?? "User",
         projectV2: {
           id: "PVT_5",
           fields: {
@@ -150,6 +153,14 @@ describe("moveCard", () => {
         at: NOW,
       },
     ]);
+  });
+
+  it("moves a card on an organisation's project", async () => {
+    const b = fakeBoard({ ownerType: "Organization" });
+    expect(await move(b.gql)).toEqual({ ok: true, changed: true });
+    expect(b.mutations()).toHaveLength(1);
+    expect(b.mutations()[0]?.vars).toMatchObject({ input: { projectId: "PVT_5" } });
+    expect(b.state.card).toBe("O_review");
   });
 
   it("looks the card up by the repository's owner, name and the issue number", async () => {

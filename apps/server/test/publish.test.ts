@@ -778,6 +778,8 @@ describe("setReviewStatus", () => {
 describe("merge steps", () => {
   const MAIN = "d".repeat(40);
   const OTHER = "e".repeat(40);
+  /** The git call that asks whether the clone has main's tip (a gitAnswers key). */
+  const HAVE_MAIN = `rev-parse -q --verify ${MAIN}^{commit}`;
   const R = run({ loop: { prNumber: 12 } as never });
   const MERGED_RUN = run({
     loop: { prNumber: 12, merging: { sha: SHA, done: ["merge"] } } as never,
@@ -835,7 +837,7 @@ describe("merge steps", () => {
       store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
       gitAnswers = {
         "ls-remote": lsRemote(),
-        "cat-file": "",
+        [HAVE_MAIN]: "",
         [ANCESTOR]: "",
         "merge-base": `${BASE}\n`,
         "rev-list": `${SHA}\n`,
@@ -887,7 +889,7 @@ describe("merge steps", () => {
     it("says a branch behind main does not contain it, and a foreign commit is not hub-only", async () => {
       gitAnswers = {
         "ls-remote": lsRemote(),
-        "cat-file": "",
+        [HAVE_MAIN]: "",
         [ANCESTOR]: exit1,
         "merge-base": `${BASE}\n`,
         "rev-list": `${SHA}\n`,
@@ -903,7 +905,7 @@ describe("merge steps", () => {
       let fetched = false;
       gitAnswers = {
         "ls-remote": lsRemote(),
-        [`cat-file -e ${MAIN}^{commit}`]: () => {
+        [HAVE_MAIN]: () => {
           if (!fetched) throw exit1;
           return "";
         },
@@ -962,7 +964,7 @@ describe("merge steps", () => {
     const mainSame = () => {
       gitAnswers = {
         "ls-remote": lsRemote(),
-        "cat-file": "",
+        [HAVE_MAIN]: "",
         [`merge-base --is-ancestor ${MAIN} ${SHA}`]: "",
       };
     };
@@ -1169,7 +1171,6 @@ describe("merge steps", () => {
       gitAnswers = {
         "rev-parse": `${OTHER}\n`,
         "ls-remote": lsRemote(),
-        "cat-file": "",
         "merge-base": "",
         branch: "",
       };
@@ -1181,7 +1182,6 @@ describe("merge steps", () => {
       gitAnswers = {
         "rev-parse": `${OTHER}\n`,
         "ls-remote": lsRemote(),
-        "cat-file": "",
         "merge-base": exit1,
       };
       expect(await publisher().deleteLocalBranch(MERGED_RUN)).toMatchObject({
