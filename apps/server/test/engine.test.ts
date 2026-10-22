@@ -12,6 +12,7 @@ import {
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
   fixSentText,
+  hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
   localNotDeletedText,
@@ -277,6 +278,8 @@ interface Harness {
   /** wakeRun's calls, and what it throws (null: it puts the run back on its seat). */
   wakes: string[];
   wakeError: Error | null;
+  /** The run's local branch no longer exists (localBranchGone answers true). */
+  branchGone: boolean;
   rules: EngineDeps["rules"];
   make: (over?: Partial<EngineDeps>) => Engine;
 }
@@ -328,6 +331,7 @@ function harness(): Harness {
     asides: [],
     wakes: [],
     wakeError: null,
+    branchGone: false,
     rules: async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true }),
     make: (over = {}) => {
       const publisher: Publisher = {
@@ -393,6 +397,7 @@ function harness(): Harness {
         closeIssue: (r) => step("close", r),
         deleteRemoteBranch: (r) => step("delete-remote", r),
         deleteLocalBranch: (r) => step("delete-local", r),
+        localBranchGone: async () => x.branchGone,
       };
       async function step(name: string, _r: Run): Promise<PublishResult> {
         x.steps.push(name);
@@ -588,6 +593,31 @@ describe("report to a draft PR", () => {
     await h.engine.reconcileRun(RUN);
     expect(loopOf().touches).toEqual({ sha: SHA, paths: [".github/ci.yml"] });
     expect(noteKeys()).toContain(`flag:${RUN}:hard-rules:${SHA}`);
+  });
+
+  it("clears the hard-rule flag once its run has ended", async () => {
+    h.touches = [".github/ci.yml"];
+    report();
+    await h.engine.reconcileRun(RUN);
+    expect(noteKeys()).toContain(`flag:${RUN}:hard-rules:${SHA}`);
+    store.setRunEnded(RUN, clock, "ok", "engine");
+    await h.engine.tick();
+    expect(noteKeys()).not.toContain(`flag:${RUN}:hard-rules:${SHA}`);
+  });
+
+  it("keeps the repo's hard_rules_by for Needs you", async () => {
+    h.rules = async () => ({
+      ...DEFAULT_REPO_RULES,
+      hardRulesSet: true,
+      hardRulesBy: "controller",
+    });
+    h.engine.stop();
+    h.engine = h.make();
+    h.engine.start();
+    h.touches = [".github/ci.yml"];
+    report();
+    await h.engine.reconcileRun(RUN);
+    expect(store.getSetting(hardRulesBySettingKey(REPO))).toBe("controller");
   });
 });
 
@@ -2275,10 +2305,14 @@ describe("the engine runs reviews", () => {
       // a later pass of the done run keeps it
       await h.engine.reconcileRun(RUN);
       expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN));
-      // the sweep leaves it for the operator, though the PR is done
+      // the sweep keeps it while the branch is there, though the PR is done
       setPr({ state: "merged", ci: "passing", mergedAt: clock });
       await h.engine.tick();
       expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN));
+      // and clears it once the branch is gone
+      h.branchGone = true;
+      await h.engine.tick();
+      expect(noteKeys()).not.toContain(cleanupBranchNoteKey(RUN));
     });
 
     it("a transient refusal of a step stops the pass, and the step is retried next tick", async () => {

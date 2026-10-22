@@ -8,6 +8,9 @@ import { pathInArea } from "./runtime.ts";
 export const REPO_NEEDS = ["done_when", "size"] as const;
 export type RepoNeed = (typeof REPO_NEEDS)[number];
 
+export const HARD_RULES_BY = ["operator", "controller"] as const;
+export type HardRulesBy = (typeof HARD_RULES_BY)[number];
+
 export interface RepoRules {
   /** Board statuses a seat may pick a ticket from. */
   pickFrom: string[];
@@ -21,6 +24,8 @@ export interface RepoRules {
   hardRules: string[];
   /** Whether the repo's block set `hard_rules` itself (`[]` counts); false on the defaults. */
   hardRulesSet: boolean;
+  /** Who merges a PR that touches hard-rule files: the operator by hand, or the controller. */
+  hardRulesBy: HardRulesBy;
   alwaysAsk: string[];
 }
 
@@ -40,6 +45,9 @@ export function freezeRules(rules: RepoRules): RepoRules {
 
 /** The Needs you note for a `merge` repo whose rules leave `hard_rules` unset: one per repo. */
 export const hardRulesUnsetNoteKey = (repoId: string): string => `hard-rules-unset:${repoId}`;
+
+/** The settings key under which the engine keeps a repo's last good `hard_rules_by`. */
+export const hardRulesBySettingKey = (repoId: string): string => `hard_rules_by:${repoId}`;
 
 export const hardRulesUnsetText = (repo: string): string =>
   `${repo}: set \`hard_rules\` in the repo's Mission Control block (a list of paths that never auto-merge, or \`[]\`) before the hub merges there.`;
@@ -70,6 +78,7 @@ export const DEFAULT_REPO_RULES: RepoRules = freezeRules({
   areas: {},
   hardRules: DEFAULT_HARD_RULES,
   hardRulesSet: false,
+  hardRulesBy: "operator",
   alwaysAsk: [],
 });
 
