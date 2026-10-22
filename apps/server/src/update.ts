@@ -258,6 +258,45 @@ export function crewRefusal(
   }
 }
 
+export interface AutoUpdateDeps {
+  /** `updates.hub` is `auto`. */
+  enabled: boolean;
+  updater: Pick<Updater, "check" | "update" | "restart">;
+  /** Whether a seat holds the test lock (`TestLock.state().holder`). */
+  lockBusy: () => boolean;
+  /** HEAD of the checkout once Update has pulled. */
+  headSha: () => Promise<string | null>;
+  /** Writes the Activity line. */
+  record: (text: string) => void;
+}
+
+export type AutoUpdateResult = "off" | "current" | "waiting" | "updated";
+
+/**
+ * `updates.hub: auto`: one check, run by the scheduler every VERSION_CHECK_MS. When origin/main is
+ * ahead and nothing Update refuses on applies (the check answers canUpdate), and the test lock is
+ * free, it runs the same `update()` the route does, records `Updated to <sha> (auto)` and
+ * schedules the restart. Anything that stops it (a refusal, the lock, an unreachable origin, a
+ * failed step) is "waiting": the next check tries again. Never forces, never throws.
+ */
+export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdateResult> {
+  return async () => {
+    if (!deps.enabled) return "off";
+    try {
+      const v = await deps.updater.check();
+      if (!v.canUpdate) return v.reason === UP_TO_DATE_MAIN ? "current" : "waiting";
+      if (deps.lockBusy()) return "waiting";
+      const out = await deps.updater.update(); // re-checks every refusal itself
+      if ("upToDate" in out) return "current";
+      deps.record(`Updated to ${(await deps.headSha()) ?? "main"} (auto)`);
+      deps.updater.restart();
+      return "updated";
+    } catch {
+      return "waiting";
+    }
+  };
+}
+
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 // no credential prompt: a remote that wants one fails instead of hanging until the timeout
 const gitEnvironment = () => ({ ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0" });

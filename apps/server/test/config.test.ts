@@ -86,6 +86,14 @@ describe("loadConfig", () => {
     expect(c.operator).toEqual({ id: "operator", timezone: "UTC" });
   });
 
+  it("reads updates.hub: off by default, auto when set, nothing else", () => {
+    expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off" });
+    const auto = tmpConfig((y) => `${y}\nupdates:\n  hub: auto\n`);
+    expect(loadConfig(auto).updates).toEqual({ hub: "auto" });
+    const bad = tmpConfig((y) => `${y}\nupdates:\n  hub: always\n`);
+    expect(errorOf(() => loadConfig(bad)).path).toBe("updates.hub");
+  });
+
   it("rejects an empty operator.id", () => {
     const p = tmpConfig((y) => y.replace("  id: operator\n", '  id: ""\n'));
     expect(errorOf(() => loadConfig(p)).path).toBe("operator.id");

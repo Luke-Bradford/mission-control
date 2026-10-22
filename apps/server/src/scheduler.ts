@@ -51,6 +51,7 @@ import {
 import type { CcConfig } from "./config.ts";
 import { attentionItems, crew, NO_LOCK } from "./hud.ts";
 import type { Store } from "./store.ts";
+import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
   | "ta"
@@ -63,7 +64,8 @@ export type Job =
   | "prs"
   | "flow"
   | "backfill"
-  | "engine";
+  | "engine"
+  | "update";
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
 export const JOBS: readonly Job[] = [
   "sessions",
@@ -77,6 +79,7 @@ export const JOBS: readonly Job[] = [
   "flow",
   "backfill",
   "engine",
+  "update",
 ];
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
@@ -152,6 +155,8 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
+  /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
+  autoUpdate?: () => Promise<unknown>;
 }
 
 /** What the scheduler asks of the first loop's engine. */
@@ -514,6 +519,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     engine: async () => {
       await engine?.tick();
     },
+    update: async () => {
+      await deps.autoUpdate?.();
+    },
     usage: async () => {
       for (const acct of config.accounts) {
         await guarded(usageCollector(acct.id), () => usageFor(acct));
@@ -640,6 +648,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_INTERVAL_MS,
     backfill: BACKFILL_INTERVAL_MS,
     engine: ENGINE_TICK_MS,
+    update: VERSION_CHECK_MS,
   };
 
   const FIRST_DELAY_MS: Partial<Record<Job, number>> = {
@@ -662,6 +671,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const job of JOBS) {
         // no engine, no engine timer (a scheduler without one has nothing to tick)
         if (job === "engine" && engine === null) continue;
+        if (job === "update" && deps.autoUpdate === undefined) continue;
         const every = () => {
           const t = setInterval(() => {
             if (job === "github" && !githubDue()) return;

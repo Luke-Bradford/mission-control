@@ -23,7 +23,9 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { CREW_LOCK_FILE, createSupervisor, type SeatBusy } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import {
+  type AutoUpdateDeps,
   CREW_STATE_UNREADABLE,
+  createAutoUpdate,
   createUpdater,
   crewRefusal,
   type Exec,
@@ -1011,4 +1013,87 @@ describe("realExec", () => {
     },
     TEST_MS,
   );
+});
+
+describe("auto update", () => {
+  function auto(over: Partial<AutoUpdateDeps> = {}, upd = updater()) {
+    const record = vi.fn();
+    const restart = vi.spyOn(upd.u, "restart");
+    const tick = createAutoUpdate({
+      enabled: true,
+      updater: upd.u,
+      lockBusy: () => false,
+      headSha: async () => head(),
+      record,
+      ...over,
+    });
+    return { ...upd, tick, record, restart };
+  }
+  const pulls = (calls: Call[]) => calls.filter((c) => c.cmd.startsWith("git pull"));
+
+  it("runs Update once when main is ahead and nothing blocks it, and records the SHA", async () => {
+    upstreamCommit("b.txt");
+    const a = auto();
+    await expect(a.tick()).resolves.toBe("updated");
+    expect(a.calls.map((c) => c.cmd)).toEqual(expect.arrayContaining(UPDATE_CMDS));
+    expect(pulls(a.calls)).toHaveLength(1);
+    expect(a.record).toHaveBeenCalledWith(`Updated to ${head()} (auto)`);
+    expect(a.restart).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when main has not moved", async () => {
+    const a = auto();
+    await expect(a.tick()).resolves.toBe("current");
+    expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+    expect(a.record).not.toHaveBeenCalled();
+  });
+
+  it("waits while a seat is mid-turn, then updates on a later check", async () => {
+    upstreamCommit("b.txt");
+    let busy: string | null = "GUIDO-1 is mid-turn";
+    const a = auto({}, updater({ crewRefusal: () => busy }));
+    await expect(a.tick()).resolves.toBe("waiting");
+    expect(pulls(a.calls)).toHaveLength(0);
+    expect(a.record).not.toHaveBeenCalled();
+    busy = null;
+    await expect(a.tick()).resolves.toBe("updated");
+    expect(pulls(a.calls)).toHaveLength(1);
+    expect(a.record).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits while the test lock is held", async () => {
+    upstreamCommit("b.txt");
+    let held = true;
+    const a = auto({ lockBusy: () => held });
+    await expect(a.tick()).resolves.toBe("waiting");
+    expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+    held = false;
+    await expect(a.tick()).resolves.toBe("updated");
+  });
+
+  it("never runs when off", async () => {
+    upstreamCommit("b.txt");
+    const a = auto({ enabled: false });
+    await expect(a.tick()).resolves.toBe("off");
+    expect(a.calls).toEqual([]);
+  });
+
+  it("never runs on a preview", async () => {
+    upstreamCommit("b.txt");
+    const a = auto({}, updater({ preview: true }));
+    await expect(a.tick()).resolves.toBe("waiting");
+    // reads only: no fetch, pull or install
+    expect(a.calls.filter((c) => /^(pnpm|git (fetch|pull))/.test(c.cmd))).toEqual([]);
+    expect(a.record).not.toHaveBeenCalled();
+  });
+
+  it("waits when the checkout is off main, and when origin is unreachable", async () => {
+    upstreamCommit("b.txt");
+    git(hub, "checkout", "-q", "-b", "feature/x");
+    const off = auto();
+    await expect(off.tick()).resolves.toBe("waiting");
+    expect(off.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+    const down = auto({}, updater({ exec: () => Promise.reject(new Error("no route")) }));
+    await expect(down.tick()).resolves.toBe("waiting");
+  });
 });

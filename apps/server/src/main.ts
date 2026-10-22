@@ -47,7 +47,7 @@ import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
 import { Store } from "./store.ts";
-import { createUpdater, crewRefusal, headSha, UPDATE_LOG } from "./update.ts";
+import { createAutoUpdate, createUpdater, crewRefusal, headSha, UPDATE_LOG } from "./update.ts";
 
 export const HOST = LOOPBACK_HOST;
 /** `pnpm build` output of apps/web, served by this process. */
@@ -92,6 +92,8 @@ async function main(): Promise<void> {
       process.env.MC_DEBUG === "1" ? (line) => process.stderr.write(`cc: ${line}\n`) : undefined,
     log: (line) => log(line),
     lockState: () => lock.state(),
+    // lazy: the updater is built below; the check only runs once the scheduler starts
+    autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
   });
   const preview = isPreview(port, process.env);
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
@@ -259,6 +261,19 @@ async function main(): Promise<void> {
           crewRefusal: () => crewRefusal(config, supervisor, (id) => store.seatSession(id)),
           // the signal path: the crew stops first, then the scheduler and the server; exit 0
           exit: () => void shutdown("update"),
+        });
+
+  // `updates.hub: auto`: the scheduler's `update` job runs Update when it would pass (never on a preview).
+  const autoUpdate =
+    updater === undefined || hubRoot === null || config.updates?.hub !== "auto"
+      ? undefined
+      : createAutoUpdate({
+          enabled: true,
+          updater,
+          lockBusy: () => lock.state().holder !== null,
+          headSha: () => headSha(hubRoot),
+          // the hub restarts at once; the Activity page reads the line after it
+          record: (text) => store.addHubEvent(text, Date.now()),
         });
 
   // Seat and role changes in config.yaml apply live; the file it reads is the one this process loaded.

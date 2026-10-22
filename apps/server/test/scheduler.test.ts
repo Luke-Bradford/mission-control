@@ -37,6 +37,7 @@ import {
   PR_SWEEP_MS,
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
+import { VERSION_CHECK_MS } from "../src/update.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -1066,6 +1067,32 @@ describe("scheduler", () => {
       expect(e.tick).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(ENGINE_TICK_MS - ENGINE_FIRST_DELAY_MS);
       expect(e.tick).toHaveBeenCalledTimes(2);
+      await s.stop();
+    });
+  });
+
+  describe("update job", () => {
+    it("has no timer without an auto-update check, and runs it every 10 minutes with one", async () => {
+      vi.useFakeTimers();
+      const none = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+      expect(JOBS).toContain("update");
+      none.start();
+      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
+      await none.stop();
+      const autoUpdate = vi.fn(async () => "waiting");
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: stubs(),
+        autoUpdate,
+      });
+      s.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(autoUpdate).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
+      expect(autoUpdate).toHaveBeenCalledTimes(2);
       await s.stop();
     });
   });

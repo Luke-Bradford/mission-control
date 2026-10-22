@@ -124,7 +124,13 @@ export interface CcConfig {
   poll: { usageMinutes: number; githubSeconds: number };
   /** Absent: no crew. */
   crew?: CrewConfig;
+  /** Loaded: always set (default `{ hub: "off" }`). */
+  updates?: { hub: HubUpdates };
 }
+
+/** `auto`: the hub runs Update by itself when main has moved and Update's refusals do not apply. */
+export const HUB_UPDATES = ["off", "auto"] as const;
+export type HubUpdates = (typeof HUB_UPDATES)[number];
 
 /** One configured agent: an observed loop, or a crew seat with its session. */
 export type ConfiguredAgent = { id: AgentId; repoId: RepoId; accountId: AccountId } & (
@@ -348,6 +354,7 @@ const fileSchema = z
         ),
       })
       .optional(),
+    updates: z.strictObject({ hub: z.enum(HUB_UPDATES).default("off") }).default({ hub: "off" }),
   })
   .transform(
     (f): CcConfig => ({
@@ -381,6 +388,7 @@ const fileSchema = z
         ...(l.logs_dir === undefined ? {} : { logsDir: expandHome(l.logs_dir) }),
       })),
       poll: { usageMinutes: f.poll.usage_minutes, githubSeconds: f.poll.github_seconds },
+      updates: { hub: f.updates.hub },
       ...(f.crew === undefined
         ? {}
         : {
