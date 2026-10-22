@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -25,11 +34,13 @@ import {
   createPublisher,
   EARLIER_PR_OPEN,
   EMPTY_LOG,
+  MERGE_PR_NOT_RUNS,
   NO_FAILED_RUN,
   REVIEW_STATUS_FAILED,
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
+import { SAFE_CONFIG } from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
 
 const tools = vi.hoisted(() => ({
@@ -497,7 +508,7 @@ describe("hardRuleTouches", () => {
     expect(paths).toEqual([".github/workflows/ci.yml", "CLAUDE.md", "loops/x/y.sh"]);
     expect(calls).toEqual([
       ["merge-base", "refs/remotes/origin/HEAD", SHA],
-      ["diff", "--name-only", "-z", BASE, SHA, "--"],
+      ["diff", "--name-only", "-z", "--no-renames", BASE, SHA, "--"],
     ]);
   });
 
@@ -508,6 +519,71 @@ describe("hardRuleTouches", () => {
     const p = createPublisher(deps({ git }));
     expect(await p.hardRuleTouches(run(), "--upload-pack=x", ["a/**"])).toEqual([]);
     expect(await p.hardRuleTouches(run(), SHA, [])).toEqual([]);
+  });
+});
+
+describe("a moved file keeps its old path (real git)", () => {
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  let clone: string;
+  let sha: string;
+
+  beforeEach(() => {
+    const origin = join(dir, "origin.git");
+    clone = join(dir, "clone");
+    mkdirSync(clone, { recursive: true });
+    execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
+    git(clone, "init", "-q", "-b", "main");
+    git(clone, "config", "user.name", "t");
+    git(clone, "config", "user.email", "t@example.com");
+    // a user gitconfig that turns rename detection on
+    git(clone, "config", "diff.renames", "true");
+    git(clone, "remote", "add", "origin", origin);
+    mkdirSync(join(clone, "apps/server/src/engine"), { recursive: true });
+    mkdirSync(join(clone, "apps/web"), { recursive: true });
+    const body = (n: string) => `${n}\n`.repeat(40);
+    writeFileSync(join(clone, "CLAUDE.md"), body("rules"));
+    writeFileSync(join(clone, "apps/server/src/engine/x.ts"), body("engine"));
+    writeFileSync(join(clone, "apps/web/a.ts"), body("web"));
+    git(clone, "add", "-A");
+    git(clone, "commit", "-q", "-m", "base");
+    git(clone, "push", "-q", "origin", "main");
+    git(clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    git(clone, "checkout", "-q", "-b", BRANCH);
+  });
+
+  const commitHead = (): string => {
+    git(clone, "commit", "-q", "-m", "move");
+    return git(clone, "rev-parse", "HEAD");
+  };
+
+  it("SAFE_CONFIG turns rename detection off", () => {
+    expect(SAFE_CONFIG.join(" ")).toContain("-c diff.renames=false");
+  });
+
+  it("hardRuleTouches reports a hard-rule file moved to a path no rule covers", async () => {
+    mkdirSync(join(clone, "docs"));
+    git(clone, "mv", "CLAUDE.md", "docs/moved.md");
+    git(clone, "mv", "apps/server/src/engine/x.ts", "docs/x.ts");
+    sha = commitHead();
+    const paths = await createPublisher(deps()).hardRuleTouches(run(), sha, [
+      "CLAUDE.md",
+      "apps/server/src/engine/**",
+    ]);
+    expect(paths.sort()).toEqual(["CLAUDE.md", "apps/server/src/engine/x.ts"]);
+  });
+
+  it("gateFacts reports the old path of a file moved into the seat's area as a stray", async () => {
+    git(clone, "mv", "apps/web/a.ts", "apps/server/a.ts");
+    sha = commitHead();
+    git(clone, "push", "-q", "origin", BRANCH);
+    const c = config();
+    const seat = c.crew?.sessions[0]?.seats[0];
+    if (seat !== undefined) seat.area = ["apps/server/**"];
+    store.upsertRun(run());
+    const g = await createPublisher(deps({ config: c })).gateFacts(run(), sha);
+    expect(g).toMatchObject({ ok: true });
+    expect(g.ok ? g.facts.strays : []).toEqual(["apps/web/a.ts"]);
   });
 });
 
@@ -729,10 +805,17 @@ describe("merge steps", () => {
     `ref: refs/heads/main\tHEAD\n${main}\tHEAD\n${branch === null ? "" : `${branch}\trefs/heads/${BRANCH}\n`}`;
   const publisher = (over: Partial<McToolsDeps> = {}) => createPublisher(deps({ git, ...over }));
   const view =
-    (state: string, head = SHA) =>
+    (state: string, head = SHA, extra: Record<string, unknown> = {}) =>
     () => ({
       code: 0,
-      stdout: JSON.stringify({ state, headRefOid: head }),
+      stdout: JSON.stringify({
+        state,
+        headRefOid: head,
+        baseRefName: "main",
+        headRefName: BRANCH,
+        isCrossRepository: false,
+        ...extra,
+      }),
     });
   const ok = () => ({ code: 0, stdout: "" });
   const pushed = (name: string) => gitCalls.some((a) => a[0] === name);
@@ -775,7 +858,15 @@ describe("merge steps", () => {
       expect(gitCalls).toContainEqual(["ls-remote", "--symref", "origin", "HEAD"]);
       expect(gitCalls).toContainEqual(["merge-base", "--is-ancestor", MAIN, SHA]);
       expect(gitCalls).toContainEqual(["rev-list", SHA, "--not", MAIN]);
-      expect(gitCalls).toContainEqual(["diff", "--name-only", "-z", BASE, SHA, "--"]);
+      expect(gitCalls).toContainEqual([
+        "diff",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        BASE,
+        SHA,
+        "--",
+      ]);
     });
 
     it("says a branch behind main does not contain it, and a foreign commit is not hub-only", async () => {
@@ -866,7 +957,14 @@ describe("merge steps", () => {
       ghAnswers = [view("OPEN"), ok];
       expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
       expect(ghCalls).toEqual([
-        ["pr", "view", "12", "--repo=o/mc", "--json", "state,headRefOid"],
+        [
+          "pr",
+          "view",
+          "12",
+          "--repo=o/mc",
+          "--json",
+          "state,headRefOid,baseRefName,headRefName,isCrossRepository",
+        ],
         ["pr", "merge", "12", "--repo=o/mc", "--merge", `--match-head-commit=${SHA}`],
       ]);
       expect(ghCalls.flat().filter((a) => FORBIDDEN.includes(a))).toEqual([]);
@@ -899,8 +997,33 @@ describe("merge steps", () => {
 
     it("refuses transiently when gh merge fails", async () => {
       mainSame();
-      ghAnswers = [view("OPEN"), () => ({ code: 1, stdout: "", stderr: "502" })];
+      ghAnswers = [view("OPEN"), () => ({ code: 1, stdout: "", stderr: "502" }), view("OPEN")];
       expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: true });
+    });
+
+    it("refuses finally a PR that is cross-repository, from another branch, or into another base", async () => {
+      for (const extra of [
+        { isCrossRepository: true },
+        { headRefName: "feature/7-other" },
+        { baseRefName: "release" },
+      ]) {
+        mainSame();
+        ghAnswers = [view("OPEN", SHA, extra)];
+        expect(await publisher().merge(R, SHA)).toEqual({
+          ok: false,
+          text: MERGE_PR_NOT_RUNS,
+          transient: false,
+        });
+        expect(ghCalls.filter((c) => c[1] === "merge")).toEqual([]);
+        ghCalls = [];
+      }
+    });
+
+    it("counts a merge whose reply was lost as success when the PR is then merged", async () => {
+      mainSame();
+      ghAnswers = [view("OPEN"), () => ({ code: 1, stdout: "", stderr: "502" }), view("MERGED")];
+      expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "merge", "view"]);
     });
 
     it("merges one at a time in a repo", async () => {

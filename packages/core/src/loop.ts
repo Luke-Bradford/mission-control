@@ -91,9 +91,9 @@ export const MERGE_STEP_WORDS = {
   close: "close the issue",
   "delete-remote": "delete the remote branch",
 } as const satisfies Partial<Record<MergeStep, string>>;
-/** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
 /** The blocked note for a merged run's local branch that could not be deleted. */
 export const cleanupBranchNoteKey = (runId: string): string => `cleanup-branch:${runId}`;
+/** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
 export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
 export const noShaDeleteText = (ref: string): string =>
   `${ref}: merged, but the remote branch could not be deleted (no sha to lease on); the operator can delete it`;

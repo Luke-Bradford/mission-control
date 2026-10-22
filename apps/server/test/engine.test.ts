@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   asideEventText,
   type BoardItem,
+  cleanupBranchNoteKey,
   closedIssueText,
   DEFAULT_REPO_RULES,
   deletedLocalText,
@@ -68,6 +69,7 @@ import type {
   Publisher,
   PublishResult,
 } from "../src/engine/publish.ts";
+import { MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -263,6 +265,8 @@ interface Harness {
   statusThrows: Error | null;
   /** setAside answers a worktree (else null, the 7b-1 behaviour), and records its calls. */
   asideOn: boolean;
+  /** The end of a run does not take (the seat still holds it). */
+  endBlocked: boolean;
   asides: string[];
   /** wakeRun's calls, and what it throws (null: it puts the run back on its seat). */
   wakes: string[];
@@ -312,6 +316,7 @@ function harness(): Harness {
     statusResults: [],
     statusThrows: null,
     asideOn: false,
+    endBlocked: false,
     asides: [],
     wakes: [],
     wakeError: null,
@@ -403,7 +408,7 @@ function harness(): Harness {
           seatFacts: (id) => (id === RETRO ? x.retroFacts : x.facts),
           async endRunByEngine(runId) {
             const r = store.run(runId);
-            if (r === null || r.endedAt !== null) return;
+            if (r === null || r.endedAt !== null || x.endBlocked) return;
             x.ended.push(runId);
             store.setRunEnded(runId, clock, "ok", "engine");
             if (store.seatSession(r.agentId)?.runId === runId) seatIdle(null, r.agentId);
@@ -2106,8 +2111,8 @@ describe("the engine runs reviews", () => {
     it("a local branch that cannot be deleted raises a note and does not park the run", async () => {
       h.stepResults["delete-local"] = [{ ok: false, text: "not merged", transient: false }];
       await gateOpen();
-      await vi.waitFor(() => expect(noteKeys()).toContain(`cleanup-branch:${RUN}`));
-      const note = store.notes().find((n) => n.key === `cleanup-branch:${RUN}`);
+      await vi.waitFor(() => expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN)));
+      const note = store.notes().find((n) => n.key === cleanupBranchNoteKey(RUN));
       expect(note?.kind).toBe("blocked");
       expect(note?.text).toContain(BRANCH);
       expect(loopTexts()).toContain(localNotDeletedText(BRANCH, "not merged"));
@@ -2115,11 +2120,11 @@ describe("the engine runs reviews", () => {
       expect(h.taken).toEqual([SEAT]);
       // a later pass of the done run keeps it
       await h.engine.reconcileRun(RUN);
-      expect(noteKeys()).toContain(`cleanup-branch:${RUN}`);
+      expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN));
       // the sweep leaves it for the operator, though the PR is done
       setPr({ state: "merged", ci: "passing", mergedAt: clock });
       await h.engine.tick();
-      expect(noteKeys()).toContain(`cleanup-branch:${RUN}`);
+      expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN));
     });
 
     it("a transient refusal of a step stops the pass, and the step is retried next tick", async () => {
@@ -2141,6 +2146,75 @@ describe("the engine runs reviews", () => {
       await gateOpen();
       await vi.waitFor(() => expect(h.steps).toEqual(["ready"]));
       expect(h.steps).not.toContain("merge");
+    });
+
+    it("a PR head that moved since the gate parks nothing and clears the gate's facts", async () => {
+      h.stepResults.merge = [{ ok: false, text: MERGE_HEAD_MOVED, transient: false }];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      await vi.waitFor(() => expect(h.polls).toBeGreaterThan(0));
+      expect(loopOf().parked ?? null).toBeNull();
+      expect(loopOf().phase).toBe("review");
+      expect(loopOf().lastRefusal ?? null).toBeNull();
+      expect(loopOf().gate ?? null).toBeNull();
+      expect(loopOf().touches ?? null).toBeNull();
+      expect(loopTexts().some((t) => t.includes(MERGE_HEAD_MOVED))).toBe(false);
+    });
+
+    it("a repo that is not a merge workspace takes no merge step, whatever was planned", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      // the loop plans from the repo as it reads it for the snapshot; `act` reads it again
+      const repo = need(config.repos[0]);
+      let reads = 0;
+      Object.defineProperty(repo, "autonomy", {
+        configurable: true,
+        get: () => (++reads <= 2 ? "merge" : "draft"),
+      });
+      reported(first().id, []);
+      await vi.waitFor(() => expect(reads).toBeGreaterThanOrEqual(3));
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
+    });
+
+    it("a merged run that crashed before deleting its local branch still finishes it", async () => {
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      setLoop({ merging: { sha: SHA, done: ["ready", "merge", "close", "delete-remote"] } });
+      h.steps.length = 0;
+      await h.engine.tick();
+      await vi.waitFor(() => expect(h.steps).toEqual(["delete-local"]));
+      expect(loopOf().merging?.done).toContain("delete-local");
+    });
+
+    it("the local branch is not deleted, nor the step recorded, while the run has not ended", async () => {
+      h.endBlocked = true;
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toContain("delete-remote"));
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).not.toContain("delete-local");
+      expect(loopOf().merging?.done ?? []).not.toContain("delete-local");
+      h.endBlocked = false;
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.steps).toContain("delete-local"));
+      expect(loopOf().merging?.done).toContain("delete-local");
+    });
+
+    it("the sweep leaves a merged run's cleanup note", async () => {
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      store.raiseNote({
+        key: `cleanup:${RUN}`,
+        kind: "blocked",
+        runId: RUN,
+        seatId: SEAT,
+        repoId: REPO,
+        text: "worktree left behind",
+        at: clock,
+      });
+      setPr({ state: "merged", ci: "passing", mergedAt: clock });
+      await h.engine.tick();
+      expect(noteKeys()).toContain(`cleanup:${RUN}`);
     });
 
     it("a draft workspace makes no ready, merge, close or delete call", async () => {

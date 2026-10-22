@@ -68,7 +68,13 @@ import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { wakeDueAsideRun } from "./aside.ts";
-import { CI_LOG_UNREADABLE, EMPTY_LOG, NO_FAILED_RUN, type Publisher } from "./publish.ts";
+import {
+  CI_LOG_UNREADABLE,
+  EMPTY_LOG,
+  MERGE_HEAD_MOVED,
+  NO_FAILED_RUN,
+  type Publisher,
+} from "./publish.ts";
 import { accountAtStop, isTransientStart, seatMayTake } from "./queue.ts";
 import type { RepoRulesError } from "./rules.ts";
 
@@ -348,6 +354,15 @@ export function createEngine(deps: EngineDeps): Engine {
     parked: boolean;
   }
 
+  /** The actions only a `merge` workspace takes, whatever the loop planned. */
+  const MERGE_STEP_KINDS: ReadonlySet<string> = new Set([
+    "mark-ready",
+    "merge",
+    "close-issue",
+    "delete-remote-branch",
+    "delete-local-branch",
+  ]);
+
   async function act(
     a: LoopAction,
     run: Run,
@@ -409,6 +424,7 @@ export function createEngine(deps: EngineDeps): Engine {
     };
     const mergedSha = (): string =>
       cur.merging?.sha ?? findPr(run, cur)?.headSha ?? store.runPush(run.id)?.sha ?? "";
+    if (MERGE_STEP_KINDS.has(a.kind) && repo?.autonomy !== "merge") return;
     switch (a.kind) {
       case "push": {
         const r = await publisher.push(run);
@@ -629,6 +645,15 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "merge": {
         const r = await publisher.merge(live(), a.sha);
+        if (!r.ok && r.text === MERGE_HEAD_MOVED) {
+          // the PR moved on since the gate: its facts are for a head that is gone, and the new
+          // head goes through CI and review again; nothing is refused
+          cur.gate = null;
+          cur.touches = null;
+          out.parked = true;
+          deps.pollGithub?.();
+          return;
+        }
         if (!r.ok) {
           // main may have moved: the gate's facts are read afresh
           cur.gate = null;
@@ -652,6 +677,8 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "delete-local-branch": {
+        // the branch goes once the run has ended; until then the step is not done
+        if (store.run(run.id)?.endedAt === null) return;
         const branch = run.branch ?? "";
         const r = await publisher.deleteLocalBranch(live());
         if (r.ok) {
@@ -842,6 +869,15 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Whether an ended run's Blocked move and note are settled, or no longer wanted. */
   function endedSettled(run: Run, loop: RunLoop): boolean {
+    // a merged run in a merge workspace still owes its local branch (a crash after end-run)
+    if (
+      config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
+      loop.merging !== undefined &&
+      loop.merging !== null &&
+      !loop.merging.done.includes("delete-local")
+    ) {
+      return false;
+    }
     // (another run has the ticket: the card is that run's now, and nothing here may move it)
     if (loop.phase === "done" || store.hasNewerRunOnTicket(run)) return true;
     if (!loop.parked?.ended || loop.cardFor !== cardMark("parked", loop.epoch)) return false;
@@ -872,6 +908,12 @@ export function createEngine(deps: EngineDeps): Engine {
     );
   }
 
+  /** Whether the run's PR is merged (found on GitHub, or by the merge step). */
+  function mergedRun(run: Run): boolean {
+    const loop = run.loop ?? NEW_LOOP;
+    return findPr(run, loop)?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
+  }
+
   function sweepNotes(): void {
     const at = now();
     for (const n of store.notes()) {
@@ -879,6 +921,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (run === null || run.endedAt === null) continue;
       // a merged run's leftover branch stays the operator's to clear: its PR is done by design
       if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) continue;
+      // (and a merged run's cleanup note: the PR is done, so the branch it names still waits)
+      if (n.key === `cleanup:${run.id}` && mergedRun(run)) continue;
       if (n.kind === "blocked" ? blockedGone(run) : n.kind !== "question") {
         store.clearNote(n.key, at);
         bus.emit("attention");

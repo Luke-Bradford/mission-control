@@ -70,6 +70,8 @@ export const MERGE_PR_NOT_OPEN = "the PR is not open";
 export const MERGE_BEHIND_MAIN = "main has moved past the branch";
 export const MERGE_NOT_RUN_BRANCH = "the branch is not this run's own";
 export const MERGE_BRANCH_MOVED = "the branch has commits that were not merged";
+export const MERGE_PR_NOT_RUNS =
+  "the PR is not this run's own branch into the repo's default branch";
 /** The most of gh's or git's stderr a refusal's text carries, in characters. */
 const STEP_STDERR_MAX = 300;
 
@@ -532,7 +534,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
         const base = (await g(["merge-base", "refs/remotes/origin/HEAD", sha])).trim();
         if (!SHA.test(base)) throw new Error("no merge base with origin/HEAD");
-        const names = (await g(["diff", "--name-only", "-z", base, sha, "--"]))
+        const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
           .split("\0")
           .filter((p) => p !== "");
         return names.filter((p) => hardRules.some((rule) => globMatches(rule, p, true)));
@@ -556,7 +558,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const hubOnly = ahead.every((c) => mine.has(c));
         const base = (await g(["merge-base", mainSha, sha])).trim();
         if (!SHA.test(base)) throw new Error("no merge base with origin's default branch");
-        const names = (await g(["diff", "--name-only", "-z", base, sha, "--"]))
+        const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
           .split("\0")
           .filter((p) => p !== "");
         const strays = names.filter((p) => !pathInArea(seat.area, p) || isProtectedPath(p));
@@ -577,26 +579,43 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (repo === undefined || n === null) return final(MERGE_NO_PR);
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return queued(mergeQueue, run.repoId, async (): Promise<PublishResult> => {
-        const pr = await ghJson(
-          ["pr", "view", String(n), `--repo=${repo}`, "--json", "state,headRefOid"],
-          "pr view",
-        );
+        const view = async (): Promise<Record<string, unknown> | Refusal> =>
+          ghJson(
+            [
+              "pr",
+              "view",
+              String(n),
+              `--repo=${repo}`,
+              "--json",
+              "state,headRefOid,baseRefName,headRefName,isCrossRepository",
+            ],
+            "pr view",
+          );
+        const pr = await view();
         if (isRefusal(pr)) return pr;
         if (pr.state === "MERGED") return { ok: true };
         if (pr.state !== "OPEN") return final(MERGE_PR_NOT_OPEN);
         if (pr.headRefOid !== sha) return final(MERGE_HEAD_MOVED);
+        if (pr.isCrossRepository !== false || pr.headRefName !== ownBranch(run)) {
+          return final(MERGE_PR_NOT_RUNS);
+        }
         const behind = await inGit(run, async (g): Promise<PublishResult> => {
           const { defaultBranch, mainSha } = await originNow(g, null);
+          if (pr.baseRefName !== defaultBranch) return final(MERGE_PR_NOT_RUNS);
           await fetchMain(g, defaultBranch, mainSha);
           return (await yes(g, ["merge-base", "--is-ancestor", mainSha, sha]))
             ? { ok: true }
             : transient(MERGE_BEHIND_MAIN);
         });
         if (!behind.ok) return behind;
-        return ghDo(
+        const merged = await ghDo(
           ["pr", "merge", String(n), `--repo=${repo}`, "--merge", `--match-head-commit=${sha}`],
           "pr merge",
         );
+        if (merged.ok || !merged.transient) return merged;
+        // the merge may have gone through with the reply lost
+        const after = await view();
+        return !isRefusal(after) && after.state === "MERGED" ? { ok: true } : merged;
       });
     },
 
