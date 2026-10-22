@@ -12,7 +12,13 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { dealQueues, refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
+import {
+  dealQueues,
+  refillQueues,
+  seatMayTake,
+  type TakeDeps,
+  takeNext,
+} from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
@@ -408,6 +414,26 @@ describe("takeNext", () => {
     await queued(card(1));
     await take();
     expect(started).toHaveLength(1);
+  });
+
+  it("rework first: an idle seat with a run waiting on rework takes nothing", async () => {
+    const aside = (wake: boolean) => ({ ...NEW_LOOP, aside: { worktree: "/w/x", wake } });
+    store.upsertRun(
+      run({ id: "r-aside", agentId: SERVER, ticket: `${REPO}#9`, loop: aside(false) }),
+    );
+    seatRow("idle");
+    await queued(card(1));
+    // a run in review, nothing due: the seat is free
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    store.setRunLoop("r-aside", aside(true));
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER)[0]?.takenAt).toBeNull();
+    // another seat's rework does not hold this one
+    store.upsertRun(run({ id: "r-other", agentId: WEB, ticket: `${REPO}#8`, loop: aside(true) }));
+    store.setRunLoop("r-aside", aside(false));
+    expect(seatMayTake(store, SERVER)).toBe(true);
   });
 
   it.each(["stopped", "error", "starting", "running", "parked"] as const)(

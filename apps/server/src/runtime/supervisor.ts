@@ -49,6 +49,7 @@ import {
   LOOPBACK_HOST,
   MCP_PATH,
   modeOfSeat,
+  NOT_ASIDE,
   notReviewSeatText,
   notWatchSeatText,
   PNPM_STORE_ENV,
@@ -56,12 +57,14 @@ import {
   ROLE_PROMPT_DIR,
   type Run,
   type RunLoop,
+  reworkFirstText,
   type SeatSessionRow,
   type SeatState,
   scratchStartRefusedText,
   seatCallSign,
   seatDef,
   type TicketView,
+  ticketInReviewText,
   watchCheckoutName,
   watchStartRefusedText,
 } from "@mc/core";
@@ -76,6 +79,7 @@ import {
   isInside,
   realish,
 } from "../config.ts";
+import { wakeDueAsideRun } from "../engine/aside.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
@@ -290,6 +294,19 @@ export interface Supervisor {
    * does not run crew (disabled, or without the crew lock).
    */
   endRunByEngine(runId: string): Promise<void>;
+  /**
+   * Takes the run off its seat while it is in review: the process is closed, the worktree kept and
+   * the seat left idle with no run; the run is not ended and no event is emitted. Null (nothing
+   * done) unless the seat holds the run, its process is alive between turns and no start is on.
+   * Never throws.
+   */
+  setAside(runId: string): Promise<{ worktree: string } | null>;
+  /**
+   * Puts a set-aside run back on its seat: its CLI session resumed in its own worktree, with no
+   * "carry on" line. A 409 while the seat is busy (or the run is not aside); a run that cannot be
+   * resumed is ended `failed` and a 500 thrown.
+   */
+  wakeRun(runId: string): Promise<void>;
   /**
    * Takes the crew lock, then resumes every active run once, in the background. Does nothing when
    * disabled; never throws (a failure leaves crew off with a note, or one seat in error).
@@ -824,10 +841,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // a review seat reads nothing of its session-mates': the author's worktree is among them
       const mates =
         modeOfSeat(info.seat) === "scratch"
-          ? info.session.seats.flatMap((s) => {
-              const w = s.id === info.seat.id ? null : store.seatSession(s.id)?.worktree;
-              return w == null ? [] : [realish(w)];
-            })
+          ? [
+              ...info.session.seats.flatMap((s) => {
+                const w = s.id === info.seat.id ? null : store.seatSession(s.id)?.worktree;
+                return w == null ? [] : [realish(w)];
+              }),
+              // a run set aside in review has no seat row to name its worktree
+              ...store.asideRuns().flatMap((r) => {
+                const w = r.loop?.aside?.worktree;
+                const mate = info.session.seats.some((s) => s.id === r.agentId);
+                return w == null || !mate || r.agentId === info.seat.id ? [] : [realish(w)];
+              }),
+            ]
           : [];
       const args = crewCliArgs({
         model: info.seat.model,
@@ -1073,6 +1098,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw busy;
+    }
+    // Rework goes first, and a ticket in review has its run already.
+    const waiting = store.asideRuns();
+    const rework = wakeDueAsideRun(store, seatId);
+    if (rework) {
+      throw new SupervisorError(409, reworkFirstText(call(info), rework.ticket ?? rework.id));
+    }
+    const ref = `${info.repo.id}#${issue}`;
+    if (waiting.some((r) => r.ticket === ref)) {
+      throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
     try {
@@ -1498,7 +1533,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = run.agentId;
     const info = seats.get(seatId);
     const row = store.seatSession(seatId);
-    if (info === undefined || row?.runId !== runId) return;
+    if (info === undefined) return;
+    if (row?.runId !== runId) {
+      // a run set aside in review: no process, no seat; its worktree is all it holds
+      const aside = run.loop?.aside;
+      if (aside && live.get(seatId)?.run.id !== runId) {
+        const at = now();
+        store.upsertRun({ ...run, endedAt: at, status: "ok" });
+        store.setRunEnded(runId, at, "ok", "engine");
+        transcripts.delete(run.transcriptPath);
+        digests.delete(run.id);
+        emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
+        await dropScratch(info, runId, run.seq, aside.worktree);
+      }
+      return;
+    }
     const worktree = row.worktree;
     const l = live.get(seatId);
     if (l && l.run.id === runId && l.ending !== null) {
@@ -1541,6 +1590,103 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       } catch (err) {
         log(`${seatId}: could not record the cleanup note: ${errText(err)}`);
       }
+    }
+  }
+
+  async function setAside(runId: string): Promise<{ worktree: string } | null> {
+    if (!mayAct()) return null;
+    const run = store.run(runId);
+    if (run === null || run.endedAt !== null) return null;
+    const seatId = run.agentId;
+    const row = store.seatSession(seatId);
+    const l = live.get(seatId);
+    if (row?.runId !== runId || row.worktree === null || starting.has(seatId)) return null;
+    if (l === undefined || l.run.id !== runId || !l.session.alive) return null;
+    if (l.inTurn || l.ending !== null) return null;
+    const worktree = row.worktree;
+    fold(l, true);
+    l.off();
+    live.delete(seatId);
+    // the process's exit takes its token and files (`release`); the run goes on
+    setSeat(seatId, {
+      runId: null,
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+    });
+    try {
+      await l.session.close();
+    } catch (e) {
+      log(`${seatId}: could not close the set-aside process: ${errText(e)}`);
+    }
+    return { worktree };
+  }
+
+  async function wakeRun(runId: string): Promise<void> {
+    const run = store.run(runId);
+    const aside = run?.endedAt === null ? run.loop?.aside : null;
+    if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
+    const seatId = run.agentId;
+    const info = need(seatId);
+    if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+    if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
+      throw new SupervisorError(409, `${call(info)} already has a run`);
+    }
+    starting.add(seatId);
+    try {
+      /** The run cannot go back: it ends `failed`, the seat (another run's now) untouched. */
+      const fail = (reason: string, cause?: unknown): never => {
+        // its worktree is no one's now (a failed removal raises its own cleanup note)
+        if (existsSync(aside.worktree)) void dropScratch(info, runId, run.seq, aside.worktree);
+        const at = now();
+        store.upsertRun({ ...run, endedAt: at, status: "failed" });
+        store.setRunEnded(runId, at, "failed", "exit");
+        emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
+        throw new SupervisorError(500, reason, { cause });
+      };
+      if (run.branch === null || run.sessionId === null) return fail(RESUME_FAILED);
+      // a seat changed to scratch mode, or off the build loop, cannot take a writer run back
+      if (modeOfSeat(info.seat) === "scratch" || seatDef(info.seat).loop !== "build") {
+        return fail(RESUME_MODE_CHANGED);
+      }
+      let checkout: { path: string; branch: string; gitDir: string };
+      try {
+        checkout = await existingCheckout(info.session.checkout, aside.worktree, run.branch);
+      } catch (e) {
+        return fail("could not resume: checkout missing", e);
+      }
+      if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+      // the check awaited: the engine may have ended the run meanwhile
+      if (store.run(runId)?.endedAt !== null) throw new SupervisorError(409, NOT_ASIDE);
+      // the seat's last turn was another run's
+      store.setSeatTurnEnded(seatId, null);
+      let l: Live;
+      try {
+        l = launch(info, run, run.sessionId, checkout, true, null);
+      } catch (e) {
+        log(`${seatId}: could not start: ${errText(e)}`);
+        return fail(CANNOT_START, e);
+      }
+      // no "carry on" line goes ahead of the fix the engine is about to send
+      l.resumedAt = null;
+      try {
+        setSeat(seatId, {
+          runId,
+          cliSessionId: run.sessionId,
+          state: "idle",
+          reason: null,
+          worktree: checkout.path,
+        });
+      } catch (e) {
+        // not recorded on the seat: discard the process rather than leave one nobody can see
+        l.off();
+        if (live.get(seatId) === l) live.delete(seatId);
+        void l.session.close();
+        return fail(CANNOT_START, e);
+      }
+    } finally {
+      starting.delete(seatId);
     }
   }
 
@@ -1682,6 +1828,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     endRun,
 
     endRunByEngine,
+
+    setAside,
+
+    wakeRun,
 
     send,
 

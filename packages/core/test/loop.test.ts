@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
+  asideEventText,
   CI_FAILED_TEXT,
   CI_PENDING_MAX_MS,
   CI_TRIES,
@@ -21,6 +22,7 @@ import {
   REFUSAL_TRIES,
   RESUME_TEXT,
   reconcile,
+  wokenEventText,
 } from "../src/loop.ts";
 import {
   fixText,
@@ -57,6 +59,7 @@ function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): Lo
       resumedAt: null,
       rateLimitedUntil: null,
       openQuestion: false,
+      holdsRun: true,
     },
     evidence: null,
     evidenceCount: 0,
@@ -70,6 +73,7 @@ function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): Lo
     tokens: 0,
     budget: 1000,
     ended: null,
+    asideOk: false,
     ...over,
   };
 }
@@ -1655,5 +1659,143 @@ describe("review decisions", () => {
       const first = reconcile(s);
       expect(again(s, first.loop).actions).toEqual(first.actions);
     }
+  });
+});
+
+describe("set aside", () => {
+  const RETRO = "RETRO-1";
+  const fact = (over: Partial<ReviewFact> = {}): ReviewFact => ({
+    id: 1,
+    sha: SHA,
+    epoch: 0,
+    attempt: 1,
+    state: "reported",
+    blocking: 0,
+    minor: 0,
+    failure: null,
+    ...over,
+  });
+  const finding: ReviewFinding = {
+    severity: "Important",
+    file: "a.ts",
+    line: 3,
+    summary: "s",
+    scenario: "w",
+    fix: "f",
+  };
+  const facts = (rows: ReviewFact[], findings: ReviewFinding[] = []): LoopReviewFacts => ({
+    retro: RETRO,
+    rows,
+    findings,
+  });
+  /** In review on its seat: pushed, PR 12 open on the sha, idle, a review seat in the session. */
+  const base = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): LoopSnapshot => {
+    const s = snap(
+      {
+        headCommit: SHA,
+        pushed: { sha: SHA, at: NOW - 60_000 },
+        pr: pr({ ci: "passing" }),
+        evidence: { id: 1, at: 2000, ruling: false },
+        evidenceCount: 1,
+        review: facts([fact()]),
+        asideOk: true,
+        ...over,
+      },
+      { phase: "review", reportedEvidenceId: 1, cardFor: "review:0", ...loop },
+    );
+    return { ...s, seat: { ...s.seat, state: "idle", lastTurnEndedAt: NOW - 1000, ...over.seat } };
+  };
+  const asideOf = (wake = false): Partial<RunLoop> => ({ aside: { worktree: "/w/r1", wake } });
+  /** The run off its seat: the seat is another run's, so the snapshot is not current. */
+  const off = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = asideOf()) => {
+    const s = base(over, loop);
+    return { ...s, seat: { ...s.seat, state: "stopped" as const, inTurn: true, holdsRun: false } };
+  };
+  const kindsOf = (a: LoopAction[]): string[] => a.map((x) => x.kind);
+  const blocking = facts([fact({ id: 5, blocking: 1 })], [finding]);
+
+  it("texts", () => {
+    expect(asideEventText("SULU")).toBe("in review; SULU is free for its next ticket");
+    expect(wokenEventText("SULU")).toBe("back to SULU for rework");
+    expect(NEW_LOOP.aside).toBeNull();
+  });
+
+  it("sets aside at review", () => {
+    const a = reconcile(base()).actions;
+    expect(a.filter((x) => x.kind === "set-aside")).toHaveLength(1);
+    expect(sends(a)).toEqual([]);
+  });
+
+  it("no review seat: held", () => {
+    expect(kindsOf(reconcile(base({ asideOk: false })).actions)).not.toContain("set-aside");
+  });
+
+  it("not set aside", () => {
+    const b = base();
+    const cases: [string, LoopSnapshot][] = [
+      ["in turn", base({ seat: { ...b.seat, inTurn: true } })],
+      ["open question", base({ seat: { ...b.seat, openQuestion: true } })],
+      ["unpushed commit", base({ headCommit: SHA2 })],
+      ["ci failed on it", base({}, { ciFailedSha: SHA })],
+      ["head moved", base({ pr: pr({ ci: "passing", headSha: SHA2 }) })],
+      ["fix due", base({ review: blocking })],
+      ["fix claimed, not reported", base({ review: blocking, claimed: { "fix:r1:0:5": 1 } })],
+      ["seat does not hold the run", base({ seat: { ...b.seat, holdsRun: false } })],
+      ["not idle", base({ seat: { ...b.seat, state: "running" } })],
+    ];
+    for (const [name, s] of cases) {
+      expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+    }
+  });
+
+  it("findings wake it", () => {
+    const r = reconcile(off({ review: blocking }));
+    expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    expect(kindsOf(r.actions).filter((k) => k === "wake")).toHaveLength(1);
+    expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a park wakes it", () => {
+    const r = reconcile(
+      off(
+        {},
+        {
+          ...asideOf(),
+          phase: "parked",
+          parked: { kind: "review-failed", reason: "x", ended: false },
+        },
+      ),
+    );
+    expect(r.loop.aside?.wake).toBe(true);
+    expect(kindsOf(r.actions)).toContain("wake");
+  });
+
+  it("the third blocking review parks and wakes it", () => {
+    const rows = facts(
+      [fact({ id: 1, blocking: 1 }), fact({ id: 2, blocking: 1 }), fact({ id: 3, blocking: 1 })],
+      [finding],
+    );
+    const r = reconcile(off({ review: rows, claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 } }));
+    expect(r.loop.phase).toBe("parked");
+    expect(r.loop.aside?.wake).toBe(true);
+  });
+
+  it("clean review stays aside", () => {
+    const r = reconcile(off({ review: facts([fact({ minor: 1 })]) }));
+    expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
+    expect(kindsOf(r.actions)).not.toContain("wake");
+    expect(kindsOf(r.actions)).not.toContain("set-aside");
+    expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("back on its seat clears aside", () => {
+    const r = reconcile(base({}, asideOf(true)));
+    expect(r.loop.aside).toBeNull();
+    expect(kindsOf(r.actions)).not.toContain("wake");
+  });
+
+  it("ended: no wake", () => {
+    const r = reconcile(off({ ended: { reason: "stopped" } }, asideOf(true)));
+    expect(kindsOf(r.actions)).not.toContain("wake");
   });
 });

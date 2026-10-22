@@ -15,6 +15,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
+import { NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -1174,6 +1175,25 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")).toEqual(seat({ lastTurnEndedAt: 77 }));
     store.setSeatSession(seat({ state: "idle", updatedAt: 9 }));
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBe(77);
+  });
+
+  it("clears when the last turn ended with null", () => {
+    store.setSeatSession(seat());
+    store.setSeatTurnEnded("guido", 77);
+    store.setSeatTurnEnded("guido", null);
+    expect(store.seatSession("guido")?.lastTurnEndedAt).toBeNull();
+  });
+
+  it("asideRuns: unended runs with an aside, oldest first", () => {
+    const aside = { worktree: "/w/x", wake: false };
+    store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, aside } }));
+    store.upsertRun(run({ id: "a", seq: 1, startedAt: 1000, loop: { ...NEW_LOOP, aside } }));
+    store.upsertRun(run({ id: "none", seq: 3, startedAt: 3000, loop: NEW_LOOP }));
+    store.upsertRun(run({ id: "plain", seq: 4, startedAt: 4000 }));
+    store.upsertRun(
+      run({ id: "ended", seq: 5, startedAt: 500, endedAt: 600, loop: { ...NEW_LOOP, aside } }),
+    );
+    expect(store.asideRuns().map((r) => r.id)).toEqual(["a", "b"]);
   });
 
   it("round-trips a row and upserts on the seat id", () => {

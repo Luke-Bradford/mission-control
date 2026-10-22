@@ -31,6 +31,7 @@ import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { wakeDueAsideRun } from "./aside.ts";
 import { RepoRulesError } from "./rules.ts";
 
 export const TWO_AREAS_KEY_PREFIX = "question:two-areas:";
@@ -94,9 +95,12 @@ const isMerge = (config: CcConfig, repoId: RepoId): boolean =>
 
 /**
  * Whether the seat may take a ticket now: it has no seat row yet, or it is idle holding no run (or
- * only one that has ended). A run the store does not know counts as live.
+ * only one that has ended), and no run of its own waits off the seat for rework (flagged to wake,
+ * or its review has reported blocking findings not yet sent). A run the store
+ * does not know counts as live.
  */
 export function seatMayTake(store: Store, seatId: string): boolean {
+  if (wakeDueAsideRun(store, seatId) !== undefined) return false;
   const row = store.seatSession(seatId);
   if (row === null) return true;
   if (row.state !== "idle") return false;

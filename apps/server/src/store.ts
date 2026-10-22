@@ -742,6 +742,19 @@ export class Store {
   }
 
   /**
+   * The run the HUD shows for an agent: the one its seat holds when that is set and not ended
+   * (a run woken from aside can be older than a run that ended meanwhile), else the newest.
+   */
+  seatRun(agentId: AgentId): Run | undefined {
+    const heldId = this.seatSession(agentId)?.runId ?? null;
+    if (heldId !== null) {
+      const held = this.run(heldId);
+      if (held !== null && held.endedAt === null && held.agentId === agentId) return held;
+    }
+    return this.runs(agentId, 1)[0];
+  }
+
+  /**
    * The runs a loop drives that may still need the engine: every one not yet ended, and those
    * that ended at or after `endedSince` with a loop that is not done. Oldest first.
    */
@@ -754,6 +767,18 @@ export class Store {
          ORDER BY started_at, seq`,
       )
       .all(endedSince) as Row[];
+    return rows.map(toRun);
+  }
+
+  /** The runs that have not ended and are off their seat in review, oldest first. */
+  asideRuns(): Run[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
+           AND json_extract(loop, '$.aside') IS NOT NULL
+         ORDER BY started_at, seq`,
+      )
+      .all() as Row[];
     return rows.map(toRun);
   }
 
@@ -1985,8 +2010,8 @@ export class Store {
       );
   }
 
-  /** Records that the seat's turn ended at `at`. */
-  setSeatTurnEnded(seatId: string, at: number): void {
+  /** Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. */
+  setSeatTurnEnded(seatId: string, at: number | null): void {
     this.db
       .prepare("UPDATE seat_sessions SET last_turn_ended_at = ? WHERE seat_id = ?")
       .run(at, seatId);
