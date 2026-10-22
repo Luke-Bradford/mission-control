@@ -306,6 +306,66 @@ export const MC_PLAN_GH_FAILED =
   "Not written: GitHub could not be reached through gh. Try again in a minute; if it keeps failing, ask the operator.";
 export const planWrittenText = (ref: string): string => `plan written to ${ref}`;
 
+/** The most missing paths a refusal lists. */
+export const PLAN_PATHS_LISTED = 5;
+export const MC_PLAN_NO_TESTS =
+  "Not added: the plan has no ### Tests part; name the test to write first for each Done when item.";
+export const planFewTestsText = (tests: number, doneWhen: number): string =>
+  `Not added: the plan's ### Tests part has ${tests} ${tests === 1 ? "entry" : "entries"} but the ticket's ## Done when has ${doneWhen} ${doneWhen === 1 ? "item" : "items"}; name the test to write first, and the file it goes in, for each Done when item.`;
+export const planMissingPathsText = (paths: readonly string[]): string =>
+  `Not added: these paths are not in the checkout: ${paths.slice(0, PLAN_PATHS_LISTED).join(", ")}${paths.length > PLAN_PATHS_LISTED ? ` (and ${paths.length - PLAN_PATHS_LISTED} more)` : ""}. Fix them, or say the plan creates them.`;
+
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+\S/;
+
+/** The lines under the first heading `title` (at `level`), up to the next heading of that level or higher. */
+function sectionLines(text: string, level: number, title: RegExp): string[] | null {
+  const out: string[] = [];
+  let inside = false;
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    const h = fenced ? null : /^(#{1,6})[ \t]+(.*?)[ \t]*$/.exec(line);
+    if (h !== null) {
+      if (inside && (h[1] ?? "").length <= level) break;
+      if (!inside && (h[1] ?? "").length === level && title.test(h[2] ?? "")) {
+        inside = true;
+        continue;
+      }
+    }
+    if (inside) out.push(line);
+  }
+  return inside ? out : null;
+}
+
+/** How many bullets the ticket's `## Done when` holds. */
+export function doneWhenCount(body: string): number {
+  return (sectionLines(body, 2, /^done when$/i) ?? []).filter((l) => LIST_ITEM.test(l)).length;
+}
+
+/** How many entries the plan's `### Tests` part holds, or null when it has no such part. */
+export function planTestCount(plan: string): number | null {
+  const lines = sectionLines(plan, 3, /^tests$/i);
+  return lines === null ? null : lines.filter((l) => LIST_ITEM.test(l)).length;
+}
+
+/**
+ * The repo-relative paths a plan names in inline code (a `/` and a file ending), but those on a
+ * line that says `new` or `create`.
+ */
+export function planPaths(plan: string): string[] {
+  const found = new Set<string>();
+  let fenced = false;
+  for (const line of plan.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    if (fenced || /\b(new|creat(?:e|es|ed|ing))\b/i.test(line)) continue;
+    for (const m of line.matchAll(/`([^`\s]+)`/g)) {
+      const p = (m[1] ?? "").replace(/^\.\//, "").replace(/:\d+(?:-\d+)?$/, "");
+      if (/^[\w.@-][\w.@/-]*\/[\w.@-]*\.[A-Za-z0-9]+$/.test(p) && !p.includes("..")) found.add(p);
+    }
+  }
+  return [...found];
+}
+
 export const MC_PR_BODY_REFUSED =
   "Not edited: the new PR body would notify someone, reference another item, hold a secret or end inside an open block.";
 export const prNotRunsText = (n: number): string =>

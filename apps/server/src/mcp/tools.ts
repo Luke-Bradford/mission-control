@@ -23,6 +23,7 @@ import {
   committedText,
   commitUnresolvedText,
   crewAuthorName,
+  doneWhenCount,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -62,6 +63,7 @@ import {
   MC_PLAN_ISSUE_CLOSED,
   MC_PLAN_MAX,
   MC_PLAN_NO_ROOM,
+  MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_WRITTEN,
   MC_PR_BODY_REFUSED,
@@ -97,6 +99,10 @@ import {
   PUSH_SCAN_MAX_BUFFER,
   pathInArea,
   planByLine,
+  planFewTestsText,
+  planMissingPathsText,
+  planPaths,
+  planTestCount,
   planTextText,
   planTooLongText,
   planWrittenText,
@@ -1681,6 +1687,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const body = String(issueJson.body ?? "");
       if (PLAN_HEADING_LINE.test(body)) return { text: MC_PLAN_ALREADY, isError: true };
       if (unclosedMarkdown(body)) return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
+
+      const tests = planTestCount(plan);
+      if (tests === null) return { text: MC_PLAN_NO_TESTS, isError: true };
+      const doneWhen = doneWhenCount(body);
+      if (tests < doneWhen) return { text: planFewTestsText(tests, doneWhen), isError: true };
+      if (live.worktree !== null) {
+        const missing: string[] = [];
+        for (const p of planPaths(plan)) {
+          try {
+            await lstat(join(live.worktree, p));
+          } catch {
+            missing.push(p);
+          }
+        }
+        if (missing.length > 0) return { text: planMissingPathsText(missing), isError: true };
+      }
 
       const next = [
         body.trim() === "" ? "" : `${body.trimEnd()}\n\n`,
