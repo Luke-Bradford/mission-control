@@ -33,6 +33,8 @@ import {
   type MergeStep,
   MINOR_CLEARED,
   MINOR_POSTED,
+  mainConflictText,
+  mergedMainText,
   mergedText,
   mergeStepFailedText,
   minorNotPostedText,
@@ -361,6 +363,7 @@ export function createEngine(deps: EngineDeps): Engine {
     "close-issue",
     "delete-remote-branch",
     "delete-local-branch",
+    "update-branch",
   ]);
 
   async function act(
@@ -635,6 +638,39 @@ export function createEngine(deps: EngineDeps): Engine {
         out.again = true;
         return;
       }
+      case "update-branch": {
+        // the run's own worktree: the aside run's, or its seat's while the seat holds it
+        const seatRow = supervisor.seat(run.agentId);
+        const worktree =
+          cur.aside?.worktree ?? (seatRow?.runId === run.id ? seatRow.worktree : null);
+        if (worktree === null || worktree === undefined) return;
+        const r = await publisher.updateBranch(live(), a.mainSha, worktree);
+        if (!r.ok) return refused(r);
+        if (r.kind === "wait") return;
+        cur.transient = 0;
+        cur.lastRefusal = null;
+        lastTransient.delete(run.id);
+        out.again = true;
+        if (r.kind === "merged") {
+          // as a report moves the run to ci: the new commit is pushed, then judged afresh
+          cur.phase = "ci";
+          cur.pushFor = r.sha;
+          cur.pushStartedAt = at;
+          store.setRunLoop(run.id, cur);
+          store.addLoopEvent(`${run.id}:update:${r.sha}`, run.id, mergedMainText(a.mainSha), at);
+        } else {
+          cur.phase = "working";
+          cur.mainMerge = { mainSha: a.mainSha, files: r.files };
+          store.setRunLoop(run.id, cur);
+          store.addLoopEvent(
+            `${run.id}:update-conflict:${a.mainSha}`,
+            run.id,
+            mainConflictText(a.mainSha, r.files.length),
+            at,
+          );
+        }
+        return;
+      }
       case "mark-ready": {
         const sha = store.runPush(run.id)?.sha;
         if (sha === undefined) return;
@@ -806,14 +842,16 @@ export function createEngine(deps: EngineDeps): Engine {
         }
       }
     }
+    // in ci, a conflicting PR needs main's sha to merge it in, reviewer or not
+    const conflicting = input.phase === "ci" && pr?.mergeable === "CONFLICTING";
     if (
       run.endedAt === null &&
       pushed !== null &&
-      input.phase === "review" &&
+      (input.phase === "review" || conflicting) &&
       pr?.state === "open" &&
       pr.headSha === pushed.sha &&
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
-      reviewerOf(config, run.agentId) !== null
+      (conflicting || reviewerOf(config, run.agentId) !== null)
     ) {
       // origin's tip is read every pass; the other reads only when the sha or the tip changed
       const known = input.gate?.sha === pushed.sha ? input.gate : null;

@@ -127,6 +127,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
     backfill: vi.fn(() => ({ folded: 0, left: 0, failed: 0 })),
     rewriteSummaries: vi.fn(() => ({ rewritten: 0, done: true })),
     fillTitles: vi.fn(async () => ({ filled: 0, done: true })),
+    cli: vi.fn(async () => ({ cask: false as const, found: true })),
     claude: vi.fn(async () => []),
     codex: vi.fn(async () => []),
     machine: vi.fn(async (_prevCpus, prev, now) => ({

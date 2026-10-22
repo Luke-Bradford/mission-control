@@ -59,9 +59,12 @@ const singleSelectField = (alias: string, name: string) =>
 
 const BOARD_QUERY = `query Board($owner: String!, $number: Int!, $after: String) {
   ${RATE_LIMIT_SELECTION}
-  user(login: $owner) {
+  repositoryOwner(login: $owner) {
+    __typename
+    ... on ProjectV2Owner {
     projectV2(number: $number) {
       id
+      url
       items(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
@@ -85,6 +88,7 @@ const BOARD_QUERY = `query Board($owner: String!, $number: Int!, $after: String)
           }
         }
       }
+    }
     }
   }
 }`;
@@ -200,10 +204,13 @@ export class GqlError extends Error {
  */
 export class GqlTransportError extends Error {
   readonly status: number | null;
-  constructor(message: string, status: number | null) {
+  /** The response's X-GitHub-SSO header (SAML single sign-on), or null. */
+  readonly sso: string | null;
+  constructor(message: string, status: number | null, sso: string | null = null) {
     super(message);
     this.name = "GqlTransportError";
     this.status = status;
+    this.sso = sso;
   }
 }
 
@@ -271,7 +278,13 @@ export function makeGql(
     if (!res.ok && isRateLimitedResponse(res.status, res.headers)) {
       rates?.record(queryName(query), exhaustedReading(res.headers, now()));
     }
-    if (!res.ok) throw new GqlTransportError(`github: HTTP ${res.status}`, res.status);
+    if (!res.ok) {
+      throw new GqlTransportError(
+        `github: HTTP ${res.status}`,
+        res.status,
+        res.headers.get("x-github-sso"),
+      );
+    }
     let body: { data?: unknown; errors?: { message?: unknown }[] };
     try {
       body = (await res.json()) as typeof body;
@@ -369,7 +382,34 @@ export function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** The one health line for a read GitHub refused for SAML single sign-on; `url` from X-GitHub-SSO. */
+export function ssoRefusalText(owner: string, url: string | null): string {
+  const head = `the gh token is not authorised for ${owner}'s single sign-on (SAML).`;
+  return url !== null
+    ? `${head} Authorise it at ${url}`
+    : `${head} Authorise the token for ${owner} in GitHub settings (Applications), then run gh auth refresh`;
+}
+
+/** That line when `e` is an SSO refusal, else null. */
+export function ssoRefusal(e: unknown, owner: string): string | null {
+  if (e instanceof GqlTransportError && e.status === 403 && e.sso !== null) {
+    return ssoRefusalText(owner, /(?:^|;)\s*url=([^;\s]+)/.exec(e.sso)?.[1] ?? null);
+  }
+  if (errMsg(e).includes("SAML enforcement")) return ssoRefusalText(owner, null);
+  return null;
+}
+
+/** Per store, each repo's Project address from its last successful board read. */
+const projectUrls = new WeakMap<Store, Map<string, string>>();
+
+/** The Project's address as GitHub last reported it, or null before the first successful board read. */
+export function projectUrlOf(store: Store, repoId: string): string | null {
+  return projectUrls.get(store)?.get(repoId) ?? null;
+}
+
 interface BoardResult {
+  /** The Project's address from any page, or null when GitHub sent none. */
+  url: string | null;
   items: BoardItem[];
   unmapped: number;
   /** Every item GitHub returned, before any is filtered out. */
@@ -387,15 +427,18 @@ async function fetchBoard(
   let raw = 0;
   // Any page may carry the project id; it is applied to every item once the pages are read.
   let projectId: string | null = null;
+  let projectUrl: string | null = null;
   let after: string | null = null;
   for (let p = 0; p < MAX_BOARD_PAGES; p++) {
     const data = await call(gql, BOARD_QUERY, { owner, number: repo.project, after });
-    const conn = path(data, "user", "projectV2", "items");
+    const conn = path(data, "repositoryOwner", "projectV2", "items");
     if (!isObj(conn) || !Array.isArray(conn.nodes)) {
       throw new Error(`project ${repo.project} not found for ${owner}`);
     }
-    const projectNodeId = path(data, "user", "projectV2", "id");
+    const projectNodeId = path(data, "repositoryOwner", "projectV2", "id");
     if (typeof projectNodeId === "string") projectId = projectNodeId;
+    const projectNodeUrl = path(data, "repositoryOwner", "projectV2", "url");
+    if (typeof projectNodeUrl === "string") projectUrl = projectNodeUrl;
     raw += conn.nodes.length;
     for (const node of conn.nodes) {
       if (!isObj(node) || !isObj(node.content) || typeof node.content.number !== "number") continue;
@@ -464,7 +507,7 @@ async function fetchBoard(
     }
     const pi = isObj(conn.pageInfo) ? conn.pageInfo : {};
     if (pi.hasNextPage !== true || typeof pi.endCursor !== "string") {
-      return { items: items.map((i) => ({ ...i, projectId })), unmapped, raw };
+      return { url: projectUrl, items: items.map((i) => ({ ...i, projectId })), unmapped, raw };
     }
     after = pi.endCursor;
   }
@@ -871,6 +914,11 @@ export async function collectGithub(
   let truncated: string[] = [];
   try {
     const board = await fetchBoard(repo, gql, now);
+    if (board.url !== null) {
+      const urls = projectUrls.get(store) ?? new Map<string, string>();
+      projectUrls.set(store, urls);
+      urls.set(repo.id, board.url);
+    }
     // GitHub can answer a board read with no items while it is degraded. Over a board that had
     // cards, empty answers keep the board and say so until they have lasted EMPTY_BOARD_GRACE_MS.
     const empties = emptyBoards.get(store) ?? new Map<string, number>();
@@ -886,7 +934,8 @@ export async function collectGithub(
       unmapped = board.unmapped;
     }
   } catch (e) {
-    failures.push(`board: ${errMsg(e)}`);
+    const [owner = ""] = repo.github.split("/");
+    failures.push(`board: ${ssoRefusal(e, owner) ?? errMsg(e)}`);
   }
   try {
     const found = await fetchEscalations(repo, gql);

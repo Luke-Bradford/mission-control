@@ -1325,7 +1325,7 @@ function stripPrefix(p: string): string {
 }
 
 const HEADER_LINE =
-  /^(--- |\+\+\+ |index |new file mode|deleted file mode|old mode|new mode|similarity index|dissimilarity index|rename |copy |Binary files|GIT binary patch)/;
+  /^(--- |\+\+\+ |index |new file mode|deleted file mode|old mode|new mode|similarity index|dissimilarity index|rename |copy |remerge CONFLICT |Binary files|GIT binary patch)/;
 const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 /**

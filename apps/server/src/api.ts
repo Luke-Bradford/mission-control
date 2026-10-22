@@ -61,7 +61,7 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ChangeBus } from "./bus.ts";
-import { fetchTicket, type Gql, githubToken, makeGql } from "./collectors/github.ts";
+import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import {
@@ -699,7 +699,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get(
         "/repos",
         async (): Promise<RepoView[]> =>
-          config.repos.map((r) => ({ id: r.id, github: r.github, project: r.project })),
+          config.repos.map((r) => ({
+            id: r.id,
+            github: r.github,
+            project: r.project,
+            projectUrl: projectUrlOf(store, r.id),
+          })),
       );
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
@@ -754,7 +759,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("config");
         bus.emit("boards");
         refreshBoards();
-        const view: RepoView = { id: repo.id, github: repo.github, project: repo.project };
+        const view: RepoView = {
+          id: repo.id,
+          github: repo.github,
+          project: repo.project,
+          projectUrl: projectUrlOf(store, repo.id),
+        };
         return { repo: view, backup: basename(result.backup) };
       });
 

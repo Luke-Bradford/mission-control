@@ -71,6 +71,8 @@ import {
   watchStartRefusedText,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
+import type { CliHold } from "../cli-update.ts";
+import { probeClaudeVersion } from "../cli-version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import {
   type CcConfig,
@@ -241,6 +243,13 @@ export interface SupervisorDeps {
   rolesDir?: string;
   /** Where a failure no caller sees goes (a fold that cannot write). Default: stderr. */
   log?: (msg: string) => void;
+  /**
+   * While it holds, no run starts or resumes (the CLI failed its smoke test); runs going are left
+   * alone, and the held resumes are tried again when the hold is released.
+   */
+  cliHold?: CliHold;
+  /** The `claude` CLI's version, recorded on each run that starts. Default: `claude --version`, cached. */
+  cliVersion?: () => Promise<string | null>;
   /** Default RESUME_WINDOW_MS. */
   resumeWindowMs?: number;
   /** Tests shorten the session's timeouts. */
@@ -477,6 +486,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   let holdsLock = false;
   let lockNote: string | null = null;
   let stopping = false;
+  /** Stops listening for the CLI hold's release (set by `start`). */
+  let unholdResume: (() => void) | undefined;
   const listeners = new Set<(e: SupervisorEvent) => void>();
 
   /** Never throws: a listener's failure is logged and the others still hear the event. */
@@ -505,6 +516,28 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const info = findSeat(seatId);
     if (!info) throw new SupervisorError(404, "unknown seat");
     return info;
+  }
+
+  /** Throws while the CLI is held back (it failed its smoke test): nothing starts or resumes. */
+  function refuseWhileHeld(): void {
+    const why = deps.cliHold?.reason;
+    if (why != null) throw new SupervisorError(409, why);
+  }
+
+  /**
+   * The run's `cliVersion` field: the version it starts on, else nothing. Called just before the
+   * run is created, so it also refuses a start the hold caught during the checkout or the read.
+   */
+  async function startedOn(): Promise<{ cliVersion?: string }> {
+    refuseWhileHeld();
+    let v: string | null = null;
+    try {
+      v = await (deps.cliVersion ?? probeClaudeVersion)();
+    } catch {
+      // the run starts without a recorded version
+    }
+    refuseWhileHeld();
+    return v === null ? {} : { cliVersion: v };
   }
 
   /** The seat's call sign in every message and commit (`guido-1` → `GUIDO-1`). */
@@ -1031,6 +1064,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   async function reattach(): Promise<void> {
     for (const row of store.activeSeatSessions()) {
       if (stopping) return;
+      // a seat with a process, or a start under way, has nothing to resume
+      if (starting.has(row.seatId) || live.has(row.seatId)) continue;
+      if (deps.cliHold?.reason != null) {
+        // the run stays active; the release of the hold resumes it
+        log(`${row.seatId}: resume held: ${deps.cliHold.reason}`);
+        continue;
+      }
       starting.add(row.seatId);
       try {
         await resumeOne(row);
@@ -1107,6 +1147,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startRun(seatId: string, issue: number, opts?: { loop: RunLoop }) {
     const info = need(seatId);
+    refuseWhileHeld();
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     const def = seatDef(info.seat);
     if (def.mode === "scratch") {
@@ -1173,6 +1214,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
+      const on = await startedOn();
       const startedAt = now();
       const last = store.runs(seatId, 1)[0];
       const seq = (last?.seq ?? 0) + 1;
@@ -1189,6 +1231,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         status: "running",
         sessionId: cliSessionId,
         model: info.seat.model,
+        ...on,
         branch: planner ? null : checkout.branch,
         ticket: planner
           ? `${info.repo.id}#${issue}`
@@ -1259,6 +1302,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startWatch(seatId: string, opts?: { first?: string }): Promise<{ runId: string }> {
     const info = need(seatId);
+    refuseWhileHeld();
     if (seatDef(info.seat).loop !== "watch") {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
     }
@@ -1280,6 +1324,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
+      const on = await startedOn();
       const startedAt = now();
       const last = store.runs(seatId, 1)[0];
       const seq = (last?.seq ?? 0) + 1;
@@ -1296,6 +1341,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         status: "running",
         sessionId: cliSessionId,
         model: info.seat.model,
+        ...on,
         branch: null,
         ticket: null,
         costUsd: null,
@@ -1355,6 +1401,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
+    refuseWhileHeld();
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     if (modeOfSeat(info.seat) !== "scratch") {
       throw new SupervisorError(409, notReviewSeatText(call(info)));
@@ -1422,6 +1469,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(409, SHUTTING_DOWN);
       }
 
+      const on = await startedOn();
       const startedAt = now();
       const seq = (store.runs(seatId, 1)[0]?.seq ?? 0) + 1;
       let runId = `${seatId}:${compactUtc(startedAt)}`;
@@ -1437,6 +1485,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         status: "running",
         sessionId: cliSessionId,
         model: info.seat.model,
+        ...on,
         branch: null,
         ticket: author.ticket,
         ticketTitle: author.ticketTitle ?? ticket.title,
@@ -1697,6 +1746,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
     const seatId = run.agentId;
     const info = need(seatId);
+    refuseWhileHeld();
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
@@ -1854,12 +1904,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       sweepRunFiles();
       void sweepScratch();
+      // runs whose resume was held back go once the CLI passes its smoke test again
+      unholdResume = deps.cliHold?.onRelease(() => {
+        if (!stopping) {
+          reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
+        }
+      });
       reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
     },
 
     async stopAll() {
       if (!holdsLock) return;
       stopping = true;
+      unholdResume?.();
       // stdin's end lets an idle CLI exit at once; one mid-turn may finish the turn first. The
       // wait is bounded so the rest of shutdown runs; a process still going then gets EOF'd stdin
       // and ends with the hub's process group (launchd), and its run is resumed on the next start.
