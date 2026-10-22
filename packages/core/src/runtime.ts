@@ -50,6 +50,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.messageSeat,
   MC_TOOL_NAMES.flightState,
   MC_TOOL_NAMES.promote,
+  MC_TOOL_NAMES.endRun,
 ];
 
 /**
@@ -457,11 +458,14 @@ export function protectedFileRules(cwd: string, extra: readonly string[] = []): 
  * - no background Bash: otherwise a Bash timeout moves the command to the background and fires a
  *   successful PostToolUse while it keeps running, which would free the test lock early, and
  *   `run_in_background` returns at once (spike 2026-10-21). With it off, a timeout kills the
- *   command and `run_in_background` is refused before any hook.
+ *   command and `run_in_background` is refused before any hook;
+ * - no self-update: the hub updates the CLI between runs (`updates.cli`), so a run's CLI never
+ *   changes underneath it.
  */
 export const CREW_CLI_ENV = {
   CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+  DISABLE_AUTOUPDATER: "1",
 } as const;
 
 /** The folder pnpm makes for a project-local store; the commit tool never stages one. */
