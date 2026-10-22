@@ -290,10 +290,11 @@ export function createEngine(deps: EngineDeps): Engine {
    * last read of the rules answers (the tick and the pass's other reads keep it fresh), so a pass
    * awaits only for a repo not read yet. Unreadable rules are not an answer: no merge.
    */
-  async function mayMerge(repoId: RepoId): Promise<boolean> {
+  function mayMerge(repoId: RepoId): boolean | Promise<boolean> {
     if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return false;
-    if (!hardRulesSet.has(repoId)) await rulesFor(repoId);
-    return hardRulesSet.get(repoId) === true;
+    const known = hardRulesSet.get(repoId);
+    if (known !== undefined) return known;
+    return rulesFor(repoId).then(() => hardRulesSet.get(repoId) === true);
   }
 
   function snapshot(run: Run, loop: RunLoop, at: number, autoMerge: boolean): LoopSnapshot | null {
@@ -862,7 +863,9 @@ export function createEngine(deps: EngineDeps): Engine {
   async function pass(runId: string, round = 0): Promise<void> {
     // read before the run's row is, so no await sits between the row and the loop saved from it
     const repoId = store.run(runId)?.repoId;
-    const autoMerge = repoId !== undefined && (await mayMerge(repoId));
+    const may = repoId === undefined ? false : mayMerge(repoId);
+    // (awaited only when the rules were not read yet: a pass otherwise starts in one turn)
+    const autoMerge = typeof may === "boolean" ? may : await may;
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
