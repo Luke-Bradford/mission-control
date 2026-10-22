@@ -27,6 +27,7 @@ import {
   type CrewChanges,
   type CrewSessionFolders,
   DEFAULT_AWAY,
+  DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
   type FlightView,
@@ -163,6 +164,7 @@ const stubSupervisor = (): Supervisor => {
     endRunByEngine: call("endByEngine", undefined),
     setAside: call("setAside", null),
     wakeRun: call("wakeRun", undefined),
+    endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
     on: () => () => {},
     emitEvidence: () => {},
@@ -455,6 +457,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/message", { text: "hello", interrupt: true }],
   ["POST", "/api/seats/guido-1/interrupt"],
   ["POST", "/api/seats/guido-1/end"],
+  ["POST", "/api/runs/shop-app-ta/end", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
@@ -566,6 +569,8 @@ describe("add a repo (POST /api/repos)", () => {
       statusMap: { Todo: "planned", Done: "done" },
       needsYouLabels: ["needs-human"],
       fullSuite: [],
+      commands: DEFAULT_SEAT_COMMANDS,
+      protectedFiles: [],
       autonomy: "draft",
     });
     expect(events).toContain("config");
@@ -2859,6 +2864,28 @@ describe("crew routes", () => {
       ["end", "guido-1"],
     ]);
     expect(seen.filter((t) => t === "agents")).toHaveLength(4);
+  });
+
+  it("ends a set-aside run by id, and refuses an unknown run, a bad body and a supervisor refusal", async () => {
+    store.upsertRun(run({ id: "r-aside", agentId: "guido-1" }));
+    const seen: string[] = [];
+    bus.subscribe((t) => seen.push(t));
+    const ok = await postBody("/api/runs/r-aside/end", {});
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true });
+    expect(supervisorCalls).toEqual([["endAside", "r-aside"]]);
+    expect(seen).toContain("agents");
+    const unknown = await postBody("/api/runs/nope/end", {});
+    expect(unknown.statusCode).toBe(404);
+    const bad = await postBody("/api/runs/r-aside/end", { extra: 1 });
+    expect(bad.statusCode).toBe(400);
+    expect(supervisorCalls).toHaveLength(1);
+    supervisorFail = new SupervisorError(409, "the run is not waiting");
+    const refused = await postBody("/api/runs/r-aside/end", {});
+    expect([refused.statusCode, refused.json()]).toEqual([
+      409,
+      { error: "the run is not waiting" },
+    ]);
   });
 
   it("refuses bad bodies with 400 and calls nothing", async () => {

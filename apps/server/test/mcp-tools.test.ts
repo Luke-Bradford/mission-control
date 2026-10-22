@@ -459,6 +459,31 @@ describe("commit", () => {
     );
   });
 
+  const withProtected = () => {
+    const c = config();
+    if (c.repos[0]) c.repos[0].protectedFiles = ["pyproject.toml"];
+    return make({ config: c });
+  };
+
+  it("refuses a file the repo lists as protected, and commits it in a repo that does not", async () => {
+    const base = head();
+    write("apps/pyproject.toml", "[project]\n");
+    expect((await commit("chore: py", withProtected())).text).toBe(
+      `Not committed: apps/pyproject.toml is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+    );
+    expect(head()).toBe(base);
+    expect(store.strays()).toEqual([]);
+    expect((await commit("chore: py")).text).toMatch(/^Committed /);
+  });
+
+  it("refuses to remove a file the repo lists as protected", async () => {
+    write("apps/pyproject.toml", "[project]\n");
+    await commit("chore: py");
+    const r = await rm(["apps/pyproject.toml"], "chore: drop", withProtected());
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("Not committed: apps/pyproject.toml is protected");
+  });
+
   it("names ten paths per group, then and {n} more", async () => {
     for (let i = 1; i <= 12; i++) write(`docs/f${String(i).padStart(2, "0")}.md`, "x\n");
     const names = Array.from(

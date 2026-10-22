@@ -15,6 +15,7 @@ import {
   type CrewMode,
   type CrewRole,
   DEFAULT_CREW_NODE,
+  DEFAULT_SEAT_COMMANDS,
   FLIGHT_TOOLS,
   hereOf,
   LOOP_KINDS,
@@ -23,17 +24,20 @@ import {
   type McToolName,
   MODE_LOOPS,
   oneWatchSeatText,
+  protectedGlobShapeProblem,
   type RepoId,
   ROLE_NAME,
   ROLE_PROMPT,
   ROLE_PROMPT_DIR,
   type RoleDef,
   resolveSeatDef,
+  type SeatCommands,
   type SeatDef,
   type SeatInput,
   seatDef,
+  seatWordsProblem,
   type TicketState,
-  WRITER_TOOLS,
+  unprotectedRecipeFile,
   watchOnlyToolText,
   watchOrPlanToolText,
 } from "@mc/core";
@@ -116,8 +120,12 @@ export interface CcConfig {
     statusMap: Record<string, TicketState>;
     /** Labels that mark an open issue as needing the operator; collector default is ['needs-design']. */
     needsYouLabels?: string[];
-    /** Commands (a `pnpm -s test`-style prefix) that run a whole suite: the guard serialises them. */
+    /** Commands that run a whole suite (the guard serialises them): each is one of the repo's commands.writer entries or a word-extension of one. */
     fullSuite?: string[];
+    /** What the repo's seats may run: `writer` for writers, `review` for read-only and scratch seats. Loaded: always set. */
+    commands?: SeatCommands;
+    /** Globs seats may not edit or commit, on top of core's PROTECTED_FILES. Loaded: always set (default []). */
+    protectedFiles?: string[];
     /** `draft`: the board is only read. `merge`: the hub moves cards between Status columns; needs a crew session. */
     autonomy: RepoAutonomy;
   }[];
@@ -260,6 +268,38 @@ export const areaGlob = nonEmpty.refine(
     !/[{[?!,()\\\s]/.test(g),
   "must be a repo-relative glob without .. segments, a leading ~, whitespace or any of { [ ? ! , ( ) \\",
 );
+/** The default seat commands as fresh arrays: what a repo with no `commands` loads with. */
+export const defaultSeatCommands = (): SeatCommands => ({
+  writer: [...DEFAULT_SEAT_COMMANDS.writer],
+  review: [...DEFAULT_SEAT_COMMANDS.review],
+});
+const PLAIN_WORDS = /^[A-Za-z0-9._/=+,@-]+( [A-Za-z0-9._/=+,@-]+)*$/;
+/** Why `e` may not be a seat command, or null when it may. */
+function seatCommandProblem(e: string): string | null {
+  if (e.length < 1 || e.length > 120) return `"${e}" must be 1–120 characters`;
+  if (!PLAIN_WORDS.test(e)) {
+    return `"${e}" must be plain words (letters, digits and . _ / = + , @ -) separated by single spaces`;
+  }
+  const first = e.split(" ")[0] ?? "";
+  if (first.includes("/") || !/^[A-Za-z0-9]/.test(first)) {
+    return `"${e}" must start with a program name, not a path`;
+  }
+  return seatWordsProblem(e);
+}
+const seatCommand = z.string().superRefine((e, ctx) => {
+  const problem = seatCommandProblem(e);
+  if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
+});
+/** A `protected` entry: an area glob in the characters core accepts. */
+const protectedGlob = areaGlob
+  .refine(
+    (g) => /^[A-Za-z0-9._/*@+-]+$/.test(g),
+    "must hold only letters, digits and . _ / * @ + -",
+  )
+  .superRefine((g, ctx) => {
+    const problem = protectedGlobShapeProblem(g);
+    if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
+  });
 const percent = z.number().min(0).max(100);
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 const MC_TOOL_VALUES = Object.values(MC_TOOL_NAMES) as [McToolName, ...McToolName[]];
@@ -304,6 +344,10 @@ const fileSchema = z
         status_map: z.record(z.string(), ticketState),
         needs_you_labels: z.array(nonEmpty).optional(),
         full_suite: z.array(nonEmpty).default([]),
+        commands: z
+          .strictObject({ writer: z.array(seatCommand), review: z.array(seatCommand) })
+          .optional(),
+        protected: z.array(protectedGlob).default([]),
         autonomy: z.enum(REPO_AUTONOMIES).default("draft"),
       }),
     ),
@@ -372,6 +416,8 @@ const fileSchema = z
         statusMap: r.status_map,
         ...(r.needs_you_labels === undefined ? {} : { needsYouLabels: r.needs_you_labels }),
         fullSuite: r.full_suite,
+        commands: r.commands ?? defaultSeatCommands(),
+        protectedFiles: r.protected,
         autonomy: r.autonomy,
       })),
       loops: f.loops.map((l) => ({
@@ -835,15 +881,12 @@ function isExecutableFile(p: string): boolean {
   }
 }
 
-/** The prefixes of the allowlist's `Bash(<prefix>:*)` entries: the commands a crew seat may run. */
-const ALLOWED_BASH_PREFIXES: readonly string[] = WRITER_TOOLS.flatMap((t) => {
-  const m = /^Bash\((.+):\*\)$/.exec(t);
-  return m?.[1] === undefined ? [] : [m[1]];
-});
+const writerOf = (r: { commands?: { writer: readonly string[] } }): readonly string[] =>
+  r.commands?.writer ?? DEFAULT_SEAT_COMMANDS.writer;
 
-/** Whether the CLI would let a seat run `cmd`: some allowed prefix is `cmd` or a word-prefix of it. */
-function seatsMayRun(cmd: string): boolean {
-  return ALLOWED_BASH_PREFIXES.some((p) => cmd === p || cmd.startsWith(`${p} `));
+/** Whether the CLI would let a seat run `cmd`: one of the repo's writer commands is `cmd` or a word-prefix of it. */
+function seatsMayRun(writer: readonly string[], cmd: string): boolean {
+  return writer.some((p) => cmd === p || cmd.startsWith(`${p} `));
 }
 
 /**
@@ -912,10 +955,34 @@ export function parseConfig(
       throw new ConfigError(`loops[${i}].accountId`, `unknown account "${l.accountId}"`);
     }
   });
+  // A task runner reads a recipe file: a seat that can edit it can change what the entry runs.
+  cfg.repos.forEach((r, i) => {
+    for (const list of ["writer", "review"] as const) {
+      (r.commands?.[list] ?? []).forEach((cmd, at) => {
+        const file = unprotectedRecipeFile(cmd, r.protectedFiles ?? []);
+        if (file !== null) {
+          throw new ConfigError(
+            `repos[${i}].commands.${list}[${at}]`,
+            `"${cmd}" runs recipes from ${file}, which must be listed in protected`,
+          );
+        }
+      });
+    }
+  });
   // A suite the guard would lock for but the CLI then refuses would hold the lock to no purpose.
   cfg.repos.forEach((r, i) => {
     for (const cmd of r.fullSuite ?? []) {
-      if (!seatsMayRun(cmd)) {
+      // a shorter writer command also runs the suite: it must be a full_suite entry itself
+      const shorter = writerOf(r).find(
+        (w) => cmd.startsWith(`${w} `) && !(r.fullSuite ?? []).includes(w),
+      );
+      if (shorter !== undefined) {
+        throw new ConfigError(
+          `repos[${i}].full_suite`,
+          `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${shorter}" in full_suite too, or name "${cmd}" as the writer command instead`,
+        );
+      }
+      if (!seatsMayRun(writerOf(r), cmd)) {
         throw new ConfigError(
           `repos[${i}].full_suite`,
           `${cmd} is not a command crew seats may run`,

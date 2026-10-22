@@ -212,6 +212,7 @@ function make(
     extraSeat?: CrewSeatConfig;
     autonomy?: "merge" | "draft";
     claim?: SupervisorDeps["claim"];
+    repo?: Partial<CcConfig["repos"][number]>;
     cliHold?: CliHold;
     cliVersion?: SupervisorDeps["cliVersion"];
   } = {},
@@ -220,6 +221,7 @@ function make(
   const log = vi.fn((_msg: string) => {});
   const cfg = config();
   if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
+  if (over.repo && cfg.repos[0]) Object.assign(cfg.repos[0], over.repo);
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;
   if (over.node !== undefined && cfg.crew) cfg.crew.node = over.node;
   if (over.nodeNote !== undefined && cfg.crew) cfg.crew.nodeNote = over.nodeNote;
@@ -822,6 +824,30 @@ describe("startRun", () => {
     ).toEqual([...READONLY_TOOLS]);
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
     expect(fs.denyWrite[0]).toBe(join(root, "retro-42"));
+  });
+
+  it("a writer on a repo with its own commands and protected files gets them", async () => {
+    const { sup } = make({
+      repo: {
+        commands: {
+          writer: ["uv run pytest", "uv run ruff check", "uv run mypy"],
+          review: ["uv run pytest"],
+        },
+        protectedFiles: ["pyproject.toml"],
+      },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const allowed = argv.slice(
+      argv.indexOf("--allowedTools") + 1,
+      argv.indexOf("--disallowedTools"),
+    );
+    expect(allowed).toContain("Bash(uv run pytest:*)");
+    expect(allowed).not.toContain("Bash(pnpm -s lint:*)");
+    const denied = argv.slice(argv.indexOf("--disallowedTools") + 1);
+    expect(denied).toContain(`Edit(/${realpathSync(join(root, "guido-1-42"))}/pyproject.toml)`);
   });
 
   it("a planner run has no branch", async () => {
@@ -3155,6 +3181,89 @@ describe("a run set aside in review", () => {
     expect(await sup.setAside("guido-1:nonesuch")).toBeNull();
     await sup.endRunByEngine(runId);
     expect(await sup.setAside(runId)).toBeNull();
+  });
+
+  it("setAside leaves a message already queued for the seat alone", async () => {
+    const { sup, runId } = await idleRun();
+    const queued = sup.message("guido-1", "SLOW", { interrupt: false });
+    expect(await sup.setAside(runId)).toBeNull();
+    await queued;
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    expect(store.seatSession("guido-1")?.runId).toBe(runId);
+    expect(sup.seatFacts("guido-1")).not.toBeNull();
+  });
+
+  it("wakeRun keeps the crash that the seat was in as an Activity row", async () => {
+    const { sup, runId } = await aside(false);
+    const other = await sup.startRun("guido-1", 43, { loop: NEW_LOOP });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "DIE", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("error"));
+    const reason = store.seatSession("guido-1")?.reason as string;
+    expect(store.seatSession("guido-1")?.runId).toBe(other.runId);
+    await sup.wakeRun(runId);
+    expect(store.seatSession("guido-1")).toMatchObject({ runId, state: "idle", reason: null });
+    const rows = store.agentEvents(0).filter((e) => e.agentId === "guido-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ from: "error", to: "idle" });
+    expect(rows[0]?.text).toContain(reason);
+  });
+
+  it("wakeRun onto a seat that was stopped records the stop too", async () => {
+    const { sup, runId } = await aside(false);
+    const other = await sup.startRun("guido-1", 43, { loop: NEW_LOOP });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.endRun("guido-1");
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(other.runId).not.toBe(runId);
+    await sup.wakeRun(runId);
+    const rows = store.agentEvents(0).filter((e) => e.agentId === "guido-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ from: "stopped", to: "idle" });
+  });
+
+  it("a woken CLI that cannot find its session reports RESUME_FAILED", async () => {
+    const m = make({ extraArgs: ["--fail-resume"] });
+    m.sup.start();
+    const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await m.sup.setAside(runId);
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+    await m.sup.wakeRun(runId);
+    await until(() => expect(seatState("guido-1")).toBe("error"));
+    expect(store.seatSession("guido-1")?.reason).toContain("could not resume the session");
+  });
+
+  it("endAsideRun ends a run that is set aside as the operator's, without waking a CLI", async () => {
+    const { sup, runId, seen } = await aside(false);
+    const before = store.seatSession("guido-1");
+    await sup.endAsideRun(runId);
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "operator" });
+    expect(store.run(runId)?.endedAt).not.toBeNull();
+    expect(ended(seen)).toEqual([
+      { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
+    ]);
+    await until(() => expect(existsSync(wt())).toBe(false));
+    expect(store.seatSession("guido-1")).toEqual(before);
+    expect(starts()).toHaveLength(1);
+  });
+
+  it("endAsideRun is refused for a run that is not set aside", async () => {
+    const { sup, runId } = await idleRun();
+    const held = await refusal(sup.endAsideRun(runId));
+    expect([held.status, held.message]).toEqual([409, NOT_ASIDE]);
+    const none = await refusal(sup.endAsideRun("guido-1:nonesuch"));
+    expect([none.status, none.message]).toEqual([409, NOT_ASIDE]);
+    expect(store.run(runId)).toMatchObject({ endedAt: null });
+  });
+
+  it("endAsideRun is refused while the run is still on its seat, however its loop reads", async () => {
+    const { sup, runId } = await idleRun();
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
+    const e = await refusal(sup.endAsideRun(runId));
+    expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(existsSync(wt())).toBe(true);
   });
 
   it("wakeRun is refused while the CLI is held, and the run stays aside", async () => {

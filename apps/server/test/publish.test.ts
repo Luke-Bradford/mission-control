@@ -866,6 +866,26 @@ describe("merge steps", () => {
       ]);
     });
 
+    it("counts a file the repo lists as protected as a stray", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "src/a.ts\0src/pyproject.toml\0",
+      };
+      const c = config();
+      const seat = c.crew?.sessions[0]?.seats[0];
+      if (seat !== undefined) seat.area = ["src/**"];
+      if (c.repos[0]) c.repos[0].protectedFiles = ["pyproject.toml"];
+      expect(await publisher({ config: c }).gateFacts(R, SHA)).toMatchObject({
+        facts: { strays: ["src/pyproject.toml"] },
+      });
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({ facts: { strays: [] } });
+    });
+
     it("says a branch behind main does not contain it, and a foreign commit is not hub-only", async () => {
       gitAnswers = {
         "ls-remote": lsRemote(),

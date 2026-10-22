@@ -30,8 +30,11 @@ export function lanesFor(repos: RepoView[], session: string = SESSION_ALL): Lane
       id: r.id,
       name: r.id,
       query: `repo:${r.github} is:issue`,
-      // The collector reads projects through `user(login:)`, so each is a user project.
-      url: `https://github.com/users/${r.github.split("/")[0] ?? ""}/projects/${r.project}`,
+      // GitHub's own address for the Project (user or organisation); until the server has read the
+      // board there is none, so assume a user project.
+      url:
+        r.projectUrl ??
+        `https://github.com/users/${r.github.split("/")[0] ?? ""}/projects/${r.project}`,
       match: (i) => i.repoId === r.id,
     }),
   );
