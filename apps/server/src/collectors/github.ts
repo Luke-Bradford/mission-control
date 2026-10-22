@@ -75,6 +75,7 @@ const BOARD_QUERY = `query Board($owner: String!, $number: Int!, $after: String)
           content {
             ... on Issue {
               number title url state updatedAt createdAt labels(first: 20) { nodes { name } }
+              assignees(first: 10) { nodes { login } }
               repository { name owner { login } }
               parent { number repository { name } }
               subIssuesSummary { total completed }
@@ -110,6 +111,22 @@ const ISSUE_QUERY = `query Ticket($owner: String!, $name: String!, $number: Int!
       milestone { title }
       subIssues(first: 50) { nodes { number title state repository { name owner { login } } } }
       closedByPullRequestsReferences(first: 10) { nodes { number title url state merged repository { name owner { login } } } }
+    }
+  }
+}`;
+
+const CARD_NOW_QUERY = `query CardNow($owner: String!, $name: String!, $number: Int!) {
+  ${RATE_LIMIT_SELECTION}
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      state
+      assignees(first: 10) { nodes { login } }
+      projectItems(first: 20) {
+        nodes {
+          project { number }
+          status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+        }
+      }
     }
   }
 }`;
@@ -311,6 +328,10 @@ const names = (v: unknown): string[] =>
   isObj(v) && Array.isArray(v.nodes)
     ? v.nodes.flatMap((n) => (isObj(n) && typeof n.name === "string" ? [n.name] : []))
     : [];
+const logins = (v: unknown): string[] =>
+  isObj(v) && Array.isArray(v.nodes)
+    ? v.nodes.flatMap((n) => (isObj(n) && typeof n.login === "string" ? [n.login] : []))
+    : [];
 const singleSelect = (v: unknown): string | null =>
   isObj(v) && typeof v.name === "string" ? v.name : null;
 
@@ -405,6 +426,7 @@ async function fetchBoard(
         status: status ?? "",
         state: state ?? "planned",
         labels,
+        assignees: logins(c.assignees),
         priority: field ?? fromLabel,
         prioritySource: field !== null ? "field" : fromLabel !== null ? "label" : null,
         closed,
@@ -518,6 +540,45 @@ export async function fetchTicket(
           ]
         : [],
     ),
+  };
+}
+
+/** What GitHub says of one card right now: enough to tell whether it is still Ready and unclaimed. */
+export type CardNow = Pick<BoardItem, "status" | "state" | "closed" | "assignees">;
+
+/**
+ * One issue and its card on the repo's project, read fresh. Null when GitHub has no such issue, the
+ * issue is not on the project, or its Status is not one the repo maps (the board skips those too).
+ */
+export async function fetchCardNow(
+  repo: CcConfig["repos"][number],
+  number: number,
+  gql: Gql,
+): Promise<CardNow | null> {
+  const [owner = "", name = ""] = repo.github.split("/");
+  let data: unknown;
+  try {
+    data = await call(gql, CARD_NOW_QUERY, { owner, name, number });
+  } catch (e) {
+    if (/could not resolve to an issue/i.test(errMsg(e))) return null;
+    throw e;
+  }
+  const issue = path(data, "repository", "issue");
+  if (!isObj(issue)) return null;
+  const items = path(issue, "projectItems", "nodes");
+  const onProject = Array.isArray(items)
+    ? items.find((i) => isObj(i) && path(i, "project", "number") === repo.project)
+    : undefined;
+  if (!isObj(onProject)) return null;
+  const status = singleSelect(onProject.status);
+  const state: TicketState | undefined =
+    status !== null && Object.hasOwn(repo.statusMap, status) ? repo.statusMap[status] : undefined;
+  if (status !== null && state === undefined) return null;
+  return {
+    status: status ?? "",
+    state: state ?? "planned",
+    closed: issue.state === "CLOSED",
+    assignees: logins(issue.assignees),
   };
 }
 

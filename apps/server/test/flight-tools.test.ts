@@ -157,6 +157,7 @@ beforeEach(() => {
     config: cfg,
     store,
     bus,
+    login: "me",
     supervisor: {
       message: async (...a) => {
         messageCalls.push(a);
@@ -648,6 +649,17 @@ describe("start_seat", () => {
     expect(startCalls).toEqual([["guido-1", 7, undefined]]);
   });
 
+  it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {
+    board(card(7, { assignees: ["other"] }));
+    expect(await start()).toEqual(
+      refused("Not started: mc#7 is assigned to other; another hub or person has it."),
+    );
+    expect(startCalls).toEqual([]);
+    board(card(7, { assignees: ["me"] }));
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+  });
+
   it("refuses a seat outside its session", async () => {
     expect(await start({ seat: "nobody-9" })).toEqual(
       refused("Not done: nobody-9 is not a seat in your session."),
@@ -1033,6 +1045,15 @@ describe("flight_state", () => {
       seats: [
         {
           ...bare,
+          id: "fao-1",
+          call: "FAO-1",
+          role: "FAO",
+          loop: "plan",
+          area: [],
+          free: true,
+        },
+        {
+          ...bare,
           id: "guido-1",
           call: "GUIDO-1",
           role: "GUIDO",
@@ -1121,6 +1142,7 @@ describe("flight_state", () => {
     }
     const s = (await state()) as { seats: { id: string; stalled: boolean; atStop: boolean }[] };
     expect(s.seats.map((x) => [x.id, x.stalled, x.atStop])).toEqual([
+      ["fao-1", false, true],
       ["guido-1", true, true],
       ["inco-1", false, true],
       ["retro-1", false, true],
