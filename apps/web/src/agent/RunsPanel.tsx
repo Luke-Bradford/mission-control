@@ -15,7 +15,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { LoopSteps } from "./LoopSteps.tsx";
+import { EndAsideButton, LoopSteps } from "./LoopSteps.tsx";
 
 const DASH = "—";
 
@@ -125,6 +125,14 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
               <span className="num right">{runDur(r, now)}</span>
               <span className="num right">{tokens}</span>
               <span className="num right">{cost(r.costUsd)}</span>
+              {r.endedAt === null && r.loop?.aside && r.id !== row.run?.id && (
+                // a set-aside run the seat has moved on from; the wrapper keeps the click off the row
+                // biome-ignore lint/a11y/useKeyWithClickEvents: the button inside is the keyboard route
+                // biome-ignore lint/a11y/noStaticElementInteractions: as above; this only stops bubbling
+                <span onClick={(e) => e.stopPropagation()}>
+                  <EndAsideButton row={row} runId={r.id} />
+                </span>
+              )}
               {(r.ticket || prs.length > 0) && (
                 <span className="rticket min0 xs">
                   {r.ticket && <TicketRef ticket={r.ticket} bare />}

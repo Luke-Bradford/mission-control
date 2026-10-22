@@ -620,6 +620,7 @@ describe("attention items", () => {
       url: null,
       escalationId: null,
       ticket: null,
+      owner: "operator",
       acked: false,
     });
     expect(items[1]).toEqual({
@@ -633,6 +634,7 @@ describe("attention items", () => {
       url: null,
       escalationId: null,
       ticket: null,
+      owner: "operator",
       acked: false,
     });
     // The first loop on the escalation's repo; none for a repo without a loop.
@@ -647,6 +649,7 @@ describe("attention items", () => {
       url: "https://github.com/o/shop-app/issues/2",
       escalationId: "shop-app#2",
       ticket: "shop-app#2",
+      owner: "operator",
       acked: false,
     });
     expect(items.find((i) => i.key === "esc:other#1")?.agentId).toBeNull();
@@ -754,6 +757,7 @@ describe("attentionItems: PRs waiting on you", () => {
         url: "https://github.com/o/shop-app/pull/7",
         escalationId: null,
         ticket: "shop-app#42",
+        owner: "operator",
         acked: false,
       },
     ]);
@@ -1250,6 +1254,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         url: null,
         escalationId: null,
         ticket: null,
+        owner: "operator",
         acked: false,
       },
       expect.objectContaining({
@@ -1317,7 +1322,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       store.addQuestion({ agentId, runId, text: "Lanes?", at: NOW - 5 * MIN });
     const keys = (at: number) =>
       attentionItems(c, store, at)
-        .filter((i) => i.kind === "question")
+        .filter((i) => i.kind === "question" && i.owner === "operator")
         .map((i) => i.key);
     store.upsertRun(run({ id: "f1", agentId: "FLIGHT-1", repoId: "shop-app" }));
     const flightRow = (over: Partial<SeatSessionRow>) =>
@@ -1391,7 +1396,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     const mine = asked("GUIDO-1");
     const other = asked("GUIDO-9");
     const keys = attentionItems(c, store, NOW)
-      .filter((i) => i.kind === "question")
+      .filter((i) => i.kind === "question" && i.owner === "operator")
       .map((i) => i.key);
     expect(keys).toEqual([`ask:${other}`]);
     expect(keys).not.toContain(`ask:${mine}`);
@@ -1464,6 +1469,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         url: null,
         escalationId: null,
         ticket: null,
+        owner: "operator",
         acked: false,
       },
     ]);

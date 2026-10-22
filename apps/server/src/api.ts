@@ -198,6 +198,8 @@ export interface AppDeps {
   seatGrants?: (seatId: string) => readonly string[];
   /** The test lock the guard takes for a full suite; absent: a full suite is denied, never run unlocked. */
   lock?: TestLock;
+  /** The hub's own `gh` login, for telling another login's draft PRs from its own; default: unknown. */
+  hubLogin?: () => string | null;
 }
 
 /**
@@ -277,8 +279,8 @@ const AckBody = z.strictObject({
   keys: z.array(z.string().min(1).max(200)).min(1).max(ACK_BATCH_MAX),
 });
 
-/** The answer to a dismiss of a key that is not an open parked note. */
-export const NO_PARKED_NOTE = "no such parked note";
+/** The answer to a dismiss of a key that is not an open note (a seat's question is not a note). */
+export const NO_OPEN_NOTE = "no such open note";
 
 /** `YYYY-MM-DD` naming a real calendar day. */
 const isCalendarDate = (s: string): boolean => {
@@ -1209,7 +1211,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get(
         "/attention",
         async (): Promise<AttentionItem[]> =>
-          attentionItems(config, store, now(), deps.lock?.state() ?? NO_LOCK),
+          attentionItems(
+            config,
+            store,
+            now(),
+            deps.lock?.state() ?? NO_LOCK,
+            undefined,
+            deps.hubLogin?.() ?? null,
+          ),
       );
 
       api.post("/attention/ack", async (req, reply) => {
@@ -1234,7 +1243,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
         if (key.length > 200 || noteKey === "" || !store.dismissNote(noteKey, now())) {
-          return reply.code(404).send({ error: NO_PARKED_NOTE });
+          return reply.code(404).send({ error: NO_OPEN_NOTE });
         }
         bus.emit("attention");
         return { dismissed: key };

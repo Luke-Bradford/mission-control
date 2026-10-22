@@ -1,5 +1,5 @@
 import type { Owner, Stage } from "./board.ts";
-import type { AttentionKind, HudColumn, HudState } from "./hud.ts";
+import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { CrewMode, CrewRole, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
@@ -214,6 +214,10 @@ export interface PullRequestView {
   headSha: string | null;
   /** UNKNOWN: GitHub has not computed it yet, so poll again. When it was read is the row's `read_at`. */
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
+  /** The PR author's login; absent or null when GitHub gave none or the row was stored before it. */
+  author?: string | null;
+  /** Logins assigned to the PR; absent means none. */
+  assignees?: string[];
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */
@@ -588,6 +592,11 @@ export interface AttentionItem {
   escalationId: string | null;
   /** The ticket (`repo#n`) this is about: an escalation's own id, a PR's ticket; null otherwise. */
   ticket: string | null;
+  /**
+   * Who has to act. The server always sets it; Needs you counts only `operator`. Optional here
+   * until every client that builds an item sets it.
+   */
+  owner?: AttentionOwner;
   acked: boolean;
 }
 

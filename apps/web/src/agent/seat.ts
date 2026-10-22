@@ -27,6 +27,16 @@ export async function endSeat(row: Pick<CrewRow, "id">): Promise<void> {
   }
 }
 
+/** End a run set aside in review, without waking its CLI; the server refuses (409) if it is not aside. */
+export async function endAsideRun(runId: string): Promise<void> {
+  try {
+    await apiPost(ACTIONS.runEnd(runId), {});
+  } finally {
+    done();
+    hub.refetch(RESOURCES.runLoop(runId).path);
+  }
+}
+
 export async function messageSeat(
   row: Pick<CrewRow, "id">,
   text: string,
@@ -38,6 +48,9 @@ export async function messageSeat(
     done();
   }
 }
+
+export const endAsideConfirm = (row: Pick<CrewRow, "id" | "kind">): string =>
+  `End ${callSign(row)}'s set-aside run? Its CLI is not woken; the checkout and branch stay.`;
 
 export const endConfirm = (row: Pick<CrewRow, "id" | "kind">): string =>
   `End ${callSign(row)}'s run? The checkout and branch stay; nothing is pushed.`;
