@@ -1416,6 +1416,9 @@ describe("Setup › Sessions: crew seats", () => {
     });
     await waitFor(() => expect(toastText()).toBe(addedText("INCO-1", "s1", "config.yaml.bak-x")));
     await waitFor(() => expect(screen.queryByRole("form")).toBeNull());
+    await waitFor(() =>
+      expect(fetchFn.mock.calls.filter(([p]) => p === "/api/config").length).toBeGreaterThan(1),
+    );
   });
 
   it("Add agent: a read-only role", async () => {
@@ -1475,6 +1478,62 @@ describe("Setup › Sessions: crew seats", () => {
     fireEvent.click(within(f).getByRole("button", { name: "Add agent" }));
     expect((await within(f).findByRole("alert")).textContent).toBe(refusedText(error));
     expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBeTruthy();
+  });
+
+  it("A role change to a non-writer clears Area", async () => {
+    seats();
+    const f = await openAdd();
+    setField(f, "Role", "INCO");
+    fireEvent.click(within(await panel()).getByRole("button", { name: "apps/" }));
+    expect((within(f).getByLabelText("Area") as HTMLInputElement).value).toBe("apps/**");
+    setField(f, "Role", "RETRO");
+    const area = within(f).getByLabelText("Area") as HTMLInputElement;
+    expect(area.value).toBe("");
+    expect(area.disabled).toBe(true);
+  });
+
+  it("No roles: Add agent is disabled", async () => {
+    seats({ "/api/config": { ...CFG2, crew: { ...CREW_CONFIG.crew, roles: undefined } } });
+    const add = await within(await panel()).findByRole("button", { name: "Add agent" });
+    expect((add as HTMLButtonElement).disabled).toBe(true);
+    expect(add.getAttribute("title")).toBe("this server does not list roles");
+  });
+
+  it("Call sign is validated", async () => {
+    seats();
+    const f = await openAdd();
+    setField(f, "Call sign", "Bad_Id");
+    expect(within(f).getByText("lower-case letters, digits and -")).toBeTruthy();
+    expect(
+      (within(f).getByRole("button", { name: "Add agent" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("A post disables save and reload", async () => {
+    seats();
+    const answer = fetchFn.getMockImplementation();
+    // never answers a POST, so the post stays out
+    fetchFn.mockImplementation((input, init) =>
+      init?.method === "POST"
+        ? new Promise<Response>(() => {})
+        : (answer?.(input, init) as Promise<Response>),
+    );
+    const f = await openAdd();
+    fireEvent.click(within(f).getByRole("button", { name: "Add agent" }));
+    await waitFor(() =>
+      expect(
+        (within(f).getByRole("button", { name: "Add agent" }) as HTMLButtonElement).disabled,
+      ).toBe(true),
+    );
+    expect(
+      (screen.getByRole("button", { name: "Reload config.yaml" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("A reload refusal", async () => {
+    seats({ "POST /api/config/reload": () => ({ status: 409, body: { error: "crew is off" } }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Reload config.yaml" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(refusedText("crew is off"));
   });
 
   it("A conflict refetches", async () => {
