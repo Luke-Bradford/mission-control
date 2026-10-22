@@ -95,6 +95,15 @@ export const MERGE_STEP_WORDS = {
 export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
 export const noShaDeleteText = (ref: string): string =>
   `${ref}: merged, but the remote branch could not be deleted (no sha to lease on); the operator can delete it`;
+/** The Activity rows of the merge steps. */
+const prRef = (pr: number | null): string => (pr === null ? "the PR" : `PR #${pr}`);
+export const readyMarkedText = (pr: number | null): string => `marked ${prRef(pr)} ready`;
+export const mergedText = (pr: number | null): string => `merged ${prRef(pr)} (merge commit)`;
+export const closedIssueText = (issue: number): string => `closed #${issue}`;
+export const deletedRemoteText = (branch: string): string => `deleted origin's ${branch}`;
+export const deletedLocalText = (branch: string): string => `deleted the local branch ${branch}`;
+export const localNotDeletedText = (branch: string, why: string): string =>
+  `could not delete the local branch ${branch}: ${why}`;
 export const mergeStepFailedText = (step: string, why: string): string => `${step} failed: ${why}`;
 /** The gate parks a run for these; the reason says which. */
 export const gateStrayParkText = (call: string, paths: readonly string[]): string =>

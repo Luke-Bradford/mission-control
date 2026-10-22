@@ -15,7 +15,10 @@ import {
   blockedNoteKey,
   CI_FAILED_TEXT,
   cardMark,
+  closedIssueText,
   currentReview,
+  deletedLocalText,
+  deletedRemoteText,
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
   fillLoopText,
@@ -24,8 +27,13 @@ import {
   type LoopAction,
   type LoopReviewFacts,
   type LoopSnapshot,
+  localNotDeletedText,
+  MERGE_STEP_WORDS,
+  type MergeStep,
   MINOR_CLEARED,
   MINOR_POSTED,
+  mergedText,
+  mergeStepFailedText,
   minorNotPostedText,
   modeOfSeat,
   NEW_LOOP,
@@ -37,6 +45,7 @@ import {
   type ReviewRow,
   type Run,
   type RunLoop,
+  readyMarkedText,
   reconcile,
   reviewDroppedText,
   reviewEventKey,
@@ -92,6 +101,8 @@ export interface EngineDeps {
   publisher: Publisher;
   /** `moveCard`, bound to the GitHub client, the store, the config and the poll. */
   board: { move: (m: Move) => Promise<MoveResult> };
+  /** Asks for a GitHub poll now (after a merge, so the boards show it before the next one). */
+  pollGithub?: () => void;
   /** A repo's board rules (read at origin/HEAD); an error is a note in `status()`. */
   rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** Rebuilds the writer seats' queues from the board (each tick). */
@@ -314,7 +325,9 @@ export function createEngine(deps: EngineDeps): Engine {
               ci: pr.ci,
               mergeable: pr.mergeable,
               polledAt: store.pullRequestReadAt(run.repoId, pr.number) ?? 0,
+              isDraft: pr.isDraft,
             },
+      autoMerge: config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge",
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),
       openNotes: store.openNoteKeys(run.id),
@@ -344,8 +357,14 @@ export function createEngine(deps: EngineDeps): Engine {
     const at = now();
     const issue = issueOf(run) ?? 0;
     const repo = config.repos.find((r) => r.id === run.repoId);
-    /** A refused push or PR: a transient one is counted, any other parks the run. */
-    const refused = (r: { text: string; transient: boolean }): void => {
+    /**
+     * A refused push or PR: a transient one is counted, any other parks the run. A refused merge
+     * step (`step`) parks it as `merge-step`, after the same count of transient ones.
+     */
+    const refused = (
+      r: { text: string; transient: boolean },
+      step?: keyof typeof MERGE_STEP_WORDS,
+    ): void => {
       if (r.transient) {
         // one counted per tick: a short outage must not use up the tries on its own
         const last = lastTransient.get(run.id);
@@ -355,20 +374,38 @@ export function createEngine(deps: EngineDeps): Engine {
           lastTransient.set(run.id, at);
         }
         cur.lastRefusal = r.text;
-        if (cur.transient >= REFUSAL_TRIES) out.again = true;
-        return;
+        if (step === undefined || cur.transient < REFUSAL_TRIES) {
+          if (cur.transient >= REFUSAL_TRIES) out.again = true;
+          return;
+        }
       }
+      const reason =
+        step === undefined ? r.text : mergeStepFailedText(MERGE_STEP_WORDS[step], r.text);
       out.parked = true;
       cur.phase = "parked";
-      cur.parked = { kind: "refused", reason: r.text, ended: false };
+      cur.parked = { kind: step === undefined ? "refused" : "merge-step", reason, ended: false };
       store.addLoopEvent(
         `${run.id}:${cur.epoch}:parked:${cur.reportedEvidenceId}`,
         run.id,
-        parkedEventText(r.text),
+        parkedEventText(reason),
         at,
       );
       out.again = true;
     };
+    /** The run as the merge steps see it: its stored row, with the loop this pass is writing. */
+    const live = (): Run => ({ ...run, loop: cur });
+    /** A merge step that went through: kept in the loop, with its Activity row. */
+    const stepDone = (step: MergeStep, sha: string, text: string): void => {
+      const same = cur.merging?.sha === sha;
+      const done = same ? (cur.merging?.done ?? []) : [];
+      cur.merging = { sha, done: done.includes(step) ? done : [...done, step] };
+      cur.transient = 0;
+      cur.lastRefusal = null;
+      lastTransient.delete(run.id);
+      store.addLoopEvent(`${run.id}:merge:${step}`, run.id, text, at);
+    };
+    const mergedSha = (): string =>
+      cur.merging?.sha ?? findPr(run, cur)?.headSha ?? store.runPush(run.id)?.sha ?? "";
     switch (a.kind) {
       case "push": {
         const r = await publisher.push(run);
@@ -579,6 +616,59 @@ export function createEngine(deps: EngineDeps): Engine {
         out.again = true;
         return;
       }
+      case "mark-ready": {
+        const sha = store.runPush(run.id)?.sha;
+        if (sha === undefined) return;
+        const r = await publisher.markReady(live());
+        if (!r.ok) return refused(r, "ready");
+        stepDone("ready", sha, readyMarkedText(cur.prNumber));
+        return;
+      }
+      case "merge": {
+        const r = await publisher.merge(live(), a.sha);
+        if (!r.ok) {
+          // main may have moved: the gate's facts are read afresh
+          cur.gate = null;
+          return refused(r, "merge");
+        }
+        stepDone("merge", a.sha, mergedText(cur.prNumber));
+        deps.pollGithub?.();
+        out.again = true;
+        return;
+      }
+      case "close-issue": {
+        const r = await publisher.closeIssue(live());
+        if (!r.ok) return refused(r, "close");
+        stepDone("close", mergedSha(), closedIssueText(issue));
+        return;
+      }
+      case "delete-remote-branch": {
+        const r = await publisher.deleteRemoteBranch(live(), a.sha);
+        if (!r.ok) return refused(r, "delete-remote");
+        stepDone("delete-remote", a.sha, deletedRemoteText(run.branch ?? ""));
+        return;
+      }
+      case "delete-local-branch": {
+        const branch = run.branch ?? "";
+        const r = await publisher.deleteLocalBranch(live());
+        if (r.ok) {
+          stepDone("delete-local", mergedSha(), deletedLocalText(branch));
+          return;
+        }
+        // the run is over and merged: this is housekeeping, left to the operator
+        stepDone("delete-local", mergedSha(), localNotDeletedText(branch, r.text));
+        store.raiseNote({
+          key: `cleanup-branch:${run.id}`,
+          kind: "blocked",
+          runId: run.id,
+          seatId: run.agentId,
+          repoId: run.repoId,
+          text: `${seatCallSign(run.agentId)}'s local branch ${branch} for run #${run.seq} could not be deleted (${r.text}); delete it by hand.`,
+          at,
+        });
+        bus.emit("attention");
+        return;
+      }
       case "pr-body": {
         const row = store.review(a.reviewId);
         const reviewer = reviewerOf(config, run.agentId);
@@ -686,6 +776,21 @@ export function createEngine(deps: EngineDeps): Engine {
         }
       }
     }
+    if (
+      run.endedAt === null &&
+      pushed !== null &&
+      input.phase === "review" &&
+      pr?.state === "open" &&
+      pr.headSha === pushed.sha &&
+      config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
+      reviewerOf(config, run.agentId) !== null
+    ) {
+      // origin's tip is read every pass; the other reads only when the sha or the tip changed
+      const known = input.gate?.sha === pushed.sha ? input.gate : null;
+      const g = await publisher.gateFacts(run, pushed.sha, known);
+      if (g.ok) input.gate = { sha: pushed.sha, ...g.facts };
+      else log(`${runId}: could not read the merge gate: ${g.text}`);
+    }
     const snap = snapshot(run, input, at);
     if (snap === null) return;
     const step = reconcile(snap);
@@ -769,6 +874,8 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const n of store.notes()) {
       const run = n.runId === null ? null : store.run(n.runId);
       if (run === null || run.endedAt === null) continue;
+      // a merged run's leftover branch stays the operator's to clear: its PR is done by design
+      if (n.key.startsWith("cleanup-branch:")) continue;
       if (n.kind === "blocked" ? blockedGone(run) : n.kind !== "question") {
         store.clearNote(n.key, at);
         bus.emit("attention");

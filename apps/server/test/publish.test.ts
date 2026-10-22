@@ -50,7 +50,8 @@ const BASE = "c".repeat(40);
 let dir: string;
 let store: Store;
 let ghCalls: string[][];
-let ghAnswers: ((args: string[]) => { code: number | null; stdout: string; stderr?: string })[];
+type GhAnswer = { code: number | null; stdout: string; stderr?: string };
+let ghAnswers: ((args: string[]) => GhAnswer | Promise<GhAnswer>)[];
 
 const config = (): CcConfig =>
   ({
@@ -77,7 +78,7 @@ const gh: GhRunner = async (args) => {
   ghCalls.push(args);
   const answer = ghAnswers.shift();
   if (answer === undefined) throw new Error(`gh ${args.join(" ")} was not expected`);
-  const r = answer(args);
+  const r = await answer(args);
   return { stderr: "", ...r };
 };
 
@@ -700,5 +701,362 @@ describe("setReviewStatus", () => {
     expect(gone).toEqual(refused);
     expect(bad).toEqual(refused);
     expect(ghCalls).toEqual([]);
+  });
+});
+
+describe("merge steps", () => {
+  const MAIN = "d".repeat(40);
+  const OTHER = "e".repeat(40);
+  const R = run({ loop: { prNumber: 12 } as never });
+  const MERGED_RUN = run({
+    loop: { prNumber: 12, merging: { sha: SHA, done: ["merge"] } } as never,
+  });
+  const FORBIDDEN = ["--admin", "--squash", "--rebase", "--auto", "--delete-branch", "--force"];
+
+  type GitAnswer = string | Error | ((args: string[]) => string);
+  let gitCalls: string[][];
+  let gitAnswers: Record<string, GitAnswer>;
+
+  const git = (async (_cwd: string, args: string[]) => {
+    gitCalls.push(args);
+    const answer = gitAnswers[args.join(" ")] ?? gitAnswers[args[0] ?? ""];
+    if (answer === undefined) throw new Error(`git ${args.join(" ")} was not expected`);
+    if (answer instanceof Error) throw answer;
+    return typeof answer === "function" ? answer(args) : answer;
+  }) as never;
+  const exit1 = Object.assign(new Error("exit 1"), { code: 1 });
+  const lsRemote = (main = MAIN, branch: string | null = null) =>
+    `ref: refs/heads/main\tHEAD\n${main}\tHEAD\n${branch === null ? "" : `${branch}\trefs/heads/${BRANCH}\n`}`;
+  const publisher = (over: Partial<McToolsDeps> = {}) => createPublisher(deps({ git, ...over }));
+  const view =
+    (state: string, head = SHA) =>
+    () => ({
+      code: 0,
+      stdout: JSON.stringify({ state, headRefOid: head }),
+    });
+  const ok = () => ({ code: 0, stdout: "" });
+  const pushed = (name: string) => gitCalls.some((a) => a[0] === name);
+
+  beforeEach(() => {
+    mkdirSync(join(dir, "clone", ".git"), { recursive: true });
+    gitCalls = [];
+    gitAnswers = {};
+    store.upsertRun(R);
+  });
+
+  describe("gateFacts", () => {
+    const withArea = () => {
+      const c = config();
+      const seat = c.crew?.sessions[0]?.seats[0];
+      if (seat !== undefined) seat.area = ["src/**"];
+      return publisher({ config: c });
+    };
+    const ANCESTOR = `merge-base --is-ancestor ${MAIN} ${SHA}`;
+
+    it("reads main from origin, then the ancestry, the hub-only commits and the strays", async () => {
+      store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        "cat-file": "",
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "src/a.ts\0docs/b.md\0package.json\0",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toEqual({
+        ok: true,
+        facts: {
+          mainSha: MAIN,
+          containsMain: true,
+          hubOnly: true,
+          strays: ["docs/b.md", "package.json"],
+        },
+      });
+      expect(gitCalls).toContainEqual(["ls-remote", "--symref", "origin", "HEAD"]);
+      expect(gitCalls).toContainEqual(["merge-base", "--is-ancestor", MAIN, SHA]);
+      expect(gitCalls).toContainEqual(["rev-list", SHA, "--not", MAIN]);
+      expect(gitCalls).toContainEqual(["diff", "--name-only", "-z", BASE, SHA, "--"]);
+    });
+
+    it("says a branch behind main does not contain it, and a foreign commit is not hub-only", async () => {
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        "cat-file": "",
+        [ANCESTOR]: exit1,
+        "merge-base": `${BASE}\n`,
+        "rev-list": `${SHA}\n`,
+        diff: "",
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        ok: true,
+        facts: { containsMain: false, hubOnly: false },
+      });
+    });
+
+    it("fetches main when the clone lacks it", async () => {
+      let fetched = false;
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [`cat-file -e ${MAIN}^{commit}`]: () => {
+          if (!fetched) throw exit1;
+          return "";
+        },
+        fetch: () => {
+          fetched = true;
+          return "";
+        },
+        [ANCESTOR]: "",
+        "merge-base": `${BASE}\n`,
+        "rev-list": "",
+        diff: "",
+      };
+      expect((await withArea().gateFacts(R, SHA)).ok).toBe(true);
+      expect(pushed("fetch")).toBe(true);
+    });
+
+    it("reuses the known facts when the sha and main's tip are unchanged", async () => {
+      gitAnswers = { "ls-remote": lsRemote() };
+      const known = { sha: SHA, mainSha: MAIN, containsMain: true, hubOnly: true, strays: [] };
+      expect(await withArea().gateFacts(R, SHA, known)).toEqual({
+        ok: true,
+        facts: { mainSha: MAIN, containsMain: true, hubOnly: true, strays: [] },
+      });
+      expect(gitCalls).toHaveLength(1);
+    });
+
+    it("refuses a sha that is not a sha without running git", async () => {
+      expect(await withArea().gateFacts(R, "--upload-pack=x")).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+      expect(gitCalls).toEqual([]);
+    });
+
+    it("answers a transient refusal when git fails", async () => {
+      gitAnswers = { "ls-remote": new Error("network") };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({ ok: false, transient: true });
+    });
+  });
+
+  describe("markReady", () => {
+    it("runs gh pr ready for the PR", async () => {
+      ghAnswers = [ok];
+      expect(await publisher().markReady(R)).toEqual({ ok: true });
+      expect(ghCalls).toEqual([["pr", "ready", "12", "--repo=o/mc"]]);
+    });
+
+    it("answers a transient refusal when gh fails, a final one with no PR", async () => {
+      ghAnswers = [() => ({ code: 1, stdout: "", stderr: "boom" })];
+      expect(await publisher().markReady(R)).toMatchObject({ ok: false, transient: true });
+      expect(await publisher().markReady(run())).toMatchObject({ ok: false, transient: false });
+    });
+  });
+
+  describe("merge", () => {
+    const mainSame = () => {
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        "cat-file": "",
+        [`merge-base --is-ancestor ${MAIN} ${SHA}`]: "",
+      };
+    };
+
+    it("merges with a merge commit, matching the head, and none of the forbidden flags", async () => {
+      mainSame();
+      ghAnswers = [view("OPEN"), ok];
+      expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
+      expect(ghCalls).toEqual([
+        ["pr", "view", "12", "--repo=o/mc", "--json", "state,headRefOid"],
+        ["pr", "merge", "12", "--repo=o/mc", "--merge", `--match-head-commit=${SHA}`],
+      ]);
+      expect(ghCalls.flat().filter((a) => FORBIDDEN.includes(a))).toEqual([]);
+    });
+
+    it("counts a PR that is already merged as success, sending nothing", async () => {
+      ghAnswers = [view("MERGED")];
+      expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
+      expect(ghCalls).toHaveLength(1);
+    });
+
+    it("refuses finally when the head is not the sha", async () => {
+      ghAnswers = [view("OPEN", OTHER)];
+      expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: false });
+      expect(ghCalls).toHaveLength(1);
+    });
+
+    it("refuses finally when the PR is closed", async () => {
+      ghAnswers = [view("CLOSED")];
+      expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: false });
+    });
+
+    it("sends nothing and refuses transiently when main has moved past the branch", async () => {
+      mainSame();
+      gitAnswers[`merge-base --is-ancestor ${MAIN} ${SHA}`] = exit1;
+      ghAnswers = [view("OPEN")];
+      expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: true });
+      expect(ghCalls).toHaveLength(1);
+    });
+
+    it("refuses transiently when gh merge fails", async () => {
+      mainSame();
+      ghAnswers = [view("OPEN"), () => ({ code: 1, stdout: "", stderr: "502" })];
+      expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: true });
+    });
+
+    it("merges one at a time in a repo", async () => {
+      mainSame();
+      let release: () => void = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      ghAnswers = [
+        view("OPEN"),
+        async () => {
+          await held;
+          return ok();
+        },
+        view("OPEN"),
+        ok,
+      ];
+      const p = publisher();
+      const first = p.merge(R, SHA);
+      const second = p.merge(R, SHA);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "merge"]);
+      release();
+      await Promise.all([first, second]);
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "merge", "view", "merge"]);
+    });
+  });
+
+  describe("closeIssue", () => {
+    it("closes an open issue as completed", async () => {
+      ghAnswers = [() => ({ code: 0, stdout: JSON.stringify({ state: "OPEN" }) }), ok];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true });
+      expect(ghCalls).toEqual([
+        ["issue", "view", "7", "--repo=o/mc", "--json", "state"],
+        ["issue", "close", "7", "--repo=o/mc", "--reason=completed"],
+      ]);
+    });
+
+    it("counts an issue already closed as success", async () => {
+      ghAnswers = [() => ({ code: 0, stdout: JSON.stringify({ state: "CLOSED" }) })];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true });
+      expect(ghCalls).toHaveLength(1);
+    });
+
+    it("refuses transiently when gh cannot read the issue", async () => {
+      ghAnswers = [() => ({ code: 1, stdout: "" })];
+      expect(await publisher().closeIssue(R)).toMatchObject({ ok: false, transient: true });
+    });
+  });
+
+  describe("deleteRemoteBranch", () => {
+    const PUSH = [
+      "push",
+      "--porcelain",
+      `--force-with-lease=refs/heads/${BRANCH}:${SHA}`,
+      "origin",
+      "--delete",
+      `refs/heads/${BRANCH}`,
+    ];
+
+    it("deletes only the merged tip, with a lease", async () => {
+      gitAnswers = { "ls-remote": lsRemote(MAIN, SHA), push: "" };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toEqual({ ok: true });
+      expect(gitCalls).toContainEqual(PUSH);
+      expect(gitCalls.flat().filter((a) => FORBIDDEN.includes(a))).toEqual([]);
+    });
+
+    it("counts a branch already gone as success, pushing nothing", async () => {
+      gitAnswers = { "ls-remote": lsRemote(MAIN, null) };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toEqual({ ok: true });
+      expect(pushed("push")).toBe(false);
+    });
+
+    it("keeps a branch someone has pushed to since", async () => {
+      gitAnswers = { "ls-remote": lsRemote(MAIN, OTHER) };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+      expect(pushed("push")).toBe(false);
+    });
+
+    it("refuses finally when the lease does not hold at the push", async () => {
+      gitAnswers = {
+        "ls-remote": lsRemote(MAIN, SHA),
+        push: new Error("! [rejected] (stale info)"),
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+    });
+
+    it("refuses a branch that is not of the run's shape, or is another issue's", async () => {
+      const p = publisher();
+      for (const branch of ["main", "feature/8-other", "release/7-x", null]) {
+        expect(await p.deleteRemoteBranch(run({ branch }), SHA)).toMatchObject({
+          ok: false,
+          transient: false,
+        });
+      }
+      expect(gitCalls).toEqual([]);
+    });
+
+    it("never deletes origin's default branch", async () => {
+      gitAnswers = {
+        "ls-remote": `ref: refs/heads/${BRANCH}\tHEAD\n${MAIN}\tHEAD\n${SHA}\trefs/heads/${BRANCH}\n`,
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({ ok: false });
+      expect(pushed("push")).toBe(false);
+    });
+  });
+
+  describe("deleteLocalBranch", () => {
+    it("deletes the branch when its tip is the merged sha", async () => {
+      gitAnswers = { "rev-parse": `${SHA}\n`, branch: "" };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toEqual({ ok: true });
+      expect(gitCalls).toContainEqual(["branch", "-D", BRANCH]);
+    });
+
+    it("deletes it when its tip is an ancestor of main", async () => {
+      gitAnswers = {
+        "rev-parse": `${OTHER}\n`,
+        "ls-remote": lsRemote(),
+        "cat-file": "",
+        "merge-base": "",
+        branch: "",
+      };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toEqual({ ok: true });
+      expect(gitCalls).toContainEqual(["merge-base", "--is-ancestor", OTHER, MAIN]);
+    });
+
+    it("keeps a branch with commits that were not merged", async () => {
+      gitAnswers = {
+        "rev-parse": `${OTHER}\n`,
+        "ls-remote": lsRemote(),
+        "cat-file": "",
+        "merge-base": exit1,
+      };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+      expect(pushed("branch")).toBe(false);
+    });
+
+    it("counts a branch already gone as success", async () => {
+      gitAnswers = { "rev-parse": exit1 };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toEqual({ ok: true });
+    });
+
+    it("refuses a branch not of the run's shape", async () => {
+      expect(await publisher().deleteLocalBranch(run({ branch: "main" }))).toMatchObject({
+        ok: false,
+      });
+      expect(gitCalls).toEqual([]);
+    });
   });
 });
