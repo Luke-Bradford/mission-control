@@ -199,6 +199,14 @@ export const MISSING_SCOPE_PREFIX = "gh token lacks the ";
 const DEFAULT_SCOPE = "read:project";
 const INSUFFICIENT_SCOPES = "INSUFFICIENT_SCOPES";
 
+/** The missing-scope line inside a health-row status (which may carry other failures and a time), or null. */
+export function missingScopeLine(status: string): string | null {
+  const i = status.indexOf(MISSING_SCOPE_PREFIX);
+  if (i < 0) return null;
+  const m = /^[^;]*? scope: run gh auth refresh -s project/.exec(status.slice(i));
+  return m?.[0] ?? null;
+}
+
 const errorMessage = (e: unknown): string => (isObj(e) ? String(e.message) : String(e));
 
 /**

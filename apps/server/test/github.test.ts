@@ -1,6 +1,7 @@
 import { type BoardItem, columnOf, hudColumnOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  call,
   collectGithub,
   describeGqlErrors,
   fetchTicket,
@@ -8,6 +9,7 @@ import {
   GqlTransportError,
   isTransient,
   makeGql,
+  missingScopeLine,
   sweepPullRequests,
 } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -779,9 +781,35 @@ describe("describeGqlErrors", () => {
       new Response(JSON.stringify({ errors: [scopeErr("id"), scopeErr("name")] }), {
         status: 200,
       })) as unknown as typeof fetch;
-    await expect(makeGql("t", f)("q", {})).rejects.toThrow(
+    await expect(makeGql("t", f)("q", {})).rejects.toMatchObject({
+      message: "gh token lacks the read:project scope: run gh auth refresh -s project",
+    });
+  });
+
+  it("falls back to read:project when the message names no scope", () => {
+    expect(describeGqlErrors([{ type: "INSUFFICIENT_SCOPES", message: "nope" }])).toBe(
       "gh token lacks the read:project scope: run gh auth refresh -s project",
     );
+  });
+
+  it("call() describes a response's errors the same way", async () => {
+    const gql = async () => ({
+      errors: [scopeErr("id"), scopeErr("name")],
+    });
+    await expect(call(gql, "q", {})).rejects.toMatchObject({
+      message: "gh token lacks the read:project scope: run gh auth refresh -s project",
+    });
+    const plain = async () => ({ errors: [{ message: "a" }, { message: "a" }, { message: "b" }] });
+    await expect(call(plain, "q", {})).rejects.toMatchObject({ message: "a; b" });
+  });
+
+  it("missingScopeLine picks the scope line out of a health-row status", () => {
+    expect(
+      missingScopeLine(
+        "board: gh token lacks the project scope: run gh auth refresh -s project; prs: boom at 2026-01-01T00:00:00.000Z",
+      ),
+    ).toBe("gh token lacks the project scope: run gh auth refresh -s project");
+    expect(missingScopeLine("board: boom at x")).toBeNull();
   });
 });
 

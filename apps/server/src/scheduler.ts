@@ -28,8 +28,8 @@ import {
   collectGithub,
   fetchTicket,
   githubToken,
-  MISSING_SCOPE_PREFIX,
   makeGql,
+  missingScopeLine,
   sweepPullRequests,
 } from "./collectors/github.ts";
 import { type LaunchctlRunner, launchctl } from "./collectors/launchd.ts";
@@ -228,8 +228,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let sessionsRead = false;
   let gql: Promise<Gql | Error> | null = null;
   const rates = new RateLimits(store);
-  /** The GitHub poll interval is this many times the configured one while the rate limit is low. */
+  /** The repos whose missing-scope line is logged already. */
   const scopeLogged = new Set<string>();
+  /** The GitHub poll interval is this many times the configured one while the rate limit is low. */
   let githubBackoff = 1;
   let githubNotBefore = 0;
   /** The reset of the reading that caused the back-off; the back-off ends then, whoever reads next. */
@@ -482,7 +483,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           if (!scopeLogged.has(repo.id)) {
             scopeLogged.add(repo.id);
             const error = store.status().find((s) => s.collector === collector)?.error;
-            if (error?.includes(MISSING_SCOPE_PREFIX)) deps.log?.(`github ${repo.id}: ${error}`);
+            const line = error ? missingScopeLine(error) : null;
+            if (line !== null) deps.log?.(`github ${repo.id}: ${line}`);
           }
         }
       }

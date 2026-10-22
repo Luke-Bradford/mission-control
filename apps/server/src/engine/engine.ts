@@ -178,6 +178,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const bodyTries = new Map<number, number>();
   /** The mc/review status last set for each run, as `<sha>:<state>:<description>` (in memory: a restart sets it once more). */
   const reviewStatuses = new Map<string, string>();
+  /** The last failure logged for each run's review status, so a lasting failure is logged once. */
+  const reviewStatusFailures = new Map<string, string>();
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
@@ -608,6 +610,22 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Keeps the mc/review commit status on the run's pushed sha in step with its review; never throws. */
   async function syncReviewStatus(runId: string): Promise<void> {
+    await setReviewStatus(runId);
+    // a run that has ended is done with its status: nothing of it is kept
+    if (store.run(runId)?.endedAt != null) {
+      reviewStatuses.delete(runId);
+      reviewStatusFailures.delete(runId);
+    }
+  }
+
+  /** Logs a status failure unless it is the one logged last for the run: it is tried again every pass. */
+  function noteStatusFailure(runId: string, text: string): void {
+    if (reviewStatusFailures.get(runId) === text) return;
+    reviewStatusFailures.set(runId, text);
+    log(`${runId}: review status not set: ${text}`);
+  }
+
+  async function setReviewStatus(runId: string): Promise<void> {
     const run = store.run(runId);
     const loop = run?.loop;
     if (run === null || loop === undefined || loop === null) return;
@@ -627,10 +645,12 @@ export function createEngine(deps: EngineDeps): Engine {
     if (reviewStatuses.get(run.id) === mark) return;
     try {
       const r = await publisher.setReviewStatus(run, sha, status.state, status.description);
-      if (r.ok) reviewStatuses.set(run.id, mark);
-      else log(`${run.id}: review status not set: ${r.text}`);
+      if (r.ok) {
+        reviewStatuses.set(run.id, mark);
+        reviewStatusFailures.delete(run.id);
+      } else noteStatusFailure(run.id, r.text);
     } catch (e) {
-      log(`${run.id}: review status not set: ${e instanceof Error ? e.message : String(e)}`);
+      noteStatusFailure(run.id, e instanceof Error ? e.message : String(e));
     }
   }
 
