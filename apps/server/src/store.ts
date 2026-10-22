@@ -744,6 +744,18 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** The runs that have not ended and are off their seat in review, oldest first. */
+  asideRuns(): Run[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
+           AND json_extract(loop, '$.aside') IS NOT NULL
+         ORDER BY started_at, seq`,
+      )
+      .all() as Row[];
+    return rows.map(toRun);
+  }
+
   /** The tickets (`repo#n`) of the runs that have not ended. */
   activeTickets(): Set<string> {
     const rows = this.db
@@ -1972,8 +1984,8 @@ export class Store {
       );
   }
 
-  /** Records that the seat's turn ended at `at`. */
-  setSeatTurnEnded(seatId: string, at: number): void {
+  /** Records that the seat's turn ended at `at`; null: no turn of the seat's current run has. */
+  setSeatTurnEnded(seatId: string, at: number | null): void {
     this.db
       .prepare("UPDATE seat_sessions SET last_turn_ended_at = ? WHERE seat_id = ?")
       .run(at, seatId);

@@ -150,7 +150,20 @@ export const NEW_LOOP: RunLoop = {
   cardFor: null,
   reviewWaivedSha: null,
   prBody: null,
+  aside: null,
 };
+
+/** A run in review leaves its seat when the session has a review seat. */
+export const asideEventText = (call: string): string =>
+  `in review; ${call} is free for its next ticket`;
+export const wokenEventText = (call: string): string => `back to ${call} for rework`;
+export const wakeFailedText = (reason: string): string =>
+  `could not go back to its seat: ${reason}`;
+export const reworkFirstText = (call: string, ref: string): string =>
+  `${call} has rework waiting on ${ref}; that goes first`;
+export const ticketInReviewText = (ref: string): string =>
+  `${ref} is in review; it comes back to its seat when it needs rework`;
+export const NOT_ASIDE = "the run is not waiting on its review";
 
 /** One run's facts, read by the caller; `reconcile` reads no clock and does no I/O. */
 export interface LoopSnapshot {
@@ -170,7 +183,11 @@ export interface LoopSnapshot {
     resumedAt: number | null;
     rateLimitedUntil: number | null;
     openQuestion: boolean;
+    /** The seat row holds this unended run. */
+    holdsRun: boolean;
   };
+  /** The run's session has a review seat, so the run may leave its seat in review. */
+  asideOk: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean } | null;
   evidenceCount: number;
@@ -216,7 +233,9 @@ export type LoopAction =
   | { kind: "event"; text: string }
   | { kind: "request-review"; sha: string; attempt: number }
   | { kind: "supersede-review"; reviewId: number }
-  | { kind: "pr-body"; reviewId: number };
+  | { kind: "pr-body"; reviewId: number }
+  | { kind: "set-aside" }
+  | { kind: "wake" };
 
 interface Step {
   loop: RunLoop;
@@ -529,6 +548,42 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
   return notes;
 }
 
+/** Whether a review's blocking findings are due to the author as a fix line under `loop`. */
+export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  const rv = reviewView(s, loop);
+  return (
+    rv.on &&
+    rv.R !== null &&
+    rv.P !== null &&
+    rv.cur !== null &&
+    rv.blocked &&
+    !(fixKey(s.runId, loop.epoch, rv.cur.id) in s.claimed) &&
+    fixesSent(s.claimed, s.runId, loop.epoch) + 1 < REVIEW_ROUNDS
+  );
+}
+
+/** Whether the run in review may leave its seat now. */
+function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  const { seat, pushed, pr } = s;
+  return (
+    s.asideOk &&
+    !loop.aside &&
+    s.ended === null &&
+    loop.phase === "review" &&
+    seat.holdsRun &&
+    seat.state === "idle" &&
+    !seat.inTurn &&
+    !seat.openQuestion &&
+    pushed !== null &&
+    s.headCommit === pushed.sha &&
+    loop.ciFailedSha !== pushed.sha &&
+    pr?.state === "open" &&
+    pr.headSha === pushed.sha &&
+    !fixDue(s, loop) &&
+    !owesReport({ ...s, loop })
+  );
+}
+
 /** The one line due this pass, if any; the first due one wins. */
 function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   const { seat, claimed, runId, ticket } = s;
@@ -538,15 +593,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   const reporting = working || loop.phase === "review";
 
   const rv = reviewView(s, loop);
-  if (
-    rv.on &&
-    rv.R !== null &&
-    rv.P !== null &&
-    rv.cur !== null &&
-    rv.blocked &&
-    free(fixKey(runId, loop.epoch, rv.cur.id)) &&
-    fixesSent(claimed, runId, loop.epoch) + 1 < REVIEW_ROUNDS
-  ) {
+  if (fixDue(s, loop) && rv.R !== null && rv.P !== null && rv.cur !== null) {
     return {
       kind: "send",
       key: fixKey(runId, loop.epoch, rv.cur.id),
@@ -690,7 +737,13 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     }
   }
   if (loop.phase !== "done") {
-    const line = dueLine(s, loop);
+    // an aside run is off its seat: it comes back, or leaves it, instead of any line
+    const line: LoopAction | null =
+      loop.aside?.wake && s.ended === null
+        ? { kind: "wake" }
+        : asideDue(s, loop)
+          ? { kind: "set-aside" }
+          : dueLine(s, loop);
     if (line !== null) actions.push(line);
   }
   return actions;
@@ -703,11 +756,20 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches } = step.loop;
+  const { parked, touches, aside } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
     touches: touches === null ? null : { sha: touches.sha, paths: [...touches.paths] },
+    ...(aside ? { aside: { ...aside } } : {}),
   };
-  return { loop, actions: [...step.actions, ...desiredStep(s, step.loop)] };
+  if (loop.aside) {
+    if (s.seat.holdsRun) {
+      // a restart mid set-aside or mid wake left the run on its seat
+      loop.aside = null;
+    } else if (s.ended === null) {
+      loop.aside.wake = loop.phase === "parked" || fixDue(s, loop);
+    }
+  }
+  return { loop, actions: [...step.actions, ...desiredStep(s, loop)] };
 }

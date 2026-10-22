@@ -78,6 +78,8 @@ export interface RunLoop {
   reviewWaivedSha?: string | null;
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
+  /** Off its seat while in review; `wake`: rework or a park is due, so it goes back first. */
+  aside?: { worktree: string; wake: boolean } | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */

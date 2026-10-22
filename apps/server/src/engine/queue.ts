@@ -94,9 +94,11 @@ const isMerge = (config: CcConfig, repoId: RepoId): boolean =>
 
 /**
  * Whether the seat may take a ticket now: it has no seat row yet, or it is idle holding no run (or
- * only one that has ended). A run the store does not know counts as live.
+ * only one that has ended), and no run of its own waits off the seat for rework. A run the store
+ * does not know counts as live.
  */
 export function seatMayTake(store: Store, seatId: string): boolean {
+  if (store.asideRuns().some((r) => r.agentId === seatId && r.loop?.aside?.wake)) return false;
   const row = store.seatSession(seatId);
   if (row === null) return true;
   if (row.state !== "idle") return false;
