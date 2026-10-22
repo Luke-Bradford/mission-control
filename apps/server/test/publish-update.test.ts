@@ -200,4 +200,44 @@ describe("updateBranch (real git)", () => {
     const r = await publisher().updateBranch(run({ branch: "main" }), mainSha, worktree);
     expect(r).toMatchObject({ ok: false, transient: false });
   });
+
+  it("a main tip only origin has (a merge made on GitHub) is fetched, then merged", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    const onOrigin = elsewhereOnMain((root) => write(root, "docs/d.md", "new\n"));
+    store.upsertRun(run());
+    const r = await publisher().updateBranch(run(), onOrigin, worktree);
+    expect(r).toMatchObject({ ok: true, kind: "merged" });
+    expect(git(worktree, "rev-list", "--parents", "-n1", "HEAD").split(" ").slice(1)).toEqual([
+      tip,
+      onOrigin,
+    ]);
+  });
+});
+
+/** Another clone moves origin's main with `edit` (a change, or its own commit), so the session clone lacks the new tip. */
+function elsewhereOnMain(edit: (root: string) => void): string {
+  const other = join(dir, "other");
+  execFileSync("git", ["clone", "-q", join(dir, "origin.git"), other]);
+  git(other, "config", "user.name", "t");
+  git(other, "config", "user.email", "t@example.com");
+  edit(other);
+  git(other, "add", "-A");
+  if (git(other, "status", "--porcelain") !== "") git(other, "commit", "-q", "-m", "elsewhere");
+  git(other, "push", "-q", "origin", "main");
+  return git(other, "rev-parse", "HEAD");
+}
+
+describe("deleteLocalBranch (real git)", () => {
+  it("deletes a branch merged on origin by a merge commit the clone has not fetched", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    git(worktree, "push", "-q", "origin", BRANCH);
+    git(clone, "worktree", "remove", "--force", worktree);
+    const merged = elsewhereOnMain((root) => {
+      git(root, "fetch", "-q", "origin", BRANCH);
+      git(root, "merge", "-q", "--no-ff", "--no-edit", "FETCH_HEAD");
+    });
+    const r = run({ loop: { prNumber: 12, merging: { sha: merged, done: ["merge"] } } as never });
+    expect(await publisher().deleteLocalBranch(r)).toEqual({ ok: true });
+    expect(git(clone, "branch", "--list", BRANCH)).toBe("");
+  });
 });
