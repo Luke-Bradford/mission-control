@@ -3129,6 +3129,15 @@ describe("a run set aside in review", () => {
     expect(store.run(runId)).toMatchObject({ endedAt: null });
   });
 
+  it("endAsideRun is refused while the run is still on its seat, however its loop reads", async () => {
+    const { sup, runId } = await idleRun();
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
+    const e = await refusal(sup.endAsideRun(runId));
+    expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(existsSync(wt())).toBe(true);
+  });
+
   it("wakeRun resumes the same session in place", async () => {
     const { sup, runId } = await aside(true);
     const sessionId = store.run(runId)?.sessionId as string;

@@ -1682,6 +1682,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const info = need(run.agentId);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (
+      starting.has(run.agentId) ||
       live.get(run.agentId)?.run.id === runId ||
       store.seatSession(run.agentId)?.runId === runId
     ) {
