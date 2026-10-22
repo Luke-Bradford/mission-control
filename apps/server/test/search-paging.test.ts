@@ -73,7 +73,8 @@ function searching(
       };
     }
     return {
-      user: {
+      repositoryOwner: {
+        __typename: "User",
         projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
       },
     };
