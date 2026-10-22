@@ -89,9 +89,10 @@ How it works today: three reads go through `user(login:)`: the board collector
 (`apps/server/src/collectors/github.ts` 62), Setup's board check, which also creates fields
 (`apps/server/src/github-setup.ts` 62, 78), and the repo profile, whose error already says
 "organisation projects are not supported yet" (`apps/server/src/repo-profile.ts` 66, 104). The
-HUD's board link builds `/users/<owner>/projects/<n>` (`apps/web/src/board/lanes.ts` 34). The
-Project's owner is the repo's owner. Card moves read `repository.issue.projectItems`, which works
-for either owner.
+HUD's board link builds `/users/<owner>/projects/<n>` (`apps/web/src/board/lanes.ts` 34, and Setup's
+link at `apps/web/src/setup/Repos.tsx` 66). The Project's owner is the repo's owner. Card moves find
+the card through `repository.issue.projectItems`, but first read the Status field through Setup's
+`user(login:)` query (`apps/server/src/github-board.ts` 99), so they fail for an organisation too.
 
 Live check: `repositoryOwner(login:)` reports `__typename` `User` for this repo's owner and
 `Organization` for an organisation the account belongs to; both answer through the
@@ -168,25 +169,26 @@ list.
 
 ## Follow-ups
 
-Hard-rule files are marked; the operator merges those. Files outside a ticket's area (`roles/**`,
-`config.example.yaml`, docs) are listed in the ticket for the operator.
+Filed as issues, each with one area label. Hard-rule files are marked in each ticket; the operator
+merges those. Files outside a ticket's area (`roles/**`, `config.example.yaml`, docs) are listed in
+the ticket for the operator.
 
-1. **area:server**: `repos[].commands` and `repos[].protected` in the config, with the entry rules
-   in §1, defaulting to today's pnpm list (`config.example.yaml`: hard-rule).
-2. **area:core**: seat allowlists, protected-file rules and the test lock's single-file rule built
-   from the repo's commands and protected list (hard-rule files). Depends on 1.
-3. **area:server**: the hub passes each repo's lists through: `crewCliArgs`' input, the commit
-   tool's protected-path check, `seatsMayRun`, and the guard context (hard-rule files). Depends
-   on 2.
-4. **area:server**: the brief takes the repo's commands and areas, not pnpm and this repo's
-   (`brief.ts`: hard-rule; the matching `roles/**` text is the operator's). Depends on 1.
-5. **area:server**: the hub installs a non-pnpm repo's dependencies from its lockfile without
-   running package code, with the install-input and tree checks in §2, and keeps tool caches out
-   of the worktree and its commits (`runtime/**`, `mcp/**`: hard-rule).
-6. **area:server**: Projects read through `repositoryOwner` (collector, Setup, repo profile), and
-   health names an SSO refusal with its fix.
-7. **area:web**: the board link uses `/orgs/` for an organisation's Project. Depends on 6.
-8. **research** (no area: a probe, not a build): the Unix-socket probe in §4, and the
-   `allowUnixSockets` decision it settles, with the database-role rule.
-9. **area:server**: the hub refuses `merge` for a repo whose rules don't set `hard_rules`, naming
-   the key to add.
+- #58 **area:core**: a seat's allowed commands, protected files and test-lock rule can come from
+  its repo (hard-rule files). It also tightens the single-test rule: only a word ending in a test
+  file's name counts, with pytest's `::test` allowed.
+- #62 **area:server**: `repos[].commands` (`writer` and `review` lists) and `repos[].protected` in
+  the config, with the entry rules in §1, wired through `crewCliArgs`, the commit tool's
+  protected-path check and the guard context (hard-rule files). Depends on #58.
+- #63 **area:server**: the brief names the repo's own commands, and FLIGHT's brief each seat's area.
+  Depends on #62.
+- #61 **area:server**: a uv repo's worktree gets its dependencies installed without running package
+  code, under the install-input and tree checks in §2, and Python tool caches stay out of commits
+  (hard-rule files).
+- #59 **area:core**: the repo views carry each Project's GitHub link.
+- #64 **area:server**: an organisation's Project loads on the board, in Setup and for card moves,
+  and health names an SSO refusal with its fix. Depends on #59.
+- #65 **area:web**: the board's and Setup's Project links open the address GitHub reports.
+  Depends on #64.
+- #60 **research**: the Unix-socket probe in §4, with the database-role rule.
+- The hub refuses to auto-merge in a repo whose rules leave `hard_rules` unset (§"Also checked"):
+  filed with the merge gate it depends on.
