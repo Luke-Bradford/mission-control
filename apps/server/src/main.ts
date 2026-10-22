@@ -21,7 +21,8 @@ import { fileURLToPath } from "node:url";
 import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
-import { fetchTicket, githubToken, makeGql } from "./collectors/github.ts";
+import { assignIssue, readLogin } from "./claim.ts";
+import { fetchCardNow, fetchTicket, githubToken, makeGql } from "./collectors/github.ts";
 import {
   ConfigError,
   crewAllowed,
@@ -92,6 +93,8 @@ async function main(): Promise<void> {
   const preview = isPreview(port, process.env);
   // The hub's own checkout: Update runs in it, and seats run the guard hook from it.
   const hubRoot = findHubRoot();
+  // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
+  let hubLogin: string | null = null;
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
   // crew config, and only where the guard hook can be found.
   const supervisor = createSupervisor({
@@ -100,6 +103,9 @@ async function main(): Promise<void> {
     bus,
     dbPath,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
+    claim: async (repo, n) => {
+      if (hubLogin !== null) await assignIssue(gh, hubRoot ?? process.cwd(), hubLogin, repo, n);
+    },
     enabled: crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null,
     tokens,
     lock,
@@ -111,6 +117,10 @@ async function main(): Promise<void> {
   const early: string[] = [];
   let log: (line: string) => void = (line) => void early.push(line);
   const gh = createGh(ghCommand(process.env, preview, (line) => log(line)));
+  if (config.crew !== undefined) {
+    hubLogin = await readLogin(gh, hubRoot ?? process.cwd());
+    if (hubLogin === null) log("gh: could not read the signed-in login; the engine takes nothing");
+  }
 
   // The mc tools: commit and push run in the session clone's queue, the one the supervisor's
   // checkouts use. The push and PR scans read the GitHub token afresh for each call.
@@ -174,6 +184,7 @@ async function main(): Promise<void> {
         config,
         store,
         rules: engineRules,
+        login: hubLogin,
         now: Date.now,
         onNotes: () => bus.emit("attention"),
       }),
@@ -183,6 +194,13 @@ async function main(): Promise<void> {
           config,
           store,
           supervisor,
+          login: hubLogin,
+          readCard: async (repoId, issue) => {
+            const repo = config.repos.find((r) => r.id === repoId);
+            return repo === undefined
+              ? null
+              : fetchCardNow(repo, issue, makeGql(await githubToken()));
+          },
           enabled: engineOn,
           transientTakes,
           now: Date.now,

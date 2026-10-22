@@ -223,6 +223,8 @@ export interface SupervisorDeps {
   /** Put before the CLI's own arguments. */
   commandArgs?: string[];
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
+  /** Assigns the hub's own login to the issue, when a run starts on it (any repo, `merge` or `draft`). */
+  claim?: (repo: CcConfig["repos"][number], n: number) => Promise<void>;
   /** false: `MC_NO_CREW=1`, or no `crew` config. */
   enabled: boolean;
   /** Per-run tokens for `/mcp` and the guard: issued at each spawn, revoked at its exit. */
@@ -1137,6 +1139,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           : await prepareCheckout({ ...where, title });
         return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
       });
+      if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+      // Claim the ticket for this hub (another hub on the board skips an assigned card); a claim
+      // GitHub refuses stops the start, since an unclaimed run could meet another hub's.
+      try {
+        await deps.claim?.(info.repo, issue);
+      } catch (e) {
+        throw new SupervisorError(502, `could not claim ${info.repo.github}#${issue} on GitHub`, {
+          cause: e,
+        });
+      }
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
       const startedAt = now();

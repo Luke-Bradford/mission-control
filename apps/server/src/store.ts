@@ -581,6 +581,8 @@ export class Store {
       ["priority_source", "TEXT"],
     ];
     for (const [column, type] of boardColumns) this.addColumn("board_items", column, type);
+    // Logins assigned to the card's issue (a JSON list); the next GitHub poll fills it.
+    this.addColumn("board_items", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
     // into the row, so the backfill can skip it.
     const runColumns: [string, string][] = [
@@ -1130,8 +1132,8 @@ export class Store {
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
            updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           closed, priority_source, created_at, item_id, project_id, assignees)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
            status = excluded.status, state = excluded.state, labels = excluded.labels,
            priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
@@ -1140,7 +1142,8 @@ export class Store {
            blocked_by = excluded.blocked_by, milestone = excluded.milestone,
            size = excluded.size, closed = excluded.closed,
            priority_source = excluded.priority_source, created_at = excluded.created_at,
-           item_id = excluded.item_id, project_id = excluded.project_id`,
+           item_id = excluded.item_id, project_id = excluded.project_id,
+           assignees = excluded.assignees`,
       );
       for (const i of items) {
         ins.run(
@@ -1166,6 +1169,7 @@ export class Store {
           i.createdAt,
           i.itemId,
           i.projectId,
+          JSON.stringify(i.assignees ?? []),
         );
       }
     });
@@ -1214,6 +1218,7 @@ export class Store {
       status: r.status as string,
       state: r.state as BoardItem["state"],
       labels: JSON.parse(r.labels as string) as string[],
+      assignees: JSON.parse(r.assignees as string) as string[],
       priority: r.priority as string | null,
       updatedAt: r.updated_at as number,
       url: r.url as string,

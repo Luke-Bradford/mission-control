@@ -2,7 +2,9 @@ import { type BoardItem, columnOf, hudColumnOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   collectGithub,
+  fetchCardNow,
   fetchTicket,
+  type Gql,
   GqlError,
   GqlTransportError,
   isTransient,
@@ -68,6 +70,32 @@ function item(
           },
   };
 }
+
+describe("fetchCardNow", () => {
+  const answer = (issue: unknown): Gql => async () => ({ repository: { issue } });
+  const onProject = (status: string | null, number = repo.project) => ({
+    state: "OPEN",
+    assignees: { nodes: [{ login: "luke" }] },
+    projectItems: {
+      nodes: [{ project: { number }, status: status === null ? null : { name: status } }],
+    },
+  });
+
+  it("reads the Status, the issue state and the assignees of the card on the repo's project", async () => {
+    expect(await fetchCardNow(repo, 7, answer(onProject("Todo")))).toEqual({
+      status: "Todo",
+      state: "planned",
+      closed: false,
+      assignees: ["luke"],
+    });
+  });
+
+  it("is null for a missing issue, a card on another project, or an unmapped Status", async () => {
+    expect(await fetchCardNow(repo, 7, answer(null))).toBeNull();
+    expect(await fetchCardNow(repo, 7, answer(onProject("Todo", 99)))).toBeNull();
+    expect(await fetchCardNow(repo, 7, answer(onProject("Parked")))).toBeNull();
+  });
+});
 
 describe("fetchTicket repos", () => {
   const other: CcConfig["repos"][number] = {
@@ -452,6 +480,15 @@ describe("collectGithub board fields", () => {
     });
     await collectGithub(repo, store, gql, NOW);
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
+  });
+
+  it("reads each card's assignee logins", async () => {
+    const assignees = { assignees: { nodes: [{ login: "luke" }, { login: "sam" }] } };
+    const { gql } = stub({
+      pages: [page([item(1, "Todo", { extra: assignees }), item(2, "Todo")])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.assignees)).toEqual([["luke", "sam"], []]);
   });
 
   it("a project without Stage/Owner fields maps to null and counts as Ready", async () => {
