@@ -1645,6 +1645,25 @@ describe("Agent page: loop steps", () => {
       ask.mockRestore();
     });
 
+    it("is not in the Steps view once the run has ended, though its loop still has aside", async () => {
+      stub({
+        rows: [
+          {
+            ...seat(loopOf({ phase: "review", text: "Waiting on review", prNumber: 77 })),
+            run: { ...crewRow().run, id: "r-12", endedAt: NOW - HOUR, status: "ok" },
+          } as CrewRow,
+        ],
+        runs: [],
+        extra: loopAnswer({ worktree: "/w/r-12", wake: false }),
+      });
+      const { container } = render(<Agent id="shop-app-ta" />);
+      await loaded();
+      const panel = $(container, "#loopP") as HTMLElement;
+      fireEvent.click(within(panel).getByRole("button", { name: "Steps" }));
+      await act(async () => {});
+      expect(screen.queryByRole("button", { name: "End run" })).toBeNull();
+    });
+
     it("shows the server's refusal text on a 409", async () => {
       await asideRun({
         ...loopAnswer({ worktree: "/w/r-12", wake: false }),

@@ -62,7 +62,7 @@ export function LoopSteps({ row }: { row: CrewRow }) {
           <span>{loop.text}</span>
         </div>
       )}
-      {row.run && <EndAsideRun row={row} runId={row.run.id} />}
+      {row.run && row.run.endedAt === null && <EndAsideRun row={row} runId={row.run.id} />}
       <div className="vsteps">
         {LOOP_PATH.map((step, i) => {
           const mark = marks[i];
