@@ -616,7 +616,7 @@ make it pushable by Mission Control, because a commit you re-make is not one the
 on the ticket does not help either: it reuses the same local branch and worktree, bad commit
 included. Take the branch out of the crew: stop the parked run (a message to the seat would resume
 it, and the push would be refused again), fetch the branch from the session checkout
-(`git fetch <session checkout> <branch>`), fix its history in your own checkout, push it and open
+(`git fetch <session checkout> <branch>:<branch>`), fix its history in your own checkout, push it and open
 the PR yourself.
 
 ### The mention and reference filter
