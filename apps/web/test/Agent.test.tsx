@@ -12,6 +12,7 @@ import {
   METER_FULL_PCT,
   METER_WARN_PCT,
   type RunDigest,
+  type RunLoop,
   type RunView,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -1586,6 +1587,32 @@ describe("Agent page: loop steps", () => {
       expect(bodyOf(f, END_PATH)).toBeUndefined();
       fireEvent.click(end);
       await vi.waitFor(() => expect(bodyOf(f, END_PATH)).toBe("{}"));
+      ask.mockRestore();
+    });
+
+    it("is in the Runs list for a set-aside run the seat has moved on from", async () => {
+      const f = stub({
+        rows: [
+          {
+            ...seat(loopOf({ phase: "working" })),
+            run: { ...crewRow().run, id: "r-13", seq: 13 },
+          } as CrewRow,
+        ],
+        runs: [
+          rv({
+            id: "r-12",
+            loop: { phase: "review", aside: { worktree: "/w/r-12", wake: false } } as RunLoop,
+          }),
+        ],
+        extra: { "POST /api/runs/r-12/end": { ok: true } },
+      });
+      const { container } = render(<Agent id="shop-app-ta" />);
+      await loaded();
+      const panel = $(container, "#loopP") as HTMLElement;
+      fireEvent.click(within(panel).getByRole("button", { name: "Runs" }));
+      const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
+      fireEvent.click(await within(panel).findByRole("button", { name: "End run" }));
+      await vi.waitFor(() => expect(bodyOf(f, "/api/runs/r-12/end")).toBe("{}"));
       ask.mockRestore();
     });
 

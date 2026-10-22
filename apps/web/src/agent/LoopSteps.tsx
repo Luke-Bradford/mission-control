@@ -5,12 +5,10 @@ import { RESOURCES, useResource } from "../data.ts";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { endAsideConfirm, endAsideRun, seatError } from "./seat.ts";
 
-/** End run for a run set aside in review (its PR in review, its seat free); nothing otherwise. */
-function EndAsideRun({ row, runId }: { row: CrewRow; runId: string }) {
+/** End run for a run already known to be set aside; the server still refuses if it is not. */
+export function EndAsideButton({ row, runId }: { row: CrewRow; runId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const aside = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop?.aside;
-  if (!aside) return null;
   const end = async () => {
     setBusy(true);
     setError(null);
@@ -41,6 +39,12 @@ function EndAsideRun({ row, runId }: { row: CrewRow; runId: string }) {
       )}
     </div>
   );
+}
+
+/** End run for a run set aside in review (its PR in review, its seat free); nothing otherwise. */
+function EndAsideRun({ row, runId }: { row: CrewRow; runId: string }) {
+  const aside = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop?.aside;
+  return aside ? <EndAsideButton row={row} runId={runId} /> : null;
 }
 
 /** Where a looped run is, as a vertical stepper; `parked` is a held state, not a step. */
