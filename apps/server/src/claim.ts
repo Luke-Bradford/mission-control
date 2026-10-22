@@ -8,6 +8,18 @@ import type { GhRunner } from "./mcp/gh.ts";
 
 export const CLAIM_FAILED = "could not claim the ticket on GitHub";
 
+/**
+ * The claim a supervisor makes when a run starts: assigns the hub's login, read when called. A hub
+ * whose login is unknown cannot claim, so the start fails rather than begin an unclaimed run.
+ */
+export const claimAs =
+  (gh: GhRunner, cwd: string, login: () => string | null) =>
+  async (repo: CcConfig["repos"][number], issue: number): Promise<void> => {
+    const l = login();
+    if (l === null) throw new Error(CLAIM_FAILED);
+    await assignIssue(gh, cwd, l, repo, issue);
+  };
+
 /** The login `gh` is signed in as (`gh api user`), read once at start-up; null when it cannot be read. */
 export async function readLogin(gh: GhRunner, cwd: string): Promise<string | null> {
   const out = await gh(["api", "user", "--jq", ".login"], { cwd });

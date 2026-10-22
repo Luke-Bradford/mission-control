@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
-import { assignIssue, readLogin } from "./claim.ts";
+import { claimAs, readLogin } from "./claim.ts";
 import { fetchCardNow, fetchTicket, githubToken, makeGql } from "./collectors/github.ts";
 import {
   ConfigError,
@@ -103,9 +103,8 @@ async function main(): Promise<void> {
     bus,
     dbPath,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
-    claim: async (repo, n) => {
-      if (hubLogin !== null) await assignIssue(gh, hubRoot ?? process.cwd(), hubLogin, repo, n);
-    },
+    // lazy: `gh` is declared below
+    claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
     enabled: crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null,
     tokens,
     lock,

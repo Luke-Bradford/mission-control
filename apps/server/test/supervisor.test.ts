@@ -37,7 +37,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import { assignIssue } from "../src/claim.ts";
+import { assignIssue, claimAs } from "../src/claim.ts";
 import { type CcConfig, type CrewSeatConfig, isInside } from "../src/config.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -327,6 +327,16 @@ describe("startRun claims the ticket", () => {
     sup.start();
     await sup.startRun("guido-1", 42);
     expect(calls).toEqual([["issue", "edit", "42", "--repo", "o/mc", "--add-assignee", "me"]]);
+  });
+
+  it("starts nothing when the hub's login is unknown", async () => {
+    const { calls, gh } = fakeGh();
+    const { sup } = make({ claim: claimAs(gh, dir, () => null) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(calls).toEqual([]);
+    expect(store.runs("guido-1", 1)).toEqual([]);
   });
 
   it("starts nothing when GitHub refuses the claim", async () => {
