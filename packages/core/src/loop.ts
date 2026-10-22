@@ -248,6 +248,11 @@ export interface LoopSnapshot {
   } | null;
   /** The repo is a `merge` workspace: the engine merges a PR that passes the gate. Absent: false. */
   autoMerge?: boolean;
+  /**
+   * The repo's rules set `hard_rules` themselves. Without it the gate never passes: the run stops
+   * at "ready for a human". Absent: false.
+   */
+  hardRulesSet?: boolean;
   /** The card's column from the poll. */
   card: string | null;
   /** This run's seat_lines keys, with the time each was claimed. */
@@ -380,7 +385,12 @@ function gateView(s: LoopSnapshot, loop: RunLoop) {
   const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
   const clear = touches !== null && touches.paths.length === 0;
   const passes =
-    on && clear && gate?.containsMain === true && gate.hubOnly && gate.strays.length === 0;
+    on &&
+    s.hardRulesSet === true &&
+    clear &&
+    gate?.containsMain === true &&
+    gate.hubOnly &&
+    gate.strays.length === 0;
   return { on, P, touches, gate, clear, passes };
 }
 
@@ -690,6 +700,11 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
               notes.set(readyNoteKey(runId, rv.P), {
                 noteKind: "ready",
                 text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
+              });
+            } else if (s.hardRulesSet !== true) {
+              notes.set(readyNoteKey(runId, rv.P), {
+                noteKind: "ready",
+                text: readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
               });
             }
           }

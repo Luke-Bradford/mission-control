@@ -100,6 +100,15 @@ describe("parseRepoRules", () => {
     expect(parseRepoRules(block("mc:\n  hard_rules: [a/**]\n")).hardRules).toEqual(["a/**"]);
   });
 
+  it("says whether hard_rules was set: null, absent and no block are not", () => {
+    expect(parseRepoRules(block("mc:\n  hard_rules: null\n")).hardRulesSet).toBe(false);
+    expect(parseRepoRules(block("mc:\n  always_ask: [x]\n")).hardRulesSet).toBe(false);
+    expect(parseRepoRules("# Repo\n").hardRulesSet).toBe(false);
+    expect(parseRepoRules(null).hardRulesSet).toBe(false);
+    expect(parseRepoRules(block("mc:\n  hard_rules: []\n")).hardRulesSet).toBe(true);
+    expect(parseRepoRules(block("mc:\n  hard_rules: [a/**]\n")).hardRulesSet).toBe(true);
+  });
+
   it("reads the first yaml block only, skipping other fences", () => {
     const md =
       "## Mission Control\n\n```sh\nfoo\n```\n\n```yaml\nmc:\n  promote_backlog: true\n```\n\n```yaml\nmc:\n  foo: 1\n```\n";
