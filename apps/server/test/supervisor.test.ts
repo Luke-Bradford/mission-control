@@ -952,6 +952,19 @@ describe("questions and strays", () => {
     expect(emitted).toContain("attention");
   });
 
+  it("FLIGHT's message options spare passed questions, or close none", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    const passed = store.addQuestion({ agentId: "guido-1", runId, text: "passed?", at: 1 });
+    store.passQuestion(passed, 2);
+    store.addQuestion({ agentId: "guido-1", runId, text: "open?", at: 1 });
+    await sup.message("guido-1", "nudge", { interrupt: false, questions: "none" });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["passed?", "open?"]);
+    await sup.message("guido-1", "answer", { interrupt: false, questions: "unpassed" });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["passed?"]);
+  });
+
   it("an interrupt alone answers nothing", async () => {
     const { sup } = make();
     sup.start();
@@ -1335,7 +1348,14 @@ describe("startWatch", () => {
     expect(argv[argv.indexOf("--tools") + 1]).toBe(READONLY_BUILTINS.join(","));
     expect(
       argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--disallowedTools")),
-    ).toEqual([...READONLY_TOOLS, "mcp__mc__log_decision"]);
+    ).toEqual([
+      ...READONLY_TOOLS,
+      "mcp__mc__log_decision",
+      "mcp__mc__read_ticket",
+      "mcp__mc__answer_question",
+      "mcp__mc__start_seat",
+      "mcp__mc__message_seat",
+    ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
 

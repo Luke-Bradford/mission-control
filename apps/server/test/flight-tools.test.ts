@@ -2,20 +2,29 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type BoardItem,
+  DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
+  FLIGHT_UNPARK_KINDS,
+  type FlightDecision,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
+  NEW_LOOP,
+  type RepoRules,
   type Run,
+  type RunLoop,
   type SeatSessionRow,
+  type TicketView,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { createFlightTools } from "../src/flight/tools.ts";
+import { type CcConfig, type CrewSeatConfig, SEAT_ID } from "../src/config.ts";
+import { createFlightTools, seatFree } from "../src/flight/tools.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
+import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
@@ -58,6 +67,19 @@ let bus: ChangeBus;
 let seen: string[];
 let tool: McTool;
 let nowMs: number;
+let cfg: CcConfig;
+let tools: McTool[];
+let startCalls: unknown[][];
+let messageCalls: unknown[][];
+let engineCalls: unknown[][];
+let fetchCalls: number[];
+let busyNow: SeatBusy[];
+let engineOn: boolean;
+let lifts: boolean;
+let rulesNow: RepoRules;
+let startImpl: () => Promise<{ runId: string; branch: string }>;
+let messageImpl: () => Promise<void>;
+let fetchImpl: (n: number) => Promise<TicketView | null>;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -106,19 +128,48 @@ beforeEach(() => {
   seen = [];
   bus.subscribe((t) => seen.push(t));
   nowMs = NOW;
-  const [t] = createFlightTools({
-    config: config(),
+  cfg = config();
+  startCalls = [];
+  messageCalls = [];
+  engineCalls = [];
+  fetchCalls = [];
+  busyNow = [];
+  engineOn = false;
+  lifts = true;
+  rulesNow = DEFAULT_REPO_RULES;
+  startImpl = async () => ({ runId: "", branch: "" });
+  messageImpl = async () => {};
+  fetchImpl = async () => null;
+  tools = createFlightTools({
+    config: cfg,
     store,
     bus,
     supervisor: {
-      message: async () => {},
-      busy: () => [],
-      startRun: async () => ({ runId: "", branch: "" }),
+      message: async (...a) => {
+        messageCalls.push(a);
+        await messageImpl();
+      },
+      busy: () => busyNow,
+      startRun: async (...a) => {
+        startCalls.push(a);
+        return startImpl();
+      },
     },
-    engine: null,
-    fetchTicket: async () => null,
+    engine: {
+      onOperatorMessage: async (...a) => {
+        engineCalls.push(a);
+        return lifts;
+      },
+      status: () => ({ on: engineOn, note: null }),
+    },
+    rules: async () => rulesNow,
+    fetchTicket: async (_repo, n) => {
+      fetchCalls.push(n);
+      return fetchImpl(n);
+    },
     now: () => nowMs,
   });
+  const t = tools[0];
   if (t === undefined) throw new Error("no tool");
   tool = t;
   live("flight-1", "r-flight");
@@ -201,5 +252,665 @@ describe("log_decision", () => {
     });
     nowMs += 61 * 60_000;
     expect((await tool.call(ctx(), args())).isError).toBeUndefined();
+  });
+});
+
+const named = (name: string): McTool => {
+  const t = tools.find((x) => x.name === name);
+  if (t === undefined) throw new Error(`no tool ${name}`);
+  return t;
+};
+const call = (name: string, a: Record<string, unknown>, c = ctx()) => named(name).call(c, a);
+const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
+  repoId: "mc",
+  issueNumber: n,
+  title: `Ticket ${n}`,
+  status: "Ready",
+  state: "planned",
+  labels: [],
+  priority: null,
+  updatedAt: NOW,
+  url: "u",
+  stage: null,
+  owner: null,
+  parent: null,
+  subIssues: null,
+  blockedBy: [],
+  milestone: null,
+  size: null,
+  closed: false,
+  prioritySource: null,
+  createdAt: NOW,
+  itemId: `I${n}`,
+  projectId: "P1",
+  ...over,
+});
+const board = (...cards: BoardItem[]) => store.replaceBoard("mc", cards);
+const ticket = (n: number, over: Partial<TicketView> = {}): TicketView => ({
+  number: n,
+  title: `Ticket ${n}`,
+  url: "u",
+  state: "open",
+  body: "Body text",
+  bodyTruncated: false,
+  bodyLength: 9,
+  labels: [],
+  milestone: null,
+  subIssues: [],
+  pullRequests: [],
+  ...over,
+});
+const decisions = () => store.flightDecisions(0, 200);
+const addDecision = (over: Partial<FlightDecision>) =>
+  store.addFlightDecision({
+    at: NOW - 1000,
+    kind: "message",
+    seatId: null,
+    targetRunId: null,
+    ref: null,
+    questionId: null,
+    about: "a",
+    decision: "d",
+    basis: "b",
+    ...over,
+  });
+const refused = (text: string) => ({ text, isError: true });
+
+describe("tool list", () => {
+  it("adds the four tools, each shown only to a granted role", () => {
+    expect(tools.map((t) => t.name)).toEqual([
+      "log_decision",
+      "read_ticket",
+      "answer_question",
+      "start_seat",
+      "message_seat",
+    ]);
+    for (const t of tools) {
+      expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
+      expect(t.inputSchema).toMatchObject({ type: "object", additionalProperties: false });
+    }
+  });
+});
+
+describe("seat schema", () => {
+  it("carries the seat id pattern on start_seat and message_seat", () => {
+    for (const name of ["start_seat", "message_seat"]) {
+      const props = (
+        named(name).inputSchema as { properties: Record<string, { pattern?: string }> }
+      ).properties;
+      expect(props.seat?.pattern).toBe(SEAT_ID.source);
+    }
+  });
+});
+
+describe("seatFree", () => {
+  it("is false for a seat with an unended run or named busy", () => {
+    expect(seatFree(store, [], "guido-1")).toBe(true);
+    expect(seatFree(store, [{ seatId: "guido-1", state: "starting" }], "guido-1")).toBe(false);
+    live("guido-1", "r-g");
+    expect(seatFree(store, [], "guido-1")).toBe(false);
+    store.upsertRun(run("r-g", "guido-1", { endedAt: NOW, status: "ok" }));
+    expect(seatFree(store, [], "guido-1")).toBe(true);
+  });
+});
+
+describe("read_ticket", () => {
+  it("answers the ticket with its column", async () => {
+    board(card(5));
+    fetchImpl = async (n) => ticket(n, { title: "Do it", body: "Plan here" });
+    expect(await call("read_ticket", { issue: 5 })).toEqual({
+      text: "#5 Do it [Ready]\n\nPlan here",
+    });
+    expect(fetchCalls).toEqual([5]);
+  });
+
+  it("says not on the board, and notes a cut body", async () => {
+    fetchImpl = async (n) => ticket(n, { body: "abc", bodyTruncated: true, bodyLength: 50 });
+    const r = await call("read_ticket", { issue: 6 });
+    expect(r.text.startsWith("#6 Ticket 6 [not on the board]\n\n[The ticket body was cut")).toBe(
+      true,
+    );
+    expect(r.text.endsWith("\n\nabc")).toBe(true);
+  });
+
+  it("refuses a throw and a missing issue", async () => {
+    fetchImpl = async () => {
+      throw new Error("net");
+    };
+    expect(await call("read_ticket", { issue: 5 })).toEqual(
+      refused("Not read: GitHub could not be reached; try again in a few minutes."),
+    );
+    fetchImpl = async () => null;
+    expect(await call("read_ticket", { issue: 5 })).toEqual(
+      refused("Not read: there is no such issue."),
+    );
+  });
+
+  it("allows 60 reads an hour, then refuses the 61st", async () => {
+    fetchImpl = async (n) => ticket(n);
+    for (let i = 0; i < 60; i++) {
+      expect((await call("read_ticket", { issue: 1 })).isError).toBeUndefined();
+    }
+    expect(await call("read_ticket", { issue: 1 })).toEqual(
+      refused(
+        "Not done: you read tickets 60 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    expect(fetchCalls).toHaveLength(60);
+  });
+
+  it("refuses a seat that is not FLIGHT and bad issue numbers", async () => {
+    live("guido-1", "r-guido");
+    expect(await call("read_ticket", { issue: 1 }, ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+    for (const bad of [0, 1.5, 2 ** 31, "1"]) {
+      expect((await call("read_ticket", { issue: bad })).text.startsWith(MC_BAD_ARGS)).toBe(true);
+    }
+  });
+});
+
+describe("answer_question", () => {
+  const ask = (agentId = "guido-1", runId = "r-guido") => {
+    live(agentId, runId);
+    return store.addQuestion({ agentId, runId, text: "Which lane?", at: NOW });
+  };
+  const A = (id: number, over: Record<string, unknown> = {}) => ({
+    question_id: id,
+    answer: "Lane 2",
+    basis: "the ticket",
+    ...over,
+  });
+
+  it("messages the seat, records the answer and emits flight", async () => {
+    const id = ask();
+    expect(await call("answer_question", A(id))).toEqual({ text: "Answered GUIDO-1." });
+    expect(messageCalls).toEqual([
+      [
+        "guido-1",
+        "FLIGHT, answering for the operator: Lane 2",
+        { interrupt: false, questions: "unpassed" },
+      ],
+    ]);
+    expect(decisions()).toEqual([
+      {
+        id: 1,
+        at: NOW,
+        kind: "answer",
+        seatId: "guido-1",
+        targetRunId: null,
+        ref: null,
+        questionId: id,
+        about: "GUIDO-1: Which lane?",
+        decision: "Lane 2",
+        basis: "the ticket",
+      },
+    ]);
+    expect(seen).toContain("flight");
+  });
+
+  it("returns a send failure and records nothing", async () => {
+    const id = ask();
+    messageImpl = async () => {
+      throw new Error("seat is gone");
+    };
+    expect(await call("answer_question", A(id))).toEqual(refused("Not sent: seat is gone"));
+    expect(decisions()).toEqual([]);
+  });
+
+  it("passes a question to the operator without a message", async () => {
+    const id = ask();
+    const r = await call("answer_question", {
+      question_id: id,
+      pass_to_operator: true,
+      basis: "spend",
+    });
+    expect(r).toEqual({
+      text: "Passed to the operator. It is in the operator's Needs-you list now; your basis is in Decided without you.",
+    });
+    expect(store.question(id)?.passedAt).toBe(NOW);
+    expect(messageCalls).toEqual([]);
+    expect(seen).toContain("attention");
+    expect(decisions()).toMatchObject([
+      { kind: "pass", seatId: "guido-1", questionId: id, decision: "Passed to the operator" },
+    ]);
+    // a passed question is no longer open to FLIGHT
+    expect((await call("answer_question", A(id))).text).toBe(
+      `Not answered: there is no open question ${id}.`,
+    );
+  });
+
+  it("refuses both fields, or neither", async () => {
+    const id = ask();
+    for (const bad of [A(id, { pass_to_operator: true }), { question_id: id, basis: "b" }]) {
+      expect(await call("answer_question", bad)).toEqual(
+        refused(`${MC_BAD_ARGS}give answer or pass_to_operator, not both`),
+      );
+    }
+  });
+
+  it("refuses an unknown or answered question", async () => {
+    expect(await call("answer_question", A(99))).toEqual(
+      refused("Not answered: there is no open question 99."),
+    );
+    const id = ask();
+    store.answerQuestions("guido-1", NOW);
+    expect((await call("answer_question", A(id))).text).toBe(
+      `Not answered: there is no open question ${id}.`,
+    );
+  });
+
+  it("refuses a question from a seat outside FLIGHT's session", async () => {
+    cfg.crew?.sessions.push({
+      id: "s2",
+      repoId: "mc",
+      checkout: "/tmp/none/clone2",
+      seats: [seat("guido-2", "GUIDO")],
+    });
+    const id = ask("guido-2", "r-guido2");
+    expect(await call("answer_question", A(id))).toEqual(
+      refused(`Not answered: there is no open question ${id}.`),
+    );
+    expect(messageCalls).toEqual([]);
+    expect(store.question(id)?.answeredAt).toBeNull();
+  });
+
+  it("applies the per-seat message cap to the asker", async () => {
+    const id = ask();
+    for (let i = 0; i < 6; i++) addDecision({ kind: "message", seatId: "guido-1" });
+    expect((await call("answer_question", A(id))).isError).toBe(true);
+    expect(messageCalls).toEqual([]);
+  });
+
+  it("keeps a passed question open through later FLIGHT messages and answers", async () => {
+    const passed = ask();
+    await call("answer_question", { question_id: passed, pass_to_operator: true, basis: "spend" });
+    const other = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Two?",
+      at: NOW,
+    });
+    await call("answer_question", A(other));
+    expect(messageCalls.at(-1)?.[2]).toEqual({ interrupt: false, questions: "unpassed" });
+    // what the supervisor does with that option
+    store.answerQuestions("guido-1", NOW, true);
+    expect(store.question(passed)?.answeredAt).toBeNull();
+    expect(store.question(other)?.answeredAt).toBe(NOW);
+  });
+
+  it("refuses FLIGHT's own question", async () => {
+    const id = store.addQuestion({ agentId: "flight-1", runId: "r-flight", text: "q", at: NOW });
+    expect(await call("answer_question", A(id))).toEqual(
+      refused("Not answered: that is your own question to the operator."),
+    );
+  });
+
+  it("refuses when the asking run has ended", async () => {
+    const id = ask();
+    store.upsertRun(run("r-guido", "guido-1", { endedAt: NOW, status: "ok" }));
+    expect(await call("answer_question", A(id))).toEqual(
+      refused("Not answered: the run of GUIDO-1 that asked it has ended."),
+    );
+  });
+
+  it("caps answers at 30 messages an hour, but still passes", async () => {
+    const id = ask();
+    for (let i = 0; i < 30; i++) addDecision({});
+    expect(await call("answer_question", A(id))).toEqual(
+      refused(
+        "Not done: you sent messages 30 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    expect(messageCalls).toEqual([]);
+    const pass = { question_id: id, pass_to_operator: true, basis: "b" };
+    expect((await call("answer_question", pass)).isError).toBeUndefined();
+  });
+});
+
+describe("start_seat", () => {
+  const start = (over: Record<string, unknown> = {}) =>
+    call("start_seat", { seat: "guido-1", issue: 7, basis: "ready", ...over });
+
+  beforeEach(() => board(card(7)));
+
+  it("starts the seat with the loop when the engine is on", async () => {
+    engineOn = true;
+    expect(await start()).toEqual({ text: "Started GUIDO-1 on mc#7." });
+    expect(startCalls).toEqual([["guido-1", 7, { loop: NEW_LOOP }]]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "start",
+        seatId: "guido-1",
+        ref: "mc#7",
+        about: "mc#7: Ticket 7",
+        decision: "Started GUIDO-1",
+        basis: "ready",
+      },
+    ]);
+    expect(seen).toEqual(expect.arrayContaining(["agents", "flight"]));
+  });
+
+  it("starts with no options when the engine is off", async () => {
+    await start();
+    expect(startCalls).toEqual([["guido-1", 7, undefined]]);
+  });
+
+  it("refuses a seat outside its session", async () => {
+    expect(await start({ seat: "nobody-9" })).toEqual(
+      refused("Not done: nobody-9 is not a seat in your session."),
+    );
+  });
+
+  describe("areas", () => {
+    beforeEach(() => {
+      rulesNow = {
+        ...DEFAULT_REPO_RULES,
+        areas: { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] },
+      };
+    });
+
+    it("refuses a card whose area is not the seat's", async () => {
+      board(card(7, { labels: ["area:server"] }));
+      expect(await start({ seat: "inco-1" })).toEqual(
+        refused("Not started: mc#7 is in area:server, not INCO-1's area."),
+      );
+      expect(startCalls).toEqual([]);
+      board(card(7, { labels: ["area:web"] }));
+      expect((await start({ seat: "inco-1" })).isError).toBeUndefined();
+    });
+
+    it("refuses a card with two area labels", async () => {
+      board(card(7, { labels: ["area:server", "area:web"] }));
+      expect(await start()).toEqual(
+        refused(
+          "Not started: mc#7 spans two areas (area:server, area:web); ask the operator to split it.",
+        ),
+      );
+      expect(startCalls).toEqual([]);
+    });
+  });
+
+  it("1: refuses a seat that is not a developer seat", async () => {
+    expect(await start({ seat: "retro-1" })).toEqual(
+      refused("Not started: RETRO-1 is not a developer seat."),
+    );
+  });
+
+  it("2: refuses a repo that takes tickets by rule", async () => {
+    const repo = cfg.repos[0];
+    if (repo === undefined) throw new Error("no repo");
+    repo.autonomy = "merge";
+    expect(await start()).toEqual(refused("Not started: mc takes its tickets from Ready by rule."));
+  });
+
+  it("3: refuses a seat with a run, or busy", async () => {
+    busyNow = [{ seatId: "guido-1", state: "starting" }];
+    expect(await start()).toEqual(refused("Not started: GUIDO-1 already has a run."));
+    busyNow = [];
+    live("guido-1", "r-g");
+    expect(await start()).toEqual(refused("Not started: GUIDO-1 already has a run."));
+  });
+
+  it("4: refuses an account at its usage stop", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: NOW,
+      pct: 96,
+      resetAt: NOW + 1000,
+      source: "t",
+    });
+    expect(await start()).toEqual(
+      refused("Not started: GUIDO-1's account claude-main is at its usage stop."),
+    );
+  });
+
+  it("5: caps starts at 4 an hour", async () => {
+    for (let i = 0; i < 4; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
+    expect(await start()).toEqual(
+      refused(
+        "Not done: you started tickets 4 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+  });
+
+  it("6: refuses the same ticket within 24 hours", async () => {
+    await start();
+    nowMs += 2 * 60 * 60_000;
+    expect(await start()).toEqual(
+      refused(
+        "Not started: you started mc#7 in the last 24 hours; ask the operator before starting it again.",
+      ),
+    );
+    nowMs += 25 * 60 * 60_000;
+    expect((await start()).isError).toBeUndefined();
+  });
+
+  it("7: refuses a card that is missing, in the wrong column, active or blocked", async () => {
+    expect(await start({ issue: 8 })).toEqual(refused("Not started: mc#8 is not on the board."));
+    board(card(7, { status: "In progress", state: "in progress" }));
+    expect(await start()).toEqual(refused("Not started: mc#7 is in In progress."));
+    board(card(7));
+    live("inco-1", "r-i", { ticket: "mc#7" });
+    expect(await start()).toEqual(refused("Not started: mc#7 already has a run."));
+    store.upsertRun(run("r-i", "inco-1", { ticket: "mc#7", endedAt: NOW, status: "ok" }));
+    board(
+      card(7, {
+        blockedBy: [
+          { ref: "mc#3", closed: false },
+          { ref: "mc#4", closed: true },
+          { ref: "mc#5", closed: false },
+        ],
+      }),
+    );
+    expect(await start()).toEqual(refused("Not started: mc#7 waits on mc#3, mc#5."));
+  });
+
+  it("8: needs a Ready column, the ready label or a Plan section", async () => {
+    board(card(7, { status: "Backlog" }));
+    fetchImpl = async (n) => ticket(n, { body: "just words\n## Planning\n" });
+    expect(await start()).toEqual(
+      refused("Not started: mc#7 has no ## Plan section, no ready label, and is not in Ready."),
+    );
+    fetchImpl = async () => {
+      throw new Error("net");
+    };
+    expect(await start()).toEqual(refused("Not started: GitHub could not be reached."));
+    expect(startCalls).toEqual([]);
+    // the label, with no fetch
+    fetchCalls.length = 0;
+    board(card(7, { status: "Backlog", labels: ["ready"] }));
+    expect((await start()).isError).toBeUndefined();
+    expect(fetchCalls).toEqual([]);
+  });
+
+  it("starts a Backlog card with a Plan section in its body", async () => {
+    board(card(7, { status: "Backlog" }));
+    fetchImpl = async (n) => ticket(n, { body: "Intro\n## Plan\nsteps" });
+    expect(await start()).toEqual({ text: "Started GUIDO-1 on mc#7." });
+  });
+
+  it("returns a refused start's own text, and a generic one for any other failure", async () => {
+    startImpl = async () => {
+      throw new SupervisorError(409, "rework first");
+    };
+    expect(await start()).toEqual(refused("Not started: rework first"));
+    startImpl = async () => {
+      throw new Error("/secret/path");
+    };
+    expect(await start()).toEqual(refused("Not started: the start failed."));
+    expect(decisions()).toEqual([]);
+  });
+});
+
+describe("message_seat", () => {
+  const M = (over: Record<string, unknown> = {}) => ({
+    seat: "guido-1",
+    text: "Please push",
+    basis: "idle",
+    ...over,
+  });
+
+  it("sends with the FLIGHT prefix and records it", async () => {
+    expect(await call("message_seat", M())).toEqual({ text: "Sent to GUIDO-1." });
+    expect(messageCalls).toEqual([
+      ["guido-1", "FLIGHT: Please push", { interrupt: false, questions: "none" }],
+    ]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "message",
+        seatId: "guido-1",
+        about: "Message to GUIDO-1",
+        decision: "Please push",
+        basis: "idle",
+      },
+    ]);
+    expect(seen).toContain("flight");
+  });
+
+  it("asks the supervisor to close no questions", async () => {
+    await call("message_seat", M());
+    expect(messageCalls[0]?.[2]).toEqual({ interrupt: false, questions: "none" });
+  });
+
+  it("refuses its own seat, RETRO and a stranger", async () => {
+    expect(await call("message_seat", M({ seat: "flight-1" }))).toEqual(
+      refused("Not sent: that is your own seat."),
+    );
+    expect(await call("message_seat", M({ seat: "retro-1" }))).toEqual(
+      refused(
+        "Not sent: RETRO-1 reviews what Mission Control hands it; it takes no messages from you.",
+      ),
+    );
+    expect((await call("message_seat", M({ seat: "x-1" }))).text).toBe(
+      "Not done: x-1 is not a seat in your session.",
+    );
+    expect(messageCalls).toEqual([]);
+  });
+
+  it("caps messages to one seat at 6 an hour", async () => {
+    for (let i = 0; i < 6; i++) expect((await call("message_seat", M())).isError).toBeUndefined();
+    expect(await call("message_seat", M())).toEqual(
+      refused("Not sent: you sent GUIDO-1 6 messages in the last hour, the most allowed."),
+    );
+    expect((await call("message_seat", M({ seat: "inco-1" }))).isError).toBeUndefined();
+  });
+
+  it("caps all messages at 30 an hour", async () => {
+    for (let i = 0; i < 30; i++) addDecision({ kind: "unpark", seatId: `s-${i}` });
+    expect((await call("message_seat", M())).text).toBe(
+      "Not done: you sent messages 30 times in the last hour, the most allowed. Wait, or ask the operator.",
+    );
+  });
+
+  it("returns a send failure", async () => {
+    messageImpl = async () => {
+      throw new Error("no process");
+    };
+    expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
+    expect(decisions()).toEqual([]);
+  });
+});
+
+describe("message_seat unpark", () => {
+  const U = (over: Record<string, unknown> = {}) => ({
+    seat: "guido-1",
+    text: "Carry on",
+    unpark: true,
+    basis: "silent",
+    ...over,
+  });
+  const parked = (kind = "silent", ended = false) => {
+    live("guido-1", "r-g");
+    const loop: RunLoop = {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind, reason: "went quiet", ended },
+    };
+    store.setRunLoop("r-g", loop);
+  };
+  beforeEach(() => {
+    engineOn = true;
+  });
+
+  it("un-parks a silent park by FLIGHT", async () => {
+    parked("silent");
+    expect(await call("message_seat", U())).toEqual({
+      text: "Sent to GUIDO-1, and its run is un-parked.",
+    });
+    expect(messageCalls).toEqual([
+      ["guido-1", "FLIGHT: Carry on", { interrupt: false, questions: "none" }],
+    ]);
+    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "unpark",
+        seatId: "guido-1",
+        targetRunId: "r-g",
+        about: "GUIDO-1: went quiet",
+        decision: "Carry on",
+      },
+    ]);
+  });
+
+  it("records a message when the engine did not un-park", async () => {
+    parked("silent");
+    lifts = false;
+    expect(await call("message_seat", U())).toEqual({ text: "Sent to GUIDO-1." });
+    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
+    expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1" }]);
+  });
+
+  it("leaves a budget park to the operator", async () => {
+    parked("budget");
+    expect(await call("message_seat", U())).toEqual(
+      refused(
+        "Not sent: a budget park is the operator's call; pass it to them with mc ask_operator.",
+      ),
+    );
+    expect(messageCalls).toEqual([]);
+  });
+
+  it("leaves an ended park to the operator", async () => {
+    parked("silent", true);
+    expect((await call("message_seat", U())).text).toBe(
+      "Not sent: a silent park is the operator's call; pass it to them with mc ask_operator.",
+    );
+  });
+
+  it("refuses a run that is not parked, or no run", async () => {
+    expect(await call("message_seat", U())).toEqual(
+      refused("Not sent: GUIDO-1's run is not parked."),
+    );
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    expect((await call("message_seat", U())).text).toBe("Not sent: GUIDO-1's run is not parked.");
+  });
+
+  it("caps the 3rd un-park of a run", async () => {
+    parked("ci");
+    for (let i = 0; i < 2; i++) {
+      addDecision({
+        at: NOW - 48 * 60 * 60_000,
+        kind: "unpark",
+        seatId: "guido-1",
+        targetRunId: "r-g",
+      });
+    }
+    expect(await call("message_seat", U())).toEqual(
+      refused(
+        "Not sent: you have un-parked this run 2 times; pass it to the operator with mc ask_operator.",
+      ),
+    );
+  });
+
+  it("refuses with the engine off", async () => {
+    parked("silent");
+    engineOn = false;
+    expect(await call("message_seat", U())).toEqual(
+      refused("Not sent: the loop engine is off on this server, so nothing can be un-parked."),
+    );
+    expect(messageCalls).toEqual([]);
   });
 });

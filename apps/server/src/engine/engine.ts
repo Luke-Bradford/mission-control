@@ -103,8 +103,16 @@ export interface Engine {
   reconcileRun(runId: string): Promise<void>;
   /** After a poll: every active looped run of the repo. */
   reconcileRepo(repoId: RepoId): Promise<void>;
-  /** The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes. */
-  onOperatorMessage(runId: string): Promise<void>;
+  /**
+   * The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes.
+   * `opts.kinds` limits the park kinds that may be lifted, checked when the run's turn comes; FLIGHT
+   * never lifts a budget park. Resolves true only when it un-parked the run.
+   */
+  onOperatorMessage(
+    runId: string,
+    by?: "CAPCOM" | "FLIGHT",
+    opts?: { kinds?: readonly string[] },
+  ): Promise<boolean>;
   status(): { on: boolean; note: string | null };
   /** How many CI excerpts are held for a busy seat (a test seam). */
   excerptsHeld(): number;
@@ -899,8 +907,9 @@ export function createEngine(deps: EngineDeps): Engine {
       await Promise.all(runs.map((r) => reconcileRun(r.id)));
     },
 
-    onOperatorMessage(runId) {
-      if (!live()) return Promise.resolve();
+    onOperatorMessage(runId, by = "CAPCOM", opts) {
+      if (!live()) return Promise.resolve(false);
+      let lifted = false;
       return onChain(runId, async () => {
         const run = store.run(runId);
         const loop = run?.loop;
@@ -911,7 +920,9 @@ export function createEngine(deps: EngineDeps): Engine {
           loop.phase !== "parked" ||
           loop.parked === null ||
           loop.parked.ended ||
-          kind === "pr-closed"
+          kind === "pr-closed" ||
+          (by === "FLIGHT" && kind === "budget") ||
+          (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
         ) {
           return;
         }
@@ -946,10 +957,11 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
-        store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, "resumed by CAPCOM", at);
+        store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
+        lifted = true;
         await pass(run.id);
-      });
+      }).then(() => lifted);
     },
 
     excerptsHeld: () => excerpts.size,

@@ -117,7 +117,7 @@ function readyCards(store: Store, repoId: RepoId): BoardItem[] {
 }
 
 /** The area labels (those the rules name) on a card. */
-const areaLabelsOf = (rules: RepoRules, card: BoardItem): string[] =>
+export const areaLabelsOf = (rules: RepoRules, card: BoardItem): string[] =>
   card.labels.filter((l) => Object.hasOwn(rules.areas, l));
 
 /**

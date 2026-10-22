@@ -315,7 +315,15 @@ export interface Supervisor {
    * worktree goes when the run ends, however it ends.
    */
   startReview(seatId: string, reviewId: number): Promise<{ runId: string }>;
-  message(seatId: string, text: string, opts: { interrupt: boolean }): Promise<void>;
+  /**
+   * `questions` says which of the seat's open questions the message closes: all (the default, the
+   * operator's reply), only those not passed to the operator, or none.
+   */
+  message(
+    seatId: string,
+    text: string,
+    opts: { interrupt: boolean; questions?: "all" | "unpassed" | "none" },
+  ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
   endRun(seatId: string): Promise<void>;
   /** null when the seat has no live session, or it did not answer. */
@@ -1654,8 +1662,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         writeLine(l, text);
         // The operator replies to a seat's ask_operator by messaging it: its open questions are answered
         try {
-          store.answerQuestions(seatId, now());
-          bus.emit("attention");
+          if (opts.questions !== "none") {
+            store.answerQuestions(seatId, now(), opts.questions === "unpassed");
+            bus.emit("attention");
+          }
         } catch (e) {
           log(`${seatId}: could not mark its questions answered: ${errText(e)}`);
         }
