@@ -181,6 +181,7 @@ async function main(): Promise<void> {
     supervisor,
     publisher: createPublisher(mcDeps),
     board: engineBoard,
+    pollGithub: () => void scheduler.tick("github"),
     rules: engineRules,
     refillQueues: () =>
       refillQueues({

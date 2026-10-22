@@ -4,20 +4,28 @@ import { join } from "node:path";
 import {
   asideEventText,
   type BoardItem,
+  cleanupBranchNoteKey,
+  closedIssueText,
   DEFAULT_REPO_RULES,
+  deletedLocalText,
+  deletedRemoteText,
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
   fixSentText,
+  localNotDeletedText,
   MC_PR_UNCLOSED,
   MC_PUSH_FAILED,
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
   MC_PUSH_ROOT,
   MINOR_POSTED,
+  mergedText,
+  mergeStepFailedText,
   minorNotPostedText,
   NEW_LOOP,
   originMovedText,
   type PullRequestView,
+  parkedEventText,
   prNamedRefText,
   prNotifyText,
   prSecretText,
@@ -31,6 +39,8 @@ import {
   type ReviewFinding,
   type Run,
   type RunLoop,
+  readyHardRuleText,
+  readyMarkedText,
   readyRuledText,
   readyText,
   readyWaivedText,
@@ -52,7 +62,14 @@ import {
   reviewerOf,
   TIP_MOVED,
 } from "../src/engine/engine.ts";
-import type { OpenPrResult, Publisher, PublishResult } from "../src/engine/publish.ts";
+import type {
+  GateFacts,
+  GateResult,
+  OpenPrResult,
+  Publisher,
+  PublishResult,
+} from "../src/engine/publish.ts";
+import { MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -208,6 +225,16 @@ interface Harness {
   pushResults: PublishResult[];
   prResults: OpenPrResult[];
   touches: string[];
+  /** The merge gate's facts (null: unreadable), and the gate reads made. */
+  gate: GateFacts | null;
+  gateReads: { sha: string; known: boolean }[];
+  /** The merge steps the publisher was asked for, in order, with the ended runs seen at the time. */
+  steps: string[];
+  stepEnded: Record<string, string[]>;
+  /** The next results of each merge step, oldest first; empty: success. */
+  stepResults: Record<string, PublishResult[]>;
+  /** The paths of a polled-after-merge request. */
+  polls: number;
   moveFails: boolean;
   /** A push that never answers (a crash in the middle of a pass). */
   pushHang: boolean;
@@ -238,6 +265,8 @@ interface Harness {
   statusThrows: Error | null;
   /** setAside answers a worktree (else null, the 7b-1 behaviour), and records its calls. */
   asideOn: boolean;
+  /** The end of a run does not take (the seat still holds it). */
+  endBlocked: boolean;
   asides: string[];
   /** wakeRun's calls, and what it throws (null: it puts the run back on its seat). */
   wakes: string[];
@@ -263,6 +292,12 @@ function harness(): Harness {
     pushResults: [],
     prResults: [],
     touches: [],
+    gate: { mainSha: "d".repeat(40), containsMain: true, hubOnly: true, strays: [] },
+    gateReads: [],
+    steps: [],
+    stepEnded: {},
+    stepResults: {},
+    polls: 0,
     moveFails: false,
     pushHang: false,
     duringOpenPr: null,
@@ -281,6 +316,7 @@ function harness(): Harness {
     statusResults: [],
     statusThrows: null,
     asideOn: false,
+    endBlocked: false,
     asides: [],
     wakes: [],
     wakeError: null,
@@ -324,7 +360,22 @@ function harness(): Harness {
         async hardRuleTouches() {
           return x.touches;
         },
+        async gateFacts(_r, sha, known): Promise<GateResult> {
+          x.gateReads.push({ sha, known: known != null });
+          if (x.gate === null) return { ok: false, text: "git is down", transient: true };
+          return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
+        },
+        markReady: (r) => step("ready", r),
+        merge: (r) => step("merge", r),
+        closeIssue: (r) => step("close", r),
+        deleteRemoteBranch: (r) => step("delete-remote", r),
+        deleteLocalBranch: (r) => step("delete-local", r),
       };
+      async function step(name: string, _r: Run): Promise<PublishResult> {
+        x.steps.push(name);
+        x.stepEnded[name] = x.ended.filter((id) => id === RUN);
+        return x.stepResults[name]?.shift() ?? { ok: true };
+      }
       return createEngine({
         config,
         store,
@@ -357,7 +408,7 @@ function harness(): Harness {
           seatFacts: (id) => (id === RETRO ? x.retroFacts : x.facts),
           async endRunByEngine(runId) {
             const r = store.run(runId);
-            if (r === null || r.endedAt !== null) return;
+            if (r === null || r.endedAt !== null || x.endBlocked) return;
             x.ended.push(runId);
             store.setRunEnded(runId, clock, "ok", "engine");
             if (store.seatSession(r.agentId)?.runId === runId) seatIdle(null, r.agentId);
@@ -399,6 +450,7 @@ function harness(): Harness {
         rules: (repoId) => x.rules(repoId),
         refillQueues: async () => void x.refills.push(x.taken.length),
         takeNext: async (seatId) => void x.taken.push(seatId),
+        pollGithub: () => void x.polls++,
         enabled: true,
         hubStartedAt: HUB,
         now: () => clock,
@@ -1652,6 +1704,11 @@ describe("the engine runs reviews", () => {
     area: [],
   });
   const seats = (): CrewSeatConfig[] => config.crew?.sessions[0]?.seats ?? [];
+  /** The repo is a draft workspace: a clean review raises the ready note and the operator merges. */
+  const draftWorkspace = (): void => {
+    const repo = config.repos[0];
+    if (repo !== undefined) repo.autonomy = "draft";
+  };
 
   beforeEach(() => {
     seats().push(retroSeat());
@@ -1909,6 +1966,7 @@ describe("the engine runs reviews", () => {
   });
 
   it("a clean review raises the ready note and lists the minor findings once", async () => {
+    draftWorkspace();
     await toReview();
     const id = first().id;
     reported(id, [finding("Minor")]);
@@ -1939,9 +1997,243 @@ describe("the engine runs reviews", () => {
     );
   });
 
+  describe("the merge", () => {
+    const ALL = ["ready", "merge", "close", "delete-remote", "delete-local"];
+    const authorEnded = () => h.ended.filter((id) => id === RUN);
+    /** A clean review of the pushed sha, with CI passing: the gate is open. */
+    async function gateOpen(): Promise<void> {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, []);
+    }
+
+    it("a merge workspace merges, then closes, deletes and takes the next ticket", async () => {
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(authorEnded()).toEqual([RUN]);
+      expect(h.taken).toEqual([SEAT]);
+      expect(h.stepEnded["delete-remote"]).toEqual([]);
+      expect(h.stepEnded["delete-local"]).toEqual([RUN]);
+      expect(h.polls).toBeGreaterThan(0);
+      expect(loopOf().phase).toBe("done");
+      expect(loopOf().merging).toEqual({
+        sha: SHA,
+        done: ["ready", "merge", "close", "delete-remote", "delete-local"],
+      });
+      const texts = loopTexts();
+      for (const t of [
+        readyMarkedText(12),
+        mergedText(12),
+        closedIssueText(7),
+        deletedRemoteText(BRANCH),
+        deletedLocalText(BRANCH),
+      ]) {
+        expect(texts.filter((x) => x === t)).toHaveLength(1);
+      }
+      expect(noteKeys().filter((k) => k.startsWith("ready:"))).toEqual([]);
+      // nothing is done twice
+      await h.engine.tick();
+      await h.engine.tick();
+      expect(h.steps).toEqual(ALL);
+    });
+
+    it("a branch that is behind main is not merged", async () => {
+      h.gate = { ...need(h.gate), containsMain: false };
+      await gateOpen();
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
+      expect(noteKeys().some((k) => k.startsWith("behind:"))).toBe(true);
+    });
+
+    it("reads origin's tip every pass but reuses the rest while sha and tip are unchanged", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(h.gateReads.length).toBeGreaterThanOrEqual(2);
+      expect(h.gateReads[0]?.known).toBe(false);
+      expect(h.gateReads.slice(1).every((g) => g.known)).toBe(true);
+    });
+
+    it("a run that touches a hard-rule file is not marked ready or merged", async () => {
+      h.touches = [".github/ci.yml"];
+      h.gate = { ...need(h.gate), strays: [".github/ci.yml"] };
+      await gateOpen();
+      await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
+      expect(h.steps).toEqual([]);
+      expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
+        readyHardRuleText(`${REPO}#7`, 12, [".github/ci.yml"]),
+      );
+    });
+
+    it("a merge refused finally parks the run as merge-step and runs no later step", async () => {
+      h.stepResults.merge = [{ ok: false, text: "the head moved", transient: false }];
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().phase).toBe("parked"));
+      const reason = mergeStepFailedText("merge", "the head moved");
+      expect(reason).toBe("merge failed: the head moved");
+      expect(loopOf().parked).toEqual({ kind: "merge-step", reason, ended: false });
+      expect(h.steps).toEqual(["ready", "merge"]);
+      expect(loopTexts()).toContain(parkedEventText(reason));
+      await h.engine.tick();
+      expect(h.steps).toEqual(["ready", "merge"]);
+      expect(authorEnded()).toEqual([]);
+    });
+
+    it("a failed step after the merge parks the run naming the step", async () => {
+      h.stepResults["delete-remote"] = [{ ok: false, text: "the branch moved", transient: false }];
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().parked?.kind).toBe("merge-step"));
+      expect(loopOf().parked?.reason).toBe(
+        mergeStepFailedText("delete the remote branch", "the branch moved"),
+      );
+      expect(h.steps).toEqual(["ready", "merge", "close", "delete-remote"]);
+      expect(authorEnded()).toEqual([]);
+    });
+
+    it("a transient refusal on three ticks in a row parks it", async () => {
+      const down = { ok: false, text: "gh is down", transient: true } as const;
+      h.stepResults.merge = [down, down, down];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      expect(loopOf().phase).toBe("review");
+      for (const n of [2, 3]) {
+        clock += ENGINE_TICK_MS;
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps.filter((s) => s === "merge")).toHaveLength(n);
+      }
+      expect(loopOf().parked).toEqual({
+        kind: "merge-step",
+        reason: mergeStepFailedText("merge", "gh is down"),
+        ended: false,
+      });
+    });
+
+    it("a local branch that cannot be deleted raises a note and does not park the run", async () => {
+      h.stepResults["delete-local"] = [{ ok: false, text: "not merged", transient: false }];
+      await gateOpen();
+      await vi.waitFor(() => expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN)));
+      const note = store.notes().find((n) => n.key === cleanupBranchNoteKey(RUN));
+      expect(note?.kind).toBe("blocked");
+      expect(note?.text).toContain(BRANCH);
+      expect(loopTexts()).toContain(localNotDeletedText(BRANCH, "not merged"));
+      expect(loopOf().phase).toBe("done");
+      expect(h.taken).toEqual([SEAT]);
+      // a later pass of the done run keeps it
+      await h.engine.reconcileRun(RUN);
+      expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN));
+      // the sweep leaves it for the operator, though the PR is done
+      setPr({ state: "merged", ci: "passing", mergedAt: clock });
+      await h.engine.tick();
+      expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN));
+    });
+
+    it("a transient refusal of a step stops the pass, and the step is retried next tick", async () => {
+      h.stepResults.close = [{ ok: false, text: "gh is down", transient: true }];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge", "close"]));
+      expect(h.steps).toEqual(["ready", "merge", "close"]);
+      expect(authorEnded()).toEqual([]);
+      expect(h.taken).toEqual([]);
+      clock += ENGINE_TICK_MS;
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual(ALL.slice(0, 3).concat(ALL.slice(2)));
+      expect(authorEnded()).toEqual([RUN]);
+      expect(h.taken).toEqual([SEAT]);
+    });
+
+    it("a transient refusal to mark ready sends no merge in that pass", async () => {
+      h.stepResults.ready = [{ ok: false, text: "gh is down", transient: true }];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready"]));
+      expect(h.steps).not.toContain("merge");
+    });
+
+    it("a PR head that moved since the gate parks nothing and clears the gate's facts", async () => {
+      h.stepResults.merge = [{ ok: false, text: MERGE_HEAD_MOVED, transient: false }];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      await vi.waitFor(() => expect(h.polls).toBeGreaterThan(0));
+      expect(loopOf().parked ?? null).toBeNull();
+      expect(loopOf().phase).toBe("review");
+      expect(loopOf().lastRefusal ?? null).toBeNull();
+      expect(loopOf().gate ?? null).toBeNull();
+      expect(loopOf().touches ?? null).toBeNull();
+      expect(loopTexts().some((t) => t.includes(MERGE_HEAD_MOVED))).toBe(false);
+    });
+
+    it("a repo that is not a merge workspace takes no merge step, whatever was planned", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      // the loop plans from the repo as it reads it for the snapshot; `act` reads it again
+      const repo = need(config.repos[0]);
+      let reads = 0;
+      Object.defineProperty(repo, "autonomy", {
+        configurable: true,
+        get: () => (++reads <= 2 ? "merge" : "draft"),
+      });
+      reported(first().id, []);
+      await vi.waitFor(() => expect(reads).toBeGreaterThanOrEqual(3));
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
+    });
+
+    it("a merged run that crashed before deleting its local branch still finishes it", async () => {
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      setLoop({ merging: { sha: SHA, done: ["ready", "merge", "close", "delete-remote"] } });
+      h.steps.length = 0;
+      await h.engine.tick();
+      await vi.waitFor(() => expect(h.steps).toEqual(["delete-local"]));
+      expect(loopOf().merging?.done).toContain("delete-local");
+    });
+
+    it("the local branch is not deleted, nor the step recorded, while the run has not ended", async () => {
+      h.endBlocked = true;
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toContain("delete-remote"));
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).not.toContain("delete-local");
+      expect(loopOf().merging?.done ?? []).not.toContain("delete-local");
+      h.endBlocked = false;
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.steps).toContain("delete-local"));
+      expect(loopOf().merging?.done).toContain("delete-local");
+    });
+
+    it("the sweep leaves a merged run's cleanup note", async () => {
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      store.raiseNote({
+        key: `cleanup:${RUN}`,
+        kind: "blocked",
+        runId: RUN,
+        seatId: SEAT,
+        repoId: REPO,
+        text: "worktree left behind",
+        at: clock,
+      });
+      setPr({ state: "merged", ci: "passing", mergedAt: clock });
+      await h.engine.tick();
+      expect(noteKeys()).toContain(`cleanup:${RUN}`);
+    });
+
+    it("a draft workspace makes no ready, merge, close or delete call", async () => {
+      draftWorkspace();
+      await gateOpen();
+      await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
+      setPr({ state: "merged", ci: "passing", mergedAt: clock });
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
+      expect(h.gateReads).toEqual([]);
+      expect(authorEnded()).toEqual([RUN]);
+      expect(h.taken).toEqual([SEAT]);
+    });
+  });
+
   it("a transient PR-body failure is tried three times, then given up", async () => {
     const down = { ok: false, text: "gh is down", transient: true } as const;
     h.minorResults = [down, down, down];
+    draftWorkspace();
     await toReview();
     reported(first().id, [finding("Minor")]);
     await vi.waitFor(() => expect(h.minorCalls).toHaveLength(1));
