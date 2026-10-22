@@ -411,10 +411,11 @@ writes exist (each one an Activity row with its basis):
   through triage, and are listed in Decided without you; (6) the hub **sets the `mc/review` commit
   status** on its own run's pushed sha while the run's PR is open — the hub's record of its own
   review, so a branch rule can require it. Only crew runs get it, so it stays out of the required
-  checks while other PRs must merge; (7) when a writer's run starts, the hub **adds its own `gh`
+  checks while other PRs must merge, and it adds no Activity row (a failed write is logged); (7) when a writer's run starts, the hub **adds its own `gh`
   login as the ticket's assignee**, in `merge` and `draft` repos alike — the claim that keeps a
   second hub on the same board off the ticket (#47). It never removes an assignee and never
-  moves the card for it.
+  moves the card for it; (8) a planner (FAO) run **appends its `## Plan`** to the ticket's issue
+  body, once — the plan a dev seat then follows; FAO refuses where a plan already exists.
 - Still approval-gated: Priority changes, comments on anything, labels on existing issues,
   starting/stopping seats, switching accounts.
 - **FLIGHT reads untrusted text** (issue bodies, PR text, seat messages) and holds write tools
