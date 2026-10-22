@@ -82,6 +82,7 @@ let nowMs: number;
 let cfg: CcConfig;
 let tools: McTool[];
 let startCalls: unknown[][];
+let endCalls: string[];
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
 let fetchCalls: number[];
@@ -92,6 +93,7 @@ let lifts: boolean;
 let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
+let endImpl: (seatId: string) => Promise<void>;
 let fetchImpl: (n: number) => Promise<TicketView | null>;
 let moveCalls: Move[];
 let moveImpl: () => Promise<MoveResult>;
@@ -145,6 +147,7 @@ beforeEach(() => {
   nowMs = NOW;
   cfg = config();
   startCalls = [];
+  endCalls = [];
   messageCalls = [];
   engineCalls = [];
   fetchCalls = [];
@@ -155,6 +158,13 @@ beforeEach(() => {
   rulesNow = DEFAULT_REPO_RULES;
   startImpl = async () => ({ runId: "", branch: "" });
   messageImpl = async () => {};
+  // what the supervisor's endRun leaves behind: the run ended, the seat stopped
+  endImpl = async (seatId) => {
+    const runId = store.seatSession(seatId)?.runId ?? null;
+    const r = runId === null ? null : store.run(runId);
+    if (r !== null) store.upsertRun({ ...r, endedAt: nowMs, status: "ok" });
+    store.setSeatSession({ ...row(seatId, ""), runId: null, state: "stopped" });
+  };
   fetchImpl = async () => null;
   moveCalls = [];
   moveImpl = async () => ({ ok: true, changed: true });
@@ -169,6 +179,10 @@ beforeEach(() => {
         await messageImpl();
       },
       busy: () => busyNow,
+      endRun: async (seatId) => {
+        endCalls.push(seatId);
+        await endImpl(seatId);
+      },
       startRun: async (...a) => {
         startCalls.push(a);
         return startImpl();
@@ -352,6 +366,7 @@ describe("tool list", () => {
       "message_seat",
       "flight_state",
       "promote",
+      "end_run",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -721,11 +736,24 @@ describe("start_seat", () => {
     );
   });
 
-  it("2: refuses a repo that takes tickets by rule", async () => {
+  it("2: starts in a merge repo, with every other check still applying", async () => {
     const repo = cfg.repos[0];
     if (repo === undefined) throw new Error("no repo");
     repo.autonomy = "merge";
-    expect(await start()).toEqual(refused("Not started: mc takes its tickets from Ready by rule."));
+    expect(await start()).toEqual({ text: "Started GUIDO-1 on mc#7." });
+    expect(startCalls).toHaveLength(1);
+    board(card(8, { blockedBy: [{ ref: "mc#9", closed: false }] }));
+    expect(await start({ issue: 8 })).toEqual(refused("Not started: mc#8 waits on mc#9."));
+  });
+
+  it("refuses a ticket the engine has taken for another seat, in a merge repo", async () => {
+    const repo = cfg.repos[0];
+    if (repo === undefined) throw new Error("no repo");
+    repo.autonomy = "merge";
+    store.replaceQueue("inco-1", [{ repoId: "mc", issue: 7 }]);
+    store.takeQueued("inco-1", NOW);
+    expect(await start()).toEqual(refused("Not started: mc#7 already has a run."));
+    expect(startCalls).toEqual([]);
   });
 
   it("3: refuses a seat with a run, or busy", async () => {
@@ -1093,6 +1121,23 @@ describe("message_seat unpark", () => {
     expect(messageCalls).toEqual([]);
   });
 
+  it.each(["review", "review-ruling", "ruling"])(
+    "leaves a %s park to the operator",
+    async (kind) => {
+      parked(kind);
+      expect((await call("message_seat", U())).isError).toBe(true);
+      expect(messageCalls).toEqual([]);
+      expect(engineCalls).toEqual([]);
+    },
+  );
+
+  it.each(["nothing", "gate", "conflict", "review-failed"])("lifts a %s park", async (kind) => {
+    parked(kind);
+    expect(await call("message_seat", U())).toEqual({
+      text: "Sent to GUIDO-1, and its run is un-parked.",
+    });
+  });
+
   it("leaves an ended park to the operator", async () => {
     parked("silent", true);
     expect((await call("message_seat", U())).text).toBe(
@@ -1136,6 +1181,77 @@ describe("message_seat unpark", () => {
   });
 });
 
+describe("end_run", () => {
+  const E = (over: Record<string, unknown> = {}) => ({
+    seat: "guido-1",
+    basis: "its ticket needs a docs note the planning lane wrote",
+    ...over,
+  });
+  const parked = (kind = "nothing") => {
+    live("guido-1", "r-g", { ticket: "mc#7" });
+    store.setRunLoop("r-g", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind, reason: "nothing to push", ended: false },
+    });
+  };
+
+  it("ends a parked run and leaves the seat idle, with its basis recorded", async () => {
+    parked();
+    expect((await call("end_run", E())).isError).toBeUndefined();
+    expect(endCalls).toEqual(["guido-1"]);
+    expect(store.run("r-g")?.endedAt).not.toBeNull();
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+    expect(seatFree(store, [], "guido-1")).toBe(true);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "end",
+        seatId: "guido-1",
+        targetRunId: "r-g",
+        basis: "its ticket needs a docs note the planning lane wrote",
+      },
+    ]);
+    expect(seen).toEqual(expect.arrayContaining(["agents", "flight"]));
+  });
+
+  it("refuses a run that is still working, and a seat with no run", async () => {
+    live("guido-1", "r-g");
+    store.setRunLoop("r-g", NEW_LOOP);
+    expect((await call("end_run", E())).isError).toBe(true);
+    store.upsertRun(run("r-g", "guido-1", { endedAt: NOW, status: "ok" }));
+    expect((await call("end_run", E())).isError).toBe(true);
+    expect(endCalls).toEqual([]);
+    expect(decisions()).toEqual([]);
+  });
+
+  it("refuses FLIGHT's own seat, a seat outside the session and a non-developer seat", async () => {
+    expect((await call("end_run", E({ seat: "flight-1" }))).isError).toBe(true);
+    expect(await call("end_run", E({ seat: "nobody-9" }))).toEqual(
+      refused("Not done: nobody-9 is not a seat in your session."),
+    );
+    expect(await call("end_run", E({ seat: "retro-1" }))).toEqual(
+      refused("Not ended: RETRO-1 is not a developer seat."),
+    );
+    expect(endCalls).toEqual([]);
+  });
+
+  it("caps ends an hour", async () => {
+    parked();
+    for (let i = 0; i < 6; i++) addDecision({ at: NOW - 1000, kind: "end", seatId: "guido-1" });
+    expect((await call("end_run", E())).isError).toBe(true);
+    expect(endCalls).toEqual([]);
+  });
+
+  it("reports a failed end and records nothing", async () => {
+    parked();
+    endImpl = async () => {
+      throw new Error("boom");
+    };
+    expect(await call("end_run", E())).toEqual(refused("Not ended: boom"));
+    expect(decisions()).toEqual([]);
+  });
+});
+
 describe("flight_state", () => {
   const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
 
@@ -1147,6 +1263,13 @@ describe("flight_state", () => {
       isError: true,
     });
     expect((await call("flight_state", { x: 1 })).isError).toBe(true);
+  });
+
+  it("lists a stopped seat", async () => {
+    store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
+    const seats = ((await state()) as { seats: { id: string; state: string; free: boolean }[] })
+      .seats;
+    expect(seats.find((x) => x.id === "guido-1")).toMatchObject({ state: "stopped", free: true });
   });
 
   it("answers the crew now", async () => {

@@ -28,6 +28,7 @@ export const FLIGHT_DECISION_KINDS = [
   "unpark",
   "note",
   "promote",
+  "end",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -77,7 +78,11 @@ export const PLAN_SIZES: readonly string[] = TICKET_SIZES.filter(
 );
 /** The board columns a ticket FLIGHT starts may be in. */
 export const FLIGHT_STARTABLE: readonly HudColumn[] = ["Backlog", "Refinement", "Ready"];
-/** The park kinds whose lifting is FLIGHT's call. */
+/**
+ * The park kinds whose lifting is FLIGHT's call: every kind but budget (a token stop), pr-closed,
+ * ended, and review or CI rulings, whose lifting waives a gate. Account stops, security refusals
+ * and hard-rule touches do not park as these kinds.
+ */
 export const FLIGHT_UNPARK_KINDS = [
   "silent",
   "nothing",
@@ -86,6 +91,9 @@ export const FLIGHT_UNPARK_KINDS = [
   "no-ci",
   "refused",
   "ci",
+  "gate",
+  "conflict",
+  "review-failed",
 ] as const;
 /** The tickets FLIGHT may start in an hour, per developer (build) seat in its session; at least this many. */
 export const FLIGHT_STARTS_PER_HOUR = 4;
@@ -136,8 +144,6 @@ export const smallNoPlanText = (ref: string, size: string): string =>
 export const plannerStartedDecision = (call: string): string => `Started ${call} to plan`;
 export const START_SEAT_DESCRIPTION =
   "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column); the planner seat on a complete Size M, L or XL ticket with no ## Plan. At most 4 starts an hour, and one start of a ticket a day.";
-export const startsByRuleText = (repoId: string): string =>
-  `Not started: ${repoId} takes its tickets from Ready by rule.`;
 export const seatHasRunText = (call: string): string => `Not started: ${call} already has a run.`;
 export const accountStoppedText = (call: string, accountId: string): string =>
   `Not started: ${call}'s account ${accountId} is at its usage stop.`;
@@ -200,6 +206,17 @@ export const moveFailedText = (reason: string): string => `Not moved: ${reason}`
 export const movedDecision = (to: string): string => `Moved to ${to}`;
 export const movedText = (ref: string, to: string): string =>
   `Moved ${ref} to ${to}. Recorded in Decided without you.`;
+
+/** The runs FLIGHT may end in an hour. */
+export const FLIGHT_ENDS_PER_HOUR = 6;
+export const notEndableSeatText = (call: string): string =>
+  `Not ended: ${call} is not a developer seat.`;
+export const notEndableRunText = (call: string): string =>
+  `Not ended: ${call} has no run, or its run is still working; end_run is for a parked run.`;
+export const endedDecision = (call: string): string => `Ended ${call}'s run`;
+export const endedText = (call: string): string =>
+  `Ended ${call}'s run; ${call} is idle and takes its next ticket. Recorded in Decided without you.`;
+export const endFailedText = (why: string): string => `Not ended: ${why}`;
 
 export const OWN_SEAT_TEXT = "Not sent: that is your own seat.";
 export const scratchSeatText = (call: string): string =>
@@ -281,9 +298,11 @@ const counted = (n: number, one: string, many: string): string => `${n} ${n === 
 export function wakeSummary(s: FlightState): string {
   const free = s.seats.filter((x) => x.loop === "build" && x.free).length;
   const parked = s.seats.filter((x) => x.parked !== null).length;
+  const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
   const parts = [
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
+    stopped > 0 ? `${stopped} stopped` : "",
     parked > 0 ? `${parked} parked` : "",
     s.prs.length > 0 ? counted(s.prs.length, "PR in review", "PRs in review") : "",
   ].filter((p) => p !== "");
