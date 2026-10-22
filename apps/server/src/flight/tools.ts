@@ -21,6 +21,7 @@ import {
   commentTextText,
   createBodyText,
   createdDecision,
+  createdDraftText,
   createdText,
   createFailedText,
   createLabelsText,
@@ -841,7 +842,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     );
     if (unfit !== null) return fail(createTextText(unfit));
 
-    // one at a time per repo: a second call finds the first one's issue in the open list
+    // one at a time per repo, so the cap and the duplicate check see the earlier call's issue; the
+    // check lists the repo's open issues, not GitHub search, whose index lags and reads qualifiers
     return queued(ticketQueue, repo.id, async (): Promise<Result> => {
       const at = now();
       const filed = lastHour(["ticket"], at);
@@ -859,9 +861,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           "list",
           `--repo=${repo.github}`,
           "--state=open",
-          `--search=${title} in:title`,
           "--json=number,title",
-          "--limit=100",
+          "--limit=1000",
         ],
         { cwd },
       );
@@ -906,6 +907,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         failed("project item-add", added);
         return fail(notOnProjectText(ref));
       }
+      // a draft repo's board is never written: moveCard would answer ok and change nothing
+      if (repo.autonomy !== "merge") return { text: createdDraftText(ref, repo.id) };
       const moved = await deps.board.move({
         runId: ctx.runId,
         repoId: repo.id,

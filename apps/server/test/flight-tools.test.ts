@@ -1689,8 +1689,59 @@ describe("create_ticket", () => {
     };
   };
   beforeEach(() => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "merge";
     engineOn = true;
     okGh();
+  });
+
+  it("does not claim Backlog in a draft repo, where no card moves", async () => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "draft";
+    const r = await call("create_ticket", C());
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toContain("draft workspace");
+    expect(r.text).not.toContain("Backlog");
+    expect(moveCalls).toEqual([]);
+    expect(decisions()).toHaveLength(1);
+  });
+
+  it("lists the repo's open issues for the duplicate check, not a search", async () => {
+    await call("create_ticket", C({ title: "Server: drop the -v flag" }));
+    expect(ghCalls[0]).toEqual([
+      "issue",
+      "list",
+      "--repo=o/mc",
+      "--state=open",
+      "--json=number,title",
+      "--limit=1000",
+    ]);
+    expect(ghCalls[0]?.some((a) => a.startsWith("--search"))).toBe(false);
+  });
+
+  it("serialises calls, so the cap holds when two are in flight together", async () => {
+    for (let i = 0; i < 9; i++) addDecision({ kind: "ticket", at: NOW - 60_000 });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = ghImpl;
+    ghImpl = async (a) => {
+      if (a[1] === "list") await gate;
+      return inner(a);
+    };
+    const both = Promise.all([
+      call("create_ticket", C({ title: "First" })),
+      call("create_ticket", C({ title: "Second" })),
+    ]);
+    release();
+    const results = await both;
+    expect(results.filter((r) => r.isError === undefined)).toHaveLength(1);
+    expect(results.filter((r) => r.isError === true)).toHaveLength(1);
+    expect(results.find((r) => r.isError === true)?.text).toContain("filed tickets 10 times");
+    expect(ghCalls.filter((a) => a[1] === "create")).toHaveLength(1);
   });
 
   it("writes nothing while the engine is off", async () => {

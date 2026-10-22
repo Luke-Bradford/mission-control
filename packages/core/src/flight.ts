@@ -273,6 +273,8 @@ export const createFailedText = (step: string): string =>
 export const createdDecision = (n: number): string => `Filed #${n}`;
 export const createdText = (ref: string, inBacklog: boolean): string =>
   `Filed ${ref}, on the project${inBacklog ? " in Backlog" : ", but not confirmed in Backlog"}. Recorded in Decided without you.`;
+export const createdDraftText = (ref: string, repoId: string): string =>
+  `Filed ${ref}, on the project; ${repoId} is a draft workspace, so its Status is not set. Recorded in Decided without you.`;
 export const notOnProjectText = (ref: string): string =>
   `Filed ${ref}, but GitHub refused adding it to the project; tell the operator with mc ask_operator.`;
 export const COMMENTED_DECISION = "Commented";
