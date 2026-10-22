@@ -18,6 +18,7 @@ export const ISSUE_REQUIRED = "issue: an issue number is required";
 export const oneWatchSeatText = (first: string): string =>
   `only one seat may run the watch loop; ${first} already does`;
 export const watchOnlyToolText = (t: string): string => `${t} is only for a watch role`;
+export const watchOrPlanToolText = (t: string): string => `${t} is only for a watch or plan role`;
 
 export const FLIGHT_DECISION_KINDS = [
   "answer",
