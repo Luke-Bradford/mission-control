@@ -986,7 +986,13 @@ describe("merge steps", () => {
     it("refuses finally when the lease does not hold at the push", async () => {
       gitAnswers = {
         "ls-remote": lsRemote(MAIN, SHA),
-        push: new Error("! [rejected] (stale info)"),
+        push: Object.assign(
+          new Error("Command failed: git push\nerror: failed to push some refs"),
+          {
+            code: 1,
+            stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
+          },
+        ),
       };
       expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
         ok: false,

@@ -635,8 +635,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             `refs/heads/${branch}`,
           ]);
         } catch (e) {
-          const why = errText(e);
-          return /stale info|rejected/.test(why) ? final(MERGE_BRANCH_MOVED) : transient(why);
+          // --porcelain prints a refused ref on stdout, not in the error message
+          const out = (e as { stdout?: unknown } | null)?.stdout;
+          return typeof out === "string" && /^!\t[^\t]*\t\[rejected\]/m.test(out)
+            ? final(MERGE_BRANCH_MOVED)
+            : transient(errText(e));
         }
         return { ok: true };
       });

@@ -92,6 +92,8 @@ export const MERGE_STEP_WORDS = {
   "delete-remote": "delete the remote branch",
 } as const satisfies Partial<Record<MergeStep, string>>;
 /** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
+/** The blocked note for a merged run's local branch that could not be deleted. */
+export const cleanupBranchNoteKey = (runId: string): string => `cleanup-branch:${runId}`;
 export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
 export const noShaDeleteText = (ref: string): string =>
   `${ref}: merged, but the remote branch could not be deleted (no sha to lease on); the operator can delete it`;
@@ -859,7 +861,12 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   }
   for (const key of s.openNotes) {
     // the flag for a merged PR's undeletable branch outlives the run's steps
-    if (loop.phase === "done" && key === noShaDeleteNoteKey(s.runId)) continue;
+    if (
+      loop.phase === "done" &&
+      (key === noShaDeleteNoteKey(s.runId) || key === cleanupBranchNoteKey(s.runId))
+    ) {
+      continue;
+    }
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {

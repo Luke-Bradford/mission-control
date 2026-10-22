@@ -15,6 +15,7 @@ import {
   blockedNoteKey,
   CI_FAILED_TEXT,
   cardMark,
+  cleanupBranchNoteKey,
   closedIssueText,
   currentReview,
   deletedLocalText,
@@ -376,6 +377,8 @@ export function createEngine(deps: EngineDeps): Engine {
         cur.lastRefusal = r.text;
         if (step === undefined || cur.transient < REFUSAL_TRIES) {
           if (cur.transient >= REFUSAL_TRIES) out.again = true;
+          // a merge step that did not go through stops the pass: the later steps wait for it
+          if (step !== undefined) out.parked = true;
           return;
         }
       }
@@ -658,7 +661,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // the run is over and merged: this is housekeeping, left to the operator
         stepDone("delete-local", mergedSha(), localNotDeletedText(branch, r.text));
         store.raiseNote({
-          key: `cleanup-branch:${run.id}`,
+          key: cleanupBranchNoteKey(run.id),
           kind: "blocked",
           runId: run.id,
           seatId: run.agentId,
@@ -875,7 +878,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const run = n.runId === null ? null : store.run(n.runId);
       if (run === null || run.endedAt === null) continue;
       // a merged run's leftover branch stays the operator's to clear: its PR is done by design
-      if (n.key.startsWith("cleanup-branch:")) continue;
+      if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) continue;
       if (n.kind === "blocked" ? blockedGone(run) : n.kind !== "question") {
         store.clearNote(n.key, at);
         bus.emit("attention");

@@ -2113,9 +2113,34 @@ describe("the engine runs reviews", () => {
       expect(loopTexts()).toContain(localNotDeletedText(BRANCH, "not merged"));
       expect(loopOf().phase).toBe("done");
       expect(h.taken).toEqual([SEAT]);
-      // the sweep leaves it for the operator
+      // a later pass of the done run keeps it
+      await h.engine.reconcileRun(RUN);
+      expect(noteKeys()).toContain(`cleanup-branch:${RUN}`);
+      // the sweep leaves it for the operator, though the PR is done
+      setPr({ state: "merged", ci: "passing", mergedAt: clock });
       await h.engine.tick();
       expect(noteKeys()).toContain(`cleanup-branch:${RUN}`);
+    });
+
+    it("a transient refusal of a step stops the pass, and the step is retried next tick", async () => {
+      h.stepResults.close = [{ ok: false, text: "gh is down", transient: true }];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge", "close"]));
+      expect(h.steps).toEqual(["ready", "merge", "close"]);
+      expect(authorEnded()).toEqual([]);
+      expect(h.taken).toEqual([]);
+      clock += ENGINE_TICK_MS;
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual(ALL.slice(0, 3).concat(ALL.slice(2)));
+      expect(authorEnded()).toEqual([RUN]);
+      expect(h.taken).toEqual([SEAT]);
+    });
+
+    it("a transient refusal to mark ready sends no merge in that pass", async () => {
+      h.stepResults.ready = [{ ok: false, text: "gh is down", transient: true }];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready"]));
+      expect(h.steps).not.toContain("merge");
     });
 
     it("a draft workspace makes no ready, merge, close or delete call", async () => {
