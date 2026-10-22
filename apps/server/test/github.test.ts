@@ -238,6 +238,8 @@ function stub(opts: {
   pages?: unknown[];
   /** The repo's open issues, each with its own project cards. */
   issues?: unknown[];
+  /** The open issues page by page; overrides `issues`. */
+  issuePages?: unknown[][];
   search?: (v: Record<string, unknown>) => unknown[];
   boardError?: Error;
   searchError?: Error;
@@ -249,6 +251,7 @@ function stub(opts: {
   const calls: Call[] = [];
   let p = 0;
   let pr = 0;
+  let ip = 0;
   const gql: Gql = async (q, v) => {
     calls.push({ q, v });
     if (q.includes("pullRequests")) {
@@ -260,12 +263,12 @@ function stub(opts: {
       return opts.pages?.[p++] ?? page([]);
     }
     if (q.includes("OpenIssues")) {
+      const nodes = opts.issuePages?.[ip] ?? opts.issues ?? [];
+      const more = opts.issuePages !== undefined && ip < opts.issuePages.length - 1;
+      ip++;
       return {
         repository: {
-          issues: {
-            pageInfo: { hasNextPage: false, endCursor: null },
-            nodes: opts.issues ?? [],
-          },
+          issues: { pageInfo: { hasNextPage: more, endCursor: more ? `ic${ip}` : null }, nodes },
         },
       };
     }
@@ -399,6 +402,22 @@ describe("collectGithub board, a stale project item list", () => {
     });
     await collectGithub(repo, store, gql, NOW);
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 5]);
+  });
+
+  it("pages the open issues by cursor", async () => {
+    const { gql, calls } = stub({
+      pages: [page([item(1, "Todo")])],
+      issuePages: [
+        [issue(5, [{ project: 2, status: "Todo" }])],
+        [issue(6, [{ project: 2, status: "Todo" }])],
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 5, 6]);
+    expect(calls.filter((c) => c.q.includes("OpenIssues")).map((c) => c.v.after)).toEqual([
+      null,
+      "ic1",
+    ]);
   });
 
   it("counts an unmapped item once when both sources return it", async () => {
