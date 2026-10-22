@@ -23,6 +23,8 @@ import {
   minorLine,
   minorMoreLine,
   prNotRunsText,
+  REVIEW_STATUS_CONTEXT,
+  type ReviewStatusState,
   type Run,
 } from "@mc/core";
 import {
@@ -47,6 +49,8 @@ export const CI_LOG_UNREADABLE = "(the CI log could not be read)";
 export const EMPTY_LOG = "(the failed run's log was empty)";
 /** The park reason when an earlier PR is open on the run's branch. */
 export const EARLIER_PR_OPEN = "an earlier PR is open on this branch";
+/** Why setReviewStatus did not set the status. */
+export const REVIEW_STATUS_FAILED = "the mc/review status could not be set";
 /** `gh run view --log-failed` may print this much. */
 export const CI_LOG_MAX_BUFFER = 16 * 1024 * 1024;
 
@@ -69,6 +73,13 @@ export interface Publisher {
   postMinorFindings(
     run: Run,
     review: { id: number; sha: string; retro: string },
+  ): Promise<PublishResult>;
+  /** Sets the run's repo's mc/review commit status on `sha`. */
+  setReviewStatus(
+    run: Run,
+    sha: string,
+    state: ReviewStatusState,
+    description: string,
   ): Promise<PublishResult>;
   /** The tail of the failed Actions logs for `sha`, as one line-safe text. */
   ciExcerpt(repo: string, sha: string): Promise<string>;
@@ -278,6 +289,28 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (r.isError === true) {
         return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
       }
+      return { ok: true };
+    },
+
+    async setReviewStatus(run, sha, state, description) {
+      const repo = deps.config.repos.find((r) => r.id === run.repoId)?.github;
+      if (repo === undefined || !SHA.test(sha)) {
+        return { ok: false, text: REVIEW_STATUS_FAILED, transient: false };
+      }
+      const r = await deps.gh(
+        [
+          "api",
+          `repos/${repo}/statuses/${sha}`,
+          "-f",
+          `state=${state}`,
+          "-f",
+          `context=${REVIEW_STATUS_CONTEXT}`,
+          "-f",
+          `description=${description}`,
+        ],
+        { cwd: cwd() },
+      );
+      if (r.code !== 0) return { ok: false, text: REVIEW_STATUS_FAILED, transient: true };
       return { ok: true };
     },
 
