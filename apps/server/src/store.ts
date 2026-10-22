@@ -410,6 +410,10 @@ const toRun = (r: Row): Run => ({
   ...(r.ticket_title === null || r.ticket_title === undefined
     ? {}
     : { ticketTitle: r.ticket_title as string }),
+  // Absent, not null, on a run that did not record its CLI version.
+  ...(r.cli_version === null || r.cli_version === undefined
+    ? {}
+    : { cliVersion: r.cli_version as string }),
   // Absent, not null, on a run no loop drives or that has no recorded ender.
   ...(r.loop === null || r.loop === undefined
     ? {}
@@ -599,6 +603,8 @@ export class Store {
       ["ticket_title", "TEXT"],
       // The review a run performs (7b-1); `upsertRun` never rewrites it.
       ["review_id", "INTEGER"],
+      // The `claude` CLI version the run started on; null on rows from before it was recorded.
+      ["cli_version", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
@@ -701,8 +707,8 @@ export class Store {
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ticket_title, review_id, cli_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -710,7 +716,8 @@ export class Store {
            ticket = excluded.ticket, cost_usd = excluded.cost_usd, tokens = excluded.tokens,
            transcript_path = excluded.transcript_path, prs = excluded.prs,
            summary = excluded.summary, folded = MAX(folded, excluded.folded),
-           ticket_title = COALESCE(excluded.ticket_title, ticket_title)`,
+           ticket_title = COALESCE(excluded.ticket_title, ticket_title),
+           cli_version = COALESCE(excluded.cli_version, cli_version)`,
       )
       .run(
         r.id,
@@ -733,6 +740,7 @@ export class Store {
         r.loop === null || r.loop === undefined ? null : JSON.stringify(r.loop),
         r.ticketTitle ?? null,
         r.reviewId ?? null,
+        r.cliVersion ?? null,
       );
   }
 

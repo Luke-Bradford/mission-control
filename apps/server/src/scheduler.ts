@@ -22,6 +22,17 @@ import {
 } from "@mc/core";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
+import {
+  CLI_COLLECTOR,
+  CLI_NOTE_KEY,
+  CLI_UPDATE_INTERVAL_MS,
+  type CliCheck,
+  CliHold,
+  checkCli,
+  cliFailedText,
+  NOT_A_CASK,
+  realExec,
+} from "./cli-update.ts";
 import { collectorName, DIGEST_RETENTION_MS, FOLD_WINDOW_MS } from "./collectors/common.ts";
 import { collectFlow } from "./collectors/flow.ts";
 import {
@@ -63,7 +74,8 @@ export type Job =
   | "prs"
   | "flow"
   | "backfill"
-  | "engine";
+  | "engine"
+  | "cli";
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
 export const JOBS: readonly Job[] = [
   "sessions",
@@ -77,6 +89,7 @@ export const JOBS: readonly Job[] = [
   "flow",
   "backfill",
   "engine",
+  "cli",
 ];
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
@@ -129,6 +142,8 @@ export interface Collectors {
   backfill: typeof backfillRuns;
   /** The one-off rewrite of past crew runs' summaries. */
   rewriteSummaries: typeof rewriteCrewSummaries;
+  /** One CLI update check (`updates.cli: between_runs`): brew outdated, upgrade, smoke test. */
+  cli: () => Promise<CliCheck>;
   /** The one-off fill of past crew runs' missing ticket titles, read from GitHub. */
   fillTitles: typeof fillTicketTitles;
   claude: (acct: AccountId, onError: OnError, now: number) => Promise<UsageSample[]>;
@@ -152,6 +167,8 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
+  /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
+  cliHold?: CliHold;
 }
 
 /** What the scheduler asks of the first loop's engine. */
@@ -193,6 +210,7 @@ export function realCollectors(config: CcConfig): Collectors {
     flow: collectFlow,
     backfill: backfillRuns,
     rewriteSummaries: rewriteCrewSummaries,
+    cli: () => checkCli({ exec: realExec }),
     fillTitles: fillTicketTitles,
     claude: (acct, onError, now) =>
       sampleClaude(
@@ -245,6 +263,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let summariesDone = false;
   let titlesDone = false;
   let engine: EngineHooks | null = null;
+  const cliHold = deps.cliHold ?? new CliHold();
 
   /** Each agent's HUD state at its last recorded change or last look; seeded so a restart is no change. */
   const lastStates = new Map<AgentId, HudState>(store.latestAgentStates());
@@ -514,6 +533,38 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     engine: async () => {
       await engine?.tick();
     },
+    cli: async () => {
+      if (config.updates?.cli !== "between_runs") return;
+      const r = await c.cli();
+      if (!r.cask) {
+        // nothing is changed, and a CLI we do not manage holds no run
+        recordStatus(CLI_COLLECTOR, false, r.found ? NOT_A_CASK : "claude is not on PATH");
+        emit("health");
+        return;
+      }
+      const problems = [r.brewProblem].filter((p) => p !== null);
+      if (r.smokeFailure === null) {
+        const version = r.version === null ? "claude" : `claude ${r.version}`;
+        const notes = [`${version}${r.upgraded ? ", upgraded" : ""}`, ...problems];
+        recordStatus(CLI_COLLECTOR, problems.length === 0, notes.join("; "));
+        store.clearNote(CLI_NOTE_KEY, now());
+        cliHold.release();
+      } else {
+        const text = cliFailedText(r.version, r.smokeFailure);
+        recordStatus(CLI_COLLECTOR, false, [text, ...problems].join("; "));
+        store.raiseNote({
+          key: CLI_NOTE_KEY,
+          kind: "blocked",
+          runId: null,
+          seatId: null,
+          repoId: null,
+          text,
+          at: now(),
+        });
+        cliHold.hold(text);
+      }
+      emit("health", "attention");
+    },
     usage: async () => {
       for (const acct of config.accounts) {
         await guarded(usageCollector(acct.id), () => usageFor(acct));
@@ -640,6 +691,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_INTERVAL_MS,
     backfill: BACKFILL_INTERVAL_MS,
     engine: ENGINE_TICK_MS,
+    cli: CLI_UPDATE_INTERVAL_MS,
   };
 
   const FIRST_DELAY_MS: Partial<Record<Job, number>> = {
@@ -662,6 +714,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const job of JOBS) {
         // no engine, no engine timer (a scheduler without one has nothing to tick)
         if (job === "engine" && engine === null) continue;
+        // `updates.cli: off` (the default) starts no update timer
+        if (job === "cli" && config.updates?.cli !== "between_runs") continue;
         const every = () => {
           const t = setInterval(() => {
             if (job === "github" && !githubDue()) return;
