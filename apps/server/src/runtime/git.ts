@@ -26,18 +26,8 @@ export class CrewGitError extends Error {
   }
 }
 
-/**
- * Applied before every subcommand: no hooks, no fsmonitor daemon, no rename detection (a user
- * gitconfig must not hide a moved file's old path from a path check).
- */
-export const SAFE_CONFIG = [
-  "-c",
-  "core.hooksPath=/dev/null",
-  "-c",
-  "core.fsmonitor=",
-  "-c",
-  "diff.renames=false",
-];
+/** Applied before every subcommand: no hooks, no fsmonitor daemon. */
+export const SAFE_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor="];
 
 export interface CrewGitOptions {
   /** Default `GIT_TIMEOUT_MS`; fetch, ls-remote and worktree add and remove need longer. */

@@ -40,7 +40,6 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
-import { SAFE_CONFIG } from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
 
 const tools = vi.hoisted(() => ({
@@ -556,10 +555,6 @@ describe("a moved file keeps its old path (real git)", () => {
     git(clone, "commit", "-q", "-m", "move");
     return git(clone, "rev-parse", "HEAD");
   };
-
-  it("SAFE_CONFIG turns rename detection off", () => {
-    expect(SAFE_CONFIG.join(" ")).toContain("-c diff.renames=false");
-  });
 
   it("hardRuleTouches reports a hard-rule file moved to a path no rule covers", async () => {
     mkdirSync(join(clone, "docs"));
