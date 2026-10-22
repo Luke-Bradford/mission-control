@@ -42,6 +42,8 @@ export const RESOURCES = {
   // Whether this server runs crew sessions (off on a preview, or when another server holds
   // the lock).
   crewStatus: { path: "/api/crew/status", topic: "agents" },
+  // What the last read of config.yaml says against what runs (pending seat changes, errors).
+  crewChanges: { path: "/api/crew/changes", topic: "config" },
   attention: { path: "/api/attention", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
@@ -138,6 +140,10 @@ export const ACTIONS = {
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,
   /** Body `{}`: ends the run. */
   seatEnd: (seatId: string) => `/api/seats/${enc(seatId)}/end`,
+  /** Body `{ base, seats }`; answers `{ backup, changes }` after writing config.yaml. */
+  crewSeats: (sessionId: string) => `/api/crew/sessions/${enc(sessionId)}/seats`,
+  /** Body `{}`; answers a ReloadResult. */
+  reloadConfig: "/api/config/reload",
   /** Body `{}`: fetches origin/main now (at most every 15 s); answers a VersionInfo. */
   versionCheck: "/api/version/check",
   /** Body `{}`: pulls main, builds, and restarts the hub (202), or answers `{ upToDate }`. */
