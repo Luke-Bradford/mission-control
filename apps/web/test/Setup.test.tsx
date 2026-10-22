@@ -25,7 +25,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
 import { SETUP_TABS, type SetupTab } from "../src/router.ts";
-import { FOLDER_FREE } from "../src/setup/Sessions.tsx";
+import {
+  AREA_HINT,
+  addedText,
+  FOLDER_FREE,
+  loadErrorText,
+  NO_STATUS,
+  RELOADED,
+  refusedText,
+  removedText,
+  restartText,
+  SAVE_NOTE,
+  SCRATCH_LABEL,
+  SESSIONS_NOTE,
+  savedText,
+} from "../src/setup/Sessions.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
@@ -59,6 +73,27 @@ const CFG: ConfigView = {
       launchdLabel: "com.studio.loop",
     },
   ],
+};
+
+const GUIDO_SEAT = {
+  id: "guido-1",
+  role: "GUIDO",
+  accountId: "claude-main",
+  model: "sonnet",
+  area: ["apps/**"],
+};
+const RETRO_SEAT = {
+  id: "retro-1",
+  role: "RETRO",
+  accountId: "claude-main",
+  model: "sonnet",
+  area: [],
+};
+const CHANGES = {
+  error: null,
+  restartNeeded: [] as string[],
+  sessions: [{ id: "s1", seats: [GUIDO_SEAT, RETRO_SEAT] }],
+  pending: [] as { sessionId: string; seatId: string; reason: string }[],
 };
 
 const CREW: Crew = {
@@ -126,11 +161,7 @@ describe("Setup tabs", () => {
   it("Sessions: a panel per repo with the crew and the branch, filtered by session", async () => {
     load();
     at("sessions");
-    expect(
-      await screen.findByText(
-        "A session is one repo and the agents working on it. They come from config.yaml for now; adding and editing them here arrives in phase 2d.",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText(SESSIONS_NOTE)).toBeTruthy();
     const p = await screen.findByRole("region", { name: "shop-app · observed loops" });
     expect(p.textContent).toContain("octo-org/shop-app · feature/3349-quote-cache");
     const btn = within(p).getByRole("button", { name: /shop-app-ta/ });
@@ -204,6 +235,7 @@ describe("Setup tabs", () => {
   it("Sessions: a panel per crew session with seats, area or read-only, state, and folder owners", async () => {
     load({
       "/api/config": SESSIONS_CFG,
+      "/api/crew/changes": CHANGES,
       "/api/crew": {
         rows: [
           crewRow(),
@@ -220,10 +252,10 @@ describe("Setup tabs", () => {
     at("sessions");
     const p = await screen.findByRole("region", { name: "s/s1" });
     expect(p.textContent).toContain("/mc/clone · octo-org/shop-app");
-    const guido = within(p).getByRole("button", { name: /guido-1/ });
+    const guido = within(p).getByRole("button", { name: /^guido-1/ });
     expect(guido.textContent).toContain("apps/**");
     expect(guido.textContent).toContain("Running");
-    const retro = within(p).getByRole("button", { name: /retro-1/ });
+    const retro = within(p).getByRole("button", { name: /^retro-1/ });
     expect(retro.textContent).toContain("read-only");
     fireEvent.click(guido);
     expect(window.location.pathname).toBe("/agent/guido-1");
@@ -252,7 +284,7 @@ describe("Setup tabs", () => {
     expect(within(docsSeen).getByText(FOLDER_FREE)).toBeTruthy();
     expect(within(docsSeen).getByText("docs/")).toBeTruthy();
     expect(p.textContent).toContain("Tiles show who owns each folder; areas can't overlap.");
-    expect(p.textContent).not.toContain("Add agent");
+    expect(await within(p).findAllByRole("button", { name: "Add agent" })).toHaveLength(1);
     expect(document.getElementById("page-setup")?.textContent).not.toContain("Add session");
     // the repo's panel is its observed loops only: the seats are in the crew session's panel
     const loops = screen.getByRole("region", { name: "shop-app · observed loops" });
@@ -629,7 +661,10 @@ describe("Setup is read-only (except Repos)", () => {
       for (const el of body.querySelectorAll("input, select, textarea")) {
         expect((el as HTMLInputElement).disabled).toBe(true);
       }
-      for (const b of body.querySelectorAll("button")) fireEvent.click(b);
+      for (const b of body.querySelectorAll("button")) {
+        // Sessions' reload button posts by design (its own test covers it)
+        if (b.textContent !== "Reload config.yaml") fireEvent.click(b);
+      }
       const posts = fetchFn.mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "GET");
       expect(posts).toEqual([]);
     },
@@ -1263,5 +1298,208 @@ describe("Setup toolbar: Update", () => {
     at("sessions");
     await screen.findByRole("region", { name: "shop-app · observed loops" });
     expect(within(toolbar()).queryByRole("button", { name: "Update" })).toBeNull();
+  });
+});
+
+describe("Setup › Sessions: crew seats", () => {
+  const CFG2: ConfigView = { ...CREW_CONFIG, loops: CFG.loops };
+  const FOLDERS = [
+    {
+      id: "s1",
+      readable: true,
+      folders: [
+        { name: "apps", owners: ["guido-1"] },
+        { name: "docs", owners: [] },
+      ],
+    },
+  ];
+  const SEATS = "/api/crew/sessions/s1/seats";
+  const OK = { backup: "config.yaml.bak-x", changes: CHANGES };
+
+  function seats(over: Record<string, unknown> = {}) {
+    load({
+      "/api/config": CFG2,
+      "/api/crew/changes": CHANGES,
+      "/api/crew/sessions": FOLDERS,
+      ...over,
+    });
+    render(<Toast />);
+    at("sessions");
+  }
+  const panel = () => screen.findByRole("region", { name: "s/s1" });
+  const bodyOf = (path: string) => {
+    const call = fetchFn.mock.calls.find(([p, i]) => p === path && i?.method === "POST");
+    return call ? JSON.parse(String(call[1]?.body)) : undefined;
+  };
+  const openAdd = async () => {
+    fireEvent.click(await within(await panel()).findByRole("button", { name: "Add agent" }));
+    return screen.getByRole("form", { name: "Add agent to s/s1" });
+  };
+  const setField = (f: HTMLElement, label: string, value: string) =>
+    fireEvent.change(within(f).getByLabelText(label), { target: { value } });
+  const table = () => screen.findByRole("table", { name: "Seats of s/s1 in config.yaml" });
+  const toastText = () => screen.getByRole("status").textContent;
+
+  it("Sessions: the seats table", async () => {
+    const session = CREW_CONFIG.crew?.sessions[0];
+    if (!CREW_CONFIG.crew || !session) throw new Error("fixture has no session");
+    seats({
+      "/api/crew/changes": {
+        ...CHANGES,
+        pending: [
+          { sessionId: "s1", seatId: "guido-1", reason: "changed; applies when it is free" },
+          { sessionId: "s1", seatId: "inco-9", reason: "removed; finishes its run" },
+        ],
+      },
+      "/api/config": {
+        ...CFG2,
+        crew: {
+          ...CREW_CONFIG.crew,
+          sessions: [
+            {
+              ...session,
+              seats: [
+                ...session.seats,
+                {
+                  id: "inco-9",
+                  role: "INCO",
+                  mode: "writer",
+                  accountId: "claude-main",
+                  model: "sonnet",
+                  area: [],
+                  retiring: true,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const t = await table();
+    const row = (id: string) => within(t).getByText(id).closest("tr") as HTMLElement;
+    expect(row("guido-1").textContent).toContain("apps/**");
+    expect(row("guido-1").textContent).toContain("changed; applies when it is free");
+    expect(row("retro-1").textContent).toContain("read-only");
+    expect(row("retro-1").textContent).toContain(NO_STATUS);
+    expect(row("inco-9").textContent).toContain("removed; finishes its run");
+    expect(within(row("inco-9")).queryByRole("button", { name: /Edit/ })).toBeNull();
+    expect(within(row("guido-1")).getByRole("button", { name: /Edit/ })).toBeTruthy();
+  });
+
+  it("Add agent: defaults, tiles, body", async () => {
+    seats({ [`POST ${SEATS}`]: OK });
+    const f = await openAdd();
+    setField(f, "Role", "INCO");
+    expect((within(f).getByLabelText("Call sign") as HTMLInputElement).value).toBe("inco-1");
+    expect((within(f).getByLabelText("Model") as HTMLInputElement).value).toBe("sonnet");
+    expect(within(f).getByText(AREA_HINT)).toBeTruthy();
+    expect(within(f).getByText(SAVE_NOTE)).toBeTruthy();
+    const tile = within(await panel()).getByRole("button", { name: "apps/" });
+    expect(tile.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(tile);
+    expect((within(f).getByLabelText("Area") as HTMLInputElement).value).toBe("apps/**");
+    fireEvent.click(within(f).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(bodyOf(SEATS)).toBeTruthy());
+    expect(bodyOf(SEATS)).toEqual({
+      base: [GUIDO_SEAT, RETRO_SEAT],
+      seats: [
+        GUIDO_SEAT,
+        RETRO_SEAT,
+        {
+          id: "inco-1",
+          role: "INCO",
+          accountId: "claude-main",
+          model: "sonnet",
+          area: ["apps/**"],
+        },
+      ],
+    });
+    await waitFor(() => expect(toastText()).toBe(addedText("INCO-1", "s1", "config.yaml.bak-x")));
+    await waitFor(() => expect(screen.queryByRole("form")).toBeNull());
+  });
+
+  it("Add agent: a read-only role", async () => {
+    seats({ [`POST ${SEATS}`]: OK });
+    const f = await openAdd();
+    setField(f, "Role", "RETRO");
+    expect((within(f).getByLabelText("Area") as HTMLInputElement).disabled).toBe(true);
+    expect(within(await panel()).queryByRole("button", { name: "apps/" })).toBeNull();
+    fireEvent.click(within(f).getByLabelText(SCRATCH_LABEL));
+    fireEvent.click(within(f).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(bodyOf(SEATS)).toBeTruthy());
+    expect(bodyOf(SEATS).seats[2]).toEqual({
+      id: "retro-2",
+      role: "RETRO",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+      mode: "scratch",
+    });
+  });
+
+  it("Edit: pre-fills and changes the seat in place", async () => {
+    seats({ [`POST ${SEATS}`]: OK });
+    fireEvent.click(within(await table()).getByRole("button", { name: "Edit guido-1" }));
+    const f = screen.getByRole("form", { name: "Edit guido-1" });
+    expect((within(f).getByLabelText("Model") as HTMLInputElement).value).toBe("sonnet");
+    expect((within(f).getByLabelText("Area") as HTMLInputElement).value).toBe("apps/**");
+    expect((within(f).getByLabelText("Effort") as HTMLSelectElement).value).toBe("");
+    setField(f, "Model", "opus");
+    setField(f, "Effort", "high");
+    fireEvent.click(within(f).getByRole("button", { name: "Save guido-1" }));
+    await waitFor(() => expect(bodyOf(SEATS)).toBeTruthy());
+    expect(bodyOf(SEATS).seats).toEqual([
+      { ...GUIDO_SEAT, model: "opus", effort: "high" },
+      RETRO_SEAT,
+    ]);
+    await waitFor(() => expect(toastText()).toBe(savedText("GUIDO-1", "config.yaml.bak-x")));
+  });
+
+  it("Remove needs a confirm", async () => {
+    seats({ [`POST ${SEATS}`]: OK });
+    const t = await table();
+    fireEvent.click(within(t).getByRole("button", { name: "Remove retro-1" }));
+    expect(bodyOf(SEATS)).toBeUndefined();
+    fireEvent.click(within(t).getByRole("button", { name: "Confirm remove retro-1" }));
+    await waitFor(() => expect(bodyOf(SEATS)).toBeTruthy());
+    expect(bodyOf(SEATS).seats).toEqual([GUIDO_SEAT]);
+    await waitFor(() =>
+      expect(toastText()).toBe(removedText("RETRO-1", "s1", "config.yaml.bak-x")),
+    );
+  });
+
+  it("A refusal keeps the form", async () => {
+    const error = "crew.sessions[0].seats[2].area: areas overlap: guido-1 and inco-1; …";
+    seats({ [`POST ${SEATS}`]: () => ({ status: 400, body: { error } }) });
+    const f = await openAdd();
+    fireEvent.click(within(f).getByRole("button", { name: "Add agent" }));
+    expect((await within(f).findByRole("alert")).textContent).toBe(refusedText(error));
+    expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBeTruthy();
+  });
+
+  it("A conflict refetches", async () => {
+    seats({
+      [`POST ${SEATS}`]: () => ({
+        status: 409,
+        body: { error: "the seats changed since this page loaded them" },
+      }),
+    });
+    const f = await openAdd();
+    const fetched = () => fetchFn.mock.calls.filter(([p]) => p === "/api/crew/changes").length;
+    const before = fetched();
+    fireEvent.click(within(f).getByRole("button", { name: "Add agent" }));
+    await waitFor(() => expect(fetched()).toBeGreaterThan(before));
+  });
+
+  it("config.yaml state", async () => {
+    seats({
+      "/api/crew/changes": { ...CHANGES, error: "bad yaml", restartNeeded: ["loops"] },
+      "POST /api/config/reload": { restartNeeded: [] },
+    });
+    expect((await screen.findByRole("alert")).textContent).toBe(loadErrorText("bad yaml"));
+    expect(screen.getByText(restartText(["loops"]))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reload config.yaml" }));
+    await waitFor(() => expect(bodyOf("/api/config/reload")).toEqual({}));
+    await waitFor(() => expect(toastText()).toBe(RELOADED));
   });
 });

@@ -2235,6 +2235,23 @@ td.wrap {
   align-items: center;
   gap: 6px;
 }
+/* setup › sessions: a folder tile that picks an area while the seat form is open */
+.tiles .tile-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.tiles .tile:has(.tile-pick.on) {
+  border-color: var(--accent);
+}
+.seatform {
+  margin-top: 12px;
+}
 /* setup › repos: the add-a-repo form and its preview */
 .frow {
   display: flex;

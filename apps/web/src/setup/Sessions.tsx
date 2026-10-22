@@ -1,25 +1,93 @@
 import {
   type ConfigView,
+  CREW_EFFORTS,
   type Crew,
   type CrewRow,
   type CrewSessionFolders,
   HUD_STATE_LABEL,
   HUD_STATE_TONE,
+  seatCallSign,
 } from "@mc/core";
-import { Fragment, useId } from "react";
+import { Fragment, useId, useState } from "react";
+import { ApiError, apiPost } from "../api.ts";
 import { modelLine, seatAreaText } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { agentPath, navigate } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
+import { toast } from "../shell/Toast.tsx";
 
 const DASH = "—";
 export const FOLDERS_UNREADABLE = "Could not read the checkout's folders.";
 export const FOLDER_FREE = "free";
 export const FOLDERS_NOTE = "Tiles show who owns each folder; areas can't overlap.";
+export const SESSIONS_NOTE =
+  "A session is one repo and the agents working on it, as config.yaml lists them. Add, edit or remove an agent here: Mission Control writes config.yaml, keeps a backup beside it, and applies the change without a restart.";
+export const SAVE_NOTE =
+  "An agent that is working keeps its current settings until its run ends; a removed one finishes its run first.";
+export const AREA_HINT = "click folder tiles to add them · empty = whole checkout";
+export const SCRATCH_LABEL = "Reviews PRs in a scratch checkout";
+export const NO_STATUS = "—";
+export const refusedText = (error: string) => `Refused: ${error}`;
+export const loadErrorText = (error: string) =>
+  `config.yaml does not load: ${error}. Mission Control keeps the last good config.`;
+export const restartText = (paths: string[]) =>
+  `Changed in config.yaml, applies after a hub restart: ${paths.join(", ")}.`;
+export const addedText = (call: string, s: string, backup: string) =>
+  `${call} added to s/${s}. Backup: ${backup}.`;
+export const savedText = (call: string, backup: string) => `${call} saved. Backup: ${backup}.`;
+export const removedText = (call: string, s: string, backup: string) =>
+  `${call} removed from s/${s}. Backup: ${backup}.`;
+export const RELOADED = "Reloaded config.yaml.";
+const NO_ROLES = "this server does not list roles";
+const CALL_SIGN = /^[a-z][a-z0-9-]{0,30}$/;
+const CALL_SIGN_HINT = "lower-case letters, digits and -";
+
+/**
+ * Contract-first (ticket 3 adds these to mc/core): a seat as config.yaml writes it, and what the
+ * server says about config.yaml against the running config. Switch to the core exports once it merges.
+ */
+interface SeatInput {
+  id: string;
+  role: string;
+  accountId: string;
+  model: string;
+  area: string[];
+  effort?: (typeof CREW_EFFORTS)[number];
+  mode?: "scratch";
+}
+interface CrewChanges {
+  error: string | null;
+  restartNeeded: string[];
+  sessions: { id: string; seats: SeatInput[] }[];
+  pending: { sessionId: string; seatId: string; reason: string }[];
+}
+
+type CrewConfig = NonNullable<ConfigView["crew"]>;
+type SessionView = CrewConfig["sessions"][number];
+
+/** The open add/edit form (one at a time, page-wide). `editId` null: adding. */
+interface FormState {
+  sessionId: string;
+  editId: string | null;
+  role: string;
+  id: string;
+  idTouched: boolean;
+  accountId: string;
+  model: string;
+  effort: string;
+  area: string;
+  scratch: boolean;
+}
+
+const globsOf = (text: string): string[] =>
+  text
+    .split(",")
+    .map((g) => g.trim())
+    .filter((g) => g !== "");
 
 /** A seat's button: named by its call sign alone; area, model line and state are its description. */
 function Seat({ id, area, row }: { id: string; area: string; row: CrewRow | undefined }) {
@@ -42,23 +110,261 @@ function Seat({ id, area, row }: { id: string; area: string; row: CrewRow | unde
   );
 }
 
-/** One crew session (config.yaml, read-only in 2a): its seats, and who owns each top folder. */
+type Role = NonNullable<CrewConfig["roles"]>[number];
+
+/** The seat form (catalogue 2.7.1): add or edit, the same fields. */
+function SeatForm({
+  form,
+  setForm,
+  config,
+  roles,
+  busy,
+  error,
+  onSave,
+  onCancel,
+}: {
+  form: FormState;
+  setForm: (f: FormState) => void;
+  config: ConfigView;
+  roles: Role[];
+  busy: boolean;
+  error: string | null;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const hint = useId();
+  const adding = form.editId === null;
+  const role = roles.find((r) => r.name === form.role);
+  const writer = (role?.mode ?? "writer") === "writer";
+  const accounts = config.accounts.filter((a) => a.vendor === "claude");
+  const idOk = !adding || CALL_SIGN.test(form.id);
+  const valid = idOk && form.model.trim() !== "" && form.accountId !== "";
+  const set = (over: Partial<FormState>) => setForm({ ...form, ...over });
+  const pickRole = (name: string) => {
+    const next = roles.find((r) => r.name === name);
+    set({
+      role: name,
+      id: form.idTouched ? form.id : defaultId(config, name),
+      model: next?.model ?? form.model,
+      scratch: false,
+      area: next?.mode === "writer" ? form.area : "",
+    });
+  };
+  return (
+    <form
+      className="preview seatform"
+      aria-label={adding ? `Add agent to s/${form.sessionId}` : `Edit ${form.editId}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid && !busy) onSave();
+      }}
+    >
+      <label className="s fg2">
+        Role
+        <select value={form.role} onChange={(e) => pickRole(e.target.value)}>
+          {[...roles]
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((r) => (
+              <option key={r.name} value={r.name}>{`${r.name} · ${r.mode}`}</option>
+            ))}
+        </select>
+      </label>
+      {adding ? (
+        <label className="s fg2">
+          Call sign
+          <input
+            value={form.id}
+            onChange={(e) => set({ id: e.target.value, idTouched: true })}
+            aria-invalid={!idOk}
+          />
+          {!idOk && <span className="crit-t xs">{CALL_SIGN_HINT}</span>}
+        </label>
+      ) : (
+        <p className="s">
+          Call sign <strong>{form.id}</strong>
+        </p>
+      )}
+      <label className="s fg2">
+        Account
+        <select value={form.accountId} onChange={(e) => set({ accountId: e.target.value })}>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="s fg2">
+        Model
+        <input value={form.model} onChange={(e) => set({ model: e.target.value })} />
+      </label>
+      <label className="s fg2">
+        Effort
+        <select value={form.effort} onChange={(e) => set({ effort: e.target.value })}>
+          <option value="">CLI default</option>
+          {CREW_EFFORTS.map((x) => (
+            <option key={x} value={x}>
+              {x}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="s fg2">
+        Area
+        <input
+          value={form.area}
+          disabled={!writer}
+          aria-describedby={hint}
+          onChange={(e) => set({ area: e.target.value })}
+        />
+      </label>
+      <span id={hint} className="xs muted">
+        {AREA_HINT}
+      </span>
+      {role?.mode === "read-only" && role.loop === "none" && (
+        <label className="s">
+          <input
+            type="checkbox"
+            checked={form.scratch}
+            onChange={(e) => set({ scratch: e.target.checked })}
+          />{" "}
+          {SCRATCH_LABEL}
+        </label>
+      )}
+      {error !== null && (
+        <p role="alert" className="crit-t s">
+          {refusedText(error)}
+        </p>
+      )}
+      <div className="frow">
+        <button type="submit" className="primary" disabled={busy || !valid}>
+          {adding ? "Add agent" : `Save ${form.editId}`}
+        </button>
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      <p className="note s">{SAVE_NOTE}</p>
+    </form>
+  );
+}
+
+/** `{role}-{n}` with the smallest n ≥ 1 that no loop and no seat (retiring included) uses. */
+function defaultId(config: ConfigView, role: string): string {
+  const used = new Set([
+    ...config.loops.map((l) => l.id),
+    ...(config.crew?.sessions.flatMap((s) => s.seats.map((x) => x.id)) ?? []),
+  ]);
+  let n = 1;
+  while (used.has(`${role.toLowerCase()}-${n}`)) n++;
+  return `${role.toLowerCase()}-${n}`;
+}
+
+/** One crew session (config.yaml): its seats table, add/edit form, and who owns each top folder. */
 function CrewSession({
   session,
   config,
   crew,
   folders,
+  changes,
+  form,
+  setForm,
+  openAdd,
+  busy,
+  error,
+  submit,
 }: {
-  session: NonNullable<ConfigView["crew"]>["sessions"][number];
+  session: SessionView;
   config: ConfigView;
   crew: Crew | undefined;
   folders: CrewSessionFolders | undefined;
+  changes: CrewChanges | undefined;
+  form: FormState | null;
+  setForm: (f: FormState | null) => void;
+  openAdd: (sessionId: string) => void;
+  busy: boolean;
+  error: string | null;
+  submit: (
+    sessionId: string,
+    base: SeatInput[],
+    seats: SeatInput[],
+    text: (backup: string) => string,
+    onDone: () => void,
+  ) => void;
 }) {
   const repo = config.repos.find((r) => r.id === session.repoId);
+  const roles = config.crew?.roles;
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const mine = changes?.sessions.find((s) => s.id === session.id);
+  const base = mine?.seats ?? [];
+  // Contract-first (ticket 3): `retiring` joins the core seat type then.
+  const retiring = session.seats.filter((s) => (s as { retiring?: boolean }).retiring);
+  const open = form?.sessionId === session.id ? form : null;
+  const picking =
+    open !== null && (roles?.find((r) => r.name === open.role)?.mode ?? "writer") === "writer";
+  const picked = open ? globsOf(open.area) : [];
+  const call = (id: string) => seatCallSign(id);
+
+  const statusOf = (id: string) =>
+    changes?.pending.find((p) => p.sessionId === session.id && p.seatId === id)?.reason ??
+    NO_STATUS;
+  const areaOf = (s: SeatInput) => {
+    if (s.mode === "scratch") return "scratch review";
+    const cfgMode = session.seats.find((x) => x.id === s.id)?.mode;
+    const mode = cfgMode ?? roles?.find((r) => r.name === s.role)?.mode ?? "writer";
+    return seatAreaText({ mode: mode === "writer" ? null : mode, area: s.area });
+  };
+
+  const edit = (s: SeatInput) =>
+    setForm({
+      sessionId: session.id,
+      editId: s.id,
+      role: s.role,
+      id: s.id,
+      idTouched: true,
+      accountId: s.accountId,
+      model: s.model,
+      effort: s.effort ?? "",
+      area: s.area.join(", "),
+      scratch: s.mode === "scratch",
+    });
+
+  function save() {
+    if (!open) return;
+    const seat: SeatInput = {
+      id: open.id,
+      role: open.role,
+      accountId: open.accountId,
+      model: open.model.trim(),
+      area: globsOf(open.area),
+    };
+    if (open.effort !== "") seat.effort = open.effort as SeatInput["effort"];
+    if (open.scratch) seat.mode = "scratch";
+    const seats =
+      open.editId === null ? [...base, seat] : base.map((s) => (s.id === open.editId ? seat : s));
+    const text = (backup: string) =>
+      open.editId === null
+        ? addedText(call(seat.id), session.id, backup)
+        : savedText(call(seat.id), backup);
+    submit(session.id, base, seats, text, () => setForm(null));
+  }
+
   return (
     <Panel
       title={`s/${session.id}`}
       sub={`${session.checkout} · ${repo?.github ?? session.repoId}`}
+      actions={
+        changes !== undefined && (
+          <button
+            type="button"
+            disabled={roles === undefined || open !== null}
+            title={roles === undefined ? NO_ROLES : undefined}
+            onClick={() => openAdd(session.id)}
+          >
+            Add agent
+          </button>
+        )
+      }
     >
       <div className="pb">
         <div className="crew">
@@ -70,9 +376,11 @@ function CrewSession({
         {folders?.readable === false && <p className="muted s">{FOLDERS_UNREADABLE}</p>}
         {folders && folders.folders.length > 0 && (
           <ul className="tiles" aria-label={`Folders of s/${session.id}`}>
-            {folders.folders.map((f) => (
-              <li key={f.name} className="tile">
-                <span className="tile-vis" aria-hidden="true">
+            {folders.folders.map((f) => {
+              const glob = `${f.name}/**`;
+              const on = picked.includes(glob);
+              const vis = (
+                <>
                   {f.owners.length > 0 ? (
                     f.owners.map((id, i) => (
                       <Fragment key={id}>
@@ -88,34 +396,254 @@ function CrewSession({
                     <span className="xs muted">{FOLDER_FREE}</span>
                   )}
                   <span className="s">{`${f.name}/`}</span>
-                </span>
-                <span className="sr-only">
-                  {`${f.name}/: ${f.owners.length > 0 ? f.owners.join(", ") : FOLDER_FREE}`}
-                </span>
-              </li>
-            ))}
+                </>
+              );
+              return (
+                <li key={f.name} className="tile">
+                  {picking && open ? (
+                    <button
+                      type="button"
+                      className={on ? "tile-pick on" : "tile-pick"}
+                      aria-pressed={on}
+                      aria-label={`${f.name}/`}
+                      onClick={() =>
+                        setForm({
+                          ...open,
+                          area: (on ? picked.filter((g) => g !== glob) : [...picked, glob]).join(
+                            ", ",
+                          ),
+                        })
+                      }
+                    >
+                      <span className="tile-vis" aria-hidden="true">
+                        {vis}
+                      </span>
+                    </button>
+                  ) : (
+                    <>
+                      <span className="tile-vis" aria-hidden="true">
+                        {vis}
+                      </span>
+                      <span className="sr-only">
+                        {`${f.name}/: ${f.owners.length > 0 ? f.owners.join(", ") : FOLDER_FREE}`}
+                      </span>
+                    </>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
         <p className="note s">{FOLDERS_NOTE}</p>
+        {changes !== undefined && (
+          <div className="tw">
+            <table aria-label={`Seats of s/${session.id} in config.yaml`}>
+              <thead>
+                <tr>
+                  <th>Seat</th>
+                  <th>Role</th>
+                  <th>Model</th>
+                  <th>Area</th>
+                  <th>Status</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {base.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.id}</td>
+                    <td>{s.role}</td>
+                    <td>{s.model}</td>
+                    <td>{areaOf(s)}</td>
+                    <td>{statusOf(s.id)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        aria-label={`Edit ${s.id}`}
+                        disabled={open !== null}
+                        onClick={() => edit(s)}
+                      >
+                        Edit
+                      </button>{" "}
+                      {confirming === s.id ? (
+                        <>
+                          <button
+                            type="button"
+                            className="primary"
+                            aria-label={`Confirm remove ${s.id}`}
+                            disabled={busy}
+                            onClick={() =>
+                              submit(
+                                session.id,
+                                base,
+                                base.filter((x) => x.id !== s.id),
+                                (backup) => removedText(call(s.id), session.id, backup),
+                                () => setConfirming(null),
+                              )
+                            }
+                          >
+                            Confirm remove
+                          </button>{" "}
+                          <button type="button" onClick={() => setConfirming(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          aria-label={`Remove ${s.id}`}
+                          onClick={() => setConfirming(s.id)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {retiring.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.id}</td>
+                    <td>{s.role}</td>
+                    <td>{s.model}</td>
+                    <td>{seatAreaText(s)}</td>
+                    <td>{statusOf(s.id)}</td>
+                    <td />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {open === null && error !== null && (
+          <p role="alert" className="crit-t s">
+            {refusedText(error)}
+          </p>
+        )}
+        {open && roles && (
+          <SeatForm
+            form={open}
+            setForm={setForm}
+            config={config}
+            roles={roles}
+            busy={busy}
+            error={error}
+            onSave={save}
+            onCancel={() => setForm(null)}
+          />
+        )}
       </div>
     </Panel>
   );
 }
 
+const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 /**
- * Setup › Sessions (catalogue 2.7.1), read-only: a panel per repo with its observed loops (none
- * for a repo without any), then one per crew session (`s/{id}`) with its seats.
+ * Setup › Sessions (catalogue 2.7.1): a panel per repo with its observed loops (none for a repo
+ * without any), then one per crew session (`s/{id}`) with its seats, which can be added, edited and
+ * removed here (the server writes config.yaml).
  */
 export function Sessions({ config }: { config: ConfigView }) {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const folders = useResource<CrewSessionFolders[]>(RESOURCES.crewSessions).data;
+  const changes = useResource<CrewChanges>(RESOURCES.crewChanges).data;
   const [session] = useSession();
+  const [form, setFormState] = useState<FormState | null>(null);
+  const [busy, setBusy] = useState(false);
+  // The last refusal and the session it concerns (shown in that session's open form, else under its table).
+  const [refusal, setRefusal] = useState<{ sessionId: string; text: string } | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
   const crewSessions = config.crew?.sessions.filter((s) => inSession(session, s.repoId)) ?? [];
+
+  const setForm = (f: FormState | null) => {
+    if (f === null || f.sessionId !== form?.sessionId || f.editId !== form?.editId) {
+      setRefusal(null);
+    }
+    setFormState(f);
+  };
+  function openAdd(sessionId: string) {
+    const roles = [...(config.crew?.roles ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    const first = roles[0];
+    if (!first) return;
+    setRefusal(null);
+    setFormState({
+      sessionId,
+      editId: null,
+      role: first.name,
+      id: defaultId(config, first.name),
+      idTouched: false,
+      accountId: config.accounts.find((a) => a.vendor === "claude")?.id ?? "",
+      model: first.model,
+      effort: "",
+      area: "",
+      scratch: false,
+    });
+  }
+
+  function refetch() {
+    hub.refetch(RESOURCES.crewChanges.path);
+    hub.refetch(RESOURCES.config.path);
+  }
+
+  async function submit(
+    sessionId: string,
+    base: SeatInput[],
+    seats: SeatInput[],
+    text: (backup: string) => string,
+    onDone: () => void,
+  ) {
+    setBusy(true);
+    setRefusal(null);
+    try {
+      const done = await apiPost<{ backup: string }>(ACTIONS.crewSeats(sessionId), {
+        base,
+        seats,
+      });
+      toast(text(done.backup));
+      onDone();
+      refetch();
+    } catch (err) {
+      setRefusal({ sessionId, text: messageOf(err) });
+      if (err instanceof ApiError && err.status === 409) refetch();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reload() {
+    setBusy(true);
+    setReloadError(null);
+    try {
+      await apiPost(ACTIONS.reloadConfig, {});
+      toast(RELOADED);
+      refetch();
+    } catch (err) {
+      setReloadError(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
-      <p className="note wide">
-        A session is one repo and the agents working on it. They come from config.yaml for now;
-        adding and editing them here arrives in phase 2d.
+      <p className="note wide">{SESSIONS_NOTE}</p>
+      {changes?.error && (
+        <p role="alert" className="crit-t s">
+          {loadErrorText(changes.error)}
+        </p>
+      )}
+      {changes && changes.restartNeeded.length > 0 && (
+        <p className="note wide">{restartText(changes.restartNeeded)}</p>
+      )}
+      {reloadError !== null && (
+        <p role="alert" className="crit-t s">
+          {refusedText(reloadError)}
+        </p>
+      )}
+      <p>
+        <button type="button" disabled={busy} onClick={() => void reload()}>
+          Reload config.yaml
+        </button>
       </p>
       {config.repos
         .filter((r) => inSession(session, r.id))
@@ -153,6 +681,13 @@ export function Sessions({ config }: { config: ConfigView }) {
           config={config}
           crew={crew}
           folders={folders?.find((f) => f.id === s.id)}
+          changes={changes}
+          form={form}
+          setForm={setForm}
+          openAdd={openAdd}
+          busy={busy}
+          error={refusal?.sessionId === s.id ? refusal.text : null}
+          submit={(...args) => void submit(...args)}
         />
       ))}
     </>

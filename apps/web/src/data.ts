@@ -37,6 +37,7 @@ const enc = encodeURIComponent;
 export const RESOURCES = {
   // The HUD's views (Plan 3).
   crew: { path: "/api/crew", topic: "agents" },
+  crewChanges: { path: "/api/crew/changes", topic: "config" },
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
   crewSessions: { path: "/api/crew/sessions", topic: null },
   // Whether this server runs crew sessions (off on a preview, or when another server holds
@@ -120,6 +121,10 @@ export const RESOURCES = {
 export const ACTIONS = {
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
+  /** Body `{ base, seats }`; answers `{ backup, changes }` after writing config.yaml. */
+  crewSeats: (sessionId: string) => `/api/crew/sessions/${enc(sessionId)}/seats`,
+  /** Body `{}`; answers a ReloadResult. */
+  reloadConfig: "/api/config/reload",
   /** Body `{ keys: string[] }`. */
   ack: "/api/attention/ack",
   /** Body: the whole AwaySettings. */
