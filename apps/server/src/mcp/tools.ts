@@ -381,7 +381,7 @@ export function issueOf(run: Pick<Run, "ticket">): number | null {
 }
 
 /** `s` with every known secret replaced and cut for the log. */
-function redact(s: string, known: readonly string[]): string {
+export function redact(s: string, known: readonly string[]): string {
   let out = s;
   for (const k of known) if (k !== "") out = out.split(k).join("[redacted]");
   return out.replace(/\s+/g, " ").trim().slice(0, LOG_LINE_MAX);
@@ -398,7 +398,10 @@ function failure(e: unknown): string {
  * The known secrets, or none when they cannot be read in time (the pattern scan still runs). A
  * failure is logged with a fixed line: its error could hold the secret.
  */
-export async function readKnown(deps: McToolsDeps, tool: string): Promise<string[]> {
+export async function readKnown(
+  deps: Pick<McToolsDeps, "knownSecrets" | "knownSecretsTimeoutMs" | "log">,
+  tool: string,
+): Promise<string[]> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -733,6 +736,8 @@ export function prTextProblem(
     known: readonly string[];
     label: string;
     unclosed?: boolean;
+    /** `#n` of the repo's own issues pass: FLIGHT's tickets and comments only. */
+    allowOwnRepoRefs?: boolean;
   },
 ): PrTextProblem | null {
   const finding = scanText(own.label, text, own.known)[0];
@@ -741,14 +746,18 @@ export function prTextProblem(
   }
   const ref = firstNamedRef(text);
   if (ref !== null) return { problem: "named", ref };
-  const first = firstPrNotifier(text, { repo: own.repo, issue: own.issue });
+  const first = firstPrNotifier(text, {
+    repo: own.repo,
+    issue: own.issue,
+    allowOwnRepoRefs: own.allowOwnRepoRefs === true,
+  });
   if (first !== null) return { problem: "notify", first };
   if (own.unclosed === true && unclosedMarkdown(text)) return { problem: "unclosed" };
   return null;
 }
 
 /** What `prTextProblem` found, as a clause for a refusal text. Never the secret itself. */
-function evidenceProblemText(p: PrTextProblem): string {
+export function evidenceProblemText(p: PrTextProblem): string {
   switch (p.problem) {
     case "secret":
       return `${p.where}:${p.line} looks like a ${p.secret}`;

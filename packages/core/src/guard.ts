@@ -1653,10 +1653,16 @@ export function closesIssue(md: string, { repo, issue }: { repo: string; issue: 
  * closing keyword for anything but that issue, and a github.com URL with a `%` or a port. A match
  * from decoded text is named with its written form too. `repo` is the run's own `owner/name`.
  * Named references outside `NAMED_REFS` are the caller's to refuse first (`firstNamedRef`).
+ * With `allowOwnRepoRefs`, a bare `#n` or `GH-n` (an issue of `repo` itself) passes too; mentions,
+ * `owner/repo#n`, links, and closing keywords for another issue are still found.
  */
 export function firstPrNotifier(
   text: string,
-  { repo, issue }: { repo: string; issue: number | null },
+  {
+    repo,
+    issue,
+    allowOwnRepoRefs = false,
+  }: { repo: string; issue: number | null; allowOwnRepoRefs?: boolean },
 ): string | null {
   const d = decode(text);
   const t = d.text;
@@ -1665,8 +1671,8 @@ export function firstPrNotifier(
   const otherItem = (m: RegExpExecArray) => `${m[1]}/${m[2]}`.toLowerCase() !== own || notOwn(m[3]);
   const hit = earliest([
     ...allMatches(MENTION, t),
-    ...allMatches(ISSUE_REF, t, (m) => notOwn(m[1])),
-    ...allMatches(GH_REF, t, (m) => notOwn(m[1])),
+    ...allMatches(ISSUE_REF, t, (m) => !allowOwnRepoRefs && notOwn(m[1])),
+    ...allMatches(GH_REF, t, (m) => !allowOwnRepoRefs && notOwn(m[1])),
     ...allMatches(REPO_REF, t, otherItem),
     ...allMatches(ISSUE_URL, t, otherItem),
     ...allMatches(CLOSING_REF, t, (m) => !closesOwn(m, own, issue)),
