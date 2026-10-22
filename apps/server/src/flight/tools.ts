@@ -14,9 +14,13 @@ import {
   capText,
   claimedText,
   ENGINE_OFF_TEXT,
+  endedDecision,
+  endedText,
+  endFailedText,
   FLIGHT_ABOUT_MAX,
   FLIGHT_BASIS_MAX,
   FLIGHT_DECISION_MAX,
+  FLIGHT_ENDS_PER_HOUR,
   FLIGHT_HOUR_MS,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
@@ -55,6 +59,8 @@ import {
   NOT_ON_BOARD,
   needsPlanText,
   noOpenQuestionText,
+  notEndableRunText,
+  notEndableSeatText,
   notInSessionText,
   notOnBoardText,
   notParkedText,
@@ -95,7 +101,6 @@ import {
   startedText,
   startFailedText,
   startMissingNeedsText,
-  startsByRuleText,
   type TicketView,
   ticketHasRunText,
   ticketReadText,
@@ -125,7 +130,7 @@ export interface FlightToolsDeps {
   config: CcConfig;
   store: Store;
   bus: ChangeBus;
-  supervisor: Pick<Supervisor, "message" | "busy" | "startRun">;
+  supervisor: Pick<Supervisor, "message" | "busy" | "startRun" | "endRun">;
   /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
   login: string | null;
   engine: Pick<Engine, "onOperatorMessage" | "status"> | null;
@@ -168,6 +173,7 @@ const StartSeatArgs = z.strictObject({
   issue: issueNumber,
   basis: basisArg,
 });
+const EndRunArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
 const MessageSeatArgs = z.strictObject({
   seat: z.string().regex(SEAT_ID),
   text: text(MC_TEXT_MAX),
@@ -406,7 +412,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
     const planner = loopKind === "plan";
-    if (!planner && repo.autonomy === "merge") return fail(startsByRuleText(repo.id));
     if (!seatFree(store, deps.supervisor.busy(), seat)) return fail(seatHasRunText(call));
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
@@ -440,6 +445,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(wrongAreaText(call, ref, areas));
     }
     if (store.activeTickets().has(ref)) return fail(ticketHasRunText(ref));
+    // a card the engine has taken for a seat has no run yet, while it reads the card
+    const taken = store.staleTakes(Number.POSITIVE_INFINITY);
+    if (taken.some((r) => r.repoId === repo.id && r.issue === issue)) {
+      return fail(ticketHasRunText(ref));
+    }
     if (claimedByOther(card, deps.login)) {
       return fail(
         claimedText(
@@ -566,6 +576,43 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("flight");
     return { text: sentUnparkedText(call) };
+  }
+
+  async function endRun(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, EndRunArgs, args);
+    if (!c.ok) return c.result;
+    const { seat, basis } = c.args;
+    const cfg = seatCfg(seat);
+    if (cfg === undefined) return fail(notInSessionText(seat));
+    const call = seatCallSign(seat);
+    if (seat === ctx.seatId) return fail(OWN_SEAT_TEXT);
+    if (seatDef(cfg).loop !== "build") return fail(notEndableSeatText(call));
+    const run = unendedRun(seat);
+    if (run === null || run.loop?.phase !== "parked") return fail(notEndableRunText(call));
+    const at = now();
+    const ended = lastHour(["end"], at);
+    if (ended >= FLIGHT_ENDS_PER_HOUR) return fail(capText("ended runs", ended));
+    try {
+      await deps.supervisor.endRun(seat);
+    } catch (e) {
+      return fail(endFailedText(e instanceof Error ? e.message : String(e)));
+    }
+    // endRun leaves the seat stopped, out of rotation; an idle seat takes its next ticket
+    const after = store.seatSession(seat);
+    if (after !== null && after.runId === null && after.state === "stopped") {
+      store.setSeatSession({ ...after, state: "idle", reason: null, updatedAt: at });
+    }
+    record(at, {
+      kind: "end",
+      seatId: seat,
+      targetRunId: run.id,
+      about: `${call}: ${run.loop.parked?.reason ?? "parked"}`,
+      decision: endedDecision(call),
+      basis,
+    });
+    bus.emit("agents");
+    bus.emit("flight");
+    return { text: endedText(call) };
   }
 
   async function promote(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -712,7 +759,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.messageSeat,
       description:
-        "Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: silent, nothing, stuck, ci-pending, no-ci, refused or ci, at most twice per run.",
+        "Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget, review or ruling park, at most twice per run.",
       inputSchema: objectSchema(
         {
           seat: SEAT_SCHEMA,
@@ -749,6 +796,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: promote,
+    },
+    {
+      name: MC_TOOL_NAMES.endRun,
+      description: `End a developer seat's run that is parked, or that reported with nothing to push, and leave the seat idle so it takes its next ticket. The basis says why nothing is lost by ending it. At most ${FLIGHT_ENDS_PER_HOUR} an hour. Never a run that is working.`,
+      inputSchema: objectSchema({ seat: SEAT_SCHEMA, basis: BASIS_SCHEMA }, ["seat", "basis"]),
+      modes: [],
+      grantable: ["read-only"],
+      call: endRun,
     },
   ];
 }
