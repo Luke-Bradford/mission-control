@@ -327,7 +327,7 @@ async function filledFormerSubmodules(worktree: string, listing: string): Promis
 const ENDED: Result = { text: MC_RUN_ENDED, isError: true };
 const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 /** A branch `branchFor` makes: `feature/{issue}` or `feature/{issue}-{slug}`. */
-const RUN_BRANCH = /^feature\/(\d+)(?:-[a-z0-9]+)*$/;
+export const RUN_BRANCH = /^feature\/(\d+)(?:-[a-z0-9]+)*$/;
 /** Where a logged line is cut. */
 const LOG_LINE_MAX = 500;
 
@@ -405,7 +405,7 @@ interface OriginHeads {
   branchSha: string | null;
 }
 
-function originHeads(out: string, branch: string | null): OriginHeads {
+export function originHeads(out: string, branch: string | null): OriginHeads {
   let defaultRef: string | null = null;
   let defaultSha: string | null = null;
   let branchSha: string | null = null;
@@ -755,7 +755,7 @@ export function openDraftPr(
 }
 
 /** Runs `fn` after every earlier call under `key` in `queue` has settled, one at a time. */
-function queued<T>(queue: Map<string, Promise<unknown>>, key: string, fn: () => Promise<T>) {
+export function queued<T>(queue: Map<string, Promise<unknown>>, key: string, fn: () => Promise<T>) {
   const prev = queue.get(key) ?? Promise.resolve();
   const next = prev.then(fn, fn);
   const tail = next.catch(() => undefined);
