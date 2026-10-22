@@ -37,9 +37,11 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { assignIssue, claimAs } from "../src/claim.ts";
 import { type CcConfig, type CrewSeatConfig, isInside } from "../src/config.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import type { GhRunner } from "../src/mcp/gh.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { CLAUDE_MD_HEADING, reviewBrief, ticketBrief, watchBrief } from "../src/runtime/brief.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -47,6 +49,7 @@ import {
   CREW_LOCK_FILE,
   createSupervisor,
   type Supervisor,
+  type SupervisorDeps,
   SupervisorError,
   type SupervisorEvent,
   seatDenyRead,
@@ -205,11 +208,14 @@ function make(
     nodeNote?: string;
     scratchRetro?: boolean;
     extraSeat?: CrewSeatConfig;
+    autonomy?: "merge" | "draft";
+    claim?: SupervisorDeps["claim"];
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
   const log = vi.fn((_msg: string) => {});
   const cfg = config();
+  if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;
   if (over.node !== undefined && cfg.crew) cfg.crew.node = over.node;
   if (over.nodeNote !== undefined && cfg.crew) cfg.crew.nodeNote = over.nodeNote;
@@ -230,6 +236,7 @@ function make(
       over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,
     fetchTicket,
+    ...(over.claim === undefined ? {} : { claim: over.claim }),
     enabled: over.enabled ?? true,
     stopGraceMs: 300,
     controlTimeoutMs: 500,
@@ -298,6 +305,49 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(sups.splice(0).map((s) => s.stopAll()));
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("startRun claims the ticket", () => {
+  /** A fake gh that records every call and answers with `code`. */
+  const fakeGh = (code = 0) => {
+    const calls: string[][] = [];
+    const gh: GhRunner = async (args) => {
+      calls.push(args);
+      return { code, stdout: "", stderr: "" };
+    };
+    return { calls, gh };
+  };
+
+  it.each(["merge", "draft"] as const)("assigns the hub's login in a %s repo", async (autonomy) => {
+    const { calls, gh } = fakeGh();
+    const { sup } = make({
+      autonomy,
+      claim: (repo, n) => assignIssue(gh, dir, "me", repo, n),
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    expect(calls).toEqual([["issue", "edit", "42", "--repo", "o/mc", "--add-assignee", "me"]]);
+  });
+
+  it("starts nothing when the hub's login is unknown", async () => {
+    const { calls, gh } = fakeGh();
+    const { sup } = make({ claim: claimAs(gh, dir, () => null) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(calls).toEqual([]);
+    expect(store.runs("guido-1", 1)).toEqual([]);
+  });
+
+  it("starts nothing when GitHub refuses the claim", async () => {
+    const { calls, gh } = fakeGh(1);
+    const { sup } = make({ claim: (repo, n) => assignIssue(gh, dir, "me", repo, n) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(calls).toHaveLength(1);
+    expect(store.runs("guido-1", 1)).toEqual([]);
+  });
 });
 
 describe("startRun", () => {
