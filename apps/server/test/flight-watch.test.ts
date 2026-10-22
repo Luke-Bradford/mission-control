@@ -354,6 +354,20 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("a question that goes away and comes back wakes again", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    // the seat's run ends: the question no longer counts, and the wake facts are empty
+    store.upsertRun(run("r-guido", "guido-1", { endedAt: nowMs, status: "ok" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.upsertRun(run("r-guido", "guido-1"));
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
   it("does not wake mid-turn", async () => {
     liveCrew();
     ask();
