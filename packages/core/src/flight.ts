@@ -79,8 +79,9 @@ export const PLAN_SIZES: readonly string[] = TICKET_SIZES.filter(
 /** The board columns a ticket FLIGHT starts may be in. */
 export const FLIGHT_STARTABLE: readonly HudColumn[] = ["Backlog", "Refinement", "Ready"];
 /**
- * The park kinds whose lifting is FLIGHT's call: every kind but budget (a token stop), pr-closed
- * and ended. Account stops, security refusals and hard-rule touches do not park as these kinds.
+ * The park kinds whose lifting is FLIGHT's call: every kind but budget (a token stop), pr-closed,
+ * ended, and review or CI rulings, whose lifting waives a gate. Account stops, security refusals
+ * and hard-rule touches do not park as these kinds.
  */
 export const FLIGHT_UNPARK_KINDS = [
   "silent",
@@ -92,9 +93,6 @@ export const FLIGHT_UNPARK_KINDS = [
   "ci",
   "gate",
   "conflict",
-  "ruling",
-  "review",
-  "review-ruling",
   "review-failed",
 ] as const;
 /** The tickets FLIGHT may start in an hour, per developer (build) seat in its session; at least this many. */

@@ -445,6 +445,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(wrongAreaText(call, ref, areas));
     }
     if (store.activeTickets().has(ref)) return fail(ticketHasRunText(ref));
+    // a card the engine has taken for a seat has no run yet, while it reads the card
+    const taken = store.staleTakes(Number.POSITIVE_INFINITY);
+    if (taken.some((r) => r.repoId === repo.id && r.issue === issue)) {
+      return fail(ticketHasRunText(ref));
+    }
     if (claimedByOther(card, deps.login)) {
       return fail(
         claimedText(
@@ -754,7 +759,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.messageSeat,
       description:
-        "Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget park, at most twice per run.",
+        "Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget, review or ruling park, at most twice per run.",
       inputSchema: objectSchema(
         {
           seat: SEAT_SCHEMA,

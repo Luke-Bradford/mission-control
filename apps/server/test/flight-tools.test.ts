@@ -746,6 +746,16 @@ describe("start_seat", () => {
     expect(await start({ issue: 8 })).toEqual(refused("Not started: mc#8 waits on mc#9."));
   });
 
+  it("refuses a ticket the engine has taken for another seat, in a merge repo", async () => {
+    const repo = cfg.repos[0];
+    if (repo === undefined) throw new Error("no repo");
+    repo.autonomy = "merge";
+    store.replaceQueue("inco-1", [{ repoId: "mc", issue: 7 }]);
+    store.takeQueued("inco-1", NOW);
+    expect(await start()).toEqual(refused("Not started: mc#7 already has a run."));
+    expect(startCalls).toEqual([]);
+  });
+
   it("3: refuses a seat with a run, or busy", async () => {
     busyNow = [{ seatId: "guido-1", state: "starting" }];
     expect(await start()).toEqual(refused("Not started: GUIDO-1 already has a run."));
@@ -1111,15 +1121,22 @@ describe("message_seat unpark", () => {
     expect(messageCalls).toEqual([]);
   });
 
-  it.each(["nothing", "gate", "conflict", "review", "review-failed"])(
-    "lifts a %s park",
+  it.each(["review", "review-ruling", "ruling"])(
+    "leaves a %s park to the operator",
     async (kind) => {
       parked(kind);
-      expect(await call("message_seat", U())).toEqual({
-        text: "Sent to GUIDO-1, and its run is un-parked.",
-      });
+      expect((await call("message_seat", U())).isError).toBe(true);
+      expect(messageCalls).toEqual([]);
+      expect(engineCalls).toEqual([]);
     },
   );
+
+  it.each(["nothing", "gate", "conflict", "review-failed"])("lifts a %s park", async (kind) => {
+    parked(kind);
+    expect(await call("message_seat", U())).toEqual({
+      text: "Sent to GUIDO-1, and its run is un-parked.",
+    });
+  });
 
   it("leaves an ended park to the operator", async () => {
     parked("silent", true);
