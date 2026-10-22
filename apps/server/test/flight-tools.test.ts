@@ -1266,6 +1266,17 @@ describe("promote", () => {
     expect(moveCalls).toEqual([]);
   });
 
+  it("refuses an undo when only another ticket was promoted", async () => {
+    addDecision({ kind: "promote", ref: "mc#8" });
+    board(backlog({ status: "Ready" }));
+    expect(await call("promote", P({ to: "Backlog" }))).toEqual(
+      refused(
+        "Not moved: mc#7 is in Ready; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.",
+      ),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
   it("refuses a move from a column outside the pairs", async () => {
     board(backlog({ status: "In progress", state: "in progress" }));
     expect((await call("promote", P({ to: "Refinement" }))).text).toContain(
