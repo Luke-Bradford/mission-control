@@ -51,6 +51,8 @@ export const EMPTY_LOG = "(the failed run's log was empty)";
 export const EARLIER_PR_OPEN = "an earlier PR is open on this branch";
 /** Why setReviewStatus did not set the status. */
 export const REVIEW_STATUS_FAILED = "the mc/review status could not be set";
+/** The most of gh's stderr a failed status write's log line carries, in characters. */
+const STATUS_STDERR_MAX = 300;
 /** `gh run view --log-failed` may print this much. */
 export const CI_LOG_MAX_BUFFER = 16 * 1024 * 1024;
 
@@ -310,7 +312,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         ],
         { cwd: cwd() },
       );
-      if (r.code !== 0) return { ok: false, text: REVIEW_STATUS_FAILED, transient: true };
+      if (r.code !== 0) {
+        const why = cleanLog(r.stderr).trim().slice(0, STATUS_STDERR_MAX);
+        return {
+          ok: false,
+          text: why === "" ? REVIEW_STATUS_FAILED : `${REVIEW_STATUS_FAILED}: ${why}`,
+          transient: true,
+        };
+      }
       return { ok: true };
     },
 
