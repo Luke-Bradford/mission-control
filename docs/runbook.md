@@ -347,11 +347,12 @@ These steps take a second Mac from nothing to a hub running crew on a board that
 machine's hub also works. Do them in this order; the sections they name have the detail.
 
 1. **Toolchain.**
-   - Node: CI uses 25, the version `engines` asks for. The full suite also passes on 24, with a
-     pnpm `Unsupported engine` warning on each command. Homebrew's `node@24` is keg-only: it is
-     neither at `/opt/homebrew/bin/node` nor on `PATH`. Put it on your shell's `PATH`
-     (`export PATH="/opt/homebrew/opt/node@24/bin:$PATH"` in `~/.zprofile`); step 6 covers the
-     hub.
+   - Node: `brew install node` gives the current release at `/opt/homebrew/bin/node`, which CI
+     (25) and `engines` match, and needs none of step 6's node edits. The full suite also passes
+     on 24, with a pnpm `Unsupported engine` warning on each command; Homebrew's `node@24` is
+     keg-only, so it is neither at `/opt/homebrew/bin/node` nor on `PATH`. If you use it, put it
+     on your shell's `PATH` (`export PATH="/opt/homebrew/opt/node@24/bin:$PATH"` in
+     `~/.zprofile`); step 6 covers the hub.
    - pnpm 11, the version CI uses. Homebrew offers pnpm 12, so install 11 with npm:
      `npm install -g pnpm@11`.
    - The `claude` CLI on `PATH`, for the seats. The copy bundled with the VS Code extension is
@@ -365,7 +366,7 @@ machine's hub also works. Do them in this order; the sections they name have the
    Project → Settings → Manage access, with Write. git must also push over HTTPS as that account
    without a prompt, since the hub's git never prompts: run `gh auth setup-git`, or use a
    credential manager that already holds the account.
-3. **Folders.** Keep the hub's folders under one parent, apart from your own working checkout of
+3. **Folders.** Keep the hub's and the crew's folders apart from your own working checkout of
    this repo, so switching branches there never changes the running hub:
 
    ```text
@@ -397,19 +398,21 @@ machine's hub also works. Do them in this order; the sections they name have the
    - the plist's first `ProgramArguments` entry. Without it launchd cannot start the hub:
      `launchctl print gui/$(id -u)/com.missioncontrol.server` shows
      `last exit code = 78: EX_CONFIG` and both logs stay empty;
-   - its folder (`/opt/homebrew/opt/node@24/bin`) at the front of the plist's `PATH`, which the
-     seats inherit, since pnpm starts with `#!/usr/bin/env node`;
+   - its folder (`/opt/homebrew/opt/node@24/bin`) at the front of the plist's `PATH`, since
+     pnpm starts with `#!/usr/bin/env node`: the hub runs pnpm itself (worktree installs,
+     Update), and the seats inherit that `PATH`;
    - `crew.node` in `config.yaml` (see "Config"). Without it crew stays off with
      `crew.node: /opt/homebrew/bin/node is not an executable file` in `server.err.log`.
 
    To change a plist that is already loaded, load it again (`kickstart` keeps the old
-   definition). Then check that every collector reads `"ok": true`, and that `server.err.log`
-   has no new `crew:` line: health doesn't show crew, and that line names why crew is off.
+   definition). Then check that every collector reads `"ok": true`, and that crew status reads
+   `"enabled": true` (health doesn't show crew; when crew is off, `note` says why):
 
    ```sh
    launchctl bootout gui/$(id -u)/com.missioncontrol.server
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist
    curl -s http://127.0.0.1:7420/api/health
+   curl -s http://127.0.0.1:7420/api/crew/status
    ```
 
 7. **Take a ticket.** Each hub keeps its runs in its own database, so neither sees the other's
@@ -417,8 +420,8 @@ machine's hub also works. Do them in this order; the sections they name have the
    `autonomy: draft` with no FLIGHT seat: in a draft repo the engine deals no cards, and a FLIGHT
    seat would start Ready tickets on its own. To take one:
    1. Move its card to In progress and assign this machine's account.
-   2. Wait one of the other hub's GitHub polls (`poll.github_seconds`, 60 by default), so it sees
-      the card has left Ready.
+   2. Wait one of the other hub's GitHub polls (its `poll.github_seconds`; 60 in the example
+      config), so it sees the card has left Ready.
    3. Check that no branch or PR exists for it:
       `git ls-remote --heads origin 'feature/<issue>' 'feature/<issue>-*'` and the repo's open
       PRs. If one does, the other hub started it first: unassign this machine's account and
@@ -426,7 +429,7 @@ machine's hub also works. Do them in this order; the sections they name have the
    4. Start a seat from the ticket's panel, which offers Start in any column. Pick the seat whose
       `area` matches the ticket's `area:` label; the panel offers the first free seat.
 
-   The check in step 3 sees a run the other hub started only once that run has pushed. If it
+   The branch check in 3 above sees a run the other hub started only once that run has pushed. If it
    could have started the ticket in the minute before you moved the card, ask whoever runs it.
 
 ## Crew pushes and PRs
