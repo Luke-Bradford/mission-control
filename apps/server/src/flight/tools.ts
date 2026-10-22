@@ -375,7 +375,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (store.activeTickets().has(ref)) return fail(ticketHasRunText(ref));
     if (claimedByOther(card, deps.login)) {
-      return fail(claimedText(ref, (card.assignees ?? []).filter((a) => a !== deps.login)));
+      return fail(
+        claimedText(
+          ref,
+          (card.assignees ?? []).filter((a) => a !== deps.login),
+        ),
+      );
     }
     const open = card.blockedBy.filter((b) => !b.closed).map((b) => b.ref);
     if (open.length > 0) return fail(waitsOnText(ref, open));
