@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mission Control server LaunchAgent (template; nothing installs or loads it automatically).
+  Runs the server entry point with node directly (not through pnpm, so launchd's SIGTERM
+  reaches the server process and it shuts down cleanly). It serves the API and the built web
+  app on 127.0.0.1:7420. Node >= 25 is expected at /opt/homebrew/bin/node; edit the first
+  ProgramArguments entry if yours is elsewhere. The bind address is fixed in apps/server/src/main.ts (loopback only in Plan 1);
+  there is no setting here that can widen it.
+
+  Placeholders: __REPO__ = absolute path of this checkout, __HOME__ = your home directory.
+  Install (see docs/runbook.md):
+    mkdir -p ~/Library/Logs/mission-control
+    sed -e "s|__REPO__|$PWD|g" -e "s|__HOME__|$HOME|g" ops/com.missioncontrol.server.plist.tmpl \
+      > ~/Library/LaunchAgents/com.missioncontrol.server.plist
+    plutil -lint ~/Library/LaunchAgents/com.missioncontrol.server.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist
+  Stop:
+    launchctl bootout gui/$(id -u)/com.missioncontrol.server
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.missioncontrol.server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>--experimental-strip-types</string>
+    <string>__REPO__/apps/server/src/main.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- gh (board/escalation reads) and codex (usage reads) are found on this PATH. -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- Restart whenever it exits; ThrottleInterval stops a crash loop (e.g. a config error) spinning. -->
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/mission-control/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/mission-control/server.err.log</string>
+</dict>
+</plist>

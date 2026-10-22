@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.superpowers/sdd/
+*.sqlite
+.env*
+.superpowers/brainstorm/
+dist-next/
+dist-prev/
+.pnpm-store/
+CLAUDE.local.md

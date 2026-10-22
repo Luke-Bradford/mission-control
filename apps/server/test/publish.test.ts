@@ -1,0 +1,646 @@
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  CI_EXCERPT_LINES,
+  CI_EXCERPT_MAX,
+  MC_PR_BODY_MAX,
+  MC_PR_BODY_REFUSED,
+  MC_PR_EDIT_FAILED,
+  MC_PR_FAILED,
+  MC_PUSH_FAILED,
+  MC_PUSH_FIRST,
+  MINOR_HEADING,
+  MINOR_WITHHELD,
+  minorIntro,
+  minorMoreLine,
+  prEditedText,
+  type Run,
+} from "@mc/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CcConfig } from "../src/config.ts";
+import {
+  CI_LOG_UNREADABLE,
+  cleanLog,
+  createPublisher,
+  EARLIER_PR_OPEN,
+  EMPTY_LOG,
+  NO_FAILED_RUN,
+} from "../src/engine/publish.ts";
+import { createGh, type GhRunner } from "../src/mcp/gh.ts";
+import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
+import { Store } from "../src/store.ts";
+
+const tools = vi.hoisted(() => ({
+  pushRun: vi.fn(),
+  openDraftPr: vi.fn(),
+}));
+vi.mock("../src/mcp/tools.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/mcp/tools.ts")>()),
+  pushRun: tools.pushRun,
+  openDraftPr: tools.openDraftPr,
+}));
+
+const START = Date.parse("2026-10-21T10:00:00Z");
+const BRANCH = "feature/7-fix-the-thing";
+const SHA = "a".repeat(40);
+const BASE = "c".repeat(40);
+
+let dir: string;
+let store: Store;
+let ghCalls: string[][];
+let ghAnswers: ((args: string[]) => { code: number | null; stdout: string; stderr?: string })[];
+
+const config = (): CcConfig =>
+  ({
+    operator: { id: "op", timezone: "Europe/London" },
+    accounts: [],
+    repos: [{ id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "merge" }],
+    loops: [],
+    poll: { usageMinutes: 30, githubSeconds: 60 },
+    crew: {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 8,
+      sessions: [
+        {
+          id: "s",
+          repoId: "mc",
+          checkout: join(dir, "clone"),
+          seats: [{ id: "guido-1", role: "GUIDO", accountId: "a", model: "haiku", area: [] }],
+        },
+      ],
+    },
+  }) as CcConfig;
+
+const gh: GhRunner = async (args) => {
+  ghCalls.push(args);
+  const answer = ghAnswers.shift();
+  if (answer === undefined) throw new Error(`gh ${args.join(" ")} was not expected`);
+  const r = answer(args);
+  return { stderr: "", ...r };
+};
+
+const run = (over: Partial<Run> = {}): Run => ({
+  id: "r1",
+  agentId: "guido-1",
+  repoId: "mc",
+  seq: 1,
+  startedAt: START,
+  endedAt: null,
+  status: "running",
+  sessionId: null,
+  model: null,
+  branch: BRANCH,
+  ticket: "mc#7",
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "",
+  prs: [],
+  summary: null,
+  ...over,
+});
+
+const deps = (over: Partial<McToolsDeps> = {}): McToolsDeps => ({
+  config: config(),
+  store,
+  bus: { emit: () => {} } as never,
+  inClone: (_c, fn) => fn(),
+  gh,
+  dbPath: join(dir, "mc.sqlite"),
+  knownSecrets: async () => [],
+  ...over,
+});
+
+const list =
+  (...prs: { number: number; createdAt: string }[]) =>
+  () => ({
+    code: 0,
+    stdout: JSON.stringify(prs),
+  });
+const TICKET = { issue: 7, title: "Fix the thing" };
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "mc-publish-"));
+  store = new Store(join(dir, "mc.sqlite"));
+  ghCalls = [];
+  ghAnswers = [];
+  tools.pushRun.mockReset();
+  tools.openDraftPr.mockReset();
+});
+afterEach(() => {
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+describe("push", () => {
+  it("counts already-on-origin and nothing-to-push as success", async () => {
+    const p = createPublisher(deps());
+    tools.pushRun.mockResolvedValueOnce({ text: "Already on origin." });
+    tools.pushRun.mockResolvedValueOnce({ text: "Nothing to push." });
+    expect(await p.push(run())).toEqual({ ok: true });
+    expect(await p.push(run())).toEqual({ ok: true });
+    expect(tools.pushRun).toHaveBeenCalledWith(expect.anything(), "r1");
+  });
+
+  it("is transient only for the tool's own failure text", async () => {
+    const p = createPublisher(deps());
+    tools.pushRun.mockResolvedValueOnce({ text: MC_PUSH_FAILED, isError: true });
+    tools.pushRun.mockResolvedValueOnce({ text: "Push refused: the branch moved.", isError: true });
+    expect(await p.push(run())).toEqual({ ok: false, text: MC_PUSH_FAILED, transient: true });
+    expect(await p.push(run())).toEqual({
+      ok: false,
+      text: "Push refused: the branch moved.",
+      transient: false,
+    });
+  });
+});
+
+describe("openPr", () => {
+  const OPENED = "https://github.com/o/mc/pull/31";
+
+  it("opens the PR with the ticket's title and a body with the latest note and the closing line", async () => {
+    ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    const r = await createPublisher(deps()).openPr(run(), TICKET, "Changed it.");
+    expect(r).toEqual({ ok: true, prNumber: 31 });
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7 Fix the thing",
+      body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\nCloses #7.",
+    });
+  });
+
+  it("cuts a note that would take the body past the limit, and keeps the closing line", async () => {
+    ghAnswers = [list()];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    await createPublisher(deps()).openPr(run(), TICKET, "x".repeat(MC_PR_BODY_MAX + 500));
+    const pr = tools.openDraftPr.mock.calls[0]?.[2] as { title: string; body: string };
+    expect(pr.body).toHaveLength(MC_PR_BODY_MAX);
+    expect(pr.body.endsWith("…\n\nCloses #7.")).toBe(true);
+  });
+
+  it("falls back to the bare issue when the title or body would notify someone", async () => {
+    ghAnswers = [list()];
+    tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+    const r = await createPublisher(deps()).openPr(
+      run(),
+      { issue: 7, title: "Thanks @someone-else for the report" },
+      "Changed it.",
+    );
+    expect(r).toEqual({ ok: true, prNumber: 31 });
+    expect(tools.openDraftPr).toHaveBeenCalledWith(expect.anything(), "r1", {
+      title: "#7",
+      body: "#7\n\n## What changed\n\nChanged it.\n\nCloses #7.",
+    });
+  });
+
+  it("takes a PR already open on the branch only when it began with this run", async () => {
+    ghAnswers = [list({ number: 30, createdAt: "2026-10-21T10:01:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: 30,
+    });
+    expect(tools.openDraftPr).not.toHaveBeenCalled();
+
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: EARLIER_PR_OPEN,
+      transient: false,
+    });
+    expect(EARLIER_PR_OPEN).toBe("an earlier PR is open on this branch");
+    expect(tools.openDraftPr).not.toHaveBeenCalled();
+  });
+
+  it("is transient when gh cannot list, or the tool's own failure text comes back", async () => {
+    ghAnswers = [() => ({ code: 1, stdout: "" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: MC_PR_FAILED,
+      transient: true,
+    });
+    ghAnswers = [list()];
+    tools.openDraftPr.mockResolvedValueOnce({ text: MC_PR_FAILED, isError: true });
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toMatchObject({
+      ok: false,
+      transient: true,
+    });
+    ghAnswers = [list()];
+    tools.openDraftPr.mockResolvedValueOnce({ text: "The PR body mentions @x.", isError: true });
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: "The PR body mentions @x.",
+      transient: false,
+    });
+  });
+});
+
+describe("openPr: the branch has moved on, and a PR that cannot be named", () => {
+  it("counts a branch that moved past the push as nothing yet, not as a refusal", async () => {
+    ghAnswers = [list()];
+    tools.openDraftPr.mockResolvedValueOnce({ text: MC_PUSH_FIRST, isError: true });
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: null,
+      tipMoved: true,
+    });
+  });
+
+  it("names a PR whose URL it was not given from the open PRs opened since the run began", async () => {
+    ghAnswers = [
+      list(),
+      list(
+        { number: 5, createdAt: "2026-10-20T09:00:00Z" },
+        { number: 31, createdAt: "2026-10-21T10:30:00Z" },
+      ),
+    ];
+    tools.openDraftPr.mockResolvedValueOnce({ text: "A PR is already open: (no URL given)" });
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: 31,
+    });
+    expect(ghCalls[1]).toEqual([
+      "pr",
+      "list",
+      "--repo=o/mc",
+      `--head=${BRANCH}`,
+      "--state=open",
+      "--json=number,createdAt",
+    ]);
+  });
+
+  it("does not name an earlier run's PR", async () => {
+    ghAnswers = [list(), list({ number: 5, createdAt: "2026-10-20T09:00:00Z" })];
+    tools.openDraftPr.mockResolvedValueOnce({ text: "A PR is already open: (no URL given)" });
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: null,
+    });
+  });
+});
+
+describe("cleanLog", () => {
+  const esc = String.fromCharCode(27);
+  const bel = String.fromCharCode(7);
+
+  const c1 = String.fromCharCode;
+
+  it("strips C1 controls", () => {
+    expect(cleanLog(`a${c1(0x80)}b${c1(0x85)}c${c1(0x8a)}d`)).toBe("abcd");
+  });
+
+  it("strips CSI sequences whatever their parameter bytes: colon-separated, private, 8-bit", () => {
+    expect(cleanLog(`${esc}[38:5:196mred${esc}[0m`)).toBe("red");
+    expect(cleanLog(`${esc}[>0cx${esc}[?25lx${esc}[1;2 qx`)).toBe("xxx");
+    expect(cleanLog(`${c1(0x9b)}31mred${c1(0x9b)}0m`)).toBe("red");
+  });
+
+  it("strips single-character escapes: Fp, Fe and Fs", () => {
+    expect(cleanLog(`a${esc}=b${esc}7c${esc}Md${esc}De${esc}cf`)).toBe("abcdef");
+  });
+
+  it("strips device-control, start-of-string, privacy and application strings whole", () => {
+    expect(cleanLog(`a${esc}P1$r0m${esc}\\b`)).toBe("ab");
+    expect(cleanLog(`a${esc}Xsos payload\nmore${esc}\\b`)).toBe("ab");
+    expect(cleanLog(`a${esc}^pm payload${esc}\\b`)).toBe("ab");
+    expect(cleanLog(`a${esc}_apc payload${esc}\\b`)).toBe("ab");
+    expect(cleanLog(`a${c1(0x90)}8-bit dcs${c1(0x9c)}b${c1(0x9d)}0;title${c1(0x9c)}c`)).toBe("abc");
+  });
+
+  it("strips operating-system commands whole, ST- and BEL-terminated", () => {
+    const link = `${esc}]8;;https://example.com/x${esc}\\text${esc}]8;;${esc}\\`;
+    expect(cleanLog(link)).toBe("text");
+    expect(cleanLog(`${esc}]0;window title${bel}after`)).toBe("after");
+  });
+
+  it("strips charset sequences", () => {
+    expect(cleanLog(`${esc}(Bplain${esc})0${esc}#8${esc}%G`)).toBe("plain");
+  });
+
+  it("keeps newlines, tabs and ordinary text", () => {
+    expect(cleanLog("a\tb\nc é 日本")).toBe("a\tb\nc é 日本");
+  });
+});
+
+describe("ciExcerpt", () => {
+  const runs =
+    (...r: { databaseId: number; name: string; conclusion: string }[]) =>
+    () => ({
+      code: 0,
+      stdout: JSON.stringify(r),
+    });
+
+  it("reads the last lines of each failed run's log, cleaned and prefixed with the run's name", async () => {
+    const log = `${Array.from({ length: 200 }, (_, i) => `line ${i}`).join("\n")}\n`;
+    ghAnswers = [
+      runs(
+        { databaseId: 11, name: "test", conclusion: "failure" },
+        { databaseId: 12, name: "lint", conclusion: "success" },
+      ),
+      () => ({ code: 0, stdout: log }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    const lines = out.split("\n");
+    expect(lines[0]).toBe("test:");
+    expect(lines).toHaveLength(1 + CI_EXCERPT_LINES);
+    expect(lines.at(-1)).toBe("line 199");
+    expect(lines[1]).toBe(`line ${200 - CI_EXCERPT_LINES}`);
+    expect(ghCalls[0]).toEqual([
+      "run",
+      "list",
+      "--repo=o/mc",
+      `--commit=${SHA}`,
+      "--json=databaseId,name,conclusion",
+    ]);
+    expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--log-failed"]);
+  });
+
+  it("strips colour codes and control characters, and caps the size", async () => {
+    const esc = String.fromCharCode(27);
+    const bell = String.fromCharCode(7);
+    expect(cleanLog(`${esc}[31mred${esc}[0m${bell}\r\nok\ttab`)).toBe("red\nok\ttab");
+    const big = `${"x".repeat(100)}\n`.repeat(200);
+    ghAnswers = [
+      runs({ databaseId: 11, name: "test", conclusion: "failure" }),
+      () => ({ code: 0, stdout: big }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    expect(out.startsWith("test:\n")).toBe(true);
+  });
+
+  it("counts bytes, headers and separators against the cap, and skips a header with no room", async () => {
+    const wide = `${"日本語".repeat(40)}\n`.repeat(80);
+    ghAnswers = [
+      runs(
+        { databaseId: 1, name: "test", conclusion: "failure" },
+        { databaseId: 2, name: "lint", conclusion: "failure" },
+        { databaseId: 3, name: "build", conclusion: "failure" },
+      ),
+      () => ({ code: 0, stdout: wide }),
+      () => ({ code: 0, stdout: wide }),
+      () => ({ code: 0, stdout: wide }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    // the first run takes nearly everything; no later header stands with nothing under it
+    for (const section of out.split("\n\n")) {
+      expect(section).toMatch(/^[a-z]+:\n\S/);
+    }
+    // the first run's text takes the whole budget: the second run gets no header, and its log is
+    // not read at all
+    ghCalls = [];
+    ghAnswers = [
+      runs(
+        { databaseId: 1, name: "test", conclusion: "failure" },
+        { databaseId: 2, name: "x".repeat(CI_EXCERPT_MAX), conclusion: "failure" },
+      ),
+      () => ({ code: 0, stdout: "y".repeat(CI_EXCERPT_MAX * 2) }),
+    ];
+    const full = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(Buffer.byteLength(full)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    expect(ghCalls.filter((c) => c[1] === "view")).toHaveLength(1);
+  });
+
+  it("fills the budget exactly across sections when the first does not use it all", async () => {
+    // 80 lines of 200 bytes for the second run; the first run's 20 bytes come off the budget
+    const long = `${"z".repeat(199)}\n`.repeat(80);
+    ghAnswers = [
+      runs(
+        { databaseId: 1, name: "a", conclusion: "failure" },
+        { databaseId: 2, name: "b", conclusion: "failure" },
+      ),
+      () => ({ code: 0, stdout: "first run log\n" }),
+      () => ({ code: 0, stdout: long }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    const [first, second] = out.split("\n\n");
+    expect(first).toBe("a:\nfirst run log");
+    expect(second?.startsWith("b:\n")).toBe(true);
+    expect(Buffer.byteLength(out)).toBe(CI_EXCERPT_MAX);
+  });
+
+  it("does not call an empty log a missing run", async () => {
+    ghAnswers = [
+      runs({ databaseId: 1, name: "a", conclusion: "failure" }),
+      () => ({ code: 0, stdout: "\n\n" }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toBe(EMPTY_LOG);
+    expect(out).not.toBe(NO_FAILED_RUN);
+  });
+
+  it("says so when no Actions run failed, and when gh fails", async () => {
+    ghAnswers = [runs({ databaseId: 1, name: "t", conclusion: "success" })];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
+    expect(NO_FAILED_RUN).toBe("(no failed Actions run to read)");
+    ghAnswers = [() => ({ code: 1, stdout: "" })];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(CI_LOG_UNREADABLE);
+    ghAnswers = [() => ({ code: 0, stdout: "not json" })];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(CI_LOG_UNREADABLE);
+    ghAnswers = [
+      runs({ databaseId: 1, name: "t", conclusion: "failure" }),
+      () => ({ code: 1, stdout: "" }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(CI_LOG_UNREADABLE);
+    expect(CI_LOG_UNREADABLE).toBe("(the CI log could not be read)");
+  });
+
+  it("asks for a 16 MiB log buffer", async () => {
+    const seen: (number | undefined)[] = [];
+    const spy: GhRunner = async (args, opts) => {
+      seen.push(opts.maxBuffer);
+      return args[1] === "list"
+        ? {
+            code: 0,
+            stdout: JSON.stringify([{ databaseId: 1, name: "t", conclusion: "failure" }]),
+            stderr: "",
+          }
+        : { code: 0, stdout: "x", stderr: "" };
+    };
+    await createPublisher(deps({ gh: spy })).ciExcerpt("o/mc", SHA);
+    expect(seen).toEqual([undefined, 16 * 1024 * 1024]);
+  });
+});
+
+describe("gh maxBuffer", () => {
+  const emit = ["-e", "process.stdout.write('x'.repeat(2_000_000))"];
+
+  it("keeps the 1 MiB default and takes a larger one", async () => {
+    const g = createGh(process.execPath);
+    expect((await g(emit, { cwd: dir })).code).toBeNull();
+    const big = await g(emit, { cwd: dir, maxBuffer: 4 * 1024 * 1024 });
+    expect(big.code).toBe(0);
+    expect(big.stdout).toHaveLength(2_000_000);
+  });
+});
+
+describe("hardRuleTouches", () => {
+  beforeEach(() => {
+    mkdirSync(join(dir, "clone", ".git"), { recursive: true });
+  });
+
+  it("lists the paths between origin's default branch and the sha that match a hard rule", async () => {
+    const calls: string[][] = [];
+    const git = (async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      return args[0] === "merge-base"
+        ? `${BASE}\n`
+        : ".github/workflows/ci.yml\0apps/web/a.ts\0CLAUDE.md\0loops/x/y.sh\0";
+    }) as never;
+    const paths = await createPublisher(deps({ git })).hardRuleTouches(run(), SHA, [
+      ".github/**",
+      "CLAUDE.md",
+      "loops/**",
+    ]);
+    expect(paths).toEqual([".github/workflows/ci.yml", "CLAUDE.md", "loops/x/y.sh"]);
+    expect(calls).toEqual([
+      ["merge-base", "refs/remotes/origin/HEAD", SHA],
+      ["diff", "--name-only", "-z", BASE, SHA, "--"],
+    ]);
+  });
+
+  it("reads nothing for a sha that is not a sha, or with no rules", async () => {
+    const git = (async () => {
+      throw new Error("git was not expected");
+    }) as never;
+    const p = createPublisher(deps({ git }));
+    expect(await p.hardRuleTouches(run(), "--upload-pack=x", ["a/**"])).toEqual([]);
+    expect(await p.hardRuleTouches(run(), SHA, [])).toEqual([]);
+  });
+});
+
+describe("postMinorFindings", () => {
+  const VIEW_OK = JSON.stringify({ headRefName: BRANCH, state: "OPEN" });
+  const R = run({ loop: { prNumber: 12 } as never });
+  let posted: string | null;
+
+  const minor = (summary: string, line = 3) => ({
+    severity: "Minor" as const,
+    file: "a.ts",
+    line,
+    summary,
+    scenario: "w",
+    fix: "f",
+  });
+  /** Records a review of the run with `findings`; returns what postMinorFindings takes. */
+  const review = (findings: ReturnType<typeof minor>[]) => {
+    const id = store.requestReview({
+      authorRunId: R.id,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 12,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: START,
+    });
+    if (id === null) throw new Error("no review");
+    store.setReviewState(id, ["queued"], "running", { at: START, runId: "rr" });
+    store.recordFindings(id, "rr", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "ok",
+      findings,
+      at: START,
+    });
+    return { id, sha: SHA, retro: "RETRO" };
+  };
+  const answer = (view = VIEW_OK, editCode = 0) => {
+    posted = null;
+    ghAnswers = [
+      () => ({ code: 0, stdout: view }),
+      (args) => {
+        const file = args.find((a) => a.startsWith("--body-file="))?.slice("--body-file=".length);
+        if (file !== undefined) posted = readFileSync(file, "utf8");
+        return { code: editCode, stdout: "" };
+      },
+    ];
+  };
+  const bodyFiles = () => {
+    const crew = join(dir, "crew");
+    return existsSync(crew) ? readdirSync(crew).filter((f) => f.startsWith("pr-")) : [];
+  };
+
+  beforeEach(() => {
+    store.upsertRun(R);
+    store.addEvidence(R.id, "Changed it.", START);
+  });
+
+  it("rewrites the body with the minors, before the closing line", async () => {
+    const rv = review([minor("first"), minor("second", 0)]);
+    answer();
+    const r = await createPublisher(deps()).postMinorFindings(R, rv);
+    expect(r).toEqual({ ok: true });
+    expect(ghCalls.map((c) => c.slice(0, 3))).toEqual([
+      ["pr", "view", "12"],
+      ["pr", "edit", "12"],
+    ]);
+    const at = (s: string) => (posted ?? "").indexOf(s);
+    expect(at(MINOR_HEADING)).toBeGreaterThan(-1);
+    expect(at(MINOR_HEADING)).toBeLessThan(at(minorIntro("RETRO", SHA)));
+    expect(at(minorIntro("RETRO", SHA))).toBeLessThan(at("- `a.ts:3` — first"));
+    expect(at("- `a.ts:3` — first")).toBeLessThan(at("- `a.ts` — second"));
+    expect(at("- `a.ts` — second")).toBeLessThan(at("Closes #7."));
+    expect(posted?.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+  });
+
+  it("withholds a line that would notify someone", async () => {
+    const rv = review([minor("ping @octocat")]);
+    answer();
+    await createPublisher(deps()).postMinorFindings(R, rv);
+    expect(posted).toContain(MINOR_WITHHELD);
+    expect(posted).not.toContain("@octocat");
+  });
+
+  it("lists 20 and counts the rest", async () => {
+    const rv = review(Array.from({ length: 21 }, (_, k) => minor(`m${k}`)));
+    answer();
+    await createPublisher(deps()).postMinorFindings(R, rv);
+    const lines = (posted ?? "").split("\n");
+    expect(lines.filter((l) => l.startsWith("- `a.ts:3`"))).toHaveLength(20);
+    expect(lines).toContain(minorMoreLine(1));
+  });
+
+  it("drops the section when there are no minors", async () => {
+    const rv = review([]);
+    answer();
+    await createPublisher(deps()).postMinorFindings(R, rv);
+    expect(posted).not.toContain(MINOR_HEADING);
+    expect(posted).toContain("Closes #7.");
+  });
+
+  it("edits nothing that is not the run's open PR", async () => {
+    const rv = review([minor("s")]);
+    for (const view of [
+      JSON.stringify({ headRefName: "other", state: "OPEN" }),
+      JSON.stringify({ headRefName: BRANCH, state: "CLOSED" }),
+    ]) {
+      ghCalls = [];
+      answer(view);
+      const r = await createPublisher(deps()).postMinorFindings(R, rv);
+      expect(r).toMatchObject({ ok: false, transient: false });
+      expect(ghCalls.some((c) => c[1] === "edit")).toBe(false);
+    }
+  });
+
+  it("is transient when gh fails, and leaves no body file", async () => {
+    const rv = review([minor("s")]);
+    answer(VIEW_OK, 1);
+    const r = await createPublisher(deps()).postMinorFindings(R, rv);
+    expect(r).toMatchObject({ ok: false, transient: true, text: MC_PR_EDIT_FAILED });
+    expect(bodyFiles()).toEqual([]);
+  });
+
+  it("refuses a body with a secret, with one guard hit and no gh call", async () => {
+    const r = await editRunPrBody(deps(), R.id, 12, `ghp_${"a".repeat(36)}`);
+    expect(r).toEqual({ text: MC_PR_BODY_REFUSED, isError: true });
+    expect(ghCalls).toEqual([]);
+    expect(store.guardHits(0)).toHaveLength(1);
+  });
+
+  it("an unended run its seat no longer holds is still edited", async () => {
+    answer();
+    const r = await editRunPrBody(deps(), R.id, 12, "Hello.");
+    expect(r).toEqual({ text: prEditedText(12) });
+  });
+});

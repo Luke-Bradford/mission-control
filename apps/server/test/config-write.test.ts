@@ -1,0 +1,423 @@
+import "./temp-home.ts";
+import {
+  chmodSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import type { NewRepo } from "@mc/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadConfig } from "../src/config.ts";
+import {
+  addRepo,
+  CONFIG_BACKUPS_KEEP,
+  ConfigWriteError,
+  NewRepoBody,
+  RepoLocation,
+} from "../src/config-write.ts";
+
+// Lets a test make the final rename fail (the disk or directory refusing the swap mid-write), or
+// any chmod fail (a backup created 0600 never needs one).
+const fault = vi.hoisted(() => ({
+  rename: null as NodeJS.ErrnoException | null,
+  chmod: null as NodeJS.ErrnoException | null,
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...real,
+    rename: async (from: string, to: string) => {
+      if (fault.rename) throw fault.rename;
+      return real.rename(from, to);
+    },
+    chmod: async (p: string, mode: number) => {
+      if (fault.chmod) throw fault.chmod;
+      return real.chmod(p, mode);
+    },
+  };
+});
+
+const EXAMPLE = resolve(import.meta.dirname, "../../../config.example.yaml");
+const NOW = Date.parse("2026-10-19T12:00:00Z");
+
+let dir: string;
+let path: string;
+
+const COMMENTED =
+  "# Mission Control config — hand-written\n" +
+  readFileSync(EXAMPLE, "utf8")
+    .replace("repos:\n", "repos:\n  # shop-app first: the TA loop's repo\n")
+    .replace("\ncrew:\n", `\ncrew:\n  node: ${process.execPath}\n`);
+
+const repo = (over: Partial<NewRepo> = {}): NewRepo => ({
+  id: "studio",
+  github: "octo-org/studio",
+  project: 4,
+  statusMap: { Todo: "planned", "In Progress": "in progress", Done: "done" },
+  ...over,
+});
+
+const files = () => readdirSync(dir).sort();
+const backups = () => files().filter((f) => f.startsWith("config.yaml.bak-"));
+
+async function writeError(p: Promise<unknown>): Promise<ConfigWriteError> {
+  try {
+    await p;
+  } catch (e) {
+    expect(e).toBeInstanceOf(ConfigWriteError);
+    return e as ConfigWriteError;
+  }
+  throw new Error("expected ConfigWriteError");
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "mc-config-write-"));
+  path = join(dir, "config.yaml");
+  writeFileSync(path, COMMENTED, { mode: 0o600 });
+  fault.rename = null;
+  fault.chmod = null;
+});
+
+afterEach(() => {
+  chmodSync(dir, 0o700);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+describe("addRepo", () => {
+  it("appends the repo, keeps comments and key order, and the file loads with it", async () => {
+    const before = loadConfig(path);
+    const { config, backup } = await addRepo(path, repo({ needsYouLabels: ["needs-design"] }), NOW);
+    const text = readFileSync(path, "utf8");
+    expect(text.startsWith("# Mission Control config — hand-written\n")).toBe(true);
+    expect(text).toContain("  # shop-app first: the TA loop's repo\n");
+    expect(text).toContain('  # The operator\'s id (default "operator").\n');
+    // the old text is untouched up to the end of the repos list, the new entry follows it
+    const head = COMMENTED.slice(0, COMMENTED.indexOf("\nloops:"));
+    expect(text.startsWith(head)).toBe(true);
+    expect(text.indexOf("id: studio")).toBeGreaterThan(text.indexOf("id: site-builder"));
+    expect(text.indexOf("id: studio")).toBeLessThan(text.indexOf("\nloops:"));
+    expect(text).toContain("needs_you_labels:");
+    const loaded = loadConfig(path);
+    expect(loaded).toEqual(config);
+    expect(loaded).toEqual({
+      ...before,
+      repos: [
+        ...before.repos,
+        {
+          id: "studio",
+          github: "octo-org/studio",
+          project: 4,
+          statusMap: { Todo: "planned", "In Progress": "in progress", Done: "done" },
+          needsYouLabels: ["needs-design"],
+          fullSuite: [],
+          autonomy: "draft",
+        },
+      ],
+    });
+    expect(backup).toBe(join(dir, "config.yaml.bak-20261019T120000Z"));
+    expect(readFileSync(backup, "utf8")).toBe(COMMENTED);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(statSync(backup).mode & 0o777).toBe(0o600);
+    expect(files()).toEqual(["config.yaml", "config.yaml.bak-20261019T120000Z"]);
+  });
+
+  it("writes 0600 even when the old file was group-readable", async () => {
+    chmodSync(path, 0o644);
+    const { backup } = await addRepo(path, repo(), NOW);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(statSync(backup).mode & 0o777).toBe(0o600);
+  });
+
+  it("creates the backup 0600 from a 0644 file, with no chmod after it", async () => {
+    chmodSync(path, 0o644);
+    fault.chmod = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+    const { backup } = await addRepo(path, repo(), NOW);
+    expect(statSync(backup).mode & 0o777).toBe(0o600);
+    expect(readFileSync(backup, "utf8")).toBe(COMMENTED);
+  });
+
+  it("refuses a config.yaml that is a symbolic link: nothing written, no backup", async () => {
+    const target = join(dir, "real.yaml");
+    writeFileSync(target, COMMENTED, { mode: 0o600 });
+    rmSync(path);
+    symlinkSync(target, path);
+    const e = await writeError(addRepo(path, repo(), NOW));
+    expect(e.kind).toBe("current");
+    expect(e.message).toBe("config.yaml is a symbolic link");
+    expect(readFileSync(target, "utf8")).toBe(COMMENTED);
+    expect(files()).toEqual(["config.yaml", "real.yaml"]);
+  });
+
+  it("keeps an existing plain scalar longer than 80 columns on one line", async () => {
+    const label =
+      "waiting on a decision from the operator before the next fire can pick this ticket up again";
+    expect(label.length).toBeGreaterThan(80);
+    const long = COMMENTED.replace(
+      "      Done: done\n  - id: site-builder",
+      `      Done: done\n    needs_you_labels:\n      - ${label}\n  - id: site-builder`,
+    );
+    expect(long).not.toBe(COMMENTED);
+    writeFileSync(path, long);
+    await addRepo(path, repo(), NOW);
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain(`      - ${label}\n`);
+    expect(text.startsWith(long.slice(0, long.indexOf("\nloops:")))).toBe(true);
+  });
+
+  it("writes a status-map key YAML would otherwise misread exactly as given", async () => {
+    const statusMap = {
+      "a: b": "done",
+      "#hash": "planned",
+      yes: "review",
+      "1": "blocked",
+      " padded ": "in progress",
+    } as const;
+    const { config } = await addRepo(path, repo({ statusMap }), NOW);
+    expect(config.repos.at(-1)?.statusMap).toEqual(statusMap);
+    expect(loadConfig(path).repos.at(-1)?.statusMap).toEqual(statusMap);
+  });
+
+  it("creates the list when repos is empty", async () => {
+    writeFileSync(
+      path,
+      readFileSync(EXAMPLE, "utf8")
+        .replace(/\ncrew:[\s\S]*$/, "") // its sessions name repos
+        .replace(
+          /repos:\n[\s\S]*?\nloops:\n[\s\S]*?\npoll:/,
+          "repos: [] # none yet\n\nloops: []\n\npoll:",
+        ),
+    );
+    expect(loadConfig(path).repos).toEqual([]);
+    const { config } = await addRepo(path, repo(), NOW);
+    expect(config.repos.map((r) => r.id)).toEqual(["studio"]);
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("repos:\n  - id: studio\n");
+    expect(loadConfig(path)).toEqual(config);
+  });
+
+  it("refuses a duplicate id: nothing written, no backup", async () => {
+    const e = await writeError(addRepo(path, repo({ id: "shop-app" }), NOW));
+    expect(e.kind).toBe("duplicate");
+    expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+    expect(files()).toEqual(["config.yaml"]);
+  });
+
+  it("refuses the same github (any case) with the same project, allows another project", async () => {
+    const e = await writeError(
+      addRepo(path, repo({ github: "OCTO-ORG/SHOP-APP", project: 2 }), NOW),
+    );
+    expect(e.kind).toBe("duplicate");
+    expect(files()).toEqual(["config.yaml"]);
+    await addRepo(path, repo({ id: "shop-app-2", github: "octo-org/shop-app", project: 9 }), NOW);
+    expect(loadConfig(path).repos.map((r) => r.id)).toEqual([
+      "shop-app",
+      "site-builder",
+      "mission-control",
+      "shop-app-2",
+    ]);
+  });
+
+  it("refuses when the current file does not load: untouched, no backup, no contents in the message", async () => {
+    const broken = `${COMMENTED}\nsecret_token: [ghp_SHOULD_NOT_LEAK\n`;
+    writeFileSync(path, broken);
+    const e = await writeError(addRepo(path, repo(), NOW));
+    expect(e.kind).toBe("current");
+    expect(e.message).not.toContain("ghp_SHOULD_NOT_LEAK");
+    expect(e.message).not.toContain("secret_token");
+    expect(readFileSync(path, "utf8")).toBe(broken);
+    expect(files()).toEqual(["config.yaml"]);
+  });
+
+  it("refuses a current file that parses but fails validation", async () => {
+    const invalid = COMMENTED.replace("repo_id: shop-app", "repo_id: nope");
+    writeFileSync(path, invalid);
+    const e = await writeError(addRepo(path, repo(), NOW));
+    expect(e.kind).toBe("current");
+    expect(e.message).not.toContain("nope");
+    expect(readFileSync(path, "utf8")).toBe(invalid);
+    expect(files()).toEqual(["config.yaml"]);
+  });
+
+  it("refuses a missing file as current", async () => {
+    rmSync(path);
+    expect((await writeError(addRepo(path, repo(), NOW))).kind).toBe("current");
+    expect(files()).toEqual([]);
+  });
+
+  it("re-reads the file: a repo hand-added since start is kept and counts as a duplicate", async () => {
+    await addRepo(path, repo({ id: "first", github: "o/first", project: 1 }), NOW);
+    const edited = readFileSync(path, "utf8").replace(
+      "\nloops:",
+      "  # added by hand\n  - id: hand\n    github: o/hand\n    project: 5\n    status_map:\n      Todo: planned\n\nloops:",
+    );
+    writeFileSync(path, edited);
+    expect((await writeError(addRepo(path, repo({ id: "hand" }), NOW + 1000))).kind).toBe(
+      "duplicate",
+    );
+    await addRepo(path, repo(), NOW + 2000);
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("  # added by hand\n");
+    expect(loadConfig(path).repos.map((r) => r.id)).toEqual([
+      "shop-app",
+      "site-builder",
+      "mission-control",
+      "first",
+      "hand",
+      "studio",
+    ]);
+  });
+
+  it("a failed rename leaves the file unchanged, removes the temp file and keeps the backup", async () => {
+    fault.rename = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    const e = await writeError(addRepo(path, repo(), NOW));
+    expect(e.kind).toBe("write");
+    expect(e.message).not.toContain(dir);
+    expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+    expect(files()).toEqual(["config.yaml", "config.yaml.bak-20261019T120000Z"]);
+  });
+
+  it("a read-only directory writes nothing and leaves no temp file", async () => {
+    chmodSync(dir, 0o500);
+    const e = await writeError(addRepo(path, repo(), NOW));
+    expect(e.kind).toBe("write");
+    expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+    chmodSync(dir, 0o700);
+    expect(files()).toEqual(["config.yaml"]);
+  });
+
+  it(`keeps the newest ${CONFIG_BACKUPS_KEEP} backups, and never a file it did not name`, async () => {
+    expect(CONFIG_BACKUPS_KEEP).toBe(10);
+    writeFileSync(join(dir, "config.yaml.bak-mine"), "kept");
+    for (let i = 0; i < 12; i++) {
+      await addRepo(path, repo({ id: `r${i}`, github: `o/r${i}`, project: i + 1 }), NOW + i * 1000);
+    }
+    expect(loadConfig(path).repos).toHaveLength(15);
+    const kept = backups().filter((f) => f !== "config.yaml.bak-mine");
+    expect(kept).toEqual(
+      Array.from(
+        { length: 10 },
+        (_, i) => `config.yaml.bak-20261019T1200${String(i + 2).padStart(2, "0")}Z`,
+      ),
+    );
+    expect(readFileSync(join(dir, "config.yaml.bak-mine"), "utf8")).toBe("kept");
+    // the newest backup is the file as it was before the last add
+    expect(readFileSync(join(dir, "config.yaml.bak-20261019T120011Z"), "utf8")).not.toContain(
+      "id: r11",
+    );
+    expect(readFileSync(join(dir, "config.yaml.bak-20261019T120011Z"), "utf8")).toContain(
+      "id: r10",
+    );
+  });
+
+  it("never prunes this add's own backup, even when its stamp is the oldest", async () => {
+    for (let i = 0; i < CONFIG_BACKUPS_KEEP; i++) {
+      writeFileSync(
+        join(dir, `config.yaml.bak-20261019T1300${String(i).padStart(2, "0")}Z`),
+        "newer",
+      );
+    }
+    const { backup } = await addRepo(path, repo(), NOW); // the clock is behind the backups
+    expect(readFileSync(backup, "utf8")).toBe(COMMENTED);
+    const kept = backups();
+    expect(kept).toHaveLength(CONFIG_BACKUPS_KEEP);
+    expect(kept).toContain("config.yaml.bak-20261019T120000Z");
+    expect(kept).not.toContain("config.yaml.bak-20261019T130000Z");
+  });
+
+  it("serialises concurrent adds: both land, in order, each with its own backup", async () => {
+    const [a, b] = await Promise.all([
+      addRepo(path, repo({ id: "a", github: "o/a", project: 1 }), NOW),
+      addRepo(path, repo({ id: "b", github: "o/b", project: 2 }), NOW),
+    ]);
+    expect(a.config.repos.map((r) => r.id).slice(3)).toEqual(["a"]);
+    expect(b.config.repos.map((r) => r.id).slice(3)).toEqual(["a", "b"]);
+    expect(loadConfig(path).repos.map((r) => r.id)).toEqual([
+      "shop-app",
+      "site-builder",
+      "mission-control",
+      "a",
+      "b",
+    ]);
+    expect(a.backup).not.toBe(b.backup);
+    expect(backups()).toHaveLength(2);
+    expect(readFileSync(b.backup, "utf8")).toContain("id: a\n");
+  });
+
+  it("a failed add does not stall the next one", async () => {
+    const dup = addRepo(path, repo({ id: "shop-app" }), NOW);
+    const ok = addRepo(path, repo(), NOW);
+    expect((await writeError(dup)).kind).toBe("duplicate");
+    await ok;
+    expect(loadConfig(path).repos.at(-1)?.id).toBe("studio");
+  });
+});
+
+describe("NewRepoBody", () => {
+  const body = {
+    id: "studio",
+    github: "octo-org/studio",
+    project: 4,
+    statusMap: { Todo: "planned" },
+  };
+  const ok = (over: object) => NewRepoBody.safeParse({ ...body, ...over }).success;
+
+  it("accepts a minimal body and an optional needsYouLabels", () => {
+    expect(ok({})).toBe(true);
+    expect(ok({ needsYouLabels: ["needs-design"] })).toBe(true);
+    expect(ok({ id: "a", project: 1_000_000 })).toBe(true);
+    expect(ok({ id: `a${"b".repeat(39)}` })).toBe(true);
+  });
+
+  it.each([
+    ["an extra key", { extra: 1 }],
+    ["an id with a slash", { id: "a/b" }],
+    ["an id starting with a dot", { id: ".a" }],
+    ["a 41-character id", { id: "a".repeat(41) }],
+    ["a github name with a space", { github: "a/b c" }],
+    ["a github name without an owner", { github: "studio" }],
+    ["a github owner starting with a dash", { github: "-a/b" }],
+    ["a github owner of 40 characters", { github: `${"a".repeat(40)}/b` }],
+    ["project 0", { project: 0 }],
+    ["project 1 000 001", { project: 1_000_001 }],
+    ["a fractional project", { project: 1.5 }],
+    ["a string project", { project: "4" }],
+    ["an empty status map", { statusMap: {} }],
+    [
+      "a 51-entry status map",
+      { statusMap: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`s${i}`, "planned"])) },
+    ],
+    ["an empty status key", { statusMap: { "": "planned" } }],
+    ["a 101-character status key", { statusMap: { ["s".repeat(101)]: "planned" } }],
+    ["a status key with a newline", { statusMap: { "To\ndo": "planned" } }],
+    ["a status key with a DEL", { statusMap: { "To\u007fdo": "planned" } }],
+    ["a status value outside TicketState", { statusMap: { Todo: "someday" } }],
+    ["11 labels", { needsYouLabels: Array.from({ length: 11 }, (_, i) => `l${i}`) }],
+    ["an empty label", { needsYouLabels: [""] }],
+    ["a 51-character label", { needsYouLabels: ["l".repeat(51)] }],
+  ])("refuses %s", (_name, over) => {
+    expect(ok(over)).toBe(false);
+  });
+
+  it("allows a 50-entry status map and 100-character keys", () => {
+    expect(
+      ok({
+        statusMap: Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`s${i}`, "done"])),
+      }),
+    ).toBe(true);
+    expect(ok({ statusMap: { ["s".repeat(100)]: "planned" } })).toBe(true);
+  });
+
+  it("shares its github and project rules with RepoLocation", () => {
+    expect(RepoLocation.safeParse({ github: "o/r", project: 1 }).success).toBe(true);
+    expect(RepoLocation.safeParse({ github: "a/b c", project: 1 }).success).toBe(false);
+    expect(RepoLocation.safeParse({ github: "o/r", project: 0 }).success).toBe(false);
+    expect(NewRepoBody.shape.github).toBe(RepoLocation.shape.github);
+    expect(NewRepoBody.shape.project).toBe(RepoLocation.shape.project);
+  });
+});

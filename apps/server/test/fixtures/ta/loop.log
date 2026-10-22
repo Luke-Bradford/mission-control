@@ -1,0 +1,14 @@
+2026-10-12T19:22:17Z === ta_loop start (worktree=/work/shop-app-autonomy, max=0, cooldown=120s, pid=1111) ===
+2026-10-12T19:22:18Z --- iteration 1 start
+2026-10-12T19:30:00Z --- iteration 1 OK (transcript: iteration-20261012T192218Z-1111.1.log)
+2026-10-12T19:30:01Z blocked pass -- sleeping 1800s instead of 120s (nothing is eligible; re-deriving that costs money)
+2026-10-12T20:00:00Z === ta_loop start (worktree=/work/shop-app-autonomy, max=0, cooldown=120s, pid=2222) ===
+2026-10-12T20:00:01Z --- iteration 1 start
+2026-10-12T20:05:00Z --- iteration 1 FAILED rc=1 result_ok=0 (failures in a row: 2)
+2026-10-12T20:05:01Z STOPPING: 3 consecutive failures -- see /work/shop-app-autonomy/iteration-20261012T200001Z-2222.1.log
+2026-10-12T20:05:02Z === ta_loop exit after 1 iteration(s) ===
+2026-10-17T09:00:00Z === ta_loop start (worktree=/work/shop-app-autonomy, max=0, cooldown=120s, pid=7522) ===
+2026-10-17T06:10:49Z --- iteration 9 OK (transcript: iteration-20261017T032442Z-7522.9.log)
+2026-10-17T09:05:12Z --- iteration 11 start
+2026-10-17T09:05:13Z prompt in sync with origin/main:.autonomy/loop_prompt.md (cf8ea1f0e98b)
+2026-10-17T09:05:13Z worktree at origin/main (515e39b78271)

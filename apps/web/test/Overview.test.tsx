@@ -1,0 +1,1413 @@
+import {
+  type ActivityEvent,
+  type AttentionItem,
+  type CrewLoop,
+  type CrewRow,
+  ENGINE_NOT_RUNNING,
+  FLIGHT_NOT_RUNNING,
+  GITHUB_SLOWED_PREFIX,
+  type GithubRateState,
+  type HealthRow,
+  type LimitRow,
+  LOCK_FREE_TEXT,
+  LOCK_HISTORY_NOTE,
+  LOCK_NOBODY_WAITING,
+  type MachineSample,
+  type PullRequestView,
+  type TestLockState,
+} from "@mc/core";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hub, RESOURCES } from "../src/data.ts";
+import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
+import { Overview } from "../src/pages/Overview.tsx";
+import { useItem } from "../src/shell/overlays.ts";
+import { setSession } from "../src/shell/session.ts";
+import { settled, stubFetch } from "./fetchStub.ts";
+import {
+  CONFIG,
+  crewRow,
+  GITHUB_RATE,
+  GITHUB_RATE_LINE,
+  HOUR,
+  item,
+  limit5h,
+  limit7d,
+  MIN,
+  NOW,
+  prView,
+  seatRow,
+  stoppedSeat,
+} from "./fixtures.ts";
+
+const GIB = 2 ** 30;
+
+function sample(over: Partial<MachineSample> = {}): MachineSample {
+  return {
+    at: NOW,
+    cpuPct: 37.4,
+    cores: 16,
+    memUsedBytes: 20.5 * GIB,
+    memTotalBytes: 64 * GIB,
+    diskFreeBytes: 412 * GIB,
+    diskTotalBytes: 1000 * GIB,
+    agents: { count: 3, rssBytes: 2 * GIB, cpuPct: 80 },
+    ...over,
+  };
+}
+
+interface Data {
+  rows?: CrewRow[];
+  items?: AttentionItem[];
+  machine?: MachineSample | null;
+  limits?: LimitRow[];
+  githubRate?: GithubRateState;
+  health?: HealthRow[];
+  activity?: ActivityEvent[];
+  away?: unknown;
+  lock?: TestLockState;
+  config?: unknown;
+  crewStatus?: { enabled: boolean; note: string | null };
+  /** The seats' repo's PRs. */
+  prs?: PullRequestView[];
+}
+
+function stub(d: Data = {}) {
+  return stubFetch({
+    "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
+    "/api/attention": d.items ?? [],
+    "/api/machine": { latest: d.machine === undefined ? sample() : d.machine },
+    "/api/limits": d.limits ?? [],
+    "/api/limits/github": d.githubRate ?? { queries: {}, pollCost: null },
+    "/api/health": d.health ?? [],
+    "/api/activity": d.activity ?? [],
+    "/api/settings/away": d.away ?? { on: false, until: "", may: {} },
+    "/api/config": d.config ?? CONFIG,
+    "/api/test-lock": d.lock ?? { holder: null, waiting: [] },
+    "/api/crew/status": d.crewStatus ?? { enabled: true, note: null },
+    "/api/repos/shop-app/prs?linked=1": d.prs ?? [],
+  });
+}
+
+function Probe() {
+  return <span data-testid="item">{useItem() ?? "none"}</span>;
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+const agentRows = (c: HTMLElement) => [
+  ...c.querySelectorAll<HTMLElement>(".trow:not(.head):not(.flight)"),
+];
+
+describe("Overview panels", () => {
+  it("every panel carries its mockup id", async () => {
+    stub();
+    const { container } = render(<Overview />);
+    for (const id of ["agentsP", "actP", "machP", "quotaP"]) {
+      expect(container.querySelector(`#${id}`), id).toBeTruthy();
+    }
+    await screen.findByText("Nothing is waiting on you.");
+  });
+});
+
+describe("Agents panel", () => {
+  it("says Crew is off with the note when the server has crew off", async () => {
+    stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
+    const { container } = render(<Overview />);
+    const line = await screen.findByRole("status");
+    expect(line.textContent).toBe("Crew is off: crew lock held by pid 123");
+    expect(container.querySelector("#agentsP")?.contains(line)).toBe(true);
+  });
+
+  it("says plain Crew is off with no note", async () => {
+    stub({ crewStatus: { enabled: false, note: null } });
+    render(<Overview />);
+    expect(await screen.findByText("Crew is off.")).toBeTruthy();
+  });
+
+  it("says nothing about crew when it is on", async () => {
+    const f = stub({ rows: [crewRow()] });
+    const { container } = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    await settled(f, "/api/crew/status");
+    expect(container.textContent).not.toContain("Crew is off");
+  });
+
+  it("shows the FLIGHT row first, with its not-running line and dashes", async () => {
+    stub({ rows: [crewRow()] });
+    const { container } = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(flight.nextElementSibling).toBe(agentRows(container)[0]);
+    expect(within(flight).getByText("FLIGHT")).toBeTruthy();
+    expect(within(flight).getByText("head agent")).toBeTruthy();
+    expect(within(flight).getByText("Head").className).toContain("neutral");
+    expect(within(flight).getByText(FLIGHT_NOT_RUNNING)).toBeTruthy();
+    expect(flight.textContent).toContain("—");
+  });
+
+  it("the FLIGHT row is not itself a button: its call sign is the button that opens the dock", async () => {
+    stub({ rows: [crewRow()] });
+    const { container } = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(flight.getAttribute("role")).toBeNull();
+    expect(flight.hasAttribute("tabindex")).toBe(false);
+    const btn = within(flight).getByRole("button", { name: "FLIGHT, open the dock" });
+    // the accessible name starts with the visible text (WCAG 2.5.3)
+    expect(btn.textContent).toBe("FLIGHT");
+  });
+
+  it("subtitle counts the working agents and says FLIGHT is not counted; no Add agent", async () => {
+    stub({
+      rows: [
+        crewRow({ id: "a" }),
+        crewRow({ id: "b", index: 1, hudState: "idle" }),
+        crewRow({ id: "c", index: 2, hudState: "running" }),
+      ],
+    });
+    render(<Overview />);
+    await screen.findByText("2 working · 3 agents · FLIGHT not counted");
+    expect(screen.queryByText("Add agent")).toBeNull();
+  });
+
+  const loopOf = (phase: CrewLoop["phase"], text: string, prNumber: number | null = null) => ({
+    phase,
+    text,
+    prNumber,
+    parked: phase === "parked" ? text : null,
+  });
+  /** The Loop step label, whose `<b>` splits its text, found by its whole text content. */
+  const stepLabel = (text: string) =>
+    screen.findByText(
+      (_, el) => el?.matches(".loopstep .ellip") === true && el.textContent === text,
+    );
+  const bar = (row: HTMLElement | undefined) =>
+    [...(row?.querySelectorAll(".loopstep .stepbar i") ?? [])].map((i) => i.className);
+
+  it("the Loop step column shows the loop type, step and a step bar; a dash without a loop", async () => {
+    const loop = loopOf("review", "In review · PR #9", 9);
+    stub({ rows: [crewRow({ loop }), crewRow({ id: "other", index: 1, loop: null })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("other");
+    const [a, b] = agentRows(container);
+    const label = a?.querySelector(".loopstep .ellip") as HTMLElement;
+    expect(label.textContent).toBe("build › In review");
+    expect(label.querySelector("b")?.textContent).toBe("In review");
+    expect(label.getAttribute("title")).toBe("In review · PR #9");
+    expect(a?.querySelector(".loopstep .stepbar")?.getAttribute("title")).toBe(
+      "Working → CI → In review → Done",
+    );
+    expect(bar(a)).toEqual(["d", "d", "c", ""]);
+    expect(b?.querySelector(".loopstep")?.textContent).toBe("—");
+  });
+
+  it("an idle seat waiting in CI shows the same cell as a running one", async () => {
+    const loop = loopOf("ci", "CI on 08a7cfc");
+    stub({ rows: [crewRow({ loop, hudState: "idle" })] });
+    const { container } = render(<Overview />);
+    await stepLabel("build › CI");
+    expect(bar(agentRows(container)[0])).toEqual(["d", "c", "", ""]);
+  });
+
+  it("a parked loop holds the whole bar and reads Blocked, with the loop text in the title", async () => {
+    const text = "Blocked: CI failed 3 times; last on 08a7cfc";
+    stub({ rows: [crewRow({ loop: loopOf("parked", text), hudState: "parked" })] });
+    const { container } = render(<Overview />);
+    await stepLabel("build › Blocked");
+    const step = agentRows(container)[0] as HTMLElement;
+    expect(bar(step)).toEqual(["w", "w", "w", "w"]);
+    expect(step.querySelector(".loopstep .ellip")?.getAttribute("title")).toBe(text);
+    expect(step.querySelector(".loopstep .crit-t")).toBeNull();
+  });
+
+  it("a finished loop has every segment done", async () => {
+    stub({ rows: [crewRow({ loop: loopOf("done", "Done · PR #205", 205), hudState: "idle" })] });
+    const { container } = render(<Overview />);
+    await stepLabel("build › Done");
+    expect(bar(agentRows(container)[0])).toEqual(["d", "d", "d", "d"]);
+  });
+
+  it("a stalled seat's current segment is amber", async () => {
+    stub({
+      rows: [
+        crewRow({ loop: loopOf("working", "Working on mission-control#198"), hudState: "stalled" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await stepLabel("build › Working");
+    expect(bar(agentRows(container)[0])).toEqual(["w", "", "", ""]);
+  });
+
+  it("the Loop step column collapses only when the rows are loaded and none has a loop", async () => {
+    const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, parked: null };
+    stub({ rows: [crewRow({ loop: null }), crewRow({ id: "other", index: 1, loop: null })] });
+    const none = render(<Overview />);
+    const list = () => none.container.querySelector("#agentsList") as HTMLElement;
+    // still loading: no collapse, so the columns do not jump when the rows arrive
+    expect(list().className).not.toContain("noloop");
+    await screen.findByText("other");
+    expect(list().className).toContain("noloop");
+    none.unmount();
+    hub.clear();
+    stub({ rows: [crewRow({ loop }), crewRow({ id: "other", index: 1, loop: null })] });
+    const some = render(<Overview />);
+    await screen.findByText("other");
+    expect(some.container.querySelector("#agentsList")?.className).not.toContain("noloop");
+  });
+
+  it("a stopped studio loop shows its stop line, whole in the title", async () => {
+    const stop = {
+      reason: "7-day quota utilization 88% >= QUOTA_STOP_PCT=80% -- refusing to fire",
+      at: NOW - HOUR,
+      quota: { usedPct: 88, stopPct: 80 },
+      resumesAt: NOW + 2 * 24 * HOUR,
+    };
+    stub({ rows: [crewRow({ hudState: "stopped", stop, run: null, ticket: null })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Stopped");
+    const row = agentRows(container)[0] as HTMLElement;
+    const line = "Stopped at the 7-day quota (88% of 80%) · resumes after Mon 13:00";
+    expect(row.querySelector(".doing")?.getAttribute("title")).toBe(line);
+    expect(row.querySelector(".doing")?.textContent).toBe(line);
+  });
+
+  it("a stopped seat whose run merged says so, and shows its ticket muted as last", async () => {
+    stub({ rows: [stoppedSeat({ merged: true })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Stopped");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".doing")?.textContent).toBe("Run ended · PR #75 merged");
+    expect(row.textContent).toContain("Last mission-control #74");
+    expect(row.textContent).not.toContain("Dead collector fallback");
+    expect(row.querySelector(".muted .rref")?.textContent).toBe("mission-control #74");
+  });
+
+  it("a seat stopped by you says so", async () => {
+    stub({ rows: [stoppedSeat()] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Stopped");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".doing")?.textContent).toBe("Run ended by you");
+    expect(row.textContent).toContain("Last mission-control #74");
+  });
+
+  it("a seat in error says its run failed and shows its ticket muted as last", async () => {
+    stub({
+      rows: [stoppedSeat({ hudState: "error", sourceError: "CLI never started" })],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Error");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".doing")?.textContent).toBe("Run failed: CLI never started");
+    expect(row.textContent).toContain("Last mission-control #74");
+    expect(row.textContent).not.toContain("Dead collector fallback");
+  });
+
+  it("a loop in error still reads Error: … with its current ticket", async () => {
+    stub({ rows: [crewRow({ hudState: "error", sourceError: "state dir gone" })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Error");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".doing")?.textContent).toBe("Error: state dir gone");
+    expect(row.textContent).toContain("Quote cache");
+    expect(row.textContent).not.toContain("Last ");
+    expect(row.querySelector(".muted .rref")).toBeNull();
+  });
+
+  it("a seat in error with no reason says only Run failed", async () => {
+    stub({ rows: [stoppedSeat({ hudState: "error", sourceError: null })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Error");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".doing")?.textContent).toBe("Run failed");
+  });
+
+  it("an agent's row carries model · effort · CLI version in the title of its role line", async () => {
+    stub({
+      rows: [
+        seatRow({ cli: { version: "2.1.302", effort: "high" } }),
+        crewRow({ id: "studio", index: 1, cli: { version: null, effort: null } }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const [seat, loop] = agentRows(container);
+    expect(within(seat as HTMLElement).getByText("GUIDO · writer").title).toBe(
+      "claude-opus-4-1 · high · CLI 2.1.302",
+    );
+    expect(within(loop as HTMLElement).getByText(/^observed loop/).title).toBe("claude-opus-4-1");
+  });
+
+  it.each([
+    ["open", "In review · PR #77"],
+    ["approved", "In review · PR #77"],
+    ["draft", "Draft PR #77"],
+    ["changes", "Changes requested · PR #77"],
+  ] as const)("an idle seat's row says %s PR, linked", async (state, line) => {
+    stub({ rows: [seatRow({ hudState: "idle", review: { prNumber: 77, state } })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
+    expect(doing.textContent).toBe(line);
+    expect(doing.getAttribute("title")).toBe(line);
+    await waitFor(() =>
+      expect(
+        within(doing).getByRole("link", { name: "shop-app PR #77" }).getAttribute("href"),
+      ).toBe("https://github.com/octo-org/shop-app/pull/77"),
+    );
+  });
+
+  it("a seat's note outranks its review, and a seat that is not idle does not show one", async () => {
+    const review = { prNumber: 77, state: "open" } as const;
+    stub({
+      rows: [
+        seatRow({ hudState: "idle", note: "Rate limited until 14:00", review }),
+        seatRow({ id: "guido-2", index: 1, hudState: "running", review }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-2");
+    const line = (id: string) =>
+      agentRows(container)
+        .find((r) => r.textContent?.includes(id))
+        ?.querySelector(".doing")?.textContent;
+    expect(line("guido-1")).toBe("Rate limited until 14:00");
+    expect(line("guido-2")).toMatch(/^run #12/);
+  });
+
+  it("a repo missing from the config leaves the PR as plain text, not a link", async () => {
+    stub({
+      rows: [
+        seatRow({ hudState: "idle", repoId: "gone", review: { prNumber: 77, state: "open" } }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
+    await waitFor(() => expect(doing.textContent).toBe("In review · PR #77"));
+    expect(within(doing).queryByRole("link")).toBeNull();
+  });
+
+  it("an idle seat with no PR stays Idle; a loop never reads as in review", async () => {
+    stub({
+      rows: [
+        seatRow({ hudState: "idle", review: null }),
+        crewRow({ id: "loop", index: 1, hudState: "idle", review: { prNumber: 5, state: "open" } }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const lines = agentRows(container).map((r) => r.querySelector(".doing")?.textContent);
+    expect(lines[0]).toMatch(/^Idle since/);
+    expect(lines[1]).toMatch(/^Idle since/);
+  });
+
+  it("the doing line shows its text before the timezone has loaded", async () => {
+    stub({
+      rows: [crewRow({ hudState: "idle", run: null, digest: null, ticket: null })],
+      config: () => ({ status: 503, body: { error: "loading" } }),
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("No ticket");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".doing")?.textContent).toBe("Idle");
+  });
+
+  it("a row with no run and no digest shows No ticket, — tokens and ctx —", async () => {
+    stub({
+      rows: [
+        crewRow({
+          hudState: "idle",
+          run: null,
+          digest: null,
+          ticket: null,
+          ticketTitle: null,
+          contextWindow: null,
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("No ticket");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".tok")?.textContent).toBe("——");
+    expect(row.textContent).toContain("ctx —");
+    expect(row.textContent).toContain("5h —");
+    expect(row.textContent).toContain("Idle since");
+    expect(row.querySelector(".spark")).toBeNull();
+  });
+
+  it("a running seat's row says its tool, what it touches and for how long, on one line", async () => {
+    const detail = "pnpm -s vitest run apps/server/test/backfill.test.ts --reporter=verbose";
+    stub({
+      rows: [
+        crewRow({
+          digest: {
+            toolCalls: 1,
+            turns: 1,
+            lastEventAt: NOW,
+            model: null,
+            contextTokens: null,
+            contextWindow: null,
+            liveTool: { name: "Bash", since: NOW - 65_000, detail },
+            tools: {},
+            subagents: [],
+            minuteTokens: [],
+            turnUsage: [],
+            background: [],
+            compactions: 0,
+          },
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
+    expect(doing.textContent).toBe(`Bash 1:05 · ${detail}`);
+    expect(doing.title).toBe(`Bash 1:05 · ${detail}`);
+    expect(doing.className).toContain("ellip");
+  });
+
+  it("an idle seat's PR row shows the PR chip and its title, from the repo's PRs", async () => {
+    // as live data is: the seat's run records no PRs, the PR is only in the repo's PRs
+    stub({
+      rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, prs: [] })],
+      prs: [prView({ number: 166, title: "Backfill the quote cache" })],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
+    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166 · Backfill the quote cache"));
+    await waitFor(() =>
+      expect(within(doing).getByRole("link", { name: "shop-app PR #166" })).toBeTruthy(),
+    );
+  });
+
+  it("the hover title is the visible line, PR title included", async () => {
+    stub({
+      rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, prs: [] })],
+      prs: [prView({ number: 166, title: "Backfill the quote cache" })],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
+    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166 · Backfill the quote cache"));
+    expect(doing.title).toBe("Draft PR #166 · Backfill the quote cache");
+  });
+
+  it("the ticket line's hover text is the ticket's whole title", async () => {
+    stub({
+      rows: [
+        seatRow({
+          ticket: "shop-app#3349",
+          ticketTitle: "Quote cache: refresh on a timer, never on read",
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const line = agentRows(container)[0]?.querySelector(".min0 > .ellip.s") as HTMLElement;
+    expect(line.title).toBe("Quote cache: refresh on a timer, never on read");
+  });
+
+  it("a seat with no ticket has no hover text on its ticket line", async () => {
+    stub({ rows: [seatRow({ ticket: null, ticketTitle: "Stale title" })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const line = agentRows(container)[0]?.querySelector(".min0 > .ellip.s") as HTMLElement;
+    expect(line.getAttribute("title")).toBeNull();
+  });
+
+  it("while the repo's PRs load the line is the bare PR line, not the last text", async () => {
+    const lastText = "I pushed the review fixes.";
+    const digest = {
+      toolCalls: 1,
+      turns: 1,
+      lastEventAt: NOW,
+      model: null,
+      contextTokens: null,
+      contextWindow: null,
+      liveTool: null,
+      lastText,
+      tools: {},
+      subagents: [],
+      minuteTokens: [],
+      turnUsage: [],
+      background: [],
+      compactions: 0,
+    };
+    const f = stub({
+      rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, digest })],
+      prs: [prView({ number: 166, title: "Backfill the quote cache" })],
+    });
+    // hold the repo's PRs back until the test lets them through
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (input === "/api/repos/shop-app/prs?linked=1") await gate;
+      return f(input, init);
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("guido-1");
+    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
+    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166"));
+    release();
+    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166 · Backfill the quote cache"));
+  });
+
+  it("the repo's PRs are kept for a seat with an open review, whatever its state, and not for a note", async () => {
+    const review = { prNumber: 77, state: "open" } as const;
+    const prsPath = "/api/repos/shop-app/prs?linked=1";
+    const fetched = async (rows: CrewRow[]) => {
+      const f = stub({ rows });
+      const { unmount } = render(<Overview />);
+      await screen.findByText(rows[0]?.id ?? "");
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      unmount();
+      return f.mock.calls.some(([p]) => p === prsPath);
+    };
+    expect(await fetched([seatRow({ hudState: "running", review })])).toBe(true);
+    hub.clear();
+    expect(await fetched([seatRow({ hudState: "idle", note: "Rate limited", review })])).toBe(
+      false,
+    );
+    hub.clear();
+    expect(await fetched([seatRow({ hudState: "idle", review: null })])).toBe(false);
+  });
+
+  it("shows ticket, title, tokens, rate, cost, ctx and the account's 5h window", async () => {
+    const minute = Math.floor(NOW / MIN) * MIN;
+    stub({
+      rows: [
+        crewRow({
+          contextWindow: 1_000_000,
+          digest: {
+            toolCalls: 1,
+            turns: 1,
+            lastEventAt: NOW,
+            model: null,
+            contextTokens: 483_137,
+            contextWindow: 1_000_000,
+            liveTool: { name: "Bash", since: NOW - 65_000 },
+            tools: {},
+            subagents: [],
+            minuteTokens: [
+              [minute - 2 * MIN, 1500],
+              [minute - MIN, 2400],
+              [minute, 100],
+            ],
+            turnUsage: [],
+            background: [],
+            compactions: 0,
+          },
+        }),
+      ],
+      limits: [limit5h({ used: 82 }), limit7d()],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.textContent).toContain("shop-app #3349");
+    expect(row.textContent).toContain("run #12 · Bash 1:05");
+    expect(row.textContent).toContain("observed loop · ta-loop");
+    expect(row.textContent).toContain("15.4k"); // 12 000 + 3 400
+    expect(row.textContent).toContain("2.4k/min · ~$2.47");
+    expect(row.textContent).toContain("ctx 48%");
+    expect(row.textContent).toContain("5h 82%");
+    expect(row.querySelector(".spark")).toBeTruthy();
+    expect(row.querySelector(".meter.hi")).toBeTruthy(); // 82 % is amber
+  });
+
+  it("sorts error before running before idle, agents with a need first", async () => {
+    stub({
+      rows: [
+        crewRow({ id: "idle-one", index: 0, hudState: "idle" }),
+        crewRow({ id: "run-one", index: 1, hudState: "running" }),
+        crewRow({ id: "err-one", index: 2, hudState: "error", sourceError: "gone" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("run-one");
+    expect(agentRows(container).map((r) => r.querySelector(".ag")?.textContent)).toEqual([
+      "err-one",
+      "run-one",
+      "idle-one",
+    ]);
+  });
+
+  it("the stalled need line counts up with the 1 s clock", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    stub({
+      rows: [crewRow({ hudState: "stalled", lastOutputAt: NOW - 11 * MIN })],
+      items: [item({ key: "stall:1", kind: "stalled", at: NOW - 125_000, tool: "Bash" })],
+    });
+    const { container } = render(<Overview />);
+    const need = async () => (await screen.findByText(/^Stalled \d+:\d\d/)).textContent;
+    expect(await need()).toBe("Stalled 2:05 in Bash");
+    expect(container.querySelector(".need")?.textContent).toContain("observed loop");
+    expect(container.querySelector(".need button")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(await need()).toBe("Stalled 2:08 in Bash");
+  });
+
+  it("a parked item shows its reason on a Blocked row; Answer opens the Item panel", async () => {
+    stub({
+      rows: [crewRow({ hudState: "blocked" })],
+      items: [
+        item({ key: "p:1", kind: "parked", text: "Needs a rebase decision" }),
+        item({ key: "esc:shop-app#4001", kind: "decision" }),
+      ],
+    });
+    const { container } = render(
+      <>
+        <Overview />
+        <Probe />
+      </>,
+    );
+    await screen.findByText("Parked: Needs a rebase decision");
+    expect(within(agentRows(container)[0] as HTMLElement).getByText("Blocked")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Answer" }));
+    expect(screen.getByTestId("item").textContent).toBe("esc:shop-app#4001");
+    expect(window.location.pathname).toBe("/"); // the row click did not also navigate
+  });
+
+  it("a row is not a button around buttons: its call sign is the link to the Agent page", async () => {
+    stub({
+      rows: [crewRow({ hudState: "blocked" })],
+      items: [item({ key: "esc:shop-app#4001", kind: "decision" })],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByRole("button", { name: "Answer" });
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.getAttribute("role")).toBeNull();
+    expect(row.hasAttribute("tabindex")).toBe(false);
+    const link = within(row).getByRole("link", { name: "shop-app-ta" });
+    expect(link.getAttribute("href")).toBe("/agent/shop-app-ta");
+    expect(link.contains(within(row).getByRole("button", { name: "Answer" }))).toBe(false);
+  });
+
+  it("a ticket link inside a row goes to GitHub and does not also open the Agent page", async () => {
+    stub({ rows: [crewRow({ id: "shop-app-ta" })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const link = await within(agentRows(container)[0] as HTMLElement).findByRole("link", {
+      name: "shop-app #3349",
+    });
+    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/3349");
+    fireEvent.click(link);
+    expect(window.location.pathname).toBe("/");
+  });
+
+  it("clicking a row or its link opens the Agent page; the session filter hides other repos", async () => {
+    stub({
+      rows: [
+        crewRow({ id: "shop-app-ta" }),
+        crewRow({ id: "studio", index: 1, repoId: "site-builder" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("studio");
+    fireEvent.click(
+      within(agentRows(container)[1] as HTMLElement).getByRole("link", { name: "studio" }),
+    );
+    expect(window.location.pathname).toBe("/agent/studio");
+    act(() => window.history.pushState(null, "", "/"));
+    fireEvent.click(within(agentRows(container)[0] as HTMLElement).getByText("Running"));
+    expect(window.location.pathname).toBe("/agent/shop-app-ta");
+    act(() => setSession("shop-app"));
+    expect(agentRows(container).map((r) => r.querySelector(".ag")?.textContent)).toEqual([
+      "shop-app-ta",
+    ]);
+    expect(container.querySelector(".trow.flight")).toBeTruthy();
+    expect(screen.getByText("1 working · 1 agents · FLIGHT not counted")).toBeTruthy();
+  });
+});
+
+describe("Needs banner", () => {
+  it("says All clear, with the away strip first when away mode is on", async () => {
+    stub({ away: { on: true, until: "2026-10-28", may: {} } });
+    const { container } = render(<NeedsBanner />);
+    await screen.findByText("All clear");
+    expect(screen.getByText("Nothing is waiting on you.")).toBeTruthy();
+    expect(screen.getByText("Away mode is on until Wed 28 Oct.")).toBeTruthy();
+    expect(container.querySelector(".awaystrip")?.nextElementSibling?.className).toContain("clear");
+  });
+
+  it("counts things by kind and goes to Comms", async () => {
+    stub({
+      items: [
+        item({ key: "1", kind: "decision" }),
+        item({ key: "2", kind: "decision" }),
+        item({ key: "3", kind: "approval" }),
+        item({ key: "4", kind: "question" }),
+        item({ key: "5", kind: "stalled" }),
+        item({ key: "6", kind: "error" }),
+        item({ key: "7", kind: "parked" }),
+        item({ key: "8", kind: "pr" }),
+        item({ key: "9", kind: "stray" }),
+        item({ key: "10", kind: "tag" }),
+      ],
+    });
+    render(<NeedsBanner />);
+    const btn = await screen.findByRole("button", { name: /things need you/ });
+    expect(btn.textContent).toBe(
+      "10things need you2 decisions2 approvals2 stalls1 message1 PR waiting on you1 parked1 stray change· 10 not acknowledgedOpen Comms →",
+    );
+    fireEvent.click(btn);
+    expect(window.location.pathname).toBe("/comms");
+  });
+});
+
+describe("Needs banner, acknowledged items", () => {
+  it("still counts them, and says how many are not acknowledged", async () => {
+    stubFetch({
+      "/api/attention": [
+        item({ key: "1", kind: "decision" }),
+        item({ key: "2", kind: "decision", acked: true }),
+        item({ key: "3", kind: "stalled", acked: true }),
+      ],
+      "/api/settings/away": { on: false },
+    });
+    render(<NeedsBanner />);
+    const btn = await screen.findByRole("button", { name: /things need you/ });
+    expect(btn.textContent).toBe(
+      "3things need you2 decisions1 stall· 1 not acknowledgedOpen Comms →",
+    );
+  });
+
+  it("adds nothing when every item is acknowledged", async () => {
+    stubFetch({
+      "/api/attention": [item({ acked: true })],
+      "/api/settings/away": { on: false },
+    });
+    render(<NeedsBanner />);
+    const btn = await screen.findByRole("button", { name: /thing/ });
+    expect(btn.textContent).not.toContain("not acknowledged");
+  });
+});
+
+describe("Machine panel: the test lock box", () => {
+  const box = async () => {
+    const { container } = render(<Overview />);
+    return container.querySelector("#machP .lock") as HTMLElement;
+  };
+
+  it("free: says so, and nobody waits; the title says history waits for 2c", async () => {
+    stub();
+    const b = await box();
+    await within(b).findByText(LOCK_FREE_TEXT);
+    expect(within(b).getByText("Full test suite · one at a time").title).toBe(LOCK_HISTORY_NOTE);
+    expect(within(b).queryByText(LOCK_NOBODY_WAITING)).toBeNull();
+  });
+
+  it("held: the holder, its command and time, then the seats in line", async () => {
+    stub({
+      lock: {
+        holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW - 83_000 },
+        waiting: [{ runId: "r-2", seatId: "guido-3", since: NOW - 12_000 }],
+      },
+    });
+    const b = await box();
+    await within(b).findByText("GUIDO-2 holds it: pnpm test · 1:23");
+    expect(within(b).getByText("GUIDO-3 waiting · 0:12")).toBeTruthy();
+    expect(b.textContent).not.toContain(LOCK_FREE_TEXT);
+  });
+
+  it("held with nobody in line says so", async () => {
+    stub({
+      lock: {
+        holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW - 5_000 },
+        waiting: [],
+      },
+    });
+    const b = await box();
+    await within(b).findByText("GUIDO-2 holds it: pnpm test · 0:05");
+    expect(within(b).getByText(LOCK_NOBODY_WAITING)).toBeTruthy();
+  });
+});
+
+describe("Machine panel", () => {
+  it("labels CPU, memory, disk and the legend", async () => {
+    stub();
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await within(mach).findByText("37%");
+    expect(mach.textContent).toContain("this Mac · every 2 s");
+    expect(mach.textContent).toContain("37% of 16 threads");
+    expect(mach.textContent).toContain("20.5 of 64 GB");
+    expect(mach.textContent).toContain("412 GB free");
+    expect(mach.textContent).toContain("Claude/Codex processes (3)");
+    expect(mach.textContent).toContain("other apps");
+    expect(mach.textContent).toContain("Full test suite · one at a time");
+    expect(mach.textContent).not.toMatch(/slots|Room for/i);
+    // agents 80 % of 16 threads = 5 % of the machine; the rest is other apps
+    const cpu = mach.querySelectorAll(".resrow")[0] as HTMLElement;
+    const widths = [...cpu.querySelectorAll<HTMLElement>(".stack i")].map((i) => i.style.width);
+    expect(widths).toEqual(["5%", "32.4%"]);
+  });
+
+  it("shows dashes and empty bars before the first sample", async () => {
+    stub({ machine: null });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(3));
+    expect(mach.querySelectorAll(".stack i").length).toBe(0);
+    for (const row of mach.querySelectorAll(".resrow")) expect(row.textContent).toContain("—");
+    expect(mach.textContent).toContain("Claude/Codex processes (—)");
+  });
+
+  it("a CPU not measured yet is —; zero cores is not '0 threads'", async () => {
+    stub({ machine: sample({ cpuPct: null, cores: 0, agents: null, memUsedBytes: null }) });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    await waitFor(() => expect(mach.textContent).toContain("412 GB free"));
+    const cpu = mach.querySelectorAll(".resrow")[0] as HTMLElement;
+    expect(cpu.querySelectorAll(".stack i").length).toBe(0);
+    expect(cpu.textContent).toContain("—");
+    expect(mach.textContent).not.toContain("0 threads");
+  });
+});
+
+describe("Account quota panel", () => {
+  const limits = [
+    limit5h({ accountId: "claude-main", used: 100, resetAt: NOW + 2 * HOUR }),
+    limit7d({ accountId: "claude-main", used: 60, fullAt: null }),
+    limit7d({ accountId: "codex-main", used: 69, fullAt: NOW + 3 * HOUR + 10 * MIN }),
+  ];
+
+  it("one row per account, hover titles, warnings and the rewritten note", async () => {
+    stub({ limits });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    await within(quota).findByText("claude-main 5h at its limit until 15:00");
+    expect(within(quota).getByText("claude-main 5h at its limit until 15:00").className).toContain(
+      "crit-t",
+    );
+    expect(
+      within(quota).getByText("codex-main 7d full in ~3h10 at this rate (resets Sun 19:00)"),
+    ).toBeTruthy();
+    const rows = quota.querySelectorAll(".quotarow");
+    expect(rows.length).toBe(2);
+    expect(rows[0]?.textContent).toContain("5h 100%");
+    expect(rows[0]?.textContent).toContain("7d 60%");
+    expect(rows[1]?.textContent).toContain("no 5h window");
+    expect(
+      quota.querySelector('[title^="claude-main 7d: 60% used · not filling at this rate"]'),
+    ).toBeTruthy();
+    expect(quota.querySelector(".meter.full")).toBeTruthy();
+    expect(quota.textContent).toContain(
+      "Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every 30 min. Hover a bar for its reset time.",
+    );
+  });
+
+  it("the GitHub row: what is left, the poll cost and the reset", async () => {
+    stub({ limits, githubRate: GITHUB_RATE });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    expect(await within(quota).findByText(GITHUB_RATE_LINE)).toBeTruthy();
+    expect(quota.textContent).not.toContain("slowed");
+  });
+
+  it("the GitHub row is — before any reading", async () => {
+    stub({ limits });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    expect(await within(quota).findByText("GitHub API · —")).toBeTruthy();
+  });
+
+  it("shows the collector's slowed note beside the GitHub row", async () => {
+    const note = `${GITHUB_SLOWED_PREFIX} rate limit low (400 left, resets 15:00)`;
+    stub({
+      limits,
+      githubRate: GITHUB_RATE,
+      health: [{ collector: "github:shop-app", ok: true, error: note, at: NOW, lastOkAt: NOW }],
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    const shown = await within(quota).findByText(note);
+    expect(shown.getAttribute("role")).toBe("status");
+  });
+
+  it("shows the slowed note even when there is no reading yet", async () => {
+    const note = `${GITHUB_SLOWED_PREFIX} rate limit low (400 left, resets 15:00)`;
+    stub({
+      limits,
+      health: [{ collector: "github:shop-app", ok: true, error: note, at: NOW, lastOkAt: NOW }],
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    expect(await within(quota).findByText(note)).toBeTruthy();
+    expect(within(quota).getByText("GitHub API · —")).toBeTruthy();
+  });
+
+  it("shows resets — once the reading's reset time has passed", async () => {
+    const q = GITHUB_RATE.queries.escalations;
+    if (!q) throw new Error("fixture has no escalations query");
+    const expired = {
+      ...GITHUB_RATE,
+      queries: { escalations: { ...q, resetAt: NOW - MIN } },
+    };
+    stub({ limits, githubRate: expired });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    expect(
+      await within(quota).findByText("GitHub API · 4750 left · 7 per poll · resets —"),
+    ).toBeTruthy();
+  });
+
+  it("keeps the row — until the timezone has loaded", async () => {
+    stubFetch({
+      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/limits": limits,
+      "/api/limits/github": GITHUB_RATE,
+      "/api/health": [],
+      "/api/config": () => ({ status: 503, body: { error: "loading" } }),
+    });
+    const { container } = render(<Overview />);
+    const { githubRate } = RESOURCES;
+    await waitFor(() => expect(hub.snapshot(githubRate.path, githubRate.topic).data).toBeTruthy());
+    // Re-query: the panel may have re-rendered since the reading landed.
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    expect(quota.querySelector(".githubrate")?.textContent).toBe("GitHub API · —");
+    expect(quota.textContent).not.toContain("4750 left");
+  });
+
+  it("shows the reset in the operator's timezone", async () => {
+    stub({
+      limits,
+      githubRate: GITHUB_RATE,
+      config: { ...CONFIG, operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" } },
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    expect(
+      await within(quota).findByText("GitHub API · 4750 left · 7 per poll · resets 23:00"),
+    ).toBeTruthy();
+  });
+});
+
+describe("Activity panel", () => {
+  const events: ActivityEvent[] = (
+    [
+      {
+        at: NOW - MIN,
+        who: "shop-app-ta",
+        kind: "run-end",
+        text: "run #11 failed",
+        ref: null,
+        url: null,
+        status: "failed",
+      },
+      {
+        at: NOW - 2 * MIN,
+        who: "shop-app-ta",
+        kind: "run-start",
+        text: "run #11 started",
+        ref: "shop-app#3349",
+        url: null,
+        status: null,
+      },
+      {
+        at: NOW - 3 * MIN,
+        who: "github:shop-app",
+        kind: "collector",
+        text: "github failed",
+        ref: null,
+        url: null,
+        status: null,
+      },
+      {
+        at: NOW - 4 * MIN,
+        who: "studio",
+        kind: "run-start",
+        text: "studio run",
+        ref: null,
+        url: null,
+        status: null,
+      },
+    ] satisfies Omit<ActivityEvent, "prs" | "summary">[]
+  ).map((e) => ({ ...e, prs: [], summary: null }));
+  const rows = [
+    crewRow({ id: "shop-app-ta" }),
+    crewRow({ id: "studio", index: 1, repoId: "site-builder" }),
+  ];
+
+  it("renders every row when events share their time, agent, kind and text", async () => {
+    const twin = events[3] as ActivityEvent;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    stub({ rows, activity: [twin, { ...twin }] });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findAllByText("studio run");
+    expect(act_.querySelectorAll(".arow")).toHaveLength(2);
+    expect(error).not.toHaveBeenCalled(); // React warns on a repeated key
+    error.mockRestore();
+  });
+
+  it("lists oldest first with glyphs; failed ends and collectors are red", async () => {
+    stub({ rows, activity: events });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText("run #11 failed");
+    const arows = [...act_.querySelectorAll<HTMLElement>(".arow")];
+    expect(arows.map((r) => r.querySelector(".txt")?.textContent)).toEqual([
+      "studio studio run",
+      "github:shop-app github failed",
+      "shop-app-ta run #11 started",
+      "shop-app-ta run #11 failed",
+    ]);
+    expect(arows[0]?.querySelector(".g")?.textContent).toBe("→");
+    expect(arows[1]?.querySelector(".g")?.textContent).toBe("◆");
+    expect(arows[1]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(arows[3]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(arows[2]?.querySelector(".g")?.className).not.toContain("crit-t");
+    expect(arows[2]?.textContent).toContain("shop-app #3349");
+    expect(act_.textContent).toContain("high-level steps from every agent");
+  });
+
+  it("a run-end row ends with its summary and shows its PR chips after the ref", async () => {
+    const ended: ActivityEvent = {
+      ...(events[0] as ActivityEvent),
+      text: "ok · shop-app#3349 · Cached quotes",
+      ref: "shop-app#3349",
+      summary: "Cached quotes",
+      prs: [
+        {
+          repoId: "shop-app",
+          number: 3240,
+          title: "Quote cache",
+          url: "https://github.com/octo-org/shop-app/pull/3240",
+          state: "merged",
+          ticket: "shop-app#3349",
+        },
+      ],
+    };
+    stub({ rows, activity: [ended] });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText(/Cached quotes/);
+    const row = act_.querySelector(".arow") as HTMLElement;
+    expect(row.querySelector(".txt")?.textContent?.endsWith(" · Cached quotes")).toBe(true);
+    const chip = within(row).getByRole("link", { name: "shop-app PR #3240" });
+    expect(chip.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/3240");
+    expect(row.textContent).toContain("shop-app #3349");
+    expect(row.textContent).toContain("Merged");
+  });
+
+  it("renders state changes (red into error or stalled) and PR rows with the ⇡ glyph", async () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null };
+    const list: ActivityEvent[] = [
+      {
+        ...base,
+        at: NOW - MIN,
+        who: "shop-app-ta",
+        kind: "state",
+        text: "Running → Stalled: no output for 10 min",
+      },
+      { ...base, at: NOW - 2 * MIN, who: "shop-app-ta", kind: "state", text: "Stalled → Running" },
+      {
+        ...base,
+        at: NOW - 3 * MIN,
+        who: "shop-app",
+        kind: "pr-opened",
+        text: "PR #41 opened: Quote cache",
+        ref: "shop-app#3349",
+        url: "https://github.com/octo-org/shop-app/pull/41",
+      },
+    ];
+    stub({ rows, activity: list });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    const prLink = await within(act_).findByRole("link", { name: "shop-app PR #41" });
+    expect(prLink.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/41");
+    expect(prLink.closest(".txt")?.textContent).toContain("PR #41 opened: Quote cache");
+    const arows = [...act_.querySelectorAll<HTMLElement>(".arow")];
+    const glyphs = arows.map((r) => r.querySelector(".g")?.textContent);
+    expect(glyphs).toEqual(["⇡", "◆", "◆"]);
+    expect(arows[0]?.querySelector(".g")?.className).not.toContain("crit-t");
+    expect(arows[1]?.querySelector(".g")?.className).not.toContain("crit-t");
+    expect(arows[2]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(
+      within(arows[0] as HTMLElement).getByRole("link", { name: "shop-app #3349" }),
+    ).toBeTruthy();
+  });
+
+  it("a failed board move reads red; a successful one does not", async () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null, kind: "board" };
+    const list = [
+      { ...base, at: NOW - MIN, who: "shop-app", text: "shop-app#7 moved to In progress" },
+      { ...base, at: NOW - 2 * MIN, who: "shop-app", text: "shop-app#8 move failed: HTTP 502" },
+    ] as ActivityEvent[];
+    stub({ rows, activity: list });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText(/move failed: HTTP 502/);
+    const arows = [...act_.querySelectorAll<HTMLElement>(".arow")];
+    expect(arows).toHaveLength(2);
+    // oldest first: the failed move, then the successful one
+    expect(arows[0]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(arows[0]?.querySelector(".txt .crit-t")).not.toBeNull();
+    expect(arows[1]?.querySelector(".g")?.className).not.toContain("crit-t");
+    expect(arows[1]?.querySelector(".txt .crit-t")).toBeNull();
+  });
+
+  describe("refs in the server's text", () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null, who: "shop-app-ta" };
+    const show = async (list: ActivityEvent[]) => {
+      stub({ rows, activity: list });
+      const { container } = render(<Overview />);
+      const act_ = container.querySelector("#actP") as HTMLElement;
+      await within(act_).findAllByRole("link");
+      return [...act_.querySelectorAll<HTMLElement>(".arow")];
+    };
+
+    it("a run's ref in its text is one linked chip, not text and a second chip", async () => {
+      const arows = await show([
+        {
+          ...base,
+          at: NOW - MIN,
+          kind: "run-start",
+          text: "started on shop-app#3349",
+          ref: "shop-app#3349",
+        },
+        {
+          ...base,
+          at: NOW - 2 * MIN,
+          kind: "run-end",
+          text: "ok · shop-app#3349 · ≈$1.20 · Cached shop-app#3349 quotes",
+          ref: "shop-app#3349",
+        },
+      ]);
+      expect(arows.map((r) => r.querySelector(".txt")?.textContent)).toEqual([
+        "shop-app-ta ok · shop-app #3349 · ≈$1.20 · Cached shop-app#3349 quotes",
+        "shop-app-ta started on shop-app #3349",
+      ]);
+      for (const r of arows) {
+        const links = within(r).getAllByRole("link", { name: "shop-app #3349" });
+        expect(links).toHaveLength(1);
+        expect(links[0]?.getAttribute("href")).toBe(
+          "https://github.com/octo-org/shop-app/issues/3349",
+        );
+      }
+    });
+
+    it("a PR event's repo is the ticket's, else the URL's, before the agent's", async () => {
+      const arows = await show([
+        {
+          ...base,
+          at: NOW - MIN,
+          kind: "pr-opened",
+          text: "PR #9 opened: From the ticket",
+          ref: "site-builder#12",
+        },
+        {
+          ...base,
+          at: NOW - 2 * MIN,
+          kind: "pr-merged",
+          text: "PR #41 merged: From the URL",
+          url: "https://github.com/octo-org/site-builder/pull/41",
+        },
+        { ...base, at: NOW - 3 * MIN, kind: "pr-opened", text: "PR #5 opened: From the agent" },
+      ]);
+      const hrefs = arows.map((r) =>
+        within(r)
+          .getByRole("link", { name: /PR #\d+$/ })
+          .getAttribute("href"),
+      );
+      expect(hrefs).toEqual([
+        "https://github.com/octo-org/shop-app/pull/5",
+        "https://github.com/octo-org/site-builder/pull/41",
+        "https://github.com/octo-org/site-builder/pull/9",
+      ]);
+    });
+
+    it("the ticket ref on a PR event links to the issue, not the PR's URL", async () => {
+      const [row] = await show([
+        {
+          ...base,
+          at: NOW - MIN,
+          kind: "pr-opened",
+          text: "PR #41 opened: Quote cache",
+          ref: "shop-app#3349",
+          url: "https://github.com/octo-org/shop-app/pull/41",
+        },
+      ]);
+      const ticket = within(row as HTMLElement).getByRole("link", { name: "shop-app #3349" });
+      expect(ticket.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/3349");
+    });
+
+    it("before the config loads, a ref is text, never the PR's URL", async () => {
+      stub({
+        rows,
+        config: () => ({ status: 503, body: { error: "loading" } }),
+        activity: [
+          {
+            ...base,
+            at: NOW - MIN,
+            kind: "pr-opened",
+            text: "PR #41 opened: Quote cache",
+            ref: "shop-app#3349",
+            url: "https://github.com/octo-org/shop-app/pull/41",
+          },
+        ],
+      });
+      const { container } = render(<Overview />);
+      const act_ = container.querySelector("#actP") as HTMLElement;
+      await within(act_).findByText(/Quote cache/);
+      expect(within(act_).queryByRole("link")).toBeNull();
+    });
+
+    it("an agent-less PR row does not say the repo twice", async () => {
+      const [row] = await show([
+        { ...base, at: NOW - MIN, who: "shop-app", kind: "pr-opened", text: "PR #5 opened: Q" },
+      ]);
+      expect((row as HTMLElement).querySelector(".txt .rchip")).toBeNull();
+      expect((row as HTMLElement).querySelector(".txt")?.textContent).toBe(
+        "shop-app PR #5 opened: Q",
+      );
+    });
+  });
+
+  it("Messages says the engine is needed; Everything changes the subtitle; Pause freezes", async () => {
+    const f = stub({ rows, activity: events });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText("run #11 failed");
+    fireEvent.click(within(act_).getByRole("button", { name: "Messages" }));
+    expect(within(act_).getByText(ENGINE_NOT_RUNNING)).toBeTruthy();
+    expect(act_.textContent).toContain("what agents said to each other");
+    fireEvent.click(within(act_).getByRole("button", { name: "Everything" }));
+    expect(act_.textContent).toContain("every event");
+    expect(act_.querySelectorAll(".arow").length).toBe(4);
+    expect(f).toHaveBeenCalled();
+    fireEvent.click(within(act_).getByRole("button", { name: "Pause" }));
+    expect(within(act_).getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  it("hides other repos' rows under a session filter", async () => {
+    stub({ rows, activity: events });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText("run #11 failed");
+    act(() => setSession("shop-app"));
+    expect(within(act_).queryByText("studio run")).toBeNull();
+    expect(within(act_).getByText("run #11 started")).toBeTruthy();
+    expect(within(act_).getByText("github failed")).toBeTruthy(); // names the repo, so it is shop-app's
+  });
+
+  it("an empty day says No events yet.", async () => {
+    stub({ activity: [] });
+    const { container } = render(<Overview />);
+    await within(container.querySelector("#actP") as HTMLElement).findByText("No events yet.");
+  });
+});
+
+describe("Overview: agent text is formatted", () => {
+  const ev = (text: string): ActivityEvent => ({
+    at: NOW - MIN,
+    who: "shop-app-ta",
+    kind: "run-start",
+    text,
+    ref: null,
+    url: null,
+    status: null,
+    prs: [],
+    summary: null,
+  });
+
+  it("an Activity row and a Parked need part render Markdown", async () => {
+    stub({
+      rows: [crewRow({ hudState: "blocked" })],
+      items: [item({ key: "p:1", kind: "parked", text: "wait for **the operator**" })],
+      activity: [ev("ran `pnpm test` on **main**")],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("main");
+    const row = container.querySelector(".arow .txt") as HTMLElement;
+    expect(row.querySelector("code")?.textContent).toBe("pnpm test");
+    expect(row.querySelector("strong")?.textContent).toBe("main");
+    expect(row.textContent).not.toContain("**");
+    const need = container.querySelector(".need") as HTMLElement;
+    expect(need.querySelector("strong")?.textContent).toBe("the operator");
+    expect(need.textContent).toContain("Parked: wait for the operator");
+  });
+
+  it.each(["__init__.py", "a*b", "1.", "-"])("plain prose %j is unchanged", async (text) => {
+    stub({
+      rows: [crewRow({ hudState: "blocked" })],
+      items: [item({ key: "p:1", kind: "parked", text })],
+      activity: [ev(text)],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText(`Parked: ${text}`);
+    const row = container.querySelector(".arow .txt") as HTMLElement;
+    // the row is the agent tag, then the event text on its own
+    expect(row.lastElementChild?.textContent).toBe(text);
+    expect(row.querySelector("strong, code, em")).toBeNull();
+  });
+
+  it("keeps an Activity row and a need part to one line: a list marker is not a list", async () => {
+    stub({
+      rows: [crewRow({ hudState: "blocked" })],
+      items: [item({ key: "p:1", kind: "parked", text: "1. retry" })],
+      activity: [ev("1. retry")],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Parked: 1. retry");
+    const row = container.querySelector(".arow .txt") as HTMLElement;
+    expect(row.lastElementChild?.textContent).toBe("1. retry");
+    expect(row.querySelector("p, ul, ol, pre, .md")).toBeNull();
+    const need = container.querySelector(".need") as HTMLElement;
+    expect(need.querySelector("p, ul, ol, pre, .md")).toBeNull();
+  });
+});
+
+describe("Overview: what a seat is doing", () => {
+  const ci = { phase: "ci" as const, text: "CI on 08a7cfc", prNumber: 9, parked: null };
+
+  it("a seat with an ended run is Free: No ticket, Free for work, no Loop step", async () => {
+    const live = seatRow().run as NonNullable<CrewRow["run"]>;
+    stub({
+      rows: [
+        seatRow({
+          hudState: "idle",
+          run: { ...live, status: "ok", endedAt: 1 },
+          loop: { phase: "done", text: "Done · PR #9", prNumber: 9, parked: null },
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Free");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.textContent).toContain("No ticket");
+    expect(row.textContent).not.toContain("Quote cache");
+    expect(row.querySelector(".doing")?.textContent).toBe("Free for work");
+    expect(row.querySelector(".loopstep .stepbar")).toBeNull();
+    expect(row.textContent).not.toContain("Done");
+  });
+
+  it("a seat in CI says Waiting on CI and the loop's text", async () => {
+    stub({ rows: [seatRow({ hudState: "idle", loop: ci })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Waiting on CI");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".pill")?.textContent).toBe("Waiting on CI");
+    expect(row.querySelector(".doing")?.textContent).toBe("CI on 08a7cfc");
+    expect(row.textContent).toContain("Quote cache");
+  });
+});

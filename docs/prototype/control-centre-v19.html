@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Control Centre — prototype v19</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--bg2:#010409;--p:#161b22;--p2:#1c2129;--sel:#1c2a3d;--ln:#30363d;--ln2:#3d444d;--tx:#e6edf3;--dim:#b1bac4;--ft:#8b949e;
+--bl:#4493f8;--gr:#3fb950;--am:#e3b341;--rd:#f85149;--pu:#a371f7;--mono:'IBM Plex Mono',ui-monospace,monospace;--sans:'IBM Plex Sans',-apple-system,sans-serif;--dock:360px}
+*{box-sizing:border-box;margin:0;padding:0;scrollbar-color:#3d444d #0d1117}
+html,body{height:100%;background:var(--bg);color:var(--tx);font:13px/1.45 var(--sans);overflow:hidden}
+.m{font-family:var(--mono)}
+a{color:var(--bl);cursor:pointer;text-decoration:none}a:hover{text-decoration:underline}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.app{display:grid;grid-template-rows:40px auto minmax(0,1fr);grid-template-columns:minmax(0,1fr) var(--dock);height:100vh;width:100vw;overflow:hidden}
+.app.nodock{grid-template-columns:minmax(0,1fr) 0}
+.app.nodock .dock{display:none}
+/* header */
+.hdr{grid-column:1/3;display:flex;align-items:stretch;border-bottom:1px solid var(--ln);background:var(--bg2);padding:0 12px;gap:2px;min-width:0}
+.brand{display:flex;align-items:center;font:600 12.5px var(--mono);color:var(--dim);margin-right:8px;white-space:nowrap}
+.tab{display:flex;align-items:center;gap:6px;padding:0 10px;cursor:pointer;color:var(--dim);border-bottom:2px solid transparent;white-space:nowrap}
+.tab:hover{color:var(--tx)}.tab.on{color:var(--tx);border-bottom-color:var(--bl)}
+.tab .b{font:600 10.5px var(--mono);color:#0d1117;background:var(--am);border-radius:8px;padding:0 5px}
+.tab .b.r{background:var(--rd);color:#fff}
+.sp{flex:1}
+.hstat{display:flex;align-items:center;gap:12px;font:12px var(--mono);color:var(--ft);min-width:0;overflow:hidden;white-space:nowrap;flex:0 1 auto}
+.hstat b{color:var(--tx);font-weight:500}.hstat .bad{color:var(--rd)}
+.nu{flex:none;display:flex;align-items:center;gap:6px;margin-left:10px;cursor:pointer;font:12px var(--mono);color:#0d1117;background:var(--am);border-radius:12px;padding:2px 10px;align-self:center;font-weight:600}
+.nu.zero{background:transparent;color:var(--ft);border:1px solid var(--ln2);font-weight:400}
+.clock{flex:none;font:12px var(--mono);color:var(--ft);align-self:center;margin-left:10px}
+/* legend */
+.legend{grid-column:1/3;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;padding:4px 14px;border-bottom:1px solid var(--ln);background:var(--bg);font:11.5px var(--mono);color:var(--ft);white-space:nowrap}
+.legend b{color:var(--dim);font-weight:500}
+main{overflow:auto;padding:12px 14px 40px;border-right:1px solid var(--ln);min-width:0;scrollbar-gutter:stable}
+.view{display:none}.view.on{display:block}
+h2{font:600 12px var(--mono);text-transform:uppercase;letter-spacing:.04em;color:var(--dim);margin:18px 0 6px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+h2 span{font-weight:400;text-transform:none;letter-spacing:0;color:var(--ft);font-size:12px}
+h2 .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+h2.first{margin-top:0}
+.fresh{font:11px var(--mono);color:var(--ft)}
+.tw{border:1px solid var(--ln);border-radius:6px;overflow:auto;background:var(--p)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font:500 11px var(--mono);color:var(--ft);padding:6px 8px;border-bottom:1px solid var(--ln);background:var(--p2);white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid #30363d99;color:var(--dim);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td.t{color:var(--tx)}td.n,th.n{text-align:right;font-family:var(--mono);white-space:nowrap}td.n{color:var(--tx)}td.mm{font-family:var(--mono);white-space:nowrap}
+tr.r{cursor:pointer}tr.r:hover td{background:#ffffff06}
+tr.g td{background:var(--bg);color:var(--tx);font:600 12px var(--mono)}
+.ok{color:var(--gr)}.wa{color:var(--am)}.bad{color:var(--rd)}.ft{color:var(--ft)}.tx{color:var(--tx)}.dim{color:var(--dim)}
+.s{font:12px var(--mono)}
+.btn{font:500 11.5px var(--mono);padding:2px 9px;border-radius:4px;border:1px solid var(--ln2);background:var(--p2);color:var(--tx);cursor:pointer;white-space:nowrap;display:inline-block;line-height:18px}
+.btn:hover{border-color:var(--ft)}.btn.g{background:transparent;border-color:transparent;color:var(--ft)}.btn.g:hover{color:var(--tx);border-color:var(--ln2)}
+.btn.danger{color:var(--rd);border-color:#f8514966}
+.btn+.btn,.btn+a,a+.btn{margin-left:4px}
+.mb{display:flex;gap:4px;flex-wrap:nowrap;justify-content:flex-end}
+select,input{background:var(--bg);border:1px solid var(--ln2);border-radius:4px;color:var(--tx);font:12px var(--mono);padding:2px 6px}
+.seg{display:inline-flex;border:1px solid var(--ln);border-radius:4px;overflow:hidden}
+.seg span{padding:2px 9px;font:11.5px var(--mono);color:var(--dim);cursor:pointer;border-right:1px solid var(--ln);white-space:nowrap}
+.seg span:last-child{border:0}.seg span.on{background:var(--p2);color:var(--tx)}
+/* agent state glyphs: shape + colour */
+.st{display:inline-flex;align-items:center;gap:6px;font:12px var(--mono);white-space:nowrap}
+.gy{display:inline-block;flex:none;width:9px;height:9px}
+.gy.working{background:var(--gr);border-radius:50%}
+.gy.waiting-agent{border:2px solid var(--dim);border-radius:50%}
+.gy.waiting-you{background:var(--am);transform:rotate(45deg);width:8px;height:8px;animation:pulse 2.4s ease-in-out infinite}
+.gy.idle{border:1.5px solid var(--ft);border-radius:50%}
+.gy.error{background:var(--rd);border-radius:1px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6;box-shadow:0 0 6px var(--am)}}
+.c-working{color:var(--gr)}.c-waiting-agent{color:var(--dim)}.c-waiting-you{color:var(--am)}.c-idle{color:var(--ft)}.c-error{color:var(--rd)}
+.tsx{font:11px var(--mono);padding:0 6px;border-radius:10px;border:1px solid;white-space:nowrap}
+.ts-planned{color:var(--dim);border-color:var(--ln2)}.ts-progress{color:var(--bl);border-color:#4493f866}.ts-review{color:var(--pu);border-color:#a371f766}.ts-blocked{color:var(--rd);border-color:#f8514966}.ts-done{color:var(--gr);border-color:#3fb95066}.ts-held{color:#9cb4d8;border-color:#9cb4d866}
+.pri{font:600 11px var(--mono);border:1px solid var(--ln2);border-radius:10px;padding:0 6px;background:var(--bg);color:var(--tx)}
+.pri.p0{border-color:var(--tx)}
+.ref{font:12px var(--mono);color:var(--dim);white-space:nowrap}
+/* kpis */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border:1px solid var(--ln);border-radius:6px;background:var(--p);overflow:hidden}
+.k{padding:7px 11px;border-right:1px solid var(--ln);border-bottom:1px solid var(--ln);min-width:0;margin:0 -1px -1px 0}
+.k span{display:block;font:11px var(--mono);color:var(--ft)}
+.k b{font:500 18px var(--mono);display:block;line-height:1.3}
+.k small{font:11px var(--mono);color:var(--ft);display:block;line-height:1.35}
+/* cto strip */
+.ctos{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);border:1px solid #4493f866;border-radius:6px;background:var(--p);margin-top:10px;cursor:pointer}
+.ctos:hover{border-color:var(--bl)}
+.ctos>div{padding:7px 11px;border-right:1px solid var(--ln);min-width:0}.ctos>div:last-child{border:0}
+.ctos .lbl{display:block;font:11px var(--mono);color:var(--ft)}
+.ctos .v{font:12.5px var(--mono);color:var(--tx)}
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(370px,1fr));gap:10px}
+.ac{border:1px solid var(--ln);border-left:3px solid var(--ln);border-radius:6px;background:var(--p);padding:9px 11px;cursor:pointer;display:flex;flex-direction:column;gap:5px;min-width:0}
+.ac:hover{border-color:var(--ln2)}
+.ac.working{border-left-color:var(--gr)}.ac.waiting-agent{border-left-color:var(--dim)}.ac.waiting-you{border-left-color:var(--am);background:linear-gradient(90deg,#e3b34110,var(--p) 30%)}.ac.error{border-left-color:var(--rd)}
+.ac .h{display:flex;gap:8px;align-items:center;min-width:0}
+.ac .h b{font:600 14px var(--mono)}
+.ac .h .role{font:11.5px var(--mono);color:var(--dim)}
+.ac .h .st{margin-left:auto}
+.ml{display:grid;grid-template-columns:52px minmax(0,1fr);gap:0 8px;font:11.5px var(--mono);color:var(--dim)}
+.ml span{color:var(--ft)}
+.ctxbar{display:inline-block;width:46px;height:5px;border-radius:3px;background:var(--ln);vertical-align:middle;position:relative;overflow:hidden;margin:0 4px}
+.ctxbar i{position:absolute;left:0;top:0;bottom:0}
+.work{font-size:13px;color:var(--tx);line-height:1.35;height:35px;overflow:hidden}
+.work .lnk{font:11.5px var(--mono);color:var(--ft)}
+.stepl{font:12px var(--mono);color:var(--tx);display:flex;gap:8px;align-items:baseline;min-width:0}
+.stepl .n{color:var(--ft);margin-left:auto;white-space:nowrap}
+.segs{display:flex;gap:2px;height:7px;margin-top:3px}
+.segs i{flex:1;border-radius:2px;background:var(--ln)}
+.segs i.d{background:#3fb95099}.segs i.c{background:var(--bl)}.segs i.c.waiting-agent{background:var(--dim)}.segs i.c.waiting-you{background:var(--am)}.segs i.x{background:repeating-linear-gradient(90deg,#3d444d 0 3px,transparent 3px 6px)}.segs i.o{background:transparent;border:1px dashed var(--ln2)}
+.lb{font:11.5px var(--mono);color:var(--dim);height:17px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.why{font:12px var(--mono);min-height:34px;line-height:1.4}
+.foot{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 10px;font:11px var(--mono);color:var(--ft);border-top:1px solid #30363d88;padding-top:5px}
+.foot b{color:var(--dim);font-weight:500;display:block}
+.feed{border:1px solid var(--ln);border-radius:6px;background:var(--p)}
+.fe{display:grid;grid-template-columns:50px 96px minmax(0,1fr);gap:8px;padding:5px 10px;border-bottom:1px solid #30363d77;font:12px var(--mono);color:var(--dim)}
+.fe:last-child{border:0}
+.fe .t{color:var(--ft)}.w-agent{color:var(--bl)}.w-cto{color:var(--pu)}.w-sys{color:var(--ft)}
+/* loops */
+.lpg{display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px}
+.lpi{padding:8px 10px;border-bottom:1px solid var(--ln);cursor:pointer}
+.lpi.on{background:var(--sel);box-shadow:inset 3px 0 0 var(--bl)}
+.lpi b{font:600 12.5px var(--sans)}.lpi .id{font:11px var(--mono);color:var(--ft);margin-left:4px}
+.lpi small{display:block;font:11px var(--mono);color:var(--ft)}
+.box{border:1px solid var(--ln);border-radius:6px;background:var(--p);padding:9px 11px;min-width:0}
+.box h3{font:600 12.5px var(--sans)}
+.box .sub{font:11.5px var(--mono);color:var(--ft);margin:1px 0 4px}
+.chart{display:block;width:100%;height:auto}
+.chart text{font:11px var(--mono);fill:var(--ft)}
+.lg{display:flex;gap:12px;font:11.5px var(--mono);color:var(--dim);flex-wrap:wrap;margin-top:4px}.lg i{display:inline-block;width:9px;height:9px;margin-right:4px;vertical-align:-1px}
+.grid{border-collapse:separate;border-spacing:3px;width:auto}
+.grid th{background:transparent;border:0;font:11px var(--mono);color:var(--ft);padding:2px 4px;text-align:center}
+.grid td{border:0;padding:0;text-align:center;vertical-align:middle}
+.cell{font:11px var(--mono);border:1px solid var(--ln);border-radius:4px;padding:2px 3px;min-width:52px;white-space:nowrap}
+.cell.ok{border-color:#3fb95066;color:var(--tx)}.cell.fail{border-color:#f8514988;color:var(--rd)}.cell.chg{border-color:var(--ln2);color:var(--dim);border-style:dotted}
+.cell.now{border-color:var(--bl);background:#4493f822;color:var(--tx)}.cell.now.waiting-agent,.cell.now.parked{border-color:var(--dim);background:#b1bac414}.cell.now.waiting-you{border-color:var(--am);background:#e3b34122}
+.cell.skip{border-style:dashed;color:var(--ft)}.cell.empty{border-color:transparent}
+.rowh{font:11px var(--mono);color:var(--ft);text-align:right!important;white-space:nowrap;padding-right:6px!important}
+.rowh .why2{color:var(--dim)}
+.rowh{white-space:normal!important;max-width:170px;line-height:1.3}
+@media (max-width:1300px){.lpg{grid-template-columns:200px minmax(0,1fr)}}
+.ctr{font:11px var(--mono);color:var(--ft);white-space:nowrap;padding-left:6px!important}
+.tline{display:flex;flex-wrap:wrap;gap:3px;align-items:center;margin:3px 0}
+.tline .lab{font:11px var(--mono);color:var(--ft);width:150px;text-align:right;padding-right:6px}
+/* boards */
+.stack{display:flex;height:16px;border-radius:3px;overflow:hidden;min-width:180px}
+.stack i{display:block;height:100%;font:600 10px/16px var(--mono);color:#0d1117;text-align:center;overflow:hidden;font-style:normal}
+.ghp{border:1px solid var(--ln);border-radius:6px;background:var(--bg)}
+.ghp-h{display:flex;align-items:center;gap:10px;padding:10px 14px 0;flex-wrap:wrap}
+.ghp-h .t{font:600 16px var(--sans)}.ghp-h .t small{font:400 13px var(--sans);color:var(--ft);margin-left:4px}
+.ghv{display:flex;gap:2px;padding:8px 14px 0;border-bottom:1px solid var(--ln)}
+.ghv span{padding:6px 12px;font-size:13px;color:var(--dim);cursor:pointer;border:1px solid transparent;border-bottom:0;border-radius:6px 6px 0 0;margin-bottom:-1px;white-space:nowrap}
+.ghv span.on{color:var(--tx);border-color:var(--ln);background:var(--bg)}
+.ghf{display:flex;gap:8px;align-items:center;padding:8px 14px;flex-wrap:wrap}
+.ghf .fi{flex:1;min-width:200px;background:var(--bg);border:1px solid var(--ln);border-radius:6px;padding:4px 10px;font-size:13px;color:var(--ft)}
+.ghb{display:flex;gap:8px;overflow-x:auto;padding:0 14px 12px}
+.ghc{background:var(--p);border:1px solid var(--ln);border-radius:8px;min-height:420px;display:flex;flex-direction:column;flex:1 0 220px;min-width:220px}
+.ghc .h{padding:8px 10px 4px}
+.ghc .h .r1{display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px}
+.ghc .h .cnt{font:500 12px var(--sans);color:var(--dim);background:var(--p2);border-radius:10px;padding:0 7px}
+.ghc .h .cnt.over{background:#f8514933;color:var(--rd)}
+.ghc .h .desc{font-size:12px;color:var(--ft);margin-top:2px}
+.ghc .b{padding:4px 8px;flex:1;overflow:auto}
+.ghc .add{padding:6px 10px;color:var(--ft);font-size:13px;border-top:1px solid var(--ln)}
+.sdot{width:12px;height:12px;border-radius:50%;border:2px solid;display:inline-block;flex:none}
+.gi{background:var(--bg);border:1px solid var(--ln);border-radius:6px;padding:8px 10px;margin-bottom:8px;cursor:pointer}
+.gi:hover{border-color:var(--ln2)}
+.gi.gneed,.gi.gyou{border-left:3px solid var(--am)}.gi.gblk{border-left:3px solid var(--rd)}.gi.gheld{border-left:3px solid #9cb4d8}.gi.gfail{border-left:3px solid var(--rd)}
+.gi .r1{display:flex;gap:6px;align-items:center;font:12px var(--mono);color:var(--ft)}
+.gi .r1 .age{margin-left:auto}
+.gi .tt{font-size:14px;font-weight:600;color:var(--tx);margin:3px 0 6px;line-height:1.3}
+.gi .lbls{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.gl{font:500 12px var(--sans);padding:0 7px;border-radius:12px;border:1px solid;line-height:18px}
+.gi .fl{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.gf{font:11.5px var(--mono);color:var(--dim);border:1px solid var(--ln);border-radius:10px;padding:0 6px;line-height:18px}
+.gf.ag{color:var(--tx)}
+.gi .act{font:11.5px var(--mono);margin-top:6px;line-height:1.4}
+.ico{display:inline-grid;place-items:center;width:16px;height:16px;flex:none}
+/* cto */
+.anch{position:sticky;top:-12px;z-index:5;background:var(--bg);padding:8px 0;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--ln);margin-bottom:4px}
+.anch a{font:12px var(--mono);border:1px solid var(--ln);border-radius:12px;padding:1px 10px;color:var(--dim)}
+.anch a b{color:var(--tx);font-weight:500}
+.need{border-bottom:1px solid var(--ln);padding:10px 12px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 10px}
+.need:last-child{border:0}
+.need .ttl{font-weight:600;color:var(--tx);font-size:13.5px}
+.need .ttl .tag{font:600 10.5px var(--mono);color:var(--ft);border:1px solid var(--ln2);border-radius:3px;padding:0 4px;margin-right:6px;vertical-align:1px}
+.need .meta2{font:11.5px var(--mono);color:var(--ft)}
+.need .esc{font:11.5px var(--mono);color:var(--dim);margin-top:2px}
+.opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;margin-top:6px}
+.opt{border:1px solid var(--ln2);border-radius:5px;padding:5px 8px;font-size:12.5px;cursor:pointer;background:var(--p2)}
+.opt:hover{border-color:var(--ft)}
+.opt .oh{display:flex;gap:6px;align-items:baseline}
+.opt .oh b{font:600 12px var(--mono)}
+.opt .oh .pick{margin-left:auto;font:11px var(--mono);color:var(--tx);white-space:nowrap}
+.opt.rec{border-color:var(--dim)}
+.opt small{display:block;font:11px var(--mono);color:var(--ft);margin-top:2px}
+.conf{font:11.5px var(--mono);color:var(--dim);margin-top:5px}
+.imp{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:8px;padding:8px 12px;border-bottom:1px solid var(--ln)}
+.imp:last-child{border:0}
+.imp .n{font:600 14px var(--mono);color:var(--bl)}
+.imp small{display:block;font:11.5px var(--mono);color:var(--ft)}
+.hb{display:inline-block;width:80px;height:6px;border-radius:3px;background:var(--ln);position:relative;overflow:hidden;vertical-align:middle;margin-right:6px}
+.hb i{position:absolute;left:0;top:0;bottom:0}
+details.scr{border:1px solid var(--ln);border-radius:6px;background:var(--p);margin-top:8px}
+details.scr summary{padding:6px 10px;font:12px var(--mono);color:var(--dim);cursor:pointer}
+.scratch{font:12px/1.65 var(--mono);color:var(--dim);padding:4px 10px 10px;white-space:pre-wrap}
+/* config */
+.code{font:12px/1.6 var(--mono);background:var(--bg2);border:1px solid var(--ln);border-radius:6px;overflow:auto;height:calc(100vh - 150px);display:grid;grid-template-columns:auto 1fr;position:sticky;top:0}
+.code .ln{color:#484f58;text-align:right;padding:8px 8px 8px 10px;user-select:none;border-right:1px solid var(--ln)}
+.code .tx2{padding:8px 12px;color:var(--dim);white-space:pre}
+.yk{color:#79c0ff}.yv{color:#a5d6ff}.yc{color:#8b949e}
+.form{display:grid;grid-template-columns:130px minmax(0,1fr);gap:6px 10px;align-items:center;font-size:12.5px}
+.form input,.form select{width:100%}
+.tog{display:inline-block;width:26px;height:14px;border-radius:7px;background:var(--dim);position:relative;vertical-align:middle;cursor:pointer}
+.tog:after{content:"";position:absolute;right:2px;top:2px;width:10px;height:10px;border-radius:50%;background:#0d1117}
+.tog.off{background:var(--ln2)}.tog.off:after{right:auto;left:2px}
+.gloss dt{font:600 12px var(--mono);color:var(--tx);margin-top:8px}
+.gloss dd{font-size:12.5px;color:var(--dim);margin-left:0}
+.gloss code{font:12px var(--mono);color:#a5d6ff}
+/* dock */
+.dock{grid-row:3;grid-column:2;display:flex;flex-direction:column;background:var(--p);min-height:0;min-width:0;overflow:hidden}
+.dock header{padding:8px 12px;border-bottom:1px solid var(--ln);font:600 12.5px var(--mono);display:flex;gap:8px;align-items:center;white-space:nowrap}
+.dock header small{font-weight:400;color:var(--ft)}
+.dock header .btn,.hdr .tab,.nu,.clock{flex:none}.dock header .sp{min-width:0}
+.pins{border-bottom:1px solid var(--ln);background:var(--bg);max-height:62%;overflow-y:auto;overflow-x:hidden}
+.part{font:11px var(--mono);color:var(--ft);padding:4px 12px;border-bottom:1px solid var(--ln);display:flex}
+.pin{padding:6px 12px;border-bottom:1px solid #30363d88;font-size:12.5px;cursor:pointer;border-left:3px solid var(--am)}
+.pin.lo{border-left-color:var(--ln2)}
+.pin:hover{background:#ffffff05}
+.pin .h{font:11px var(--mono);display:flex;gap:6px;align-items:center;color:var(--ft)}
+.pin .t{color:var(--tx);margin:2px 0}
+.pin .op{font:11.5px var(--mono);color:var(--dim);display:block;padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pin .op b{color:var(--tx)}
+.thread{flex:1;overflow:auto;padding:8px 12px;display:flex;flex-direction:column;gap:10px}
+.mg{font-size:12.5px}.mg .h{font:11px var(--mono);color:var(--ft)}.mg .h b{color:var(--pu);font-weight:600}.mg.me .h b{color:var(--bl)}.mg.ag .h b{color:var(--bl)}
+.mg p{margin-top:1px;color:var(--tx)}
+.mg table{margin-top:4px;font-size:12px;border:1px solid var(--ln)}
+.mg td,.mg th{padding:3px 6px}
+.mg .bt{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap}
+.scope{font:11px var(--mono);color:var(--ft);padding:4px 12px;border-bottom:1px solid var(--ln);display:flex;gap:6px;align-items:center}
+.cin{border-top:1px solid var(--ln);padding:8px;position:relative}
+.cin input{width:100%;padding:6px 8px;font-size:12.5px}
+.slash{position:absolute;bottom:44px;left:8px;right:8px;background:var(--p2);border:1px solid var(--ln2);border-radius:6px;display:none;font:12px var(--mono)}
+.slash div{padding:4px 10px;border-bottom:1px solid var(--ln)}.slash div:last-child{border:0}
+.slash b{color:var(--tx)}.slash span{color:var(--ft)}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--p2);border:1px solid var(--ln2);border-radius:6px;padding:8px 12px;font:12.5px var(--mono);z-index:60;display:none}
+/* drawer */
+.scrim{position:fixed;inset:66px var(--dock) 0 0;background:#0008;z-index:29;display:none}
+.app.nodock~.scrim{right:0}
+.scrim.on{display:block}
+.drw{position:fixed;top:66px;right:var(--dock);bottom:0;width:min(860px,calc(100vw - var(--dock) - 40px));background:var(--p);border-left:1px solid var(--ln);box-shadow:-20px 0 40px #0009;display:none;z-index:30;overflow:auto;padding:12px 14px}
+.app.nodock~.drw{right:0}
+.drw.on{display:block}
+.kv{display:grid;grid-template-columns:120px minmax(0,1fr);gap:4px 10px;font-size:12.5px}
+.kv span{color:var(--ft);font:11.5px var(--mono)}.kv b{font:500 12.5px var(--mono);color:var(--tx);word-break:break-word}
+.statg{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--ln);border:1px solid var(--ln);border-radius:4px;margin-top:6px}
+.statg div{background:var(--bg);padding:5px 8px}.statg span{display:block;font:11px var(--mono);color:var(--ft)}.statg b{font:500 13px var(--mono)}
+.agrp{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0}
+.agrp div{display:flex;gap:4px;align-items:center}
+.agrp small{font:10.5px var(--mono);color:var(--ft);margin-right:2px}
+@media (max-width:1400px){.hstat .h5,.clock .cl-d{display:none}}.hstat .mach2{display:none}@media (max-width:1750px){.hstat .mach{display:none}.hstat .mach2{display:inline}}@media (max-width:760px){.hstat .mach2{display:none}}
+.hstat .ac1{flex:none}
+.lgd{font:11px var(--mono);color:var(--ft);margin:2px 0 4px}
+.side-h{color:var(--ft);font-style:italic}
+.since{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0;border:1px solid var(--ln);border-radius:6px;background:var(--p);overflow:hidden}
+.since>div{padding:6px 10px;border-right:1px solid var(--ln)}.since span{display:block;font:11px var(--mono);color:var(--ft)}.since b{font:500 15px var(--mono)}
+.segs .sep{flex:0 0 6px;background:transparent}
+.cell.crash{border-color:#f8514988;color:var(--rd);border-style:dashed}
+.q{font:11.5px var(--mono);color:var(--dim)}.q li{list-style:none;padding:2px 0}
+@media (max-width:760px){.app{grid-template-rows:auto auto minmax(0,1fr)}.hdr{flex-wrap:wrap;padding:4px 8px}.hdr .sp,.clock{display:none}.hstat{order:9;flex-basis:100%;gap:8px;font-size:11px;padding:2px 0 4px}.tab{padding:6px 7px}.legend{display:none}.kpis{grid-template-columns:repeat(2,1fr)}.ctos{grid-template-columns:1fr}.ctos>div{border-right:0;border-bottom:1px solid var(--ln)}.cards{grid-template-columns:1fr}.lpg{grid-template-columns:1fr}.drw{top:0;width:100vw;right:0}.scrim{inset:0}main{padding:8px}h2 .r{margin-left:0;flex-wrap:wrap}main [style*="grid-template-columns"]{grid-template-columns:minmax(0,1fr)!important}.form{grid-template-columns:1fr}main .tw{max-width:100%}.statg{grid-template-columns:repeat(2,1fr)}main .box{overflow-x:auto}h2 .r select{max-width:30vw}.ac .h{flex-wrap:wrap}}
+.chatbtn{display:none;flex:none;align-self:center;margin-left:8px}
+.app.nodock .chatbtn{display:inline-block}
+.parked{font:11.5px var(--mono);color:var(--dim);border-top:1px dashed var(--ln);padding-top:4px}
+.parked b{color:var(--tx);font-weight:500}
+.sub-row td{background:#ffffff03}
+.sub-row td:first-child{padding-left:22px}
+@media (max-width:1280px){:root{--dock:320px}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+<div class="hdr">
+  <div class="brand">control-centre</div>
+  <div class="tab on" data-v="agents">Agents</div>
+  <div class="tab" data-v="loops">Loops</div>
+  <div class="tab" data-v="boards">Boards <span class="b r" id="b-boards" title="blocked tickets"></span></div>
+  <div class="tab" data-v="cto">CTO <span class="b" id="b-cto" title="needs you"></span></div>
+  <div class="tab" data-v="metrics">Metrics</div>
+  <div class="tab" data-v="config">Config</div>
+  <div class="sp"></div>
+  <div class="hstat" id="hstat"></div>
+  <div class="clock" id="clock"></div>
+  <div class="nu" id="nu" onclick="go('cto')"></div><span class="btn chatbtn" onclick="openDock()">CTO chat ⇤</span>
+</div>
+<div class="legend" id="legend"></div>
+<main id="main">
+<section class="view on" id="v-agents"></section>
+<section class="view" id="v-loops"></section>
+<section class="view" id="v-boards"></section>
+<section class="view" id="v-cto"></section>
+<section class="view" id="v-metrics"></section>
+<section class="view" id="v-config"></section>
+</main>
+<aside class="dock" id="dock">
+  <header>CTO chat <small class="ell">all repos</small><span class="sp"></span><span class="btn g" onclick="toggleDock()" title="hide chat (key: \)">hide ⇥</span></header>
+  <div class="pins" id="pins"></div>
+  <div class="scope" id="scope"></div>
+  <div class="thread" id="thread"></div>
+  <div class="cin"><div class="slash" id="slash"></div><input id="cin" placeholder="ask the CTO…   type / for commands"></div>
+</aside>
+</div>
+<div class="scrim" id="scrim" onclick="closeD()"></div>
+<div class="drw" id="drw"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+/* ====================================================================
+   CLOCK — every time on screen derives from NOW (frozen for the prototype)
+   ==================================================================== */
+const NOW=Date.UTC(2026,9,17,1,42); // Sat 17 Oct 2026 02:42 BST
+const TZ='Europe/London';
+const ago=m=>NOW-m*60000;
+const clock=ms=>new Date(ms).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:TZ});
+const dayTime=ms=>new Date(ms).toLocaleString('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:TZ}).replace(',','');
+const dayOnly=ms=>new Date(ms).toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:TZ});
+const dur=m=>{if(m==null||isNaN(m))return '—';if(m<1)return Math.max(1,Math.round(m*60))+'s';m=Math.round(m);if(m<60)return m+'m';const h=Math.floor(m/60);if(h<48)return h+'h '+String(m%60).padStart(2,'0')+'m';return Math.floor(h/24)+'d '+(h%24)+'h'};
+const q15=ms=>Math.round(ms/900000)*900000; // estimates rounded to the quarter hour
+const minsTo=ms=>(ms-NOW)/60000, minsSince=ms=>(NOW-ms)/60000;
+const sum=a=>a.reduce((x,y)=>x+(+y||0),0);
+const when=ms=>minsTo(ms)<720&&minsTo(ms)>-720?'~'+clock(ms):dayTime(ms);
+
+/* ====================================================================
+   CONFIG — config.yaml. Structure only; every screen renders CONFIG + DATA.
+   ==================================================================== */
+const CONFIG={
+ operator:{timezone:'Europe/London',offline:'00:00–07:00',digest:'08:00',notify:'only items that block work now'},
+ escalation:{tiers:[['now','blocks work that is in progress','push to phone + watch · pulsing badge'],['soon','blocks work due to start within 3 days','badge · 08:00 digest'],['later','anything else','08:00 digest']],digest:['open needs-you items','merged since the last digest','CTO decisions, with undo links','alerts','limit projections per account']},
+ accounts:[
+  {id:'claude-main',vendor:'claude',plan:'Max',alertAt:85,stopAt:95,windows:[{w:'5h',kind:'5h from first use',used:41,resetAt:Date.UTC(2026,9,17,2,10),len:300},{w:'7d',kind:'weekly · Tue 09:00',used:35,resetAt:Date.UTC(2026,9,20,8,0),len:10080}]},
+  {id:'codex-main',vendor:'codex',plan:'Pro Lite',alertAt:70,stopAt:80,windows:[{w:'7d',kind:'weekly · Mon 06:00',used:69,resetAt:Date.UTC(2026,9,19,5,0),len:10080}],no5h:true},
+ ],
+ rates:{'opus-5.5':1.00,'sonnet-5.5':0.60,'haiku-5.5':0.20,'gpt-5.3-codex':1.10}, // API-equivalent $/M tokens (blended with cache)
+ hosts:[{id:'my-mac',cpu:38,ram:21.4,ramMax:64,slots:12,status:'online'}],
+ integrations:{usage:{claude:'statusline rate_limits, stored every 30m',codex:'app-server account/rateLimits/read every 30m'},reviewBot:{name:'Claude Code Review',workflow:'.github/workflows/claude-review.yml'},github:{token:'ok · scopes repo, project, workflow'}},
+ states:['planned','in progress','review','blocked','done'],
+ heldLabel:'held',
+ repos:[
+  {id:'shop-app',gh:'octo-org/shop-app',color:'#39c5cf',project:{number:2,title:'shop-app engineering board',fields:['Priority','Size','Iteration'],views:['Board','Table','By agent','Roadmap'],
+    status:[{n:'Todo',c:'#8b949e',d:'Not started',map:'planned'},{n:'In Progress',c:'#4493f8',d:'Being implemented',map:'in progress',limit:3},{n:'In Review',c:'#a371f7',d:'PR open',map:'review'},{n:'Blocked',c:'#f85149',d:'Needs someone outside the agent loop',map:'blocked'},{n:'Done',c:'#3fb950',d:'Closed',map:'done'}]},
+   goal:{type:'milestone',title:'CK2 phase 3',scope:[44,44,46,46,47,48,48,49,50,50,50,50,50,50],start:10,unit:'issues'},hidden:{planned:15},loopOverrides:[]},
+  {id:'site-builder',gh:'octo-org/site-builder',color:'#f778ba',project:{number:3,title:'Site Builder Progress',fields:['Priority','Size','Epic'],views:['Board','Table','By agent'],
+    status:[{n:'Backlog',c:'#8b949e',d:'',map:'planned'},{n:'Ready',c:'#8b949e',d:'Groomed, can start',map:'planned'},{n:'In progress',c:'#4493f8',d:'',map:'in progress',limit:2},{n:'In review',c:'#a371f7',d:'',map:'review'},{n:'Blocking',c:'#f85149',d:'',map:'blocked'},{n:'Done',c:'#3fb950',d:'',map:'done'}]},
+   goal:{type:'epic',ref:'site-builder#1416',title:'Epic #1416 (UX7)',scope:[30,30,31,33,34,35,35,36,37,37,38,38,38,38],start:7,unit:'sub-issues'},hidden:{planned:6},loopOverrides:[{role:'dev',label:'docs',loop:'deliver-light'}]},
+  {id:'control-centre',gh:'octo-org/control-centre',color:'#d2a8ff',project:null,goal:null,loopOverrides:[]},
+ ],
+ roles:{supervisor:{label:'supervisor',loop:'supervise'},dev:{label:'developer',loop:'deliver'},qa:{label:'QA tester',loop:'verify'},research:{label:'researcher',loop:'research'},pm:{label:'project manager',loop:'plan'}},
+ // loop edges: [from, to, trigger, rework, signal]. side = steps reached only through an edge (drawn below the main line)
+ loops:{
+  supervise:{name:'Supervise',steps:['observe','assess','decide','act','escalate','watch'],back:[['watch','observe','next sweep (60s)',0,'timer:60s']]},
+  deliver:{name:'Deliver a ticket',steps:['plan','branch','implement','test','open-pr','review','qa','your-test','merge','fix'],side:['fix'],optional:['your-test'],skipIfNoAgent:{qa:'qa'},
+   back:[['test','implement','tests failed',1,'ci:fail'],['review','fix','changes requested',1,'review:changes_requested'],['qa','fix','QA found a bug',1,'qa:fail'],['fix','test','re-test after a fix',0,'step:done']]},
+  'deliver-light':{name:'Deliver (light)',steps:['plan','branch','implement','open-pr','review','merge','fix'],side:['fix'],back:[['review','fix','changes requested',1,'review:changes_requested'],['fix','review','re-review',0,'step:done']]},
+  verify:{name:'Verify a PR',steps:['pr-opened','read-spec','plan-tests','start-app','run-tests','explore','verdict','sign-off','report-bug','retest'],side:['report-bug','retest'],
+   back:[['run-tests','start-app','agent restarted',0,'agent:restart'],['verdict','report-bug','verdict: fail',0,'qa:fail'],['retest','verdict','re-check after the fix',0,'step:done']]},
+  research:{name:'Research',steps:['scan','gather','brief','spec-check','hand-off','drift-watch'],back:[['spec-check','gather','gap found',1,'agent:gap'],['drift-watch','spec-check','drift found',1,'agent:drift']]},
+  plan:{name:'Plan the board',steps:['sweep','groom','size','staff','track','report'],back:[['report','sweep','next day',0,'timer:daily']]},
+ },
+ agents:[
+  {id:'cto',role:'supervisor',repo:'*',account:'claude-main',model:'opus-5.5',host:'my-mac'},
+  {id:'dev-1',role:'dev',repo:'shop-app',account:'claude-main',model:'opus-5.5',host:'my-mac'},
+  {id:'qa-1',role:'qa',repo:'shop-app',account:'codex-main',model:'gpt-5.3-codex',fallback:'claude-main / sonnet-5.5',host:'my-mac'},
+  {id:'research-1',role:'research',repo:'shop-app',account:'claude-main',model:'sonnet-5.5',host:'my-mac'},
+  {id:'dev-2',role:'dev',repo:'site-builder',account:'claude-main',model:'opus-5.5',host:'my-mac'},
+  {id:'research-2',role:'research',repo:'site-builder',account:'codex-main',model:'gpt-5.3-codex',fallback:'claude-main / sonnet-5.5',host:'my-mac'},
+  {id:'pm-1',role:'pm',repo:'site-builder',account:'claude-main',model:'sonnet-5.5',host:'my-mac'},
+ ],
+ rules:{
+  auto:[{r:'reorder the queue (bugs on main first)',on:1},{r:'interrupt or reassign an agent within its repo',on:1},{r:'move board cards, add labels (incl. held)',on:1},{r:'restart a crashed agent',on:1,p:'max 3 in a row'},{r:'switch an agent to its fallback account',on:1,p:'when its account is projected over 100% at reset and the fallback is projected under 100%; applies from the agent\'s next new run'},{r:'start / stop branch apps',on:1},{r:'merge a PR via safe_merge',on:1,p:'review approved + CI green + QA passed (if the repo has QA)'}],
+  ask:[{r:'product or spec decisions, incl. conflicting specs',on:1},{r:'adding an agent, or spend over',on:1,p:'5% of an account\'s 7d window'},{r:'credentials, secrets, account access',on:1},{r:'CI / workflow / branch-protection changes',on:1},{r:'deleting unmerged work',on:1},{r:'anything where its confidence is below',on:1,p:'80%'}],
+ },
+ // standing watches (yours, in config). The CTO arms temporary ones at runtime; those live in DATA.ARMED.
+ watches:[
+  {id:'s-stop',when:'each account reaches its stop_at',then:'stop starting new runs on that account'},
+  {id:'s-proj',when:'an account is projected over 100% at reset',then:'move agents that have a fallback to it, from their next new run'},
+  {id:'s-ctx',when:'any agent\'s context window reaches 85%',then:'fresh session with a handoff note'},
+  {id:'s-stall',when:'any agent has 3 runs in a row without progress',then:'pause that agent and tell you'},
+  {id:'s-wait',when:'items wait on you past the next digest',then:'re-raise them in the digest'},
+ ],
+};
+/* ====================================================================
+   DATA — what the collectors report. Every number on screen derives from this.
+   ==================================================================== */
+const OP={lastSeen:ago(1),lastVisit:ago(182)}; // presence: last browser activity, last visit before this one
+// GitHub issues (cards). PRs are attached to their issue; never a separate card. app = branch app on the host.
+const T={
+ 'shop-app#3612':{t:'Basket shows pence prices ×100',st:'In Review',stAt:ago(68),lb:['bug'],f:{Priority:'P0',Size:'S',Iteration:'It 42'},owner:'dev-1',pr:{n:3830,author:'dev-1',checks:'pass',bot:'approved',qa:'failed',app:{host:'my-mac.local:5181',head:'a41f9c2',since:ago(41)}}},
+ 'shop-app#3822':{t:'Stock refresh: idempotent upsert',st:'In Progress',stAt:ago(36),lb:['CK2','feature'],f:{Priority:'P1',Size:'M',Iteration:'It 42'},owner:'dev-1'},
+ 'shop-app#3826':{t:'Order timeout: jitter window',st:'In Review',stAt:ago(129),lb:['ops'],f:{Priority:'P2',Size:'XS',Iteration:'It 42'},owner:'dev-1',pr:{n:3827,author:'dev-1',checks:'running',bot:'approved',qa:'running',app:{host:'my-mac.local:5182',head:'c09e1b7',since:ago(1)}}},
+ 'shop-app#3624':{t:'Payment sandbox harness',st:'Todo',stAt:ago(2880),lb:['CK2','feature'],f:{Priority:'P1',Size:'L',Iteration:'It 42'},owner:'research-1',subs:[1,3]},
+ 'shop-app#3631':{t:'Stock drift alerting',st:'Todo',stAt:ago(4320),lb:['CK2','needs-spec','held'],f:{Priority:'P2',Size:'M',Iteration:'It 43'},held:{by:'cto',at:ago(37),why:'no acceptance criteria'}},
+ 'shop-app#3633':{t:'Per-carrier shipping fees',st:'Todo',stAt:ago(4320),lb:['needs-spec','held'],f:{Priority:'P2',Size:'L',Iteration:'It 43'},held:{by:'cto',at:ago(37),why:'no acceptance criteria'}},
+ 'shop-app#3640':{t:'CK2 runbook',st:'Todo',stAt:ago(1440),lb:['CK2','ops'],f:{Priority:'P2',Size:'S',Iteration:'It 43'}},
+ 'shop-app#3618':{t:'Sandbox order path',st:'Blocked',stAt:ago(510),lb:['CK2'],f:{Priority:'P1',Size:'M',Iteration:'It 42'},owner:'dev-1',block:{by:'you',why:'needs payment sandbox credentials',brief:'b-cred'}},
+ 'shop-app#3819':{t:'Alert watch dedupe',st:'Done',stAt:ago(60),lb:['ops'],f:{Priority:'P2',Size:'S'},owner:'dev-1',closed:ago(60)},
+ 'shop-app#3815':{t:'Sales report PNG export',st:'Done',stAt:ago(180),lb:['feature'],f:{Priority:'P2',Size:'M'},owner:'dev-1',closed:ago(180)},
+ 'site-builder#1720':{t:'Page import from YAML',st:'Backlog',stAt:ago(8640),lb:['feature'],f:{Priority:'P2',Size:'L'}},
+ 'site-builder#1731':{t:'Publish history panel',st:'Ready',stAt:ago(600),lb:['UX7','frontend','held'],f:{Priority:'P1',Size:'M',Epic:'#1416'},held:{by:'cto',at:ago(172),why:'needs a frontend developer — waiting on your approval',brief:'b-fe'}},
+ 'site-builder#1732':{t:'Theme editor',st:'Ready',stAt:ago(600),lb:['UX7','frontend','held'],f:{Priority:'P1',Size:'S',Epic:'#1416'},held:{by:'cto',at:ago(172),why:'needs a frontend developer — waiting on your approval',brief:'b-fe'}},
+ 'site-builder#1733':{t:'Empty states',st:'Ready',stAt:ago(600),lb:['UX7','frontend','held'],f:{Priority:'P2',Size:'S',Epic:'#1416'},held:{by:'cto',at:ago(172),why:'needs a frontend developer — waiting on your approval',brief:'b-fe'}},
+ 'site-builder#1694':{t:'UX7 slice 6: text boxes expand on edit',st:'In review',stAt:ago(38),lb:['UX7'],f:{Priority:'P1',Size:'M',Epic:'#1416'},owner:'dev-2',subs:[5,6],pr:{n:1709,author:'dev-2',checks:'pass',bot:'changes requested',qa:'n/a',app:{host:'my-mac.local:8091',head:'7be03d1',since:ago(36)},mergeHeld:{why:'your ADR-12 decision',brief:'b-adr'}}},
+ 'site-builder#1708':{t:'Note anchor sweep',st:'Done',stAt:ago(110),lb:['UX7'],f:{Priority:'P2',Size:'S',Epic:'#1416'},owner:'dev-2',closed:ago(110)},
+ 'site-builder#1706':{t:'Per-field help audit',st:'Done',stAt:ago(300),lb:['UX7'],f:{Priority:'P2',Size:'M',Epic:'#1416'},owner:'dev-2',closed:ago(300)},
+ 'site-builder#1416':{t:'Epic: UX7 editor overhaul',epic:1,st:'In progress',stAt:Date.UTC(2026,8,21,8,0)},
+ 'shop-app#3590':{t:'Sales report rework',past:1},'site-builder#1691':{t:'UX7 slice 5: property rows',past:1},'shop-app#3581':{t:'Stock table migration',past:1},'site-builder#1688':{t:'Field schema v2',past:1},
+};
+const LABELS={'bug':'#f85149','feature':'#3fb950','CK2':'#39c5cf','needs-spec':'#d2a8ff','ops':'#8b949e','UX7':'#f778ba','frontend':'#58a6ff','held':'#9cb4d8'};
+// Runs: one per agent per ticket. path = [step, minutes, outcome] (ok|fail|changes|crash|now).
+// state: active (the agent is on it now) | queued (waiting for this agent's own active run) | parked (waiting on someone else)
+const RUNS=[
+ {agent:'cto',ticket:null,state:'active',path:[['observe',0.1,'ok'],['assess',0.1,'ok'],['decide',0.2,'ok'],['act',1,'now']],tok:1.9},
+ {agent:'dev-1',ticket:'shop-app#3822',state:'active',path:[['plan',6,'ok'],['branch',1,'ok'],['implement',14,'ok'],['test',3,'fail'],['implement',12,'now']],tok:1.6},
+ {agent:'dev-1',ticket:'shop-app#3612',state:'queued',at:'fix',waitSince:ago(20),waitWhy:'QA failed on PR #3830 · dev-1 starts the fix after its current step (~03:00)',path:[['plan',5,'ok'],['branch',1,'ok'],['implement',22,'ok'],['test',4,'ok'],['open-pr',2,'ok'],['review',6,'ok'],['qa',42,'fail'],['fix',20,'now']],tok:1.5},
+ {agent:'dev-1',ticket:'shop-app#3826',state:'parked',at:'qa',waitSince:ago(124),waitWhy:'PR #3827 waiting for QA (qa-1 verifying since 02:40)',path:[['plan',3,'ok'],['branch',1,'ok'],['implement',9,'ok'],['test',2,'ok'],['open-pr',1,'ok'],['review',5,'ok'],['qa',124,'now']],tok:0.6},
+ {agent:'qa-1',ticket:'shop-app#3826',state:'active',path:[['pr-opened',0.2,'ok'],['read-spec',0.6,'ok'],['plan-tests',0.4,'ok'],['start-app',0.3,'ok'],['run-tests',0.5,'now']],tok:0.1},
+ {agent:'qa-1',ticket:'shop-app#3612',state:'parked',at:'retest',waitSince:ago(18),waitWhy:'waiting for dev-1 to push a fix to PR #3830',path:[['pr-opened',1,'ok'],['read-spec',3,'ok'],['plan-tests',4,'ok'],['start-app',2,'ok'],['run-tests',8,'crash'],['start-app',3,'ok'],['run-tests',12,'ok'],['explore',9,'ok'],['verdict',0.1,'fail'],['report-bug',2,'ok'],['retest',18,'now']],tok:1.9},
+ {agent:'research-1',ticket:'shop-app#3624',state:'active',path:[['scan',8,'ok'],['gather',34,'ok'],['brief',12,'now']],tok:0.9},
+ {agent:'dev-2',ticket:'site-builder#1694',state:'active',path:[['plan',9,'ok'],['branch',1,'ok'],['implement',38,'ok'],['test',4,'fail'],['implement',6,'ok'],['test',5,'ok'],['open-pr',2,'ok'],['review',11,'changes'],['fix',8,'ok'],['test',3,'ok'],['review',9,'changes'],['fix',7,'now']],tok:3.9},
+ {agent:'research-2',ticket:'site-builder#1694',state:'active',waitYou:'b-adr',waitSince:ago(28),path:[['scan',6,'ok'],['gather',22,'ok'],['brief',10,'ok'],['spec-check',94,'now']],tok:0.6},
+ {agent:'pm-1',ticket:'site-builder#1416',state:'active',waitYou:'b-fe',waitSince:ago(172),path:[['sweep',5,'ok'],['groom',17,'ok'],['size',8,'ok'],['staff',172,'now']],tok:0.4},
+];
+// sessions (live + earlier ones in the last 24h) · 24h tokens = sum of those sessions · d14 = collector totals · w7 = % of the account's current 7d window used by this agent
+const AG={
+ 'cto':{session:{id:'cc-mgr-01',start:ago(401),turns:612,ctx:31,tok:1.9},prev:[{id:'cc-mgr-00',start:ago(1440),end:ago(401),tok:1.2,why:'context 85% → handoff'}],now:'queuing the fix of PR #3830 for dev-1',d14:{tok:26,h:{busy:140,wAg:0,wYou:0,idle:196}},w7:8},
+ 'dev-1':{session:{id:'cc-7f3a91',start:ago(50),turns:61,ctx:54,tok:1.6,branch:'feature/3822-stock-upsert'},prev:[{id:'cc-7f2e10',start:ago(410),end:ago(50),tok:2.8,why:'context 85% → handoff'}],d14:{tok:80,h:{busy:62,wAg:3,wYou:0,idle:15}},w7:10},
+ 'qa-1':{session:{id:'cx-019a3c',start:ago(44),turns:40,ctx:38,tok:0.9,branch:'pr-3827 (read-only)'},prev:[{id:'cx-0199f0',start:ago(330),end:ago(44),tok:1.2,why:'exit 137 (out of memory) → restarted by cto'}],d14:{tok:16,h:{busy:41,wAg:25,wYou:0,idle:14}},w7:48},
+ 'research-1':{session:{id:'cc-c21d07',start:ago(92),turns:33,ctx:22,tok:0.9,branch:'main (read-only)'},prev:[],d14:{tok:14,h:{busy:48,wAg:2,wYou:0,idle:30}},w7:3},
+ 'dev-2':{session:{id:'cc-5e8b22',start:ago(109),turns:212,ctx:61,tok:3.9,branch:'feature/1694-ux7-slice6'},prev:[{id:'cc-5e7a01',start:ago(560),end:ago(110),tok:1.3,why:'merged site-builder#1708 → new session'}],d14:{tok:85,h:{busy:65,wAg:2,wYou:5,idle:8}},w7:12},
+ 'research-2':{session:{id:'cx-019a2f',start:ago(132),turns:18,ctx:19,tok:0.6,branch:'feature/1694-ux7-slice6 (read-only)'},prev:[],d14:{tok:6,h:{busy:28,wAg:2,wYou:9,idle:41}},w7:21},
+ 'pm-1':{session:{id:'cc-90aa13',start:ago(202),turns:27,ctx:12,tok:0.4,branch:'— (board only)'},prev:[],d14:{tok:5,h:{busy:16,wAg:0,wYou:12,idle:52}},w7:2},
+};
+// 14 days of issue closes per repo; last element = last 24h. Burn-up, throughput, totals and ETA read this.
+const DAILY={'shop-app':[2,1,2,2,1,1,0,2,2,1,2,1,2,2],'site-builder':[1,2,1,2,1,2,1,1,2,1,1,2,1,2]};
+// loop-back history for loops other than deliver (deliver is derived from PRS14 + live runs): [count 14d incl. in flight, worst ticket, its count]
+const LOOPH={'verify:run-tests>start-app':[2,'shop-app#3612',1],'research:spec-check>gather':[4,'site-builder#1688',2],'research:drift-watch>spec-check':[6,'site-builder#1691',2]};
+// event store aggregates (14d) not kept as individual events on this screen
+const DEC14={decisions:41,undone:6};
+// previous 14 days, same derivations — for the ▲▼ deltas
+const PREV14={closed:35,lead:5.0,fp:50,rework:2.6,cf:4,usdMerge:7.10,autonomy:80,intervention:11,wasted:6,tta:125,undo:12};
+// your answers to escalations · 14d: [raised h ago, answered h ago, repo, title, choice]
+const ESC14=[[300,296.5,'shop-app','Mock or payment sandbox for CK2 tests?','B mock first'],[280,278,'site-builder','UX7 slice 3: keep legacy field names?','A keep'],[250,241,'shop-app','Let dev-1 bump pandas to 2.3?','A yes'],[210,207,'site-builder','Add research-2 on codex-main?','A yes'],[190,189.5,'shop-app','Stock table migration: lock or online?','B online'],[160,152,'site-builder','Field help or tooltip when specs conflict?','A field help'],[120,118,'site-builder','Slice 5 property rows: write ADR-12?','A write it'],[96,95,'shop-app','Run e2e nightly instead of per PR?','C per PR, capped'],[70,66.5,'site-builder','pm-1 covers one repo, not two?','A one repo'],[48,47.2,'shop-app','Raise restart limit 3 → 5?','B keep 3'],[26,25.5,'site-builder','Merge slice 5 with one open nit?','A merge']];
+const INCIDENTS=[{at:ago(44),agent:'qa-1',what:'exit 137 (out of memory)',sev:'crash',cause:'end-to-end suite ran twice in parallel',handled:'cto restarted it · test parallelism 4 → 2'},{at:Date.UTC(2026,9,15,13,2),agent:'dev-2',what:'3 runs in a row without progress',sev:'stall',cause:'flaky CI on main',handled:'stall watch fired → cto paused dev-2 20m and told you'},{at:Date.UTC(2026,9,13,8,41),agent:'dev-1',what:'rate limited',sev:'limit',cause:'claude-main 5h window',handled:'backed off 38m'}];
+// tool calls · 14d: tool → agent → [calls, M tokens]
+const TOOLS14={'Read':{'dev-1':[3480,24.6],'dev-2':[2950,16.2],'qa-1':[820,2.6],'research-1':[690,3.4],'research-2':[380,1.2],'cto':[92,0.9]},'Bash':{'qa-1':[2410,11.5],'dev-1':[1460,7.9],'dev-2':[1320,7.1]},'Edit / Write':{'dev-1':[3180,13.4],'dev-2':[2853,12.3]},'Grep / Glob':{'research-2':[1620,2.3],'research-1':[1410,2.9],'dev-1':[980,2.6],'dev-2':[870,2.3]},'Subagents':{'cto':[212,14.0]},'Web':{'research-1':[410,3.2],'research-2':[200,1.6]},'MCP (GitHub)':{'pm-1':[1004,3.4],'cto':[400,2.6]},'other':{'dev-1':[600,3.1],'dev-2':[502,2.8]}};
+const TOOLNOTE={'Read':'uv.lock partial reads on shop-app#3590 · proposal p4','Bash':'pytest -vv output','Subagents':'repo exploration'};
+// the CTO's own published state (via MCP cto_publish_state)
+const CTO={
+ now:'queuing the fix of PR #3830 for dev-1',
+ important:[['shop-app#3612 — pence prices ×100 on main','PR #3830 failed QA. A bug on main outranks new work, so dev-1 fixes it after its current step (~03:00).','dev-1'],['site-builder#1694 — slice 6','dev-2 is fixing review round 2. Even when review passes, the merge waits on your ADR-12 decision.','dev-2'],['codex-main 7d window','@codex','account']],
+ plan:[[q15(ago(-3)),'dev-1','push WIP on shop-app#3822; it waits queued at implement',''],[q15(ago(-18)),'dev-1','start fixing PR #3830 (shop-app#3612, QA failed)',''],[q15(ago(-18)),'qa-1','finish verifying PR #3827 (shop-app#3826)',''],[q15(ago(-18)),'dev-2','push round-2 fixes to PR #1709; review bot re-reviews',''],[q15(ago(-48)),'dev-1','push the fix to PR #3830',''],[q15(ago(-50)),'dev-1','merge PR #3827 via safe_merge (closes shop-app#3826)','qa-1 sign-off'],[q15(ago(-63)),'qa-1','retest PR #3830 on codex (same PR; the switch applies after it)','the fix'],[q15(ago(-93)),'dev-1','merge PR #3830 (closes shop-app#3612), resume shop-app#3822','QA + review bot pass'],[q15(ago(-95)),'qa-1','next new run on claude-main / sonnet-5.5',''],['ADR','dev-2','merge PR #1709 via safe_merge','your ADR-12 decision + review pass'],[Date.UTC(2026,9,17,7,0),'cto','08:00 digest to you',''],[Date.UTC(2026,9,19,8,0),'fe-1 (new)','start slice 7 on site-builder#1731','your approval'],[Date.UTC(2026,9,19,8,0),'dev-1','start shop-app#3618 order-path tests (slips to It 43)','shop-app#3618 credentials']],
+ scratch:[[ago(1),'PR #3830 root cause per qa-1: fx_scale() applied after pence→pounds. small fix, ~30m.'],[ago(1),'02:41 codex sample: projected over 100% at reset (24h pace; qa-1 e2e rerun spike) → qa-1 + research-2 to claude from their next new run. #3827 (started 02:40) and the #3830 retest stay on codex. claude headroom tight if fe-1 + pm-2 + QA all approved.'],[ago(20),'slice 6 review round 2 open. if operator picks A, research-2 drafts the ADR amendment in parallel.'],[ago(37),'shop-app specs thin → proposal p2.'],[ago(70),'shop-app#3618 credentials: digest, not a 2am push (urgency later).']],
+};
+// armed by the CTO at runtime, expire on their own
+const ARMED=[{id:'a1',what:'dev-1 starts fixing PR #3830 (shop-app)',by:Date.UTC(2026,9,17,2,0),then:'pause shop-app#3822 and switch dev-1 now',armed:ago(1)}];
+// Event log, newest first. Activity, CTO log, merges and escalations read this. Alerts are added by deriving threshold crossings.
+const EV=[
+ {at:ago(1),who:'cto',k:'decide',ref:'shop-app#3612',txt:'queued the fix of PR #3830 for dev-1 after its current step',rule:'reorder the queue (bugs on main first)'},
+ {at:ago(1),who:'cto',k:'decide',ref:null,txt:'qa-1 and research-2 move to claude-main / sonnet-5.5 from their next new run (codex-main projected over 100% at reset)',rule:'switch an agent to its fallback account'},
+ {at:ago(2),who:'cto',k:'decide',ref:'shop-app#3826',txt:'told qa-1 to verify PR #3827 while it waits on dev-1',rule:'interrupt or reassign an agent within its repo'},
+ {at:ago(2),who:'qa-1',k:'start',ref:'shop-app#3826',txt:'started verifying PR #3827 (shop-app#3826)'},
+ {at:ago(7),who:'review-bot',k:'review',ref:'site-builder#1694',txt:'requested changes on PR #1709 (site-builder#1694), round 2 (2 findings)'},
+ {at:ago(12),who:'research-1',k:'step',ref:'shop-app#3624',txt:'started the brief for shop-app#3624'},
+ {at:ago(18),who:'qa-1',k:'msg',ref:'shop-app#3612',txt:'→ dev-1: PR #3830 still shows pence prices ×100 · failing test test_pence_scaling added'},
+ {at:ago(19),who:'dev-2',k:'push',ref:'site-builder#1694',txt:'pushed round-1 fixes to PR #1709'},
+ {at:ago(20),who:'qa-1',k:'verdict',ref:'shop-app#3612',txt:'QA FAIL on PR #3830 (shop-app#3612)'},
+ {at:ago(27),who:'review-bot',k:'review',ref:'site-builder#1694',txt:'requested changes on PR #1709 (site-builder#1694), round 1 (3 findings)'},
+ {at:ago(28),who:'cto',k:'escalate',ref:'site-builder#1694',txt:'escalated to you: UX7 vs ADR-12',brief:'b-adr'},
+ {at:ago(36),who:'dev-1',k:'start',ref:'shop-app#3822',txt:'started shop-app#3822'},
+ {at:ago(37),who:'cto',k:'decide',ref:'shop-app#3631',txt:'labelled shop-app#3631 and shop-app#3633 held: no acceptance criteria',rule:'move board cards, add labels (incl. held)'},
+ {at:ago(38),who:'dev-2',k:'pr',ref:'site-builder#1694',txt:'opened PR #1709 for site-builder#1694'},
+ {at:ago(44),who:'qa-1',k:'error',ref:'shop-app#3612',txt:'exit 137 (out of memory) during run-tests on PR #3830'},
+ {at:ago(44),who:'cto',k:'decide',ref:'shop-app#3612',txt:'restarted qa-1 after out-of-memory (exit 137); test parallelism 4 → 2',rule:'restart a crashed agent (1 of 3)'},
+ {at:ago(60),who:'dev-1',k:'merge',ref:'shop-app#3819',txt:'merged the PR for shop-app#3819 via safe_merge · issue closed'},
+ {at:ago(68),who:'dev-1',k:'pr',ref:'shop-app#3612',txt:'opened PR #3830 for shop-app#3612'},
+ {at:ago(68),who:'cto',k:'decide',ref:'shop-app#3612',txt:'moved shop-app#3612 to In Review when PR #3830 opened',rule:'move board cards, add labels (incl. held)'},
+ {at:ago(103),who:'dev-2',k:'start',ref:'site-builder#1694',txt:'started site-builder#1694'},
+ {at:ago(110),who:'dev-2',k:'merge',ref:'site-builder#1708',txt:'merged the PR for site-builder#1708 via safe_merge · issue closed'},
+ {at:ago(129),who:'dev-1',k:'pr',ref:'shop-app#3826',txt:'opened PR #3827 for shop-app#3826'},
+ {at:ago(172),who:'cto',k:'escalate',ref:'site-builder#1416',txt:'escalated to you: add a frontend developer',brief:'b-fe'},
+ {at:ago(172),who:'cto',k:'decide',ref:'site-builder#1731',txt:'labelled site-builder#1731, #1732, #1733 held: need a frontend developer',rule:'move board cards, add labels (incl. held)'},
+ {at:ago(180),who:'dev-1',k:'merge',ref:'shop-app#3815',txt:'merged the PR for shop-app#3815 via safe_merge · issue closed'},
+ {at:ago(300),who:'dev-2',k:'merge',ref:'site-builder#1706',txt:'merged the PR for site-builder#1706 via safe_merge · issue closed'},
+ {at:ago(510),who:'cto',k:'escalate',ref:'shop-app#3618',txt:'escalated to you: payment sandbox credentials',brief:'b-cred'},
+];
+const ASKED=[
+ {at:ago(1),who:'dev-1',q:'finish this step or stop now for PR #3830?',a:'finish the step (~10m), push WIP, then fix PR #3830'},
+ {at:ago(2),who:'qa-1',q:'waiting on dev-1 — anything else to do?',a:'verify PR #3827 while you wait'},
+ {at:ago(8),who:'dev-2',q:'merge PR #1709 once review approves my round-1 fixes?',a:'no — the merge is held for your ADR-12 decision'},
+];
+const BR=[
+ {id:'b-adr',urg:'now',kind:'decision',repo:'site-builder',at:ago(28),title:'Should text boxes grow when edited? (UX7 vs ADR-12)',blocks:'merge of PR #1709 once review passes',raised:'research-2',rule:'product or spec decisions, incl. conflicting specs',conf:82,
+  catch:['UX7 (your UX spec) item 4: text inputs rest at 1 line and grow to 8 while being edited.','ADR-12, written during slice 5, fixes property-pane rows at one height so the grid keeps one rhythm.','dev-2 built slice 6 to UX7; research-2 found that rows below a box shift while it is being edited.','dev-2 is still fixing review round 2; without your answer the PR cannot merge even when review passes.'],
+  opts:[['A','UX7 wins: grow on edit, amend ADR-12','research-2 drafts the amendment; PR merges after review passes','≈0.3% of claude-main 7d',1,'newer, written by you; rows only shift while editing'],['B','ADR-12 wins: keep fixed height','dev-2 reworks slice 6; new review cycle','≈2–3% of claude-main 7d, +½ day',0,'undoes the intent of UX7 item 4'],['C','Grow up to 3 lines in the properties pane only','dev-2 adds a cap; ADR-12 gets an exception','≈1% of claude-main 7d, +2h',0,'if the 8-line jump bothers you']],
+  fallback:'PR stays open; asked again in the 08:00 digest',urgWhy:'blocks a PR in review'},
+ {id:'b-fe',urg:'soon',kind:'approval',repo:'site-builder',at:ago(172),title:'Add a frontend developer agent for slice 7',blocks:'site-builder#1731, #1732, #1733',raised:'pm-1',rule:'adding an agent, or spend over 5% of an account\'s 7d window',conf:88,
+  catch:['Slice 7 is three UI tickets: publish history panel (M), theme editor (S), empty states (S).','dev-2 is the only developer on site-builder and is busy on slice 6.','@claude-room','codex-main is projected over its limit before its reset.'],
+  opts:[['A','Yes, on claude-main (sonnet-5.5)','fe-1 starts Mon 19 Oct 09:00 on site-builder#1731','≈6–9% of claude-main 7d',1,'claude-main stays under its alert with fe-1 alone'],['B','Yes, on codex-main','same, on codex','pushes codex further over its limit',0,'not advised'],['C','No: dev-2 takes slice 7 after slice 6','slice 7 starts ~Wed','no extra spend',0,'saves spend, slower']],
+  fallback:'no new agent; dev-2 picks up slice 7 after slice 6',urgWhy:'blocks 3 tickets from Mon'},
+ {id:'b-cred',urg:'soon',kind:'action',repo:'shop-app',at:ago(510),title:'Add payment sandbox credentials for shop-app#3618',blocks:'shop-app#3618 · order-path tests in CK2 phase 3',raised:'dev-1',rule:'credentials, secrets, account access',conf:null,
+  catch:['shop-app#3618 tests the order path against the payment sandbox. It has not started.','Agents never handle credentials, so only you can do this.','It is the only blocked ticket on shop-app; without it CK2 phase 3 cannot finish.','It slips from It 42 (ends Sun 18 Oct) to It 43 whatever you answer: dev-1 can start it Mon 09:00 at the earliest.'],
+  opts:[['A','Done: I added them to the shop-app secret store','cto detects them; dev-1 starts shop-app#3618 Mon 09:00','',1,''],['B','Remind me Mon 08:00','stays blocked until then','',0,''],['C','Drop shop-app#3618 from CK2 phase 3','phase 3 is re-planned without order-path tests','',0,'']],
+  fallback:'stays blocked; re-raised in the 08:00 digest',urgWhy:'blocks 1 ticket due to start Mon 19 Oct'},
+];
+const PROPOSALS=[
+ {id:'p1',what:'Cap QA end-to-end runs at 1 per PR',why:'qa-1 re-ran e2e after an out-of-memory restart, doubling its codex use on PR #3830',impact:'saves ≈5% of codex-main 7d',conf:90,repo:'shop-app',notNow:'config change; nothing blocked'},
+ {id:'p2',what:'Add a project manager (pm-2) to shop-app',why:'shop-app tickets arrive without acceptance criteria (shop-app#3631, #3633 held)',impact:'≈2% of claude-main 7d; unblocks 2 held tickets',conf:72,repo:'shop-app',notNow:'held tickets are due in It 43 (from Mon 19 Oct)'},
+ {id:'p3',what:'Add a QA agent to site-builder',why:'PRs merge on the review bot only; the qa step is skipped',impact:'≈5% of claude-main 7d',conf:75,repo:'site-builder',notNow:'nothing blocked; quality only'},
+ {id:'p4',what:'Add uv.lock to the agents\' read-ignore list',why:'shop-app#3590 spent ≈1.1M tokens across 4 partial reads of uv.lock; it is touched on most dependency tickets',impact:'≈0.5–1M tokens per affected ticket',conf:95,repo:'shop-app',notNow:'config change; nothing blocked'},
+];
+const USAGE={"claude-main":[[5382,0.0],[5371,0.07],[5341,0.27],[5311,0.46],[5281,0.65],[5251,0.85],[5221,1.04],[5191,1.24],[5161,1.43],[5131,1.62],[5101,1.82],[5071,2.01],[5041,2.21],[5011,2.4],[4981,2.59],[4951,2.79],[4921,2.98],[4891,3.18],[4861,3.37],[4831,3.57],[4801,3.76],[4771,3.95],[4741,4.15],[4711,4.34],[4681,4.54],[4651,4.73],[4621,4.92],[4591,5.12],[4561,5.31],[4531,5.51],[4501,5.7],[4471,5.89],[4441,6.09],[4411,6.28],[4381,6.48],[4351,6.67],[4321,6.87],[4291,7.06],[4261,7.25],[4231,7.45],[4201,7.64],[4171,7.84],[4141,8.03],[4111,8.22],[4081,8.42],[4051,8.61],[4021,8.81],[3991,9.0],[3961,9.19],[3931,9.39],[3901,9.58],[3871,9.78],[3841,9.97],[3811,10.17],[3781,10.36],[3751,10.55],[3721,10.75],[3691,10.94],[3661,11.14],[3631,11.33],[3601,11.52],[3571,11.72],[3541,11.91],[3511,12.11],[3481,12.3],[3451,12.49],[3421,12.69],[3391,12.88],[3361,13.08],[3331,13.27],[3301,13.46],[3271,13.66],[3241,13.85],[3211,14.05],[3181,14.24],[3151,14.44],[3121,14.63],[3091,14.82],[3061,15.02],[3031,15.21],[3001,15.41],[2971,15.6],[2941,15.79],[2911,15.99],[2881,16.18],[2851,16.38],[2821,16.57],[2791,16.76],[2761,16.96],[2731,17.15],[2701,17.35],[2671,17.54],[2641,17.74],[2611,17.93],[2581,18.12],[2551,18.32],[2521,18.51],[2491,18.71],[2461,18.9],[2431,19.09],[2401,19.29],[2371,19.48],[2341,19.68],[2311,19.87],[2281,20.06],[2251,20.26],[2221,20.45],[2191,20.65],[2161,20.84],[2131,21.04],[2101,21.23],[2071,21.42],[2041,21.62],[2011,21.81],[1981,22.01],[1951,22.2],[1921,22.39],[1891,22.59],[1861,22.78],[1831,22.98],[1801,23.17],[1771,23.36],[1741,23.56],[1711,23.75],[1681,23.95],[1651,24.14],[1621,24.34],[1591,24.53],[1561,24.72],[1531,24.92],[1501,25.11],[1471,25.31],[1441,25.5],[1411,25.61],[1381,25.71],[1351,25.82],[1321,25.93],[1291,26.03],[1261,26.14],[1231,26.25],[1201,26.35],[1171,26.46],[1141,26.57],[1111,26.68],[1081,26.78],[1051,26.89],[1021,27.0],[991,27.1],[961,27.21],[931,27.32],[901,27.42],[871,27.53],[841,27.64],[811,27.74],[781,27.85],[751,27.96],[721,28.06],[691,28.17],[661,28.28],[631,28.38],[601,28.49],[571,28.6],[541,28.7],[511,28.81],[481,28.92],[451,29.02],[421,29.13],[391,29.24],[361,29.35],[331,29.45],[301,29.56],[271,29.67],[241,29.77],[211,29.88],[181,29.99],[151,30.09],[121,30.2],[91,31.4],[61,32.6],[31,33.8],[1,35.0]],"codex-main":[[7002,0.0],[6991,0.1],[6961,0.39],[6931,0.67],[6901,0.95],[6871,1.23],[6841,1.52],[6811,1.8],[6781,2.08],[6751,2.37],[6721,2.65],[6691,2.93],[6661,3.21],[6631,3.5],[6601,3.78],[6571,4.06],[6541,4.34],[6511,4.63],[6481,4.91],[6451,5.19],[6421,5.47],[6391,5.76],[6361,6.04],[6331,6.32],[6301,6.61],[6271,6.89],[6241,7.17],[6211,7.45],[6181,7.74],[6151,8.02],[6121,8.3],[6091,8.58],[6061,8.87],[6031,9.15],[6001,9.43],[5971,9.71],[5941,10.0],[5911,10.28],[5881,10.56],[5851,10.85],[5821,11.13],[5791,11.41],[5761,11.69],[5731,11.98],[5701,12.26],[5671,12.54],[5641,12.82],[5611,13.11],[5581,13.39],[5551,13.67],[5521,13.96],[5491,14.24],[5461,14.52],[5431,14.8],[5401,15.09],[5371,15.37],[5341,15.65],[5311,15.93],[5281,16.22],[5251,16.5],[5221,16.78],[5191,17.06],[5161,17.35],[5131,17.63],[5101,17.91],[5071,18.2],[5041,18.48],[5011,18.76],[4981,19.04],[4951,19.33],[4921,19.61],[4891,19.89],[4861,20.17],[4831,20.46],[4801,20.74],[4771,21.02],[4741,21.3],[4711,21.59],[4681,21.87],[4651,22.15],[4621,22.44],[4591,22.72],[4561,23.0],[4531,23.28],[4501,23.57],[4471,23.85],[4441,24.13],[4411,24.41],[4381,24.7],[4351,24.98],[4321,25.26],[4291,25.55],[4261,25.83],[4231,26.11],[4201,26.39],[4171,26.68],[4141,26.96],[4111,27.24],[4081,27.52],[4051,27.81],[4021,28.09],[3991,28.37],[3961,28.65],[3931,28.94],[3901,29.22],[3871,29.5],[3841,29.79],[3811,30.07],[3781,30.35],[3751,30.63],[3721,30.92],[3691,31.2],[3661,31.48],[3631,31.76],[3601,32.05],[3571,32.33],[3541,32.61],[3511,32.89],[3481,33.18],[3451,33.46],[3421,33.74],[3391,34.03],[3361,34.31],[3331,34.59],[3301,34.87],[3271,35.16],[3241,35.44],[3211,35.72],[3181,36.0],[3151,36.29],[3121,36.57],[3091,36.85],[3061,37.14],[3031,37.42],[3001,37.7],[2971,37.98],[2941,38.27],[2911,38.55],[2881,38.83],[2851,39.11],[2821,39.4],[2791,39.68],[2761,39.96],[2731,40.24],[2701,40.53],[2671,40.81],[2641,41.09],[2611,41.38],[2581,41.66],[2551,41.94],[2521,42.22],[2491,42.51],[2461,42.79],[2431,43.07],[2401,43.35],[2371,43.64],[2341,43.92],[2311,44.2],[2281,44.48],[2251,44.77],[2221,45.05],[2191,45.33],[2161,45.62],[2131,45.9],[2101,46.18],[2071,46.46],[2041,46.75],[2011,47.03],[1981,47.31],[1951,47.59],[1921,47.88],[1891,48.16],[1861,48.44],[1831,48.73],[1801,49.01],[1771,49.29],[1741,49.57],[1711,49.86],[1681,50.14],[1651,50.42],[1621,50.7],[1591,50.99],[1561,51.27],[1531,51.55],[1501,51.83],[1471,52.12],[1441,52.4],[1411,52.4],[1381,52.4],[1351,52.4],[1321,52.4],[1291,52.4],[1261,52.4],[1231,52.4],[1201,52.4],[1171,52.4],[1141,52.4],[1111,52.4],[1081,52.4],[1051,52.4],[1021,52.4],[991,52.4],[961,52.4],[931,52.4],[901,52.4],[871,52.4],[841,52.4],[811,52.4],[781,52.4],[751,52.4],[721,52.4],[691,52.4],[661,52.4],[631,52.4],[601,52.4],[571,52.4],[541,52.4],[511,52.4],[481,52.4],[451,52.4],[421,52.4],[391,52.4],[361,52.4],[331,52.4],[301,53.13],[271,53.89],[241,54.64],[211,55.4],[181,56.15],[151,56.91],[121,57.96],[91,59.54],[61,61.12],[31,64.01],[1,68.6]]};
+const PRS14=[{"r":"shop-app","n":3560,"a":"dev-1","h":325.17,"ph":[2.4,0.4,0.3,0.2,0.4,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.61},{"r":"shop-app","n":3563,"a":"dev-1","h":323.12,"ph":[2.1,0.4,0.3,0.4,0.5,0.3],"tl":2,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.26},{"r":"shop-app","n":3566,"a":"dev-1","h":296.78,"ph":[2.9,0.3,0.3,1.0,0.3,0.2],"tl":1,"rf":1,"qf":1,"hc":0,"ff":0,"usd":1.67},{"r":"shop-app","n":3569,"a":"dev-1","h":273.22,"ph":[2.7,0.7,0.3,0.4,0.5,0.2],"tl":0,"rf":1,"qf":0,"hc":0,"ff":0,"usd":1.56},{"r":"shop-app","n":3572,"a":"dev-1","h":241.1,"ph":[2.7,0.6,0.4,0.6,0.7,0.2],"tl":3,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.72},{"r":"shop-app","n":3574,"a":"dev-1","h":255.2,"ph":[2.5,0.2,0.3,0.4,0.4,0.2],"tl":2,"rf":0,"qf":0,"hc":1,"ff":0,"usd":1.48},{"r":"shop-app","n":3577,"a":"dev-1","h":220.24,"ph":[1.6,0.4,0.4,1.3,0.4,0.2],"tl":1,"rf":2,"qf":1,"hc":0,"ff":0,"usd":2.5},{"r":"shop-app","n":3579,"a":"dev-1","h":202.0,"ph":[2.4,0.5,0.5,0.4,0.4,0.1],"tl":2,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.59},{"r":"shop-app","n":3581,"a":"dev-1","h":156.8,"ph":[2.8,0.6,0.7,0.2,0.3,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":22.9,"note":"large migration diff"},{"r":"shop-app","n":3584,"a":"dev-1","h":163.26,"ph":[2.1,0.5,0.4,1.2,0.5,0.2],"tl":2,"rf":1,"qf":1,"hc":0,"ff":1,"usd":2.41},{"r":"shop-app","n":3586,"a":"dev-1","h":126.99,"ph":[2.7,0.6,0.4,0.2,0.3,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.28},{"r":"shop-app","n":3588,"a":"dev-1","h":107.3,"ph":[4.1,0.6,0.4,0.8,0.6,0.2],"tl":2,"rf":1,"qf":0,"hc":0,"ff":0,"usd":2.34},{"r":"shop-app","n":3590,"a":"dev-1","h":73.94,"ph":[1.6,0.4,0.4,1.3,0.5,0.2],"tl":5,"rf":1,"qf":0,"hc":0,"ff":0,"usd":38.1,"note":"4 partial reads of uv.lock (≈1.1M tokens)"},{"r":"shop-app","n":3594,"a":"dev-1","h":77.15,"ph":[2.3,0.7,0.1,0.6,0.2,0.1],"tl":1,"rf":0,"qf":1,"hc":0,"ff":0,"usd":1.36},{"r":"shop-app","n":3597,"a":"dev-1","h":58.87,"ph":[3.0,0.2,0.6,0.2,0.7,0.2],"tl":1,"rf":0,"qf":0,"hc":1,"ff":0,"usd":1.04},{"r":"shop-app","n":3601,"a":"dev-1","h":43.48,"ph":[2.8,0.4,0.5,1.1,0.4,0.2],"tl":2,"rf":1,"qf":1,"hc":0,"ff":0,"usd":1.71},{"r":"shop-app","n":3606,"a":"dev-1","h":42.9,"ph":[2.1,0.5,0.2,1.0,0.5,0.2],"tl":1,"rf":2,"qf":0,"hc":0,"ff":0,"usd":2.26},{"r":"shop-app","n":3815,"a":"dev-1","h":3.0,"ph":[2.9,0.5,0.4,0.7,0.5,0.2],"tl":2,"rf":1,"qf":0,"hc":0,"ff":0,"usd":1.96},{"r":"shop-app","n":3819,"a":"dev-1","h":1.0,"ph":[3.0,0.6,0.5,0.5,0.4,0.2],"tl":1,"rf":1,"qf":0,"hc":0,"ff":0,"usd":1.56},{"r":"site-builder","n":1668,"a":"dev-2","h":327.82,"ph":[1.9,0.7,0.1,0.3,0,0.1],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.64},{"r":"site-builder","n":1670,"a":"dev-2","h":305.48,"ph":[2.6,0.4,0.4,0.2,0,0.3],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":0.95},{"r":"site-builder","n":1672,"a":"dev-2","h":307.51,"ph":[2.1,0.3,0.6,0.4,0,0.1],"tl":2,"rf":0,"qf":0,"hc":1,"ff":0,"usd":1.53},{"r":"site-builder","n":1674,"a":"dev-2","h":282.35,"ph":[1.4,0.6,0.4,0.2,0,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.4},{"r":"site-builder","n":1676,"a":"dev-2","h":257.44,"ph":[1.4,0.6,0.4,0.4,0,0.3],"tl":2,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.86},{"r":"site-builder","n":1679,"a":"dev-2","h":225.41,"ph":[1.3,0.6,0.5,0.2,0,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.0},{"r":"site-builder","n":1681,"a":"dev-2","h":202.59,"ph":[1.8,0.3,0.3,0.3,0,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.62},{"r":"site-builder","n":1683,"a":"dev-2","h":207.84,"ph":[2.6,0.7,0.3,0.4,0,0.2],"tl":2,"rf":0,"qf":0,"hc":1,"ff":0,"usd":1.95},{"r":"site-builder","n":1685,"a":"dev-2","h":178.37,"ph":[2.8,0.4,0.7,0.3,0,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.62},{"r":"site-builder","n":1686,"a":"dev-2","h":147.87,"ph":[2.4,0.3,0.4,0.4,0,0.1],"tl":2,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.3},{"r":"site-builder","n":1688,"a":"dev-2","h":138.83,"ph":[2.5,0.4,0.4,0.2,0,0.2],"tl":1,"rf":0,"qf":0,"hc":0,"ff":1,"usd":12.4,"note":"spec gap found twice"},{"r":"site-builder","n":1690,"a":"dev-2","h":122.64,"ph":[2.0,0.5,0.4,0.4,0,0.2],"tl":2,"rf":0,"qf":0,"hc":0,"ff":0,"usd":1.93},{"r":"site-builder","n":1691,"a":"dev-2","h":105.79,"ph":[2.7,0.6,0.5,1.6,0,0.2],"tl":1,"rf":4,"qf":0,"hc":1,"ff":0,"usd":31.2,"note":"spec changed mid-ticket"},{"r":"site-builder","n":1695,"a":"dev-2","h":61.01,"ph":[2.6,0.7,0.3,0.9,0,0.3],"tl":1,"rf":2,"qf":0,"hc":0,"ff":0,"usd":2.62},{"r":"site-builder","n":1698,"a":"dev-2","h":53.89,"ph":[2.2,0.4,0.4,0.7,0,0.2],"tl":2,"rf":1,"qf":0,"hc":1,"ff":0,"usd":2.46},{"r":"site-builder","n":1702,"a":"dev-2","h":30.85,"ph":[1.8,0.3,0.2,0.6,0,0.3],"tl":1,"rf":1,"qf":0,"hc":0,"ff":0,"usd":1.87},{"r":"site-builder","n":1706,"a":"dev-2","h":5.0,"ph":[2.4,0.4,0.3,0.7,0,0.1],"tl":2,"rf":1,"qf":0,"hc":0,"ff":0,"usd":2.06},{"r":"site-builder","n":1708,"a":"dev-2","h":1.83,"ph":[1.8,0.6,0.5,0.8,0,0.2],"tl":2,"rf":1,"qf":0,"hc":0,"ff":0,"usd":2.29}];
+const RUNS14=[["dev-1","shop-app#3560","merged",325.17],["dev-1","shop-app#3563","merged",323.12],["dev-1","shop-app#3566","merged",296.78],["dev-1","shop-app#3569","merged",273.22],["dev-1","shop-app#3572","merged",241.1],["dev-1","shop-app#3574","merged",255.2],["dev-1","shop-app#3577","merged",220.24],["dev-1","shop-app#3579","merged",202.0],["dev-1","shop-app#3581","merged",156.8],["dev-1","shop-app#3584","merged",163.26],["dev-1","shop-app#3586","merged",126.99],["dev-1","shop-app#3588","merged",107.3],["dev-1","shop-app#3590","merged",73.94],["dev-1","shop-app#3594","merged",77.15],["dev-1","shop-app#3597","merged",58.87],["dev-1","shop-app#3601","merged",43.48],["dev-1","shop-app#3606","merged",42.9],["dev-1","shop-app#3815","merged",3.0],["dev-1","shop-app#3819","merged",1.0],["dev-2","site-builder#1668","merged",327.82],["dev-2","site-builder#1670","merged",305.48],["dev-2","site-builder#1672","merged",307.51],["dev-2","site-builder#1674","merged",282.35],["dev-2","site-builder#1676","merged",257.44],["dev-2","site-builder#1679","merged",225.41],["dev-2","site-builder#1681","merged",202.59],["dev-2","site-builder#1683","merged",207.84],["dev-2","site-builder#1685","merged",178.37],["dev-2","site-builder#1686","merged",147.87],["dev-2","site-builder#1688","merged",138.83],["dev-2","site-builder#1690","merged",122.64],["dev-2","site-builder#1691","merged",105.79],["dev-2","site-builder#1695","merged",61.01],["dev-2","site-builder#1698","merged",53.89],["dev-2","site-builder#1702","merged",30.85],["dev-2","site-builder#1706","merged",5.0],["dev-2","site-builder#1708","merged",1.83],["dev-2",null,"wasted",37.4],["dev-2",null,"wasted",37.0],["dev-2",null,"wasted",36.7],["qa-1","shop-app#3560","signed-off",325.67],["qa-1","shop-app#3563","signed-off",323.62],["qa-1","shop-app#3566","signed-off",297.28],["qa-1","shop-app#3569","signed-off",273.72],["qa-1","shop-app#3572","signed-off",241.6],["qa-1","shop-app#3574","signed-off",255.7],["qa-1","shop-app#3577","signed-off",220.74],["qa-1","shop-app#3579","signed-off",202.5],["qa-1","shop-app#3581","signed-off",157.3],["qa-1","shop-app#3584","signed-off",163.76],["qa-1","shop-app#3586","signed-off",127.49],["qa-1","shop-app#3588","signed-off",107.8],["qa-1","shop-app#3590","signed-off",74.44],["qa-1","shop-app#3594","signed-off",77.65],["qa-1","shop-app#3597","signed-off",59.37],["qa-1","shop-app#3601","signed-off",43.98],["qa-1","shop-app#3606","signed-off",43.4],["qa-1","shop-app#3815","signed-off",3.5],["qa-1","shop-app#3819","signed-off",1.5],["qa-1",null,"wasted",150],["research-1",null,"brief",5],["research-1",null,"brief",31],["research-1",null,"brief",57],["research-1",null,"brief",83],["research-1",null,"brief",109],["research-1",null,"brief",135],["research-1",null,"brief",161],["research-1",null,"brief",187],["research-1",null,"brief",213],["research-1",null,"brief",239],["research-1",null,"brief",265],["research-1",null,"brief",291],["research-2",null,"brief",8],["research-2",null,"brief",43],["research-2",null,"brief",78],["research-2",null,"brief",113],["research-2",null,"brief",148],["research-2",null,"brief",183],["research-2",null,"brief",218],["research-2",null,"brief",253],["research-2",null,"brief",288],["research-1",null,"wasted",90],["pm-1",null,"report",6],["pm-1",null,"report",30],["pm-1",null,"report",54],["pm-1",null,"report",78],["pm-1",null,"report",102],["pm-1",null,"report",126],["pm-1",null,"report",150],["pm-1",null,"report",174],["pm-1",null,"report",198],["pm-1",null,"report",222],["pm-1",null,"report",246],["pm-1",null,"report",270],["pm-1",null,"report",294],["pm-1",null,"report",318]];
+const SESS14=[["cto",4.2,0],["cto",83.7,0],["cto",169.6,0],["cto",252.6,0],["dev-1",0.4,0],["dev-1",45.2,0],["dev-1",84.6,0],["dev-1",126.8,0],["dev-1",165.8,0],["dev-1",209.8,0],["dev-1",251.9,0],["dev-1",293.6,0],["qa-1",0.5,0],["qa-1",48.6,0],["qa-1",96.9,0],["qa-1",143.8,0],["qa-1",192.7,0],["qa-1",238.0,0],["qa-1",284.9,0],["research-1",5.2,0],["research-1",87.3,0],["research-1",167.0,0],["research-1",249.8,0],["dev-2",1.3,0],["dev-2",42.3,0],["dev-2",82.6,1],["dev-2",124.3,0],["dev-2",170.2,0],["dev-2",210.2,1],["dev-2",248.1,0],["dev-2",294.7,0],["research-2",3.0,0],["research-2",84.1,1],["research-2",165.8,0],["research-2",248.4,0],["pm-1",0.9,0],["pm-1",115.1,0],["pm-1",221.7,0]];
+/* ====================================================================
+   DERIVED — one function per number
+   ==================================================================== */
+const agentOf=id=>CONFIG.agents.find(a=>a.id==id);
+const role=a=>CONFIG.roles[a.role];
+const acct=id=>CONFIG.accounts.find(a=>a.id==id);
+const repoOf=id=>CONFIG.repos.find(r=>r.id==id);
+const loopOf=a=>CONFIG.loops[role(a).loop];
+const loopOfRun=r=>CONFIG.loops[r.loop||role(agentOf(r.agent)).loop];
+const loopKeyOfRun=r=>r.loop||role(agentOf(r.agent)).loop;
+const mainSteps=L=>L.steps.filter(s=>!(L.side||[]).includes(s));
+const isSide=(L,s)=>(L.side||[]).includes(s);
+const AGd=id=>AG[id]||(AG[id]={session:{id:'—',start:NOW,turns:0,ctx:0,tok:0,branch:'—'},prev:[],d14:{tok:0,h:{busy:0,wAg:0,wYou:0,idle:0}},w7:0});
+const tok24=id=>{const d=AGd(id);return +(d.session.tok+sum(d.prev.filter(p=>minsSince(p.end)<=1440).map(p=>p.tok))).toFixed(1)};
+const runsOf=id=>RUNS.filter(r=>r.agent==id);
+const activeRun=id=>runsOf(id).find(r=>r.state=='active');
+const waitingRuns=id=>runsOf(id).filter(r=>r.state!='active'); // queued + parked
+const assignedBlocked=id=>Object.entries(T).filter(([k,v])=>v.owner==id&&v.block&&!RUNS.some(r=>r.ticket==k&&r.agent==id)).map(([k,v])=>({id:k,...v}));
+function agentState(id){const r=activeRun(id);if(!r)return waitingRuns(id).length?'waiting-agent':'idle';if(r.waitYou)return 'waiting-you';return 'working'}
+function stateSince(id){const r=activeRun(id);if(!r){const p=waitingRuns(id);return p.length?Math.max(...p.map(x=>x.waitSince)):NOW}if(r.waitYou)return r.waitSince;return ago(cur(r)[1])}
+const cur=r=>r&&r.path.length?r.path[r.path.length-1]:null;
+function edges(r){const L=loopOfRun(r),p=r.path,o=[];for(let i=1;i<p.length;i++){const e=L.back.find(([f,t])=>f==p[i-1][0]&&t==p[i][0]);if(e)o.push(e)}return o}
+const reworkN=r=>edges(r).filter(e=>e[3]).length;
+const attempt=r=>reworkN(r)+1;
+function lbShort(r){const g={};edges(r).forEach(e=>{const k=`${e[0]}→${e[1]}`;g[k]=(g[k]||0)+1});return Object.entries(g).map(([k,v])=>`${k} ×${v}`).join(' · ')}
+const tickets=rid=>Object.entries(T).filter(([k,v])=>k.startsWith(rid+'#')&&!v.epic&&!v.past).map(([k,v])=>({id:k,...v}));
+const tstate=(r,i)=>{const s=r.project.status.find(x=>x.n==i.st);return s?s.map:'planned'};
+function counts(rid){const r=repoOf(rid),o={planned:0,'in progress':0,review:0,blocked:0,held:0,closed7:0};if(!r||!r.project)return o;tickets(rid).forEach(i=>{const s=tstate(r,i);if(s!='done')o[s]++;if(i.held)o.held++});o.planned+=(r.hidden||{}).planned||0;o.closed7=sum(DAILY[rid].slice(-7));return o}
+const allC=()=>CONFIG.repos.reduce((t,r)=>{const c=counts(r.id);Object.keys(c).forEach(k=>t[k]=(t[k]||0)+c[k]);return t},{});
+const ev24=k=>EVX().filter(e=>e.k==k&&minsSince(e.at)<=1440);
+const closed24=()=>sum(Object.values(DAILY).map(d=>d[13]));
+const merges24=who=>ev24('merge').filter(e=>!who||e.who==who).length;
+const closed14=r=>sum(DAILY[r]),closed14All=()=>sum(Object.keys(DAILY).map(closed14));
+const goalDone=r=>repoOf(r).goal.start+closed14(r),goalScope=r=>{const s=repoOf(r).goal.scope;return s[s.length-1]};
+const rate7=r=>sum(DAILY[r].slice(-7))/7;
+const etaDays=r=>Math.ceil((goalScope(r)-goalDone(r))/rate7(r)),eta=r=>NOW+etaDays(r)*86400000;
+const rate=a=>CONFIG.rates[a.model]||1;
+const usd24=id=>tok24(id)*rate(agentOf(id)),usd14=id=>AGd(id).d14.tok*rate(agentOf(id));
+const tot24=()=>sum(CONFIG.agents.map(a=>tok24(a.id))),usd24All=()=>sum(CONFIG.agents.map(a=>usd24(a.id))),usd14All=()=>sum(CONFIG.agents.map(a=>usd14(a.id)));
+const ticketUsd=ref=>sum(RUNS.filter(r=>r.ticket==ref).map(r=>r.tok*rate(agentOf(r.agent))));
+// accounts
+const w7=a=>a.windows.find(w=>w.w=='7d');
+const wStart=w=>w.resetAt-w.len*60000, wEl=w=>w.len-minsTo(w.resetAt);
+// usage samples (USAGE) → current %, last-24h pace, projection, threshold crossings
+const hist=a=>(USAGE[a.id]||[]).map(([m,p])=>[ago(m),p]);
+const uAt=(a,ms)=>{const h=hist(a);if(ms<=h[0][0])return h[0][1];for(let i=1;i<h.length;i++)if(h[i][0]>=ms){const[t0,p0]=h[i-1],[t1,p1]=h[i];return p0+(p1-p0)*(ms-t0)/(t1-t0)}return h[h.length-1][1]};
+const lastS=a=>{const h=hist(a);return h[h.length-1]};
+const pace24=(a,ms)=>{ms=ms||lastS(a)[0];return (uAt(a,ms)-uAt(a,ms-86400000))/24}; // % points per hour
+const projAt=(a,ms)=>{ms=ms||lastS(a)[0];return uAt(a,ms)+pace24(a,ms)*(w7(a).resetAt-ms)/3600000};
+const acctOfW=w=>CONFIG.accounts.find(a=>a.windows.includes(w));
+const winPace=w=>Math.round(projAt(acctOfW(w)));
+const stopForecast=a=>{const w=w7(a),p=pace24(a),[t,u]=lastS(a);if(u>=a.stopAt||p<=0)return null;const ms=t+(a.stopAt-u)/p*3600000;return ms<w.resetAt?ms:null};
+const firstSample=(a,f)=>{const h=hist(a);for(let i=h.length-1;i>0;i--)if(f(h[i])&&!f(h[i-1]))return h[i][0];return null}; // latest crossing
+const alertCrossed=a=>firstSample(a,([t,u])=>u>=a.alertAt);
+const projFired=a=>firstSample(a,([t,u])=>t-86400000>=hist(a)[0][0]&&projAt(a,t)>=100);
+// M tokens per 100% of an account's 7d window, from its agents' last 24h (model mix ignored)
+const capM=a=>sum(CONFIG.agents.filter(x=>x.account==a.id).map(x=>tok24(x.id)))/(pace24(a)*24)*100;
+const movers=a=>CONFIG.agents.filter(x=>x.fallback&&x.fallback.startsWith(a.id)&&winPace(w7(acct(x.account)))>100);
+const switchAt=x=>{const r=activeRun(x.id);if(r&&r.waitYou)return null;const p=CTO.plan.filter(q=>q[1]==x.id&&typeof q[0]=='number').map(q=>q[0]);return p.length?Math.max(...p):null}; // ≈ when its next new run starts; null = unknown (waits on you)
+const idleNow=x=>{const r=activeRun(x.id);return !r||!!r.waitYou};
+const projWithMoves=a=>Math.round(projAt(a)+sum(movers(a).map(x=>tok24(x.id)/capM(a)*100/24*(w7(a).resetAt-(switchAt(x)||NOW))/3600000))); // unknown switch time → counted from now (upper bound)
+const projIfMoved=a=>{const ag=CONFIG.agents.filter(x=>x.account==a.id),tot=sum(ag.map(x=>tok24(x.id)))||1,leave=fallbackAgents(a.id);return Math.round(lastS(a)[1]+sum(ag.map(x=>idleNow(x)?0:pace24(a)*tok24(x.id)/tot*((leave.includes(x)?(switchAt(x)||lastS(a)[0]):w7(a).resetAt)-lastS(a)[0])/3600000)))}; // agents waiting on you use no tokens
+CONFIG.accounts.forEach(a=>{if(USAGE[a.id])w7(a).used=Math.round(lastS(a)[1])});
+const nextNew=x=>{const rs=runsOf(x.id).filter(r=>r.ticket);return rs.length?'after '+rs.map(r=>x.role!='research'&&T[r.ticket]&&T[r.ticket].pr?'PR #'+T[r.ticket].pr.n:'its run on '+r.ticket).join(' and ')+(switchAt(x)?` (≈ ${clock(switchAt(x))})`:` (waits on your ${(brById(activeRun(x.id).waitYou)||{}).title?'answer: '+brById(activeRun(x.id).waitYou).title.split('(')[0].trim():'answer'})`):'from its next run'};
+const stallStreak=()=>Math.max(0,...CONFIG.agents.map(x=>{const rs=RUNS14.filter(r=>r[0]==x.id).sort((p,q)=>p[3]-q[3]);let n=0;for(const r of rs){if(r[2]=='wasted')n++;else break}return n}));
+const SESS=()=>SESS14.filter(s=>s[1]>24).concat(CONFIG.agents.flatMap(x=>{const d=AGd(x.id);return [[x.id,minsSince(d.session.start)/60,0],...d.prev.map(p=>[x.id,minsSince(p.start)/60,0])]}));
+const blockedIn=rid=>tickets(rid).filter(i=>i.block).length;
+const fallbackAgents=aid=>CONFIG.agents.filter(x=>x.account==aid&&x.fallback);
+// event log incl. derived threshold crossings
+let _evx=null;
+function EVX(){if(_evx)return _evx;const x=[...EV];CONFIG.accounts.forEach(a=>{const t=alertCrossed(a);if(t&&minsSince(t)<=1440)x.push({at:t,who:'monitor',k:'alert',ref:null,txt:`${a.id} passed alert_at ${a.alertAt}% of its 7d window (sample ${uAt(a,t).toFixed(1)}%)`});const f=projFired(a);if(f&&minsSince(f)<=1440)x.push({at:f,who:'monitor',k:'watch',ref:null,txt:`watch fired: ${a.id} projected ${Math.round(projAt(a,f))}% at reset (last-24h pace)`})});return _evx=x.sort((a,b)=>b.at-a.at)}
+// escalations
+const URG=Object.fromEntries(CONFIG.escalation.tiers.map((t,i)=>[t[0],i])); // order comes from config
+const openBR=()=>BR.filter(b=>!b.done).sort((a,b)=>URG[a.urg]-URG[b.urg]||a.at-b.at);
+const brById=id=>BR.find(b=>b.id==id);
+const channel=urg=>CONFIG.escalation.tiers.find(t=>t[0]==urg)[2];
+const online=()=>minsSince(OP.lastSeen)<10;
+// 14d history
+const P14=()=>PRS14;
+const merged14=()=>PRS14.length;
+const fpN=()=>PRS14.filter(p=>p.rf==0).length;
+const leadMean=rs=>sum(rs.map(p=>sum(p.ph)))/rs.length;
+const phaseMeans=rid=>{const rs=PRS14.filter(p=>p.r==rid);return ['coding','pickup','review','rework','qa','merge'].map((n,i)=>[n,+(sum(rs.map(p=>p.ph[i]))/rs.length).toFixed(1)])};
+const prsBy=a=>PRS14.filter(p=>p.a==a);
+const runs14=a=>RUNS14.filter(r=>!a||r[0]==a);
+const wasted14=()=>RUNS14.filter(r=>r[2]=='wasted').length;
+const tta=()=>sum(ESC14.map(e=>(e[0]-e[1])*60))/ESC14.length; // minutes
+const liveEdge=(loop,f,t)=>sum(RUNS.filter(r=>loopKeyOfRun(r)==loop).map(r=>edges(r).filter(e=>e[0]==f&&e[1]==t).length));
+// loop-back totals: deliver from PRS14 (merged) + live runs; others from LOOPH. returns {k:[merged-only, live, worst, worstN]}
+function LB(){const o={},PF={'test>implement':p=>p.tl,'review>fix':p=>p.rf,'qa>fix':p=>p.qf,'fix>test':p=>p.rf+p.qf};
+ Object.entries(PF).forEach(([e,f])=>{const [a,b]=e.split('>'),w=PRS14.reduce((m,p)=>f(p)>m[1]?[p.r+'#'+p.n,f(p)]:m,['',0]);o['deliver:'+e]=[sum(PRS14.map(f)),liveEdge('deliver',a,b),...w]});
+ o['verify:verdict>report-bug']=[sum(PRS14.map(p=>p.qf)),liveEdge('verify','verdict','report-bug'),...PRS14.reduce((m,p)=>p.qf>m[1]?[p.r+'#'+p.n,p.qf]:m,['',0])];
+ o['verify:retest>verdict']=[sum(PRS14.map(p=>p.qf)),liveEdge('verify','retest','verdict'),...PRS14.reduce((m,p)=>p.qf>m[1]?[p.r+'#'+p.n,p.qf]:m,['',0])];
+ Object.entries(LOOPH).forEach(([k,v])=>{const[l,e]=k.split(':'),[a,b]=e.split('>'),lv=liveEdge(l,a,b);o[k]=[v[0]-lv,lv,v[1],v[2]]});
+ o['plan:report>sweep']=[runs14('pm-1').length,0,'',0];o['supervise:watch>observe']=[AGd('cto').d14.h.busy*60,0,'',0];return o}
+const reworkPerMerge=()=>{const L=LB();return sum(['deliver:test>implement','deliver:review>fix','deliver:qa>fix'].map(k=>L[k][0]))/merged14()};
+// display helpers
+const title=ref=>(T[ref]||{}).t||'';
+const tlink=ref=>`<a class="ref" onclick="event.stopPropagation();openTicket('${ref}')" title="${esc(title(ref))}">${ref}</a>`;
+const linkify=s=>String(s).replace(/((shop-app|site-builder|control-centre)#\d+)/g,m=>`<a class="ref" onclick="event.stopPropagation();openTicket('${m}')">${m}</a>`);
+const prStatus=p=>`PR #${p.n} · checks ${p.checks} · review bot ${p.bot}${p.qa!='n/a'?' · QA '+p.qa:''}`;
+const SL={'working':'working','waiting-agent':'waiting on agent','waiting-you':'waiting on you','idle':'idle','error':'error'};
+const RS={queued:'queued',parked:'parked'};
+const glyph=s=>`<span class="gy ${s}"></span>`;
+const stTxt=(s,since)=>`<span class="st c-${s}">${glyph(s)}${SL[s]}${since!=null?' · '+dur(minsSince(since)):''}</span>`;
+const runTxt=r=>`<span class="st c-waiting-agent">${glyph('waiting-agent')}${RS[r.state]} at ${r.at} · ${dur(minsSince(r.waitSince))}</span>`;
+const pri=p=>`<span class="pri ${p=='P0'?'p0':''}">${p}</span>`;
+function skipsFor(a){const L=loopOf(a),o=[];Object.entries(L.skipIfNoAgent||{}).forEach(([step,rl])=>{if(!CONFIG.agents.some(x=>x.role==rl&&x.repo==a.repo))o.push(step)});return o}
+function exitOf(L,s){const e=L.back.find(x=>x[0]==s&&!isSide(L,x[1]));return e?e[1]:null}
+function stepLabel(r){const L=loopOfRun(r),c=cur(r);if(!c)return '—';if(isSide(L,c[0]))return `<b>${c[0]}</b> (side → ${exitOf(L,c[0])||exitOf(L,(L.back.find(x=>x[0]==c[0])||[])[1])||'—'})`;const M=mainSteps(L);return `step ${M.indexOf(c[0])+1}/${M.length} <b>${c[0]}</b>`}
+function segs(r){const a=agentOf(r.agent),L=loopOfRun(r),c=cur(r),seen=new Set(r.path.map(p=>p[0])),sk=skipsFor(a),st=r.state!='active'?'waiting-agent':agentState(a.id);const cls=n=>c&&n==c[0]?'c '+st:sk.includes(n)?'x':(L.optional||[]).includes(n)&&!seen.has(n)?'o':seen.has(n)?'d':'';
+ return `<div class="segs" title="${mainSteps(L).join(' → ')}${L.side?' · side: '+L.side.join(', '):''}">${mainSteps(L).map(n=>`<i class="${cls(n)}" title="${n}"></i>`).join('')}${(L.side||[]).length?'<i class="sep"></i>'+L.side.map(n=>`<i class="${cls(n)}" style="flex:.6" title="side: ${n}"></i>`).join(''):''}</div>`}
+const toast=m=>{const t=$('#toast');t.innerHTML=m;t.style.display='block';clearTimeout(window._tt);window._tt=setTimeout(()=>t.style.display='none',7000)};
+const btns=(...b)=>`<span class="mb">${b.join('')}</span>`;
+const GRIDKEY='<div class="lgd">✓ done · ✗ failed · ~ changes requested · ✗ crash (dashed) · ● now · ⏸ waiting (queued/parked) · new row = a rework loop-back or a restart · <i>italic</i> = side step</div>';
+
+/* ====================================================================
+   HEADER + LEGEND
+   ==================================================================== */
+function renderChrome(){
+ const nb=openBR().length,ac=allC();
+ $('#b-cto').textContent=nb;$('#b-cto').style.display=nb?'':'none';$('#b-cto').title=nb+' items need you';
+ $('#b-boards').textContent=ac.blocked;$('#b-boards').style.display=ac.blocked?'':'none';$('#b-boards').title=ac.blocked+' blocked ticket(s)';
+ const live=CONFIG.agents.filter(a=>AGd(a.id).session.id!='—').length;
+ $('#hstat').innerHTML=CONFIG.accounts.map(a=>{const w=w7(a),p=winPace(w),h=a.windows.find(x=>x.w=='5h');return `<span class="ac1" title="${a.id}: 7d ${w.used}% used → ${p}% projected at reset if nothing moves${fallbackAgents(a.id).length&&p>100?' · ≈'+projIfMoved(a)+'% once '+fallbackAgents(a.id).map(x=>x.id).join(', ')+' switch away':''}">${a.id} ${h?`<span class="h5">5h <b>${h.used}%</b> · </span>`:''}7d <b>${w.used}%</b>→<b class="${p>100?'bad':''}">${p}%</b></span>`}).join('')+CONFIG.hosts.map(m=>`<span class="mach2">${m.id} ${live}/${m.slots}</span><span class="mach">${m.id} ${live}/${m.slots} sessions · cpu <b>${m.cpu}%</b> · ram <b>${m.ram}/${m.ramMax} GB</b></span>`).join('');
+ $('#clock').innerHTML=`<span class="cl-d">${dayOnly(NOW)} </span>${clock(NOW)} BST`;
+ $('#nu').className='nu'+(nb?'':' zero');$('#nu').innerHTML=nb?`${glyph('waiting-you')} needs you ${nb}`:'nothing needs you';
+ $('#legend').innerHTML=`<b>agent</b> ${Object.keys(SL).map(s=>`<span class="st">${glyph(s)}${SL[s]}</span>`).join('')}<span style="margin-left:6px"><b>ticket</b></span>${CONFIG.states.map(t=>`<span class="tsx ts-${t=='in progress'?'progress':t}">${t}</span>`).join(' ')}<span class="tsx ts-held">⏸ held</span><span>amber = needs you · 7d x→y% = used → projected · $ = API-equiv</span><a onclick="go('config');setTimeout(()=>$('#glossary').scrollIntoView(),40)">glossary</a>`;
+}
+
+/* ====================================================================
+   AGENTS
+   ==================================================================== */
+let fRepo='all',fRole='all',fSort='attention',fView='auto';
+const ORD={'error':0,'waiting-you':1,'waiting-agent':2,'working':3,'idle':4};
+function renderAgents(){
+ const W=CONFIG.agents.filter(a=>a.role!='supervisor'),cnt=s=>W.filter(a=>agentState(a.id)==s).length,ac=allC();
+ const L=W.filter(a=>(fRepo=='all'||a.repo==fRepo)&&(fRole=='all'||a.role==fRole)).sort((a,b)=>fSort=='attention'?ORD[agentState(a.id)]-ORD[agentState(b.id)]:fSort=='repo'?a.repo.localeCompare(b.repo):fSort=='cost (24h)'?usd24(b.id)-usd24(a.id):stateSince(a.id)-stateSince(b.id));
+ const view=fView=='auto'?(W.length>9?'table':'cards'):fView;
+ const c=AGd('cto'),wn=watchRows().filter(w=>!w.fired&&w.etaMin!=null).sort((a,b)=>a.etaMin-b.etaMin)[0];
+ const dec=ev24('decide'),m24=merges24();
+ $('#v-agents').innerHTML=`
+ <div class="kpis">
+  <div class="k"><span>workers working</span><b>${cnt('working')} / ${W.length}</b><small>${cnt('waiting-you')} waiting on you · ${cnt('waiting-agent')} on an agent<br>${cnt('idle')} idle · ${cnt('error')} error</small></div>
+  <div class="k"><span>tickets in progress / review</span><b>${ac['in progress']} / ${ac.review}</b><small>board status · WIP ${ac['in progress']+ac.review}<br>researchers + PM work outside these</small></div>
+  <div class="k"><span>blocked</span><b class="${ac.blocked?'bad':''}">${ac.blocked}</b><small>${tickets('shop-app').concat(tickets('site-builder')).filter(i=>i.block&&i.block.by=='you').length} on you · <a onclick="go('boards')">boards</a><br>${ac.held} held (label)</small></div>
+  <div class="k"><span>issues closed · 24h</span><b>${closed24()}</b><small>${m24} via merged PRs<br>${closed14All()} in 14d</small></div>
+  <div class="k"><span>tokens · 24h</span><b>${tot24().toFixed(1)}M</b><small>all agents and sessions<br>incl. cto ${tok24('cto')}M</small></div>
+  <div class="k"><span>$ · 24h · API-equiv</span><b>$${usd24All().toFixed(2)}</b><small>$${(usd24All()/Math.max(1,m24)).toFixed(2)} per merge (all agents)</small></div>
+ </div>
+ <div class="ctos" onclick="go('cto')" title="open the CTO page">
+  <div><span class="lbl">cto · supervisor · claude-main · opus-5.5</span>${stTxt(agentState('cto'))} <span class="ft s">· ${c.session.id} · up ${dur(minsSince(c.session.start))} · ctx ${c.session.ctx}%</span><div class="s dim">now: ${CTO.now}</div></div>
+  <div><span class="lbl">next check · ${watchRows().filter(w=>!w.fired).length} watches active (${ARMED.length} armed by cto)</span><div class="v">${wn?`in ${dur(wn.etaMin)}: ${linkify(wn.what)} — then ${linkify(wn.then)}`:'—'}</div></div>
+  <div><span class="lbl">decided alone · 24h</span><div class="v">${dec.length} <span class="ft">· ${dec.filter(e=>e.undone).length} undone</span></div></div>
+  <div><span class="lbl">waiting on you</span><div class="v">${openBR().length} <span class="ft">· oldest ${dur(Math.max(...openBR().map(b=>minsSince(b.at))))}</span></div></div>
+ </div>
+ <h2>workers <span>${L.length} of ${W.length} · each assigned to one repo · one session · one active ticket; may own queued or parked ones</span><span class="r">
+  <select onchange="fRepo=this.value;renderAgents()"><option value="all">all repos</option>${CONFIG.repos.map(r=>`<option ${r.id==fRepo?'selected':''}>${r.id}</option>`).join('')}</select>
+  <select onchange="fRole=this.value;renderAgents()"><option value="all">all roles</option>${Object.entries(CONFIG.roles).filter(([k])=>k!='supervisor').map(([k,v])=>`<option value="${k}" ${k==fRole?'selected':''}>${v.label}</option>`).join('')}</select>
+  <select onchange="fSort=this.value;renderAgents()">${['attention','repo','cost (24h)','time in state'].map(x=>`<option ${x==fSort?'selected':''}>${x}</option>`).join('')}</select>
+  <span class="seg">${['cards','table'].map(v=>`<span class="${v==view?'on':''}" onclick="fView='${v}';renderAgents()">${v}</span>`).join('')}</span></span></h2>
+ <div class="lgd">step bar: one segment per main step · <span style="color:#3fb950">■</span> done · <span style="color:#4493f8">■</span> current · ▭ dashed = optional, not reached · ▥ hatched = skipped (no agent for it) · after the gap = side steps (fix, report-bug…)</div>
+ ${view=='cards'?`<div class="cards">${L.map(card).join('')}</div>`:agTable(L)}
+ <h2>activity <span>last 10 events · all repos · ⓔ = outside Control Centre (GitHub, review bot) · monitor = threshold checks</span></h2>
+ <div class="feed">${EVX().slice(0,10).map(feedRow).join('')}</div>`;
+}
+const feedRow=e=>`<div class="fe"><span class="t">${clock(e.at)}</span><span class="${e.who=='cto'?'w-cto':agentOf(e.who)?'w-agent':'w-sys'}">${e.who}${agentOf(e.who)||e.who=='monitor'?'':' ⓔ'}</span><span class="${e.k=='error'?'bad':''}">${linkify(e.txt)}</span></div>`;
+function card(a){const d=AGd(a.id),st=agentState(a.id),r=activeRun(a.id),wr=waitingRuns(a.id),blk=assignedBlocked(a.id),c=cur(r),L=r?loopOfRun(r):loopOf(a),ac=acct(a.account),sk=skipsFor(a),tk=r&&r.ticket?T[r.ticket]:null;
+ const P=prsBy(a.id),fp=P.length?Math.round(P.filter(p=>p.rf==0).length/P.length*100)+'%':'—';
+ const own=tk&&tk.pr&&tk.pr.author==a.id;
+ const line=r&&r.waitYou?`<div class="why c-waiting-you">${brById(r.waitYou).title} · <a onclick="event.stopPropagation();brief('${r.waitYou}')">decide →</a></div>`:tk&&tk.pr&&tk.pr.mergeHeld&&own?`<div class="why"><span class="tsx" style="color:var(--am);border-color:#e3b34166">⏸ merge held</span> <span class="dim">${tk.pr.mergeHeld.why}</span> · <a onclick="event.stopPropagation();brief('${tk.pr.mergeHeld.brief}')">decide →</a></div>`:'<div class="why ft">nothing blocking this run</div>';
+ const also=[...wr.map(p=>`${tlink(p.ticket)} <b>${RS[p.state]} at ${p.at}</b> ${dur(minsSince(p.waitSince))}`),...blk.map(b=>`${tlink(b.id)} <b class="wa">blocked on you</b> ${dur(minsSince(b.stAt))}`)];
+ return `<div class="ac ${st}" onclick="openAgent('${a.id}')">
+ <div class="h"><b>${a.id}</b><span class="role">${role(a).label}</span>${stTxt(st,stateSince(a.id))}</div>
+ <div class="ml"><span>where</span><span class="ell" title="${a.repo} · ${ac.id} · ${a.model} · ${a.host}">${a.repo} · ${ac.id} · ${a.model}</span><span>session</span><span class="ell">${d.session.id} · ${dur(minsSince(d.session.start))} · ctx<span class="ctxbar"><i style="width:${d.session.ctx}%;background:${d.session.ctx>80?'var(--rd)':d.session.ctx>60?'var(--dim)':'var(--bl)'}"></i></span>${d.session.ctx}%</span></div>
+ <div class="work">${r&&r.ticket?`${tlink(r.ticket)} ${title(r.ticket)}${tk&&tk.pr&&own?` <span class="lnk">· PR #${tk.pr.n}</span>`:''}`:'—'}</div>
+ <div><div class="stepl"><span>${r?stepLabel(r):'—'} · attempt ${r?attempt(r):1}</span><span class="n">${L.name}${sk.length?' · '+sk.join(', ')+' skipped':''}</span></div>${r?segs(r):''}</div>
+ <div class="lb" title="${r?lbShort(r):''}">${r&&edges(r).length?`↺ ${edges(r).length} loop-back${edges(r).length>1?'s':''} (${reworkN(r)} rework): ${lbShort(r)}`:'<span class="ft">no loop-backs on this ticket</span>'}</div>
+ ${line}
+ ${also.length?`<div class="parked">also owns: ${also.join(' · ')}</div>`:''}
+ <div class="foot"><span>merged · 24h<b>${a.role=='dev'?merges24(a.id):'—'}</b></span><span>1st-pass · 14d<b>${fp}</b></span><span>tokens · 24h<b>${tok24(a.id)}M</b></span><span>$ · 24h<b>$${usd24(a.id).toFixed(2)}</b></span><span>busy · 14d<b>${d.d14.h.busy}h</b></span><span>last step change<b>${c?dur(c[1])+' ago':'—'}</b></span></div></div>`}
+function agTable(L){return `<div class="tw"><table><tr><th>agent</th><th>role</th><th>repo</th><th>account · model</th><th>state</th><th>active ticket</th><th>step</th><th class="n">attempt</th><th>also owns</th><th class="n">ctx</th><th class="n">tok 24h</th><th class="n">$ 24h</th></tr>${L.map(a=>{const d=AGd(a.id),r=activeRun(a.id),c=cur(r);return `<tr class="r" onclick="openAgent('${a.id}')"><td class="mm t">${a.id}</td><td>${role(a).label}</td><td class="mm">${a.repo}</td><td class="mm">${a.account} · ${a.model}</td><td>${stTxt(agentState(a.id),stateSince(a.id))}</td><td class="t">${r&&r.ticket?tlink(r.ticket):'—'}</td><td class="mm">${c?c[0]:'—'}</td><td class="n">${r?attempt(r):''}</td><td class="mm">${waitingRuns(a.id).map(p=>p.ticket.split('#')[1]+' '+p.state+'@'+p.at).concat(assignedBlocked(a.id).map(b=>b.id.split('#')[1]+' blocked')).join(', ')||'—'}</td><td class="n">${d.session.ctx}%</td><td class="n">${tok24(a.id)}M</td><td class="n">$${usd24(a.id).toFixed(2)}</td></tr>`}).join('')}</table></div>`}
+
+/* agent drawer */
+function queueOf(id){const o=[],r=activeRun(id);if(r)o.push(['now',r.ticket?r.ticket:CTO.now,r.waitYou?'waiting on your answer':stepLabel(r).replace(/<\/?b>/g,'')]);waitingRuns(id).forEach(p=>o.push([p.state,p.ticket,p.waitWhy]));assignedBlocked(id).forEach(b=>o.push(['blocked',b.id,b.block.why+' (on you)']));CTO.plan.filter(p=>p[1]==id).forEach(p=>o.push([p[0]=='ADR'?'plan':when(p[0]),'',p[2]+(p[3]?' — after '+p[3]:'')]));return o}
+function openAgent(id){const a=agentOf(id),d=AGd(id),st=agentState(id),ac=acct(a.account),r=activeRun(id),wr=waitingRuns(id),P=prsBy(id);
+ const out=a.role=='dev'?[['PRs merged',P.length],['1st-pass review',P.length?Math.round(P.filter(p=>p.rf==0).length/P.length*100)+'%':'—']]:a.role=='qa'?[['QA runs',runs14(id).length],['retests',LB()['verify:retest>verdict'][0]]]:a.role=='research'?[['briefs',runs14(id).filter(x=>x[2]=='brief').length],['wasted runs',runs14(id).filter(x=>x[2]=='wasted').length]]:a.role=='pm'?[['daily reports',runs14(id).length],['',' ']]:[['decisions',DEC14.decisions],['undone',DEC14.undone]];
+ const re=new RegExp('\\b'+id.replace('-','\\-')+'\\b');
+ $('#drw').innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b class="m" style="font-size:16px">${a.id}</b><span class="ft">${role(a).label} · ${a.repo=='*'?'all repos':a.repo} · ${a.host}</span>${stTxt(st,stateSince(id))}<span class="sp"></span>${btns('<span class="btn g" onclick="nav(-1)" title="k">‹ prev</span>','<span class="btn g" onclick="nav(1)" title="j">next ›</span>','<span class="btn" onclick="closeD()">esc ✕</span>')}</div>
+ <div class="agrp"><div><small>talk</small><span class="btn" onclick="chatAbout('${a.id}')" title="open a CTO chat thread about this agent">ask cto about ${a.id}</span><span class="btn" title="send a message into the agent's session; the CTO sees it">message ${a.id}</span></div><div><small>control</small><span class="btn" title="the agent stops at the end of its current step and pushes WIP">pause after step</span><span class="btn" title="move its active ticket to another agent in the same repo">reassign…</span><span class="btn" title="end the session with a handoff note and start a fresh one">new session</span><span class="btn danger" onclick="if(confirm('Stop ${a.id}? WIP is pushed to its branch; its tickets go back to the board unassigned.'))toast('${a.id} stopping after pushing WIP')">stop</span></div><div><small>inspect</small><span class="btn" title="read-only transcript of the current session">transcript</span><span class="btn" title="attach to the live CLI in a terminal on the host">attach terminal</span></div></div>
+ <div class="kv"><span>state</span><b class="c-${st}">${SL[st]} · ${dur(minsSince(stateSince(id)))}${r&&r.waitYou?' — '+brById(r.waitYou).title:''}</b><span>account · model</span><b>${ac.id} · ${a.model}${a.fallback?` · fallback ${a.fallback}`:''}</b><span>session</span><b>${d.session.id} · started ${clock(d.session.start)} · ${d.session.turns} turns · ctx ${d.session.ctx}% · ${d.session.tok}M tokens</b><span>branch</span><b>${d.session.branch||'—'}</b>${d.prev.map(p=>`<span>earlier session</span><b>${p.id} · ${clock(p.start)}–${clock(p.end)} · ${p.tok}M · ${p.why}</b>`).join('')}</div>
+ <h2>queue <span>what ${a.id} does next, in order (runs + the CTO's plan)</span></h2><div class="tw"><table>${queueOf(id).map(q=>`<tr><td class="mm" style="width:90px">${q[0]}</td><td class="mm">${q[1]?(q[1].includes('#')?tlink(q[1]):q[1]):''}</td><td class="dim">${linkify(q[2])}</td></tr>`).join('')}</table></div>
+ ${r||wr.length?`<h2>runs</h2>${GRIDKEY}`:''}${r?`<h2>active run · ${loopOfRun(r).name} <span>${r.ticket||''}</span></h2>${traceGrid(r,1)}`:''}
+ ${wr.map(p=>`<h2>${p.state} run · ${p.ticket} <span>${p.waitWhy}</span></h2>${traceGrid(p,1)}`).join('')}
+ <h2>numbers <span>24h and 14d windows, same as Metrics</span></h2><div class="statg"><div><span>tokens · 24h</span><b>${tok24(id)}M</b></div><div><span>$ · 24h</span><b>$${usd24(id).toFixed(2)}</b></div><div><span>tokens · 14d</span><b>${d.d14.tok}M</b></div><div><span>$ · 14d</span><b>$${usd14(id).toFixed(0)}</b></div>${out.map(([k,v])=>`<div><span>${k}${k?' · 14d':''}</span><b>${v}</b></div>`).join('')}</div>
+ <h2>recent activity</h2><div class="feed">${EVX().filter(e=>e.who==id||re.test(e.txt)).map(feedRow).join('')||'<div class="fe ft" style="grid-template-columns:1fr">no events in 24h</div>'}</div>`;
+ placeDrw();$('#drw').classList.add('on');$('#scrim').classList.add('on');$('#drw').dataset.id=id}
+function placeDrw(){const t=innerWidth>760?Math.round($('#legend').getBoundingClientRect().bottom)+'px':'0px';$('#drw').style.top=t;$('#scrim').style.top=t}
+function nav(dd){const ids=CONFIG.agents.map(a=>a.id);const i=ids.indexOf($('#drw').dataset.id);openAgent(ids[(i+dd+ids.length)%ids.length])}
+function closeD(){$('#drw').classList.remove('on');$('#scrim').classList.remove('on')}
+function traceGrid(r,compact){const L=loopOfRun(r);if(!r.path.length)return '<div class="ft">no steps yet</div>';const rows=[[]],why=[''];let last=null,att=1;
+ r.path.forEach((p,i)=>{if(last){const e=L.back.find(([f,t])=>f==last[0]&&t==p[0]);const rw0=rows[rows.length-1],rowHas=rw0.some(x=>x[0]==p[0])||(rw0.length&&L.steps.indexOf(p[0])<L.steps.indexOf(rw0[rw0.length-1][0]));if(e&&e[3]){att++;rows.push([]);why.push(`attempt ${att}<br><span class="why2">↺ ${e[0]} → ${e[1]} · ${e[2]}</span>`)}else if(rowHas){rows.push([]);why.push(`attempt ${att} · cont.<br><span class="why2">↺ ${e?e[0]+' → '+e[1]+' · '+e[2]:'repeat'}</span>`)}}rows[rows.length-1].push([...p,i==r.path.length-1]);last=p});
+ why[0]='attempt 1';
+ const st=r.state!='active'?'parked':agentState(r.agent),used=new Set(r.path.map(p=>p[0])),cols=compact?L.steps.filter(s=>used.has(s)):L.steps;
+ return `<div class="tw" style="padding:6px"><table class="grid"><tr><th></th>${cols.map(n=>`<th class="${isSide(L,n)?'side-h':''}">${n}</th>`).join('')}<th>total</th></tr>${rows.map((rw,ri)=>`<tr><td class="rowh">${why[ri]}</td>${cols.map(n=>{const c=rw.find(x=>x[0]==n);if(!c)return '<td><div class="cell empty"></div></td>';const cls=c[3]?'now '+st:c[2]=='fail'?'fail':c[2]=='crash'?'crash':c[2]=='changes'?'chg':'ok';return `<td><div class="cell ${cls}">${c[3]?(r.state!='active'?'⏸':'●'):c[2]=='fail'||c[2]=='crash'?'✗':c[2]=='changes'?'~':'✓'} ${dur(c[1])}${c[2]=='crash'?' crash':''}</div></td>`}).join('')}<td class="ctr">${dur(sum(rw.map(x=>x[1])))}</td></tr>`).join('')}<tr><td class="rowh">run total</td>${cols.map(()=>'<td></td>').join('')}<td class="ctr tx">${dur(sum(r.path.map(x=>x[1])))}</td></tr></table></div>`}
+
+/* ticket drawer */
+function openTicket(ref){const i=T[ref];if(!i)return;const rid=ref.split('#')[0],r=repoOf(rid);const s=i.epic?'epic':i.past?'done':tstate(r,i);const runs=RUNS.filter(x=>x.ticket==ref),p14=PRS14.find(p=>p.r+'#'+p.n==ref);
+ const g=r&&r.goal&&r.goal.ref==ref?r.goal:null;
+ $('#drw').innerHTML=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b class="m" style="font-size:15px">${ref}</b><span class="tsx ts-${s=='in progress'?'progress':s=='epic'?'planned':s}">${s=='epic'?'epic · open':s}</span>${i.held?'<span class="tsx ts-held">⏸ held</span>':''}<span class="sp"></span><a class="s">open in GitHub ↗</a><span class="btn" onclick="closeD()">esc ✕</span></div>
+ <div style="font:600 15px var(--sans);margin:6px 0">${i.t}</div>
+ <div class="kv">${i.st?`<span>board status</span><b>${i.st} (${r&&r.project?r.project.title:'—'}) · since ${dayTime(i.stAt)}</b>`:''}${g?`<span>progress</span><b>${goalDone(rid)}/${goalScope(rid)} ${g.unit} closed · eta ${dayOnly(eta(rid))} · agents on it now: ${[...new Set(RUNS.filter(x=>x.ticket==ref||(x.ticket&&T[x.ticket]&&T[x.ticket].f&&T[x.ticket].f.Epic=='#'+ref.split('#')[1])).map(x=>x.agent))].join(', ')}</b>`:''}${i.f?`<span>fields</span><b>${Object.entries(i.f).map(([k,v])=>k+' '+v).join(' · ')}</b>`:''}${i.owner?`<span>owner</span><b>${i.owner}</b>`:''}${runs.length?`<span>agents on it</span><b>${runs.map(x=>`${x.agent} (${x.waitYou?'waiting on you':x.state}${x.state!='active'?' at '+x.at:''})`).join(' · ')}</b>`:''}${i.pr?`<span>pull request</span><b>${prStatus(i.pr)}${i.pr.mergeHeld?' · merge held: '+i.pr.mergeHeld.why:''}</b>`:''}${i.pr&&i.pr.app?`<span>branch app</span><b>${i.pr.app.host} · PR #${i.pr.n} head ${i.pr.app.head} · up since ${clock(i.pr.app.since)} · <a>open ↗</a></b>`:''}${i.held?`<span>held</span><b>set by ${i.held.by} at ${clock(i.held.at)} — ${i.held.why}</b>`:''}${i.block?`<span>blocked</span><b>by ${i.block.by} — ${i.block.why}</b>`:''}${runs.length?`<span>cost so far</span><b>$${ticketUsd(ref).toFixed(2)} API-equiv (all runs incl. PR)</b>`:''}${p14?`<span>14d history</span><b>merged ${dur(p14.h*60)} ago · $${p14.usd.toFixed(2)} · lead ${sum(p14.ph).toFixed(1)}h · test→implement ×${p14.tl} · review→fix ×${p14.rf} · qa→fix ×${p14.qf}${p14.note?' · '+p14.note:''}</b>`:''}</div>
+ ${runs.length?GRIDKEY:''}${runs.map(x=>`<h2>${x.agent} · ${loopOfRun(x).name} <span>${x.waitYou?'waiting on you — '+brById(x.waitYou).title:x.state}${x.waitWhy?' — '+x.waitWhy:''}</span></h2>${traceGrid(x,1)}`).join('')}
+ <h2>events</h2><div class="feed">${EVX().filter(e=>e.ref==ref).map(feedRow).join('')||'<div class="fe ft" style="grid-template-columns:1fr">no events in 24h</div>'}</div>`;
+ placeDrw();$('#drw').classList.add('on');$('#scrim').classList.add('on');$('#drw').dataset.id=''}
+
+/* ====================================================================
+   LOOPS
+   ==================================================================== */
+let selLoop='all';
+function loopDiagram(key){const L=CONFIG.loops[key],rs=RUNS.filter(r=>loopKeyOfRun(r)==key),M=mainSteps(L),S=L.side||[],agg={};rs.forEach(r=>edges(r).forEach(e=>{const k=e[0]+'>'+e[1];agg[k]=(agg[k]||0)+1}));
+ const n=M.length,W=1000,nw=Math.min(112,(W-30)/n-14),gap=n>1?(W-30-nw*n)/(n-1):0,y=40,P={};M.forEach((k,i)=>P[k]={x:15+i*(nw+gap),y});
+ const mainBack=L.back.filter(e=>!isSide(L,e[0])&&!isSide(L,e[1])),laneY=i=>y+48+i*18,sideY=y+48+mainBack.length*18+34;
+ S.forEach(k=>{const ins=L.back.filter(e=>e[1]==k&&!isSide(L,e[0])).map(e=>P[e[0]].x),outs=L.back.filter(e=>e[0]==k&&!isSide(L,e[1])).map(e=>P[e[1]].x),xs=ins.length?ins:outs;P[k]={x:Math.max(15,Math.min(W-15-nw,(sum(xs)/xs.length)+(ins.length&&outs.length?(Math.max(...ins)-Math.min(...outs))/4:0))),y:sideY}});
+ // spread side nodes that collide
+ S.forEach((k,i)=>S.slice(0,i).forEach(j=>{if(Math.abs(P[k].x-P[j].x)<nw+10)P[k].x=P[j].x+nw+30}));
+ const fs=k=>Math.min(12,Math.floor((nw-8)/(k.length*0.62)));
+ let s=`<defs><marker id="a1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#6e7681"/></marker><marker id="a2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="#b1bac4"/></marker></defs>`;
+ for(let i=0;i<n-1;i++){const A_=P[M[i]],B=P[M[i+1]];s+=`<line x1="${A_.x+nw}" y1="${y+16}" x2="${B.x-1}" y2="${y+16}" stroke="#6e7681" stroke-width="1.3" marker-end="url(#a1)"/>`}
+ const anchors={};const anc=(k,side)=>{const key=k+side;anchors[key]=(anchors[key]||0)+1;return anchors[key]};
+ L.back.forEach(([a,b,lab],i)=>{const c=agg[a+'>'+b]||0,col=c?'#b1bac4':'#6e7681',sw=c?1.8:1.1,da=c?'':'3 3';let d,mx,my;
+  const off=(k)=>{const j=anc(k,'b');return (j-1)*14-7};
+  if(!isSide(L,a)&&!isSide(L,b)){const x1=P[a].x+nw/2+off(a),x2=P[b].x+nw/2+off(b),ly=laneY(mainBack.indexOf(L.back[i]));d=`M${x1} ${y+32} L${x1} ${ly} L${x2} ${ly} L${x2} ${y+34}`;mx=(x1+x2)/2;my=ly}
+  else if(!isSide(L,a)&&isSide(L,b)){const x1=P[a].x+nw/2+off(a),x2=P[b].x+nw/2-12+(anc(b,'t')-1)*10;d=`M${x1} ${y+32} L${x1} ${sideY-14} L${x2} ${sideY-14} L${x2} ${sideY-2}`;mx=(x1+x2)/2;my=sideY-14}
+  else if(isSide(L,a)&&!isSide(L,b)){const x1=P[a].x+nw-6,x2=P[b].x+nw/2+off(b),bot=sideY+44+rs.filter(r=>cur(r)&&cur(r)[0]==a).length*19;d=`M${x1} ${sideY+32} L${x1} ${bot} L${x2+12} ${bot} L${x2+12} ${y+34}`;mx=(x1+x2+12)/2;my=bot}
+  else{const x1=P[a].x+nw,x2=P[b].x;d=`M${x1} ${sideY+16} L${x2-1} ${sideY+16}`;mx=(x1+x2)/2;my=sideY+16}
+  s+=`<path d="${d}" stroke="${col}" stroke-width="${sw}" stroke-dasharray="${da}" fill="none" marker-end="url(#a2)"/><circle cx="${mx}" cy="${my}" r="8" fill="#161b22" stroke="${col}"/><text x="${mx}" y="${my+4}" text-anchor="middle" style="font:600 10.5px var(--mono);fill:${c?'#e6edf3':'#8b949e'}">${i+1}</text>`});
+ // side→side forward links (e.g. report-bug → retest) drawn when not already an edge
+ S.forEach((k,i)=>{const nx=S[i+1];if(nx&&!L.back.some(e=>e[0]==k&&e[1]==nx))s+=`<line x1="${P[k].x+nw}" y1="${sideY+16}" x2="${P[nx].x-1}" y2="${sideY+16}" stroke="#6e7681" stroke-width="1.3" marker-end="url(#a1)"/>`});
+ const pills=k=>rs.filter(r=>cur(r)&&cur(r)[0]==k);
+ [...M,...S].forEach(k=>{const p=P[k],here=pills(k),opt=(L.optional||[]).includes(k),sd=isSide(L,k);s+=`<rect x="${p.x}" y="${p.y}" width="${nw}" height="32" rx="${sd?14:5}" fill="${here.length?'#1c2a3d':'#161b22'}" stroke="${here.length?'#4493f8':'#3d444d'}" ${opt?'stroke-dasharray="4 3"':''}/><text x="${p.x+nw/2}" y="${p.y+20}" text-anchor="middle" style="font:${sd?'italic ':''}${fs(k)}px var(--mono);fill:#e6edf3">${k}</text>`;
+  here.forEach((r,j)=>{const wt=r.state!='active',st=agentState(r.agent),col=wt?'#b1bac4':st=='working'?'#3fb950':'#e3b341',py=sd?p.y+36+j*19:p.y-20-j*19;s+=`<g style="cursor:pointer" onclick="${r.ticket?`openTicket('${r.ticket}')`:''}"><rect x="${p.x+1}" y="${py}" width="${nw-2}" height="16" rx="8" fill="${col}22" stroke="${col}" ${wt?'stroke-dasharray="3 2"':''}/><text x="${p.x+nw/2}" y="${py+12}" text-anchor="middle" style="font:10px var(--mono);fill:#e6edf3">${wt?'⏸ ':''}${r.agent}${r.ticket?' #'+r.ticket.split('#')[1]:''}</text></g>`})});
+ const maxTop=Math.max(1,...M.map(k=>pills(k).length)),top=maxTop*19+6,maxBot=Math.max(0,...S.map(k=>pills(k).length)),H=(S.length?sideY+56+maxBot*19:laneY(mainBack.length))+6;
+ return `<svg class="chart" viewBox="0 -${top} ${W} ${H+top}">${s}</svg>`}
+function renderLoops(){
+ const LL=Object.entries(CONFIG.loops),runsOn=k=>RUNS.filter(r=>loopKeyOfRun(r)==k),lb=LB();
+ const used=k=>Object.entries(CONFIG.roles).filter(([t,v])=>v.loop==k).map(([t])=>t).concat(CONFIG.repos.flatMap(r=>(r.loopOverrides||[]).filter(o=>o.loop==k).map(o=>`${o.role} on ${o.label} (${r.id})`)));
+ const side=`<div class="tw" style="align-self:start"><div class="lpi ${selLoop=='all'?'on':''}" onclick="selLoop='all';renderLoops()"><b>All runs</b><small>every agent: active, queued, parked</small></div>${LL.map(([k,l])=>{const rs=runsOn(k),lbN=sum(rs.map(r=>edges(r).length)),wt=rs.filter(r=>r.state!='active').length;return `<div class="lpi ${k==selLoop?'on':''}" onclick="selLoop='${k}';renderLoops()"><b>${l.name}</b><span class="id">${k}</span><small>${mainSteps(l).length} steps${l.side?' + '+l.side.length+' side':''} · ${l.back.length} edge${l.back.length==1?'':'s'}</small><small>${rs.length} run${rs.length==1?'':'s'} now (${wt} waiting) · ${lbN} loop-back${lbN==1?'':'s'} on them</small></div>`}).join('')}<div class="lpi" style="cursor:default"><a onclick="go('config');setTimeout(()=>$('#cf-loops').scrollIntoView(),40)">edit loops in Config →</a></div></div>`;
+ let body;
+ if(selLoop=='all'){
+  body=`<h2 class="first">all runs <span>one row per agent per ticket · queued/parked runs indented under their agent</span></h2><div class="tw"><table><tr><th>agent / ticket</th><th>loop</th><th>state</th><th>current step</th><th class="n">attempt</th><th class="n">in step</th><th style="min-width:130px">loop-backs on this run</th></tr>${CONFIG.agents.map(a=>{const ar=activeRun(a.id),wr=waitingRuns(a.id);const row=(r,sub)=>{const c=cur(r);return `<tr class="r ${sub?'sub-row':''}" onclick="${r.ticket?`openTicket('${r.ticket}')`:`openAgent('${a.id}')`}"><td class="mm t">${sub?'└ ':a.id+' '}${r.ticket?tlink(r.ticket):'<span class="dim">sweep (no ticket)</span>'}</td><td class="mm">${loopKeyOfRun(r)}</td><td>${sub?runTxt(r):stTxt(agentState(a.id),stateSince(a.id))}</td><td class="mm">${c?c[0]+(isSide(loopOfRun(r),c[0])?' (side)':''):'—'}</td><td class="n">${attempt(r)}</td><td class="n">${c?dur(c[1]):''}</td><td class="mm" style="white-space:normal">${lbShort(r)||'<span class="ft">none</span>'}</td></tr>`};return (ar?row(ar,0):`<tr><td class="mm t">${a.id}</td><td colspan="6" class="ft">no active run</td></tr>`)+wr.map(p=>row(p,1)).join('')}).join('')}</table></div>
+  <div class="lgd" style="margin-top:6px">queued = waiting for this agent's own active run · parked = waiting on another agent or a PR check · in step = time since the run entered its current step</div>`}
+ else{
+  const L=CONFIG.loops[selLoop],rs=runsOn(selLoop),agg={},who={};rs.forEach(r=>edges(r).forEach(e=>{const k=e[0]+'>'+e[1];agg[k]=(agg[k]||0)+1;(who[k]=who[k]||[]).push(r.ticket?r.ticket.split('#')[1]:r.agent)}));
+  body=`<div class="box"><h3>${L.name} <span class="ft s">· id ${selLoop} · used by ${used(selLoop).join(', ')||'nothing yet'}</span></h3><div class="sub">main line left → right · rounded italic boxes below = side steps (only reached through an edge) · numbered lines = edges (key below) · solid bright = taken by a run in flight · pills = runs at that step (⏸ dashed = queued/parked) · dashed box = optional</div>${loopDiagram(selLoop)}
+  <table style="margin-top:6px"><tr><th>#</th><th>edge</th><th>trigger</th><th>signal</th><th>rework</th><th>on runs in flight</th><th class="n">14d</th></tr>${L.back.map(([a,b,lab,rw,sig],i)=>{const c=agg[a+'>'+b]||0,h=lb[selLoop+':'+a+'>'+b],ws=who[a+'>'+b]||[];return `<tr><td class="mm ft">${i+1}</td><td class="mm t">${a} → ${b}</td><td class="dim">${lab}</td><td class="mm ft">${sig}</td><td class="mm">${rw?'yes':'no'}</td><td class="mm">${c?`${c}× (${[...new Set(ws)].map(t=>{const k=ws.filter(x=>x==t).length;return k>1?t+' ×'+k:t}).join(', ')})`:'0'}</td><td class="n">${h?(h[0]+h[1]).toLocaleString():0}</td></tr>`}).join('')}</table>${L.skipIfNoAgent?`<div class="ft s" style="margin-top:4px">step options (config): ${Object.entries(L.skipIfNoAgent).map(([st,rl])=>`"${st}" is skipped when the repo has no ${rl} agent`).join('; ')}</div>`:''}</div>
+  <h2>runs on this loop <span>a new row starts on each rework loop-back, or when a step repeats (restart, re-test)</span></h2>${GRIDKEY}${rs.map(r=>`<div class="box" style="margin-bottom:8px"><div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:4px"><b class="m">${r.agent}</b><span class="ft s">${agentOf(r.agent).repo}</span>${r.state!='active'?runTxt(r):stTxt(agentState(r.agent),stateSince(r.agent))}<span class="t">${r.ticket?tlink(r.ticket)+' '+title(r.ticket):CTO.now}</span></div>${traceGrid(r,0)}</div>`).join('')||'<div class="ft">no runs on this loop now</div>'}`}
+ $('#v-loops').innerHTML=`<div class="lpg">${side}<div style="min-width:0">${body}</div></div>`}
+
+/* ====================================================================
+   BOARDS
+   ==================================================================== */
+let bProj='all',bView='Board';
+const ICO={open:'<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="#3fb950" stroke-width="1.5"/><circle cx="8" cy="8" r="1.6" fill="#3fb950"/></svg>',closed:'<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="#ab7df8" stroke-width="1.5"/><path d="M5 8.2l2 2 4-4.2" fill="none" stroke="#ab7df8" stroke-width="1.5"/></svg>',pr:'<svg width="13" height="13" viewBox="0 0 16 16" style="vertical-align:-2px"><circle cx="4" cy="3.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="4" cy="12.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="12" cy="12.5" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4 5.3v5.4M12 10.7V6a2 2 0 0 0-2-2H7.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>'};
+function priSel(i){return `<select onclick="event.stopPropagation()" onchange="setPri('${i.id}',this.value)" style="font:600 11px var(--mono);padding:0 2px;border-radius:10px" title="Priority (writes to GitHub)">${['P0','P1','P2','P3'].map(p=>`<option ${p==i.f.Priority?'selected':''}>${p}</option>`).join('')}</select>`}
+function setPri(id,p){const old=T[id].f.Priority;T[id].f.Priority=p;toast(`${id} priority ${old} → ${p} · written to GitHub · <a onclick="T['${id}'].f.Priority='${old}';renderBoards();toast('undone')">undo</a>`);renderBoards()}
+function runNote(ref){return RUNS.filter(r=>r.ticket==ref).map(r=>{const c=cur(r);return r.state!='active'?`${r.agent}: ⏸ ${r.state} at ${r.at} · ${dur(minsSince(r.waitSince))}`:`${r.agent}: ${c[0]}${attempt(r)>1?' (attempt '+attempt(r)+')':''} · ${dur(c[1])}${r.waitYou?' · waiting on you':''}`})}
+function gi(r,i){const s=tstate(r,i),fail=i.pr&&(i.pr.qa=='failed'||i.pr.checks=='fail'),notes=runNote(i.id),you=i.block&&i.block.by=='you';return `<div class="gi ${you?'gyou':i.block?'gblk':fail?'gfail':i.pr&&i.pr.mergeHeld?'gneed':i.held?'gheld':''}" onclick="openTicket('${i.id}')"><div class="r1"><span class="ico">${s=='done'?ICO.closed:ICO.open}</span>${i.id}<span class="age" title="time in this Status">${dur(minsSince(i.stAt))}</span></div>
+ <div class="tt">${i.t}</div>${i.lb.length?`<div class="lbls">${i.lb.map(l=>`<span class="gl" style="color:${LABELS[l]};border-color:${LABELS[l]}66;background:${LABELS[l]}14">${l=='held'?'⏸ ':''}${l}</span>`).join('')}</div>`:''}
+ <div class="fl">${s=='done'?pri(i.f.Priority):priSel(i)}${i.f.Size?`<span class="gf">size ${i.f.Size}</span>`:''}${i.f.Iteration?`<span class="gf">iter ${i.f.Iteration.replace('It ','')}</span>`:''}${i.f.Epic?`<span class="gf">epic ${i.f.Epic}</span>`:''}${i.subs?`<span class="gf" title="sub-issues closed / total">sub-issues ${i.subs[0]}/${i.subs[1]}</span>`:''}${i.owner?`<span class="gf ag">${i.owner}</span>`:''}</div>
+ ${i.pr?`<div class="act ${fail?'bad':'dim'}">${ICO.pr} ${prStatus(i.pr)}${i.pr.app?` · <a onclick="event.stopPropagation()" title="this PR's branch running on ${i.pr.app.host}">try app ↗</a>`:''}</div>`:''}
+ ${s!='done'?notes.map(n=>`<div class="act dim">${n}</div>`).join(''):''}
+ ${i.block?`<div class="act ${you?'wa':'bad'}">blocked on ${i.block.by}: ${i.block.why}<br><a onclick="event.stopPropagation();brief('${i.block.brief}')">${you?'act →':'see →'}</a></div>`:''}${i.held?`<div class="act" style="color:#9cb4d8">⏸ held · set by ${i.held.by} ${dur(minsSince(i.held.at))} ago: ${i.held.why}${i.held.brief?`<br><a onclick="event.stopPropagation();brief('${i.held.brief}')">decide →</a>`:''}</div>`:''}${i.pr&&i.pr.mergeHeld?`<div class="act wa">⏸ merge held: ${i.pr.mergeHeld.why}<br><a onclick="event.stopPropagation();brief('${i.pr.mergeHeld.brief}')">decide →</a></div>`:''}</div>`}
+function renderBoards(){
+ const R=CONFIG.repos;
+ const sel=`<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap"><span class="seg">${['all',...R.map(r=>r.id)].map(p=>`<span class="${p==bProj?'on':''}" onclick="bProj='${p}';bView='Board';renderBoards()">${p=='all'?'all projects':p}</span>`).join('')}</span><span class="sp"></span><span class="fresh">live from GitHub Projects · edits write back · synced 12s ago</span></div>`;
+ if(bProj=='all'){
+  const all=R.flatMap(r=>r.project?tickets(r.id).map(i=>({...i,r,s:tstate(r,i)})):[]);
+  const lst=(h,sub,items,cols,hd,ageH='in status',ageF=i=>dur(minsSince(i.stAt)))=>`<h2>${h} <span>${sub}</span></h2><div class="tw"><table><tr><th>ticket</th><th>pri</th><th>owner</th>${hd}<th class="n">${ageH}</th></tr>${items.map(i=>`<tr class="r" onclick="openTicket('${i.id}')"><td class="t">${tlink(i.id)} ${i.t}</td><td>${i.s=='done'?pri(i.f.Priority):priSel(i)}</td><td class="mm">${i.owner||'—'}</td>${cols(i)}<td class="n ft">${ageF(i)}</td></tr>`).join('')||`<tr><td colspan="5" class="ft">none</td></tr>`}</table></div>`;
+  const planned=all.filter(i=>i.s=='planned'&&!i.held).sort((a,b)=>a.f.Priority.localeCompare(b.f.Priority)),hid=sum(R.map(r=>(r.hidden||{}).planned||0));
+  const apps=all.filter(i=>i.pr&&i.pr.app);
+  $('#v-boards').innerHTML=sel+`<h2 class="first">projects <span>goal = the milestone or epic each repo is driving · open tickets count every open issue on the board</span></h2>
+  <div class="tw"><table><tr><th>repo</th><th>project</th><th>goal</th><th style="min-width:150px">goal progress</th><th style="min-width:280px">open tickets on the board (any goal)</th><th class="n">closed · 7d</th><th>agents</th></tr>${R.map(r=>{const c=counts(r.id),ags=CONFIG.agents.filter(a=>a.repo==r.id),open=['planned','in progress','review','blocked'],g=r.goal;
+   return `<tr class="r" onclick="bProj='${r.id}';renderBoards()"><td class="mm t"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${r.color};margin-right:6px"></span>${r.id}</td><td>${r.project?`${r.project.title} <span class="ft">#${r.project.number}</span>`:`<a onclick="event.stopPropagation();go('config')">link a project →</a>`}</td><td>${g?`<span class="ft s">${g.type}</span> ${g.title}<div class="ft s">${goalScope(r.id)-goalDone(r.id)} left · eta ${dayOnly(eta(r.id))} · ${rate7(r.id).toFixed(1)}/day${blockedIn(r.id)?` · assumes ${blockedIn(r.id)} blocked ticket unblocks`:''}</div>`:'—'}</td>
+   <td>${g?`<div class="hb" style="width:100px"><i style="width:${goalDone(r.id)/goalScope(r.id)*100}%;background:var(--dim)"></i></div><span class="s">${goalDone(r.id)}/${goalScope(r.id)} ${g.unit}</span>`:'—'}</td>
+   <td>${r.project?`<div class="stack">${open.map(k=>c[k]?`<i style="flex:${c[k]};background:${k=='planned'?'#6e7681':k=='in progress'?'#4493f8':k=='review'?'#a371f7':'#f85149'}" title="${k} ${c[k]}">${c[k]}</i>`:'').join('')}</div><div class="ft s" style="margin-top:2px">${c.planned} planned (${c.held} held) · ${c['in progress']} in progress · ${c.review} review · ${c.blocked} blocked</div>`:'<span class="ft">no board</span>'}</td>
+   <td class="n">${r.project?c.closed7:'—'}</td><td class="mm">${ags.map(a=>`${glyph(agentState(a.id))} ${a.id}`).join('&nbsp; ')||'<span class="ft">none · <a onclick="event.stopPropagation();go(\'config\')">add</a></span>'}</td></tr>`}).join('')}</table></div>
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start">
+   <div>${lst('in progress','being implemented',all.filter(i=>i.s=='in progress'),i=>`<td class="dim">${runNote(i.id).join('<br>')}</td>`,'<th>now</th>')}
+   ${lst('in review','PR open · PR shown on its issue',all.filter(i=>i.s=='review'),i=>`<td class="${i.pr&&(i.pr.qa=='failed')?'bad':i.pr&&i.pr.mergeHeld?'wa':'dim'}">${prStatus(i.pr)}${i.pr.mergeHeld?' · merge held':''}</td>`,'<th>PR</th>')}
+   ${lst('planned next',`top by priority · ${planned.length} shown, ${hid} more lower priority`,planned,i=>`<td class="dim">${runNote(i.id).join('<br>')}</td>`,'<th>now</th>')}</div>
+   <div>${lst('blocked','needs someone outside the agent loop',all.filter(i=>i.s=='blocked'),i=>`<td class="${i.block.by=='you'?'wa':'bad'}">on ${i.block.by}: ${i.block.why} · <a onclick="event.stopPropagation();brief('${i.block.brief}')">act →</a></td>`,'<th>reason</th>')}
+   ${lst('held','label "held" · set by cto or you',all.filter(i=>i.held),i=>`<td style="color:#9cb4d8">set by ${i.held.by}: ${i.held.why}</td>`,'<th>reason</th>','held for',i=>dur(minsSince(i.held.at)))}
+   ${lst('closed','last 24h',all.filter(i=>i.s=='done'&&i.closed&&minsSince(i.closed)<=1440),i=>`<td class="ok">closed ${clock(i.closed)}</td>`,'<th></th>','ago',i=>dur(minsSince(i.closed)))}
+   <h2>branch apps <span>a PR's branch running on the host so you can click through it before merge ("try app")</span></h2><div class="tw"><table><tr><th>PR</th><th>ticket</th><th>address</th><th class="n">up</th><th></th></tr>${apps.map(i=>`<tr><td class="mm t">#${i.pr.n}</td><td>${tlink(i.id)}</td><td class="mm" title="head ${i.pr.app.head}">${i.pr.app.host}</td><td class="n">${dur(minsSince(i.pr.app.since))}</td><td>${btns('<span class="btn g" title="open the branch app">open ↗</span>')}</td></tr>`).join('')}</table></div></div>
+  </div>`;return}
+ const r=repoOf(bProj);
+ if(!r.project){$('#v-boards').innerHTML=sel+`<div class="box"><b>${r.id}</b> — no GitHub Project linked.<div class="ft" style="margin:6px 0">Link an existing Projects board, or create one and ask the CTO to draft the first goal.</div><span class="btn" onclick="go('config')">link or create project →</span></div>`;return}
+ const its=tickets(r.id),P=r.project,c7=counts(r.id).closed7,plannedCol=P.status.find(x=>x.map=='planned');
+ const extra=sc=>sc==plannedCol?(r.hidden||{}).planned||0:sc.map=='done'?Math.max(0,c7-its.filter(i=>i.st==sc.n).length):0;
+ const head=`<div class="ghp"><div class="ghp-h"><span class="t">${P.title}<small>#${P.number}</small></span><span class="ft" style="font-size:12px">${r.gh}</span><span class="sp"></span>${r.goal?`<span class="ft s">${r.goal.type} ${r.goal.title} · ${goalDone(r.id)}/${goalScope(r.id)} ${r.goal.unit} · eta ${dayOnly(eta(r.id))}</span>`:''}<a style="font-size:12px">Insights ↗</a><a style="font-size:12px">open in GitHub ↗</a></div>
+ <div class="ghv">${P.views.map(v=>`<span class="${v==bView?'on':''}" onclick="bView='${v}';renderBoards()">${v}</span>`).join('')}<span class="ft" style="cursor:default">+ New view</span></div>
+ <div class="ghf"><div class="fi">Filter by keyword or by field</div><span class="btn">Group by: Status</span><span class="btn">Sort: manual</span><span class="ft s">fields: ${P.fields.join(', ')} · held = label · n / limit = items / column limit</span></div>`;
+ if(bView=='Board'){
+  $('#v-boards').innerHTML=sel+head+`<div class="ghb">${P.status.map(sc=>{const ci=its.filter(i=>i.st==sc.n),ex=extra(sc);
+   return `<div class="ghc" style="flex:1 0 180px;min-width:180px"><div class="h"><div class="r1"><span class="sdot" style="border-color:${sc.c}"></span>${sc.n}<span class="cnt ${sc.limit&&ci.length>sc.limit?'over':''}" title="${sc.limit?'items / column limit':''}">${sc.map=='done'?c7+' in 7d':ci.length+ex}${sc.limit?' / '+sc.limit:''}</span></div>${sc.d?`<div class="desc">${sc.d}</div>`:''}</div><div class="b">${ci.map(i=>gi(r,i)).join('')}${ex?`<div class="s ft" style="padding:4px 2px">+ ${ex} more${sc.map=='done'?' closed in 7d':', lower priority'} · <a>show</a></div>`:''}</div><div class="add">+ Add item</div></div>`}).join('')}</div></div>`}
+ else if(bView=='By agent'){const g=[...new Set(its.map(i=>i.owner||'unassigned'))];
+  $('#v-boards').innerHTML=sel+head+`<div style="padding:0 14px 14px">${g.map(a=>`<div style="margin:10px 0 4px;font:600 13px var(--mono)">${a!='unassigned'?glyph(agentState(a))+' ':''}${a} <span class="ft">${its.filter(i=>(i.owner||'unassigned')==a).length}</span></div><div style="display:grid;grid-template-columns:repeat(${P.status.length},minmax(170px,1fr));gap:6px;overflow-x:auto">${P.status.map(sc=>`<div style="background:var(--p);border:1px solid var(--ln);border-radius:6px;padding:4px;min-height:36px"><div class="ft s" style="padding:2px 4px">${sc.n}</div>${its.filter(i=>i.st==sc.n&&(i.owner||'unassigned')==a).map(i=>gi(r,i)).join('')}</div>`).join('')}</div>`).join('')}</div></div>`}
+ else if(bView=='Roadmap'){const its2=its.filter(i=>i.f.Iteration);const IT=['It 41','It 42','It 43','It 44'];
+  $('#v-boards').innerHTML=sel+head+`<div style="padding:0 14px 14px"><div class="tw"><table><tr><th>ticket</th>${IT.map((x,j)=>`<th>${x} · ${dayOnly(Date.UTC(2026,9,5+7*j,8))}–${dayOnly(Date.UTC(2026,9,11+7*j,8)).split(' ').slice(1).join(' ')}</th>`).join('')}</tr>${its2.map(i=>{const k=IT.indexOf(i.f.Iteration),s=tstate(r,i);return `<tr class="r" onclick="openTicket('${i.id}')"><td class="t">${tlink(i.id)} ${i.t}</td>${IT.map((_,j)=>`<td>${j==k?`<div style="height:12px;border-radius:6px;background:${s=='done'?'#3fb95088':s=='blocked'?'#f8514988':'#4493f888'}"></div>`:''}</td>`).join('')}</tr>`}).join('')}</table></div></div></div>`}
+ else{
+  $('#v-boards').innerHTML=sel+head+`<div style="padding:0 14px 14px"><div class="tw"><table><tr><th>Title</th><th>Status</th>${P.fields.map(f=>`<th>${f}</th>`).join('')}<th>Owner</th><th>Labels</th><th>Linked PR</th><th class="n">In status</th></tr>${P.status.map(sc=>{const ci=its.filter(i=>i.st==sc.n),ex=extra(sc),tot=sc.map=='done'?c7:ci.length+ex;return tot?`<tr class="g"><td colspan="${6+P.fields.length}"><span class="sdot" style="border-color:${sc.c};width:10px;height:10px;vertical-align:-1px"></span> ${sc.n} <span class="ft">${tot}${sc.map=='done'?' in 7d':''}</span></td></tr>`+ci.map(i=>`<tr class="r" onclick="openTicket('${i.id}')"><td class="t">${i.t} <span class="ref">${i.id}</span></td><td><select onclick="event.stopPropagation()">${P.status.map(o=>`<option ${o.n==i.st?'selected':''}>${o.n}</option>`).join('')}</select></td>${P.fields.map(f=>`<td class="mm">${f=='Priority'?(tstate(r,i)=='done'?pri(i.f.Priority):priSel(i)):i.f[f]||''}</td>`).join('')}<td class="mm">${i.owner||''}</td><td>${i.lb.map(l=>`<span class="gl" style="color:${LABELS[l]};border-color:${LABELS[l]}66">${l}</span>`).join(' ')}</td><td class="mm">${i.pr?'#'+i.pr.n:''}</td><td class="n ft">${dur(minsSince(i.stAt))}</td></tr>`).join('')+(ex?`<tr><td colspan="${6+P.fields.length}" class="ft s">+ ${ex} more ${sc.map=='done'?'closed in 7d':'lower priority'} · <a>load</a></td></tr>`:''):''}).join('')}</table></div></div></div>`}}
+
+/* ====================================================================
+   CTO
+   ==================================================================== */
+function watchRows(){const o=[];
+ ARMED.forEach(w=>{const r=RUNS.find(x=>x.agent=='dev-1'&&x.ticket=='shop-app#3612'),started=r&&r.state=='active',left=minsTo(w.by);o.push({type:'armed by cto',what:w.what,now:started?'started':'not started',threshold:'by '+clock(w.by),pct:1-left/30,left:dur(left)+' left',etaMin:left,then:w.then,expires:'expires '+clock(w.by)})});
+ CONFIG.accounts.forEach(a=>{const w=w7(a),sf=stopForecast(a);o.push({type:'standing',what:`${a.id} 7d usage reaches stop_at`,now:w.used+'%',threshold:a.stopAt+'% (stop_at)',pct:w.used/a.stopAt,left:`${a.stopAt-w.used} pts${sf?' · ≈ '+dayTime(sf)+' if nothing moves':''}`,etaMin:sf?minsTo(sf):null,then:`stop new runs on ${a.id}${fallbackAgents(a.id).length&&winPace(w)>100?' ('+fallbackAgents(a.id).map(x=>x.id).join(', ')+' are already switching to fallback)':''}`})});
+ CONFIG.accounts.forEach(a=>{const w=w7(a),p=winPace(w),f=projFired(a);if(p>100&&f)o.push({type:'standing',what:`${a.id} projected over 100% at reset`,now:p+'%',threshold:'over 100% (last-24h pace)',fired:f,then:`${fallbackAgents(a.id).map(x=>x.id).join(' and ')} move to fallback from their next new run`,status:'pending · '+fallbackAgents(a.id).map(x=>x.id+' '+nextNew(x)).join('; ')});else o.push({type:'standing',what:`${a.id} projected over 100% at reset`,now:p+'%',threshold:'over 100%',pct:p/100,left:(100-p)+' pts',then:'move agents with a fallback'})});
+ const mx=CONFIG.agents.reduce((m,a)=>AGd(a.id).session.ctx>m[1]?[a.id,AGd(a.id).session.ctx]:m,['',0]);o.push({type:'standing',what:`context window, any agent (highest: ${mx[0]})`,now:mx[1]+'%',threshold:'85%',pct:mx[1]/85,left:(85-mx[1])+' pts',then:'fresh session with a handoff note'});
+ const sk=stallStreak();o.push({type:'standing',what:'runs without progress in a row, any agent',now:String(sk),threshold:'3',pct:sk/3,left:(3-sk)+' runs',then:'pause that agent and tell you'});
+ const ob=openBR(),dg=minsTo(Date.UTC(2026,9,17,7,0));o.push({type:'standing',what:'items waiting on you',now:`${ob.length} (oldest ${dur(Math.max(...ob.map(b=>minsSince(b.at))))})`,threshold:'next digest '+CONFIG.operator.digest,pct:1-dg/600,left:dur(dg),etaMin:dg,then:'re-raise them in the digest'});
+ return o}
+function needItem(b){const age=minsSince(b.at);return `<div class="need"><span class="gy waiting-you" style="margin-top:5px"></span><div><div class="ttl"><span class="tag">${b.kind}</span>${b.title}</div><div class="meta2">${b.repo} · waiting ${dur(age)} · urgency <b class="tx">${b.urg}</b>: ${b.urgWhy} · raised by ${b.raised} · ${channel(b.urg)}</div><div class="esc">escalated because "${b.rule}" is on the always-ask list${b.conf?` — the CTO is ${b.conf}% sure of its pick (★) but may not decide this kind of thing`:''}</div>
+ ${b.kind=='action'?'<div class="conf tx">only you can do this:</div>':''}<div class="opts">${b.opts.map(o=>`<div class="opt ${o[4]&&b.kind!='action'?'rec':''}" onclick="decide('${b.id}','${o[0]}')" title="click to choose (asks to confirm)"><div class="oh"><b>${o[0]}</b><span>${o[1]}</span>${o[4]&&b.kind!='action'?'<span class="pick">★ cto pick</span>':''}</div><small>${o[2]}${o[3]?' · '+o[3]:''}</small>${o[5]?`<small class="dim">${o[5]}</small>`:''}</div>`).join('')}</div>
+ <div class="conf"><a onclick="discuss('${b.id}')">discuss with cto + ${b.raised}</a> · <a onclick="showBrief('${b.id}')">full brief in chat</a> · if you don't answer: ${b.fallback}</div></div></div>`}
+const fillTxt=s=>s=='@codex'?(()=>{const a=acct('codex-main'),w=w7(a),sf=stopForecast(a);return `${w.used}% used, projected ${winPace(w)}% at reset (${dayTime(w.resetAt)}) at the last-24h pace. New runs would stop at ${a.stopAt}%${sf?' ≈ '+dayTime(sf):''} if nothing moved; ${fallbackAgents(a.id).map(x=>x.id).join(' and ')} move to claude-main from their next new run, leaving codex ≈${projIfMoved(a)}% at reset.`})():s=='@claude-room'?(()=>{const a=acct('claude-main'),pm=projWithMoves(a);return `claude-main is projected ≈${pm}% at reset including ${movers(a).map(x=>x.id).join(' and ')} moving onto it — ${a.alertAt-pm} pts below its ${a.alertAt}% alert. fe-1 (≈6–9) fits; fe-1 + pm-2 + a QA agent (≈13–16) would reach ≈${pm+13}–${pm+16}% and cross the alert.`})():s;
+function renderCTO(){
+ const open=openBR(),wr=watchRows(),armedN=wr.filter(w=>!w.fired).length,dec=ev24('decide');
+ const cx=acct('codex-main'),cl=acct('claude-main'),cxw=w7(cx),clw=w7(cl);
+ const since=EVX().filter(e=>e.at>OP.lastVisit),sk=k=>since.filter(e=>k.includes(e.k)).length,tiles=[['merged',['merge']],['decided alone',['decide']],['new needs-you',['escalate']],['PRs opened',['pr']],['QA / review fails',['verdict','review']],['errors',['error']],['alerts · watches fired',['alert','watch']]],adrWhen=online()?q15(ago(-33)):Date.UTC(2026,9,17,7,15);
+ const plan=CTO.plan.map(p=>p[0]=='ADR'?[adrWhen,p[1],p[2]+(online()?' — if you answer now (you are online); otherwise ~08:15':''),p[3]]:p).sort((a,b)=>a[0]-b[0]);
+ const alerts=[...EVX().filter(e=>e.k=='alert'||e.k=='watch').map(e=>[e.at,e.txt,'08:00 digest',e.k]),...open.map(b=>[b.at,'needs you: '+b.title,channel(b.urg),'needs'])].sort((a,b)=>b[0]-a[0]);
+ const anchors=[['c-since','Since last visit',sum(tiles.map(t=>sk(t[1])))],['c-needs','Needs you',open.length],['c-imp','Important now',CTO.important.length],['c-watch','Watching',wr.length],['c-plan','Plan',plan.length],['c-prop','Proposals',PROPOSALS.length],['c-alert','Alerts',alerts.length],['c-aware','Aware of',CONFIG.repos.length],['c-sess','Sessions',CONFIG.agents.length],['c-log','Decided alone',dec.length],['c-yours','Your decisions',ESC14.length],['c-asked','Asked',ASKED.length]];
+ $('#v-cto').innerHTML=`<div class="anch">${anchors.map(([h,l,n])=>`<a href="#${h}">${l} <b>${n}</b></a>`).join('')}</div>
+ <h2 id="c-since">since you were last here <span>${dayTime(OP.lastVisit)} → now (${dur(minsSince(OP.lastVisit))}) · you are ${online()?'online':'away'}</span></h2>
+ <div class="since">${tiles.map(([l,k])=>`<div><span>${l}</span><b class="${k[0]=='escalate'&&sk(k)?'wa':k[0]=='error'&&sk(k)?'bad':''}">${sk(k)}</b></div>`).join('')}</div>
+ <h2 id="c-needs">needs you <span>outside the CTO's rules · most urgent first · click an option to choose</span></h2><div class="tw">${open.map(needItem).join('')||'<div class="need ft" style="grid-template-columns:1fr">nothing needs you</div>'}</div>
+ <h2 id="c-imp">important now <span>what the CTO is prioritising, and why (published by the CTO)</span></h2>
+ <div class="tw">${CTO.important.map(([t,w,o],i)=>`<div class="imp"><span class="n">${i+1}</span><div><div class="tx">${linkify(t)}</div><small>${linkify(fillTxt(w))}</small></div><span class="s">${o=='account'?'<span class="ft">account</span>':`<a onclick="openAgent('${o}')">${o} →</a>`}</span></div>`).join('')}</div>
+ <h2 id="c-watch">watching <span>standing = your config · armed = set by the CTO, expires · bar = how close to firing</span></h2>
+ <div class="tw"><table><tr><th>type</th><th>condition</th><th>now</th><th>threshold</th><th style="width:210px">headroom</th><th>then it will</th></tr>${wr.map(w=>w.fired?`<tr><td class="mm ft">${w.type}</td><td class="t">${w.what}</td><td class="mm">${w.now}</td><td class="mm">${w.threshold}</td><td class="mm">fired ${clock(w.fired)}</td><td class="dim">${w.then} · <span class="tx">${w.status}</span></td></tr>`:`<tr><td class="mm ft">${w.type}${w.expires?'<br>'+w.expires:''}</td><td class="t">${linkify(w.what)}</td><td class="mm">${w.now}</td><td class="mm">${w.threshold}</td><td class="mm"><span class="hb"><i style="width:${Math.max(0,Math.min(100,Math.round(w.pct*100)))}%;background:${w.pct>.75?'var(--tx)':'var(--dim)'}"></i></span>${w.left}</td><td class="dim">${linkify(w.then)}</td></tr>`).join('')}</table></div>
+ <h2 id="c-plan">plan <span>time order · estimates rounded to the quarter hour · BST · one active run per agent</span></h2>
+ <div class="tw"><table><tr><th>when</th><th>who</th><th>what</th><th>depends on</th><th></th></tr>${plan.map(p=>`<tr><td class="mm">${when(p[0])}</td><td class="mm">${p[1]}</td><td class="t">${linkify(p[2])}</td><td class="${/your|credentials/.test(p[3])?'wa':'ft'}">${linkify(p[3])}</td><td>${btns('<span class="btn g" title="keep this step from happening until you release it">hold</span>','<span class="btn g" title="open a chat thread about this step">discuss</span>')}</td></tr>`).join('')}</table></div>
+ <h2 id="c-prop">proposals <span>suggestions with nothing blocked yet · approving one is the same as answering an approval</span></h2>
+ <div class="tw"><table><tr><th>id</th><th>proposal</th><th>why</th><th>impact</th><th>why not in needs-you</th><th class="n">conf</th><th></th></tr>${PROPOSALS.map(p=>`<tr id="prop-${p.id}"><td class="mm ft">${p.id}</td><td class="t">${p.what}</td><td class="dim">${linkify(p.why)}</td><td class="mm" style="white-space:normal">${p.impact}</td><td class="ft">${p.notNow}</td><td class="n">${p.conf}%</td><td>${btns('<span class="btn">approve</span>','<span class="btn g">decline</span>')}</td></tr>`).join('')}</table></div>
+ <h2 id="c-alert">alerts &amp; notifications <span>threshold crossings and what was sent where · notify: "${CONFIG.operator.notify}"</span></h2>
+ <div class="tw"><table><tr><th>time</th><th>what</th><th>sent to</th></tr>${alerts.map(a=>`<tr><td class="mm">${clock(a[0])}</td><td class="t">${linkify(a[1])}</td><td class="mm ${a[2].startsWith('push')?'wa':'ft'}">${a[2]}</td></tr>`).join('')}</table></div>
+ ${open.filter(b=>b.urg=='now').slice(0,1).map(b=>`<div class="box" style="margin-top:6px;max-width:420px"><div class="ft s">push preview · phone lock screen / watch</div><div style="font:600 13px var(--sans);margin-top:3px">Control Centre · needs you (${b.urg})</div><div class="s tx">${b.title}</div><div class="ft s">${b.repo} · blocks ${b.blocks} · cto pick ${b.opts.find(o=>o[4])[0]}</div><div style="margin-top:4px">${b.opts.map(o=>`<span class="btn">${o[0]}${o[4]?' ★':''}</span>`).join('')}<span class="btn g">discuss</span></div><div class="ft s" style="margin-top:3px">watch: title + pick + A/B/C actions · complication: needs-you count, pulsing when urgency is now</div></div>`).join('')}
+ <h2 id="c-aware">aware of <span>every repo in config, and the constraints it works within</span></h2>
+ <div class="tw"><table><tr><th>repo</th><th>goal</th><th>open tickets</th><th>agents (state)</th><th>last event</th></tr>${CONFIG.repos.map(r=>{const c=counts(r.id),ags=CONFIG.agents.filter(a=>a.repo==r.id);const e=EVX().find(x=>x.ref&&x.ref.startsWith(r.id+'#'));return `<tr><td class="mm t">${r.id}</td><td>${r.goal?`${r.goal.title} · ${goalDone(r.id)}/${goalScope(r.id)} · eta ${dayOnly(eta(r.id))}`:'—'}</td><td class="s">${r.project?`${c['in progress']} in progress · ${c.review} review · <span class="${c.blocked?'wa':''}">${c.blocked} blocked</span> · ${c.planned} planned (${c.held} held)`:'<span class="ft">no board</span>'}</td><td class="mm">${ags.map(a=>`${glyph(agentState(a.id))} ${a.id}`).join('&nbsp; ')||'<span class="ft">none</span>'}</td><td class="ft">${e?clock(e.at)+' '+linkify(e.txt):'—'}</td></tr>`}).join('')}</table></div>
+ <div class="tw" style="margin-top:6px"><table><tr><th>constraint</th><th>effect</th><th></th></tr>${[[`codex-main ${cxw.used}% used, projected ${winPace(cxw)}% at reset`,`${fallbackAgents(cx.id).map(x=>x.id).join(' and ')} move to claude-main from their next new run → ≈${projIfMoved(cx)}% at reset; would stop at ${cx.stopAt}%${stopForecast(cx)?' ≈ '+dayTime(stopForecast(cx)):''} only if nothing moved`,'<a onclick="document.getElementById(\'c-watch\').scrollIntoView()">watch →</a>'],[`claude-main ${clw.used}% used, projected ${winPace(clw)}% at reset; ≈${projWithMoves(cl)}% with ${movers(cl).map(x=>x.id).join(' and ')} moved onto it`,`${cl.alertAt-projWithMoves(cl)} pts of headroom to its ${cl.alertAt}% alert · fe-1 ≈6–9 fits · fe-1 + pm-2 + QA agent ≈13–16 → ≈${projWithMoves(cl)+13}–${projWithMoves(cl)+16}%, crosses the alert`,''],['shop-app has no project manager','tickets arrive without acceptance criteria','<a onclick="document.getElementById(\'prop-p2\').scrollIntoView()">p2 →</a>'],['site-builder has no QA agent','the qa step is skipped; PRs merge on the review bot','<a onclick="document.getElementById(\'prop-p3\').scrollIntoView()">p3 →</a>'],[`you are usually offline ${CONFIG.operator.offline}`,online()?`you are online now (last active ${clock(OP.lastSeen)}), so the plan assumes you may answer`:`non-urgent items wait for the ${CONFIG.operator.digest} digest`,'<a onclick="go(\'config\')">config →</a>']].map(r=>`<tr><td class="t">${r[0]}</td><td class="dim">${r[1]}</td><td class="s">${r[2]}</td></tr>`).join('')}</table></div>
+ <h2 id="c-sess">sessions <span>every live agent session</span></h2>
+ <div class="tw"><table><tr><th>session</th><th>agent</th><th>active ticket</th><th>queued / parked</th><th>account · model</th><th class="n">age</th><th class="n">turns</th><th class="n">ctx</th><th class="n">tokens</th></tr>${CONFIG.agents.map(a=>{const d=AGd(a.id),r=activeRun(a.id);return `<tr class="r" onclick="openAgent('${a.id}')"><td class="mm t">${d.session.id}</td><td class="mm">${a.id}</td><td>${r&&r.ticket?tlink(r.ticket):'—'}</td><td class="mm">${waitingRuns(a.id).map(p=>tlink(p.ticket)).join(' ')||'—'}</td><td class="mm">${a.account} · ${a.model}</td><td class="n">${dur(minsSince(d.session.start))}</td><td class="n">${d.session.turns}</td><td class="n">${d.session.ctx}%</td><td class="n">${d.session.tok}M</td></tr>`}).join('')}</table></div>
+ <h2 id="c-log">decided alone <span>last 24h · with the rule it used</span></h2>
+ <div class="tw"><table><tr><th>time</th><th>decision</th><th>rule it used</th><th></th></tr>${dec.map(e=>`<tr><td class="mm">${clock(e.at)}</td><td class="t">${linkify(e.txt)}</td><td class="dim">${e.rule}</td><td>${btns(`<span class="btn g" onclick="toast('reverted: ${esc(e.txt.slice(0,40))}…')" title="reverse this decision">undo</span>`,'<span class="btn g" title="keep it, but tell the CTO you disagree; it may propose a rule change">object</span>')}</td></tr>`).join('')}</table></div>
+ <h2 id="c-yours">your decisions <span>escalations you answered · 14d · mean time to answer ${dur(tta())}</span></h2>
+ <div class="tw"><table><tr><th>raised</th><th>repo</th><th>question</th><th>you chose</th><th class="n">answered after</th></tr>${ESC14.map(e=>`<tr><td class="mm">${dayTime(ago(e[0]*60))}</td><td class="mm">${e[2]}</td><td class="t">${e[3]}</td><td class="dim">${e[4]}</td><td class="n">${dur((e[0]-e[1])*60)}</td></tr>`).join('')}</table></div>
+ <h2 id="c-asked">agents asked it <span>newest first</span></h2><div class="tw"><table><tr><th>time</th><th>question</th><th>cto answered</th></tr>${ASKED.map(q=>`<tr><td class="mm">${clock(q.at)}</td><td class="t"><span class="m">${q.who}:</span> ${linkify(q.q)}</td><td class="dim">${linkify(q.a)}</td></tr>`).join('')}</table></div>
+ <details class="scr"><summary>scratchpad · raw working notes (${CTO.scratch.length})</summary><div class="scratch">${CTO.scratch.map(s=>`${clock(s[0])}  ${s[1]}`).join('\n')}</div></details>`;
+ $$('#v-cto .anch a').forEach(x=>x.onclick=e=>{e.preventDefault();document.querySelector(x.getAttribute('href')).scrollIntoView({behavior:'smooth'})});
+}
+function showBrief(id){const b=brById(id);ensureThread(id);thread=id;THREADS[id].msgs.push(['cto','now',`<b>brief:</b><ul style="margin:4px 0 0 16px">${b.catch.map(c=>`<li>${linkify(fillTxt(c))}</li>`).join('')}</ul>`]);openDock();drawTh()}
+
+/* ====================================================================
+   METRICS
+   ==================================================================== */
+function axes(W,H,ymax,step,xl,x0=44,suf=''){let s='';const Y=v=>H-20-v/ymax*(H-30);for(let v=0;v<=ymax+1e-9;v+=step)s+=`<line x1="${x0}" x2="${W-6}" y1="${Y(v)}" y2="${Y(v)}" stroke="#30363d"/><text x="${x0-5}" y="${Y(v)+4}" text-anchor="end">${v}${suf}</text>`;xl.forEach(([x,t],i)=>s+=`<text x="${x}" y="${H-4}" text-anchor="${i==xl.length-1?'end':i==0?'start':'middle'}">${t}</text>`);return [s,Y]}
+const PH={coding:'#58a6ff',pickup:'#6e7681',review:'#d2a8ff',rework:'#ff7b72',qa:'#7ee787',merge:'#8b949e'};
+function renderMetrics(){
+ const W=600,days=Array.from({length:14},(_,i)=>NOW-(13-i)*86400000),dl=i=>new Date(days[i]).toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:TZ});
+ const SS=SESS(),m=merged14(),lb=LB(),usdM=usd14All()/m,lead=leadMean(PRS14),fp=Math.round(fpN()/m*100),rw=reworkPerMerge(),cf=Math.round(PRS14.filter(p=>p.ff).length/m*100),au=Math.round(PRS14.filter(p=>!p.hc).length/m*100),iv=Math.round(SS.filter(s=>s[2]).length/SS.length*100),ws=Math.round(wasted14()/RUNS14.length*100),undo=Math.round(DEC14.undone/DEC14.decisions*100);
+ const dl2=(v,p,hi,fmt=x=>x)=>{const d=v-p;if(Math.abs(d)<1e-9)return '<span class="ft">= prev 14d</span>';const good=hi?d>0:d<0;return `<span class="${good?'ok':'bad'}">${good?'▲ better':'▼ worse'} ${d>0?'+':'−'}${fmt(Math.abs(d))}</span> <span class="ft">vs prev 14d</span>`};
+ const k=(l,v,d,sub)=>`<div class="k"><span>${l}</span><b>${v}</b><small>${d}${sub?'<br>'+sub:''}</small></div>`;
+ const maxD=Math.max(...['shop-app','site-builder'].map(etaDays)),span=13+maxD;
+ const burn=(()=>{const X=i=>48+i*(W-60)/span;let [s,Y]=axes(W,220,60,10,[[X(0),dl(0)],[X(6),dl(6)],[X(13),'now'],[X(span),dayOnly(NOW+maxD*86400000)]]);
+  ['shop-app','site-builder'].forEach((r,ri)=>{const g=repoOf(r).goal,col=repoOf(r).color;let c=g.start;const done=DAILY[r].map(v=>c+=v),ed=etaDays(r);
+   s+=`<polyline points="${g.scope.map((v,i)=>`${X(i)},${Y(v)}`).join(' ')} ${X(span)},${Y(goalScope(r))}" fill="none" stroke="${col}" stroke-width="1.2" stroke-dasharray="1 3"/>`;
+   s+=`<polyline points="${done.map((v,i)=>`${X(i)},${Y(v)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2.2"/>`;
+   s+=`<line x1="${X(13)}" y1="${Y(done[13])}" x2="${X(13+ed)}" y2="${Y(goalScope(r))}" stroke="${col}" stroke-width="1.6" stroke-dasharray="6 4"/><circle cx="${X(13+ed)}" cy="${Y(goalScope(r))}" r="3.5" fill="${col}"/><text x="${X(13+ed)-6}" y="${Y(goalScope(r))+(ri?16:-8)}" text-anchor="end" style="fill:${col}">eta ${dayOnly(eta(r))}</text>`});
+  s+=`<line x1="${X(13)}" x2="${X(13)}" y1="8" y2="200" stroke="#8b949e" stroke-dasharray="2 3"/>`;return s})();
+ const thr=(()=>{const bw=(W-60)/14;let [s]=axes(W,190,6,2,[]);for(let i=0;i<14;i++){const a=DAILY['shop-app'][i],b=DAILY['site-builder'][i],h1=a/6*160,h2=b/6*160;s+=`<rect x="${48+i*bw}" y="${170-h1}" width="${bw-4}" height="${h1}" fill="${repoOf('shop-app').color}"/><rect x="${48+i*bw}" y="${170-h1-h2}" width="${bw-4}" height="${h2}" fill="${repoOf('site-builder').color}"/>`;if(i%3==1||i==13)s+=`<text x="${48+i*bw+bw/2}" y="186" text-anchor="${i==13?'end':'middle'}">${i==13?'last 24h':dl(i)}</text>`}return s})();
+ const lim=a=>{const w=w7(a),W2=560,H2=190,start=wStart(w),X=ms=>44+(ms-start)/(w.len*60000)*(W2-56),[s,Y]=axes(W2,H2,120,20,[0,1,2,3,4,5,6,7].map(d=>[X(start+d*86400000),d==7?'reset':dayOnly(start+d*86400000).split(' ').slice(0,2).join(' ')]),44,'%');
+  const pts=hist(a),pace=winPace(w),p24=pace24(a),[lt,lu]=lastS(a),hit=pace>100&&p24>0?lt+(100-lu)/p24*3600000:null,sf=stopForecast(a),al=alertCrossed(a),mv=movers(a);
+  return `<div class="box"><h3>${a.id} · 7d window</h3><div class="sub">${w.kind} · resets ${dayTime(w.resetAt)} (in ${dur(minsTo(w.resetAt))}) · sampled ${clock(lt)}: ${lu.toFixed(1)}% · last-24h pace ${p24.toFixed(2)} pts/h → <b class="${pace>100?'bad':'tx'}">${pace}%</b> by reset${mv.length?` (≈${projWithMoves(a)}% with ${mv.map(x=>x.id).join(', ')} moved here)`:''}${fallbackAgents(a.id).length&&pace>100?` · ≈${projIfMoved(a)}% once ${fallbackAgents(a.id).map(x=>x.id).join(', ')} switch away`:''}${sf?` · <b class="tx">stop_at ${a.stopAt}% ≈ ${dayTime(sf)} if nothing moves</b>`:''} · alert ${a.alertAt}%${al?' (crossed at the '+clock(al)+' sample)':''}</div><svg class="chart" viewBox="0 0 ${W2} ${H2}">${s}<line x1="44" x2="${W2-6}" y1="${Y(100)}" y2="${Y(100)}" stroke="#f85149" stroke-dasharray="4 3"/><line x1="44" x2="${W2-6}" y1="${Y(a.stopAt)}" y2="${Y(a.stopAt)}" stroke="#8b949e" stroke-dasharray="2 4"/><text x="50" y="${Y(a.stopAt)-3}">stop ${a.stopAt}%</text><polyline points="${pts.map(([t,v])=>`${X(t)},${Y(v)}`).join(' ')}" fill="none" stroke="#e6edf3" stroke-width="2"/>${sf?`<line x1="${X(NOW)}" y1="${Y(w.used)}" x2="${X(sf)}" y2="${Y(a.stopAt)}" stroke="#e6edf3" stroke-dasharray="5 4"/><line x1="${X(sf)}" y1="${Y(a.stopAt)}" x2="${X(w.resetAt)}" y2="${Y(a.stopAt)}" stroke="#e6edf3" stroke-dasharray="5 4"/><line x1="${X(sf)}" y1="${Y(a.stopAt)}" x2="${X(w.resetAt)}" y2="${Y(pace)}" stroke="#6e7681" stroke-dasharray="1 3"/><circle cx="${X(sf)}" cy="${Y(a.stopAt)}" r="3.5" fill="#e6edf3"/><text x="${X(sf)+6}" y="${Y(a.stopAt)+14}">stop ≈ ${clock(sf)}</text><text x="${W2-8}" y="${Y(pace)-4}" text-anchor="end" fill="#8b949e">${pace}% if nothing stopped</text>${fallbackAgents(a.id).length?`<line x1="${X(NOW)}" y1="${Y(w.used)}" x2="${X(w.resetAt)}" y2="${Y(projIfMoved(a))}" stroke="#3fb950" stroke-dasharray="4 3"/><text x="${W2-8}" y="${Y(projIfMoved(a))+14}" text-anchor="end" fill="#3fb950">≈${projIfMoved(a)}% after the switch</text>`:''}`:`<line x1="${X(NOW)}" y1="${Y(w.used)}" x2="${X(w.resetAt)}" y2="${Y(pace)}" stroke="#e6edf3" stroke-dasharray="5 4"/>`}<line x1="${X(NOW)}" x2="${X(NOW)}" y1="8" y2="${H2-20}" stroke="#8b949e" stroke-dasharray="2 3"/><text x="${X(NOW)-4}" y="16" text-anchor="end">now</text>${hit&&!sf?`<circle cx="${X(hit)}" cy="${Y(100)}" r="4" fill="#f85149"/><text x="${X(hit)-6}" y="${Y(100)-8}" text-anchor="end" fill="#f85149">100% ≈ ${dayTime(hit)}</text>`:''}</svg></div>`};
+ const cyc=r=>{const S=phaseMeans(r),t=leadMean(PRS14.filter(p=>p.r==r));return `<div style="margin:6px 0"><div class="s tx">${r} <span class="ft">mean ${t.toFixed(1)}h per merged PR (${PRS14.filter(p=>p.r==r).length} PRs)</span></div><div style="display:flex;height:18px;border-radius:3px;overflow:hidden;margin-top:3px">${S.filter(x=>x[1]).map(([n,h])=>`<span title="${n} ${h}h" style="flex:${h};background:${PH[n]};font:600 10.5px/18px var(--mono);color:#0d1117;text-align:center;overflow:hidden;white-space:nowrap">${h>=.4?n+' '+h+'h':''}</span>`).join('')}</div><div class="ft s">${S.filter(x=>x[1]).map(([n,h])=>`${n} ${h}h`).join(' · ')}</div></div>`};
+ const hrs=CONFIG.agents.map(a=>({a,h:AGd(a.id).d14.h})),hmax=Math.max(...hrs.map(x=>sum(Object.values(x.h))));
+ const tools=Object.entries(TOOLS14).map(([t,o])=>{const e=Object.entries(o);return {t,calls:sum(e.map(x=>x[1][0])),tok:sum(e.map(x=>x[1][1])),top:e.sort((x,y)=>y[1][1]-x[1][1])[0][0]}}),ttot=sum(tools.map(x=>x.tok));
+ const byAcctRepo={};CONFIG.agents.forEach(a=>{const k=a.account+'|'+(a.repo=='*'?'all (cto)':a.repo);byAcctRepo[k]=(byAcctRepo[k]||0)+AGd(a.id).w7});
+ const repos2=[...new Set(CONFIG.agents.map(a=>a.repo=='*'?'all (cto)':a.repo))];
+ const exp=[...PRS14].sort((a,b)=>b.usd-a.usd).slice(0,4);
+ $('#v-metrics').innerHTML=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><span class="seg"><span>24h</span><span>7d</span><span class="on">14d</span><span>30d</span></span><select><option>all repos</option>${CONFIG.repos.map(r=>`<option>${r.id}</option>`).join('')}</select><select><option>all accounts</option>${CONFIG.accounts.map(a=>`<option>${a.id}</option>`).join('')}</select><span class="sp"></span><span class="fresh">14 days to ${dayTime(NOW)} BST · ${m} merged PRs · ${RUNS14.length} runs · ${SS.length} sessions · formulas: Config → glossary</span></div>
+ <div class="kpis">${k('issues closed',closed14All(),dl2(closed14All(),PREV14.closed,1),`${m} via merged PRs · ${closed14All()-m} closed without a PR`)}${k('lead time (mean)',lead.toFixed(1)+'h',dl2(lead,PREV14.lead,0,x=>x.toFixed(1)+'h'),'branch → merge')}${k('first-pass review',fp+'%',dl2(fp,PREV14.fp,1,x=>x+' pts'),`${fpN()} of ${m} merged PRs`)}${k('rework / merged PR',rw.toFixed(1),dl2(+rw.toFixed(1),PREV14.rework,0,x=>x.toFixed(1)),'rework loop-backs on merged PRs ÷ merged PRs')}${k('WIP now',allC()['in progress']+allC().review,'<span class="ft">snapshot</span>',`${allC()['in progress']} in progress + ${allC().review} in review`)}${k('change failure',cf+'%',dl2(cf,PREV14.cf,0,x=>x+' pts'),`${PRS14.filter(p=>p.ff).length} of ${m} merged PRs needed a follow-up fix`)}${k('$ / merge (all agents)','$'+usdM.toFixed(2),dl2(+usdM.toFixed(2),PREV14.usdMerge,0,x=>'$'+x.toFixed(2)),'all agents\' $ ÷ merged PRs')}${k('autonomy rate',au+'%',dl2(au,PREV14.autonomy,1,x=>x+' pts'),`${PRS14.filter(p=>!p.hc).length} of ${m} merged with no human commit`)}${k('intervention rate',iv+'%',dl2(iv,PREV14.intervention,0,x=>x+' pts'),`${SS.filter(s=>s[2]).length} of ${SS.length} sessions you typed into`)}${k('wasted runs',ws+'%',dl2(ws,PREV14.wasted,0,x=>x+' pts'),`${wasted14()} of ${RUNS14.length} runs ended without progress`)}${k('time to answer you',dur(tta()),dl2(tta(),PREV14.tta,0,x=>dur(x)),`mean of ${ESC14.length} answered escalations`)}${k('cto undo rate',undo+'%',dl2(undo,PREV14.undo,0,x=>x+' pts'),`${DEC14.undone} of ${DEC14.decisions} decisions undone`)}</div>
+ <h2>delivery <span>is work getting done?</span></h2>
+ <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px"><div class="box"><h3>Goal burn-up → ETA</h3><div class="sub">solid = done · dotted = scope · dashed = projection at last-7-day rate · dot = ETA</div><svg class="chart" viewBox="0 0 ${W} 220">${burn}</svg><div class="lg">${['shop-app','site-builder'].map(r=>`<span><i style="background:${repoOf(r).color}"></i>${r} ${repoOf(r).goal.title} · ${goalDone(r)}/${goalScope(r)} · ${goalScope(r)-goalDone(r)} left · ${rate7(r).toFixed(1)}/day</span>`).join('')}</div></div>
+ <div class="box"><h3>Issues closed per day</h3><div class="sub">${closed14All()} in 14 days · last bar = last 24h · control-centre has no board</div><svg class="chart" viewBox="0 0 ${W} 190">${thr}</svg><div class="lg">${['shop-app','site-builder'].map(r=>`<span><i style="background:${repoOf(r).color}"></i>${r} ${closed14(r)}</span>`).join('')}</div></div></div>
+ <div class="box" style="margin-top:10px"><h3>Where ticket time goes</h3><div class="sub">mean hours per merged PR; parts add up to lead time · coding = branch → PR open · pickup = PR open → first review · review · rework = fixing after review/QA · qa · merge</div>${cyc('shop-app')}${cyc('site-builder')}</div>
+ <h2>quality <span>every edge in every loop · 14d · "per merged PR" excludes runs still in flight</span></h2>
+ <div class="tw"><table><tr><th>loop</th><th>edge</th><th>trigger</th><th>rework</th><th class="n">on merged / finished</th><th class="n">in flight now</th><th class="n">per merged PR</th><th>worst ticket</th></tr>${Object.entries(lb).map(([kk,v])=>{const[l,e]=kk.split(':'),[f,t]=e.split('>'),b=CONFIG.loops[l].back.find(x=>x[0]==f&&x[1]==t);return `<tr><td class="mm">${l}</td><td class="mm t">${f} → ${t}</td><td class="dim">${b[2]}</td><td class="mm">${b[3]?'yes':'no'}</td><td class="n">${v[0].toLocaleString()}</td><td class="n">${v[1]}</td><td class="n">${l=='deliver'||l=='verify'?(v[0]/m).toFixed(2):'—'}</td><td>${v[2]?linkify(v[2])+' ×'+v[3]:'<span class="ft">—</span>'}</td></tr>`}).join('')}<tr><td colspan="8" class="ft s">rework / merged PR = ${['test>implement','review>fix','qa>fix'].map(e=>lb['deliver:'+e][0]).join(' + ')} = ${['test>implement','review>fix','qa>fix'].map(e=>lb['deliver:'+e][0]).reduce((a,b)=>a+b)} ÷ ${m} = ${rw.toFixed(2)}</td></tr></table></div>
+ <h2>capacity <span>will each account last until its reset?</span></h2>
+ <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">${CONFIG.accounts.map(lim).join('')}</div>
+ <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:12px;margin-top:10px">
+  <div><div class="box"><h3>Short windows</h3>${CONFIG.accounts.map(a=>{const w=a.windows.find(x=>x.w=='5h');return w?`<div style="margin:6px 0"><div style="display:flex;font:12px var(--mono)"><span class="tx">${a.id} · 5h</span><span class="sp"></span><b>${w.used}%</b></div><div class="hb" style="width:100%;height:8px;margin:0"><i style="width:${w.used}%;background:var(--dim)"></i></div><div class="ft s">${w.kind} · resets ${clock(w.resetAt)} (in ${dur(minsTo(w.resetAt))})</div></div>`:`<div class="ft s" style="margin:6px 0">${a.id}: no 5h window on this plan</div>`}).join('')}</div>
+  <div class="tw" style="margin-top:10px"><table><tr><th>7d window used by</th>${CONFIG.accounts.map(a=>`<th class="n">${a.id}</th>`).join('')}</tr>${repos2.map(r=>`<tr><td class="mm t">${r}</td>${CONFIG.accounts.map(a=>`<td class="n">${byAcctRepo[a.id+'|'+r]?byAcctRepo[a.id+'|'+r]+'%':'—'}</td>`).join('')}</tr>`).join('')}<tr><td class="mm">total</td>${CONFIG.accounts.map(a=>`<td class="n tx">${w7(a).used}%</td>`).join('')}</tr></table></div></div>
+  <div class="box"><h3>Agent time · 14d</h3><div class="sub">hours of session time · one scale for all agents (longest bar = ${hmax}h)</div>${hrs.map(({a,h})=>`<div style="display:grid;grid-template-columns:86px minmax(0,1fr) 240px;gap:8px;align-items:center;font:11.5px var(--mono);margin:3px 0"><span class="tx">${a.id}</span><div style="display:flex;height:9px;border-radius:3px;overflow:hidden;width:${sum(Object.values(h))/hmax*100}%">${[['busy','#7ee787'],['wAg','#8b949e'],['wYou','#e3b341'],['idle','#30363d']].map(([kk,c])=>`<span style="flex:${h[kk]};background:${c};${kk=='wAg'?'background-image:repeating-linear-gradient(45deg,transparent 0 3px,#0d111788 3px 5px)':''}"></span>`).join('')}</div><span class="ft">${h.busy}h busy · ${h.wAg}h agent · ${h.wYou}h you</span></div>`).join('')}<div class="lg"><span><i style="background:#7ee787"></i>busy</span><span><i style="background:#8b949e"></i>waiting on agent</span><span><i style="background:#e3b341"></i>waiting on you</span><span><i style="background:#30363d"></i>idle</span></div></div></div>
+ <h2>cost <span>API-equivalent · 14d · $${usd14All().toFixed(0)} total</span></h2>
+ <div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:12px"><div class="tw"><table><tr><th>agent</th><th>repo</th><th style="min-width:130px">$ · 14d</th><th class="n">tokens</th><th>output</th><th class="n">dev $ / merge</th></tr>${CONFIG.agents.map(a=>({a,u:usd14(a.id)})).sort((x,y)=>y.u-x.u).map(({a,u})=>{const rs=runs14(a.id),P=prsBy(a.id);const out=a.role=='dev'?`${P.length} PRs merged`:a.role=='qa'?`${rs.length} QA runs (${rs.filter(x=>x[2]=='wasted').length} wasted) · ${lb['verify:retest>verdict'][0]} retests`:a.role=='research'?`${rs.filter(x=>x[2]=='brief').length} briefs`:a.role=='pm'?`${rs.length} daily reports`:`${DEC14.decisions} decisions`;return `<tr><td class="mm t">${a.id}</td><td class="mm">${a.repo=='*'?'all':a.repo}</td><td class="mm"><span class="hb" style="width:70px"><i style="width:${u/Math.max(...CONFIG.agents.map(x=>usd14(x.id)))*100}%;background:var(--dim)"></i></span>$${u.toFixed(0)}</td><td class="n">${AGd(a.id).d14.tok}M</td><td>${out}</td><td class="n">${a.role=='dev'?'$'+(u/P.length).toFixed(2):'—'}</td></tr>`}).join('')}</table></div>
+ <div class="tw"><table><tr><th>most expensive tickets · 14d</th><th class="n">$ (issue + PR, all agents)</th><th>why</th></tr>${exp.map(p=>`<tr><td class="t">${tlink(p.r+'#'+p.n)}<div class="ft" style="font-size:12px">${title(p.r+'#'+p.n)}</div></td><td class="n">$${p.usd.toFixed(2)}</td><td class="dim">${[p.tl>1?'test → implement ×'+p.tl:'',p.rf>1?'review → fix ×'+p.rf:'',p.note||''].filter(Boolean).join('; ')}</td></tr>`).join('')}<tr><td class="ft" colspan="3">in flight now: ${[...new Set(RUNS.filter(r=>r.ticket).map(r=>r.ticket))].map(t=>`${tlink(t)} $${ticketUsd(t).toFixed(2)}`).join(' · ')}</td></tr></table></div></div>
+ <div class="lgd" style="margin-top:4px">${(()=>{const mp=sum(PRS14.map(p=>p.usd)),fl=sum([...new Set(RUNS.filter(r=>r.ticket).map(r=>r.ticket))].map(ticketUsd)),tot=usd14All();return `reconciliation · 14d $${tot.toFixed(0)} = merged PRs $${mp.toFixed(0)} + in flight $${fl.toFixed(0)} + everything else $${(tot-mp-fl).toFixed(0)} (cto supervision, research briefs, PM reports, wasted runs, context reloads). dev $ / merge = all of that developer's spend ÷ its merges, so it is higher than a PR's own cost.`})()}</div>
+ <h2>tools <span>share of tool-call tokens · 14d · ${ttot.toFixed(0)}M tokens</span></h2>
+ <div class="tw"><table><tr><th>tool</th><th class="n">share</th><th class="n">calls</th><th class="n">avg tokens</th><th>biggest user</th><th>note</th></tr>${tools.map(r=>`<tr><td class="mm t">${r.t}</td><td class="n">${Math.round(r.tok/ttot*100)}%</td><td class="n">${r.calls.toLocaleString()}</td><td class="n">${(r.tok*1000/r.calls).toFixed(1)}k</td><td class="mm">${r.top}</td><td class="ft">${linkify(TOOLNOTE[r.t]||'')}</td></tr>`).join('')}</table></div>
+ <h2>reliability <span>what broke · 14d</span></h2>
+ <div class="tw"><table><tr><th>when</th><th>agent</th><th>what</th><th>cause</th><th>handled by</th></tr>${INCIDENTS.map(r=>`<tr><td class="mm">${dayTime(r.at)}</td><td class="mm t">${r.agent}</td><td class="mm ${r.sev=='crash'?'bad':'tx'}">${r.what}</td><td>${r.cause}</td><td class="dim">${r.handled}</td></tr>`).join('')}</table></div>`}
+
+/* ====================================================================
+   CONFIG
+   ==================================================================== */
+let openLoop='deliver';
+function yamlLines(){const L=[],kv=(i,k,v,c)=>L.push(`${'  '.repeat(i)}<span class="yk">${k}:</span>${v!==undefined?' <span class="yv">'+v+'</span>':''}${c?'  <span class="yc"># '+c+'</span>':''}`);
+ L.push('<span class="yc"># ~/.config/control-centre/config.yaml</span>');L.push('<span class="yc"># source of truth · the forms on the right write here</span>');
+ kv(0,'operator');kv(1,'timezone',CONFIG.operator.timezone);kv(1,'offline_hours',CONFIG.operator.offline);kv(1,'digest_at',CONFIG.operator.digest);kv(1,'notify',`"${CONFIG.operator.notify}"`);
+ kv(0,'escalation');kv(1,'tiers');CONFIG.escalation.tiers.forEach(t=>L.push(`    - { <span class="yk">urgency:</span> <span class="yv">${t[0]}</span>, <span class="yk">when:</span> "${t[1]}", <span class="yk">channel:</span> "${t[2]}" }`));kv(1,'digest',`[${CONFIG.escalation.digest.join(', ')}]`);
+ kv(0,'accounts');CONFIG.accounts.forEach(a=>{L.push(`  - <span class="yk">id:</span> <span class="yv">${a.id}</span>`);kv(2,'vendor',a.vendor);kv(2,'plan',a.plan);kv(2,'alert_at',a.alertAt+'%','notify via digest');kv(2,'stop_at',a.stopAt+'%','no new runs above this');kv(2,'windows');a.windows.forEach(w=>kv(3,w.w,`"${w.kind}"`));if(a.no5h)kv(3,'5h','none','not on this plan')});
+ kv(0,'rates',undefined,'API-equivalent $ per M tokens');Object.entries(CONFIG.rates).forEach(([m,v])=>kv(1,m,v));
+ kv(0,'hosts');CONFIG.hosts.forEach(h=>L.push(`  - { <span class="yk">id:</span> <span class="yv">${h.id}</span>, <span class="yk">slots:</span> ${h.slots} }`));
+ kv(0,'integrations');kv(1,'review_bot');kv(2,'name',`"${CONFIG.integrations.reviewBot.name}"`);kv(2,'workflow',CONFIG.integrations.reviewBot.workflow);
+ kv(0,'held_label',CONFIG.heldLabel);
+ kv(0,'repos');CONFIG.repos.forEach(r=>{L.push(`  - <span class="yk">id:</span> <span class="yv">${r.id}</span>`);kv(2,'github',r.gh);if(r.project){kv(2,'project',r.project.number);kv(2,'goal',r.goal?`{ type: ${r.goal.type}, title: "${r.goal.title}" }`:'null');kv(2,'status_map');r.project.status.forEach(s=>kv(3,`"${s.n}"`,s.map+(s.limit?`  <span class="yc"># column limit ${s.limit}</span>`:'')));if((r.loopOverrides||[]).length){kv(2,'loop_overrides');r.loopOverrides.forEach(o=>L.push(`      - { role: ${o.role}, label: ${o.label}, loop: <span class="yv">${o.loop}</span> }`))}}else kv(2,'project','null','not linked yet')});
+ kv(0,'roles');Object.entries(CONFIG.roles).forEach(([k,v])=>kv(1,k,`{ loop: ${v.loop} }`));
+ kv(0,'loops');Object.entries(CONFIG.loops).forEach(([k,l])=>{kv(1,k);kv(2,'steps',`[${l.steps.join(', ')}]`);if(l.side)kv(2,'side',`[${l.side.join(', ')}]`);if(l.optional)kv(2,'optional',`[${l.optional.join(', ')}]`);if(l.skipIfNoAgent)kv(2,'skip_if_no_agent',`{ ${Object.entries(l.skipIfNoAgent).map(([s,r])=>s+': '+r).join(', ')} }`);kv(2,'edges');l.back.forEach(b=>L.push(`      - { from: <span class="yv">${b[0]}</span>, to: <span class="yv">${b[1]}</span>, on: <span class="yv">${b[4]}</span>, rework: ${b[3]?'true':'false'} }  <span class="yc"># ${b[2]}</span>`))});
+ kv(0,'agents');CONFIG.agents.forEach(a=>L.push(`  - { <span class="yk">id:</span> <span class="yv">${a.id}</span>, <span class="yk">role:</span> ${a.role}, <span class="yk">repo:</span> "${a.repo}", <span class="yk">account:</span> ${a.account}, <span class="yk">model:</span> ${a.model}, <span class="yk">host:</span> ${a.host}${a.fallback?`, <span class="yk">fallback:</span> "${a.fallback}"`:''} }`));
+ kv(0,'cto_rules');kv(1,'may_decide');CONFIG.rules.auto.filter(r=>r.on).forEach(r=>L.push(`    - "<span class="yv">${r.r}${r.p?' — '+r.p:''}</span>"`));kv(1,'always_ask');CONFIG.rules.ask.filter(r=>r.on).forEach(r=>L.push(`    - "<span class="yv">${r.r}${r.p?' '+r.p:''}</span>"`));
+ kv(0,'watches',undefined,'standing; the CTO arms temporary ones at runtime');CONFIG.watches.forEach(w=>L.push(`  - { <span class="yk">when:</span> "<span class="yv">${w.when}</span>", <span class="yk">then:</span> "<span class="yv">${w.then}</span>" }`));return L}
+function renderConfig(){const L=yamlLines(),models=v=>v=='claude'?['opus-5.5','sonnet-5.5','haiku-5.5']:['gpt-5.3-codex','gpt-5.3-codex-mini'];const lp=CONFIG.loops[openLoop];
+ const act=(...x)=>btns(...x.map(t=>`<span class="btn g">${t}</span>`));const SIG=['ci:fail','review:changes_requested','qa:fail','step:done','pr:pushed','agent:restart','agent:gap','agent:drift','timer:60s','timer:daily'];
+ $('#v-config').innerHTML=`<div style="max-width:1100px">
+ <details class="scr" style="margin-top:0"><summary>config.yaml · ${L.length} lines · read-only view of the source of truth; the forms below write to it</summary><div class="code" style="height:auto;max-height:70vh;position:static;margin:0 8px 8px"><div class="ln">${L.map((_,i)=>i+1).join('<br>')}</div><div class="tx2">${L.join('\n')}</div></div></details>
+ <div>
+ <h2>operator</h2><div class="box form"><span>timezone</span><input value="${CONFIG.operator.timezone}"><span>offline hours</span><input value="${CONFIG.operator.offline}"><span>morning digest</span><input value="${CONFIG.operator.digest}"><span>notify phone / watch</span><select><option>only items that block work now</option><option>everything that needs me</option><option>never</option></select></div>
+ <h2>escalation <span>urgency tiers decide where a needs-you item goes</span></h2><div class="tw"><table><tr><th>urgency</th><th>when</th><th>channel</th><th></th></tr>${CONFIG.escalation.tiers.map(t=>`<tr><td class="mm t">${t[0]}</td><td><input value="${t[1]}" style="width:100%"></td><td class="mm">${t[2]}</td><td>${act('edit')}</td></tr>`).join('')}<tr><td class="mm">digest</td><td colspan="3" class="dim">${CONFIG.escalation.digest.join(' · ')}</td></tr></table></div>
+ <h2>repos</h2><div class="tw"><table><tr><th>repo</th><th>project</th><th>goal</th><th>status map</th><th>loop overrides</th><th></th></tr>${CONFIG.repos.map(r=>`<tr><td class="mm t">${r.id}</td><td>${r.project?`#${r.project.number} <span class="ok s">ok</span>`:'<span class="ft">none</span>'}</td><td class="s">${r.goal?r.goal.type+': '+r.goal.title:'—'}</td><td class="s">${r.project?r.project.status.map(s=>`${s.n}→${s.map}`).join(', '):'—'}</td><td class="s">${(r.loopOverrides||[]).map(o=>`${o.role} + label ${o.label} → ${o.loop}`).join('<br>')||'<span class="ft">role defaults</span>'}</td><td>${act('edit','remove')}</td></tr>`).join('')}</table></div>
+ <div class="box form" style="margin-top:6px"><span>repo</span><input id="nr-gh" placeholder="owner/repo"><span>project number</span><input id="nr-pn" placeholder="e.g. 4"><span></span><span><span class="btn" onclick="addRepo()">connect</span> <span class="ft s">reads the project's Status options, then you map each one</span></span></div><div id="maparea"></div>
+ <h2>agents</h2><div class="tw"><table><tr><th>id</th><th>role → loop</th><th>repo</th><th>account · model</th><th>fallback</th><th></th></tr>${CONFIG.agents.map(a=>`<tr><td class="mm t">${a.id}</td><td class="mm">${a.role} → ${role(a).loop}</td><td class="mm">${a.repo=='*'?'all':a.repo}</td><td class="s">${a.account}<br>${a.model}</td><td class="s ft">${a.fallback||'—'}</td><td>${a.id!='cto'?btns('<span class="btn g">edit</span>','<span class="btn g">pause</span>',`<span class="btn g" onclick="if(confirm('Remove ${a.id}? Its session stops after pushing WIP; its tickets return to the board unassigned.'))rmAgent('${a.id}')">remove</span>`):btns('<span class="btn g">edit</span>')}</td></tr>`).join('')}</table></div>
+ <div class="box form" style="margin-top:6px"><span>role</span><select id="na-ro" onchange="$('#na-id').placeholder=this.value+'-'+(CONFIG.agents.filter(a=>a.role==this.value).length+1)">${Object.entries(CONFIG.roles).filter(([k])=>k!='supervisor').map(([k,v])=>`<option value="${k}" ${k=='dev'?'selected':''}>${v.label}</option>`).join('')}</select><span>id</span><input id="na-id" placeholder="dev-3"><span>repo</span><select id="na-rp">${CONFIG.repos.map(r=>`<option>${r.id}</option>`).join('')}</select><span>account</span><select id="na-ac" onchange="$('#na-md').innerHTML=(acct(this.value).vendor=='claude'?['opus-5.5','sonnet-5.5','haiku-5.5']:['gpt-5.3-codex','gpt-5.3-codex-mini']).map(m=>'<option>'+m+'</option>').join('')">${CONFIG.accounts.map(a=>`<option>${a.id}</option>`).join('')}</select><span>model</span><select id="na-md">${models('claude').map(m=>`<option>${m}</option>`).join('')}</select><span>fallback account</span><select><option>none</option>${CONFIG.accounts.map(a=>`<option>${a.id}</option>`).join('')}</select><span>host</span><select>${CONFIG.hosts.map(h=>`<option>${h.id}</option>`).join('')}</select><span></span><span><span class="btn" onclick="addAgent()">add agent</span> <span class="ft s">its loop comes from its role (and the repo's overrides) · the CTO asks you first if it costs > 5% of a 7d window</span></span></div>
+ <h2 id="cf-loops">loops <span>steps and edges per loop · roles pick a loop; repos can override per label</span><span class="r">${btns('<span class="btn g">+ loop</span>','<span class="btn g">+ role</span>')}</span></h2>
+ <div class="seg" style="margin-bottom:6px">${Object.keys(CONFIG.loops).map(k=>`<span class="${k==openLoop?'on':''}" onclick="openLoop='${k}';renderConfig()">${k}</span>`).join('')}</div>
+ <div class="box"><div class="s tx" style="margin-bottom:6px">${lp.name}</div><table><tr><th>#</th><th>step</th><th>side</th><th>optional</th><th>skip if repo has no</th><th></th></tr>${lp.steps.map((s,i)=>`<tr><td class="mm ft">${i+1}</td><td><input value="${s}" style="width:110px"></td><td><span class="tog ${isSide(lp,s)?'':'off'}"></span></td><td><span class="tog ${(lp.optional||[]).includes(s)?'':'off'}"></span></td><td><select><option>—</option>${Object.keys(CONFIG.roles).map(r=>`<option ${(lp.skipIfNoAgent||{})[s]==r?'selected':''}>${r}</option>`).join('')}</select></td><td>${act('↑','↓','remove')}</td></tr>`).join('')}</table><span class="btn g">+ step</span>
+ <table style="margin-top:8px"><tr><th>edge from</th><th>to</th><th>on signal</th><th>label</th><th>rework</th><th></th></tr>${lp.back.map(b=>`<tr><td><select>${lp.steps.map(s=>`<option ${s==b[0]?'selected':''}>${s}</option>`).join('')}</select></td><td><select>${lp.steps.map(s=>`<option ${s==b[1]?'selected':''}>${s}</option>`).join('')}</select></td><td><select>${SIG.map(s=>`<option ${s==b[4]?'selected':''}>${s}</option>`).join('')}</select></td><td><input value="${b[2]}" style="width:100%"></td><td><span class="tog ${b[3]?'':'off'}"></span></td><td>${act('remove')}</td></tr>`).join('')}</table><span class="btn g">+ edge</span></div>
+ <h2 id="cf-watch">watches <span>standing watches you own · the CTO's temporary ones show on the CTO page</span></h2><div class="tw"><table><tr><th>when</th><th>then</th><th></th></tr>${CONFIG.watches.map(w=>`<tr><td class="t">${w.when}</td><td class="dim">${w.then}</td><td>${act('edit','remove')}</td></tr>`).join('')}</table></div><span class="btn g" style="margin-top:4px">+ watch</span>
+ <h2>accounts</h2><div class="tw"><table><tr><th>account</th><th>plan</th><th>windows · reset anchor</th><th>alert_at</th><th>stop_at</th><th></th></tr>${CONFIG.accounts.map(a=>`<tr><td class="mm t">${a.id}</td><td>${a.vendor} ${a.plan}</td><td class="mm">${a.windows.map(w=>`${w.w} · ${w.kind}`).join('<br>')}${a.no5h?'<br><span class="ft">no 5h window</span>':''}</td><td><input value="${a.alertAt}%" style="width:56px"> <span class="ft s">notify</span></td><td><input value="${a.stopAt}%" style="width:56px"> <span class="ft s">no new runs</span></td><td>${act('remove')}</td></tr>`).join('')}</table></div><span class="btn g" style="margin-top:4px">+ account</span>
+ <h2>rates, hosts, integrations</h2><div class="tw"><table><tr><th>model</th><th class="n">$ / M tokens (API-equivalent)</th></tr>${Object.entries(CONFIG.rates).map(([m,v])=>`<tr><td class="mm t">${m}</td><td class="n"><input value="${v.toFixed(2)}" style="width:70px;text-align:right"></td></tr>`).join('')}</table></div>
+ <div class="tw" style="margin-top:6px"><table><tr><th>host</th><th>status</th><th class="n">slots used / total</th><th></th></tr>${CONFIG.hosts.map(h=>`<tr><td class="mm t">${h.id}</td><td class="ok s">${h.status}</td><td class="n">${CONFIG.agents.filter(a=>a.host==h.id).length} / ${h.slots}</td><td>${act('edit')}</td></tr>`).join('')}<tr><td colspan="4"><span class="btn g">+ host</span></td></tr></table></div>
+ <div class="tw" style="margin-top:6px"><table><tr><th>integration</th><th>setting</th></tr><tr><td class="t">review bot</td><td class="mm">${CONFIG.integrations.reviewBot.name} · ${CONFIG.integrations.reviewBot.workflow}</td></tr><tr><td class="t">GitHub</td><td class="mm">${CONFIG.integrations.github.token}</td></tr><tr><td class="t">held label</td><td class="mm">${CONFIG.heldLabel}</td></tr></table></div>
+ <h2>cto rules <span>per repo · an "always ask" rule switched off lets the CTO decide that alone</span></h2>
+ <div class="tw"><table><tr><th colspan="3">may decide on its own</th></tr>${CONFIG.rules.auto.map((r,i)=>`<tr><td style="width:64px"><span class="tog ${r.on?'':'off'}" onclick="CONFIG.rules.auto[${i}].on=!CONFIG.rules.auto[${i}].on;renderConfig()"></span> <span class="s ${r.on?'tx':'ft'}">${r.on?'on':'off'}</span></td><td class="t" style="white-space:normal">${r.r}${r.p?`<div class="s dim">${r.p}</div>`:''}</td><td><select><option>all repos</option>${CONFIG.repos.map(x=>`<option>${x.id}</option>`).join('')}</select></td></tr>`).join('')}<tr><th colspan="3">always asks you</th></tr>${CONFIG.rules.ask.map((r,i)=>`<tr><td><span class="tog ${r.on?'':'off'}" onclick="if(!CONFIG.rules.ask[${i}].on||confirm('Turning this off lets the CTO decide “${esc(r.r)}” without asking you. Continue?')){CONFIG.rules.ask[${i}].on=!CONFIG.rules.ask[${i}].on;renderConfig()}"></span> <span class="s ${r.on?'tx':'ft'}">${r.on?'on':'off — CTO decides'}</span></td><td class="t" style="white-space:normal">${r.r}${r.p?` <b>${r.p}</b>`:''}</td><td><select><option>all repos</option>${CONFIG.repos.map(x=>`<option>${x.id}</option>`).join('')}</select></td></tr>`).join('')}</table></div><span class="btn g" style="margin-top:4px">+ rule</span>
+ <h2 id="glossary">glossary &amp; data model <span>how every state and number is defined</span></h2>
+ <div class="box gloss"><dl>
+ <dt>entities</dt><dd><code>account</code> · <code>host</code> · <code>repo</code> (+ GitHub project, goal) · <code>agent</code> (one role, one repo, one account, one host) · <code>session</code> (one CLI process) · <code>ticket</code> (GitHub issue; its PR is attached) · <code>run</code> (one agent working one ticket through a loop) · <code>pr record</code> (a merged PR with its loop-back counts, phases, cost) · <code>event</code> · <code>escalation</code> · <code>rule</code> · <code>watch</code> · <code>incident</code> · <code>tool-call aggregate</code>. Every number on screen is computed from these and GitHub.</dd>
+ <dt>ticket · PR</dt><dd>Written <code>repo#n</code>. A PR is shown as <code>PR #n</code> on its issue and never as its own card; PR cost and loop-backs roll up to the issue.</dd>
+ <dt>ticket states</dt><dd>Each project's Status options map to <code>planned · in progress · review · blocked · done</code> via <code>status_map</code>. <b>in progress</b> = being implemented. <b>review</b> = PR open (from the PR's created time). <b>blocked</b> = needs someone outside the agent loop; amber when that someone is you. <b>WIP</b> = in progress + review. A column limit (e.g. <code>1 / 3</code> = 1 item, limit 3) applies to that Status column only.</dd>
+ <dt>goal</dt><dd>What a repo is driving towards: a GitHub milestone, an epic (via sub-issues) or an iteration. Its "left" counts only issues in the goal; the board counts every open issue.</dd>
+ <dt>held · merge held</dt><dd><b>held</b> = the <code>held_label</code> on an issue, set by the CTO or you; agents won't start it; the Status is unchanged. <b>merge held</b> = a PR that may not merge until a decision is made.</dd>
+ <dt>runs: active · queued · parked</dt><dd>An agent has at most one <b>active</b> run. <b>queued</b> = waiting for this agent's own active run to finish (e.g. a fix it will do next). <b>parked</b> = waiting on another agent or a PR check (e.g. a PR in QA). Neither uses the agent's time.</dd>
+ <dt>agent states</dt><dd><code>working</code> active run progressing · <code>waiting on agent</code> no active run, only queued/parked ones · <code>waiting on you</code> active run needs an escalation answered · <code>idle</code> no runs · <code>error</code> crashed or stalled.</dd>
+ <dt>durations</dt><dd><b>in state</b> = since the agent's state last changed · <b>in step</b> = since the run entered its current step · <b>in status</b> = since the ticket's Status last changed · <b>held for</b> = since the held label was added · <b>age</b> = since the session started.</dd>
+ <dt>loop · step · side step · edge · attempt · rework</dt><dd>A loop is a main line of steps plus <b>side steps</b> (fix, report-bug, retest) reached only through an <b>edge</b>. Each edge fires on a <b>signal</b> (e.g. <code>ci:fail</code>, <code>review:changes_requested</code>). Edges flagged <code>rework</code> count as rework; rework is counted on the delivering loop only (QA's bug report is the developer's rework, not QA's). <b>attempt</b> = 1 + rework edges taken on this run. <b>step n/N</b> counts main steps only. "↺ n on them" = loop-backs taken on runs in flight.</dd>
+ <dt>windows</dt><dd><b>24h</b> = the last 24 hours rolling. <b>7d</b> / <b>14d</b> = rolling days. A chart's last bar is the last 24h. "% of claude-main 7d" = share of that account's current 7d window.</dd>
+ <dt>limits</dt><dd>Usage is <b>sampled</b> every 30m (claude: statusline; codex: app-server). <b>projected at reset</b> = latest sample + last-24h pace × hours to reset. <b>alert_at</b>, <b>stop_at</b> and the over-100% watch fire on the first sample that crosses them. <b>alert_at</b> notifies you (digest). <b>stop_at</b> stops new runs on that account; running runs finish. A projection "≈ with X moved" adds the 24h tokens of agents switching onto the account from their switch time, converted with the receiving account's tokens-per-% from its last 24h — an estimate (vendor weighting and model mix ignored); "once X switch away" splits the source account's pace by its agents' tokens and stops each at its switch time. The samples are the source of truth for limits; tokens are only used for these estimates. The 5h window starts at first use and resets 5h later.</dd>
+ <dt>escalations</dt><dd><b>urgency</b> now / soon / later decides the channel (Config → escalation). <b>★ cto pick</b> = the option the CTO recommends; <b>conf</b> = its confidence in that pick. A <b>proposal</b> is a suggestion with nothing blocked yet.</dd>
+ <dt>branch app</dt><dd>A PR's branch running on the host (e.g. <code>my-mac.local:5181</code>) so you can click through it before merge — "try app". The CTO starts it when the PR opens; QA's <code>start-app</code> restarts it with test data. The optional <code>your-test</code> step waits for your pass/fail on it.</dd>
+ <dt>ETA</dt><dd>Goal issues left ÷ issues closed per day over the last 7 days, rounded up to whole days.</dd>
+ <dt>$</dt><dd>API-equivalent: tokens × <code>rates</code>[model]. Subscriptions are not billed per token. <b>$ / merge (all agents)</b> = every agent's $ ÷ merged PRs. <b>dev $ / merge</b> = that developer's $ ÷ its merged PRs.</dd>
+ <dt>KPIs</dt><dd><b>lead time</b> branch → merge (mean) = coding (branch → PR open) + pickup (PR open → first review) + review + rework + qa + merge · <b>first-pass review</b> merged PRs with no review→fix ÷ merged PRs · <b>rework / merged PR</b> rework edges on merged PRs ÷ merged PRs · <b>change failure</b> merged PRs that needed a follow-up fix ÷ merged PRs · <b>autonomy rate</b> merged PRs with no human commit ÷ merged PRs · <b>intervention rate</b> sessions you typed into ÷ sessions · <b>wasted run</b> a run that ended without progress (reset or abandoned) · <b>time to answer</b> escalation raised → your answer (mean) · <b>busy</b> hours with an active, progressing run.</dd>
+ <dt>symbols</dt><dd>ⓔ = actor outside Control Centre (GitHub, review bot) · <code>monitor</code> = Control Centre's threshold checks · ⏸ = waiting / held · ★ = CTO pick.</dd>
+ </dl></div>
+ </div></div>`}
+function addRepo(){const gh=$('#nr-gh').value.trim();if(!gh)return;const id=gh.split('/').pop();if(repoOf(id))return;const opts=['Todo','In Progress','Review','Done'];
+ $('#maparea').innerHTML=`<div class="box" style="margin-top:6px"><div class="s tx">found project #${$('#nr-pn').value||'?'} on ${gh} · Status options: ${opts.join(', ')}</div><div class="form" style="margin-top:6px">${opts.map((o,i)=>`<span>"${o}" means</span><select class="mapsel">${CONFIG.states.map((t,j)=>`<option ${[0,1,2,4][i]==j?'selected':''}>${t}</option>`).join('')}</select>`).join('')}<span></span><span><span class="btn" onclick="confirmRepo('${gh}','${id}')">save repo</span></span></div></div>`}
+function confirmRepo(gh,id){const opts=['Todo','In Progress','Review','Done'],maps=$$('.mapsel').map(s=>s.value),cols=['#8b949e','#4493f8','#a371f7','#3fb950'];CONFIG.repos.push({id,gh,color:'#ffa657',project:{number:+$('#nr-pn').value||4,title:id+' board',status:opts.map((n,i)=>({n,c:cols[i],d:'',map:maps[i]})),fields:['Priority','Size'],views:['Board','Table']},goal:null,loopOverrides:[]});DAILY[id]=Array(14).fill(0);say(`connected ${id}. No agents assigned yet — add one, or ask me to propose agents.`,'main');renderAll();go('config')}
+function addAgent(){const ro=$('#na-ro').value,id=($('#na-id').value||$('#na-id').placeholder).trim();if(agentOf(id))return;CONFIG.agents.push({id,role:ro,repo:$('#na-rp').value,account:$('#na-ac').value,model:$('#na-md').value,host:CONFIG.hosts[0].id});AGd(id);say(`added ${id} (${CONFIG.roles[ro].label}) on ${$('#na-rp').value}. Idle until I give it the top ticket on its board.`,'main');renderAll();go('config')}
+function rmAgent(id){CONFIG.agents=CONFIG.agents.filter(a=>a.id!=id);renderAll();go('config')}
+
+/* ====================================================================
+   DOCK — pins, threads, commands
+   ==================================================================== */
+let thread='main';
+const THREADS={main:{name:'all repos',msgs:[]}};
+function seedMain(){const cx=w7(acct('codex-main')),cl=w7(acct('claude-main'));THREADS.main.msgs=[['you',clock(ago(1)),'status across all repos?'],['cto',clock(ago(1)),{table:[['repo','goal','now'],...CONFIG.repos.map(r=>[r.id,r.goal?`${goalDone(r.id)}/${goalScope(r.id)} · eta ${dayOnly(eta(r.id))}`:'no board',(CTO.important.find(i=>i[0].startsWith(r.id+'#'))||[0,'—'])[1]])],after:`Limits: claude-main 7d ${cl.used}% → ${winPace(cl)}% at reset. codex-main 7d ${cx.used}% → ${winPace(cx)}%; ${fallbackAgents('codex-main').map(x=>x.id).join(' + ')} move to claude-main from their next new run, leaving codex ≈${projIfMoved(acct('codex-main'))}% at reset; it would stop at ${acct('codex-main').stopAt}% ≈ ${clock(stopForecast(acct('codex-main')))} only if nothing moved. ${openBR().length} items need you (pinned above).`}]]}
+function drawPins(){const o=openBR(),onCto=$('#v-cto').classList.contains('on');$('#pins').style.display=onCto?'none':'';
+ $('#pins').innerHTML=`<div class="part">needs you · ${o.length}<span class="sp"></span>most urgent first</div>`+o.map(b=>`<div class="pin ${b.urg=='later'?'lo':''}"><div class="h"><b class="tx" style="font-weight:600">${b.kind}</b> · ${b.urg} · ${b.repo} · ${dur(minsSince(b.at))}</div><div class="t" title="${esc(b.rule)}">${b.title}</div><div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${b.opts.map(x=>`<span class="btn" title="${esc(x[0]+': '+x[1]+' — '+x[2])}" onclick="decide('${b.id}','${x[0]}')">${x[0]}${x[4]&&b.kind!='action'?' ★':''}</span>`).join('')}<span class="btn g" onclick="discuss('${b.id}')">discuss</span><span class="btn g" onclick="brief('${b.id}')">details</span></div></div>`).join('')}
+function ensureThread(id){if(THREADS[id])return;const b=brById(id);THREADS[id]={name:b.title.slice(0,38)+'…',msgs:[['cto','now',`Thread for: ${b.title}. ${b.raised} is in this thread. Options: ${b.opts.map(o=>o[0]+' '+o[1]).join(' · ')}`]]};if(id=='b-adr'){THREADS[id].msgs.push(['research-2','now','ADR-12 aligns every property row to 28px. An 8-line box pushes the rows below it down while you type.']);THREADS[id].msgs.push(['dev-2','now','Rows only move while the box has focus; it collapses back on blur. Try it at my-mac.local:8091 (PR #1709 branch app).']);THREADS[id].msgs.push(['cto','now','Option C (cap at 3 lines in the properties pane) keeps most of UX7 and limits the shift. I still recommend A.',['choose A','choose C','choose B']])}}
+function drawTh(){const Tt=THREADS[thread];$('#scope').innerHTML=`thread: <b class="tx">${Tt.name}</b>${thread!='main'?` · <a onclick="thread='main';drawTh()">all repos</a>`:''}<span class="sp"></span>${Object.keys(THREADS).length>1?`<select onchange="thread=this.value;drawTh()">${Object.entries(THREADS).map(([k,v])=>`<option value="${k}" ${k==thread?'selected':''}>${v.name}</option>`).join('')}</select>`:''}`;
+ $('#thread').innerHTML=Tt.msgs.map(([w,t,m,b])=>`<div class="mg ${w=='you'?'me':w=='cto'?'':'ag'}"><div class="h"><b>${w}</b> ${t}</div>${typeof m=='object'?`<table>${m.table.map((r,i)=>`<tr>${r.map(c=>i?`<td>${linkify(String(c))}</td>`:`<th>${c}</th>`).join('')}</tr>`).join('')}</table><p style="margin-top:4px">${m.after}</p>`:`<p>${linkify(m)}</p>`}${b?`<div class="bt">${b.map(x=>`<span class="btn" onclick="decide('${thread}','${x.slice(-1)}')">${x}</span>`).join('')}</div>`:''}</div>`).join('');$('#thread').scrollTop=1e6}
+function say(m,th){(THREADS[th||thread]||THREADS.main).msgs.push(['cto','now',m]);drawTh()}
+function decide(id,o){const b=brById(id);if(!b||b.done)return;const op=b.opts.find(x=>x[0]==o);if(!confirm(`${b.kind}: ${b.title}\n\nChoose ${o}: ${op[1]}?\nWhat happens: ${op[2]}`))return;b.done=1;ensureThread(id);THREADS[id].msgs.push(['you','now',`${o}: ${op[1]}`]);THREADS[id].msgs.push(['cto','now',`Doing it: ${op[2]}. Agents told; logged.`]);thread=id;toast(`${b.kind} answered: ${o} · <a onclick="brById('${id}').done=0;renderAll();toast('decision undone')">undo</a>`);renderAll()}
+function discuss(id){ensureThread(id);thread=id;openDock();drawTh()}
+function brief(id){go('cto');setTimeout(()=>{document.getElementById('c-needs').scrollIntoView()},30);discuss(id)}
+function chatAbout(aid){thread='ag-'+aid;if(!THREADS[thread])THREADS[thread]={name:'about '+aid,msgs:[['cto','now',`What do you want to know about ${aid}? It is ${SL[agentState(aid)]}${activeRun(aid)&&activeRun(aid).ticket?' on '+activeRun(aid).ticket:''}.`]]};openDock();drawTh()}
+function openDock(){$('#app').classList.remove('nodock')}
+function toggleDock(){$('#app').classList.toggle('nodock')}
+const SLASH=[['/priority','shop-app#3633 P1','set a ticket\'s priority (writes to GitHub)'],['/assign','shop-app#3624 dev-1','give a ticket to an agent'],['/try','PR #3830','open the branch app for a PR'],['/pause','dev-2','pause an agent after its current step'],['/hire','qa site-builder','propose a new agent (asks before spending)'],['/digest','','summary since you were last here']];
+$('#cin').addEventListener('input',e=>{const v=e.target.value;const m=v.startsWith('/')?SLASH.filter(s=>s[0].startsWith(v.split(' ')[0])):[];$('#slash').style.display=m.length?'block':'none';$('#slash').innerHTML=m.map(s=>`<div><b>${s[0]}</b> <span>${s[1]} — ${s[2]}</span></div>`).join('')});
+$('#cin').addEventListener('keydown',e=>{if(e.key=='Enter'&&e.target.value.trim()){const v=e.target.value.trim().replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));THREADS[thread].msgs.push(['you','now',v]);e.target.value='';$('#slash').style.display='none';
+ const r=v.startsWith('/priority')?`${v.split(' ')[1]} → ${v.split(' ')[2]}. Written to GitHub; agents pick by priority.`:v.startsWith('/try')?`The branch app for ${v.split(' ').slice(1).join(' ')} is at my-mac.local:5181.`:v.startsWith('/pause')?`${v.split(' ')[1]} will pause after its current step.`:'(prototype — the real CTO session answers here)';setTimeout(()=>say(r),200);drawTh()}});
+
+/* ====================================================================
+   NAV
+   ==================================================================== */
+function renderAll(){_evx=null;renderChrome();renderAgents();renderLoops();renderBoards();renderCTO();renderMetrics();renderConfig();drawPins();drawTh()}
+function go(v){$$('.view').forEach(x=>x.classList.toggle('on',x.id=='v-'+v));$$('.tab').forEach(x=>x.classList.toggle('on',x.dataset.v==v));$('#main').scrollTop=0;closeD();drawPins()}
+$$('.tab').forEach(t=>t.onclick=()=>go(t.dataset.v));
+document.addEventListener('keydown',e=>{if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;if(e.key=='Escape')closeD();if(e.key=='\\')toggleDock();if($('#drw').classList.contains('on')&&$('#drw').dataset.id){if(e.key=='j')nav(1);if(e.key=='k')nav(-1)}});
+if(innerWidth<1280)$('#app').classList.add('nodock');
+seedMain();renderAll();
+</script>
+</body></html>

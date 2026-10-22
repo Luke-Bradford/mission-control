@@ -1,0 +1,3105 @@
+import "./temp-home.ts";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  CREW_MODES,
+  EVIDENCE_IN_CI,
+  EVIDENCE_NO_COMMIT,
+  EVIDENCE_NO_LOOP,
+  EVIDENCE_PARKED,
+  EVIDENCE_RECORDED,
+  evidenceTextText,
+  evidenceUncommittedText,
+  FINDINGS_ALREADY,
+  FINDINGS_BLOCKING_NEEDS_FAIL,
+  FINDINGS_DROPPED,
+  FINDINGS_FAIL_NEEDS_BLOCKING,
+  FINDINGS_NOT_A_REVIEW,
+  FINDINGS_RECORDED,
+  findingFileText,
+  MC_PLAN_ALREADY,
+  MC_PLAN_BODY_UNCLOSED,
+  MC_PLAN_GH_FAILED,
+  MC_PLAN_ISSUE_CLOSED,
+  MC_PLAN_MAX,
+  MC_PLAN_NO_ROOM,
+  MC_PLAN_NOT_FAO,
+  MC_PLAN_WRITTEN,
+  MC_PR_UNCLOSED,
+  MC_PUSH_MERGE,
+  MC_PUSH_NO_COMMIT,
+  MC_PUSH_ROOT,
+  MC_REMOVE_REFUSED,
+  MC_RUN_ENDED,
+  MC_TOOL_GRANTS,
+  MC_TOOLS,
+  originMovedText,
+  planByLine,
+  planTooLongText,
+  prNamedRefText,
+  prNotifyText,
+  prSecretText,
+  type Run,
+  type RunLoop,
+  removeLinkedText,
+  removeMissingText,
+  removeNotFileText,
+} from "@mc/core";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildApp } from "../src/api.ts";
+import { ChangeBus } from "../src/bus.ts";
+import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
+import { type CcConfig, crewSeatMode } from "../src/config.ts";
+import { attentionItems, NO_LOCK } from "../src/hud.ts";
+import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
+import type { McTool, McToolContext } from "../src/mcp/server.ts";
+import { RunTokens } from "../src/mcp/tokens.ts";
+import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mcp/tools.ts";
+import { CREW_GIT_SLOW_MS } from "../src/runtime/checkouts.ts";
+import { crewGit } from "../src/runtime/git.ts";
+import { Store } from "../src/store.ts";
+
+const NOW = Date.parse("2026-10-20T12:00:00Z");
+const BRANCH = "feature/42-fix-the-stop-race";
+const RUN = "guido-1:20261020T115000Z";
+const SESSION = "mc-crew";
+const REVERT = "Revert what you didn't mean to change.";
+/** A push refused for a commit the commit tool did not make: the Blocked note's reason, for the operator. */
+const FOREIGN = (sha: string) =>
+  `Not pushed: ${sha.slice(0, 7)} was not made by the commit tool, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.`;
+/**
+ * The tail of every push secret refusal. It is the Blocked note's reason, so it speaks to the operator:
+ * the commit is made, only they can take the value out of history, and the seat resumes on their word.
+ */
+const SECRET_ASK =
+  "The commit is already made and the seat cannot rewrite history, so only you can take it out of the branch; then message the seat to carry on.";
+
+let dir: string;
+let clone: string;
+let wt: string;
+let store: Store;
+let bus: ChangeBus;
+let emitted: string[];
+let tools: McTool[];
+
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=Test", ...args], {
+    cwd,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+
+const write = (rel: string, text: string) => {
+  mkdirSync(join(wt, rel, ".."), { recursive: true });
+  writeFileSync(join(wt, rel), text);
+};
+
+const head = () => git(wt, "rev-parse", "HEAD").trim();
+const staged = () => git(wt, "diff", "--cached", "--name-only");
+const strayKey = (path: string) =>
+  `stray:${createHash("sha256").update(`${SESSION}\0${path}`).digest("hex").slice(0, 16)}`;
+
+function config(): CcConfig {
+  return {
+    operator: { id: "op", timezone: "Europe/London" },
+    accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
+    repos: [{ id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "draft" }],
+    loops: [],
+    poll: { usageMinutes: 30, githubSeconds: 60 },
+    crew: {
+      worktrees: join(dir, "worktrees"),
+      maxSeats: 8,
+      sessions: [
+        {
+          id: SESSION,
+          repoId: "mc",
+          checkout: clone,
+          seats: [
+            {
+              id: "guido-1",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "haiku",
+              area: ["apps/**"],
+            },
+            {
+              id: "guido-2",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "haiku",
+              area: ["web/**"],
+            },
+            { id: "retro", role: "RETRO", accountId: "claude-main", model: "haiku", area: [] },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+const run = (over: Partial<Run> = {}): Run => ({
+  id: RUN,
+  agentId: "guido-1",
+  repoId: "mc",
+  seq: 1,
+  startedAt: NOW - 600_000,
+  endedAt: null,
+  status: "running",
+  sessionId: "cli-1",
+  model: "haiku",
+  branch: BRANCH,
+  ticket: "mc#42",
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "",
+  prs: [],
+  summary: null,
+  ...over,
+});
+
+/** The tools' log lines (every test): none may hold a known secret. */
+let logs: string[];
+
+/** A gh no test outside the push suite should reach: it never runs anything. */
+const noGh: GhRunner = async (args) => {
+  throw new Error(`gh ${args.join(" ")} was not expected`);
+};
+
+function deps(over: Partial<McToolsDeps> = {}): McToolsDeps {
+  return {
+    config: config(),
+    store,
+    bus,
+    inClone: (_checkout, fn) => fn(),
+    now: () => NOW,
+    gh: noGh,
+    dbPath: join(dir, "mc.sqlite"),
+    knownSecrets: async () => [],
+    log: (line) => logs.push(line),
+    ...over,
+  };
+}
+
+function make(over: Partial<McToolsDeps> = {}): McTool[] {
+  return createMcTools(deps(over));
+}
+
+const tool = (name: string, ts: McTool[] = tools): McTool => {
+  const t = ts.find((x) => x.name === name);
+  if (!t) throw new Error(`no tool ${name}`);
+  return t;
+};
+const CTX: McToolContext = { seatId: "guido-1", runId: RUN };
+/** A seat with a live run (its run row unended, its seat row naming it). */
+const liveSeat = (seatId: string, runId: string) => {
+  store.upsertRun(run({ id: runId, agentId: seatId }));
+  store.setSeatSession({
+    seatId,
+    runId,
+    cliSessionId: null,
+    state: "running",
+    reason: null,
+    worktree: null,
+    updatedAt: NOW,
+  });
+};
+const SPECIAL = "is a symlink or a nested repository; the crew commits plain files only.";
+const SPECIALS = "are a symlink or a nested repository; the crew commits plain files only.";
+/** A nested repository with one commit at `rel` in the worktree. */
+const nestedRepo = (rel: string) => {
+  const at = join(wt, rel);
+  mkdirSync(at, { recursive: true });
+  git(at, "init", "-q");
+  writeFileSync(join(at, "f.txt"), "f\n");
+  git(at, "add", "-A");
+  git(at, "commit", "-qm", "inner");
+};
+const commit = (message: unknown, ts: McTool[] = tools, ctx: McToolContext = CTX) =>
+  tool("commit", ts).call(ctx, message === undefined ? {} : { message });
+
+const rm = (remove: unknown, message = "chore: drop", ts: McTool[] = tools, ctx = CTX) =>
+  tool("commit", ts).call(ctx, { message, remove });
+
+beforeEach(() => {
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-tools-")));
+  clone = join(dir, "clone");
+  wt = join(dir, "worktrees", "guido-1-42");
+  mkdirSync(clone);
+  git(clone, "init", "-q", "-b", "main");
+  git(clone, "config", "user.name", "Test Operator");
+  git(clone, "config", "user.email", "you@example.com");
+  for (const [rel, text] of Object.entries({
+    "apps/a.ts": "a\n",
+    "web/b.ts": "b\n",
+    "docs/c.md": "c\n",
+    "package.json": "{}\n",
+    "README.md": "hi\n",
+  })) {
+    mkdirSync(join(clone, rel, ".."), { recursive: true });
+    writeFileSync(join(clone, rel), text);
+  }
+  git(clone, "add", "-A");
+  git(clone, "commit", "-qm", "init");
+  git(clone, "worktree", "add", "-q", "-b", BRANCH, wt);
+  store = new Store(join(dir, "mc.sqlite"));
+  store.upsertRun(run());
+  store.setSeatSession({
+    seatId: "guido-1",
+    runId: RUN,
+    cliSessionId: "cli-1",
+    state: "running",
+    reason: null,
+    worktree: wt,
+    updatedAt: NOW,
+  });
+  bus = new ChangeBus();
+  logs = [];
+  emitted = [];
+  bus.subscribe((t) => emitted.push(t));
+  tools = make();
+});
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+describe("the mc tools", () => {
+  it("serves commit (writer), ask_operator and report_evidence (writer and read-only) and report_findings (scratch) under the names the CLI prefixes, and no push or draft_pr", () => {
+    expect(tools.map((t) => [t.name, t.modes])).toEqual([
+      ["commit", ["writer"]],
+      ["ask_operator", ["writer", "read-only"]],
+      ["report_evidence", ["writer", "read-only"]],
+      ["report_findings", ["scratch"]],
+      ["report_plan", []],
+    ]);
+    expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
+      MC_TOOLS.commit,
+      MC_TOOLS.askOperator,
+      MC_TOOLS.reportEvidence,
+      MC_TOOLS.reportFindings,
+      MC_TOOLS.reportPlan,
+    ]);
+  });
+
+  it("tool modes match MC_TOOL_GRANTS", () => {
+    const modesWith = (key: "base" | "grantable", name: string) =>
+      CREW_MODES.filter((m) => (MC_TOOL_GRANTS[m][key] as readonly string[]).includes(name));
+    for (const t of tools) {
+      expect([...t.modes], t.name).toEqual(modesWith("base", t.name));
+      expect([...(t.grantable ?? [])], t.name).toEqual(modesWith("grantable", t.name));
+    }
+  });
+});
+
+describe("commit", () => {
+  it("commits everything in the area, as the seat, and records the commit for the run", async () => {
+    const base = head();
+    write("apps/a.ts", "a2\n");
+    write("apps/new.ts", "n\n");
+    const r = await commit("feat: the new thing\n\nWith a body.");
+    const sha = head();
+    expect(sha).not.toBe(base);
+    expect(r).toEqual({ text: `Committed ${sha.slice(0, 7)} on ${BRANCH}: feat: the new thing` });
+    expect(git(wt, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%P|%B").trim()).toBe(
+      `GUIDO-1 (Mission Control) <you@example.com>|GUIDO-1 (Mission Control) <you@example.com>|${base}|feat: the new thing\n\nWith a body.`,
+    );
+    expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim().split("\n")).toEqual([
+      "apps/a.ts",
+      "apps/new.ts",
+    ]);
+    expect(git(wt, "status", "--porcelain")).toBe("");
+    expect(store.runCommits(RUN)).toEqual([sha]);
+    expect(store.branchCommits("mc", BRANCH)).toEqual(new Set([sha]));
+    expect(emitted).toContain("agents");
+  });
+
+  it("keeps every run's commits on the branch: a later run on the ticket counts the earlier one's", async () => {
+    write("apps/a.ts", "a2\n");
+    await commit("one");
+    const first = head();
+    store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+    const second = "guido-1:20261020T130000Z";
+    store.upsertRun(run({ id: second, seq: 2 }));
+    const row = store.seatSession("guido-1");
+    if (row === null) throw new Error("no seat row");
+    store.setSeatSession({ ...row, runId: second });
+    write("apps/a.ts", "a3\n");
+    await commit("two", tools, { seatId: "guido-1", runId: second });
+    expect(store.runCommits(RUN)).toEqual([first]);
+    expect(store.runCommits(second)).toEqual([head()]);
+    expect(store.branchCommits("mc", BRANCH)).toEqual(new Set([first, head()]));
+    expect(store.branchCommits("mc", "feature/other").size).toBe(0);
+  });
+
+  it("never stages a .pnpm-store, at the top or nested: committed around it, no stray", async () => {
+    write(".pnpm-store/v11/index.db", "db\n");
+    write("apps/.pnpm-store/v11/index.db", "db\n");
+    write("apps/a.ts", "a2\n");
+    const r = await commit("feat: x");
+    expect(r.text).toMatch(/^Committed /);
+    expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim().split("\n")).toEqual([
+      "apps/a.ts",
+    ]);
+    expect(store.strays()).toEqual([]);
+    // left where pnpm put them, untracked
+    expect(git(wt, "status", "--porcelain", "-uall").split("\n").filter(Boolean)).toEqual([
+      "?? .pnpm-store/v11/index.db",
+      "?? apps/.pnpm-store/v11/index.db",
+    ]);
+  });
+
+  it("answers Nothing to commit when only a .pnpm-store changed, recording no stray", async () => {
+    write(".pnpm-store/v11/index.db", "db\n");
+    expect(await commit("feat: x")).toEqual({ text: "Nothing to commit." });
+    expect(store.strays()).toEqual([]);
+    expect(staged()).toBe("");
+  });
+
+  it("still stages a deletion with the store excluded", async () => {
+    write(".pnpm-store/v11/index.db", "db\n");
+    rmSync(join(wt, "apps", "a.ts"));
+    expect((await commit("chore: drop a")).text).toMatch(/^Committed /);
+    expect(git(wt, "show", "--name-status", "--format=", "HEAD").trim()).toBe("D\tapps/a.ts");
+  });
+
+  it("answers Nothing to commit when nothing changed", async () => {
+    const base = head();
+    expect(await commit("feat: nothing")).toEqual({ text: "Nothing to commit." });
+    expect(head()).toBe(base);
+    expect(store.runCommits(RUN)).toEqual([]);
+  });
+
+  it("refuses a path outside the area: index reset, a stray recorded, nothing committed", async () => {
+    const base = head();
+    write("apps/a.ts", "a2\n");
+    write("docs/c.md", "c2\n");
+    const r = await commit("feat: x");
+    expect(r).toEqual({
+      text: `Not committed: docs/c.md is outside your area (apps/**).\n${REVERT}`,
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+    // the seat's changes are left in its worktree, unstaged
+    expect(git(wt, "status", "--porcelain").split("\n").filter(Boolean)).toEqual([
+      " M apps/a.ts",
+      " M docs/c.md",
+    ]);
+    expect(store.strays()).toEqual([
+      {
+        key: strayKey("docs/c.md"),
+        sessionId: SESSION,
+        path: "docs/c.md",
+        agentId: "guido-1",
+        kind: "outside",
+        at: NOW,
+      },
+    ]);
+    expect(store.runCommits(RUN)).toEqual([]);
+    expect(emitted).toContain("attention");
+  });
+
+  it("refuses each kind in its own line: outside, another writer's area, protected", async () => {
+    const base = head();
+    write("apps/a.ts", "a2\n");
+    write("docs/c.md", "c2\n");
+    write("README.md", "hi2\n");
+    write("web/b.ts", "b2\n");
+    write("package.json", '{"x":1}\n');
+    write("apps/package.json", "{}\n");
+    const r = await commit("feat: x");
+    expect(r.text).toBe(
+      [
+        "Not committed: README.md and docs/c.md are outside your area (apps/**).",
+        "Not committed: web/b.ts is in GUIDO-2's area.",
+        "Not committed: apps/package.json and package.json are protected (build, install and CI files); ask the operator if the ticket needs them.",
+        REVERT,
+      ].join("\n"),
+    );
+    expect(r.isError).toBe(true);
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+    // protected files are refused, not strays
+    expect(store.strays().map((s) => [s.path, s.kind])).toEqual([
+      ["README.md", "outside"],
+      ["docs/c.md", "outside"],
+      ["web/b.ts", "other-area"],
+    ]);
+  });
+
+  it("refuses one protected file, inside the area or nested, as it", async () => {
+    write("apps/tsconfig.json", "{}\n");
+    expect((await commit("chore: ts")).text).toBe(
+      `Not committed: apps/tsconfig.json is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+    );
+    expect(store.strays()).toEqual([]);
+    write("apps/tsconfig.json", "{}\n");
+    rmSync(join(wt, "apps/tsconfig.json"));
+    write("apps/.github/workflows/ci.yml", "on: push\n");
+    expect((await commit("ci")).text).toBe(
+      `Not committed: apps/.github/workflows/ci.yml is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+    );
+  });
+
+  it("names ten paths per group, then and {n} more", async () => {
+    for (let i = 1; i <= 12; i++) write(`docs/f${String(i).padStart(2, "0")}.md`, "x\n");
+    const names = Array.from(
+      { length: 10 },
+      (_, i) => `docs/f${String(i + 1).padStart(2, "0")}.md`,
+    );
+    expect((await commit("docs")).text).toBe(
+      `Not committed: ${names.join(", ")} and 2 more are outside your area (apps/**).\n${REVERT}`,
+    );
+    expect(store.strays()).toHaveLength(12);
+  });
+
+  it("sees both sides of a rename: out of the area, and into it", async () => {
+    const base = head();
+    renameSync(join(wt, "apps/a.ts"), join(wt, "docs/a.ts"));
+    expect((await commit("move")).text).toBe(
+      `Not committed: docs/a.ts is outside your area (apps/**).\n${REVERT}`,
+    );
+    renameSync(join(wt, "docs/a.ts"), join(wt, "apps/a.ts"));
+    renameSync(join(wt, "docs/c.md"), join(wt, "apps/c.md"));
+    expect((await commit("move")).text).toBe(
+      `Not committed: docs/c.md is outside your area (apps/**).\n${REVERT}`,
+    );
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+  });
+
+  it("checks what add staged: a file changed after the seat looked, before the add, is refused", async () => {
+    const base = head();
+    write("apps/a.ts", "a2\n");
+    const late: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      if (args[0] === "add") write("docs/late.md", "late\n");
+      return crewGit(cwd, args, common, o);
+    };
+    const r = await commit("feat: x", make({ git: late }));
+    expect(r.text).toBe(`Not committed: docs/late.md is outside your area (apps/**).\n${REVERT}`);
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+    expect(store.strays().map((s) => s.path)).toEqual(["docs/late.md"]);
+  });
+
+  it("commits the index it checked: a file changed after the check is not in the commit", async () => {
+    write("apps/a.ts", "a2\n");
+    const late: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      if (args.includes("commit")) write("docs/after.md", "after\n");
+      return crewGit(cwd, args, common, o);
+    };
+    const r = await commit("feat: x", make({ git: late }));
+    expect(r.text).toMatch(/^Committed [0-9a-f]{7} on /);
+    expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim()).toBe("apps/a.ts");
+    expect(git(wt, "status", "--porcelain").trim()).toBe("?? docs/after.md");
+  });
+
+  it("refuses a worktree whose HEAD left the run's branch, branch or detached", async () => {
+    write("apps/a.ts", "a2\n");
+    git(wt, "checkout", "-q", "-b", "elsewhere");
+    const text = `Not committed: your worktree is not on ${BRANCH}.`;
+    expect(await commit("feat: x")).toEqual({ text, isError: true });
+    git(wt, "checkout", "-q", "--detach");
+    expect(await commit("feat: x")).toEqual({ text, isError: true });
+    expect(git(wt, "rev-list", "--count", "--all").trim()).toBe("1");
+    expect(staged()).toBe("");
+  });
+
+  it("clears the seat's strays on the commit that reverts them, and keeps the ones still there", async () => {
+    write("docs/c.md", "c2\n");
+    write("README.md", "hi2\n");
+    await commit("feat: x");
+    expect(store.strays().map((s) => s.path)).toEqual(["README.md", "docs/c.md"]);
+    git(wt, "checkout", "--", "README.md");
+    await commit("feat: x");
+    expect(store.strays().map((s) => s.path)).toEqual(["docs/c.md"]);
+    git(wt, "checkout", "--", "docs/c.md");
+    write("apps/a.ts", "a2\n");
+    expect((await commit("feat: x")).text).toMatch(/^Committed /);
+    expect(store.strays()).toEqual([]);
+  });
+
+  it("leaves another seat's strays alone", async () => {
+    store.addStrays([
+      { sessionId: SESSION, path: "docs/z.md", agentId: "guido-2", kind: "outside", at: 1 },
+    ]);
+    write("apps/a.ts", "a2\n");
+    await commit("feat: x");
+    expect(store.strays().map((s) => s.path)).toEqual(["docs/z.md"]);
+  });
+
+  it("validates the message: 1 to 2000 characters, not blank", async () => {
+    write("apps/a.ts", "a2\n");
+    const base = head();
+    for (const bad of [undefined, "", "   \n", "x".repeat(2001), 42]) {
+      const r = await commit(bad);
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/^Invalid arguments: /);
+    }
+    expect((await tool("commit").call(CTX, { message: "ok", extra: 1 })).isError).toBe(true);
+    expect(head()).toBe(base);
+    expect((await commit("x".repeat(2000))).text).toMatch(/^Committed /);
+  });
+
+  it("refuses a run that is not the seat's live one, running no git", async () => {
+    write("apps/a.ts", "a2\n");
+    let ran = 0;
+    const counting: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      ran++;
+      return crewGit(cwd, args, common, o);
+    };
+    const ts = make({ git: counting });
+    // an earlier run of the seat, never closed: the seat's row names another run now
+    store.upsertRun(run({ id: "guido-1:old" }));
+    const stale = await commit("feat: x", ts, { seatId: "guido-1", runId: "guido-1:old" });
+    expect(stale).toEqual({ text: "This run has ended.", isError: true });
+    store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+    expect(await commit("feat: x", ts)).toEqual({ text: "This run has ended.", isError: true });
+    expect(ran).toBe(0);
+  });
+
+  it("runs inside the clone's queue", async () => {
+    write("apps/a.ts", "a2\n");
+    const queued: string[] = [];
+    const ts = make({
+      inClone: async (checkout, fn) => {
+        queued.push(checkout);
+        return fn();
+      },
+    });
+    await commit("feat: x", ts);
+    expect(queued).toEqual([clone]);
+  });
+});
+
+describe("commit: another open run changed the same file", () => {
+  const RUN2 = "guido-2:20261020T115500Z";
+  const CTX2: McToolContext = { seatId: "guido-2", runId: RUN2 };
+  let wt2: string;
+  const twins = (): CcConfig => {
+    const c = config();
+    const seat = c.crew?.sessions[0]?.seats[1];
+    if (seat !== undefined) seat.area = ["apps/**"];
+    return c;
+  };
+  const write2 = (rel: string, text: string) => {
+    mkdirSync(join(wt2, rel, ".."), { recursive: true });
+    writeFileSync(join(wt2, rel), text);
+  };
+  const clashLine = (paths: string, verb = "is") =>
+    `Note: ${paths} ${verb} also changed by GUIDO-2 on mc#43, which is still open; the two PRs may conflict when the second one is merged, and the operator or the controller will resolve it.`;
+
+  beforeEach(() => {
+    wt2 = join(dir, "worktrees", "guido-2-43");
+    git(clone, "worktree", "add", "-q", "-b", "feature/43-other", wt2);
+    store.upsertRun(
+      run({ id: RUN2, agentId: "guido-2", branch: "feature/43-other", ticket: "mc#43" }),
+    );
+    store.setSeatSession({
+      seatId: "guido-2",
+      runId: RUN2,
+      cliSessionId: "cli-2",
+      state: "running",
+      reason: null,
+      worktree: wt2,
+      updatedAt: NOW,
+    });
+    tools = make({ config: twins() });
+  });
+
+  it("commits a path another open run changed in its worktree, with a note", async () => {
+    write2("apps/a.ts", "theirs\n");
+    write("apps/a.ts", "mine\n");
+    const base = head();
+    const r = await commit("feat: x");
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toMatch(/^Committed /);
+    expect(r.text.endsWith(`\n\n${clashLine("apps/a.ts")}`)).toBe(true);
+    expect(head()).not.toBe(base);
+    expect(store.runCommits(RUN)).toEqual([head()]);
+  });
+
+  it("commits a path another open run committed on its branch, with a note", async () => {
+    write2("apps/a.ts", "theirs\n");
+    expect((await commit("feat: theirs", tools, CTX2)).text).toMatch(/^Committed /);
+    write("apps/a.ts", "mine\n");
+    const r = await commit("feat: x");
+    expect(r.isError).toBeUndefined();
+    expect(r.text.endsWith(`\n\n${clashLine("apps/a.ts")}`)).toBe(true);
+    expect(store.runCommits(RUN)).toEqual([head()]);
+  });
+
+  it("counts a new untracked file and a rename's source", async () => {
+    write2("apps/n.ts", "theirs\n");
+    write2("apps/a.ts", "theirs\n");
+    write("apps/n.ts", "mine\n");
+    renameSync(join(wt, "apps/a.ts"), join(wt, "apps/z.ts"));
+    const r = await commit("feat: x");
+    expect(r.isError).toBeUndefined();
+    expect(r.text.endsWith(`\n\n${clashLine("apps/a.ts and apps/n.ts", "are")}`)).toBe(true);
+  });
+
+  it("commits when the other run changed other files only", async () => {
+    write2("apps/b.ts", "theirs\n");
+    write("apps/a.ts", "mine\n");
+    expect((await commit("feat: x")).text).toMatch(/^Committed /);
+  });
+
+  it("commits without a note when the other run cannot be read", async () => {
+    write2("apps/b.ts", "theirs\n");
+    write("apps/a.ts", "mine\n");
+    const base = head();
+    const ts = make({
+      config: twins(),
+      knownSecrets: async () => [LOCAL],
+      git: async (cwd, args, common, o) => {
+        if (cwd === wt2) throw Object.assign(new Error("boom"), { stderr: `fatal: ${LOCAL}` });
+        return crewGit(cwd, args, common, o);
+      },
+    });
+    const r = await commit("feat: x", ts);
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toMatch(/^Committed /);
+    expect(r.text).not.toContain("Note:");
+    expect(head()).not.toBe(base);
+    expect(store.runCommits(RUN)).toEqual([head()]);
+    const line = logs.find((l) => l.includes("guido-2:"));
+    expect(line).toBeDefined();
+    expect(logs.join("\n")).not.toContain(LOCAL);
+  });
+
+  it("removes a file another open run's change clashes with, with a note", async () => {
+    write2("apps/a.ts", "theirs\n");
+    const base = head();
+    const r = await rm(["apps/a.ts"]);
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toMatch(/^Removed apps\/a\.ts\.\nCommitted /);
+    expect(r.text.endsWith(`\n\n${clashLine("apps/a.ts")}`)).toBe(true);
+    expect(head()).not.toBe(base);
+    expect(existsSync(join(wt, "apps/a.ts"))).toBe(false);
+  });
+});
+
+describe("commit: remove", () => {
+  const nameStatus = () => git(wt, "show", "--name-status", "--format=", "HEAD").trim();
+
+  it("removes a file in the area and commits it with the other changes", async () => {
+    write("apps/new.ts", "n\n");
+    const r = await rm(["apps/a.ts"], "chore: drop a");
+    expect(r).toEqual({
+      text: `Removed apps/a.ts.\nCommitted ${head().slice(0, 7)} on ${BRANCH}: chore: drop a`,
+    });
+    expect(nameStatus()).toBe("D\tapps/a.ts\nA\tapps/new.ts");
+    expect(existsSync(join(wt, "apps/a.ts"))).toBe(false);
+    expect(git(wt, "status", "--porcelain")).toBe("");
+  });
+
+  it("refuses before deleting anything: outside, another's area, protected, non-ASCII", async () => {
+    const base = head();
+    const r = await rm(["docs/c.md", "web/b.ts", "package.json", "apps/é.ts"]);
+    expect(r).toEqual({
+      text: [
+        "Not committed: docs/c.md is outside your area (apps/**).",
+        "Not committed: web/b.ts is in GUIDO-2's area.",
+        "Not committed: package.json is protected (build, install and CI files); ask the operator if the ticket needs it.",
+        "Not committed: apps/é.ts is not plain ASCII paths; the crew commits ASCII paths only.",
+        MC_REMOVE_REFUSED,
+      ].join("\n"),
+      isError: true,
+    });
+    expect(existsSync(join(wt, "docs/c.md"))).toBe(true);
+    expect(existsSync(join(wt, "web/b.ts"))).toBe(true);
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+    expect(store.strays()).toEqual([]);
+    expect(store.guardHits(0)).toEqual([]);
+  });
+
+  it("refuses a folder and a path that is nowhere", async () => {
+    expect(await rm(["apps", "apps/nope.ts"])).toEqual({
+      text: [
+        removeNotFileText(["apps"]),
+        removeMissingText(["apps/nope.ts"]),
+        MC_REMOVE_REFUSED,
+      ].join("\n"),
+      isError: true,
+    });
+    expect(existsSync(join(wt, "apps/a.ts"))).toBe(true);
+  });
+
+  it("refuses a tracked file under a symlinked folder, and the target survives", async () => {
+    mkdirSync(join(dir, "out"));
+    writeFileSync(join(dir, "out/a.ts"), "outside\n");
+    rmSync(join(wt, "apps"), { recursive: true });
+    symlinkSync(join(dir, "out"), join(wt, "apps"));
+    expect(await rm(["apps/a.ts"])).toEqual({
+      text: `${removeLinkedText(["apps/a.ts"])}\n${MC_REMOVE_REFUSED}`,
+      isError: true,
+    });
+    expect(existsSync(join(dir, "out/a.ts"))).toBe(true);
+  });
+
+  it("refuses a path whose case differs from the tracked file's", async () => {
+    const r = await rm(["Docs/c.md"]);
+    // linked on a case-insensitive disk, missing on a case-sensitive one: refused either way
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain(MC_REMOVE_REFUSED);
+    expect(existsSync(join(wt, "docs/c.md"))).toBe(true);
+  });
+
+  it("removes a new file outside the area and clears its stray", async () => {
+    write("docs/new.md", "n\n");
+    expect((await commit("x")).isError).toBe(true);
+    expect(store.strays()).toHaveLength(1);
+    expect(await rm(["docs/new.md"])).toEqual({ text: "Removed docs/new.md.\nNothing to commit." });
+    expect(store.strays()).toEqual([]);
+    expect(existsSync(join(wt, "docs/new.md"))).toBe(false);
+  });
+
+  it("accepts a file already gone, with no Removed line", async () => {
+    rmSync(join(wt, "apps/a.ts"));
+    expect((await rm(["apps/a.ts"])).text).toMatch(/^Committed /);
+    expect(nameStatus()).toBe("D\tapps/a.ts");
+  });
+
+  it("keeps a removal when the commit is refused for another path", async () => {
+    write("docs/c.md", "c2\n");
+    expect(await rm(["apps/a.ts"], "x")).toEqual({
+      text: `Removed apps/a.ts.\nNot committed: docs/c.md is outside your area (apps/**).\n${REVERT}`,
+      isError: true,
+    });
+    expect(existsSync(join(wt, "apps/a.ts"))).toBe(false);
+    write("docs/c.md", "c\n");
+    expect((await commit("chore: drop a")).text).toMatch(/^Committed /);
+    expect(nameStatus()).toBe("D\tapps/a.ts");
+  });
+
+  it("validates remove", async () => {
+    const base = head();
+    const bad: unknown[] = [
+      ["/a.ts"],
+      ["apps/../a.ts"],
+      ["apps/"],
+      ["./a.ts"],
+      [""],
+      ["a//b"],
+      Array.from({ length: 51 }, (_, i) => `apps/f${i}.ts`),
+      "apps/a.ts",
+      [42],
+    ];
+    for (const remove of bad) {
+      const r = await rm(remove);
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/^Invalid arguments: remove/);
+    }
+    expect(head()).toBe(base);
+    expect(existsSync(join(wt, "apps/a.ts"))).toBe(true);
+  });
+
+  it("drops duplicates", async () => {
+    expect((await rm(["apps/a.ts", "apps/a.ts"])).text).toMatch(
+      /^Removed apps\/a\.ts\.\nCommitted /,
+    );
+  });
+
+  it("describes remove in the schema", () => {
+    const t = tool("commit");
+    expect(t.inputSchema).toMatchObject({
+      required: ["message"],
+      properties: {
+        remove: {
+          type: "array",
+          maxItems: 50,
+          items: { type: "string", minLength: 1, maxLength: 1024 },
+          description:
+            "Files to delete, as paths from the repo's top (apps/server/src/old.ts); files only, not folders. Each must be in your area, unless it is a new file your branch doesn't have yet.",
+        },
+      },
+    });
+    expect(t.description).toBe(
+      "Commit every change in your worktree to your run's branch. Mission Control makes the commit: you cannot run git commit yourself. To delete files, list them in remove: Mission Control deletes them first, then commits the deletions with your other changes. A change outside your area, in another agent's area, to a protected file (build, install and CI config), or a symlink or nested repository refuses the whole commit and is reported to the operator; revert it and commit again. A file another agent's open run has also changed does not stop the commit: the answer carries a note naming that agent and ticket, as the two PRs may conflict at merge. A file in remove that may not be deleted refuses the call before anything is deleted; files deleted before a later refusal stay deleted.",
+    );
+  });
+});
+
+describe("ask_operator", () => {
+  const ask = (args: unknown) => tool("ask_operator").call(CTX, args);
+
+  it("records the question and tells the seat to carry on", async () => {
+    expect(await ask({ question: "Lanes per customer, or one global list?" })).toEqual({
+      text: "Asked the operator. The answer arrives as a message; carry on with what you can meanwhile.",
+    });
+    expect(store.openQuestions()).toEqual([
+      {
+        id: expect.any(Number),
+        agentId: "guido-1",
+        runId: RUN,
+        text: "Lanes per customer, or one global list?",
+        at: NOW,
+      },
+    ]);
+    expect(emitted).toContain("attention");
+  });
+
+  it("closes a seat's open questions when it is answered, and only that seat's", async () => {
+    await ask({ question: "one?" });
+    liveSeat("retro", "retro:1");
+    await tool("ask_operator").call({ seatId: "retro", runId: "retro:1" }, { question: "two?" });
+    store.answerQuestions("guido-1", NOW + 1);
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["two?"]);
+  });
+
+  it("refuses a run that has ended, or is not the seat's live one, recording nothing", async () => {
+    store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+    expect(await ask({ question: "one?" })).toEqual({ text: "This run has ended.", isError: true });
+    const other = await tool("ask_operator").call(
+      { seatId: "guido-1", runId: "guido-1:none" },
+      { question: "two?" },
+    );
+    expect(other).toEqual({ text: "This run has ended.", isError: true });
+    expect(store.openQuestions()).toEqual([]);
+  });
+
+  it("validates the question: 1 to 2000 characters, not blank", async () => {
+    for (const bad of [{}, { question: "" }, { question: " " }, { question: "x".repeat(2001) }]) {
+      const r = await ask(bad);
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/^Invalid arguments: /);
+    }
+    expect(store.openQuestions()).toEqual([]);
+  });
+});
+
+describe("through /mcp", () => {
+  it("offers a writer seat every tool and a read-only seat ask_operator and report_evidence; commit runs end to end", async () => {
+    const cfg = config();
+    const tokens = new RunTokens();
+    const writer = tokens.issue("guido-1", RUN);
+    const reader = tokens.issue("retro", "retro:1");
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      tokens,
+      mcpTools: () => tools,
+      seatMode: (id) => crewSeatMode(cfg, id),
+    });
+    await app.ready();
+    try {
+      const rpc = (tok: string, method: string, params?: unknown) =>
+        app
+          .inject({
+            method: "POST",
+            url: "/mcp",
+            headers: { "content-type": "application/json", authorization: `Bearer ${tok}` },
+            payload: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          })
+          .then((r) => r.json());
+      const names = async (tok: string) =>
+        (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
+      expect(await names(writer)).toEqual(["commit", "ask_operator", "report_evidence"]);
+      expect(await names(reader)).toEqual(["ask_operator", "report_evidence"]);
+      write("apps/a.ts", "a2\n");
+      const r = await rpc(writer, "tools/call", {
+        name: "commit",
+        arguments: { message: "feat: e2e" },
+      });
+      expect(r.result.content[0].text).toBe(
+        `Committed ${head().slice(0, 7)} on ${BRANCH}: feat: e2e`,
+      );
+      const denied = await rpc(reader, "tools/call", {
+        name: "commit",
+        arguments: { message: "x" },
+      });
+      expect(denied.error.message).toBe("unknown tool");
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("commit: what it refuses beyond areas (fix round 1)", () => {
+  it("sees a nested repo that .gitmodules says to ignore, refuses it and leaves nothing staged", async () => {
+    writeFileSync(
+      join(wt, ".gitmodules"),
+      '[submodule "docs/sub"]\n\tpath = docs/sub\n\turl = ./sub\n\tignore = all\n',
+    );
+    git(wt, "add", ".gitmodules");
+    git(wt, "commit", "-qm", "modules");
+    const base = head();
+    nestedRepo("docs/sub");
+    const r = await commit("feat: x");
+    expect(r).toEqual({
+      text: `Not committed: docs/sub is outside your area (apps/**).\n${REVERT}`,
+      isError: true,
+    });
+    expect(staged()).toBe("");
+    expect(git(wt, "ls-files", "-s", "docs/sub")).toBe("");
+    // the next in-area commit carries only its own file
+    write("apps/a.ts", "a2\n");
+    rmSync(join(wt, "docs/sub"), { recursive: true, force: true });
+    expect((await commit("feat: y")).text).toMatch(/^Committed /);
+    expect(git(wt, "diff", "--name-only", base, "HEAD").trim()).toBe("apps/a.ts");
+  });
+
+  it("resets the index on Nothing to commit, too", async () => {
+    write("apps/a.ts", "a2\n");
+    const blind: McToolsDeps["git"] = async (cwd, args, common, o) =>
+      args[0] === "diff" ? "" : crewGit(cwd, args, common, o);
+    expect(await commit("feat: x", make({ git: blind }))).toEqual({ text: "Nothing to commit." });
+    expect(staged()).toBe("");
+  });
+
+  it("resets the index when a step after the add throws", async () => {
+    write("apps/a.ts", "a2\n");
+    const broken: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      if (args[0] === "diff") throw new Error("diff broke");
+      return crewGit(cwd, args, common, o);
+    };
+    await expect(commit("feat: x", make({ git: broken }))).rejects.toThrow("diff broke");
+    expect(staged()).toBe("");
+  });
+
+  it("refuses a nested repository inside the area", async () => {
+    const base = head();
+    nestedRepo("apps/sub");
+    expect(await commit("feat: x")).toEqual({
+      text: `Not committed: apps/sub ${SPECIAL}\n${REVERT}`,
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+    expect(store.strays()).toEqual([]);
+  });
+
+  it("refuses symlinks inside the area, absolute or relative", async () => {
+    const base = head();
+    symlinkSync("/etc/passwd", join(wt, "apps/pw"));
+    symlinkSync("../docs", join(wt, "apps/docslink"));
+    write("apps/a.ts", "a2\n");
+    expect((await commit("feat: x")).text).toBe(
+      `Not committed: apps/docslink and apps/pw ${SPECIALS}\n${REVERT}`,
+    );
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+  });
+
+  it("refuses a file turned into a symlink", async () => {
+    rmSync(join(wt, "apps/a.ts"));
+    symlinkSync("/etc/hosts", join(wt, "apps/a.ts"));
+    expect((await commit("feat: x")).text).toBe(`Not committed: apps/a.ts ${SPECIAL}\n${REVERT}`);
+  });
+
+  it("refuses a symlink named for a protected folder as protected", async () => {
+    symlinkSync("evil", join(wt, "apps/.claude"));
+    expect((await commit("feat: x")).text).toBe(
+      `Not committed: apps/.claude is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+    );
+  });
+
+  it("matches protected files whatever their case (APFS)", async () => {
+    write("apps/x/Package.json", "{}\n");
+    write("apps/Vitest.config.ts", "x\n");
+    expect((await commit("feat: x")).text).toBe(
+      `Not committed: apps/Vitest.config.ts and apps/x/Package.json are protected (build, install and CI files); ask the operator if the ticket needs them.\n${REVERT}`,
+    );
+  });
+
+  it("gives add and commit the slow timeout", async () => {
+    write("apps/a.ts", "a2\n");
+    const seen: [string, number | undefined][] = [];
+    const spy: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      const sub = args.find((a) => a === "add" || a === "commit");
+      if (sub !== undefined) seen.push([sub, o?.timeoutMs]);
+      return crewGit(cwd, args, common, o);
+    };
+    await commit("feat: x", make({ git: spy }));
+    expect(seen).toEqual([
+      ["add", CREW_GIT_SLOW_MS],
+      ["commit", CREW_GIT_SLOW_MS],
+    ]);
+  });
+
+  it.each(["add", "commit"])(
+    "answers a timed-out %s with a fixed text, index reset",
+    async (sub) => {
+      const base = head();
+      write("apps/a.ts", "a2\n");
+      // execFile kills a child at its timeout and rejects with `killed: true`; throwing that
+      // here keeps the test independent of how fast git happens to be on the machine.
+      const slow: McToolsDeps["git"] = async (cwd, args, common, o) => {
+        if (args.includes(sub)) throw Object.assign(new Error("git timed out"), { killed: true });
+        return crewGit(cwd, args, common, o);
+      };
+      expect(await commit("feat: x", make({ git: slow }))).toEqual({
+        text: "Not committed: git took too long to stage or commit your changes, so the index was reset. Try again; if it keeps happening, tell the operator.",
+        isError: true,
+      });
+      expect(head()).toBe(base);
+      expect(staged()).toBe("");
+    },
+  );
+
+  it("checks the run again inside the clone's queue: a run that ended while queued commits nothing", async () => {
+    write("apps/a.ts", "a2\n");
+    write("docs/c.md", "c2\n");
+    let ran = 0;
+    const counting: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      ran++;
+      return crewGit(cwd, args, common, o);
+    };
+    const ts = make({
+      git: counting,
+      inClone: async (_checkout, fn) => {
+        // the run ends while the commit waits behind a slow checkout
+        store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+        return fn();
+      },
+    });
+    expect(await commit("feat: x", ts)).toEqual({ text: "This run has ended.", isError: true });
+    expect(ran).toBe(0);
+    expect(store.strays()).toEqual([]);
+  });
+
+  it("tells a read-only seat it cannot commit", async () => {
+    liveSeat("retro", "retro:1");
+    expect(await commit("feat: x", tools, { seatId: "retro", runId: "retro:1" })).toEqual({
+      text: "Read-only roles cannot write: commit is for writer seats.",
+      isError: true,
+    });
+  });
+});
+
+describe("commit: fix round 2", () => {
+  const PROT_ONE =
+    "is protected (build, install and CI files); ask the operator if the ticket needs it.";
+
+  it("refuses any path that is not plain ASCII, wherever it is", async () => {
+    const base = head();
+    write("apps/x/package.jſon", "{}\n");
+    write("apps/viteﬆ.config.ts", "x\n");
+    write("apps/ok.ts", "ok\n");
+    const r = await commit("feat: x");
+    expect(r).toEqual({
+      text: `Not committed: apps/viteﬆ.config.ts and apps/x/package.jſon are not plain ASCII paths; the crew commits ASCII paths only.\n${REVERT}`,
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+  });
+
+  it("refuses a rename to a non-ASCII name, and a non-ASCII path outside the area without a stray", async () => {
+    renameSync(join(wt, "apps/a.ts"), join(wt, "apps/ä.ts"));
+    expect((await commit("feat: x")).text).toBe(
+      `Not committed: apps/ä.ts is not plain ASCII paths; the crew commits ASCII paths only.\n${REVERT}`,
+    );
+    renameSync(join(wt, "apps/ä.ts"), join(wt, "apps/a.ts"));
+    write(".huſky/pre-commit", "x\n");
+    expect((await commit("feat: x")).text).toBe(
+      `Not committed: .huſky/pre-commit is not plain ASCII paths; the crew commits ASCII paths only.\n${REVERT}`,
+    );
+    expect(store.strays()).toEqual([]);
+  });
+
+  it("protects .gitmodules", async () => {
+    write(".gitmodules", '[submodule "apps/sub"]\n\tpath = apps/sub\n\turl = ./sub\n');
+    expect((await commit("feat: x")).text).toBe(
+      `Not committed: .gitmodules ${PROT_ONE}\n${REVERT}`,
+    );
+  });
+
+  it("names ten symlinks, then and {n} more", async () => {
+    const names = Array.from({ length: 12 }, (_, i) => `apps/l${String(i + 1).padStart(2, "0")}`);
+    for (const n of names) symlinkSync("a.ts", join(wt, n));
+    expect((await commit("feat: x")).text).toBe(
+      `Not committed: ${names.slice(0, 10).join(", ")} and 2 more ${SPECIALS}\n${REVERT}`,
+    );
+  });
+
+  it("orders a mixed answer: other-area, link, protected", async () => {
+    write("web/b.ts", "b2\n");
+    symlinkSync("a.ts", join(wt, "apps/link"));
+    write("apps/package.json", "{}\n");
+    expect((await commit("feat: x")).text).toBe(
+      [
+        "Not committed: web/b.ts is in GUIDO-2's area.",
+        `Not committed: apps/link ${SPECIAL}`,
+        `Not committed: apps/package.json ${PROT_ONE}`,
+        REVERT,
+      ].join("\n"),
+    );
+  });
+
+  it("refuses an in-area nested repo that .gitmodules says to ignore", async () => {
+    writeFileSync(
+      join(wt, ".gitmodules"),
+      '[submodule "apps/sub"]\n\tpath = apps/sub\n\turl = ./sub\n\tignore = all\n',
+    );
+    git(wt, "add", ".gitmodules");
+    git(wt, "commit", "-qm", "modules");
+    nestedRepo("apps/sub");
+    expect(await commit("feat: x")).toEqual({
+      text: `Not committed: apps/sub ${SPECIAL}\n${REVERT}`,
+      isError: true,
+    });
+    expect(staged()).toBe("");
+  });
+
+  it("refuses files put in a former submodule's folder, rather than answer Nothing to commit", async () => {
+    const blob = git(wt, "rev-parse", "HEAD").trim();
+    git(wt, "update-index", "--add", "--cacheinfo", `160000,${blob},apps/sub`);
+    git(wt, "commit", "-qm", "gitlink");
+    const base = head();
+    write("apps/sub/x.ts", "x\n");
+    expect(await commit("feat: x")).toEqual({
+      text: `Not committed: apps/sub is a former submodule folder; the files in it cannot be committed here (this check covers the whole repository, not only your paths).\n${REVERT}`,
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+    // an empty folder there is the ordinary unchecked-out submodule: nothing to say
+    rmSync(join(wt, "apps/sub/x.ts"));
+    expect(await commit("feat: x")).toEqual({ text: "Nothing to commit." });
+  });
+
+  it("gives the staged-paths diff the slow timeout, and answers an overflow with a fixed text", async () => {
+    write("apps/a.ts", "a2\n");
+    const seen: (number | undefined)[] = [];
+    const caps: (number | undefined)[] = [];
+    const spy: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      if (args[0] === "diff") seen.push(o?.timeoutMs);
+      if (args[0] === "diff") caps.push(o?.maxBuffer);
+      return crewGit(cwd, args, common, o);
+    };
+    await commit("feat: x", make({ git: spy }));
+    // the listing, then the secret scan's patch (with the push scan's 64 MiB cap)
+    expect(seen).toEqual([CREW_GIT_SLOW_MS, CREW_GIT_SLOW_MS]);
+    expect(caps).toEqual([undefined, 64 * 1024 * 1024]);
+
+    // the scan's patch passing its cap answers the same way
+    write("apps/a.ts", "a2b\n");
+    const before = head();
+    const tinyScan: McToolsDeps["git"] = async (cwd, args, common, o) =>
+      crewGit(cwd, args, common, args.includes("--text") ? { ...o, maxBuffer: 10 } : o);
+    expect((await commit("feat: x", make({ git: tinyScan }))).text).toMatch(
+      /^Not committed: the change is too large for the commit tool to check/,
+    );
+    expect(head()).toBe(before);
+    expect(staged()).toBe("");
+
+    write("apps/a.ts", "a3\n");
+    const base = head();
+    const tiny: McToolsDeps["git"] = async (cwd, args, common, o) =>
+      crewGit(cwd, args, common, args[0] === "diff" ? { ...o, maxBuffer: 10 } : o);
+    expect(await commit("feat: x", make({ git: tiny }))).toEqual({
+      text: "Not committed: the change is too large for the commit tool to check, so the index was reset. Commit fewer files at once; if it keeps happening, tell the operator.",
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+  });
+
+  it("a commit that timed out after HEAD moved is recorded and answered as committed", async () => {
+    write("apps/a.ts", "a2\n");
+    const late: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      const out = await crewGit(cwd, args, common, o);
+      if (args.includes("commit")) throw Object.assign(new Error("timed out"), { killed: true });
+      return out;
+    };
+    const r = await commit("feat: late", make({ git: late }));
+    const sha = head();
+    expect(r).toEqual({ text: `Committed ${sha.slice(0, 7)} on ${BRANCH}: feat: late` });
+    expect(store.runCommits(RUN)).toEqual([sha]);
+    expect(git(wt, "status", "--porcelain")).toBe("");
+  });
+});
+
+describe("commit: fix round 3", () => {
+  it.each([
+    ["a tab", "apps/a\tb.ts"],
+    ["an ESC byte", "apps/\u001b[31mred.ts"],
+    ["a DEL byte", "apps/del\u007f.ts"],
+  ])("refuses a path holding %s as not plain ASCII", async (_what, path) => {
+    const base = head();
+    write(path, "x\n");
+    expect(await commit("feat: x")).toEqual({
+      text: `Not committed: ${path} is not plain ASCII paths; the crew commits ASCII paths only.\n${REVERT}`,
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+  });
+
+  it("lists the index with its own 64 MiB cap, and answers an overflow with its own text", async () => {
+    write("apps/a.ts", "a2\n");
+    const caps: (number | undefined)[] = [];
+    const spy: McToolsDeps["git"] = async (cwd, args, common, o) => {
+      if (args[0] === "ls-files") caps.push(o?.maxBuffer);
+      return crewGit(cwd, args, common, o);
+    };
+    await commit("feat: x", make({ git: spy }));
+    expect(caps).toEqual([64 * 1024 * 1024]);
+
+    write("apps/a.ts", "a3\n");
+    const base = head();
+    const tiny: McToolsDeps["git"] = async (cwd, args, common, o) =>
+      crewGit(cwd, args, common, args[0] === "ls-files" ? { ...o, maxBuffer: 10 } : o);
+    expect(await commit("feat: x", make({ git: tiny }))).toEqual({
+      text: "Not committed: the commit tool could not list the index; ask the operator.",
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+  });
+});
+
+// ---------- Task 9: push and draft_pr ----------
+
+/** A GitHub-shaped token (the pattern scan) and a local credential (the verbatim scan). */
+const TOKEN = `ghp_${"A1b2".repeat(9)}`;
+const LOCAL = "mc-local-credential-0123456789";
+const PR_URL = "https://github.com/o/mc/pull/7";
+const GH_ENV_KEYS = ["GH_PROMPT_DISABLED", "HOME", "PATH"];
+
+/** A fake gh: answers from state.json by its first two words, and records each call. */
+const FAKE_GH = `#!${process.execPath}
+const fs = require("node:fs");
+const path = require("node:path");
+const here = path.dirname(fs.realpathSync(process.argv[1]));
+const args = process.argv.slice(2);
+const call = { args, cwd: process.cwd(), env: process.env };
+const bodyArg = args.find((a) => a.startsWith("--body-file="));
+if (bodyArg) {
+  const f = bodyArg.slice("--body-file=".length);
+  call.bodyFile = f;
+  call.body = fs.readFileSync(f, "utf8");
+  call.mode = (fs.statSync(f).mode & 0o777).toString(8);
+}
+fs.appendFileSync(path.join(here, "calls.jsonl"), JSON.stringify(call) + "\\n");
+const state = JSON.parse(fs.readFileSync(path.join(here, "state.json"), "utf8"));
+const key = args.slice(0, 2).join(" ");
+const r = state[key] || { code: 0, stdout: "" };
+if (r.sleepMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, r.sleepMs);
+const created = path.join(here, "created");
+if (key === "pr create" && r.marksOpen) fs.writeFileSync(created, (r.stdout || "").trim());
+if (key === "pr list" && fs.existsSync(created)) {
+  r.stdout = JSON.stringify([{ url: fs.readFileSync(created, "utf8") }]);
+}
+process.stdout.write(r.stdout || "");
+process.stderr.write(r.stderr || "");
+process.exit(r.code || 0);
+`;
+
+describe("commit: secrets (final review m6)", () => {
+  const SECRET_TAIL = "Take it out, then commit again.";
+
+  it("refuses a staged token before any commit exists: file, line and kind, never the token", async () => {
+    const base = head();
+    write("apps/a.ts", `const a = 1;\nconst t = "${TOKEN}";\n`);
+    const r = await commit("feat: x");
+    expect(r).toEqual({
+      text: `Not committed: apps/a.ts:2 looks like a GitHub token. ${SECRET_TAIL}`,
+      isError: true,
+    });
+    expect(r.text).not.toContain(TOKEN);
+    // as the other refusals leave them: no commit, nothing staged, the seat's file untouched
+    expect(head()).toBe(base);
+    expect(store.runCommits(RUN)).toEqual([]);
+    expect(staged()).toBe("");
+    expect(readFileSync(join(wt, "apps", "a.ts"), "utf8")).toContain(TOKEN);
+    expect(store.guardHits(0).map((h) => [h.agentId, h.runId, h.rule, h.text])).toEqual([
+      ["guido-1", RUN, "secret", "No secrets in a push: mc commit"],
+    ]);
+    expect(emitted).toContain("guard");
+    // the seat takes it out and commits
+    write("apps/a.ts", "const a = 1;\n");
+    expect((await commit("feat: x")).text).toMatch(/^Committed /);
+  });
+
+  it("refuses a token in the message, by its line", async () => {
+    const base = head();
+    write("apps/a.ts", "a2\n");
+    expect(await commit(`feat: x\n\nkey ${TOKEN}`)).toEqual({
+      text: `Not committed: commit message:3 looks like a GitHub token. ${SECRET_TAIL}`,
+      isError: true,
+    });
+    expect(head()).toBe(base);
+    expect(staged()).toBe("");
+  });
+
+  it("refuses a known secret verbatim, and a file under * -diff read as stored", async () => {
+    writeFileSync(join(clone, ".git", "info", "attributes"), "* -diff\n");
+    write("apps/blob.dat", `bin\n${LOCAL}\n`);
+    expect(await commit("feat: x", make({ knownSecrets: async () => [LOCAL] }))).toEqual({
+      text: `Not committed: apps/blob.dat:2 looks like a local credential. ${SECRET_TAIL}`,
+      isError: true,
+    });
+    expect(staged()).toBe("");
+  });
+});
+
+interface GhCall {
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  body?: string;
+  bodyFile?: string;
+  mode?: string;
+}
+
+describe("push and draft_pr", () => {
+  let origin: string;
+  let ghDir: string;
+  let known: string[];
+
+  const ghState = (
+    state: Record<
+      string,
+      { code?: number; stdout?: string; stderr?: string; sleepMs?: number; marksOpen?: boolean }
+    >,
+  ) => writeFileSync(join(ghDir, "state.json"), JSON.stringify(state));
+  const ghCalls = (): GhCall[] => {
+    try {
+      return readFileSync(join(ghDir, "calls.jsonl"), "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as GhCall);
+    } catch {
+      return [];
+    }
+  };
+  const pushDeps = (over: Partial<McToolsDeps> = {}) =>
+    deps({ gh: createGh(join(ghDir, "gh")), knownSecrets: async () => known, ...over });
+  // the MCP server no longer serves push or draft_pr (the engine calls the two functions), so the
+  // suite reaches them through tools it builds itself, which only pass the run on
+  const ts = (over: Partial<McToolsDeps> = {}): McTool[] => {
+    const d = pushDeps(over);
+    const direct = (name: string, call: McTool["call"]): McTool => ({
+      name,
+      description: "",
+      inputSchema: { type: "object" },
+      modes: ["writer"],
+      call,
+    });
+    return [
+      ...createMcTools(d),
+      direct("push", async (ctx) => pushRun(d, ctx.runId)),
+      direct("draft_pr", async (ctx, args) =>
+        openDraftPr(d, ctx.runId, args as { title: string; body: string }),
+      ),
+    ];
+  };
+  const push = (t: McTool[] = ts(), ctx: McToolContext = CTX) => tool("push", t).call(ctx, {});
+  const pr = (title: string, body: string, t: McTool[] = ts(), ctx: McToolContext = CTX) =>
+    tool("draft_pr", t).call(ctx, { title, body });
+  const remoteTip = (branch = BRANCH): string | null => {
+    try {
+      return git(origin, "rev-parse", "--verify", "-q", `refs/heads/${branch}`).trim();
+    } catch {
+      return null;
+    }
+  };
+  const commitOk = async (rel: string, text: string, message = `feat: ${rel}`, ctx = CTX) => {
+    write(rel, text);
+    const r = await tool("commit", ts()).call(ctx, { message });
+    expect(r.text).toMatch(/^Committed /);
+    return head();
+  };
+  it("pushes a removal commit", async () => {
+    const r = await rm(["apps/a.ts"], "chore: drop a", ts());
+    expect(r.text).toMatch(/^Removed apps\/a\.ts\.\nCommitted /);
+    expect((await push()).text).toBe(`Pushed ${head().slice(0, 7)} to ${BRANCH}.`);
+    expect(git(origin, "ls-tree", "-r", "--name-only", BRANCH)).not.toContain("apps/a.ts");
+  });
+
+  /**
+   * A commit the hub recorded whose message the commit tool would now refuse (one made before its
+   * check existed): the push's message check is the backstop for it.
+   */
+  const hubRecorded = (message: string) => {
+    write("apps/a.ts", `${message.length}\n`);
+    git(wt, "commit", "-qam", message);
+    const sha = head();
+    store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha, at: NOW });
+    return sha;
+  };
+  /**
+   * A recorded commit holding a secret the commit tool would now refuse (one made before its scan
+   * existed, or with a known secret it could not read in time): the push's scan is the backstop.
+   */
+  const recordedWithSecret = (rel: string, text: string, message = `feat: ${rel}`) => {
+    write(rel, text);
+    git(wt, "add", "-A");
+    git(wt, "commit", "-qm", message);
+    const sha = head();
+    store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha, at: NOW });
+    return sha;
+  };
+  /** Another clone of origin, as the operator's machine: commits there reach origin with raw git. */
+  const operatorPushes = (file: string, branch = BRANCH) => {
+    const other = join(dir, `operator-${Math.random().toString(36).slice(2)}`);
+    git(dir, "clone", "-q", origin, other);
+    git(other, "checkout", "-q", branch);
+    writeFileSync(join(other, file), "operator\n");
+    git(other, "add", "-A");
+    git(other, "commit", "-qm", "the operator's change");
+    git(other, "push", "-q", "origin", branch);
+    return git(other, "rev-parse", "HEAD").trim();
+  };
+  /** A later run of the same seat on the same ticket (the earlier one ended). */
+  const nextRun = (id: string) => {
+    store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+    store.upsertRun(run({ id, seq: 2 }));
+    const row = store.seatSession("guido-1");
+    if (row === null) throw new Error("no seat row");
+    store.setSeatSession({ ...row, runId: id });
+    return { seatId: "guido-1", runId: id };
+  };
+  /** Records the stdout of each git subcommand named in `subs`. */
+  const recording =
+    (subs: string[], seen: Record<string, string[]>): McToolsDeps["git"] =>
+    async (cwd, args, common, o) => {
+      const out = await crewGit(cwd, args, common, o);
+      const sub = args.find((a) => subs.includes(a));
+      if (sub !== undefined) seen[sub] = [...(seen[sub] ?? []), out];
+      return out;
+    };
+  const noSecretAnywhere = (answers: string[]) => {
+    const everything = [
+      ...logs,
+      ...answers,
+      ...store.guardHits(0).map((h) => h.text),
+      ...store.crewErrors().map((e) => e.text),
+      ...store.openQuestions().map((q) => q.text),
+    ].join("\n");
+    expect(everything).not.toContain(TOKEN);
+    expect(everything).not.toContain(LOCAL);
+  };
+
+  beforeEach(() => {
+    origin = join(dir, "origin.git");
+    git(dir, "init", "-q", "--bare", "-b", "main", origin);
+    git(clone, "remote", "add", "origin", origin);
+    git(clone, "push", "-q", "origin", "main");
+    git(clone, "fetch", "-q", "origin");
+    ghDir = join(dir, "fakegh");
+    mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
+    ghState({ "pr list": { stdout: "[]\n" }, "pr create": { stdout: `${PR_URL}\n` } });
+    known = [LOCAL];
+  });
+
+  describe("push", () => {
+    it("pushes the run's hub-made commits as a plain fast-forward and records the push", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      const pushes: string[][] = [];
+      const spy: McToolsDeps["git"] = async (cwd, args, common, o) => {
+        if (args.includes("push")) pushes.push(args);
+        return crewGit(cwd, args, common, o);
+      };
+      expect(await push(ts({ git: spy }))).toEqual({
+        text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
+      });
+      expect(remoteTip()).toBe(sha);
+      expect(store.runPush(RUN)).toEqual({ sha, at: NOW });
+      // never forced: no +, no --force, no lease, no tags
+      expect(pushes).toEqual([
+        [
+          "push",
+          "--porcelain",
+          "--no-follow-tags",
+          "--no-recurse-submodules",
+          "origin",
+          `${sha}:refs/heads/${BRANCH}`,
+        ],
+      ]);
+      expect(remoteTip("main")).toBe(git(clone, "rev-parse", "main").trim());
+    });
+
+    it("gives every slow step the slow timeout and runs in the clone's queue", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      const seen: [string, number | undefined][] = [];
+      const queued: string[] = [];
+      const spy: McToolsDeps["git"] = async (cwd, args, common, o) => {
+        const sub = args.find((a) => ["ls-remote", "fsck", "log", "push"].includes(a));
+        if (sub !== undefined) seen.push([sub, o?.timeoutMs]);
+        return crewGit(cwd, args, common, o);
+      };
+      await push(
+        ts({
+          git: spy,
+          inClone: async (checkout, fn) => {
+            queued.push(checkout);
+            return fn();
+          },
+        }),
+      );
+      expect(queued).toEqual([clone]);
+      expect(new Set(seen.map(([sub]) => sub))).toEqual(
+        new Set(["ls-remote", "fsck", "log", "push"]),
+      );
+      for (const [, ms] of seen) expect(ms).toBe(CREW_GIT_SLOW_MS);
+    });
+
+    it("answers Nothing to push for a branch with no new commits", async () => {
+      expect(await push()).toEqual({ text: "Nothing to push." });
+      expect(remoteTip()).toBeNull();
+      expect(store.runPush(RUN)).toBeNull();
+    });
+
+    it("answers Already on origin, and records it, when origin is at the tip (a push cut off and retried)", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      // the push lands, then git is killed before it answers
+      const cut: McToolsDeps["git"] = async (cwd, args, common, o) => {
+        const out = await crewGit(cwd, args, common, o);
+        if (args.includes("push")) throw Object.assign(new Error("timed out"), { killed: true });
+        return out;
+      };
+      const first = await push(ts({ git: cut }));
+      expect(first).toEqual({
+        text: "Not pushed: git could not push to origin. Check the connection and your GitHub access, then message the seat to try again.",
+        isError: true,
+      });
+      expect(remoteTip()).toBe(sha);
+      expect(store.runPush(RUN)).toBeNull();
+      expect(await push()).toEqual({ text: `Already on origin: ${sha.slice(0, 7)}.` });
+      expect(store.runPush(RUN)).toEqual({ sha, at: NOW });
+      // and again, with nothing new
+      expect(await push()).toEqual({ text: `Already on origin: ${sha.slice(0, 7)}.` });
+    });
+
+    it("refuses when origin's branch moved, and never overwrites it", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      await push();
+      const theirs = operatorPushes("docs/operator.md");
+      await commitOk("apps/a.ts", "a3\n");
+      expect(await push()).toEqual({
+        text: originMovedText(BRANCH),
+        isError: true,
+      });
+      expect(remoteTip()).toBe(theirs);
+    });
+
+    it("answers git's own non-fast-forward refusal (origin moved after the check) with the same text", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      await push();
+      await commitOk("apps/a.ts", "a3\n");
+      let theirs = "";
+      const race: McToolsDeps["git"] = async (cwd, args, common, o) => {
+        if (args.includes("push")) theirs = operatorPushes("docs/race.md");
+        return crewGit(cwd, args, common, o);
+      };
+      expect(await push(ts({ git: race }))).toEqual({
+        text: originMovedText(BRANCH),
+        isError: true,
+      });
+      expect(remoteTip()).toBe(theirs);
+    });
+
+    it("refuses a commit made with raw git in the clone (a bypass of the commit tool), naming it for the operator and raising no item of its own", async () => {
+      write("apps/a.ts", "raw\n");
+      git(wt, "commit", "-qam", "raw commit");
+      const raw = head();
+      emitted = [];
+      expect(await push()).toEqual({ text: FOREIGN(raw), isError: true });
+      expect(remoteTip()).toBeNull();
+      expect(store.crewErrors()).toEqual([]);
+      expect(emitted).not.toContain("attention");
+    });
+
+    it("refuses a branch whose tip is not the last commit the hub recorded", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      write("apps/a.ts", "on top\n");
+      git(wt, "commit", "-qam", "on top");
+      expect((await push()).text).toBe(FOREIGN(head()));
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("refuses a merge commit", async () => {
+      operatorPushes("docs/main.md", "main");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "-q", "--no-ff", "-m", "merge main", "origin/main");
+      const merge = head();
+      store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
+      expect(await push()).toEqual({
+        text: MC_PUSH_MERGE,
+        isError: true,
+      });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("refuses a clone that fails git fsck, for the operator, raising no item of its own", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      mkdirSync(join(clone, ".git", "objects", "ab"), { recursive: true });
+      writeFileSync(
+        join(clone, ".git", "objects", "ab", "cdef0123456789abcdef0123456789abcdef01"),
+        "garbage",
+      );
+      expect(await push()).toEqual({
+        text: "Not pushed: the session clone failed git fsck. Check the clone's health, then message the seat.",
+        isError: true,
+      });
+      expect(remoteTip()).toBeNull();
+      expect(store.crewErrors()).toEqual([]);
+    });
+
+    it("refuses a token in an added file: where, line and kind, a guard hit, never the token", async () => {
+      recordedWithSecret("apps/x.ts", `const a = 1;\nconst t = "${TOKEN}";\n`);
+      const r = await push();
+      expect(r).toEqual({
+        text: `Not pushed: apps/x.ts:2 looks like a GitHub token. ${SECRET_ASK}`,
+        isError: true,
+      });
+      expect(remoteTip()).toBeNull();
+      expect(store.guardHits(0).map((h) => [h.agentId, h.runId, h.rule, h.text])).toEqual([
+        ["guido-1", RUN, "secret", "No secrets in a push: Mission Control's push"],
+      ]);
+      expect(emitted).toContain("guard");
+      noSecretAnywhere([r.text]);
+    });
+
+    it("raises no Needs-you item of its own for a secret: the engine's Blocked note is the one", async () => {
+      recordedWithSecret("apps/x.ts", `const a = 1;\nconst t = "${TOKEN}";\n`);
+      emitted = [];
+      const r = await push();
+      expect(r.isError).toBe(true);
+      expect(store.openQuestions()).toEqual([]);
+      expect(store.crewErrors()).toEqual([]);
+      expect(emitted).not.toContain("attention");
+      const items = attentionItems(config(), store, NOW, NO_LOCK).filter(
+        (i) => i.kind === "question" || i.kind === "error",
+      );
+      expect(items).toEqual([]);
+      noSecretAnywhere([r.text]);
+    });
+
+    it("names a secret in a commit message by the commit, in the refusal", async () => {
+      const sha = recordedWithSecret("apps/a.ts", "a2\n", `feat: x\n\nkey ${LOCAL}`);
+      const r = await push();
+      expect(r.text).toBe(
+        `Not pushed: commit ${sha.slice(0, 7)}:3 looks like a local credential. ${SECRET_ASK}`,
+      );
+      expect(store.openQuestions()).toEqual([]);
+      noSecretAnywhere([r.text]);
+    });
+
+    it("raises no question for a push that passes the scan", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toMatch(/^Pushed /);
+      expect(store.openQuestions()).toEqual([]);
+    });
+
+    it("finds a known secret in a file under * -diff", async () => {
+      writeFileSync(join(clone, ".git", "info", "attributes"), "* -diff\n");
+      recordedWithSecret("apps/blob.dat", `bin\n${LOCAL}\n`);
+      expect((await push()).text).toBe(
+        `Not pushed: apps/blob.dat:2 looks like a local credential. ${SECRET_ASK}`,
+      );
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("finds a token in a commit later reverted", async () => {
+      recordedWithSecret("apps/x.ts", `${TOKEN}\n`);
+      await commitOk("apps/x.ts", "clean\n", "fix: drop it");
+      expect((await push()).text).toBe(
+        `Not pushed: apps/x.ts:1 looks like a GitHub token. ${SECRET_ASK}`,
+      );
+    });
+
+    it("finds a token under a quoted path", async () => {
+      recordedWithSecret('apps/q"x.ts', `${TOKEN}\n`);
+      expect((await push()).text).toBe(
+        `Not pushed: apps/q"x.ts:1 looks like a GitHub token. ${SECRET_ASK}`,
+      );
+    });
+
+    it("reads a rename as the whole file added (--no-renames): it fails closed", async () => {
+      git(clone, "checkout", "-q", "main");
+      writeFileSync(join(clone, "apps", "old.ts"), `${LOCAL}\n`);
+      git(clone, "add", "-A");
+      git(clone, "commit", "-qm", "the operator's fixture");
+      git(clone, "push", "-q", "origin", "main");
+      git(wt, "merge", "-q", "--ff-only", "main");
+      renameSync(join(wt, "apps", "old.ts"), join(wt, "apps", "new.ts"));
+      // the commit tool reads it the same way now; a commit made before that is pushed so
+      git(wt, "add", "-A");
+      git(wt, "commit", "-qm", "refactor: move");
+      store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: head(), at: NOW });
+      expect((await push()).text).toBe(
+        `Not pushed: apps/new.ts:1 looks like a local credential. ${SECRET_ASK}`,
+      );
+    });
+
+    it("finds a token in a commit message", async () => {
+      const sha = recordedWithSecret("apps/a.ts", "a2\n", `feat: x\n\nkey ${TOKEN}`);
+      expect((await push()).text).toBe(
+        `Not pushed: commit ${sha.slice(0, 7)}:3 looks like a GitHub token. ${SECRET_ASK}`,
+      );
+    });
+
+    it("finds a token a commit message hides on a fake diff's removed line", async () => {
+      const message = `feat: x\n\ndiff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-${TOKEN}\n+ok`;
+      const sha = recordedWithSecret("apps/a.ts", "a2\n", message);
+      expect((await push()).text).toBe(
+        `Not pushed: commit ${sha.slice(0, 7)}:7 looks like a GitHub token. ${SECRET_ASK}`,
+      );
+    });
+
+    it.each([
+      ["a closing keyword", "fix: x\n\nFixes #42", "Fixes #42"],
+      ["another issue", "feat: x, see #7", "#7"],
+      ["another repo's issue", "feat: x, like o/other#3", "o/other#3"],
+      ["a mention", "feat: x, thanks @octocat", "@octocat"],
+    ])("refuses %s in a commit message (the push's backstop)", async (_what, message, what) => {
+      const sha = hubRecorded(message);
+      expect(await push()).toEqual({
+        text: `Not pushed: commit ${sha.slice(0, 7)}'s message would notify or close something on GitHub (${what}). The seat cannot rewrite a commit, so only you can reword it; then message the seat to carry on.`,
+        isError: true,
+      });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("passes the run's own issue and an email address in a message", async () => {
+      const sha = await commitOk(
+        "apps/a.ts",
+        "a2\n",
+        "feat: x (#42)\n\nUses `mc` core; reported by you@example.com.",
+      );
+      expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+    });
+
+    it("a later run on a ticket already on origin sends only its own commits; the operator's there are not re-checked", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      await push();
+      operatorPushes("docs/operator.md");
+      git(clone, "fetch", "-q", "origin");
+      git(wt, "merge", "-q", "--ff-only", `origin/${BRANCH}`);
+      const second = nextRun("guido-1:20261020T130000Z");
+      const mine = await commitOk("apps/a.ts", "a3\n", "feat: second", second);
+      const seen: Record<string, string[]> = {};
+      const r = await push(ts({ git: recording(["rev-list"], seen) }), second);
+      expect(r.text).toBe(`Pushed ${mine.slice(0, 7)} to ${BRANCH}.`);
+      expect(
+        seen["rev-list"]
+          ?.join("")
+          .trim()
+          .split("\n")
+          .map((l) => l.split(" ")[0]),
+      ).toEqual([mine]);
+      expect(store.runPush(second.runId)?.sha).toBe(mine);
+    });
+
+    it("a run that ended unpushed leaves its commits to the next run's push, which sends both", async () => {
+      const first = await commitOk("apps/a.ts", "a2\n");
+      const second = nextRun("guido-1:20261020T130000Z");
+      const mine = await commitOk("apps/a.ts", "a3\n", "feat: second", second);
+      const seen: Record<string, string[]> = {};
+      expect((await push(ts({ git: recording(["rev-list"], seen) }), second)).text).toBe(
+        `Pushed ${mine.slice(0, 7)} to ${BRANCH}.`,
+      );
+      expect(
+        new Set(
+          seen["rev-list"]
+            ?.join("")
+            .trim()
+            .split("\n")
+            .map((l) => l.split(" ")[0]),
+        ),
+      ).toEqual(new Set([first, mine]));
+      expect(remoteTip()).toBe(mine);
+    });
+
+    it.each([
+      ["the default branch", "main"],
+      ["another ticket's branch", "feature/7-other-ticket"],
+    ])("refuses to push %s: the merge-push rule, and a guard hit", async (_what, branch) => {
+      await commitOk("apps/a.ts", "a2\n");
+      store.upsertRun(run({ branch }));
+      const mainBefore = remoteTip("main");
+      expect(await push()).toEqual({
+        text: "Not pushed: No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
+        isError: true,
+      });
+      expect(remoteTip("main")).toBe(mainBefore);
+      expect(remoteTip(branch === "main" ? BRANCH : branch)).toBeNull();
+      expect(store.runPush(RUN)).toBeNull();
+      expect(store.guardHits(0).map((h) => [h.rule, h.text])).toEqual([
+        [
+          "merge-push",
+          "No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode: Mission Control's push",
+        ],
+      ]);
+    });
+
+    it("refuses a branch another live run has", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      liveSeat("guido-2", "guido-2:1"); // its run row names the same branch
+      expect((await push()).text).toBe(
+        "Not pushed: No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
+      );
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("refuses an ended run and a read-only seat", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      liveSeat("retro", "retro:1");
+      expect(await push(ts(), { seatId: "retro", runId: "retro:1" })).toEqual({
+        text: "Read-only roles cannot write: push is for writer seats.",
+        isError: true,
+      });
+      store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+      expect(await push()).toEqual({ text: MC_RUN_ENDED, isError: true });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("answers a scan log past its cap with a fixed text, pushing nothing", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      const tiny: McToolsDeps["git"] = async (cwd, args, common, o) =>
+        crewGit(cwd, args, common, args.includes("-p") ? { ...o, maxBuffer: 10 } : o);
+      expect(await push(ts({ git: tiny }))).toEqual({
+        text: "Not pushed: the new commits are too large for the secret scan to read, so nothing was pushed unread. Push them yourself if they are fine, then message the seat.",
+        isError: true,
+      });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("fetches origin's default tip when the clone lacks it, and still sends only the run's commits", async () => {
+      const operatorMain = operatorPushes("docs/main.md", "main"); // the clone has not fetched it
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      const seen: Record<string, string[]> = {};
+      expect((await push(ts({ git: recording(["rev-list"], seen) }))).text).toBe(
+        `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
+      );
+      expect(
+        seen["rev-list"]
+          ?.join("")
+          .trim()
+          .split("\n")
+          .map((l) => l.split(" ")[0]),
+      ).toEqual([sha]);
+      expect(git(clone, "cat-file", "-t", operatorMain).trim()).toBe("commit");
+    });
+
+    it("is exported as pushRun for the engine to call", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      expect(await pushRun(pushDeps(), RUN)).toEqual({
+        text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
+      });
+    });
+  });
+
+  describe("draft_pr", () => {
+    const pushed = async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toMatch(/^Pushed /);
+      return sha;
+    };
+
+    it("opens one draft PR for the pushed branch, through gh, and answers its URL", async () => {
+      await pushed();
+      process.env.MC_TEST_LEAK = "leaked";
+      let r: { text: string; isError?: boolean };
+      try {
+        r = await pr("feat: the thing", "It does the thing.");
+      } finally {
+        delete process.env.MC_TEST_LEAK;
+      }
+      expect(r).toEqual({ text: PR_URL });
+      const crew = join(dir, "crew");
+      const calls = ghCalls();
+      expect(calls).toHaveLength(2);
+      const [list, create] = calls;
+      expect(list?.args).toEqual([
+        "pr",
+        "list",
+        "--repo=o/mc",
+        `--head=${BRANCH}`,
+        "--state=open",
+        "--json=url",
+      ]);
+      expect(create?.args.slice(0, -1)).toEqual([
+        "pr",
+        "create",
+        "--repo=o/mc",
+        "--draft",
+        `--head=${BRANCH}`,
+        "--base=main",
+        "--title=feat: the thing",
+      ]);
+      expect(create?.args.at(-1)).toBe(`--body-file=${create?.bodyFile}`);
+      expect(create?.cwd).toBe(realpathSync(crew));
+      expect(create?.bodyFile?.startsWith(`${crew}/`)).toBe(true);
+      expect(create?.mode).toBe("600");
+      expect(create?.body).toBe(
+        "It does the thing.\n\nCloses #42.\n\nOpened by GUIDO-1 (Mission Control).\n",
+      );
+      for (const c of calls) {
+        expect(
+          Object.keys(c.env)
+            .filter((k) => !k.startsWith("__CF"))
+            .sort(),
+        ).toEqual(GH_ENV_KEYS);
+        expect(c.env.GH_PROMPT_DISABLED).toBe("1");
+      }
+      // the body file is gone
+      expect(existsSync(create?.bodyFile ?? "")).toBe(false);
+    });
+
+    it("adds no closing line when the body names the run's issue", async () => {
+      await pushed();
+      await pr("feat: x", "Part of #42.");
+      expect(ghCalls()[1]?.body).toBe("Part of #42.\n\nOpened by GUIDO-1 (Mission Control).\n");
+    });
+
+    it("refuses before a push, and after a commit the push has not sent", async () => {
+      const text = { text: "Push first: the PR shows what is on origin.", isError: true };
+      expect(await pr("feat: x", "body")).toEqual(text);
+      await pushed();
+      await commitOk("apps/a.ts", "a3\n");
+      expect(await pr("feat: x", "body")).toEqual(text);
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("answers with the open PR instead of opening a second", async () => {
+      await pushed();
+      ghState({ "pr list": { stdout: '[{"url":"https://github.com/o/mc/pull/5"}]\n' } });
+      expect(await pr("feat: x", "body")).toEqual({
+        text: "A PR is already open: https://github.com/o/mc/pull/5",
+      });
+      expect(ghCalls().map((c) => c.args[1])).toEqual(["list"]);
+    });
+
+    it("refuses a token in the body or a known secret in the title, with a guard hit and no gh call", async () => {
+      await pushed();
+      const body = await pr("feat: x", `fine\nthen ${TOKEN}`);
+      expect(body).toEqual({
+        text: prSecretText("PR body", 2, "GitHub token"),
+        isError: true,
+      });
+      const title = await pr(`feat: ${LOCAL}`, "fine");
+      expect(title.text).toBe(prSecretText("PR title", 1, "local credential"));
+      expect(store.guardHits(0).map((h) => [h.rule, h.text])).toEqual([
+        ["secret", "No secrets in a push: Mission Control's draft PR"],
+        ["secret", "No secrets in a push: Mission Control's draft PR"],
+      ]);
+      expect(ghCalls()).toEqual([]);
+      noSecretAnywhere([body.text, title.text]);
+    });
+
+    it.each([
+      ["a mention", "thanks @octocat", "@octocat"],
+      ["a cross-repo reference", "like o/other#3", "o/other#3"],
+      [
+        "another repo's PR link",
+        "see https://github.com/x/y/pull/1",
+        "https://github.com/x/y/pull/1",
+      ],
+    ])("refuses %s", async (_what, body, first) => {
+      await pushed();
+      expect(await pr("feat: x", body)).toEqual({ text: prNotifyText(first), isError: true });
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("refuses a mention in the title", async () => {
+      await pushed();
+      expect((await pr("feat: x for @octocat", "body")).text).toBe(prNotifyText("@octocat"));
+    });
+
+    it("passes an email address and a package name without its @ (round 4)", async () => {
+      await pushed();
+      const body = "Uses `mc/core`; by you@example.com.\n\n```\nrun mc/core here\n```\n";
+      expect(await pr("feat: x", body)).toEqual({ text: PR_URL });
+    });
+
+    it.each([
+      ["a code span", "Uses `@mc/core`.", "@mc/core"],
+      ["a code block", "```\nping @octocat\n```\n", "@octocat"],
+      ["a character reference", "thanks &#64;octocat", "@octocat (written as &#64;octocat)"],
+      ["another issue in a code span", "Run `gh issue view #7`.", "#7"],
+    ])("refuses a mention or reference in %s (round 4)", async (_what, body, first) => {
+      await pushed();
+      expect(await pr("feat: x", body)).toEqual({ text: prNotifyText(first), isError: true });
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("refuses a mention in a title's code span (round 4)", async () => {
+      await pushed();
+      expect((await pr("feat: `@octocat`", "body")).text).toBe(prNotifyText("@octocat"));
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("answers a gh failure with a fixed text and logs it with known secrets redacted", async () => {
+      await pushed();
+      known = [LOCAL, TOKEN];
+      ghState({ "pr list": { code: 1, stderr: `HTTP 401 for token ${TOKEN} / ${LOCAL}\n` } });
+      const r = await pr("feat: x", "body");
+      expect(r).toEqual({
+        text: "Not opened: GitHub could not be reached through gh. Check the connection and your GitHub access, then message the seat to try again.",
+        isError: true,
+      });
+      expect(logs.some((l) => l.includes("[redacted]"))).toBe(true);
+      noSecretAnywhere([r.text]);
+    });
+
+    it("takes the longest title and body", async () => {
+      await pushed();
+      expect(await pr("x".repeat(200), "x".repeat(20_000))).toEqual({ text: PR_URL });
+    });
+
+    it("refuses an ended run and a read-only seat", async () => {
+      await pushed();
+      liveSeat("retro", "retro:1");
+      expect(await pr("t", "b", ts(), { seatId: "retro", runId: "retro:1" })).toEqual({
+        text: "Read-only roles cannot write: draft_pr is for writer seats.",
+        isError: true,
+      });
+      store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+      expect(await pr("t", "b")).toEqual({ text: MC_RUN_ENDED, isError: true });
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("is exported as openDraftPr for the engine to call", async () => {
+      await pushed();
+      expect(await openDraftPr(pushDeps(), RUN, { title: "t", body: "b" })).toEqual({
+        text: PR_URL,
+      });
+    });
+  });
+
+  describe("fix round 1", () => {
+    const pushed = async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toMatch(/^Pushed /);
+      return sha;
+    };
+    const notify = (first: string) => ({ text: prNotifyText(first), isError: true });
+
+    it("refuses a raw-git commit beneath a hub commit (finding 11)", async () => {
+      write("apps/a.ts", "raw\n");
+      git(wt, "commit", "-qam", "raw commit");
+      const raw = head();
+      await commitOk("apps/b.ts", "hub\n");
+      expect(await push()).toEqual({ text: FOREIGN(raw), isError: true });
+      expect(store.crewErrors()).toEqual([]);
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("reads files as stored, not through a textconv driver (finding 12)", async () => {
+      writeFileSync(join(clone, ".git", "info", "attributes"), "*.dat diff=hide\n");
+      git(clone, "config", "diff.hide.textconv", "true");
+      recordedWithSecret("apps/k.dat", `${TOKEN}\n`);
+      expect((await push()).text).toBe(
+        `Not pushed: apps/k.dat:1 looks like a GitHub token. ${SECRET_ASK}`,
+      );
+    });
+
+    it("answers a branch with no commit with its own text, not the connection one", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      git(wt, "update-ref", "-d", `refs/heads/${BRANCH}`);
+      expect(await push()).toEqual({ text: MC_PUSH_NO_COMMIT, isError: true });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it("refuses a commit with no parent with its own text, not the merge one (finding 15)", async () => {
+      const tree = git(wt, "rev-parse", "HEAD^{tree}").trim();
+      const root = git(wt, "commit-tree", tree, "-m", "root").trim();
+      git(wt, "update-ref", `refs/heads/${BRANCH}`, root);
+      store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: root, at: NOW });
+      expect(await push()).toEqual({
+        text: MC_PUSH_ROOT,
+        isError: true,
+      });
+      expect(remoteTip()).toBeNull();
+    });
+
+    it.each([
+      [
+        "another repo's issue link",
+        "see https://github.com/o/other/issues/5",
+        "https://github.com/o/other/issues/5",
+      ],
+      [
+        "another own-repo issue link",
+        "see https://github.com/o/mc/issues/99",
+        "https://github.com/o/mc/issues/99",
+      ],
+      ["GH-n", "see GH-99", "GH-99"],
+      ["Fixes GH-n", "Fixes GH-99", "Fixes GH-99"],
+      ["a team mention", "chore: bump @mc/core", "@mc/core"],
+    ])("refuses %s in a commit message (finding 3, ruling 7)", async (_what, message, what) => {
+      const sha = hubRecorded(message);
+      expect((await push()).text).toBe(
+        `Not pushed: commit ${sha.slice(0, 7)}'s message would notify or close something on GitHub (${what}). The seat cannot rewrite a commit, so only you can reword it; then message the seat to carry on.`,
+      );
+    });
+
+    it("reads the known secrets before the clone's queue, with a timeout, and says when it cannot (findings 5, 6)", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      const order: string[] = [];
+      const r = await push(
+        ts({
+          knownSecrets: () => {
+            order.push("known");
+            return new Promise<string[]>(() => {}); // gh auth token hung
+          },
+          knownSecretsTimeoutMs: 50,
+          inClone: async (_checkout, fn) => {
+            order.push("queue");
+            return fn();
+          },
+        }),
+      );
+      expect(r.text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+      expect(order).toEqual(["known", "queue"]);
+      expect(logs).toEqual(["mc push: could not read the known secrets; scanning by pattern only"]);
+    });
+
+    it("logs a known-secret read that throws with a fixed line, never its error (finding 6)", async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      await push(
+        ts({
+          knownSecrets: async () => {
+            throw new Error(`gh said ${LOCAL}`);
+          },
+        }),
+      );
+      expect(logs).toEqual(["mc push: could not read the known secrets; scanning by pattern only"]);
+    });
+
+    it("refuses a title that opens with a fence: a title has no code blocks (finding 1)", async () => {
+      await pushed();
+      expect(await pr("```x @octocat", "body")).toEqual(notify("@octocat"));
+      expect(await pr("```x other/repo#5", "body")).toEqual(notify("other/repo#5"));
+      expect(ghCalls()).toEqual([]);
+    });
+
+    it("refuses a mention in a fence inside an HTML block (finding 2)", async () => {
+      await pushed();
+      expect(await pr("feat: x", "<details>\n```\n@octocat\n```\n</details>")).toEqual(
+        notify("@octocat"),
+      );
+    });
+
+    it("refuses a team mention and a closing keyword for another issue (rulings 7, 9)", async () => {
+      await pushed();
+      expect(await pr("feat: x", "cc @org/team")).toEqual(notify("@org/team"));
+      expect(await pr("feat: x", "Fixes #99")).toEqual(notify("Fixes #99"));
+      expect(ghCalls()).toEqual([]);
+      expect(await pr("feat: x", "Fixes #42")).toEqual({ text: PR_URL });
+      expect(ghCalls()[1]?.body).toBe("Fixes #42\n\nOpened by GUIDO-1 (Mission Control).\n");
+    });
+
+    it.each([
+      ["an unclosed fence", "Notes:\n```\nraw output"],
+      ["an unclosed HTML comment", "Notes <!-- todo\n<!-- still open"],
+    ])(
+      "refuses a body that ends in %s, which would swallow the hub's lines (finding 8)",
+      async (_what, body) => {
+        await pushed();
+        expect(await pr("feat: x", body)).toEqual({
+          text: MC_PR_UNCLOSED,
+          isError: true,
+        });
+        expect(ghCalls()).toEqual([]);
+      },
+    );
+
+    it("adds no Closes when the body names the issue anywhere, code included (finding 8, round 4)", async () => {
+      await pushed();
+      await pr("feat: x", "Run `gh issue view #42`.");
+      expect(ghCalls()[1]?.body).toBe(
+        "Run `gh issue view #42`.\n\nOpened by GUIDO-1 (Mission Control).\n",
+      );
+    });
+
+    it("serialises a run's draft_pr calls: the second answers with the open PR (finding 10)", async () => {
+      await pushed();
+      ghState({
+        "pr list": { stdout: "[]\n", sleepMs: 200 },
+        "pr create": { stdout: `${PR_URL}\n`, marksOpen: true },
+      });
+      const d = pushDeps();
+      const both = await Promise.all([
+        openDraftPr(d, RUN, { title: "t", body: "b" }),
+        openDraftPr(d, RUN, { title: "t", body: "b" }),
+      ]);
+      expect(both.map((r) => r.text).sort()).toEqual(
+        [PR_URL, `A PR is already open: ${PR_URL}`].sort(),
+      );
+      expect(ghCalls().filter((c) => c.args[1] === "create")).toHaveLength(1);
+    });
+  });
+
+  describe("fix round 2", () => {
+    it.each([
+      ["a scope that is a team mention", "fix(@mc/core): x", "@mc/core"],
+      ["a closing keyword", "fix: x\n\nFixes #42", "Fixes #42"],
+      ["another issue", "feat: x, see #7", "#7"],
+      ["a mention", "feat: x, thanks @octocat", "@octocat"],
+    ])(
+      "the commit tool refuses %s before committing, so the seat can reword (N1)",
+      async (_what, message, what) => {
+        const base = head();
+        write("apps/a.ts", "a2\n");
+        expect(await tool("commit", ts()).call(CTX, { message })).toEqual({
+          text: `Not committed: the message would notify or close something on GitHub (${what}); reword it, then commit again. Write package names without the @ (mc/core, not @mc/core) and describe other issues in words, without # or links.`,
+          isError: true,
+        });
+        expect(head()).toBe(base);
+        expect(staged()).toBe("");
+        expect(store.runCommits(RUN)).toEqual([]);
+        // reworded, it commits
+        expect(
+          (await tool("commit", ts()).call(CTX, { message: "fix(core): x (#42)" })).text,
+        ).toMatch(/^Committed /);
+      },
+    );
+  });
+
+  describe("fix round 5", () => {
+    const pushed = async () => {
+      await commitOk("apps/a.ts", "a2\n");
+      expect((await push()).text).toMatch(/^Pushed /);
+    };
+    const namedPr = (ref: string) => ({
+      text: prNamedRefText(ref),
+      isError: true,
+    });
+
+    it.each([
+      ["the body", "feat: x", "see torvalds&sol;linux#9"],
+      ["the title", "feat: o&sol;r#42", "body"],
+      ["the body, without its ;", "feat: x", "Closes o&sol r#9"],
+    ])(
+      "draft_pr refuses a named reference outside the allow-list in %s",
+      async (_w, title, body) => {
+        await pushed();
+        const ref = /&sol;?/.exec(`${title} ${body}`)?.[0] ?? "";
+        expect(await pr(title, body)).toEqual(namedPr(ref));
+        expect(ghCalls()).toEqual([]);
+      },
+    );
+
+    it("draft_pr passes an allowed &amp; and refuses a github.com URL with a port", async () => {
+      await pushed();
+      expect((await pr("feat: x", "https://github.com:443/o/r/issues/9")).text).toBe(
+        prNotifyText("https://github.com:443/o/r/issues/9"),
+      );
+      expect(await pr("feat: x &amp; y", "R &amp; D")).toEqual({ text: PR_URL });
+    });
+
+    it("the commit tool refuses a named reference before committing", async () => {
+      const base = head();
+      write("apps/a.ts", "a2\n");
+      expect(await tool("commit", ts()).call(CTX, { message: "fix: o&sol;r#9" })).toEqual({
+        text: "Not committed: &sol; is an HTML character reference GitHub would turn into another character; write the character itself, then commit again.",
+        isError: true,
+      });
+      expect(head()).toBe(base);
+      expect(store.runCommits(RUN)).toEqual([]);
+    });
+
+    it("the push backstop refuses a named reference in an older commit's message", async () => {
+      const sha = hubRecorded("fix: see o&period;x");
+      expect((await push()).text).toBe(
+        `Not pushed: commit ${sha.slice(0, 7)}'s message would notify or close something on GitHub (&period;). The seat cannot rewrite a commit, so only you can reword it; then message the seat to carry on.`,
+      );
+      expect(remoteTip()).toBeNull();
+    });
+  });
+
+  describe("logging", () => {
+    it("nothing logged holds a known secret: a failed push through /mcp, the server log and the tools' log", async () => {
+      known = [LOCAL, TOKEN];
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      // origin answers ls-remote, but the push goes to a path that is the token
+      git(clone, "config", "remote.origin.pushurl", join(dir, "nowhere", TOKEN));
+      const cfg = config();
+      const tokens = new RunTokens();
+      const bearerToken = tokens.issue("guido-1", RUN);
+      const server: string[] = [];
+      const app = buildApp({
+        config: cfg,
+        store,
+        bus,
+        tokens,
+        mcpTools: () => ts(),
+        seatMode: (id) => crewSeatMode(cfg, id),
+        logger: { stream: { write: (m: string) => void server.push(m) } },
+      });
+      await app.ready();
+      const answers: string[] = [];
+      try {
+        const call = async (name: string, args: unknown) => {
+          const r = await app.inject({
+            method: "POST",
+            url: "/mcp",
+            headers: { "content-type": "application/json", authorization: `Bearer ${bearerToken}` },
+            payload: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "tools/call",
+              params: { name, arguments: args },
+            }),
+          });
+          const text = r.json().result.content[0].text as string;
+          answers.push(text);
+          return text;
+        };
+        expect(await call("push", {})).toBe(
+          "Not pushed: git could not push to origin. Check the connection and your GitHub access, then message the seat to try again.",
+        );
+        expect(logs.some((l) => l.includes("[redacted]"))).toBe(true);
+        git(clone, "config", "--unset", "remote.origin.pushurl");
+        recordedWithSecret("apps/k.ts", `${LOCAL}\n`);
+        expect(await call("push", {})).toMatch(
+          /^Not pushed: apps\/k\.ts:1 looks like a local credential/,
+        );
+        expect(remoteTip()).toBeNull();
+        expect(sha).not.toBe(head());
+      } finally {
+        await app.close();
+      }
+      expect(server.join("\n")).not.toContain(TOKEN);
+      expect(server.join("\n")).not.toContain(LOCAL);
+      noSecretAnywhere(answers);
+    });
+  });
+});
+
+describe("the gh wrapper", () => {
+  let ghDir: string;
+  beforeEach(() => {
+    ghDir = join(dir, "fakegh");
+    mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
+  });
+
+  it("runs with PATH and HOME only, prompts off, and returns a failure's code and streams", async () => {
+    writeFileSync(
+      join(ghDir, "state.json"),
+      JSON.stringify({ "api user": { code: 4, stdout: "out", stderr: "err" } }),
+    );
+    process.env.MC_TEST_LEAK = "leaked";
+    try {
+      const r = await createGh(join(ghDir, "gh"))(["api", "user"], { cwd: dir });
+      expect(r).toEqual({ code: 4, stdout: "out", stderr: "err" });
+    } finally {
+      delete process.env.MC_TEST_LEAK;
+    }
+    const call = JSON.parse(readFileSync(join(ghDir, "calls.jsonl"), "utf8")) as GhCall;
+    expect(
+      Object.keys(call.env)
+        .filter((k) => !k.startsWith("__CF"))
+        .sort(),
+    ).toEqual(GH_ENV_KEYS);
+    expect(call.cwd).toBe(dir);
+  });
+
+  it("kills gh at its timeout and answers code null", async () => {
+    writeFileSync(join(ghDir, "state.json"), JSON.stringify({ "pr list": { sleepMs: 5000 } }));
+    const started = Date.now();
+    const r = await createGh(join(ghDir, "gh"))(["pr", "list"], { cwd: dir, timeoutMs: 200 });
+    expect(r.code).toBeNull();
+    expect(Date.now() - started).toBeLessThan(4000);
+  }, 10_000);
+
+  it("answers code null for a gh that cannot be started", async () => {
+    const r = await createGh(join(dir, "missing-gh"))(["pr", "list"], { cwd: dir });
+    expect(r.code).toBeNull();
+  });
+
+  it("honours MC_GH_COMMAND only on a preview with MC_CREW=1, and says once when it ignores it", () => {
+    const lines: string[] = [];
+    const log = (l: string) => lines.push(l);
+    expect(ghCommand({ MC_GH_COMMAND: "/fake/gh", MC_CREW: "1" }, true, log)).toBe("/fake/gh");
+    expect(lines).toEqual([]);
+    expect(ghCommand({ MC_GH_COMMAND: "/fake/gh", MC_CREW: "1" }, false, log)).toBe("gh");
+    expect(ghCommand({ MC_GH_COMMAND: "/fake/gh" }, true, log)).toBe("gh");
+    expect(ghCommand({}, false, log)).toBe("gh");
+    expect(lines).toEqual([
+      "MC_GH_COMMAND is ignored: only a preview started with MC_CREW=1 honours it",
+      "MC_GH_COMMAND is ignored: only a preview started with MC_CREW=1 honours it",
+    ]);
+  });
+});
+
+// ---------- Plan 7a Task 2: report_evidence ----------
+
+describe("report_evidence", () => {
+  const LOOP: RunLoop = {
+    phase: "working",
+    reportedEvidenceId: 0,
+    prNumber: null,
+    pushStartedAt: null,
+    pushFor: null,
+    unparkedAt: null,
+    ciFails: 0,
+    ciFailedSha: null,
+    relayedSha: null,
+    transient: 0,
+    lastRefusal: null,
+    epoch: 0,
+    budgetExtra: 0,
+    parked: null,
+    touches: null,
+    cardFor: null,
+  };
+  let clock: number;
+  let told: [string, string][];
+  let ev: McTool[];
+  const setLoop = (over: Partial<RunLoop> = {}) => store.setRunLoop(RUN, { ...LOOP, ...over });
+  const report = (note: unknown, ctx: McToolContext = CTX) =>
+    tool("report_evidence", ev).call(ctx, note === undefined ? {} : { note });
+  /** A committed change, one tick after the last thing that happened. */
+  const committed = async (rel = "apps/a.ts", text = `${clock}\n`) => {
+    clock += 1000;
+    write(rel, text);
+    const r = await commit(`feat: ${rel}`, ev);
+    expect(r.text).toMatch(/^Committed /);
+    return head();
+  };
+  const refused = (text: string) => ({ text, isError: true });
+
+  beforeEach(() => {
+    clock = NOW;
+    told = [];
+    ev = make({ now: () => clock, onEvidence: (s, r) => told.push([s, r]) });
+    setLoop();
+  });
+
+  it("accepts a removal commit", async () => {
+    clock += 1000;
+    expect((await rm(["apps/a.ts"], "chore: drop a", ev)).text).toMatch(/^Removed .*\nCommitted /);
+    expect(await report("done")).toEqual({ text: EVIDENCE_RECORDED });
+  });
+
+  it("is offered to every mode", () => {
+    expect(tool("report_evidence", ev).modes).toEqual(["writer", "read-only"]);
+  });
+
+  it("answers EVIDENCE_NO_LOOP for a run no loop drives", async () => {
+    store.setRunLoop(RUN, null);
+    expect(await report("done")).toEqual(refused(EVIDENCE_NO_LOOP));
+    expect(store.latestEvidence(RUN)).toBeNull();
+    expect(told).toEqual([]);
+  });
+
+  it("answers the ended-run text for a run that has ended or is not the seat's", async () => {
+    store.upsertRun(run({ endedAt: NOW, status: "ok" }));
+    expect(await report("done")).toEqual(refused("This run has ended."));
+    expect(await report("done", { seatId: "guido-2", runId: RUN })).toEqual(
+      refused("This run has ended."),
+    );
+  });
+
+  it("refuses, in order: parked, then in CI, then uncommitted, then no commit, then the text", async () => {
+    write("apps/a.ts", "dirty\n");
+    setLoop({ phase: "parked" });
+    expect(await report("@someone done")).toEqual(refused(EVIDENCE_PARKED));
+    setLoop({ phase: "ci" });
+    expect(await report("@someone done")).toEqual(refused(EVIDENCE_IN_CI));
+    setLoop({ phase: "working" });
+    expect(await report("@someone done")).toEqual(refused(evidenceUncommittedText(["apps/a.ts"])));
+    await commit("wip", ev);
+    clock += 1000;
+    expect(await report("@someone done")).toMatchObject({ isError: true });
+    expect((await report("@someone done")).text).toContain("@someone");
+    // the first report with no commit since: NO_COMMIT beats the text
+    expect(await report("fine")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(await report("@someone done")).toEqual(refused(EVIDENCE_NO_COMMIT));
+  });
+
+  it("names up to ten uncommitted paths, untracked ones too, then how many more", async () => {
+    for (let i = 0; i < 12; i++) write(`apps/f${String(i).padStart(2, "0")}.ts`, "x\n");
+    const r = await report("done");
+    expect(r.isError).toBe(true);
+    expect(r.text).toBe(
+      evidenceUncommittedText(
+        Array.from({ length: 12 }, (_, i) => `apps/f${String(i).padStart(2, "0")}.ts`),
+      ),
+    );
+    expect(r.text).toContain("apps/f09.ts and 2 more.");
+    expect(r.text).not.toContain("apps/f10.ts");
+    expect(store.latestEvidence(RUN)).toBeNull();
+  });
+
+  it("counts a staged change and a rename once, and leaves a .pnpm-store out", async () => {
+    write(".pnpm-store/v11/index.db", "db\n");
+    expect(await report("Ruling: x")).toEqual({ text: EVIDENCE_RECORDED });
+    git(wt, "mv", "apps/a.ts", "apps/renamed.ts");
+    const r = await report("Ruling: x");
+    expect(r.text).toBe(evidenceUncommittedText(["apps/renamed.ts"]));
+  });
+
+  it("counts a rename in the worktree column once too (intent-to-add)", async () => {
+    renameSync(join(wt, "apps/a.ts"), join(wt, "apps/renamed.ts"));
+    git(wt, "add", "-N", "apps/renamed.ts");
+    expect(git(wt, "status", "--porcelain=v1")).toMatch(/^ R /);
+    const r = await report("Ruling: x");
+    expect(r.text).toBe(evidenceUncommittedText(["apps/renamed.ts"]));
+  });
+
+  it("refuses no-loop, parked and in-CI without reading the known secrets", async () => {
+    let reads = 0;
+    const counted = make({
+      now: () => clock,
+      knownSecrets: async () => {
+        reads++;
+        return [];
+      },
+    });
+    const call = () => tool("report_evidence", counted).call(CTX, { note: "done" });
+    store.setRunLoop(RUN, null);
+    expect(await call()).toEqual(refused(EVIDENCE_NO_LOOP));
+    setLoop({ phase: "parked" });
+    expect(await call()).toEqual(refused(EVIDENCE_PARKED));
+    setLoop({ phase: "ci" });
+    expect(await call()).toEqual(refused(EVIDENCE_IN_CI));
+    expect(reads).toBe(0);
+    setLoop();
+    await call();
+    expect(reads).toBe(1);
+  });
+
+  it("reads the loop inside the clone's queue, not before it", async () => {
+    await committed();
+    const moved = (over: Partial<RunLoop>) =>
+      make({
+        now: () => clock,
+        inClone: async (_c, fn) => {
+          setLoop(over);
+          return fn();
+        },
+      });
+    // each call starts from a working loop, which only the queue's own hook then moves
+    const call = (ts: McTool[]) => {
+      setLoop();
+      return tool("report_evidence", ts).call(CTX, { note: "done" });
+    };
+    expect(await call(moved({ phase: "ci" }))).toEqual(refused(EVIDENCE_IN_CI));
+    expect(await call(moved({ phase: "parked" }))).toEqual(refused(EVIDENCE_PARKED));
+    expect(await call(moved({ ciFailedSha: head() }))).toEqual(refused(EVIDENCE_NO_COMMIT));
+    expect(store.evidenceCount(RUN)).toBe(0);
+  });
+
+  it("refuses a report with no commit since the last one, and takes it after a new one", async () => {
+    expect(await report("done")).toEqual(refused(EVIDENCE_NO_COMMIT));
+    await committed();
+    expect(await report("one")).toEqual({ text: EVIDENCE_RECORDED });
+    clock += 1000;
+    expect(await report("two")).toEqual(refused(EVIDENCE_NO_COMMIT));
+    await committed("apps/b.ts");
+    expect(await report("two")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.evidenceCount(RUN)).toBe(2);
+  });
+
+  it("refuses the sha CI last failed on, and takes a newer commit", async () => {
+    const failed = await committed();
+    setLoop({ ciFailedSha: failed });
+    expect(await report("again")).toEqual(refused(EVIDENCE_NO_COMMIT));
+    await committed("apps/b.ts");
+    expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
+  });
+
+  it("takes a note that starts with Ruling: with no new commit, even on the failed sha", async () => {
+    const failed = await committed();
+    setLoop({ ciFailedSha: failed });
+    expect(await report("Ruling: the failure is a flake; no change needed")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
+    expect(await report("Ruling: still no change")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.evidenceCount(RUN)).toBe(2);
+  });
+
+  it("records the note, answers EVIDENCE_RECORDED, tells the supervisor and the bus", async () => {
+    await committed();
+    emitted.length = 0;
+    clock += 1000;
+    expect(await report("Fixed the race.\n\nDeploy: restart the hub.")).toEqual({
+      text: "Recorded. Mission Control is pushing and will message you when CI has run.",
+    });
+    expect(store.latestEvidence(RUN)).toEqual({
+      id: expect.any(Number),
+      runId: RUN,
+      note: "Fixed the race.\n\nDeploy: restart the hub.",
+      at: clock,
+    });
+    expect(told).toEqual([["guido-1", RUN]]);
+    expect(emitted).toContain("agents");
+  });
+
+  it("lets the run's own issue through, and refuses a mention, another issue and an unclosed block", async () => {
+    const own = "Fixes the race (see #42 and `code`).";
+    await committed();
+    for (const bad of [
+      "thanks @octocat",
+      "Closes #12",
+      "see o/other#3",
+      "```\nnever closed",
+      "write &sol; here",
+    ]) {
+      const r = await report(bad);
+      expect(r.isError, bad).toBe(true);
+      expect(r.text, bad).toMatch(/^Not recorded: the note is posted to GitHub /);
+    }
+    expect(store.evidenceCount(RUN)).toBe(0);
+    expect(told).toEqual([]);
+    expect(await report(own)).toEqual({ text: EVIDENCE_RECORDED });
+  });
+
+  it("names what it found in the note's text", async () => {
+    await committed();
+    expect((await report("thanks @octocat")).text).toBe(evidenceTextText("@octocat"));
+  });
+
+  it("refuses a secret in the note without repeating it, and records a guard hit", async () => {
+    await committed();
+    const r = await report(`token: ${TOKEN}`);
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("evidence note:1 looks like a");
+    expect(r.text).not.toContain(TOKEN);
+    expect(store.guardHits(0).map((h) => [h.agentId, h.runId, h.rule, h.text])).toEqual([
+      ["guido-1", RUN, "secret", "No secrets in a push: mc report_evidence"],
+    ]);
+    const local = make({ now: () => clock, knownSecrets: async () => [LOCAL] });
+    const k = await tool("report_evidence", local).call(CTX, { note: `key ${LOCAL}` });
+    expect(k.isError).toBe(true);
+    expect(k.text).not.toContain(LOCAL);
+    expect(store.evidenceCount(RUN)).toBe(0);
+  });
+
+  it("validates its arguments", async () => {
+    for (const bad of [undefined, "", "   ", "x".repeat(4001), "a\0b"]) {
+      const r = await report(bad);
+      expect(r.isError, String(bad)).toBe(true);
+      expect(r.text).toMatch(/^Invalid arguments: /);
+    }
+    const extra = await tool("report_evidence", ev).call(CTX, { note: "ok", more: 1 });
+    expect(extra.text).toMatch(/^Invalid arguments: /);
+    await committed();
+    expect(await report("x".repeat(4000))).toEqual({ text: EVIDENCE_RECORDED });
+  });
+});
+
+// ---------- Plan 7b-1 ticket 02: report_findings ----------
+
+describe("report_findings", () => {
+  const REVIEW_RUN = "retro:20261020T115500Z";
+  const AUTHOR_SHA = "a".repeat(40);
+  let told: [string, string][];
+  let rt: McTool[];
+  let reviewId: number;
+  const ctx: McToolContext = { seatId: "retro", runId: REVIEW_RUN };
+  const finding = (over: Record<string, unknown> = {}) => ({
+    severity: "Critical",
+    file: "apps/a.ts",
+    line: 3,
+    summary: "wrong",
+    scenario: "when x, y",
+    fix: "change z",
+    ...over,
+  });
+  const failing = { spec: "fail", quality: "pass" };
+  const passing = { spec: "pass", quality: "pass" };
+  const args = (over: Record<string, unknown> = {}) => ({
+    verdict: failing,
+    summary: "two sentences",
+    findings: [finding(), finding({ severity: "Minor", line: 0 })],
+    ...over,
+  });
+  const report = (a: unknown = args(), c: McToolContext = ctx) =>
+    tool("report_findings", rt).call(c, a);
+  const refused = (text: string) => ({ text, isError: true });
+  const stored = () => store.findingsOf(reviewId).length;
+  /** The retro seat's live run `runId`, performing review `id` (review_id is set at insert only). */
+  const reviewRun = (runId: string, id: number | null, over: Partial<Run> = {}) => {
+    store.upsertRun(run({ id: runId, agentId: "retro", ticket: null, reviewId: id, ...over }));
+    store.setSeatSession({
+      seatId: "retro",
+      runId,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    return { seatId: "retro", runId };
+  };
+
+  beforeEach(() => {
+    told = [];
+    rt = make({ onFindings: (s, r) => told.push([s, r]) });
+    const id = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: AUTHOR_SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW,
+    });
+    if (id === null) throw new Error("no review");
+    reviewId = id;
+    store.setReviewState(id, ["queued"], "running", { at: NOW, runId: REVIEW_RUN });
+    reviewRun(REVIEW_RUN, id);
+  });
+
+  it("is offered to scratch seats only, and says what the schema requires", () => {
+    const t = tool("report_findings", rt);
+    expect(t.modes).toEqual(["scratch"]);
+    expect(t.inputSchema).toMatchObject({
+      required: ["verdict", "summary", "findings"],
+      additionalProperties: false,
+    });
+  });
+
+  it("answers bad arguments", async () => {
+    const r = await report(args({ findings: [finding({ line: -1 })] }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/^Invalid arguments: /);
+    expect((await report({ ...args(), extra: 1 })).text).toMatch(/^Invalid arguments: /);
+    expect(stored()).toBe(0);
+  });
+
+  it("answers the ended-run text for a run that has ended", async () => {
+    reviewRun(REVIEW_RUN, reviewId, { endedAt: NOW, status: "ok" });
+    expect(await report()).toEqual(refused(MC_RUN_ENDED));
+  });
+
+  it("refuses a run that is not a review", async () => {
+    expect(await report(args(), CTX)).toEqual(refused(FINDINGS_NOT_A_REVIEW));
+    expect(await report(args(), reviewRun("retro:no-review", 999))).toEqual(
+      refused(FINDINGS_NOT_A_REVIEW),
+    );
+    // a review that names another run
+    const other = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: AUTHOR_SHA,
+      epoch: 0,
+      attempt: 2,
+      round: 1,
+      at: NOW,
+    }) as number;
+    store.setReviewState(other, ["queued"], "running", { at: NOW, runId: "someone-else" });
+    expect(await report(args(), reviewRun("retro:other", other))).toEqual(
+      refused(FINDINGS_NOT_A_REVIEW),
+    );
+  });
+
+  it("answers already for a reported review and dropped for any other state", async () => {
+    store.setReviewState(reviewId, ["running"], "superseded", { at: NOW });
+    expect(await report()).toEqual(refused(FINDINGS_DROPPED));
+    store.setReviewState(reviewId, ["superseded"], "reported", { at: NOW });
+    expect(await report()).toEqual({ text: FINDINGS_ALREADY });
+    expect(stored()).toBe(0);
+    expect(told).toEqual([]);
+  });
+
+  it("names the first finding whose file is not a plain path", async () => {
+    const r = await report(args({ findings: [finding(), finding({ file: "a/../b" })] }));
+    expect(r).toEqual(refused(findingFileText(2)));
+    expect((await report(args({ findings: [finding({ file: "@x/y" })] }))).text).toBe(
+      findingFileText(1),
+    );
+    expect(stored()).toBe(0);
+  });
+
+  it("holds a fail verdict to a blocking finding, and a blocking finding to a fail verdict", async () => {
+    expect(await report(args({ findings: [finding({ severity: "Minor" })] }))).toEqual(
+      refused(FINDINGS_FAIL_NEEDS_BLOCKING),
+    );
+    expect(await report(args({ verdict: failing, findings: [] }))).toEqual(
+      refused(FINDINGS_FAIL_NEEDS_BLOCKING),
+    );
+    expect(await report(args({ verdict: passing }))).toEqual(refused(FINDINGS_BLOCKING_NEEDS_FAIL));
+    expect(stored()).toBe(0);
+    expect(store.review(reviewId)?.state).toBe("running");
+  });
+
+  it("answers dropped when the review is dropped between the read and the write", async () => {
+    const real = store.recordFindings.bind(store);
+    store.recordFindings = (id, runId, r) => {
+      store.setReviewState(id, ["running"], "superseded", { at: NOW });
+      return real(id, runId, r);
+    };
+    try {
+      expect(await report()).toEqual(refused(FINDINGS_DROPPED));
+    } finally {
+      store.recordFindings = real;
+    }
+    expect(stored()).toBe(0);
+    expect(store.loopEventsOfRun(RUN)).toEqual([]);
+    expect(told).toEqual([]);
+  });
+
+  it("records findings, an Activity row, a bus change and the supervisor event", async () => {
+    const before = emitted.length;
+    expect(await report()).toEqual({ text: FINDINGS_RECORDED });
+    expect(store.review(reviewId)).toMatchObject({
+      state: "reported",
+      blocking: 1,
+      minor: 1,
+      verdict: failing,
+    });
+    expect(store.findingsOf(reviewId).map((f) => [f.severity, f.state, f.line])).toEqual([
+      ["Critical", "open", 3],
+      ["Minor", "logged", 0],
+    ]);
+    expect(store.loopEventsOfRun(RUN)).toEqual([
+      {
+        key: `${RUN}:review:${reviewId}:reported`,
+        runId: RUN,
+        text: "RETRO reviewed aaaaaaa: 1 blocking, 1 minor",
+        at: NOW,
+      },
+    ]);
+    expect(emitted.slice(before)).toContain("agents");
+    expect(told).toEqual([["retro", REVIEW_RUN]]);
+  });
+
+  it("records an empty report with passing verdicts", async () => {
+    expect(await report(args({ verdict: passing, findings: [] }))).toEqual({
+      text: FINDINGS_RECORDED,
+    });
+    expect(store.review(reviewId)).toMatchObject({ state: "reported", blocking: 0, minor: 0 });
+  });
+
+  it("a second call is already recorded", async () => {
+    await report();
+    expect(await report()).toEqual({ text: FINDINGS_ALREADY });
+    expect(stored()).toBe(2);
+    expect(store.loopEventsOfRun(RUN)).toHaveLength(1);
+    expect(told).toHaveLength(1);
+  });
+});
+
+// ---------- report_plan ----------
+
+describe("report_plan", () => {
+  const FAO_RUN = "fao-1:20261020T115000Z";
+  const FAO_CTX: McToolContext = { seatId: "fao-1", runId: FAO_RUN };
+  const PLAN = "### Outcome\n\nDo X, then Y.";
+  let ghDir: string;
+  let told: [string, string][];
+  let pt: McTool[];
+
+  const ghState = (state: Record<string, { code?: number; stdout?: string; stderr?: string }>) =>
+    writeFileSync(join(ghDir, "state.json"), JSON.stringify(state));
+  const view = (body: string, state = "OPEN") => ({
+    "issue view": { stdout: JSON.stringify({ body, state }) },
+  });
+  const ghCalls = (): GhCall[] => {
+    try {
+      return readFileSync(join(ghDir, "calls.jsonl"), "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as GhCall);
+    } catch {
+      return [];
+    }
+  };
+  const plan = (text: unknown = PLAN, ctx: McToolContext = FAO_CTX) =>
+    tool("report_plan", pt).call(ctx, { plan: text });
+  const refused = (text: string) => ({ text, isError: true });
+  const bodyFiles = () => readdirSync(join(dir, "crew")).filter((f) => f.startsWith("pr-"));
+
+  beforeEach(() => {
+    ghDir = join(dir, "fakegh");
+    mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
+    ghState(view("Do X."));
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "fao-1",
+      role: "FAO",
+      accountId: "claude-main",
+      model: "haiku",
+      area: [],
+    });
+    told = [];
+    pt = createMcTools(
+      deps({
+        config: cfg,
+        gh: createGh(join(ghDir, "gh")),
+        onPlanned: (s, r) => told.push([s, r]),
+      }),
+    );
+    store.upsertRun(run({ id: FAO_RUN, agentId: "fao-1", branch: null, ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "fao-1",
+      runId: FAO_RUN,
+      cliSessionId: "cli-2",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+  });
+
+  it("is offered to read-only seats whose role is granted it", () => {
+    expect(tool("report_plan", pt).modes).toEqual([]);
+    expect(tool("report_plan", pt).grantable).toEqual(["read-only"]);
+  });
+
+  it("appends the plan", async () => {
+    expect(await plan()).toEqual({ text: MC_PLAN_WRITTEN });
+    const calls = ghCalls();
+    expect(calls.map((c) => c.args.slice(0, 3))).toEqual([
+      ["issue", "view", "7"],
+      ["issue", "edit", "7"],
+    ]);
+    expect(calls[0]?.args).toContain("--repo=o/mc");
+    expect(calls[0]?.args).toContain("--json=body,state");
+    expect(calls[1]?.args).toContain("--repo=o/mc");
+    expect(calls[1]?.body).toBe(
+      `Do X.\n\n## Plan\n\n${PLAN}\n\nPlanned by FAO-1 (Mission Control).\n`,
+    );
+    expect(calls[1]?.mode).toBe("600");
+    expect(told).toEqual([["fao-1", FAO_RUN]]);
+    expect(store.loopEventsOfRun(FAO_RUN).map((e) => [e.key, e.text])).toEqual([
+      [`${FAO_RUN}:plan`, "plan written to mc#7"],
+    ]);
+    expect(emitted).toContain("agents");
+    expect(bodyFiles()).toEqual([]);
+  });
+
+  it("starts the body with the plan when the ticket body is blank", async () => {
+    ghState(view("  \n"));
+    await plan();
+    expect(ghCalls()[1]?.body).toBe(`## Plan\n\n${PLAN}\n\nPlanned by FAO-1 (Mission Control).\n`);
+  });
+
+  it("refuses a mention, another issue, a secret", async () => {
+    const mention = await plan("ask @someone");
+    expect(mention.isError).toBe(true);
+    expect(mention.text).toMatch(/^Not written: the plan is posted to GitHub and must not notify/);
+    expect((await plan("see #99")).text).toMatch(/^Not written: the plan is posted to GitHub/);
+    expect(ghCalls()).toEqual([]);
+    expect(store.guardHits(0)).toEqual([]);
+    const secret = await plan(`key ${TOKEN}`);
+    expect(secret.isError).toBe(true);
+    expect(secret.text).toContain("plan:1 looks like a GitHub token");
+    expect(secret.text).not.toContain(TOKEN);
+    expect(ghCalls()).toEqual([]);
+    expect(store.guardHits(0).map((h) => [h.agentId, h.runId, h.rule])).toEqual([
+      ["fao-1", FAO_RUN, "secret"],
+    ]);
+    expect(told).toEqual([]);
+  });
+
+  it("refuses a plan that ends inside an unclosed code block", async () => {
+    const r = await plan("```ts\nlet a");
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("unclosed code or HTML block");
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it("already planned", async () => {
+    ghState(view("Do X.\n\n## Plan\n\nold\n"));
+    expect(await plan()).toEqual(refused(MC_PLAN_ALREADY));
+    expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+    expect(told).toEqual([]);
+  });
+
+  it("closed", async () => {
+    ghState(view("Do X.", "CLOSED"));
+    expect(await plan()).toEqual(refused(MC_PLAN_ISSUE_CLOSED));
+    expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+  });
+
+  it("body ends unclosed", async () => {
+    ghState(view("Do X.\n\n```ts\nlet a"));
+    expect(await plan()).toEqual(refused(MC_PLAN_BODY_UNCLOSED));
+    expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+  });
+
+  it("gh view fails", async () => {
+    ghState({ "issue view": { code: 1, stderr: "boom" } });
+    expect(await plan()).toEqual(refused(MC_PLAN_GH_FAILED));
+    expect(logs.some((l) => l.includes("issue view"))).toBe(true);
+    ghState({ "issue view": { stdout: "not json" } });
+    expect(await plan()).toEqual(refused(MC_PLAN_GH_FAILED));
+    expect(told).toEqual([]);
+  });
+
+  it("gh edit fails", async () => {
+    ghState({ ...view("Do X."), "issue edit": { code: 1, stderr: "nope" } });
+    expect(await plan()).toEqual(refused(MC_PLAN_GH_FAILED));
+    expect(told).toEqual([]);
+    expect(store.loopEventsOfRun(FAO_RUN)).toEqual([]);
+    expect(bodyFiles()).toEqual([]);
+    // the seat may retry
+    ghState(view("Do X."));
+    expect(await plan()).toEqual({ text: MC_PLAN_WRITTEN });
+  });
+
+  it("not a planner", async () => {
+    store.upsertRun(run({ id: "retro:1", agentId: "retro", branch: null, ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "retro",
+      runId: "retro:1",
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(await plan(PLAN, { seatId: "retro", runId: "retro:1" })).toEqual(
+      refused(MC_PLAN_NOT_FAO),
+    );
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it("answers the ended-run text for a run that has ended", async () => {
+    store.upsertRun(
+      run({ id: FAO_RUN, agentId: "fao-1", branch: null, ticket: "mc#7", endedAt: NOW }),
+    );
+    expect(await plan()).toEqual(refused(MC_RUN_ENDED));
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it("too long", async () => {
+    ghState(view("b".repeat(15_000)));
+    const overhead = 15_000 + 2 + "## Plan\n\n".length + 2 + planByLine("FAO-1").length + 1;
+    expect(await plan("p".repeat(6000))).toEqual(
+      refused(planTooLongText(TICKET_BODY_MAX, TICKET_BODY_MAX - overhead)),
+    );
+    expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+    // a plan of exactly that room fits
+    expect((await plan("p".repeat(TICKET_BODY_MAX - overhead))).text).toBe(MC_PLAN_WRITTEN);
+  });
+
+  it("says there is no room when the ticket alone is too long", async () => {
+    ghState(view("b".repeat(TICKET_BODY_MAX)));
+    expect(await plan()).toEqual(refused(MC_PLAN_NO_ROOM));
+  });
+
+  it("refuses arguments it does not take", async () => {
+    expect((await plan("")).isError).toBe(true);
+    expect((await plan("x".repeat(MC_PLAN_MAX + 1))).isError).toBe(true);
+    expect((await tool("report_plan", pt).call(FAO_CTX, { plan: "ok", more: 1 })).isError).toBe(
+      true,
+    );
+    expect(ghCalls()).toEqual([]);
+  });
+});

@@ -1,0 +1,186 @@
+import type { CpuInfo } from "node:os";
+import type { MachineSample } from "@mc/core";
+import { describe, expect, it } from "vitest";
+import {
+  cpuPercent,
+  type MachineDeps,
+  parsePs,
+  parseVmStat,
+  sampleMachine,
+} from "../src/collectors/machine.ts";
+
+// Recorded on macOS (Apple silicon), 2026-10-18; trimmed to the lines the sampler reads and more.
+const VM_STAT = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                    20291.
+Pages active:                                 541351.
+Pages inactive:                               537706.
+Pages speculative:                              3226.
+Pages throttled:                                   0.
+Pages wired down:                             144555.
+Pages purgeable:                                2491.
+"Translation faults":                    18882109672.
+Pages stored in compressor:                   557127.
+`;
+const PAGE = 16384;
+const TOTAL = 24 * 1024 ** 3;
+
+// `ps -axo pid=,rss=,%cpu=,comm=` on the same Mac, a handful of lines; home paths anonymised.
+const PS = `    1  14288   0.0 /sbin/launchd
+ 5630  31968   0.0 /Users/user/.vscode/extensions/openai.chatgpt-26.1007.21434-darwin-arm64/bin/macos-aarch64/codex
+ 5899 391520   2.0 /Users/user/.vscode/extensions/anthropic.claude-code-2.1.301-darwin-arm64/resources/native-binary/claude
+12812 243088   2.3 claude
+20001  50000   9.9 /Users/user/Library/Application Support/Claude Tools/claude
+20002  60000   1.0 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer)
+20003  70000   1.0 /usr/local/bin/claude-code-guide
+28102 269344   0.5 claude
+`;
+
+const cpu = (user: number, sys: number, idle: number): CpuInfo => ({
+  model: "x",
+  speed: 0,
+  times: { user, nice: 0, sys, idle, irq: 0 },
+});
+
+const sample = (over: Partial<MachineSample> = {}): MachineSample => ({
+  at: 1000,
+  cpuPct: 12,
+  cores: 2,
+  memUsedBytes: 5,
+  memTotalBytes: TOTAL,
+  diskFreeBytes: 100,
+  diskTotalBytes: 400,
+  agents: { count: 1, rssBytes: 2048, cpuPct: 3 },
+  ...over,
+});
+
+function deps(over: Partial<MachineDeps> = {}): MachineDeps {
+  return {
+    cpus: () => [cpu(300, 100, 600), cpu(100, 100, 800)],
+    totalmem: () => TOTAL,
+    freemem: () => 1024 ** 3,
+    vmStat: async () => VM_STAT,
+    statfs: async () => ({ bavail: 250, blocks: 1000, bsize: 4096 }),
+    ps: async () => PS,
+    prevCpus: [cpu(100, 100, 400), cpu(50, 50, 400)],
+    prev: null,
+    now: 5000,
+    ...over,
+  };
+}
+
+describe("parsers", () => {
+  it("computes memory used as total − (free + inactive + speculative) × page size", () => {
+    const available = (20291 + 537706 + 3226) * PAGE;
+    expect(parseVmStat(VM_STAT, TOTAL)).toBe(TOTAL - available);
+    expect(parseVmStat("garbage", TOTAL)).toBeNull();
+  });
+
+  it("sums claude and codex processes by command basename, command may hold spaces", () => {
+    // codex 31968 + claude 391520 + 243088 + 50000 (path with spaces) + 269344 KiB
+    expect(parsePs(PS)).toEqual({ count: 5, rssBytes: 985920 * 1024, cpuPct: 14.7 });
+    expect(parsePs("")).toEqual({ count: 0, rssBytes: 0, cpuPct: 0 });
+  });
+
+  it("computes CPU % from the busy/total tick delta across all cores", () => {
+    // ticks: previous busy 300 of 1100, current busy 600 of 2000 → 300 busy of 900.
+    const prev = [cpu(100, 100, 400), cpu(50, 50, 400)];
+    const cur = [cpu(300, 100, 600), cpu(100, 100, 800)];
+    expect(cpuPercent(prev, cur)).toBeCloseTo((300 / 900) * 100, 6);
+    expect(cpuPercent(cur, cur)).toBeNull();
+  });
+});
+
+describe("sampleMachine", () => {
+  it("reads CPU, memory, disk and processes", async () => {
+    const r = await sampleMachine(deps());
+    expect(r.errors).toEqual([]);
+    expect(r.sample).toEqual({
+      at: 5000,
+      cpuPct: (300 / 900) * 100,
+      cores: 2,
+      memUsedBytes: TOTAL - (20291 + 537706 + 3226) * PAGE,
+      memTotalBytes: TOTAL,
+      diskFreeBytes: 250 * 4096,
+      diskTotalBytes: 1000 * 4096,
+      agents: { count: 5, rssBytes: 985920 * 1024, cpuPct: 14.7 },
+    });
+    expect(r.cpus).toHaveLength(2);
+  });
+
+  it("first sample has no CPU delta: cpuPct null", async () => {
+    const r = await sampleMachine(deps({ prevCpus: null }));
+    expect(r.sample.cpuPct).toBeNull();
+    expect(r.sample.cores).toBe(2);
+    expect(r.errors).toEqual([]);
+  });
+
+  it("ps failing with no previous sample gives agents null and an error", async () => {
+    const r = await sampleMachine(
+      deps({
+        ps: async () => {
+          throw new Error("ps timed out");
+        },
+      }),
+    );
+    expect(r.sample.agents).toBeNull();
+    expect(r.errors).toEqual(["ps: ps timed out"]);
+  });
+
+  it("ps failing keeps the previous agents", async () => {
+    const prev = sample();
+    const r = await sampleMachine(
+      deps({
+        prev,
+        ps: async () => {
+          throw new Error("boom");
+        },
+      }),
+    );
+    expect(r.sample.agents).toEqual(prev.agents);
+    expect(r.errors).toEqual(["ps: boom"]);
+  });
+
+  it("vm_stat failing falls back to total − freemem", async () => {
+    const r = await sampleMachine(
+      deps({
+        vmStat: async () => {
+          throw new Error("not found");
+        },
+      }),
+    );
+    expect(r.sample.memUsedBytes).toBe(TOTAL - 1024 ** 3);
+    expect(r.errors).toEqual(["vm_stat: not found"]);
+    const bad = await sampleMachine(deps({ vmStat: async () => "nonsense" }));
+    expect(bad.sample.memUsedBytes).toBe(TOTAL - 1024 ** 3);
+    expect(bad.errors).toHaveLength(1);
+  });
+
+  it("disk failing keeps the previous disk values, or null", async () => {
+    const fail = async () => {
+      throw new Error("EIO");
+    };
+    const kept = await sampleMachine(deps({ prev: sample(), statfs: fail }));
+    expect(kept.sample.diskFreeBytes).toBe(100);
+    expect(kept.sample.diskTotalBytes).toBe(400);
+    expect(kept.errors).toEqual(["disk: EIO"]);
+    const none = await sampleMachine(deps({ statfs: fail }));
+    expect(none.sample.diskFreeBytes).toBeNull();
+    expect(none.sample.diskTotalBytes).toBeNull();
+  });
+
+  it("cpus() throwing keeps the previous CPU reading and snapshot", async () => {
+    const prevCpus = [cpu(1, 1, 1)];
+    const r = await sampleMachine(
+      deps({
+        prev: sample(),
+        prevCpus,
+        cpus: () => {
+          throw new Error("no cpus");
+        },
+      }),
+    );
+    expect(r.sample.cpuPct).toBe(12);
+    expect(r.cpus).toBe(prevCpus);
+    expect(r.errors).toEqual(["cpu: no cpus"]);
+  });
+});

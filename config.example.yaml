@@ -1,0 +1,105 @@
+operator:
+  # The operator's id (default "operator").
+  id: operator
+  timezone: UTC
+
+accounts:
+  - id: claude-main
+    vendor: claude
+    alert_at: 85
+    stop_at: 95
+  - id: codex-main
+    vendor: codex
+    alert_at: 70
+    stop_at: 80
+
+# Each repo's `project` is a GitHub Project owned by a user account; organisation-owned Projects are not supported.
+repos:
+  - id: shop-app
+    github: octo-org/shop-app
+    project: 2
+    status_map:
+      Todo: planned
+      In Progress: in progress
+      In Review: review
+      Blocked: blocked
+      Done: done
+  - id: site-builder
+    github: octo-org/site-builder
+    project: 3
+    status_map:
+      Backlog: planned
+      Ready: planned
+      In progress: in progress
+      In review: review
+      Blocking: blocked
+      Done: done
+  # Mission Control itself: the first crew's repo (Setup › Repos adds it with your project's number).
+  # Placeholder: no Mission Control project exists yet; use its number once it is created.
+  - id: mission-control
+    github: octo-org/mission-control
+    project: 5
+    # Commands that run the whole suite: the guard lets one seat at a time run them. Each must be a
+    # command crew seats may run (see WRITER_TOOLS in packages/core/src/runtime.ts).
+    full_suite:
+      - pnpm -s test
+      - pnpm -s vitest run
+      - pnpm -s vitest
+    # autonomy: draft (the default) — Mission Control never moves this repo's cards. Set
+    # `autonomy: merge` to let the build loop move a run's own card In progress / In review /
+    # Blocked; merge needs a crew session for this repo, or the config fails to load.
+    status_map:
+      Todo: planned
+      In Progress: in progress
+      In Review: review
+      Blocked: blocked
+      Done: done
+
+loops:
+  - id: shop-app-ta
+    repo_id: shop-app
+    kind: ta-loop
+    account_id: claude-main
+    state_dir: ~/code/.shop-app-autonomy/var/autonomy
+    worktree: ~/code/.shop-app-autonomy
+    launchd_label: com.shop-app.ta-loop
+  - id: studio-builder
+    repo_id: site-builder
+    kind: studio-loop
+    account_id: claude-main
+    logs_dir: ~/code/studio-loop/logs
+    state_dir: ~/code/studio-loop
+    worktree: ~/code/studio-loop-repo
+    launchd_label: com.site-builder.studio-build-driver
+
+poll:
+  usage_minutes: 30
+  github_seconds: 60
+
+# Optional: Mission Control's own crew. Each session is a repo cloned for the crew (never your
+# working checkout) and the seats that work in it. GUIDO and INCO write inside their `area`
+# (globs; writer areas in a session must not overlap); RETRO is read-only and takes no area.
+# `worktrees` and every `checkout` must lie outside the hub's checkout and every loop's paths, and a
+# `checkout` must be a clone of its own, never a worktree of the hub's or a loop's repository.
+crew:
+  worktrees: ~/code/mc-crew/worktrees
+  max_seats: 8
+  # The node the guard hook runs under: a stable path (never a Cellar path), an executable file.
+  # Default /opt/homebrew/bin/node.
+  # node: /opt/homebrew/bin/node
+  # Folders code the seats run may not read, on top of the credential folders, the hub's checkout,
+  # every loop's folders and the other sessions' checkouts, which are always denied. List your own
+  # working folders. Absolute paths (~ allowed); none may be or hold `worktrees`, a `checkout` or
+  # a temp dir (the hub's, or /tmp).
+  # deny_read: [~/code/work, ~/Documents]
+  # Input + output tokens one build-loop run may use (the engine will park a run that goes over).
+  # Default 400000.
+  # run_token_budget: 400000
+  sessions:
+    - id: mission-control
+      repo_id: mission-control
+      checkout: ~/code/mc-crew/mission-control
+      seats:
+        - { id: guido-1, role: GUIDO, account_id: claude-main, model: sonnet, area: ["apps/server/**", "packages/core/**"] }
+        - { id: inco-1, role: INCO, account_id: claude-main, model: sonnet, area: ["apps/web/**"] }
+        - { id: retro-1, role: RETRO, account_id: claude-main, model: opus }

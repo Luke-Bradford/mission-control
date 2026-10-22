@@ -1,0 +1,382 @@
+import { FLIGHT_NOT_RUNNING } from "@mc/core";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hub } from "../src/data.ts";
+import type { FlightView } from "../src/flight/flightTypes.ts";
+import { Dock } from "../src/shell/Dock.tsx";
+import { ItemPanel } from "../src/shell/ItemPanel.tsx";
+import { installKeys } from "../src/shell/keys.ts";
+import { openItem, toggleDock, useBuildStatus } from "../src/shell/overlays.ts";
+import { DOCK_KEY } from "../src/storage.ts";
+import { stubFetch } from "./fetchStub.ts";
+import { CONFIG, NOW } from "./fixtures.ts";
+
+const noop = () => {};
+let off: () => void;
+let breakpointListeners: (() => void)[] = [];
+
+/** `matchMedia` for a window at least (or less than) 1200px wide. */
+function stubWidth(wide: boolean) {
+  breakpointListeners = [];
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: wide,
+    media: q,
+    addEventListener: (_: string, fn: () => void) => breakpointListeners.push(fn),
+    removeEventListener: noop,
+  }));
+}
+
+const dockEl = (container: HTMLElement) => container.querySelector<HTMLElement>("#dock");
+const esc = () =>
+  act(() => {
+    fireEvent.keyDown(document.body, { key: "Escape" });
+  });
+
+beforeEach(() => {
+  stubFetch({
+    "/api/attention": [],
+    "/api/escalations": [],
+    "/api/crew": { rows: [] },
+    "/api/flight": { seat: null, decisions: [] },
+  });
+  off = installKeys({
+    navigate: noop,
+    toggleDock: () => toggleDock(),
+    help: noop,
+    selectNext: noop,
+    selectPrev: noop,
+    toast: noop,
+  });
+});
+
+afterEach(() => {
+  off();
+  vi.unstubAllGlobals();
+  hub.clear();
+});
+
+describe("Dock content", () => {
+  it("says FLIGHT is not running, with no conversation and the input switched off", () => {
+    const { container } = render(<Dock />);
+    const dock = dockEl(container) as HTMLElement;
+    expect(dock.getAttribute("aria-label")).toBe("FLIGHT");
+    expect(dock.querySelector(".dh")?.textContent).toContain("FLIGHT");
+    expect(screen.getByText("Head agent").className).toBe("pill neutral");
+    expect(dock.querySelector(".meta")?.textContent).toBe(FLIGHT_NOT_RUNNING);
+    expect(container.querySelector("#dockWaiting")).toBeNull();
+    expect(container.querySelector("#dockMsgs")?.children.length).toBe(0);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    expect(input.placeholder).toBe("Ask FLIGHT to assign, reprioritise or report…");
+    expect(input.title).toBe(FLIGHT_NOT_RUNNING);
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("carries the P2 badge, which the build-status chips replace", () => {
+    function On() {
+      const [, set] = useBuildStatus();
+      return (
+        <button type="button" onClick={() => set(true)}>
+          on
+        </button>
+      );
+    }
+    const { container } = render(
+      <>
+        <On />
+        <Dock />
+      </>,
+    );
+    expect(container.querySelector("#dock .phase")?.textContent).toBe("P2");
+    fireEvent.click(screen.getByRole("button", { name: "on" }));
+    expect(container.querySelector("#dock .phase")).toBeNull();
+    const chip = screen.getByText("P2");
+    expect(chip.className).toContain("bs-later");
+    expect(chip.getAttribute("title")).toBe("FLIGHT itself, with structured decision briefs.");
+  });
+});
+
+describe("Dock on a wide screen", () => {
+  it("is shown by default; Hide hides it and remembers, showing again remembers that", () => {
+    stubWidth(true);
+    const { container } = render(<Dock />);
+    expect(dockEl(container)?.hidden).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    expect(dockEl(container)?.hidden).toBe(true);
+    expect(localStorage.getItem(DOCK_KEY)).toBe("false");
+    act(() => toggleDock());
+    expect(dockEl(container)?.hidden).toBe(false);
+    expect(localStorage.getItem(DOCK_KEY)).toBe("true");
+  });
+
+  it("starts hidden when it was hidden last time", () => {
+    stubWidth(true);
+    localStorage.setItem(DOCK_KEY, "false");
+    const { container } = render(<Dock />);
+    expect(dockEl(container)?.hidden).toBe(true);
+  });
+
+  it("has no scrim", () => {
+    stubWidth(true);
+    render(<Dock />);
+    expect(screen.queryByTestId("dock-scrim")).toBeNull();
+  });
+
+  it("does not trap Tab: it is a column, not a drawer", () => {
+    stubWidth(true);
+    const { container } = render(<Dock />);
+    const hide = screen.getByRole("button", { name: "Hide" });
+    const last = document.createElement("button");
+    dockEl(container)?.querySelector(".panel")?.append(last);
+    last.focus();
+    expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(true);
+    expect(document.activeElement).toBe(last);
+    hide.focus();
+    expect(fireEvent.keyDown(hide, { key: "Tab", shiftKey: true })).toBe(true);
+    expect(document.activeElement).toBe(hide);
+  });
+});
+
+describe("Dock on a narrow screen", () => {
+  it("is a drawer, closed by default, that Esc closes and nothing remembers", () => {
+    stubWidth(false);
+    const { container } = render(<Dock />);
+    expect(dockEl(container)?.hidden).toBe(true);
+    expect(screen.queryByTestId("dock-scrim")).toBeNull();
+    act(() => toggleDock());
+    expect(dockEl(container)?.hidden).toBe(false);
+    expect(screen.getByTestId("dock-scrim")).toBeTruthy();
+    expect(localStorage.getItem(DOCK_KEY)).toBeNull();
+    esc();
+    expect(dockEl(container)?.hidden).toBe(true);
+    expect(localStorage.getItem(DOCK_KEY)).toBeNull();
+  });
+
+  it("closes when the scrim or Hide is pressed", () => {
+    stubWidth(false);
+    const { container } = render(<Dock />);
+    act(() => toggleDock());
+    fireEvent.click(screen.getByTestId("dock-scrim"));
+    expect(dockEl(container)?.hidden).toBe(true);
+    act(() => toggleDock());
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    expect(dockEl(container)?.hidden).toBe(true);
+  });
+
+  it("gives focus back to the control that opened it, on Hide and on Esc", () => {
+    stubWidth(false);
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    render(<Dock />);
+    for (const close of [
+      () => fireEvent.click(screen.getByRole("button", { name: "Hide" })),
+      esc,
+    ]) {
+      opener.focus();
+      act(() => toggleDock());
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Hide" }));
+      close();
+      expect(document.activeElement).toBe(opener);
+    }
+    opener.remove();
+  });
+
+  it("keeps Tab and Shift+Tab inside the drawer, wrapping between its first and last stop", () => {
+    stubWidth(false);
+    const { container } = render(<Dock />);
+    act(() => toggleDock());
+    const hide = screen.getByRole("button", { name: "Hide" });
+    const dock = dockEl(container) as HTMLElement;
+    // Send and the input are switched off, so add a second stop after Hide.
+    const last = document.createElement("button");
+    dock.querySelector(".panel")?.append(last);
+    last.focus();
+    expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false); // prevented: the trap moved focus
+    expect(document.activeElement).toBe(hide);
+    expect(fireEvent.keyDown(hide, { key: "Tab", shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(last);
+    // Between the edges Tab is left to the browser.
+    hide.focus();
+    expect(fireEvent.keyDown(hide, { key: "Tab" })).toBe(true);
+    last.focus();
+    expect(fireEvent.keyDown(last, { key: "Tab", shiftKey: true })).toBe(true);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    fireEvent.keyDown(dock, { key: "Tab" });
+    expect(document.activeElement).toBe(hide);
+    outside.remove();
+  });
+
+  it("closes when the window crosses the breakpoint", () => {
+    stubWidth(false);
+    const { container } = render(<Dock />);
+    act(() => toggleDock());
+    expect(dockEl(container)?.hidden).toBe(false);
+    act(() => {
+      for (const fn of breakpointListeners) fn();
+    });
+    expect(dockEl(container)?.hidden).toBe(true);
+  });
+});
+
+const flightSeat = (over: Partial<NonNullable<FlightView["seat"]>> = {}) => ({
+  id: "flight-1",
+  call: "FLIGHT-1",
+  model: "opus",
+  state: "idle" as const,
+  live: true,
+  ...over,
+});
+const STREAM = {
+  runId: "r1",
+  truncated: false,
+  lastOutputAt: null,
+  reason: null,
+  events: [
+    { id: "0:0", at: NOW - 600_000, kind: "op", text: "[Mission Control] Wake: 2 questions\n{}" },
+    { id: "1:0", at: NOW - 500_000, kind: "op", text: "<b>hi</b> FLIGHT" },
+    { id: "2:0", at: NOW - 400_000, kind: "msg", text: "Over to you @CAPCOM, please." },
+    { id: "3:0", at: NOW - 300_000, kind: "tool", text: "ls" },
+  ],
+};
+const DECISION = {
+  id: 1,
+  targetRunId: null,
+  ref: null,
+  questionId: null,
+  at: NOW - 450_000,
+  seatId: null,
+  kind: "answer",
+  about: "Which branch?",
+  decision: "main",
+  basis: "the spec",
+};
+
+function stubFlight(view: FlightView, extra: Record<string, unknown> = {}) {
+  return stubFetch({
+    "/api/attention": [],
+    "/api/escalations": [],
+    "/api/crew": { rows: [] },
+    "/api/config": CONFIG,
+    "/api/flight": view,
+    "/api/agents/flight-1/stream": STREAM,
+    ...extra,
+  });
+}
+
+const form = (c: HTMLElement) => c.querySelector("#dockForm") as HTMLFormElement;
+const bodyOf = (fn: ReturnType<typeof stubFetch>, path: string) => {
+  const call = fn.mock.calls.find(([p]) => p === path);
+  return call ? JSON.parse(call[1]?.body as string) : undefined;
+};
+
+describe("live FLIGHT", () => {
+  it("shows its state, the conversation in order, and sends a message", async () => {
+    const fn = stubFlight(
+      { seat: flightSeat(), decisions: [DECISION as FlightView["decisions"][number]] },
+      { "POST /api/seats/flight-1/message": {} },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(4));
+    expect(container.querySelector(".meta")?.textContent).toBe(
+      "FLIGHT-1 · opus · waiting for a wake",
+    );
+    const rows = [...container.querySelectorAll(".dmsg")];
+    expect(rows.map((r) => r.className)).toEqual([
+      "dmsg hub",
+      "dmsg you",
+      "dmsg decision",
+      "dmsg flight",
+    ]);
+    expect(rows[0]?.textContent).toContain("Mission Control");
+    expect(rows[0]?.textContent).toContain("Wake: 2 questions");
+    expect(rows[1]?.querySelector(".txt")?.textContent).toBe("<b>hi</b> FLIGHT");
+    expect(rows[1]?.querySelector("b")).toBeNull();
+    expect(rows[2]?.textContent).toContain("FLIGHT · Answered");
+    expect(rows[2]?.textContent).toContain("Which branch? → main");
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "  assign it  " } });
+    fireEvent.submit(form(container));
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(bodyOf(fn, "/api/seats/flight-1/message")).toEqual({ text: "assign it" });
+  });
+
+  it("does not send a blank message", async () => {
+    const fn = stubFlight({ seat: flightSeat(), decisions: [] });
+    const { container } = render(<Dock />);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.submit(form(container));
+    expect(fn.mock.calls.some(([p]) => p === "/api/seats/flight-1/message")).toBe(false);
+  });
+
+  it("shows a failure and keeps the text", async () => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "POST /api/seats/flight-1/message": () => ({ status: 409, body: { error: "seat busy" } }) },
+    );
+    const { container } = render(<Dock />);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "go" } });
+    fireEvent.submit(form(container));
+    expect((await screen.findByRole("alert")).textContent).toBe("seat busy");
+    expect(input.value).toBe("go");
+  });
+
+  it("highlights @CAPCOM in a FLIGHT row", async () => {
+    stubFlight({ seat: flightSeat(), decisions: [] });
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelector(".dmsg.flight b.capcom")).toBeTruthy());
+    expect(container.querySelector(".dmsg.flight b.capcom")?.textContent).toBe("@CAPCOM");
+  });
+});
+
+describe("stopped FLIGHT", () => {
+  it("switches the input off and offers Start FLIGHT", async () => {
+    const fn = stubFlight(
+      { seat: flightSeat({ state: "stopped", live: false }), decisions: [] },
+      { "POST /api/seats/flight-1/start": { runId: "r2" } },
+    );
+    const { container } = render(<Dock />);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    await waitFor(() => expect(input.placeholder).toBe("FLIGHT is stopped"));
+    expect(input.disabled).toBe(true);
+    expect(container.querySelector(".meta")?.textContent).toBe("FLIGHT-1 · opus · stopped");
+    fireEvent.click(screen.getByRole("button", { name: "Start FLIGHT" }));
+    await waitFor(() => expect(bodyOf(fn, "/api/seats/flight-1/start")).toEqual({}));
+  });
+
+  it("shows a failed start", async () => {
+    stubFlight(
+      { seat: flightSeat({ state: "stopped", live: false }), decisions: [] },
+      { "POST /api/seats/flight-1/start": () => ({ status: 500, body: { error: "no slot" } }) },
+    );
+    render(<Dock />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start FLIGHT" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("no slot");
+  });
+});
+
+describe("Esc", () => {
+  it("closes only the topmost overlay: the Item panel over the dock drawer", () => {
+    stubWidth(false);
+    const { container } = render(
+      <>
+        <Dock />
+        <ItemPanel />
+      </>,
+    );
+    act(() => toggleDock());
+    act(() => openItem("esc:shop-app#1"));
+    expect(container.querySelector("#discuss")).toBeTruthy();
+    esc();
+    expect(container.querySelector("#discuss")).toBeNull();
+    expect(dockEl(container)?.hidden).toBe(false);
+    esc();
+    expect(dockEl(container)?.hidden).toBe(true);
+  });
+});

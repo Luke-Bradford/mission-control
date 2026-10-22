@@ -1,0 +1,573 @@
+/**
+ * The HUD's server-built views: agent views, crew rows and attention items. Kept apart from api.ts
+ * so the scheduler can build attention items without importing the API (api.ts imports the
+ * scheduler).
+ */
+import { statSync } from "node:fs";
+import {
+  type AgentView,
+  ATTENTION_KINDS,
+  type AttentionItem,
+  agentState,
+  type BoardItem,
+  type Crew,
+  type CrewRow,
+  crewHudState,
+  type DriverStop,
+  driverStopKey,
+  escalationKind,
+  hudState,
+  LOCK_WAITING_TEXT,
+  lockBlockedText,
+  loopText,
+  modeOfSeat,
+  pathInArea,
+  prYouAction,
+  questionText,
+  type Run,
+  type RunDigest,
+  type SeatSessionRow,
+  STALL_TEXT,
+  seatCallSign,
+  seatDef,
+  stallStart,
+  startOfLocalDay,
+  strayText,
+  type TestLockState,
+} from "@mc/core";
+import { claudeVersion } from "./cli-version.ts";
+import { collectorName, noteCollectorName } from "./collectors/common.ts";
+import { isPaused } from "./collectors/ta-loop.ts";
+import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
+import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
+import type { Store } from "./store.ts";
+import { lastOutputAt } from "./stream.ts";
+
+/** A crew error's attention key: this, then its row id (an ack of it acks the row). */
+export const CREW_ERROR_KEY = "crew-error:";
+/** An engine note's Needs-you key: this, then the note's own key. */
+export const NOTE_KEY = "note:";
+
+/** Runs read per loop for its view (state, context-window fallback). */
+const AGENT_RUNS = 50;
+/** No lock: the default for callers that have none (a preview, a test). */
+export const NO_LOCK: TestLockState = { holder: null, waiting: [] };
+
+/** A transcript's mtime (whole ms), or null when the run has none or the file is gone. */
+function transcriptMtime(path: string): number | null {
+  if (path === "") return null;
+  try {
+    return Math.floor(statSync(path).mtimeMs);
+  } catch {
+    return null;
+  }
+}
+
+interface LoopView {
+  agent: ConfiguredAgent;
+  runs: Run[];
+  view: AgentView;
+  /** Crew only: the seat's session row (null before it was ever started). */
+  seatRow: SeatSessionRow | null;
+}
+
+/** The fields an agent view has only for a crew seat; a loop has none of them. */
+function crewFields(
+  agent: ConfiguredAgent,
+): Pick<AgentView, "kind" | "role" | "mode" | "area" | "model" | "sessionId"> {
+  if (agent.kind === "loop") {
+    return { kind: "loop", role: null, mode: null, area: [], model: null, sessionId: null };
+  }
+  const { seat } = agent;
+  return {
+    kind: "crew",
+    role: seat.role,
+    mode: modeOfSeat(seat),
+    area: [...seat.area],
+    model: seat.model,
+    sessionId: agent.sessionId,
+  };
+}
+
+/** The driver stop the collector stored, else null (also when the stored text is not a stop). */
+function readStop(store: Store, loopId: string): DriverStop | null {
+  const raw = store.getSetting(driverStopKey(loopId));
+  if (raw === null) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<DriverStop> | null;
+    return v && typeof v.reason === "string" && typeof v.at === "number" ? (v as DriverStop) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loopViews(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  lock: TestLockState = NO_LOCK,
+): LoopView[] {
+  const status = new Map(store.status().map((s) => [s.collector, s]));
+  const inLine = new Set(lock.waiting.map((w) => w.runId));
+  const escalations = store.escalations();
+  return configuredAgents(config).map((agent) => {
+    const runs = store.runs(agent.id, AGENT_RUNS);
+    const latest = runs[0];
+    const lastOutput = latest
+      ? lastOutputAt(
+          store.digest(latest.id)?.lastEventAt ?? null,
+          transcriptMtime(latest.transcriptPath),
+        )
+      : null;
+    if (agent.kind === "crew") {
+      const seatRow = store.seatSession(agent.id);
+      const waiting = seatRow?.runId != null && inLine.has(seatRow.runId);
+      const hud = crewHudState(seatRow, lastOutput, now, waiting);
+      const reason = hud === "waiting" ? LOCK_WAITING_TEXT : (seatRow?.reason ?? null);
+      const view: AgentView = {
+        id: agent.id,
+        repoId: agent.repoId,
+        ...crewFields(agent),
+        loopKind: "crew",
+        accountId: agent.accountId,
+        state:
+          hud === "error"
+            ? "error"
+            : hud === "running" || hud === "stalled"
+              ? "working"
+              : hud === "waiting"
+                ? "waiting-agent"
+                : "idle",
+        stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
+        currentRun: latest ?? null,
+        paused: false,
+        sourceError: hud === "error" ? (reason ?? "seat error") : null,
+        // The seat's reason is its doing line, unless it is already the error text.
+        note: hud === "error" ? null : reason,
+        stop: null,
+        lastOutputAt: lastOutput,
+      };
+      return { agent, runs, view, seatRow };
+    }
+    const loop = agent.loop;
+    const st = status.get(collectorName(loop.kind, loop.id));
+    const sourceError = st && !st.ok ? (st.error ?? "collector failed") : null;
+    const paused = loop.kind === "ta-loop" ? isPaused(loop) : false;
+    // Only a title marker (`[operator-decision]` / `[loop-blocked]` / `[mvp-ready]`) means the
+    // loop waits on the operator; a label-only escalation is listed in Needs you and nothing more.
+    const waitingOnOperator = escalations.some(
+      (e) => e.repoId === loop.repoId && e.source === "title",
+    );
+    const note = status.get(noteCollectorName(loop.kind, loop.id))?.error ?? null;
+    const stop = loop.kind === "studio-loop" ? readStop(store, loop.id) : null;
+    const { state, since } = agentState({ runs, paused, sourceError, waitingOnOperator });
+    const view: AgentView = {
+      id: loop.id,
+      repoId: loop.repoId,
+      ...crewFields(agent),
+      loopKind: loop.kind,
+      accountId: loop.accountId,
+      state,
+      stateSince: since,
+      currentRun: runs[0] ?? null,
+      paused,
+      sourceError,
+      note,
+      stop,
+      lastOutputAt: lastOutput,
+    };
+    return { agent, runs, view, seatRow: null };
+  });
+}
+
+export function agentViews(config: CcConfig, store: Store, now: number = Date.now()): AgentView[] {
+  return loopViews(config, store, now).map((l) => l.view);
+}
+
+/**
+ * The open PR on the run's branch in the seat's repo (the newest, if several), as the row's review
+ * state; null without a branch or an open PR.
+ */
+function reviewOf(store: Store, repoId: string, branch: string | null): CrewRow["review"] {
+  if (branch === null) return null;
+  const open = store
+    .pullRequests(repoId)
+    .filter((p) => p.state === "open" && p.branch === branch)
+    .sort((a, b) => b.number - a.number)[0];
+  if (!open) return null;
+  const state = open.isDraft
+    ? "draft"
+    : open.review === "changes" || open.review === "approved"
+      ? open.review
+      : "open";
+  return { prNumber: open.number, state };
+}
+
+/** A scratch seat's live review: its latest run is active and performs a review. */
+function reviewingOf(store: Store, latest: Run | null): CrewRow["reviewing"] {
+  if (latest === null || latest.endedAt !== null || latest.reviewId == null) return null;
+  const rv = store.review(latest.reviewId);
+  return rv === null ? null : { prNumber: rv.prNumber, sha: rv.sha, ref: latest.ticket };
+}
+
+export function crew(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  /** The test lock: a seat in line for it is waiting, not stalled. */
+  lock: TestLockState = NO_LOCK,
+  /** The CLI version; tests pass a stub. */
+  cliVersion: () => string | null = claudeVersion,
+): Crew {
+  const boards = new Map<string, BoardItem[]>();
+  const boardOf = (repoId: string): BoardItem[] => {
+    let b = boards.get(repoId);
+    if (!b) {
+      b = config.repos.some((r) => r.id === repoId) ? store.board(repoId) : [];
+      boards.set(repoId, b);
+    }
+    return b;
+  };
+  const ticketTitle = (ticket: string | null): string | null => {
+    const t = ticket === null ? null : parseTicket(ticket);
+    if (!t) return null;
+    return boardOf(t.repoId).find((i) => i.issueNumber === t.number)?.title ?? null;
+  };
+
+  let version: string | null | undefined;
+  const cliVersionOnce = (): string | null => {
+    if (version === undefined) version = cliVersion();
+    return version;
+  };
+
+  const prCache: PrCache = new Map();
+  const rows = loopViews(config, store, now, lock).map(
+    ({ agent, runs, view, seatRow }, index): CrewRow => {
+      const latest = runs[0] ?? null;
+      const digests: Map<string, RunDigest> = store.digests(runs.map((r) => r.id));
+      const digest = latest ? (digests.get(latest.id) ?? null) : null;
+      let contextWindow: number | null = null;
+      for (const r of runs) {
+        const w = digests.get(r.id)?.contextWindow ?? null;
+        if (w !== null) {
+          contextWindow = w;
+          break;
+        }
+      }
+      const prs = latest ? runPrs(config, store, latest, prCache) : [];
+      const ticket = latest ? runTicket(latest, prs) : null;
+      const backgroundInFlight = (digest?.background.length ?? 0) > 0;
+      const state =
+        agent.kind === "crew"
+          ? crewHudState(
+              seatRow,
+              view.lastOutputAt,
+              now,
+              seatRow?.runId != null && lock.waiting.some((w) => w.runId === seatRow.runId),
+            )
+          : hudState({
+              state: view.state,
+              paused: view.paused,
+              stopped: view.stop !== null,
+              lastOutputAt: view.lastOutputAt,
+              now,
+              backgroundInFlight,
+            });
+      // A stalled agent has been in that state since the silence reached the threshold, not
+      // since its run began. A seat that wrote nothing counts from its row's last change. Never
+      // before the view's own stateSince (the run start): output older than the run is no stall of it.
+      const silentSince = view.lastOutputAt ?? seatRow?.updatedAt ?? null;
+      const stateSince =
+        state === "stalled" && silentSince !== null
+          ? Math.max(
+              stallStart(silentSince, agent.kind === "loop" && backgroundInFlight),
+              view.stateSince,
+            )
+          : view.stateSince;
+      return {
+        id: agent.id,
+        repoId: agent.repoId,
+        index,
+        hudState: state,
+        stateSince,
+        accountId: agent.accountId,
+        kind: view.kind,
+        loopKind: view.loopKind,
+        role: view.role,
+        mode: view.mode,
+        area: view.area,
+        model: view.model,
+        sessionId: view.sessionId,
+        cli:
+          agent.kind === "crew"
+            ? { version: cliVersionOnce(), effort: agent.seat.effort ?? null }
+            : { version: null, effort: null },
+        review:
+          agent.kind === "crew" ? reviewOf(store, agent.repoId, latest?.branch ?? null) : null,
+        reviewing: reviewingOf(store, latest),
+        paused: view.paused,
+        note: view.note,
+        stop: view.stop,
+        sourceError: view.sourceError,
+        ticket,
+        ticketTitle: latest ? runTicketTitle(latest, ticket, ticketTitle(ticket)) : null,
+        loop:
+          agent.kind === "crew" && latest?.loop
+            ? {
+                phase: latest.loop.phase,
+                text: loopText(ticket, latest.loop),
+                prNumber: latest.loop.prNumber,
+                parked:
+                  latest.loop.phase === "parked" ? (latest.loop.parked?.reason ?? null) : null,
+              }
+            : null,
+        run: latest
+          ? {
+              id: latest.id,
+              seq: latest.seq,
+              startedAt: latest.startedAt,
+              endedAt: latest.endedAt,
+              status: latest.status,
+              model: latest.model,
+              branch: latest.branch,
+              tokens: latest.tokens,
+              costUsd: latest.costUsd,
+            }
+          : null,
+        prs,
+        summary: latest?.summary ?? null,
+        digest,
+        contextWindow,
+        lastOutputAt: view.lastOutputAt,
+      };
+    },
+  );
+
+  const dayStart = startOfLocalDay(now, config.operator.timezone);
+  const agents = new Set(agentIds(config));
+  let firstRunToday: number | null = null;
+  for (const r of store.runsOverlapping(dayStart, now + 1)) {
+    if (!agents.has(r.agentId) || r.startedAt < dayStart) continue;
+    if (firstRunToday === null || r.startedAt < firstRunToday) firstRunToday = r.startedAt;
+  }
+  return { rows, firstRunToday };
+}
+
+const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k);
+
+/**
+ * Needs-you items: every escalation, every stalled loop (keyed by run and last output, so a new
+ * stall, on a new run or later in the same one, pulses again) and every loop in error (keyed by
+ * its last success, so a failure after a recovery pulses again); the crew's strays, open
+ * questions and unacked errors; and the test lock when its holder has stalled with seats in line.
+ * Sorted by ATTENTION_KINDS order, then time; `acked` from the acks table.
+ */
+export function attentionItems(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  lock: TestLockState = NO_LOCK,
+  /** The crew rows at `now` (built with `lock`), when the caller has already built them. */
+  rows: CrewRow[] = crew(config, store, now, lock).rows,
+): AttentionItem[] {
+  const acks = store.acks();
+  const status = new Map(store.status().map((s) => [s.collector, s]));
+  const items: Omit<AttentionItem, "acked">[] = [];
+
+  for (const e of store.escalations()) {
+    items.push({
+      key: `esc:${e.id}`,
+      kind: escalationKind(e),
+      agentId: config.loops.find((l) => l.repoId === e.repoId)?.id ?? null,
+      repoId: e.repoId,
+      text: e.title,
+      tool: null,
+      at: e.openedAt,
+      url: e.url,
+      escalationId: e.id,
+      ticket: e.id,
+    });
+  }
+
+  for (const row of rows) {
+    if (row.hudState === "stalled" && row.run && row.lastOutputAt !== null) {
+      items.push({
+        key: `stall:${row.id}:${row.run.id}:${row.lastOutputAt}`,
+        kind: "stalled",
+        agentId: row.id,
+        repoId: row.repoId,
+        text: STALL_TEXT,
+        tool: row.digest?.liveTool?.name ?? null,
+        at: row.lastOutputAt,
+        url: null,
+        escalationId: null,
+        ticket: null,
+      });
+    } else if (row.hudState === "error" && row.sourceError !== null) {
+      // Every error row has a sourceError: loopViews gives a failing collector "collector failed"
+      // when it stored no text, and a seat "seat error".
+      // A loop's error is keyed by its collector's last success; a seat's by its last state change.
+      const st =
+        row.loopKind === "crew" ? undefined : status.get(collectorName(row.loopKind, row.id));
+      items.push({
+        key:
+          row.kind === "crew"
+            ? `error:${row.id}:${row.stateSince}`
+            : `error:${row.id}:${st?.lastOkAt ?? "never"}`,
+        kind: "error",
+        agentId: row.id,
+        repoId: row.repoId,
+        text: row.sourceError,
+        tool: null,
+        at: row.kind === "crew" ? row.stateSince : (st?.lastOkAt ?? st?.at ?? now),
+        url: null,
+        escalationId: null,
+        ticket: null,
+      });
+    }
+  }
+
+  // A PR waits on you when it is linked to a ticket on a configured board and no agent is running
+  // on that ticket (the loops merge their own PRs; see PR_WAIT_MS).
+  const working = new Set(
+    rows.filter((r) => r.run?.status === "running" && r.ticket !== null).map((r) => r.ticket),
+  );
+  for (const repo of config.repos) {
+    const onBoard = new Set(store.board(repo.id).map((b) => `${repo.id}#${b.issueNumber}`));
+    for (const pr of store.pullRequests(repo.id)) {
+      if (pr.ticket === null || !onBoard.has(pr.ticket)) continue;
+      const action = prYouAction(pr, working.has(pr.ticket), now);
+      if (action === null) continue;
+      items.push({
+        key: `pr:${pr.repoId}#${pr.number}:${pr.updatedAt}`,
+        kind: "pr",
+        agentId: null,
+        repoId: pr.repoId,
+        text: `PR #${pr.number} · You: ${action}`,
+        tool: null,
+        at: pr.updatedAt,
+        url: pr.url,
+        escalationId: null,
+        ticket: pr.ticket,
+      });
+    }
+  }
+
+  items.push(...crewItems(config, store, lock, rows));
+
+  return items
+    .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
+    .map((i) => ({ ...i, acked: acks.has(i.key) }));
+}
+
+/** The crew's own Needs-you items: strays, questions, crew errors and a blocked test lock. */
+function crewItems(
+  config: CcConfig,
+  store: Store,
+  lock: TestLockState,
+  rows: CrewRow[],
+): Omit<AttentionItem, "acked">[] {
+  const sessions = config.crew?.sessions ?? [];
+  const repoOfSeat = (seatId: string) =>
+    sessions.find((s) => s.seats.some((x) => x.id === seatId))?.repoId ?? null;
+  const item = (
+    i: Pick<AttentionItem, "key" | "kind" | "agentId" | "repoId" | "text" | "at">,
+  ): Omit<AttentionItem, "acked"> => ({
+    ...i,
+    tool: null,
+    url: null,
+    escalationId: null,
+    ticket: null,
+  });
+  const out: Omit<AttentionItem, "acked">[] = [];
+
+  for (const s of store.strays()) {
+    const session = sessions.find((x) => x.id === s.sessionId);
+    // the writer whose area holds it, by today's config; none: it reads as outside every area
+    const owner =
+      s.kind === "other-area"
+        ? (session?.seats.find(
+            (w) =>
+              w.id !== s.agentId &&
+              seatDef(w).mode === "writer" &&
+              w.area.length > 0 &&
+              pathInArea(w.area, s.path),
+          ) ?? null)
+        : null;
+    out.push(
+      item({
+        key: s.key,
+        kind: "stray",
+        agentId: s.agentId,
+        repoId: session?.repoId ?? null,
+        text: strayText(s.path, s.sessionId, owner === null ? null : seatCallSign(owner.id)),
+        at: s.at,
+      }),
+    );
+  }
+
+  for (const q of store.openQuestions()) {
+    out.push(
+      item({
+        key: `ask:${q.id}`,
+        kind: "question",
+        agentId: q.agentId,
+        repoId: repoOfSeat(q.agentId),
+        text: questionText(seatCallSign(q.agentId), q.text),
+        at: q.at,
+      }),
+    );
+  }
+
+  // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each
+  // goes when the engine clears it.
+  for (const n of store.notes()) {
+    const run = n.runId === null ? null : store.run(n.runId);
+    const pr =
+      run?.loop?.prNumber === undefined || run.loop.prNumber === null
+        ? undefined
+        : store.pullRequests(run.repoId).find((p) => p.number === run.loop?.prNumber);
+    out.push({
+      key: `${NOTE_KEY}${n.key}`,
+      kind: n.kind,
+      agentId: n.seatId,
+      repoId: n.repoId,
+      text: n.text,
+      tool: null,
+      at: n.at,
+      url: pr?.url ?? null,
+      escalationId: null,
+      ticket: run?.ticket ?? null,
+    });
+  }
+
+  for (const e of store.crewErrors()) {
+    out.push(
+      item({
+        key: `${CREW_ERROR_KEY}${e.id}`,
+        kind: "error",
+        agentId: e.agentId,
+        repoId: repoOfSeat(e.agentId),
+        text: e.text,
+        at: e.at,
+      }),
+    );
+  }
+
+  const holder = lock.holder;
+  const holderRow = holder === null ? undefined : rows.find((r) => r.id === holder.seatId);
+  if (holder !== null && holderRow?.hudState === "stalled" && lock.waiting.length > 0) {
+    const waiting = [...new Set(lock.waiting.map((w) => seatCallSign(w.seatId)))];
+    out.push(
+      item({
+        key: `lock:${holder.runId}:${holder.since}`,
+        kind: "lock",
+        agentId: holder.seatId,
+        repoId: holderRow.repoId,
+        text: lockBlockedText(waiting, seatCallSign(holder.seatId)),
+        at: holderRow.lastOutputAt ?? holder.since,
+      }),
+    );
+  }
+  return out;
+}

@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+  - apps/*
+# esbuild ships prebuilt binaries via optional deps; its postinstall is unnecessary, so deny it.
+allowBuilds:
+  esbuild: false

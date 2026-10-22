@@ -1,0 +1,94 @@
+import { ENGINE_NOT_RUNNING, type Telemetry } from "@mc/core";
+import { cost, kTokens } from "../fmt.ts";
+import { AgentTag } from "../hud/AgentTag.tsx";
+import { HBar } from "../hud/charts/HBar.tsx";
+import { Panel } from "../hud/Panel.tsx";
+import { TicketRef } from "../hud/RepoRef.tsx";
+import { DASH, indexOf, type Scope } from "./common.ts";
+
+const TICKET_ROWS = 8;
+
+/** Cost (catalogue 2.6.6): tokens by ticket, totals; loop steps wait for the engine. */
+export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+  const tickets = (t?.tokensByTicket ?? []).slice(0, TICKET_ROWS);
+  const most = Math.max(1, ...tickets.map((r) => r.tokens));
+  const inView = new Set(scope.agents.map((a) => a.id));
+  const totals = (t?.totals ?? []).filter(
+    (r) => inView.has(r.agentId) && (scope.account === "" || r.accountId === scope.account),
+  );
+
+  return (
+    <div className="tgrid">
+      <Panel id="tTicketBars" title="Tokens by ticket" sub="every agent and step on it">
+        {!t ? (
+          <p className="pb s muted">{scope.wait}</p>
+        ) : tickets.length === 0 ? (
+          <p className="pb s muted">No ticket work in the last {scope.range}.</p>
+        ) : (
+          <div className="pb">
+            {tickets.map((r) => (
+              <HBar
+                key={r.ticket}
+                label={<TicketRef ticket={r.ticket} />}
+                pct={(r.tokens / most) * 100}
+                value={kTokens(r.tokens)}
+                extra={cost(r.costUsd)}
+                title={`${r.ticket}: ${kTokens(r.tokens)} tokens`}
+              />
+            ))}
+          </div>
+        )}
+      </Panel>
+      <Panel id="tStepBars" title="Tokens by loop step" sub="repeats cost more">
+        <p className="pb note">{ENGINE_NOT_RUNNING}</p>
+      </Panel>
+      {/* Decision: no Lines column; lines changed per run arrive with the engine's commits. */}
+      <Panel id="tTotals" title="Totals" sub="selected range" className="wide">
+        {!t ? (
+          <p className="pb s muted">{scope.wait}</p>
+        ) : totals.length === 0 ? (
+          <p className="pb s muted">No usage for this filter in the last {scope.range}.</p>
+        ) : (
+          <div className="pb tw">
+            <table>
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Account</th>
+                  <th>Model</th>
+                  <th className="r">Input</th>
+                  <th className="r">Output</th>
+                  <th className="r">Cache read</th>
+                  <th className="r">Cache hit</th>
+                  <th className="r">Turns</th>
+                  <th className="r">Tool calls</th>
+                  <th className="r">~Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {totals.map((r) => (
+                  <tr key={`${r.agentId}\n${r.model ?? ""}`}>
+                    <td>
+                      <AgentTag id={r.agentId} index={indexOf(scope, r.agentId)} sm />
+                    </td>
+                    <td className="muted">{r.accountId}</td>
+                    <td className="muted">{r.model ?? DASH}</td>
+                    <td className="r num">{kTokens(r.input)}</td>
+                    <td className="r num">{kTokens(r.output)}</td>
+                    <td className="r num">{kTokens(r.cacheRead)}</td>
+                    <td className="r num">
+                      {r.cacheHitPct === null ? DASH : `${Math.round(r.cacheHitPct)}%`}
+                    </td>
+                    <td className="r num">{r.turns}</td>
+                    <td className="r num">{r.toolCalls}</td>
+                    <td className="r num muted">{cost(r.costUsd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}

@@ -1,0 +1,272 @@
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readStream, STREAM_CHUNK_BYTES, STREAM_SCAN_BYTES } from "../src/stream.ts";
+
+const FIXTURE = resolve(import.meta.dirname, "fixtures/stream/agent.jsonl");
+const T = (iso: string) => Date.parse(iso);
+
+let dir: string;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "mc-stream-"));
+});
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const at = (i: number) => new Date(T("2026-10-18T10:00:00Z") + i * 1000).toISOString();
+const say = (text: string, i = 0) =>
+  JSON.stringify({
+    type: "assistant",
+    message: { id: `m${i}`, content: [{ type: "text", text }] },
+    parent_tool_use_id: null,
+    timestamp: at(i),
+  });
+const filler = (bytes: number): string => {
+  const line = `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"text":"${"x".repeat(200)}"}}}\n`;
+  return line.repeat(Math.ceil(bytes / line.length));
+};
+const write = (name: string, text: string) => {
+  const p = join(dir, name);
+  writeFileSync(p, text);
+  return p;
+};
+
+describe("readStream", () => {
+  it("turns the fixture's top-level frames into events, oldest first", () => {
+    const { events, truncated } = readStream(FIXTURE, 200);
+    expect(truncated).toBe(false);
+    expect(events.map((e) => [e.kind, e.text])).toEqual([
+      ["think", "thinking"],
+      ["msg", "I will run the tests."],
+      ["tool", "Bash"],
+      ["tool", "Read"],
+      ["tool", "Agent"],
+      ["sys", "Subagent started: Explore · Find the fold"],
+      ["sys", "Subagent started: general-purpose · Check CI"],
+      ["sys", "Pushed"],
+      ["sys", "PR created: https://github.com/o/r/pull/7"],
+      ["msg", "Done. Checking the PR."],
+      ["tool", "Bash"],
+    ]);
+    const [, , bash, read, agent] = events;
+    expect(bash).toMatchObject({
+      at: T("2026-10-18T10:00:06Z"),
+      tool: {
+        name: "Bash",
+        input: JSON.stringify({ command: "pnpm test", description: "Run the tests" }),
+        result: "Tests 42 passed",
+        ms: 30_000,
+        error: false,
+      },
+    });
+    expect(read?.tool).toMatchObject({ result: "File does not exist.", ms: 1000, error: true });
+    expect(agent?.tool?.result).toBe("The fold is in apps/server/src/streamjson.ts.");
+    // The live call has no result yet.
+    expect(events.at(-1)?.tool).toMatchObject({ name: "Bash", result: null, ms: null });
+  });
+
+  it("returns the newest `limit` events", () => {
+    const { events } = readStream(FIXTURE, 3);
+    expect(events.map((e) => e.text)).toEqual([
+      "PR created: https://github.com/o/r/pull/7",
+      "Done. Checking the PR.",
+      "Bash",
+    ]);
+  });
+
+  it("names a result whose call lies before the scan window `(earlier call)`", () => {
+    const p = write(
+      "t.jsonl",
+      `${JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "gone", content: "late" }] },
+        parent_tool_use_id: null,
+        timestamp: at(5),
+      })}\n`,
+    );
+    expect(readStream(p, 10).events).toEqual([
+      {
+        id: "0:0",
+        at: T(at(5)),
+        kind: "tool",
+        text: "(earlier call)",
+        tool: { name: "(earlier call)", input: "", result: "late", ms: null, error: false },
+      },
+    ]);
+  });
+
+  it("maps top-level user text to op and skips subagent frames", () => {
+    const lines = [
+      JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "text", text: "Please carry on" }] },
+        parent_tool_use_id: null,
+        timestamp: at(1),
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "s", content: [{ type: "text", text: "subagent talk" }] },
+        parent_tool_use_id: "toolu_parent",
+        timestamp: at(2),
+      }),
+      JSON.stringify({ type: "system", subtype: "vcs_state_changed", kind: "push", branch: "b" }),
+      JSON.stringify({ type: "system", subtype: "vcs_state_changed", kind: "commit" }),
+      "",
+    ];
+    const p = write("t.jsonl", lines.join("\n"));
+    const pushedAt = (lines[0]?.length ?? 0) + (lines[1]?.length ?? 0) + 2;
+    expect(readStream(p, 10).events).toEqual([
+      { id: "0:0", at: T(at(1)), kind: "op", text: "Please carry on" },
+      { id: `${pushedAt}:0`, at: null, kind: "sys", text: "Pushed b" },
+    ]);
+  });
+
+  it("reads a 10 MB transcript of stream_event filler up to the scan cap: the last 30 events, truncated", () => {
+    const real = Array.from({ length: 30 }, (_, i) => say(`event ${i}`, i)).join("\n");
+    const p = write("big.jsonl", `${filler(10 * 1024 * 1024)}${real}\n${filler(64 * 1024)}`);
+    const { events, truncated } = readStream(p, 200);
+    expect(truncated).toBe(true);
+    expect(events.map((e) => e.text)).toEqual(Array.from({ length: 30 }, (_, i) => `event ${i}`));
+  });
+
+  it("stops early when the last chunk already holds `limit` events", () => {
+    const real = Array.from({ length: 50 }, (_, i) => say(`event ${i}`, i)).join("\n");
+    // A first line that is not JSON at all: reached only if the reader scanned the whole file.
+    const p = write("t.jsonl", `${"z".repeat(STREAM_SCAN_BYTES)}\n${real}\n`);
+    const { events, truncated } = readStream(p, 20);
+    expect(truncated).toBe(false);
+    expect(events.map((e) => e.text)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `event ${i + 30}`),
+    );
+  });
+
+  it("skips a partial first line, a non-JSON line and a cut last line", () => {
+    const whole = say("kept", 2);
+    const p = write(
+      "t.jsonl",
+      `${whole.slice(20)}\n=== fire START ===\n${whole}\n${say("cut", 3).slice(0, 40)}`,
+    );
+    expect(readStream(p, 10).events.map((e) => e.text)).toEqual(["kept"]);
+  });
+
+  it("skips one line longer than the scan cap", () => {
+    const huge = say("y".repeat(9 * 1024 * 1024), 1);
+    const p = write("t.jsonl", `${say("before", 0)}\n${huge}\n${say("after", 2)}\n`);
+    const { events, truncated } = readStream(p, 10);
+    expect(events.map((e) => e.text)).toEqual(["after"]);
+    expect(truncated).toBe(true);
+  });
+
+  it("joins a line that spans several chunks", () => {
+    const long = say("w".repeat(STREAM_CHUNK_BYTES * 2 + 17), 1);
+    const p = write("t.jsonl", `${say("first", 0)}\n${long}\n`);
+    const { events } = readStream(p, 10);
+    expect(events.map((e) => e.text.length)).toEqual([5, 2000]);
+  });
+
+  it("returns markup as the same string and redacts a token", () => {
+    const xss = `<script>alert(1)</script><img src=x onerror="alert(2)">`;
+    const p = write(
+      "t.jsonl",
+      `${say(xss, 0)}\n${say("token ghp_abcdefghijklmnopqrstuvwxyz0123 here", 1)}\n`,
+    );
+    expect(readStream(p, 10).events.map((e) => e.text)).toEqual([xss, "token [redacted] here"]);
+  });
+
+  it("cleans tool input and result text", () => {
+    const p = write(
+      "t.jsonl",
+      [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            id: "m",
+            content: [
+              {
+                type: "tool_use",
+                id: "t1",
+                name: "Bash",
+                input: { command: "echo AKIAABCDEFGHIJKLMNOP" },
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+          timestamp: at(0),
+        }),
+        JSON.stringify({
+          type: "user",
+          message: {
+            content: [{ type: "tool_result", tool_use_id: "t1", content: "\u001b[32mok\u001b[0m" }],
+          },
+          parent_tool_use_id: null,
+          timestamp: at(1),
+        }),
+        "",
+      ].join("\n"),
+    );
+    expect(readStream(p, 10).events[0]?.tool).toEqual({
+      name: "Bash",
+      input: '{"command":"echo [redacted]"}',
+      result: "ok",
+      ms: 1000,
+      error: false,
+    });
+  });
+
+  it("gives every event a stable id: its line's byte offset and block index", () => {
+    const { events } = readStream(FIXTURE, 200);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+    for (const e of events) expect(e.id).toMatch(/^\d+:\d+$/);
+    // The first line holds the first event at offset 0.
+    const two = JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "m0",
+        content: [
+          { type: "text", text: "a" },
+          { type: "text", text: "b" },
+        ],
+      },
+      parent_tool_use_id: null,
+      timestamp: at(0),
+    });
+    const p = write("ids.log", `${two}\n${say("c", 1)}\n`);
+    expect(readStream(p, 10).events.map((e) => [e.id, e.text])).toEqual([
+      ["0:0", "a"],
+      ["0:1", "b"],
+      [`${two.length + 1}:0`, "c"],
+    ]);
+  });
+
+  it("keeps an event's id when the window moves on and when the read crosses chunks", () => {
+    const lines = Array.from({ length: 6 }, (_, i) => say(`m${i}`, i));
+    const p = write("move.log", `${lines.slice(0, 4).join("\n")}\n`);
+    const before = readStream(p, 3).events;
+    writeFileSync(p, `${lines.join("\n")}\n`);
+    const after = readStream(p, 3).events;
+    expect(before.map((e) => e.text)).toEqual(["m1", "m2", "m3"]);
+    expect(after.map((e) => e.text)).toEqual(["m3", "m4", "m5"]);
+    expect(after[0]?.id).toBe(before[2]?.id);
+    // A line that spans chunk boundaries keeps the offset it starts at.
+    const big = say("y".repeat(STREAM_CHUNK_BYTES * 2), 7);
+    const q = write("big.log", `${say("x", 6)}\n${big}\n`);
+    expect(readStream(q, 10).events.map((e) => e.id)).toEqual([
+      "0:0",
+      `${say("x", 6).length + 1}:0`,
+    ]);
+  });
+
+  it("reads an empty file as no events", () => {
+    expect(readStream(write("e.jsonl", ""), 10)).toEqual({ events: [], truncated: false });
+  });
+
+  it("handles a file with no trailing newline whose last line is complete", () => {
+    const p = join(dir, "t.jsonl");
+    const fd = openSync(p, "w");
+    writeSync(fd, `${say("a", 0)}\n${say("b", 1)}`);
+    closeSync(fd);
+    expect(readStream(p, 10).events.map((e) => e.text)).toEqual(["a", "b"]);
+  });
+});

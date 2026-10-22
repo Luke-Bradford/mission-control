@@ -1,0 +1,14 @@
+[2026-10-15T08:59:00Z] quota ok: 7-day utilization 40% (< 80%)
+[2026-10-15T09:00:00Z] === FIRE 1 (main=aaaaaaa openPR=0) ===
+[2026-10-15T10:00:00Z] fire 1 exited 0
+[2026-10-15T10:00:05Z] plane drift: prompt.md differs from origin/main
+[2026-10-16T08:00:00Z] === FIRE 2 (main=bbbbbbb openPR=0) ===
+[2026-10-16T09:00:00Z] === FIRE 1 (main=ccccccc openPR=1) ===
+[2026-10-16T09:50:00Z] fire 1 exited 1
+[2026-10-16T09:50:10Z] STOP: signal issue open (operator-decision=1 loop-blocked=0 mvp-ready=0)
+[2026-10-16T12:00:00Z] STOP: stalled 3 fires with no progress
+[2026-10-17T08:17:46Z] quota ok: 7-day utilization 43% (< 80%)
+[2026-10-17T10:20:03Z] === FIRE 42 (main=6468d94 openPR=0) ===
+[2026-10-17T11:19:46Z] fire 42 exited 0
+[2026-10-17T11:19:55Z] quota source: dashboard (7-day utilization 45%)
+[2026-10-17T11:45:00Z] === FIRE 43 (main=1234567 openPR=0) ===

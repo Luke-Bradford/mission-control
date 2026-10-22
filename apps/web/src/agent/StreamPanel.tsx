@@ -1,0 +1,277 @@
+import {
+  type AgentStream,
+  BACKGROUND_STALL_MS,
+  type ConfigView,
+  type CrewRow,
+  ENGINE_NOT_RUNNING,
+  HUD_STATE_LABEL,
+  STALL_MS,
+  type StreamEvent,
+  type StreamKind,
+} from "@mc/core";
+import { type FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Markdown } from "../components/Markdown.tsx";
+import { callSign, seatTurn } from "../crew.ts";
+import { RESOURCES, useResource } from "../data.ts";
+import { dur, hhmm, mss } from "../fmt.ts";
+import { Panel } from "../hud/Panel.tsx";
+import { Seg } from "../hud/Seg.tsx";
+import { toast } from "../shell/Toast.tsx";
+import { messageSeat, seatError } from "./seat.ts";
+import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
+
+const DASH = "—";
+/**
+ * The composer hint's id, which the input's aria-describedby points at. Fixed like the prototype's
+ * `agentInput`: the Agent page renders a single composer, so the id is unique.
+ */
+const HINT_ID = "agentHint";
+/** Within this of the bottom counts as at the bottom (following new events). */
+const NEAR_BOTTOM_PX = 40;
+
+type Filter = "all" | "talk" | "think" | "tool" | "guard";
+
+const FILTERS: readonly { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "talk", label: "Messages" },
+  { value: "think", label: "Thinking" },
+  { value: "tool", label: "Tools" },
+  { value: "guard", label: "Guard" },
+];
+
+/** Which kinds each filter shows; Guard has none until the engine's guard exists. */
+const SHOWS: Record<Filter, readonly StreamKind[] | null> = {
+  all: null,
+  talk: ["op", "msg", "sys"],
+  think: ["think"],
+  tool: ["tool"],
+  guard: [],
+};
+
+/**
+ * Who each kind is. **Decision:** the loop's prompt reads `prompt`, not the mockup's `you`: it is
+ * the loop's message, not the operator's.
+ */
+const WHO: Record<StreamKind, string> = {
+  op: "prompt",
+  think: "thinking",
+  tool: "tool",
+  msg: "to you",
+  sys: "system",
+};
+
+/** The row class (the mockup's: `op` is styled as `you`). */
+const CLS: Record<StreamKind, string> = {
+  op: "you",
+  think: "think",
+  tool: "tool",
+  msg: "msg",
+  sys: "sys",
+};
+
+function ToolText({ tool, rel }: { tool: NonNullable<StreamEvent["tool"]>; rel: Relativise }) {
+  const took = tool.ms === null ? DASH : dur(tool.ms);
+  const result = tool.result === null ? "no result yet" : tool.result;
+  const target = toolTarget(tool.input, rel);
+  return (
+    <details>
+      <summary>
+        <span className="tn">{tool.name}</span>
+        {target && ` ${target}`}
+        <span className="tres">
+          {" · "}
+          {toolResult(result, tool.error, rel)}
+        </span>
+      </summary>
+      <pre>{`input: ${tool.input}\nresult: ${tool.error ? "error: " : ""}${result}\nduration: ${took}`}</pre>
+    </details>
+  );
+}
+
+/** Kinds whose text is the agent's (or the loop's prompt) own Markdown. */
+const MARKDOWN: readonly StreamKind[] = ["op", "msg"];
+
+function EventRow({ ev, tz, rel }: { ev: StreamEvent; tz: string | null; rel: Relativise }) {
+  return (
+    <div className={`ev ${CLS[ev.kind]}`}>
+      <span className="at num">{ev.at !== null && tz ? hhmm(ev.at, tz) : DASH}</span>
+      <span className="who">{WHO[ev.kind]}</span>
+      <div className="txt">
+        {ev.kind === "tool" && ev.tool ? (
+          <ToolText tool={ev.tool} rel={rel} />
+        ) : MARKDOWN.includes(ev.kind) ? (
+          <Markdown text={ev.text} />
+        ) : (
+          ev.text
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The live call bar: the running tool and its time, only while the latest run is running (a
+ * tool_use left open by an ended run is not live); a stalled agent's bar says since when nothing
+ * was written.
+ */
+function LiveCall({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+  const running = row.run?.status === "running";
+  const live = running ? (row.digest?.liveTool ?? null) : null;
+  const stalled = running && row.hudState === "stalled";
+  if (!live && !stalled) return <div id="liveCall" />;
+  const since = row.lastOutputAt;
+  return (
+    <div id="liveCall">
+      <div className={stalled ? "livecall stuck" : "livecall"}>
+        <span aria-hidden="true">▶</span>
+        <span className="t">{live ? live.name : "no tool running"}</span>
+        {live && <span className="num">{mss(now - live.since)}</span>}
+        <span className="xs">
+          {stalled
+            ? `no output since ${since !== null && tz ? hhmm(since, tz) : DASH} · stall flagged at ${mss(row.digest?.background.length ? BACKGROUND_STALL_MS : STALL_MS)}`
+            : "elapsed"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The hint under a crew seat's composer. */
+function seatHint(row: CrewRow): string {
+  const call = callSign(row);
+  switch (seatTurn(row)) {
+    case "running":
+      return `Reaches ${call} mid-turn, alongside its next tool result. Smaller models can ignore a mid-turn note; use Interrupt and send if it matters.`;
+    case "idle":
+      return `${call} is ${HUD_STATE_LABEL[row.hudState].toLowerCase()}; your message starts its next turn.`;
+    case "none":
+      return `${call} has no live session; start it on a ticket from the Board.`;
+  }
+}
+
+/** Message a crew seat; an observed loop keeps the disabled composer and its fixed line. */
+function Composer({ row }: { row: CrewRow }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const crew = row.kind === "crew";
+  const call = callSign(row);
+
+  const send = async (interrupt: boolean) => {
+    if (text.trim() === "") {
+      toast("Type a message first.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await messageSeat(row, text, interrupt);
+      setText("");
+      toast(`Delivered to ${call}.`);
+    } catch (e) {
+      setError(seatError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (crew && !busy) void send(false);
+  };
+
+  return (
+    <form className="composer" id="agentForm" onSubmit={submit}>
+      <input
+        id="agentInput"
+        autoComplete="off"
+        aria-label="Message this agent"
+        aria-describedby={HINT_ID}
+        placeholder={`Message ${call}…`}
+        disabled={!crew}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <button type="submit" className="primary" disabled={!crew || busy}>
+        Send
+      </button>
+      <button
+        type="button"
+        className="sm ghost"
+        title="Stop the current turn, then send"
+        disabled={!crew || busy}
+        onClick={() => void send(true)}
+      >
+        Interrupt and send
+      </button>
+      {error && (
+        <span className="crit-t s" role="alert">
+          {error}
+        </span>
+      )}
+      <span className="hint" id={HINT_ID}>
+        {crew
+          ? seatHint(row)
+          : `${row.id} is an observed loop; messaging arrives with the engine (phase 2).`}
+      </span>
+    </form>
+  );
+}
+
+/** The Activity panel (catalogue 2.4.4): the latest run's transcript, as inert text. */
+export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+  const [filter, setFilter] = useState<Filter>("all");
+  const stream = useResource<AgentStream>(RESOURCES.stream(row.id));
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const rel = useMemo(() => relativiser(config, row.id), [config, row.id]);
+  const box = useRef<HTMLDivElement>(null);
+  const shows = SHOWS[filter];
+  const events = (stream.data?.events ?? []).filter(
+    (e) => shows === null || shows.includes(e.kind),
+  );
+  const count = events.length;
+
+  // Follow the newest event only when the list's content changed and the reader was already at
+  // the bottom: a refetch (a fresh object every few seconds) or a reader scrolled up stays put.
+  const atBottom = useRef(true);
+  const signature = `${stream.data?.runId ?? ""}:${filter}:${count}:${events.at(-1)?.at ?? ""}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+  }, [signature]);
+  const onScroll = () => {
+    const el = box.current;
+    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  };
+
+  let empty: string | null = null;
+  if (filter === "guard") empty = ENGINE_NOT_RUNNING;
+  else if (stream.error && !stream.data)
+    empty = `Could not load the activity: ${stream.error.message}`;
+  else if (!stream.data) empty = "Loading…";
+  else if (stream.data.events.length === 0) empty = stream.data.reason ?? "No activity yet.";
+  else if (count === 0) empty = "Nothing of this kind in this run.";
+
+  return (
+    <Panel
+      id="streamP"
+      title="Activity"
+      sub="messages, thinking, tool calls and checks"
+      actions={
+        <Seg label="Activity filter" options={FILTERS} value={filter} onChange={setFilter} />
+      }
+    >
+      <LiveCall row={row} now={now} tz={tz} />
+      <div className="scroll" id="stream" ref={box} onScroll={onScroll}>
+        {empty !== null ? (
+          <p className="pb s muted">{empty}</p>
+        ) : (
+          events.map((ev) => (
+            <EventRow key={`${stream.data?.runId}:${ev.id}`} ev={ev} tz={tz} rel={rel} />
+          ))
+        )}
+      </div>
+      <Composer row={row} />
+    </Panel>
+  );
+}

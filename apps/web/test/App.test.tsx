@@ -1,0 +1,199 @@
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "../src/App.tsx";
+import { navigate } from "../src/router.ts";
+import { stubFetch } from "./fetchStub.ts";
+import { CONFIG, crewRow, REPOS } from "./fixtures.ts";
+
+class StubEventSource {
+  addEventListener() {}
+  close() {}
+}
+
+beforeEach(() => {
+  vi.stubGlobal("EventSource", StubEventSource);
+  stubFetch({ "/api/repos": REPOS, "/api/config": CONFIG });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+const at = (path: string) => {
+  window.history.replaceState(null, "", path);
+  return render(<App />);
+};
+
+describe("App", () => {
+  it.each([
+    ["/", "page-overview", "Overview"],
+    ["/flight", "page-flight", "FLIGHT"],
+    ["/board", "page-board", "Board"],
+    ["/agent", "page-agent", "Agent"],
+    ["/comms", "page-comms", "Comms"],
+    ["/telemetry", "page-telemetry", "Telemetry"],
+    ["/setup/loops", "page-setup", null],
+  ])("%s renders its page and marks its tab", (path, id, tabName) => {
+    const { container } = at(path);
+    expect(container.querySelector(`main > section#${id}`)).not.toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Pages" });
+    const current = within(nav)
+      .queryAllByRole("link")
+      .filter((a) => a.getAttribute("aria-current"));
+    expect(current.map((a) => a.textContent)).toEqual(tabName ? [tabName] : []);
+  });
+
+  it("opens one event stream, and closes it when the app unmounts", () => {
+    const close = vi.fn();
+    const opened = vi.fn();
+    class RecordingEventSource {
+      constructor(url: string) {
+        opened(url);
+      }
+      addEventListener() {}
+      close = close;
+    }
+    vi.stubGlobal("EventSource", RecordingEventSource);
+    const { unmount } = at("/");
+    expect(opened.mock.calls).toEqual([["/api/stream"]]);
+    expect(close).not.toHaveBeenCalled();
+    unmount();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unknown path shows Overview at /", async () => {
+    const { container } = at("/nope");
+    await vi.waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(container.querySelector("#page-overview")).not.toBeNull();
+  });
+
+  it.each([
+    ["/agents/shop-app-ta", "/agent/shop-app-ta", ""],
+    ["/needs/shop-app%233227", "/comms/esc%3Ashop-app%233227", ""],
+    ["/config", "/setup/sources", "#glossary"],
+    ["/settings#glossary", "/setup/sources", "#glossary"],
+    ["/settings", "/setup", ""],
+    ["/boards/shop-app", "/board/shop-app", ""],
+    ["/metrics", "/telemetry", ""],
+  ])("redirects old path %s to %s%s", async (from, to, hash) => {
+    Element.prototype.scrollIntoView = vi.fn();
+    at(from);
+    await vi.waitFor(() => expect(window.location.pathname).toBe(to));
+    expect(window.location.hash).toBe(hash);
+  });
+
+  it("g then b goes to the Board; ? opens the help", async () => {
+    const { container } = at("/");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "g" });
+      fireEvent.keyDown(document.body, { key: "b" });
+    });
+    expect(window.location.pathname).toBe("/board");
+    expect(container.querySelector("#page-board")).not.toBeNull();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "?" });
+    });
+    expect(screen.getByRole("dialog", { name: "Keys and lamps" })).toBeTruthy();
+  });
+
+  it("i off the agent page toasts", () => {
+    at("/");
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "i" });
+    });
+    expect(screen.getByRole("status").textContent).toBe("Open an agent to interrupt it.");
+  });
+
+  it("the footer carries the key hints, Setup included, and no sample-data chip", () => {
+    const { container } = at("/");
+    const keys = container.querySelector(".keys");
+    expect(keys?.textContent).toContain("g then o f b a c t pages");
+    expect(keys?.textContent).toContain("s Setup");
+    for (const hint of ["f FLIGHT", "jk next agent", "/ Agent page", "i interrupt", "? help"]) {
+      expect(keys?.textContent).toContain(hint);
+    }
+    expect(keys?.textContent).not.toContain("message agent");
+    expect(keys?.textContent).not.toContain("Sample data");
+  });
+
+  it("the build-status toggle shows the legend and hides phase badges", () => {
+    const { container } = at("/flight");
+    const btn = screen.getByRole("button", { name: "Show build status" });
+    expect(container.querySelector(".bslegend")?.hasAttribute("hidden")).toBe(true);
+    fireEvent.click(btn);
+    expect(btn.textContent).toBe("Hide build status");
+    expect(container.querySelector(".bslegend")?.hasAttribute("hidden")).toBe(false);
+    expect(container.querySelector(".app")?.classList.contains("bs-on")).toBe(true);
+    expect(localStorage.getItem("mc-build-status")).toBe("true");
+  });
+
+  it("a popped-out agent (?popout=1) renders only the Agent page, titled with its id", () => {
+    const { container, unmount } = at("/agent/shop-app-ta?popout=1");
+    expect(container.querySelector("main > section#page-agent")).not.toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Pages" })).toBeNull();
+    expect(container.querySelector(".keys")).toBeNull();
+    expect(container.querySelector("#dock")).toBeNull();
+    expect(container.querySelector("header")).toBeNull();
+    expect(container.querySelector("footer")).toBeNull();
+    expect(document.title).toBe("shop-app-ta · Mission Control");
+    unmount();
+    const full = at("/agent/shop-app-ta");
+    expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
+    expect(full.container.querySelector(".keys")).not.toBeNull();
+  });
+
+  it("a pop-out ignores the g page keys and has no Pop out control", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/config": CONFIG,
+      "/api/crew": { rows: [crewRow()], firstRunToday: null },
+    });
+    at("/agent/shop-app-ta?popout=1");
+    await screen.findByRole("region", { name: "shop-app-ta details" });
+    expect(screen.queryByRole("button", { name: "Pop out" })).toBeNull();
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "g" });
+      fireEvent.keyDown(document.body, { key: "b" });
+    });
+    expect(window.location.pathname).toBe("/agent/shop-app-ta");
+  });
+
+  it("a pop-out stays one when it moves to another agent, which drops ?popout=1", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/config": CONFIG,
+      "/api/crew": {
+        rows: [crewRow(), crewRow({ id: "other-seat", index: 3 })],
+        firstRunToday: null,
+      },
+    });
+    const { container } = at("/agent/shop-app-ta?popout=1");
+    await screen.findByRole("region", { name: "shop-app-ta details" });
+    act(() => navigate("/agent/other-seat"));
+    await screen.findByRole("region", { name: "other-seat details" });
+    expect(window.location.search).toBe("");
+    expect(screen.queryByRole("button", { name: "Pop out" })).toBeNull();
+    expect(container.querySelector(".popout")).not.toBeNull();
+    expect(container.querySelector("header")).toBeNull();
+  });
+
+  it("the full app's Agent header has Pop out", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/config": CONFIG,
+      "/api/crew": { rows: [crewRow()], firstRunToday: null },
+    });
+    at("/agent/shop-app-ta");
+    await screen.findByRole("button", { name: "Pop out" });
+  });
+
+  it("the setup tabs follow the URL", () => {
+    at("/setup");
+    const tabs = screen.getByRole("group", { name: "Setup" });
+    expect(
+      within(tabs).getByRole("button", { name: "Sessions" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(within(tabs).getByRole("button", { name: "Sources" }));
+    expect(window.location.pathname).toBe("/setup/sources");
+  });
+});

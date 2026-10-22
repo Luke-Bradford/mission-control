@@ -1,0 +1,1463 @@
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  ATTENTION_LABEL,
+  type BoardItem,
+  driverStopKey,
+  type Escalation,
+  NEW_LOOP,
+  type PullRequestView,
+  type Run,
+  type RunDigest,
+  type RunLoop,
+  type SeatSessionRow,
+  type TestLockState,
+} from "@mc/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CcConfig } from "../src/config.ts";
+import { attentionItems, crew, NO_LOCK } from "../src/hud.ts";
+import { Store } from "../src/store.ts";
+import { foldTranscript } from "../src/streamjson.ts";
+
+// 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
+const NOW = Date.parse("2026-10-17T12:00:00Z");
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+let dir: string;
+let store: Store;
+let config: CcConfig;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "mc-hud-"));
+  mkdirSync(join(dir, "ta"));
+  store = new Store(join(dir, "mc.sqlite"));
+  config = {
+    operator: { id: "operator", timezone: "Europe/London" },
+    accounts: [{ id: "claude-main", vendor: "claude", alertAt: 85, stopAt: 95 }],
+    repos: [
+      { id: "shop-app", github: "o/shop-app", project: 2, statusMap: {}, autonomy: "draft" },
+      { id: "site-builder", github: "o/ae", project: 3, statusMap: {}, autonomy: "draft" },
+    ],
+    loops: [
+      {
+        id: "shop-app-ta",
+        repoId: "shop-app",
+        kind: "ta-loop",
+        accountId: "claude-main",
+        stateDir: join(dir, "ta"),
+        worktree: join(dir, "wt"),
+        launchdLabel: "x",
+      },
+      {
+        id: "studio-builder",
+        repoId: "site-builder",
+        kind: "studio-loop",
+        accountId: "claude-main",
+        stateDir: join(dir, "st"),
+        logsDir: join(dir, "st-logs"),
+        worktree: join(dir, "wt2"),
+        launchdLabel: "y",
+      },
+      {
+        id: "shop-app-2",
+        repoId: "shop-app",
+        kind: "studio-loop",
+        accountId: "claude-main",
+        stateDir: join(dir, "st2"),
+        logsDir: join(dir, "st2-logs"),
+        worktree: join(dir, "wt3"),
+        launchdLabel: "z",
+      },
+    ],
+    poll: { usageMinutes: 30, githubSeconds: 60 },
+  };
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const run = (over: Partial<Run>): Run => ({
+  id: "r1",
+  agentId: "shop-app-ta",
+  repoId: "shop-app",
+  seq: 1,
+  startedAt: NOW - HOUR,
+  endedAt: null,
+  status: "running",
+  sessionId: null,
+  model: "claude-opus-5-5",
+  branch: null,
+  ticket: null,
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "",
+  prs: [],
+  summary: null,
+  ...over,
+});
+
+const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
+  toolCalls: 1,
+  turns: 1,
+  lastEventAt: NOW - MIN,
+  model: "claude-opus-5-5",
+  contextTokens: 100,
+  contextWindow: null,
+  liveTool: null,
+  tools: {},
+  subagents: [],
+  minuteTokens: [],
+  turnUsage: [],
+  background: [],
+  compactions: 0,
+  ...over,
+});
+
+const boardItem = (over: Partial<BoardItem>): BoardItem => ({
+  repoId: "shop-app",
+  issueNumber: 42,
+  title: "Fix the fence",
+  status: "In progress",
+  state: "in progress",
+  labels: [],
+  priority: null,
+  updatedAt: NOW,
+  url: "https://github.com/o/shop-app/issues/42",
+  stage: null,
+  owner: null,
+  parent: null,
+  subIssues: null,
+  blockedBy: [],
+  milestone: null,
+  size: null,
+  closed: false,
+  prioritySource: null,
+  createdAt: 1,
+  itemId: null,
+  projectId: null,
+  ...over,
+});
+
+const escalation = (over: Partial<Escalation>): Escalation => ({
+  id: "shop-app#9",
+  repoId: "shop-app",
+  issueNumber: 9,
+  title: "[operator-decision] pick one",
+  kind: "operator-decision",
+  source: "title",
+  openedAt: NOW - DAY,
+  url: "https://github.com/o/shop-app/issues/9",
+  question: null,
+  ...over,
+});
+
+/** A transcript file whose mtime is `ageMs` before NOW. */
+function transcript(name: string, lines: string[], ageMs: number): string {
+  const path = join(dir, name);
+  writeFileSync(path, `${lines.join("\n")}\n`);
+  const t = (NOW - ageMs) / 1000;
+  utimesSync(path, t, t);
+  return path;
+}
+
+/** Records a collector status as if written at `at`. */
+function statusAt(at: number, collector: string, ok: boolean, error: string | null) {
+  vi.spyOn(Date, "now").mockReturnValue(at);
+  store.setStatus(collector, ok, error);
+  vi.restoreAllMocks();
+}
+
+const rowOf = (id: string) => crew(config, store, NOW).rows.find((r) => r.id === id);
+
+describe("crew", () => {
+  it("a loop with no runs: run, digest and context null, idle, and no attention item", () => {
+    const c = crew(config, store, NOW);
+    expect(c.rows.map((r) => [r.id, r.index])).toEqual([
+      ["shop-app-ta", 0],
+      ["studio-builder", 1],
+      ["shop-app-2", 2],
+    ]);
+    expect(c.rows[0]).toEqual({
+      id: "shop-app-ta",
+      repoId: "shop-app",
+      index: 0,
+      hudState: "idle",
+      stateSince: 0,
+      accountId: "claude-main",
+      kind: "loop",
+      role: null,
+      mode: null,
+      area: [],
+      model: null,
+      sessionId: null,
+      cli: { version: null, effort: null },
+      review: null,
+      reviewing: null,
+      loopKind: "ta-loop",
+      paused: false,
+      note: null,
+      stop: null,
+      sourceError: null,
+      ticket: null,
+      ticketTitle: null,
+      loop: null,
+      run: null,
+      prs: [],
+      summary: null,
+      digest: null,
+      contextWindow: null,
+      lastOutputAt: null,
+    });
+    expect(c.firstRunToday).toBeNull();
+    expect(attentionItems(config, store, NOW)).toEqual([]);
+  });
+
+  it("carries the latest run, its ticket's board title and its digest", () => {
+    store.upsertRun(
+      run({ id: "r0", seq: 1, startedAt: NOW - 3 * HOUR, endedAt: NOW - 2 * HOUR, status: "ok" }),
+    );
+    store.upsertRun(
+      run({
+        id: "r1",
+        seq: 2,
+        startedAt: NOW - HOUR,
+        endedAt: NOW - 30 * MIN,
+        status: "ok",
+        branch: "fix/42-fence",
+        ticket: "shop-app#42",
+        tokens: { input: 1, output: 2, cacheRead: 3, cacheCreate: 4 },
+        costUsd: 1.5,
+      }),
+    );
+    store.replaceBoard("shop-app", [boardItem({}), boardItem({ issueNumber: 43, title: "other" })]);
+    const d = digest({ contextWindow: 1_000_000 });
+    store.setDigest("r1", d);
+    const row = rowOf("shop-app-ta");
+    expect(row).toMatchObject({
+      hudState: "idle",
+      stateSince: NOW - 30 * MIN,
+      ticket: "shop-app#42",
+      ticketTitle: "Fix the fence",
+      run: {
+        id: "r1",
+        seq: 2,
+        startedAt: NOW - HOUR,
+        endedAt: NOW - 30 * MIN,
+        status: "ok",
+        model: "claude-opus-5-5",
+        branch: "fix/42-fence",
+        tokens: { input: 1, output: 2, cacheRead: 3, cacheCreate: 4 },
+        costUsd: 1.5,
+      },
+      digest: d,
+      contextWindow: 1_000_000,
+      lastOutputAt: NOW - MIN,
+    });
+    // The run summary carries no transcript path.
+    expect(Object.keys(row?.run ?? {}).sort()).toEqual(
+      [
+        "id",
+        "seq",
+        "startedAt",
+        "endedAt",
+        "status",
+        "model",
+        "branch",
+        "tokens",
+        "costUsd",
+      ].sort(),
+    );
+  });
+
+  it("ticketTitle is null when the ticket has no board row", () => {
+    store.upsertRun(run({ ticket: "shop-app#99", status: "ok", endedAt: NOW - MIN }));
+    store.replaceBoard("shop-app", [boardItem({})]);
+    expect(rowOf("shop-app-ta")).toMatchObject({ ticket: "shop-app#99", ticketTitle: null });
+  });
+
+  it("ticketTitle falls back to the title the run began with, but only for the run's own ticket", () => {
+    store.upsertRun(
+      run({ ticket: "shop-app#99", ticketTitle: "Fence it", status: "ok", endedAt: NOW - MIN }),
+    );
+    expect(rowOf("shop-app-ta")).toMatchObject({ ticket: "shop-app#99", ticketTitle: "Fence it" });
+    // A run with no ticket of its own takes its PR's; the stored title is not that ticket's.
+    store.upsertRun(
+      run({
+        id: "r2",
+        seq: 2,
+        startedAt: NOW - 30 * MIN,
+        ticket: null,
+        ticketTitle: "Fence it",
+        prs: [{ repo: "o/shop-app", number: 7 }],
+        status: "ok",
+        endedAt: NOW - MIN,
+      }),
+    );
+    store.replacePullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 7,
+          title: "spec",
+          url: "https://github.com/o/shop-app/pull/7",
+          branch: "docs/42-spec",
+          ticket: "shop-app#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      0,
+    );
+    expect(rowOf("shop-app-ta")).toMatchObject({ ticket: "shop-app#42", ticketTitle: null });
+  });
+
+  it("contextWindow falls back to the newest earlier run's digest that has one, else null", () => {
+    store.upsertRun(run({ id: "r0", seq: 1, startedAt: NOW - 5 * HOUR, status: "ok" }));
+    store.upsertRun(run({ id: "r1", seq: 2, startedAt: NOW - 4 * HOUR, status: "ok" }));
+    store.upsertRun(run({ id: "r2", seq: 3, startedAt: NOW - 3 * HOUR, status: "ok" }));
+    store.upsertRun(run({ id: "r3", seq: 4, startedAt: NOW - 10 * MIN }));
+    expect(rowOf("shop-app-ta")?.contextWindow).toBeNull();
+    store.setDigest("r0", digest({ contextWindow: 1_000_000 }));
+    store.setDigest("r1", digest({ contextWindow: 200_000 }));
+    store.setDigest("r2", digest({ contextWindow: null }));
+    store.setDigest("r3", digest({ contextWindow: null }));
+    const row = rowOf("shop-app-ta");
+    expect(row?.digest?.contextWindow).toBeNull();
+    expect(row?.contextWindow).toBe(200_000);
+  });
+
+  it("a paused ta-loop with no running run is parked", () => {
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    expect(rowOf("shop-app-ta")).toMatchObject({ hudState: "parked", paused: true });
+  });
+
+  it("an open title-marker escalation of any kind on the loop's repo blocks it", () => {
+    store.replaceEscalations("shop-app", [escalation({ kind: "loop-blocked" })]);
+    store.replaceEscalations("site-builder", [
+      escalation({ id: "ae#2", repoId: "site-builder", kind: "mvp-ready" }),
+    ]);
+    expect(rowOf("shop-app-ta")?.hudState).toBe("blocked");
+    expect(rowOf("studio-builder")?.hudState).toBe("blocked");
+  });
+
+  it("a label-only escalation is listed in Needs you but never changes a loop's state", () => {
+    store.replaceEscalations("shop-app", [
+      escalation({ title: "needs a design", kind: "operator-decision", source: "label" }),
+    ]);
+    store.replaceEscalations("site-builder", [
+      escalation({
+        id: "ae#3",
+        repoId: "site-builder",
+        title: "triaged design",
+        kind: "autonomy-question",
+        source: "label",
+      }),
+    ]);
+    expect(rowOf("shop-app-ta")?.hudState).toBe("idle");
+    expect(rowOf("studio-builder")?.hudState).toBe("idle");
+    expect(attentionItems(config, store, NOW).filter((i) => i.escalationId !== null)).toHaveLength(
+      2,
+    );
+  });
+
+  it("carries a studio loop's note", () => {
+    store.setStatus("studio-loop:studio-builder:note", true, "stopped: quota");
+    expect(rowOf("studio-builder")?.note).toBe("stopped: quota");
+  });
+
+  it("carries a TA loop's note (launchd job missing)", () => {
+    store.setStatus("ta-loop:shop-app-ta:note", true, "launchd job missing: x");
+    expect(rowOf("shop-app-ta")?.note).toBe("launchd job missing: x");
+  });
+
+  it("a studio loop whose driver stopped is stopped, with its stop; a paused or running one is not", () => {
+    const stop = {
+      reason: "7-day quota utilization 88% >= QUOTA_STOP_PCT=80% -- refusing to fire",
+      at: NOW - HOUR,
+      quota: { usedPct: 88, stopPct: 80 },
+      resumesAt: NOW + 5 * HOUR,
+    };
+    expect(rowOf("studio-builder")).toMatchObject({ hudState: "idle", stop: null });
+    store.setSetting(driverStopKey("studio-builder"), JSON.stringify(stop));
+    expect(rowOf("studio-builder")).toMatchObject({ hudState: "stopped", stop });
+    // Not a Needs-you item.
+    expect(
+      attentionItems(config, store, NOW).filter((i) => i.agentId === "studio-builder"),
+    ).toEqual([]);
+    // A garbled value is no stop.
+    store.setSetting(driverStopKey("studio-builder"), "{nope");
+    expect(rowOf("studio-builder")).toMatchObject({ hudState: "idle", stop: null });
+  });
+
+  // Review Focus 3: heartbeats move the file mtime, not the newest event.
+  it("a working run whose transcript grew a minute ago is running, though its newest event is 15 min old", () => {
+    const path = transcript("t.log", ['{"type":"tool_progress"}'], MIN);
+    store.upsertRun(run({ transcriptPath: path }));
+    store.setDigest("r1", digest({ lastEventAt: NOW - 15 * MIN }));
+    expect(rowOf("shop-app-ta")).toMatchObject({ hudState: "running", lastOutputAt: NOW - MIN });
+  });
+
+  it("a working run whose transcript has not grown for 11 min is stalled", () => {
+    const path = transcript("t.log", ['{"type":"tool_progress"}'], 11 * MIN);
+    store.upsertRun(run({ transcriptPath: path }));
+    store.setDigest("r1", digest({ lastEventAt: NOW - 15 * MIN }));
+    expect(rowOf("shop-app-ta")).toMatchObject({
+      hudState: "stalled",
+      lastOutputAt: NOW - 11 * MIN,
+    });
+  });
+
+  it("a stalled loop's stateSince is when the stall began, not the run start", () => {
+    const path = transcript("t.log", ['{"type":"tool_progress"}'], 15 * MIN);
+    store.upsertRun(run({ transcriptPath: path, startedAt: NOW - 2 * HOUR }));
+    store.setDigest("r1", digest({ lastEventAt: NOW - 15 * MIN }));
+    expect(rowOf("shop-app-ta")).toMatchObject({ hudState: "stalled", stateSince: NOW - 5 * MIN });
+  });
+
+  it("a running loop keeps its run start as stateSince", () => {
+    store.upsertRun(run({ startedAt: NOW - 2 * HOUR }));
+    store.setDigest("r1", digest({ lastEventAt: NOW - MIN }));
+    expect(rowOf("shop-app-ta")).toMatchObject({ hudState: "running", stateSince: NOW - 2 * HOUR });
+  });
+
+  // Review Focus 3 Decision: a printed result, then silence on a background shell, is a stall.
+  it("a running run whose transcript ends in a result line and has not grown for 11 min is stalled", () => {
+    const at = new Date(NOW - 12 * MIN).toISOString();
+    const lines = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s", model: "m" }),
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "m1", content: [{ type: "text", text: "done" }] },
+        parent_tool_use_id: null,
+        timestamp: at,
+      }),
+      JSON.stringify({ type: "result", total_cost_usd: 1, is_error: false }),
+    ];
+    const path = transcript("t.log", lines, 11 * MIN);
+    store.upsertRun(run({ transcriptPath: path }));
+    store.setDigest("r1", foldTranscript(null, lines, NOW - 11 * MIN).digest);
+    expect(rowOf("shop-app-ta")).toMatchObject({
+      hudState: "stalled",
+      lastOutputAt: NOW - 11 * MIN,
+    });
+  });
+
+  // Ruling R21 (run #28): a result line, then a background shell the run waits on.
+  it("a run waiting on a background task after its result is running for up to 60 min of quiet", () => {
+    const at = new Date(NOW - 70 * MIN).toISOString();
+    const lines = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s", model: "m" }),
+      JSON.stringify({
+        type: "system",
+        subtype: "task_started",
+        task_id: "b1",
+        task_type: "local_bash",
+        is_backgrounded: true,
+        description: "Run the full suite",
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "m1", content: [{ type: "text", text: "waiting on the suite" }] },
+        parent_tool_use_id: null,
+        timestamp: at,
+      }),
+      JSON.stringify({ type: "result", total_cost_usd: 1, is_error: false }),
+    ];
+    store.upsertRun(run({ seq: 28 }));
+    store.setDigest("r1", foldTranscript(null, lines, NOW - 35 * MIN).digest);
+    store.upsertRun(run({ seq: 28, transcriptPath: transcript("t.log", lines, 35 * MIN) }));
+    expect(rowOf("shop-app-ta")).toMatchObject({
+      hudState: "running",
+      lastOutputAt: NOW - 35 * MIN,
+    });
+    expect(attentionItems(config, store, NOW)).toEqual([]);
+    store.upsertRun(run({ seq: 28, transcriptPath: transcript("t.log", lines, 61 * MIN) }));
+    // 61 min silent against the 60 min limit: the stall began a minute ago.
+    expect(rowOf("shop-app-ta")).toMatchObject({
+      hudState: "stalled",
+      lastOutputAt: NOW - 61 * MIN,
+      stateSince: NOW - MIN,
+    });
+    // Once the task closes, the ordinary 10-minute rule applies again.
+    const closed = [
+      ...lines,
+      JSON.stringify({
+        type: "system",
+        subtype: "task_notification",
+        task_id: "b1",
+        status: "completed",
+      }),
+    ];
+    store.setDigest("r1", foldTranscript(null, closed, NOW - 35 * MIN).digest);
+    store.upsertRun(run({ seq: 28, transcriptPath: transcript("t.log", closed, 35 * MIN) }));
+    expect(rowOf("shop-app-ta")?.hudState).toBe("stalled");
+  });
+
+  it("reads a persisted digest without the background field as none", () => {
+    const { background: _, ...old } = digest({ lastEventAt: NOW - 35 * MIN });
+    store.upsertRun(run({ transcriptPath: transcript("t.log", ["{}"], 35 * MIN) }));
+    store.setDigest("r1", old as RunDigest);
+    expect(rowOf("shop-app-ta")).toMatchObject({ hudState: "stalled", digest: { background: [] } });
+  });
+
+  // Review Focus 4
+  it("firstRunToday uses the operator's local midnight: 23:50 yesterday is ignored, 00:10 today wins", () => {
+    store.upsertRun(run({ id: "y", startedAt: Date.parse("2026-10-16T22:50:00Z") }));
+    store.upsertRun(
+      run({
+        id: "t2",
+        agentId: "studio-builder",
+        repoId: "site-builder",
+        startedAt: Date.parse("2026-10-17T08:00:00Z"),
+        endedAt: Date.parse("2026-10-17T09:00:00Z"),
+        status: "ok",
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "t1",
+        agentId: "shop-app-2",
+        startedAt: Date.parse("2026-10-16T23:10:00Z"),
+        endedAt: Date.parse("2026-10-16T23:40:00Z"),
+        status: "ok",
+      }),
+    );
+    expect(crew(config, store, NOW).firstRunToday).toBe(Date.parse("2026-10-16T23:10:00Z"));
+  });
+
+  it("firstRunToday ignores runs of agents that are not configured", () => {
+    store.upsertRun(run({ id: "x", agentId: "gone", startedAt: NOW - HOUR }));
+    expect(crew(config, store, NOW).firstRunToday).toBeNull();
+  });
+});
+
+describe("attention items", () => {
+  it("lists escalations of every produced kind, a stalled and an error loop, sorted by kind then time", () => {
+    store.replaceEscalations("shop-app", [
+      escalation({
+        id: "shop-app#1",
+        issueNumber: 1,
+        title: "[operator-decision] a",
+        openedAt: NOW - 2 * HOUR,
+      }),
+      escalation({
+        id: "shop-app#2",
+        issueNumber: 2,
+        title: "[mvp-ready] b",
+        kind: "mvp-ready",
+        openedAt: NOW - 5 * HOUR,
+        url: "https://github.com/o/shop-app/issues/2",
+      }),
+      escalation({
+        id: "shop-app#3",
+        issueNumber: 3,
+        title: "[loop-blocked] c",
+        kind: "loop-blocked",
+        openedAt: NOW - 9 * HOUR,
+      }),
+      escalation({
+        id: "shop-app#4",
+        issueNumber: 4,
+        title: "label only",
+        source: "label",
+        openedAt: NOW - 3 * HOUR,
+      }),
+      escalation({
+        id: "shop-app#5",
+        issueNumber: 5,
+        title: "autonomy q",
+        kind: "autonomy-question",
+        source: "label",
+        openedAt: NOW - 4 * HOUR,
+      }),
+    ]);
+    store.replaceEscalations("other", [
+      escalation({ id: "other#1", repoId: "other", issueNumber: 1, title: "no loop here" }),
+    ]);
+    // shop-app-ta stalled on run r7 in Bash.
+    const path = transcript("t.log", ["{}"], 20 * MIN);
+    store.upsertRun(run({ id: "r7", transcriptPath: path }));
+    store.setDigest(
+      "r7",
+      digest({ lastEventAt: NOW - 25 * MIN, liveTool: { name: "Bash", since: NOW - 30 * MIN } }),
+    );
+    // studio-builder's collector failing, never having succeeded.
+    statusAt(NOW - 5 * MIN, "studio-loop:studio-builder", false, "logs dir missing");
+
+    const items = attentionItems(config, store, NOW);
+    expect(items.map((i) => [i.kind, i.key])).toEqual([
+      ["stalled", `stall:shop-app-ta:r7:${NOW - 20 * MIN}`],
+      ["error", "error:studio-builder:never"],
+      ["decision", "esc:other#1"],
+      ["decision", "esc:shop-app#5"],
+      ["decision", "esc:shop-app#1"],
+      ["approval", "esc:shop-app#2"],
+      ["question", "esc:shop-app#4"],
+      ["parked", "esc:shop-app#3"],
+    ]);
+    expect(items[0]).toEqual({
+      key: `stall:shop-app-ta:r7:${NOW - 20 * MIN}`,
+      kind: "stalled",
+      agentId: "shop-app-ta",
+      repoId: "shop-app",
+      text: "No output",
+      tool: "Bash",
+      at: NOW - 20 * MIN,
+      url: null,
+      escalationId: null,
+      ticket: null,
+      acked: false,
+    });
+    expect(items[1]).toEqual({
+      key: "error:studio-builder:never",
+      kind: "error",
+      agentId: "studio-builder",
+      repoId: "site-builder",
+      text: "logs dir missing",
+      tool: null,
+      at: NOW - 5 * MIN,
+      url: null,
+      escalationId: null,
+      ticket: null,
+      acked: false,
+    });
+    // The first loop on the escalation's repo; none for a repo without a loop.
+    expect(items.find((i) => i.key === "esc:shop-app#2")).toEqual({
+      key: "esc:shop-app#2",
+      kind: "approval",
+      agentId: "shop-app-ta",
+      repoId: "shop-app",
+      text: "[mvp-ready] b",
+      tool: null,
+      at: NOW - 5 * HOUR,
+      url: "https://github.com/o/shop-app/issues/2",
+      escalationId: "shop-app#2",
+      ticket: "shop-app#2",
+      acked: false,
+    });
+    expect(items.find((i) => i.key === "esc:other#1")?.agentId).toBeNull();
+  });
+
+  it("a stall with no live tool has tool null", () => {
+    const path = transcript("t.log", ["{}"], 20 * MIN);
+    store.upsertRun(run({ transcriptPath: path }));
+    store.setDigest("r1", digest({ lastEventAt: NOW - 20 * MIN }));
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ kind: "stalled", tool: null });
+  });
+
+  it("a failing collector that stored no text is an error item reading 'collector failed'", () => {
+    statusAt(NOW - 5 * MIN, "ta-loop:shop-app-ta", false, null);
+    expect(attentionItems(config, store, NOW)).toEqual([
+      expect.objectContaining({ kind: "error", agentId: "shop-app-ta", text: "collector failed" }),
+    ]);
+  });
+
+  it("an error that recovers and fails again is a new key, timed at its last success", () => {
+    const c = "ta-loop:shop-app-ta";
+    statusAt(NOW - 30 * MIN, c, false, "boom");
+    expect(attentionItems(config, store, NOW).map((i) => [i.key, i.at])).toEqual([
+      ["error:shop-app-ta:never", NOW - 30 * MIN],
+    ]);
+    store.ack(["error:shop-app-ta:never"], NOW - 29 * MIN);
+    statusAt(NOW - 20 * MIN, c, true, null);
+    expect(attentionItems(config, store, NOW)).toEqual([]);
+    statusAt(NOW - 10 * MIN, c, false, "boom again");
+    expect(attentionItems(config, store, NOW)).toEqual([
+      expect.objectContaining({
+        key: `error:shop-app-ta:${NOW - 20 * MIN}`,
+        at: NOW - 20 * MIN,
+        text: "boom again",
+        acked: false,
+      }),
+    ]);
+  });
+
+  // Review Focus 5
+  it("an acked stall stays acked; a new stall on another run is not", () => {
+    const path = transcript("t.log", ["{}"], 20 * MIN);
+    const key = (runId: string) => `stall:shop-app-ta:${runId}:${NOW - 20 * MIN}`;
+    store.upsertRun(run({ id: "r1", transcriptPath: path }));
+    store.ack([key("r1")], NOW - MIN);
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ key: key("r1"), acked: true });
+    store.upsertRun(run({ id: "r2", seq: 2, startedAt: NOW - 30 * MIN, transcriptPath: path }));
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({ key: key("r2"), acked: false });
+  });
+
+  it("a second stall in the same run is a new key: ack, recover, stall again pulses again", () => {
+    store.upsertRun(run({ transcriptPath: transcript("t.log", ["{}"], 20 * MIN) }));
+    const first = attentionItems(config, store, NOW)[0];
+    expect(first).toMatchObject({ key: `stall:shop-app-ta:r1:${NOW - 20 * MIN}`, acked: false });
+    store.ack([first?.key ?? ""], NOW - MIN);
+    expect(attentionItems(config, store, NOW)[0]?.acked).toBe(true);
+    // The transcript grows again (recovered), then goes quiet for 12 minutes.
+    store.upsertRun(run({ transcriptPath: transcript("t.log", ["{}", "{}"], MIN) }));
+    expect(attentionItems(config, store, NOW)).toEqual([]);
+    store.upsertRun(run({ transcriptPath: transcript("t.log", ["{}", "{}"], 12 * MIN) }));
+    expect(attentionItems(config, store, NOW)[0]).toMatchObject({
+      key: `stall:shop-app-ta:r1:${NOW - 12 * MIN}`,
+      kind: "stalled",
+      acked: false,
+    });
+  });
+});
+
+describe("attentionItems: PRs waiting on you", () => {
+  const pr = (over: Partial<PullRequestView> = {}): PullRequestView => ({
+    repoId: "shop-app",
+    number: 7,
+    title: "spec",
+    url: "https://github.com/o/shop-app/pull/7",
+    branch: "docs/42-spec",
+    ticket: "shop-app#42",
+    state: "open",
+    isDraft: true,
+    review: null,
+    ci: null,
+    createdAt: NOW - 9 * DAY,
+    updatedAt: NOW - 9 * DAY,
+    mergedAt: null,
+    headSha: null,
+    mergeable: null,
+    ...over,
+  });
+  const seed = (prs: PullRequestView[]) => {
+    store.replaceBoard("shop-app", [boardItem({})]);
+    store.replacePullRequests("shop-app", prs, 0);
+  };
+  const prItems = () => attentionItems(config, store, NOW).filter((i) => i.kind === "pr");
+
+  it("a 9-day-old draft on a board ticket is a pr item", () => {
+    seed([pr()]);
+    expect(prItems()).toEqual([
+      {
+        key: `pr:shop-app#7:${NOW - 9 * DAY}`,
+        kind: "pr",
+        agentId: null,
+        repoId: "shop-app",
+        text: "PR #7 · You: decide on the draft",
+        tool: null,
+        at: NOW - 9 * DAY,
+        url: "https://github.com/o/shop-app/pull/7",
+        escalationId: null,
+        ticket: "shop-app#42",
+        acked: false,
+      },
+    ]);
+  });
+
+  it("approved merges, plain reviews", () => {
+    seed([
+      pr({ isDraft: false, review: "approved" }),
+      pr({ number: 8, isDraft: false, updatedAt: NOW - 2 * HOUR }),
+    ]);
+    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: merge", "PR #8 · You: review"]);
+  });
+
+  it("not while an agent is running on the ticket, nor when recent, closed or off-board", () => {
+    seed([pr()]);
+    store.upsertRun(run({ ticket: "shop-app#42" }));
+    expect(prItems()).toEqual([]);
+    store.upsertRun(run({ status: "ok", endedAt: NOW - HOUR }));
+    expect(prItems()).toHaveLength(1);
+    seed([pr({ updatedAt: NOW - 59 * MIN })]);
+    expect(prItems()).toEqual([]);
+    seed([
+      pr({ state: "closed" }),
+      pr({ number: 9, ticket: "shop-app#99" }),
+      pr({ number: 10, ticket: null }),
+    ]);
+    expect(prItems()).toEqual([]);
+  });
+
+  it("a changed PR is a new key, and an ack of the old one does not carry", () => {
+    seed([pr()]);
+    const old = prItems()[0]?.key as string;
+    store.ack([old], NOW);
+    expect(prItems()[0]?.acked).toBe(true);
+    seed([pr({ updatedAt: NOW - 2 * HOUR })]);
+    expect(prItems()[0]).toMatchObject({ acked: false });
+    expect(prItems()[0]?.key).not.toBe(old);
+  });
+});
+
+describe("crew seats in the rows", () => {
+  const withCrew = (): CcConfig => ({
+    ...config,
+    crew: {
+      worktrees: join(dir, "crew-wt"),
+      maxSeats: 4,
+      sessions: [
+        {
+          id: "shop-app-1",
+          repoId: "shop-app",
+          checkout: join(dir, "crew-co"),
+          seats: [
+            {
+              id: "GUIDO-1",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "sonnet",
+              area: ["apps/**"],
+            },
+            { id: "RETRO-1", role: "RETRO", accountId: "claude-main", model: "haiku", area: [] },
+          ],
+        },
+      ],
+    },
+  });
+  const seat = (over: Partial<SeatSessionRow>): SeatSessionRow => ({
+    seatId: "GUIDO-1",
+    runId: "c1",
+    cliSessionId: null,
+    state: "running",
+    reason: null,
+    worktree: null,
+    updatedAt: NOW - 5 * MIN,
+    ...over,
+  });
+  const crewRun = (over: Partial<Run> = {}): Run =>
+    run({ id: "c1", agentId: "GUIDO-1", repoId: "shop-app", ...over });
+  const rowOf = (c: CcConfig, id: string) => crew(c, store, NOW).rows.find((r) => r.id === id);
+
+  it("lists seats after the loops, with role, mode, area, model and session", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    store.setSeatSession(seat({}));
+    const rows = crew(c, store, NOW).rows;
+    expect(rows.map((r) => r.id)).toEqual([
+      "shop-app-ta",
+      "studio-builder",
+      "shop-app-2",
+      "GUIDO-1",
+      "RETRO-1",
+    ]);
+    expect(rows.map((r) => r.index)).toEqual([0, 1, 2, 3, 4]);
+    expect(rows[0]).toMatchObject({ kind: "loop", role: null, mode: null, area: [], model: null });
+    expect(rows[3]).toMatchObject({
+      kind: "crew",
+      loopKind: "crew",
+      role: "GUIDO",
+      mode: "writer",
+      area: ["apps/**"],
+      model: "sonnet",
+      sessionId: "shop-app-1",
+      repoId: "shop-app",
+      accountId: "claude-main",
+      hudState: "running",
+      stateSince: NOW - 5 * MIN,
+    });
+    expect(rows[3]?.run?.id).toBe("c1");
+    expect(rows[4]).toMatchObject({
+      kind: "crew",
+      role: "RETRO",
+      mode: "read-only",
+      hudState: "idle",
+    });
+    expect(rows[4]?.run).toBeNull();
+  });
+
+  it("a scratch seat's crew row says scratch", () => {
+    const c = withCrew();
+    const retro = c.crew?.sessions[0]?.seats.find((s) => s.id === "RETRO-1");
+    if (retro) retro.mode = "scratch";
+    expect(rowOf(c, "RETRO-1")?.mode).toBe("scratch");
+  });
+
+  it("a reviewing seat says which PR", () => {
+    const c = withCrew();
+    const sha = "c".repeat(40);
+    store.upsertRun(crewRun());
+    store.setSeatSession(seat({}));
+    const id = store.requestReview({
+      authorRunId: "c1",
+      repoId: "shop-app",
+      seatId: "RETRO-1",
+      prNumber: 12,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - MIN,
+    });
+    if (id === null) throw new Error("not queued");
+    store.upsertRun(
+      crewRun({ id: "r1", agentId: "RETRO-1", reviewId: id, ticket: "shop-app#90", loop: null }),
+    );
+    expect(rowOf(c, "RETRO-1")?.reviewing).toEqual({ prNumber: 12, sha, ref: "shop-app#90" });
+    expect(rowOf(c, "GUIDO-1")?.reviewing).toBeNull();
+    // an ended review run is no longer reviewing
+    store.setRunEnded("r1", NOW, "ok", "engine");
+    expect(rowOf(c, "RETRO-1")?.reviewing).toBeNull();
+  });
+
+  it("carries the CLI version and the seat's configured effort; a loop has neither", () => {
+    const c = withCrew();
+    const seatCfg = c.crew?.sessions[0]?.seats[0];
+    if (seatCfg) seatCfg.effort = "max";
+    const rows = crew(c, store, NOW, NO_LOCK, () => "2.1.302").rows;
+    const by = (id: string) => rows.find((r) => r.id === id);
+    expect(by("GUIDO-1")?.cli).toEqual({ version: "2.1.302", effort: "max" });
+    expect(by("RETRO-1")?.cli).toEqual({ version: "2.1.302", effort: null });
+    expect(by("shop-app-ta")?.cli).toEqual({ version: null, effort: null });
+    expect(
+      crew(c, store, NOW, NO_LOCK, () => null).rows.find((r) => r.id === "GUIDO-1")?.cli.version,
+    ).toBe(null);
+  });
+
+  it("asks for the CLI version once per call, however many seats there are", () => {
+    const c = withCrew();
+    c.crew?.sessions[0]?.seats.push({
+      id: "GUIDO-2",
+      role: "GUIDO",
+      accountId: "claude-main",
+      model: "sonnet",
+      area: [],
+    });
+    let calls = 0;
+    const rows = crew(c, store, NOW, NO_LOCK, () => {
+      calls += 1;
+      return "2.1.302";
+    }).rows;
+    expect(rows.filter((r) => r.cli.version === "2.1.302")).toHaveLength(3);
+    expect(calls).toBe(1);
+  });
+
+  describe("review", () => {
+    const BRANCH = "feature/90-x";
+    const pr = (over: Partial<PullRequestView>): PullRequestView => ({
+      repoId: "shop-app",
+      number: 7,
+      title: "t",
+      url: "u",
+      branch: BRANCH,
+      ticket: null,
+      state: "open",
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: NOW - HOUR,
+      updatedAt: NOW - HOUR,
+      mergedAt: null,
+      headSha: null,
+      mergeable: null,
+      ...over,
+    });
+    const reviewOf = (prs: PullRequestView[], runBranch: string | null = BRANCH) => {
+      const c = withCrew();
+      store.upsertRun(crewRun({ branch: runBranch }));
+      store.setSeatSession(seat({ state: "idle" }));
+      for (const repoId of ["shop-app", "site-builder"]) {
+        store.replacePullRequests(
+          repoId,
+          prs.filter((p) => p.repoId === repoId),
+          NOW,
+        );
+      }
+      return rowOf(c, "GUIDO-1")?.review;
+    };
+
+    it("is null when the run's branch has no open PR", () => {
+      expect(reviewOf([])).toBeNull();
+      expect(reviewOf([pr({ branch: "feature/other" })])).toBeNull();
+      expect(reviewOf([pr({ state: "merged" })])).toBeNull();
+      expect(reviewOf([pr({ state: "closed" })])).toBeNull();
+      expect(reviewOf([pr({})], null)).toBeNull();
+      expect(reviewOf([pr({ repoId: "site-builder" })])).toBeNull();
+    });
+
+    it("names the open PR and its state", () => {
+      expect(reviewOf([pr({ isDraft: true })])).toEqual({ prNumber: 7, state: "draft" });
+      expect(reviewOf([pr({})])).toEqual({ prNumber: 7, state: "open" });
+      expect(reviewOf([pr({ review: "requested" })])).toEqual({ prNumber: 7, state: "open" });
+      expect(reviewOf([pr({ review: "changes" })])).toEqual({ prNumber: 7, state: "changes" });
+      expect(reviewOf([pr({ review: "approved" })])).toEqual({ prNumber: 7, state: "approved" });
+    });
+
+    it("names the newest of several open PRs on the branch", () => {
+      expect(reviewOf([pr({ number: 7 }), pr({ number: 9 }), pr({ number: 8 })])).toEqual({
+        prNumber: 9,
+        state: "open",
+      });
+      expect(
+        reviewOf([pr({ number: 9, state: "closed" }), pr({ number: 7, review: "approved" })]),
+      ).toEqual({ prNumber: 7, state: "approved" });
+    });
+
+    it("is null for a loop row", () => {
+      expect(rowOf(withCrew(), "shop-app-ta")?.review).toBeNull();
+    });
+  });
+
+  describe("loop on a crew row", () => {
+    const loopOf = (over: Partial<RunLoop>): RunLoop => ({ ...NEW_LOOP, ...over });
+    it("a looped run's row carries its phase, text, PR and park reason", () => {
+      const c = withCrew();
+      store.upsertRun(crewRun({ ticket: "mission-control#197" }));
+      store.setSeatSession(seat({}));
+      store.setRunLoop("c1", loopOf({ phase: "ci", pushFor: "abcdef1234" }));
+      expect(rowOf(c, "GUIDO-1")?.loop).toEqual({
+        phase: "ci",
+        text: "CI on abcdef1",
+        prNumber: null,
+        parked: null,
+      });
+      store.setRunLoop("c1", loopOf({ phase: "review", prNumber: 208 }));
+      expect(rowOf(c, "GUIDO-1")?.loop).toEqual({
+        phase: "review",
+        text: "In review · PR #208",
+        prNumber: 208,
+        parked: null,
+      });
+      store.setRunLoop(
+        "c1",
+        loopOf({
+          phase: "parked",
+          parked: { kind: "ci", reason: "CI failed 3 times", ended: false },
+        }),
+      );
+      expect(rowOf(c, "GUIDO-1")?.loop).toEqual({
+        phase: "parked",
+        text: "Blocked: CI failed 3 times",
+        prNumber: null,
+        parked: "CI failed 3 times",
+      });
+      store.setRunLoop("c1", loopOf({ phase: "working" }));
+      expect(rowOf(c, "GUIDO-1")?.loop?.text).toBe("Working on mission-control#197");
+    });
+    it("a done loop is carried with its PR", () => {
+      const c = withCrew();
+      store.upsertRun(crewRun());
+      store.setSeatSession(seat({}));
+      store.setRunLoop("c1", loopOf({ phase: "done", prNumber: 9 }));
+      expect(rowOf(c, "GUIDO-1")?.loop).toEqual({
+        phase: "done",
+        text: "Done · PR #9",
+        prNumber: 9,
+        parked: null,
+      });
+    });
+    it("a parked-ended loop on an ended run still carries its reason", () => {
+      const c = withCrew();
+      store.upsertRun(crewRun({ status: "ok", endedAt: NOW - MIN }));
+      store.setRunLoop(
+        "c1",
+        loopOf({ phase: "parked", parked: { kind: "ci", reason: "gave up", ended: true } }),
+      );
+      expect(rowOf(c, "GUIDO-1")?.loop).toMatchObject({
+        phase: "parked",
+        text: "Blocked: gave up",
+        parked: "gave up",
+      });
+    });
+    it("a crew run without a loop has none", () => {
+      const c = withCrew();
+      store.upsertRun(crewRun());
+      store.setSeatSession(seat({}));
+      expect(rowOf(c, "GUIDO-1")?.loop).toBeNull();
+    });
+    it("an observed loop agent has none, whatever its run holds", () => {
+      store.upsertRun(run({ id: "l1", agentId: "shop-app-ta", repoId: "shop-app" }));
+      store.setRunLoop("l1", loopOf({ phase: "review", prNumber: 3 }));
+      expect(rowOf(withCrew(), "shop-app-ta")?.loop).toBeNull();
+    });
+  });
+
+  it("a running seat stalls after STALL_MS without output", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    store.setSeatSession(seat({}));
+    store.setDigest("c1", digest({ lastEventAt: NOW - 11 * MIN }));
+    expect(rowOf(c, "GUIDO-1")).toMatchObject({ hudState: "stalled", stateSince: NOW - MIN });
+    store.setDigest("c1", digest({ lastEventAt: NOW - 9 * MIN }));
+    expect(rowOf(c, "GUIDO-1")?.hudState).toBe("running");
+  });
+
+  it("a seat that wrote nothing is stalled from its row's last change plus STALL_MS", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    store.setSeatSession(seat({ updatedAt: NOW - 11 * MIN }));
+    expect(rowOf(c, "GUIDO-1")).toMatchObject({
+      hudState: "stalled",
+      lastOutputAt: null,
+      stateSince: NOW - MIN,
+    });
+  });
+
+  it("a seat's background task does not stretch its stall: stateSince is never in the future", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    store.setSeatSession(seat({}));
+    store.setDigest(
+      "c1",
+      digest({
+        lastEventAt: NOW - 11 * MIN,
+        background: [{ taskId: "b1", description: "sleep", type: "local_bash" }],
+      }),
+    );
+    const row = rowOf(c, "GUIDO-1");
+    expect(row).toMatchObject({ hudState: "stalled", stateSince: NOW - MIN });
+    expect(row?.stateSince).toBeLessThanOrEqual(NOW);
+  });
+
+  it("a stall never began before its run did", () => {
+    // silent for 15 min by an old event, but the run only started 2 min ago
+    store.upsertRun(run({ startedAt: NOW - 2 * MIN }));
+    store.setDigest("r1", digest({ lastEventAt: NOW - 15 * MIN }));
+    expect(rowOf(withCrew(), "shop-app-ta")).toMatchObject({
+      hudState: "stalled",
+      stateSince: NOW - 2 * MIN,
+    });
+  });
+
+  it("carries the seat's reason, and maps parked, stopped and error", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    store.setSeatSession(seat({ state: "parked", reason: "rate limited until 14:00" }));
+    expect(rowOf(c, "GUIDO-1")).toMatchObject({
+      hudState: "parked",
+      note: "rate limited until 14:00",
+    });
+    store.setSeatSession(seat({ state: "stopped", reason: null, runId: null }));
+    expect(rowOf(c, "GUIDO-1")?.hudState).toBe("stopped");
+    store.setSeatSession(seat({ state: "error", reason: "process exited 1" }));
+    expect(rowOf(c, "GUIDO-1")).toMatchObject({
+      hudState: "error",
+      sourceError: "process exited 1",
+    });
+  });
+
+  it("an error seat is an error attention item; a stalled one a stall item", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    store.setSeatSession(
+      seat({ state: "error", reason: "process exited 1", updatedAt: NOW - MIN }),
+    );
+    const err = attentionItems(c, store, NOW).find((i) => i.agentId === "GUIDO-1");
+    expect(err).toMatchObject({
+      kind: "error",
+      key: `error:GUIDO-1:${NOW - MIN}`,
+      text: "process exited 1",
+      repoId: "shop-app",
+    });
+    store.setSeatSession(seat({}));
+    store.setDigest("c1", digest({ lastEventAt: NOW - 11 * MIN }));
+    const stall = attentionItems(c, store, NOW).find((i) => i.agentId === "GUIDO-1");
+    expect(stall).toMatchObject({ kind: "stalled", key: `stall:GUIDO-1:c1:${NOW - 11 * MIN}` });
+  });
+
+  it("firstRunToday counts a crew run", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun({ startedAt: NOW - 2 * HOUR }));
+    expect(crew(c, store, NOW).firstRunToday).toBe(NOW - 2 * HOUR);
+  });
+});
+
+describe("crew items: strays, questions, crew errors and the test lock", () => {
+  const withCrew = (): CcConfig => ({
+    ...config,
+    crew: {
+      worktrees: join(dir, "crew-wt"),
+      maxSeats: 4,
+      sessions: [
+        {
+          id: "shop-app-1",
+          repoId: "shop-app",
+          checkout: join(dir, "crew-co"),
+          seats: [
+            {
+              id: "GUIDO-1",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "sonnet",
+              area: ["apps/**"],
+            },
+            {
+              id: "GUIDO-2",
+              role: "GUIDO",
+              accountId: "claude-main",
+              model: "sonnet",
+              area: ["web/**"],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const seat = (seatId: string, runId: string, over: Partial<SeatSessionRow> = {}) =>
+    store.setSeatSession({
+      seatId,
+      runId,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW - 30 * MIN,
+      ...over,
+    });
+  const crewRun = (id: string, agentId: string) =>
+    store.upsertRun(run({ id, agentId, repoId: "shop-app", startedAt: NOW - HOUR }));
+  const items = (c: CcConfig, lock: TestLockState = NO_LOCK) =>
+    attentionItems(c, store, NOW, lock).filter((i) => i.agentId?.startsWith("GUIDO"));
+
+  it("lists a stray outside every area, and one in another writer's area, by its key", () => {
+    const c = withCrew();
+    store.addStrays([
+      {
+        sessionId: "shop-app-1",
+        path: "docs/c.md",
+        agentId: "GUIDO-1",
+        kind: "outside",
+        at: NOW - 2 * MIN,
+      },
+      {
+        sessionId: "shop-app-1",
+        path: "web/b.ts",
+        agentId: "GUIDO-1",
+        kind: "other-area",
+        at: NOW - MIN,
+      },
+    ]);
+    const strays = store.strays();
+    expect(strays.map((s) => s.key)).toEqual(
+      ["docs/c.md", "web/b.ts"].map(
+        (p) =>
+          `stray:${createHash("sha256").update(`shop-app-1\0${p}`).digest("hex").slice(0, 16)}`,
+      ),
+    );
+    expect(items(c)).toEqual([
+      {
+        key: strays[0]?.key,
+        kind: "stray",
+        agentId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "docs/c.md changed in s/shop-app-1 outside every agent's area",
+        tool: null,
+        at: NOW - 2 * MIN,
+        url: null,
+        escalationId: null,
+        ticket: null,
+        acked: false,
+      },
+      expect.objectContaining({
+        key: strays[1]?.key,
+        kind: "stray",
+        text: "web/b.ts changed in s/shop-app-1 inside GUIDO-2's area",
+      }),
+    ]);
+    store.clearStrays("shop-app-1", ["docs/c.md"]);
+    expect(items(c).map((i) => i.text)).toEqual([
+      "web/b.ts changed in s/shop-app-1 inside GUIDO-2's area",
+    ]);
+  });
+
+  it("re-recording a stray moves it to the latest seat and time, under the same key", () => {
+    store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-1", kind: "outside", at: 1 }]);
+    store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-2", kind: "outside", at: 2 }]);
+    expect(store.strays()).toMatchObject([{ path: "x", agentId: "GUIDO-2", at: 2 }]);
+  });
+
+  it("lists a seat's open question until it is answered", () => {
+    const c = withCrew();
+    const id = store.addQuestion({
+      agentId: "GUIDO-1",
+      runId: "c1",
+      text: "Lanes per customer?",
+      at: NOW - MIN,
+    });
+    expect(items(c)).toEqual([
+      expect.objectContaining({
+        key: `ask:${id}`,
+        kind: "question",
+        agentId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "GUIDO-1 asks: Lanes per customer?",
+        at: NOW - MIN,
+      }),
+    ]);
+    store.answerQuestions("GUIDO-1", NOW);
+    expect(items(c)).toEqual([]);
+  });
+
+  it("lists an unacked crew error as an error item", () => {
+    const c = withCrew();
+    const id = store.addCrewError({
+      agentId: "GUIDO-1",
+      runId: "c1",
+      text: "the clone failed an object check",
+      at: NOW - MIN,
+    });
+    expect(items(c)).toEqual([
+      expect.objectContaining({
+        key: `crew-error:${id}`,
+        kind: "error",
+        agentId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "the clone failed an object check",
+        at: NOW - MIN,
+        acked: false,
+      }),
+    ]);
+    store.ackCrewError(id);
+    expect(items(c)).toEqual([]);
+  });
+
+  it("shows a seat waiting for the test lock as waiting, never stalled", () => {
+    const c = withCrew();
+    crewRun("c1", "GUIDO-1");
+    crewRun("c2", "GUIDO-2");
+    seat("GUIDO-1", "c1");
+    seat("GUIDO-2", "c2");
+    store.setDigest("c2", digest({ lastEventAt: NOW - 20 * MIN }));
+    const lock: TestLockState = {
+      holder: { runId: "c1", seatId: "GUIDO-1", command: "pnpm -s test", since: NOW - 5 * MIN },
+      waiting: [{ runId: "c2", seatId: "GUIDO-2", since: NOW - 20 * MIN }],
+    };
+    store.setDigest("c1", digest({ lastEventAt: NOW - MIN }));
+    const row = crew(c, store, NOW, lock).rows.find((r) => r.id === "GUIDO-2");
+    expect(row).toMatchObject({ hudState: "waiting", note: "waiting for the test lock" });
+    expect(items(c, lock)).toEqual([]);
+    // without the lock's word it is an ordinary stall
+    expect(crew(c, store, NOW).rows.find((r) => r.id === "GUIDO-2")?.hudState).toBe("stalled");
+  });
+
+  it("raises the lock item when the holder has stalled and someone waits", () => {
+    const c = withCrew();
+    crewRun("c1", "GUIDO-1");
+    crewRun("c2", "GUIDO-2");
+    seat("GUIDO-1", "c1");
+    seat("GUIDO-2", "c2");
+    store.setDigest("c1", digest({ lastEventAt: NOW - 11 * MIN }));
+    store.setDigest("c2", digest({ lastEventAt: NOW - MIN }));
+    const lock: TestLockState = {
+      holder: { runId: "c1", seatId: "GUIDO-1", command: "pnpm -s test", since: NOW - 15 * MIN },
+      waiting: [{ runId: "c2", seatId: "GUIDO-2", since: NOW - 4 * MIN }],
+    };
+    const lockItems = items(c, lock).filter((i) => i.kind === "lock");
+    expect(lockItems).toEqual([
+      {
+        key: `lock:c1:${NOW - 15 * MIN}`,
+        kind: "lock",
+        agentId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "GUIDO-2 waiting for the test lock, held by a stalled run (GUIDO-1)",
+        tool: null,
+        at: NOW - 11 * MIN,
+        url: null,
+        escalationId: null,
+        ticket: null,
+        acked: false,
+      },
+    ]);
+    // the lock sorts first
+    expect(attentionItems(c, store, NOW, lock)[0]?.kind).toBe("lock");
+    // a holder still printing, or nobody waiting: no lock item
+    store.setDigest("c1", digest({ lastEventAt: NOW - MIN }));
+    expect(items(c, lock).filter((i) => i.kind === "lock")).toEqual([]);
+    store.setDigest("c1", digest({ lastEventAt: NOW - 11 * MIN }));
+    expect(items(c, { ...lock, waiting: [] }).filter((i) => i.kind === "lock")).toEqual([]);
+  });
+});
+
+describe("the engine's notes in Needs you", () => {
+  const note = (key: string, kind: "blocked" | "review" | "flag" | "ratelimit", at = NOW - MIN) =>
+    store.raiseNote({
+      key,
+      kind,
+      runId: "r1",
+      seatId: "guido-1",
+      repoId: "shop-app",
+      text: `text of ${key}`,
+      at,
+    });
+  const noteItems = () =>
+    attentionItems(config, store, NOW).filter((i) => i.key.startsWith("note:"));
+
+  it("shows each kind with its note's text, and drops it when the note clears", () => {
+    note("blocked:r1:0", "blocked", NOW - 4 * MIN);
+    note("review:r1:abc", "review", NOW - 3 * MIN);
+    note("flag:r1:hard-rules:abc", "flag", NOW - 2 * MIN);
+    note("ratelimit:r1", "ratelimit", NOW - MIN);
+    expect(noteItems().map((i) => [i.key, i.kind, i.text, i.agentId, i.repoId])).toEqual([
+      ["note:blocked:r1:0", "blocked", "text of blocked:r1:0", "guido-1", "shop-app"],
+      ["note:review:r1:abc", "review", "text of review:r1:abc", "guido-1", "shop-app"],
+      [
+        "note:flag:r1:hard-rules:abc",
+        "flag",
+        "text of flag:r1:hard-rules:abc",
+        "guido-1",
+        "shop-app",
+      ],
+      ["note:ratelimit:r1", "ratelimit", "text of ratelimit:r1", "guido-1", "shop-app"],
+    ]);
+    expect(ATTENTION_LABEL.ratelimit).toBe("Rate-limited");
+    store.clearNote("review:r1:abc", NOW);
+    store.clearNote("ratelimit:r1", NOW);
+    expect(noteItems().map((i) => i.kind)).toEqual(["blocked", "flag"]);
+    store.clearNotesFor("r1", NOW);
+    expect(noteItems()).toEqual([]);
+  });
+
+  it("links a run's note to its ticket and PR", () => {
+    store.upsertRun({
+      id: "r1",
+      agentId: "guido-1",
+      repoId: "shop-app",
+      seq: 1,
+      startedAt: NOW - HOUR,
+      endedAt: null,
+      status: "running",
+      sessionId: null,
+      model: null,
+      branch: "feature/7-x",
+      ticket: "shop-app#7",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      loop: { ...NEW_LOOP, prNumber: 12 },
+    });
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 12,
+          title: "t",
+          url: "https://github.com/o/shop-app/pull/12",
+          branch: "feature/7-x",
+          ticket: "shop-app#7",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: "passing",
+          createdAt: NOW - HOUR,
+          updatedAt: NOW - MIN,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    note("review:r1:abc", "review");
+    expect(noteItems()[0]).toMatchObject({
+      ticket: "shop-app#7",
+      url: "https://github.com/o/shop-app/pull/12",
+    });
+  });
+});

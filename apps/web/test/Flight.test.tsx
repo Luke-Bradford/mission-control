@@ -1,0 +1,548 @@
+import { FLIGHT_NOT_RUNNING } from "@mc/core";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hub } from "../src/data.ts";
+import { overturnText } from "../src/flight/conversation.ts";
+import type { FlightDecision, FlightView } from "../src/flight/flightTypes.ts";
+import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
+import { Flight } from "../src/pages/Flight.tsx";
+import { resetSession, setSession } from "../src/shell/session.ts";
+import { stubFetch } from "./fetchStub.ts";
+import {
+  boardItem,
+  CONFIG,
+  crewRow,
+  HOUR,
+  item,
+  limit5h,
+  MIN,
+  NOW,
+  prView,
+  REPOS,
+  seatRow,
+  stoppedSeat,
+} from "./fixtures.ts";
+
+const board = [
+  boardItem({ issueNumber: 1, status: "In progress", state: "in progress" }),
+  boardItem({ issueNumber: 2, status: "In progress", state: "in progress" }),
+  boardItem({ issueNumber: 3, status: "In review", state: "review" }),
+  boardItem({ issueNumber: 4, status: "Ready for QA", state: "review" }),
+  boardItem({ issueNumber: 5, status: "Done", state: "done" }),
+];
+
+function stub() {
+  stubFetch({
+    "/api/repos": REPOS,
+    "/api/boards/shop-app": board,
+    "/api/boards/site-builder": [],
+    "/api/attention": [
+      item({ key: "a", kind: "decision" }),
+      item({ key: "b", kind: "decision" }),
+      item({ key: "c", kind: "approval" }),
+      item({ key: "d", kind: "question" }),
+      item({ key: "e", kind: "stalled" }),
+      item({ key: "f", kind: "error" }),
+      item({ key: "g", kind: "tag" }),
+    ],
+    "/api/limits": [
+      limit5h({ resetAt: NOW + 26 * MIN }),
+      limit5h({ accountId: "codex", window: "5h", resetAt: NOW + 30 * HOUR }),
+    ],
+    "/api/health": [
+      { collector: "github:shop-app", ok: false, error: "x", at: NOW - 50_000, lastOkAt: null },
+      {
+        collector: "usage:claude-main",
+        ok: true,
+        error: null,
+        at: NOW - 10 * MIN,
+        lastOkAt: NOW - 10 * MIN,
+      },
+    ],
+    "/api/config": CONFIG,
+  });
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  hub.clear();
+  resetSession();
+});
+
+const decided = (id: string, at: number, over: Partial<FlightDecision> = {}): FlightDecision => ({
+  id: Number(id.replace(/\D/g, "")),
+  targetRunId: null,
+  ref: null,
+  questionId: null,
+  at,
+  seatId: "guido-1",
+  kind: "answer",
+  about: `question ${id}`,
+  decision: `yes ${id}`,
+  basis: `because ${id}`,
+  ...over,
+});
+const flightView = (over: Partial<FlightView> = {}): FlightView => ({
+  seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
+  decisions: [decided("d1", NOW - 2 * HOUR), decided("d2", NOW - HOUR, { kind: "pass" })],
+  ...over,
+});
+function stubDecided(view: FlightView, extra: Record<string, unknown> = {}) {
+  return stubFetch({
+    "/api/flight": view,
+    "/api/config": CONFIG,
+    "/api/crew": { rows: [seatRow()], firstRunToday: null },
+    ...extra,
+  });
+}
+
+describe("Decided without you", () => {
+  it("lists decisions newest first with tag, time, label, about, decision and basis", async () => {
+    stubDecided(flightView());
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("decided-row");
+    expect(rows).toHaveLength(2);
+    const first = rows[0]?.textContent ?? "";
+    expect(first).toContain("GUIDO-1");
+    expect(first).toContain("Passed to you");
+    expect(first).toContain("question d2");
+    expect(first).toContain("yes d2 · because d2");
+    expect(first).toMatch(/\d\d:\d\d/);
+    expect(rows[1]?.textContent).toContain("Answered");
+  });
+
+  it("says so when nothing was decided", async () => {
+    stubDecided(flightView({ decisions: [] }));
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#decidedP")?.textContent).toContain(
+        "Nothing decided in the last day.",
+      ),
+    );
+  });
+
+  it("says FLIGHT is not running with no seat", async () => {
+    stubDecided({ seat: null, decisions: [] });
+    const { container } = render(<Flight />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.querySelector("#decidedP")?.textContent).toContain(FLIGHT_NOT_RUNNING);
+  });
+
+  it("Overturn posts the exact text, then shows You overturned it", async () => {
+    const d = decided("d2", NOW - HOUR, { kind: "pass" });
+    const fn = stubDecided(flightView({ decisions: [d] }), {
+      "POST /api/seats/flight-1/message": {},
+    });
+    render(<Flight />);
+    fireEvent.click(await screen.findByRole("button", { name: "Overturn" }));
+    expect(await screen.findByText("You overturned it")).toBeTruthy();
+    const post = fn.mock.calls.find(([p]) => p === "/api/seats/flight-1/message");
+    expect(JSON.parse(post?.[1]?.body as string)).toEqual({
+      text: overturnText(d, "GUIDO-1"),
+    });
+    expect(screen.queryByRole("button", { name: "Overturn" })).toBeNull();
+  });
+
+  it("shows a failed Overturn under the row and keeps the button", async () => {
+    stubDecided(flightView({ decisions: [decided("d1", NOW - HOUR)] }), {
+      "POST /api/seats/flight-1/message": () => ({ status: 409, body: { error: "seat busy" } }),
+    });
+    render(<Flight />);
+    fireEvent.click(await screen.findByRole("button", { name: "Overturn" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("seat busy");
+    expect(screen.getByRole("button", { name: "Overturn" })).toBeTruthy();
+  });
+
+  it("disables Overturn when FLIGHT is not live", async () => {
+    stubDecided(
+      flightView({
+        seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "stopped", live: false },
+      }),
+    );
+    render(<Flight />);
+    const [btn] = await screen.findAllByRole("button", { name: "Overturn" });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("FLIGHT page", () => {
+  it("every FLIGHT-owned panel says so", async () => {
+    stub();
+    const { container } = render(<Flight />);
+    for (const id of ["sitP", "askP", "incP", "watchP", "draftsP", "decidedP"]) {
+      expect(container.querySelector(`#${id}`)?.textContent, id).toContain(FLIGHT_NOT_RUNNING);
+    }
+    expect(container.querySelector("#sitP .phase")?.textContent).toBe("P2");
+  });
+
+  it("Work in flight is empty without crew runs, and does not list loops", async () => {
+    stubFetch({ "/api/crew": { rows: [crewRow()], firstRunToday: null }, "/api/config": CONFIG });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#wifP")?.textContent).toContain(
+        "No crew runs. Start a seat from a ticket on the Board.",
+      ),
+    );
+    expect(container.querySelector("#wifP")?.textContent).not.toContain("shop-app-ta");
+  });
+
+  it("Work in flight has one row per active crew run", async () => {
+    const run = { ...(crewRow().run as NonNullable<ReturnType<typeof crewRow>["run"]>) };
+    stubFetch({
+      "/api/crew": {
+        rows: [
+          crewRow(),
+          seatRow({
+            run: { ...run, startedAt: NOW - 12 * MIN, branch: "feature/5-stop-race" },
+            ticket: "shop-app#5",
+            hudState: "running",
+          }),
+          seatRow({ id: "retro-1", role: "RETRO", run: { ...run, status: "ok", endedAt: NOW } }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const rows = list.querySelectorAll("li");
+    expect(rows).toHaveLength(1);
+    const text = rows[0]?.textContent ?? "";
+    expect(text).toContain("guido-1");
+    expect(text).toContain("Running");
+    expect(text).toContain("shop-app #5");
+    expect(text).toContain("feature/5-stop-race");
+    expect(text).toContain("12m 00s");
+    expect(text).toContain("run #12");
+    expect(container.querySelector("#wifP a")?.getAttribute("href")).toBe("/agent/guido-1");
+  });
+
+  it("Work in flight's doing line is the Overview's: the PR linked, its title, and the line as hover text", async () => {
+    stubFetch({
+      "/api/crew": {
+        rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" } })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/repos/shop-app/prs?linked=1": [
+        prView({ number: 166, title: "Backfill the quote cache" }),
+      ],
+    });
+    render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const doing = list.querySelector("li .ellip") as HTMLElement;
+    const line = "Draft PR #166 · Backfill the quote cache";
+    await waitFor(() => expect(doing.textContent).toBe(line));
+    expect(doing.title).toBe(line);
+    expect(doing.querySelector("a")?.textContent).toBe("PR #166");
+  });
+
+  it("Work in flight leaves out stopped seats, whether their run merged or you ended it", async () => {
+    stubFetch({
+      "/api/crew": {
+        rows: [
+          stoppedSeat({ merged: true }),
+          stoppedSeat({ id: "retro-1", role: "RETRO" }),
+          seatRow({ id: "guido-2", hudState: "running" }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    expect(list.textContent).toContain("guido-2");
+    expect(list.textContent).not.toContain("guido-1");
+    expect(list.textContent).not.toContain("retro-1");
+    expect(list.textContent).not.toContain("Run ended");
+  });
+
+  it("Work in flight has a row per looped run: ticket, phase and a linked PR", async () => {
+    const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, parked: null };
+    stubFetch({
+      "/api/crew": {
+        rows: [
+          seatRow({ hudState: "idle", ticket: "shop-app#5", loop }),
+          seatRow({ id: "guido-2", run: null, hudState: "idle", ticket: "shop-app#6", loop: null }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const rows = list.querySelectorAll("li");
+    expect(rows).toHaveLength(1);
+    const text = rows[0]?.textContent ?? "";
+    expect(text).toContain("guido-1");
+    expect(text).toContain("shop-app #5");
+    expect(text).toContain("In review");
+    expect(text).toContain("PR #9");
+    expect(rows[0]?.querySelector('a[href$="/pull/9"]')).not.toBeNull();
+    expect(rows[0]?.querySelector('a[href$="/issues/5"]')).not.toBeNull();
+  });
+
+  it("Work in flight shows a looped run without a PR, and a parked one as blocked", async () => {
+    const parked = {
+      phase: "parked" as const,
+      text: "Blocked: needs you",
+      prNumber: null,
+      parked: "needs you",
+    };
+    stubFetch({
+      "/api/crew": {
+        rows: [seatRow({ hudState: "blocked", ticket: "shop-app#5", loop: parked })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    expect(list.querySelectorAll("li")).toHaveLength(1);
+    expect(list.textContent).toContain("Blocked");
+    expect(list.textContent).not.toContain("PR #");
+    expect(list.querySelector(".crit-t")).not.toBeNull();
+  });
+
+  it("Work in flight leaves out a looped run whose loop is done", async () => {
+    const done = { phase: "done" as const, text: "Done", prNumber: 9, parked: null };
+    stubFetch({
+      "/api/crew": {
+        rows: [seatRow({ run: null, hudState: "idle", ticket: "shop-app#5", loop: done })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    expect(await screen.findByText(NO_CREW_RUNS)).toBeTruthy();
+  });
+
+  it("Work in flight names the phase on its own span, apart from the state pill", async () => {
+    const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
+    stubFetch({
+      "/api/crew": {
+        rows: [seatRow({ hudState: "blocked", ticket: "shop-app#5", loop })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const phase = list.querySelector(".loopphase") as HTMLElement;
+    expect(phase.textContent).toBe("CI");
+    expect(phase.className).not.toContain("crit-t");
+    expect(phase.className).toBe(phase.className.trim());
+  });
+
+  it("Work in flight lists a seat with an active run and a loop once; a done loop with an active run stays", async () => {
+    const live = crewRow().run as NonNullable<ReturnType<typeof crewRow>["run"]>;
+    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
+    const done = { phase: "done" as const, text: "Done", prNumber: 9, parked: null };
+    stubFetch({
+      "/api/crew": {
+        rows: [
+          seatRow({ run: live, hudState: "running", ticket: "shop-app#5", loop }),
+          seatRow({
+            id: "guido-2",
+            run: live,
+            hudState: "running",
+            ticket: "shop-app#6",
+            loop: done,
+          }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    const rows = list.querySelectorAll("li");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("guido-1");
+    expect(rows[1]?.textContent).toContain("guido-2");
+  });
+
+  it("Work in flight does not list an observed loop that carries a loop", async () => {
+    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
+    stubFetch({
+      "/api/crew": { rows: [crewRow({ loop })], firstRunToday: null },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    expect(await screen.findByText(NO_CREW_RUNS)).toBeTruthy();
+  });
+
+  it("the session filter applies to a looped row", async () => {
+    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
+    stubFetch({
+      "/api/crew": {
+        rows: [seatRow({ hudState: "idle", ticket: "shop-app#5", loop })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    await screen.findByRole("list", { name: "Crew runs" });
+    act(() => setSession("site-builder"));
+    expect(await screen.findByText(NO_CREW_RUNS)).toBeTruthy();
+    act(() => setSession("shop-app"));
+    expect(await screen.findByRole("list", { name: "Crew runs" })).toBeTruthy();
+  });
+
+  it("Work in flight shows the doing text before the timezone has loaded", async () => {
+    stubFetch({
+      "/api/crew": { rows: [seatRow({ hudState: "running" })], firstRunToday: null },
+      "/api/config": () => ({ status: 503, body: { error: "loading" } }),
+    });
+    render(<Flight />);
+    const list = await screen.findByRole("list", { name: "Crew runs" });
+    expect(list.textContent).toContain("run #12");
+  });
+
+  it("the stats strip comes from the board and the attention list", async () => {
+    stub();
+    const { container } = render(<Flight />);
+    const strip = container.querySelector(".sitstats") as HTMLElement;
+    await waitFor(() => expect(strip.textContent).toContain("2 tickets in progress"));
+    expect(strip.textContent).toContain("2 waiting on other people");
+    expect(strip.textContent).toContain("2 decisions for you");
+    expect(strip.textContent).toContain("2 routine approvals");
+    expect(strip.textContent).toContain("2 stalls");
+    expect(screen.getByRole("button", { name: "Open what needs you" })).toBeTruthy();
+  });
+
+  it("the stats strip counts only the selected session's tickets and attention items", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": board,
+      "/api/boards/site-builder": [
+        boardItem({ repoId: "site-builder", issueNumber: 9, status: "In progress" }),
+      ],
+      "/api/attention": [
+        item({ key: "a", kind: "decision" }),
+        item({ key: "b", kind: "decision", repoId: "site-builder" }),
+        item({ key: "c", kind: "stalled", repoId: "site-builder" }),
+        item({ key: "d", kind: "approval", repoId: "site-builder" }),
+        // no repo: it belongs to no session, so every session still counts it
+        item({ key: "e", kind: "stalled", repoId: null }),
+      ],
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    const strip = container.querySelector(".sitstats") as HTMLElement;
+    await waitFor(() => expect(strip.textContent).toContain("3 tickets in progress"));
+    expect(strip.textContent).toContain("2 decisions for you");
+    act(() => setSession("site-builder"));
+    await waitFor(() => expect(strip.textContent).toContain("1 tickets in progress"));
+    expect(strip.textContent).toContain("1 decision for you");
+    expect(strip.textContent).toContain("1 routine approval");
+    expect(strip.textContent).toContain("2 stalls");
+    act(() => setSession("shop-app"));
+    await waitFor(() => expect(strip.textContent).toContain("2 tickets in progress"));
+    expect(strip.textContent).toContain("1 decision for you");
+    expect(strip.textContent).toContain("0 routine approvals");
+    expect(strip.textContent).toContain("1 stall");
+    expect(strip.textContent).not.toContain("2 stalls");
+  });
+
+  it("shows — before the data, and no Open button without decisions or approvals", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/attention": [],
+      "/api/config": CONFIG,
+      "/api/limits": [],
+      "/api/health": [],
+    });
+    const { container } = render(<Flight />);
+    const strip = container.querySelector(".sitstats") as HTMLElement;
+    expect(strip.textContent).toContain("— tickets in progress");
+    await waitFor(() => expect(strip.textContent).toContain("0 decisions for you"));
+    expect(screen.queryByRole("button", { name: "Open what needs you" })).toBeNull();
+  });
+
+  it("the timeline places events and the Later line carries the rest", async () => {
+    stub();
+    const { container } = render(<Flight />);
+    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
+    const text = container.querySelector("#timeline")?.textContent ?? "";
+    expect(text).toContain("claude-main 5h window resets");
+    expect(text).toContain("Board and escalations poll (every 60 s)");
+    expect(text).toContain("Usage read (every 30 min)");
+    const later = container.querySelector(".tllater") as HTMLElement;
+    expect(later.textContent).toBe("Later: Sun 19:00 codex 5h window resets");
+  });
+
+  it("each marker names its event, and the narrow Next list gives them all, joined by ' · '", async () => {
+    stub();
+    const { container } = render(<Flight />);
+    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
+    const evs = [...container.querySelectorAll<HTMLElement>(".tlev")];
+    for (const ev of evs) expect(ev.title).toBe(ev.querySelector("span")?.textContent);
+    const labels = evs.map((e) => e.querySelector("span")?.textContent);
+    expect(container.querySelector(".tlnext.narrow")?.textContent).toBe(
+      `Next: ${labels.join(" · ")}`,
+    );
+    const bare = [...container.querySelectorAll(".tlev.bare")].map(
+      (e) => e.querySelector("span")?.textContent,
+    );
+    expect(container.querySelector(".tlnext.wide")?.textContent).toBe(`Next: ${bare.join(" · ")}`);
+  });
+
+  it("a well-spaced timeline has no wide Next list; the narrow one lists every label", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [],
+      "/api/boards/site-builder": [],
+      "/api/attention": [],
+      "/api/limits": ["a", "b", "c"].map((id, i) =>
+        limit5h({ accountId: `acct-${id}`, resetAt: NOW + (20 + i * 100) * MIN }),
+      ),
+      "/api/health": [],
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
+    expect(container.querySelectorAll(".tlev.bare").length).toBe(0);
+    expect(container.querySelector(".tlnext.wide")).toBeNull();
+    expect(container.querySelector(".tlnext.narrow")?.textContent).toBe(
+      "Next: 13:20 acct-a 5h window resets · 15:00 acct-b 5h window resets · 16:40 acct-c 5h window resets",
+    );
+  });
+
+  it("a crowded timeline lists on the Next line only the labels the line could not show", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [],
+      "/api/boards/site-builder": [],
+      "/api/attention": [],
+      "/api/limits": ["a", "b", "c", "d", "e", "f"].map((id, i) =>
+        limit5h({ accountId: `acct-${id}`, resetAt: NOW + (20 + i) * MIN }),
+      ),
+      "/api/health": [],
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(6));
+    const label = (e: Element) => e.querySelector("span")?.textContent;
+    const all = [...container.querySelectorAll(".tlev")].map(label);
+    const bare = [...container.querySelectorAll(".tlev.bare")].map(label);
+    // the first two labels fit on the line (one above, one below); the other four found no room
+    expect(bare).toEqual([
+      "13:22 acct-c 5h window resets",
+      "13:23 acct-d 5h window resets",
+      "13:24 acct-e 5h window resets",
+      "13:25 acct-f 5h window resets",
+    ]);
+    expect(all.slice(0, 2)).toEqual([
+      "13:20 acct-a 5h window resets",
+      "13:21 acct-b 5h window resets",
+    ]);
+    expect(container.querySelector(".tlnext.narrow")?.textContent).toBe(`Next: ${all.join(" · ")}`);
+    expect(container.querySelector(".tlnext.wide")?.textContent).toBe(`Next: ${bare.join(" · ")}`);
+  });
+});

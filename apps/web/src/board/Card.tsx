@@ -1,0 +1,192 @@
+import {
+  type BoardItem,
+  CI_PILL,
+  type CrewRow,
+  HUD_STATE_LABEL,
+  HUD_STATE_TONE,
+  type PullRequestView,
+  prPill,
+  STATUS_OUT_OF_DATE,
+} from "@mc/core";
+import { type MouseEvent, memo } from "react";
+import { AgentTag } from "../hud/AgentTag.tsx";
+import { Lamp } from "../hud/Lamp.tsx";
+import { Pill } from "../hud/Pill.tsx";
+import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
+import { agentPath, followLink, navigate, ticketPath } from "../router.ts";
+import { cardColumn, firstBlocker, ticketRef } from "./cards.ts";
+
+/** Tests count card renders through this (#26 A1); null outside tests. */
+export const cardRenderProbe: { onRender: ((ref: string) => void) | null } = { onRender: null };
+
+const MAX_LABELS = 3;
+const MILESTONE_SPLIT = " — ";
+
+/** The card's PR; the card's own header names the repo, so the PR does not. */
+function PrLine({ pr }: { pr: PullRequestView }) {
+  const showState = pr.state !== "open" || pr.isDraft || pr.review !== null;
+  const ci = pr.ci === null ? null : CI_PILL[pr.ci];
+  const state = prPill(pr);
+  return (
+    <>
+      <RepoRef repoId={pr.repoId} number={pr.number} kind="pr" bare url={pr.url} />
+      {ci && <Pill tone={ci.tone}>{ci.label}</Pill>}
+      {showState && <Pill tone={state.tone}>{state.label}</Pill>}
+    </>
+  );
+}
+
+/** What a card shows, worked out by `Kanban` (`cardProps`) so a card never reads the clock. */
+export interface CardProps {
+  item: BoardItem;
+  showRepo: boolean;
+  /** The agent whose run is on this ticket. */
+  agent: CrewRow | null;
+  /** The PR the card shows. */
+  pr: PullRequestView | null;
+  /** Something on this card waits on you. */
+  mine: boolean;
+  /** A Done card's outcome. */
+  outcome: "Merged" | "Closed";
+  /** A Done card's age, already formatted (`today`, `3d ago`, `—`); "" on other cards. */
+  when: string;
+  /** The issue's open/closed state and the board's Status disagree; null when they agree. */
+  statusOutOfDate: string | null;
+  /** What you must do to the card's PR and how long it has waited; null when nothing waits on you. */
+  youWait: { action: string; waiting: string } | null;
+}
+
+/**
+ * Props equal by value: a refetch hands back unchanged rows as new objects, and those must not
+ * re-render the card (#26 A1). Values that are the same object skip the comparison.
+ */
+function sameProps(a: CardProps, b: CardProps): boolean {
+  return (Object.keys(a) as (keyof CardProps)[]).every(
+    (k) => Object.is(a[k], b[k]) || JSON.stringify(a[k]) === JSON.stringify(b[k]),
+  );
+}
+
+/**
+ * One ticket. Click the card, or Enter or Space on its title link: the agent's page if one is
+ * working it, else the ticket beside the board.
+ */
+export const Card = memo(function Card({
+  item,
+  showRepo,
+  agent,
+  pr,
+  mine,
+  outcome,
+  when,
+  statusOutOfDate,
+  youWait,
+}: CardProps) {
+  cardRenderProbe.onRender?.(ticketRef(item));
+  const col = cardColumn(item);
+  const worked = !mine && agent?.hudState === "running";
+  const blocker = col === "Done" ? null : firstBlocker(item);
+  const to = agent ? agentPath(agent.id) : ticketPath(item.repoId, item.issueNumber);
+  const go = () => navigate(to);
+  // The title is the link that opens the card (its ::after covers the card); a click on the rest
+  // of the card is a mouse shortcut to it. A link inside the card goes elsewhere (GitHub), and
+  // must not also open the card.
+  const click = (e: MouseEvent) => {
+    if (!(e.target as Element).closest("a")) go();
+  };
+  const overlay = [
+    agent && (
+      <span key="agent" className="row">
+        <AgentTag id={agent.id} index={agent.index} sm />
+        <Pill tone={HUD_STATE_TONE[agent.hudState]}>{HUD_STATE_LABEL[agent.hudState]}</Pill>
+        {agent.run && <span className="xs">run #{agent.run.seq}</span>}
+      </span>
+    ),
+    !agent && col === "Ready" && (
+      <span key="un" className="xs muted">
+        Unassigned
+      </span>
+    ),
+    col !== "Done" && pr && <PrLine key="pr" pr={pr} />,
+    col === "Done" && (
+      <span key="done" className="row">
+        <Pill tone={outcome === "Merged" ? "ok" : "plain"}>{outcome}</Pill>
+        <span className="xs muted">
+          {when}
+          {pr && (
+            <>
+              {" · "}
+              <RepoRef repoId={pr.repoId} number={pr.number} kind="pr" bare url={pr.url} />
+            </>
+          )}
+        </span>
+      </span>
+    ),
+    youWait && (
+      <Pill key="you" tone="warn">
+        You: {youWait.action} · waiting {youWait.waiting}
+      </Pill>
+    ),
+    statusOutOfDate && (
+      <span key="stale" className="xs warn-t" title={statusOutOfDate}>
+        {STATUS_OUT_OF_DATE}
+      </span>
+    ),
+    blocker && (
+      <span key="blocked" className="xs warn-t">
+        Blocked: <TicketRef ticket={blocker} bare={!showRepo} />
+      </span>
+    ),
+  ].filter(Boolean);
+  const title = mine ? "Needs you" : worked ? "Being worked on or looked at now" : undefined;
+  return (
+    // The card holds links (GitHub refs), so it is not a button: its title is the link a keyboard
+    // or screen reader uses (Enter), and a click anywhere else on the card is a mouse shortcut to it.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the title link is the keyboard route
+    // biome-ignore lint/a11y/noStaticElementInteractions: as above; the card is a container
+    <div
+      className={`kcard${mine ? " pulse-warn" : worked ? " pulse-ok" : ""}`}
+      title={title}
+      data-card={ticketRef(item)}
+      onClick={click}
+    >
+      <div className="kref">
+        {mine && <Lamp kind="warn" pulse label="Needs you" />}
+        {worked && <Lamp kind="ok" pulse label="Being worked on" />}
+        <RepoRef repoId={item.repoId} number={item.issueNumber} bare={!showRepo} url={item.url} />
+        {item.priority && <span className="p">{item.priority}</span>}
+        {item.size && <span>{item.size}</span>}
+        <span className="spacer" />
+        {item.milestone && (
+          <span className="ellip" style={{ maxWidth: 120 }} title={item.milestone}>
+            {item.milestone.split(MILESTONE_SPLIT)[0]}
+          </span>
+        )}
+      </div>
+      <a
+        className="ktitle"
+        href={to}
+        onClick={(e) => followLink(e, to)}
+        onKeyDown={(e) => {
+          // a link takes Enter natively; Space is the button habit, and must not scroll the board.
+          // A modified or held Space is the browser's (or the OS's) own.
+          if (e.key === " " && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.repeat) {
+            e.preventDefault();
+            go();
+          }
+        }}
+      >
+        {item.title}
+      </a>
+      {item.labels.length > 0 && (
+        <div className="labels">
+          {item.labels.slice(0, MAX_LABELS).map((l) => (
+            <span key={l} className="lb">
+              {l}
+            </span>
+          ))}
+        </div>
+      )}
+      {overlay.length > 0 && <div className="overlay">{overlay}</div>}
+    </div>
+  );
+}, sameProps);

@@ -1,0 +1,933 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type {
+  Escalation,
+  FlowIssue,
+  FlowPr,
+  MachineSample,
+  PullRequestView,
+  Run,
+  RunDigest,
+  SubagentInfo,
+} from "@mc/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CcConfig } from "../src/config.ts";
+import { Store } from "../src/store.ts";
+import { type TelemetryScope, telemetry } from "../src/telemetry.ts";
+
+// 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
+const NOW = Date.parse("2026-10-17T12:00:00Z");
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+const at = (iso: string) => Date.parse(iso);
+
+let dir: string;
+let store: Store;
+let config: CcConfig;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "mc-telemetry-"));
+  mkdirSync(join(dir, "ta"));
+  store = new Store(join(dir, "mc.sqlite"));
+  config = {
+    operator: { id: "operator", timezone: "Europe/London" },
+    accounts: [
+      { id: "claude-main", vendor: "claude", alertAt: 85, stopAt: 95 },
+      { id: "codex-pro", vendor: "codex", alertAt: 70, stopAt: 80 },
+    ],
+    repos: [
+      { id: "shop-app", github: "o/shop-app", project: 2, statusMap: {}, autonomy: "draft" },
+      { id: "site-builder", github: "o/ae", project: 3, statusMap: {}, autonomy: "draft" },
+    ],
+    loops: [
+      {
+        id: "shop-app-ta",
+        repoId: "shop-app",
+        kind: "ta-loop",
+        accountId: "claude-main",
+        stateDir: join(dir, "ta"),
+        worktree: join(dir, "wt"),
+        launchdLabel: "x",
+      },
+      {
+        id: "studio-builder",
+        repoId: "site-builder",
+        kind: "studio-loop",
+        accountId: "codex-pro",
+        stateDir: join(dir, "st"),
+        logsDir: join(dir, "st-logs"),
+        worktree: join(dir, "wt2"),
+        launchdLabel: "y",
+      },
+    ],
+    poll: { usageMinutes: 30, githubSeconds: 60 },
+  };
+});
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const run = (over: Partial<Run>): Run => ({
+  id: "r",
+  agentId: "shop-app-ta",
+  repoId: "shop-app",
+  seq: 1,
+  startedAt: NOW - HOUR,
+  endedAt: NOW - HOUR / 2,
+  status: "ok",
+  sessionId: null,
+  model: null,
+  branch: null,
+  ticket: null,
+  costUsd: null,
+  tokens: null,
+  transcriptPath: "",
+  prs: [],
+  summary: null,
+  ...over,
+});
+
+const tok = (input: number, output: number, cacheRead = 0, cacheCreate = 0) => ({
+  input,
+  output,
+  cacheRead,
+  cacheCreate,
+});
+
+const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
+  toolCalls: 0,
+  turns: 0,
+  lastEventAt: null,
+  model: null,
+  contextTokens: null,
+  contextWindow: null,
+  liveTool: null,
+  tools: {},
+  subagents: [],
+  minuteTokens: [],
+  turnUsage: [],
+  background: [],
+  compactions: 0,
+  ...over,
+});
+
+const escalation = (over: Partial<Escalation>): Escalation => ({
+  id: "shop-app#9",
+  repoId: "shop-app",
+  issueNumber: 9,
+  title: "[operator-decision] pick one",
+  kind: "operator-decision",
+  source: "title",
+  openedAt: NOW - DAY,
+  url: "https://github.com/o/shop-app/issues/9",
+  question: null,
+  ...over,
+});
+
+const pr = (n: number, mergedAt: number | null, repoId = "shop-app"): PullRequestView => ({
+  repoId,
+  number: n,
+  title: "t",
+  url: "u",
+  branch: "b",
+  ticket: null,
+  state: mergedAt === null ? "open" : "merged",
+  isDraft: false,
+  review: null,
+  ci: null,
+  createdAt: 1,
+  updatedAt: mergedAt ?? 2,
+  mergedAt,
+  headSha: null,
+  mergeable: null,
+});
+
+const ALL: TelemetryScope = { agent: null, account: null };
+const tel = (range: "1h" | "6h" | "24h" | "7d" = "6h", now = NOW, scope = ALL) =>
+  telemetry(config, store, range, now, scope);
+
+describe("today, in the operator's timezone", () => {
+  it("clips a run from 23:30 yesterday to its after-midnight half: tokens, tool calls, turns and cost", () => {
+    // 23:30 → 00:30 BST
+    store.upsertRun(
+      run({
+        id: "a",
+        startedAt: at("2026-10-16T22:30:00Z"),
+        endedAt: at("2026-10-16T23:30:00Z"),
+        costUsd: 2,
+        tokens: tok(600, 400, 5000, 7000),
+      }),
+    );
+    store.setDigest("a", digest({ toolCalls: 10, turns: 4 }));
+    // Wholly yesterday: not counted at all.
+    store.upsertRun(
+      run({
+        id: "b",
+        seq: 0,
+        startedAt: at("2026-10-16T20:00:00Z"),
+        endedAt: at("2026-10-16T21:00:00Z"),
+        costUsd: 9,
+        tokens: tok(9000, 0),
+      }),
+    );
+    store.setDigest("b", digest({ toolCalls: 90, turns: 90 }));
+    const t = tel().today;
+    expect(t).toEqual({
+      tokens: 500,
+      costUsd: 1,
+      toolCalls: 5,
+      turns: 2,
+      cacheRead: 2500,
+      working: 0,
+      agents: 2,
+      merged7d: 0,
+    });
+  });
+
+  it("counts running crew rows as working and ignores runs of unconfigured agents", () => {
+    store.upsertRun(
+      run({ id: "live", startedAt: NOW - 10 * MIN, endedAt: null, status: "running" }),
+    );
+    store.upsertRun(
+      run({ id: "ghost", agentId: "ghost", repoId: "x", tokens: tok(1000, 0), costUsd: 5 }),
+    );
+    const t = tel().today;
+    expect(t.working).toBe(1);
+    expect(t.tokens).toBe(0);
+    expect(t.costUsd).toBeNull();
+  });
+
+  it("on 2026-10-25 (25 h) at 23:00 a run across the repeated hour counts 3 h of a 24 h denominator", () => {
+    const now = at("2026-10-25T23:00:00Z"); // 23:00 GMT; midnight was 2026-10-24T23:00Z (BST)
+    // 00:30 BST → 02:30 GMT: three hours of wall time
+    store.upsertRun(
+      run({
+        id: "a",
+        startedAt: at("2026-10-24T23:30:00Z"),
+        endedAt: at("2026-10-25T02:30:00Z"),
+        tokens: tok(300, 0),
+      }),
+    );
+    const t = tel("6h", now);
+    expect(t.today.tokens).toBe(300);
+    const u = t.utilisation.find((x) => x.agentId === "shop-app-ta");
+    expect(u).toEqual({ agentId: "shop-app-ta", working: 12.5, waiting: 0, idle: 87.5 });
+  });
+
+  it("merged7d counts PRs merged in the last 7 days only", () => {
+    store.replacePullRequests(
+      "shop-app",
+      [pr(1, NOW - 3 * DAY), pr(2, NOW - 8 * DAY), pr(3, null)],
+      0,
+    );
+    store.replacePullRequests("site-builder", [pr(4, NOW - HOUR, "site-builder")], 0);
+    expect(tel().today.merged7d).toBe(2);
+  });
+});
+
+describe("utilisation", () => {
+  it("working that overlaps an open title escalation counts as working only; shares sum to 100", () => {
+    const now = at("2026-10-17T15:00:00Z"); // 16:00 BST: 16 h since midnight
+    store.upsertRun(
+      run({
+        id: "a",
+        startedAt: at("2026-10-17T08:00:00Z"),
+        endedAt: at("2026-10-17T10:00:00Z"),
+      }),
+    );
+    // Open since 07:00Z (8 h before now): 8 h minus the 2 h of work = 6 h waiting.
+    store.replaceEscalations("shop-app", [
+      escalation({ openedAt: at("2026-10-17T07:00:00Z") }),
+      // label-only escalations never set an agent's state
+      escalation({
+        id: "shop-app#10",
+        issueNumber: 10,
+        source: "label",
+        openedAt: at("2026-10-16T23:00:00Z"),
+      }),
+    ]);
+    const u = tel("6h", now).utilisation;
+    expect(u).toEqual([
+      { agentId: "shop-app-ta", working: 12.5, waiting: 37.5, idle: 50 },
+      { agentId: "studio-builder", working: 0, waiting: 0, idle: 100 },
+    ]);
+    for (const row of u) expect(row.working + row.waiting + row.idle).toBeCloseTo(100, 9);
+  });
+
+  it("an escalation opened yesterday counts from midnight; overlapping runs are not double-counted", () => {
+    const now = at("2026-10-17T15:00:00Z"); // 16 h since midnight
+    store.upsertRun(
+      run({ id: "a", startedAt: at("2026-10-17T07:00:00Z"), endedAt: at("2026-10-17T09:00:00Z") }),
+    );
+    store.upsertRun(
+      run({
+        id: "b",
+        seq: 2,
+        startedAt: at("2026-10-17T08:00:00Z"),
+        endedAt: at("2026-10-17T11:00:00Z"),
+      }),
+    );
+    store.replaceEscalations("shop-app", [escalation({ openedAt: at("2026-10-16T12:00:00Z") })]);
+    const u = tel("6h", now).utilisation[0];
+    // working 07:00–11:00 = 4 h (25%); waiting = 16 h − 4 h = 12 h (75%)
+    expect(u).toEqual({ agentId: "shop-app-ta", working: 25, waiting: 75, idle: 0 });
+  });
+});
+
+describe("flow of work", () => {
+  it("throughput: 14 local days oldest first, PRs by mergedAt, zeros kept", () => {
+    store.replacePullRequests(
+      "shop-app",
+      [
+        pr(1, at("2026-10-16T23:30:00Z")), // 00:30 BST on the 17th
+        pr(2, at("2026-10-17T09:00:00Z")),
+        pr(3, at("2026-10-03T23:30:00Z")), // 00:30 BST on the 4th: first day of the range
+        pr(4, at("2026-10-03T22:30:00Z")), // 23:30 BST on the 3rd: outside
+      ],
+      0,
+    );
+    store.replacePullRequests(
+      "site-builder",
+      [pr(5, at("2026-10-10T12:00:00Z"), "site-builder")],
+      0,
+    );
+    const th = tel().throughput;
+    expect(th).toHaveLength(14);
+    expect(th[0]).toEqual({ day: "2026-10-04", merged: 1 });
+    expect(th[13]).toEqual({ day: "2026-10-17", merged: 2 });
+    expect(th.find((d) => d.day === "2026-10-10")?.merged).toBe(1);
+    expect(th.reduce((n, d) => n + d.merged, 0)).toBe(4);
+    expect(th.filter((d) => d.merged === 0)).toHaveLength(11);
+  });
+
+  it("cycle time: median days by size in XS S M L XL order then none, and the excluded count", () => {
+    const issue = (number: number, size: string | null, days: number | null): FlowIssue => ({
+      repoId: "shop-app",
+      number,
+      size,
+      startAt: days === null ? null : NOW - DAY - days * DAY,
+      doneAt: NOW - DAY,
+    });
+    store.replaceFlow(
+      "shop-app",
+      [
+        issue(1, "M", 1),
+        issue(2, "M", 4),
+        issue(3, "M", 2),
+        issue(4, "S", 1),
+        issue(5, "S", 2),
+        issue(6, null, 3),
+        issue(7, "M", null),
+        issue(8, null, null),
+      ],
+      [],
+    );
+    expect(tel().cycleTime).toEqual({
+      rows: [
+        { size: "XS", medianDays: null, tickets: 0 },
+        { size: "S", medianDays: 1.5, tickets: 2 },
+        { size: "M", medianDays: 2, tickets: 3 },
+        { size: "L", medianDays: null, tickets: 0 },
+        { size: "XL", medianDays: null, tickets: 0 },
+        { size: "none", medianDays: 3, tickets: 1 },
+      ],
+      excluded: 2,
+    });
+  });
+
+  it("CI green on first push ignores PRs with unknown CI", () => {
+    const fp = (number: number, firstPushCi: FlowPr["firstPushCi"]): FlowPr => ({
+      repoId: "shop-app",
+      number,
+      mergedAt: NOW - DAY,
+      firstPushCi,
+    });
+    store.replaceFlow(
+      "shop-app",
+      [],
+      [
+        fp(1, "passing"),
+        fp(2, "passing"),
+        fp(3, "passing"),
+        fp(4, "failing"),
+        fp(5, null),
+        fp(6, null),
+      ],
+    );
+    expect(tel().quality).toEqual({ ciGreenFirstPushPct: 75, prs: 4 });
+  });
+});
+
+describe("agents", () => {
+  it("spreads a 10-minute 1000-token run evenly over its wall time (72 points, tokens per minute)", () => {
+    // range 1h: 72 buckets of 50 s; the run covers buckets 36..47 exactly
+    store.upsertRun(
+      run({
+        id: "a",
+        startedAt: NOW - 30 * MIN,
+        endedAt: NOW - 20 * MIN,
+        tokens: tok(600, 400, 99_999, 0),
+      }),
+    );
+    const series = tel("1h").tokensPerMinute;
+    expect(series.map((s) => s.agentId)).toEqual(["shop-app-ta", "studio-builder"]);
+    const points = series[0]?.points ?? [];
+    expect(points).toHaveLength(72);
+    points.forEach((p, i) => {
+      if (i >= 36 && i < 48) expect(p).toBeCloseTo(100, 9);
+      else expect(p).toBe(0);
+    });
+    expect(series[1]?.points).toEqual(Array(72).fill(0));
+  });
+
+  it("live minutes: the last 60 minutes from the digests' real minute buckets", () => {
+    const now = NOW + 30_000; // 12:00:30Z: the current minute is 12:00
+    store.upsertRun(run({ id: "a", startedAt: now - 30 * MIN, endedAt: null, status: "running" }));
+    store.setDigest(
+      "a",
+      digest({
+        minuteTokens: [
+          [NOW, 50],
+          [NOW - 2 * MIN, 300],
+          [NOW - 60 * MIN, 999], // 61st minute back: outside
+        ],
+      }),
+    );
+    const live = tel("6h", now).liveMinutes;
+    const points = live[0]?.points ?? [];
+    expect(points).toHaveLength(60);
+    expect(points[59]).toBe(50);
+    expect(points[57]).toBe(300);
+    expect(points.reduce((a, b) => a + b, 0)).toBe(350);
+    expect(live[1]?.points).toEqual(Array(60).fill(0));
+  });
+
+  it("tool latency: nearest-rank p50/p95 over digests of runs started in range", () => {
+    const ds = Array.from({ length: 20 }, (_, i) => (i + 1) * 100);
+    store.upsertRun(run({ id: "a", startedAt: NOW - 2 * HOUR }));
+    store.setDigest(
+      "a",
+      digest({
+        tools: {
+          Bash: { calls: 10, failed: 1, durationsMs: ds.slice(0, 10) },
+          Read: { calls: 3, failed: 0, durationsMs: [] },
+        },
+      }),
+    );
+    store.upsertRun(run({ id: "b", seq: 2, agentId: "studio-builder", repoId: "site-builder" }));
+    store.setDigest(
+      "b",
+      digest({ tools: { Bash: { calls: 12, failed: 2, durationsMs: ds.slice(10).reverse() } } }),
+    );
+    // started before the 6h range: not counted
+    store.upsertRun(run({ id: "old", seq: 0, startedAt: NOW - 7 * HOUR, endedAt: NOW - HOUR }));
+    store.setDigest(
+      "old",
+      digest({ tools: { Bash: { calls: 99, failed: 9, durationsMs: [999_999] } } }),
+    );
+    expect(tel().toolLatency).toEqual([
+      { tool: "Bash", calls: 22, p50Ms: 1000, p95Ms: 1900, failed: 3 },
+      { tool: "Read", calls: 3, p50Ms: null, p95Ms: null, failed: 0 },
+    ]);
+  });
+
+  it("turn usage of each agent's latest run, and subagents of runs overlapping today", () => {
+    const sub = (taskId: string): SubagentInfo => ({
+      taskId,
+      type: "Explore",
+      description: "look",
+      status: "completed",
+      tokens: 10,
+      toolUses: 2,
+      durationMs: 3000,
+    });
+    store.upsertRun(
+      run({
+        id: "y",
+        seq: 1,
+        startedAt: at("2026-10-16T20:00:00Z"),
+        endedAt: at("2026-10-16T21:00:00Z"),
+      }),
+    );
+    store.setDigest("y", digest({ subagents: [sub("yesterday")] }));
+    store.upsertRun(run({ id: "a", seq: 2 }));
+    store.setDigest(
+      "a",
+      digest({
+        subagents: [sub("t1")],
+        turnUsage: [{ input: 1, output: 2, cacheRead: 3 }],
+      }),
+    );
+    const t = tel();
+    expect(t.turnUsage).toEqual([
+      { agentId: "shop-app-ta", turns: [{ input: 1, output: 2, cacheRead: 3 }] },
+      { agentId: "studio-builder", turns: [] },
+    ]);
+    expect(t.subagents).toEqual([{ ...sub("t1"), agentId: "shop-app-ta" }]);
+  });
+});
+
+describe("capacity", () => {
+  it("quota points per account window in range", () => {
+    const sample = (accountId: string, window: "5h" | "7d", atMs: number, pct: number) =>
+      store.addUsage({ accountId, window, at: atMs, pct, resetAt: NOW + DAY, source: "x" });
+    sample("claude-main", "5h", NOW - 7 * HOUR, 1); // before the range
+    sample("claude-main", "5h", NOW - 2 * HOUR, 20);
+    sample("claude-main", "5h", NOW - HOUR, 30);
+    sample("claude-main", "7d", NOW - HOUR, 60);
+    expect(tel().quota).toEqual([
+      {
+        accountId: "claude-main",
+        window: "5h",
+        points: [
+          { at: NOW - 2 * HOUR, pct: 20 },
+          { at: NOW - HOUR, pct: 30 },
+        ],
+      },
+      { accountId: "claude-main", window: "7d", points: [{ at: NOW - HOUR, pct: 60 }] },
+    ]);
+  });
+
+  it("7 days of minute machine samples come back as at most 72 averaged points", () => {
+    const sample = (atMs: number, cpuPct: number | null): MachineSample => ({
+      at: atMs,
+      cpuPct,
+      cores: 8,
+      memUsedBytes: 4,
+      memTotalBytes: 8,
+      diskFreeBytes: null,
+      diskTotalBytes: null,
+      agents: null,
+    });
+    store = new Store(":memory:"); // 10 080 inserts: keep them off the disk
+    for (let t = NOW - 7 * DAY + MIN; t <= NOW; t += MIN) {
+      store.addMachineSample(sample(t, t % (2 * MIN) === 0 ? 40 : 60));
+    }
+    const m = tel("7d").machine;
+    expect(m.length).toBeLessThanOrEqual(72);
+    expect(m.length).toBeGreaterThanOrEqual(70);
+    for (const p of m) {
+      expect(p.cpuPct).toBeCloseTo(50, 0);
+      expect(p.memPct).toBe(50);
+    }
+    const ats = m.map((p) => p.at);
+    expect([...ats].sort((a, b) => a - b)).toEqual(ats);
+  });
+
+  it("the 7d view reads bucketed rows, not the raw samples, and matches averaging them", () => {
+    store = new Store(":memory:");
+    for (let t = NOW - 7 * DAY + MIN, i = 0; t <= NOW + 5 * MIN; t += MIN, i++) {
+      const s: MachineSample = {
+        at: t,
+        cpuPct: i % 7 === 0 ? null : (i * 13) % 100,
+        cores: 8,
+        memUsedBytes: i % 11 === 0 ? null : (i * 17) % 1000,
+        memTotalBytes: i % 13 === 0 ? 0 : 1000,
+        diskFreeBytes: null,
+        diskTotalBytes: null,
+        agents: null,
+      };
+      store.addMachineSample(s);
+    }
+    // The previous behaviour: every sample in range, averaged per bucket in JS.
+    const since = NOW - 7 * DAY;
+    const bucketMs = (7 * DAY) / 72;
+    const ref = new Map<number, { at: number; cpu: number[]; mem: number[] }>();
+    // What the store kept: it prunes samples older than a week before its newest.
+    for (const s of store.machineSamples(0)) {
+      if (s.at < since || s.at > NOW) continue;
+      const i = Math.min(71, Math.floor((s.at - since) / bucketMs));
+      const b = ref.get(i) ?? { at: s.at, cpu: [], mem: [] };
+      b.at = s.at;
+      if (s.cpuPct !== null) b.cpu.push(s.cpuPct);
+      if (s.memUsedBytes !== null && s.memTotalBytes > 0) {
+        b.mem.push((s.memUsedBytes / s.memTotalBytes) * 100);
+      }
+      ref.set(i, b);
+    }
+    const mean = (xs: number[]) =>
+      xs.length === 0 ? null : xs.reduce((a, b) => a + b, 0) / xs.length;
+    const expected = [...ref].sort((a, b) => a[0] - b[0]).map(([, b]) => b);
+
+    const raw = vi.spyOn(store, "machineSamples");
+    const m = tel("7d").machine;
+    expect(raw).not.toHaveBeenCalled();
+    expect(m).toHaveLength(expected.length);
+    expect(m.length).toBeLessThanOrEqual(72);
+    for (const [k, p] of m.entries()) {
+      const b = expected[k] as (typeof expected)[number];
+      expect(p.at).toBe(b.at);
+      expect(p.cpuPct).toBeCloseTo(mean(b.cpu) as number, 9);
+      expect(p.memPct).toBeCloseTo(mean(b.mem) as number, 9);
+    }
+  });
+
+  it("machine points keep null where no sample in the bucket measured it", () => {
+    store.addMachineSample({
+      at: NOW - MIN,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: null,
+      memTotalBytes: 8,
+      diskFreeBytes: null,
+      diskTotalBytes: null,
+      agents: null,
+    });
+    expect(tel("1h").machine).toEqual([{ at: NOW - MIN, cpuPct: null, memPct: null }]);
+  });
+});
+
+describe("cost", () => {
+  it("tokens by ticket and totals over runs in range; cache hit = cacheRead ÷ (input + cacheRead + cacheCreate)", () => {
+    store.upsertRun(
+      run({
+        id: "a",
+        ticket: "shop-app#7",
+        model: "opus",
+        costUsd: 1,
+        tokens: tok(100, 50, 300, 100),
+      }),
+    );
+    store.setDigest("a", digest({ toolCalls: 4, turns: 2 }));
+    store.upsertRun(
+      run({
+        id: "b",
+        seq: 2,
+        ticket: "shop-app#7",
+        model: "opus",
+        costUsd: 2,
+        tokens: tok(100, 50, 100, 100),
+      }),
+    );
+    store.setDigest("b", digest({ toolCalls: 6, turns: 3 }));
+    store.upsertRun(
+      run({
+        id: "c",
+        seq: 3,
+        agentId: "studio-builder",
+        repoId: "site-builder",
+        ticket: "site-builder#3",
+        tokens: tok(0, 10),
+      }),
+    );
+    store.upsertRun(run({ id: "d", seq: 4, tokens: tok(0, 0) }));
+    const t = tel();
+    expect(t.tokensByTicket).toEqual([
+      { ticket: "shop-app#7", tokens: 300, costUsd: 3 },
+      { ticket: "site-builder#3", tokens: 10, costUsd: null },
+    ]);
+    // Run d has no usage at all: its all-zero row is dropped.
+    expect(t.totals).toEqual([
+      {
+        agentId: "shop-app-ta",
+        accountId: "claude-main",
+        model: "opus",
+        input: 200,
+        output: 100,
+        cacheRead: 400,
+        cacheHitPct: 50,
+        turns: 5,
+        toolCalls: 10,
+        costUsd: 3,
+      },
+      {
+        agentId: "studio-builder",
+        accountId: "codex-pro",
+        model: null,
+        input: 0,
+        output: 10,
+        cacheRead: 0,
+        cacheHitPct: null,
+        turns: 0,
+        toolCalls: 0,
+        costUsd: null,
+      },
+    ]);
+  });
+  it("a run straddling the start of the range counts pro rata to its wall time inside it", () => {
+    store.upsertRun(
+      run({
+        id: "a",
+        ticket: "shop-app#1",
+        startedAt: NOW - 2 * HOUR,
+        endedAt: NOW,
+        costUsd: 4,
+        tokens: tok(1000, 0),
+      }),
+    );
+    const t = tel("1h");
+    expect(t.tokensByTicket).toEqual([{ ticket: "shop-app#1", tokens: 500, costUsd: 2 }]);
+    expect(t.totals[0]).toMatchObject({ input: 500, costUsd: 2 });
+  });
+  // #26 A3: a run whose branch names no ticket counts toward its PR's ticket.
+  it("counts a run without a ticket of its own toward its PR's ticket", () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 41,
+          title: "t",
+          url: "https://github.com/o/shop-app/pull/41",
+          branch: "chore/x",
+          ticket: "shop-app#3349",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 2,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      0,
+    );
+    store.upsertRun(
+      run({ id: "a", tokens: tok(10, 0), prs: [{ repo: "o/shop-app", number: 41 }] }),
+    );
+    expect(tel().tokensByTicket).toEqual([{ ticket: "shop-app#3349", tokens: 10, costUsd: null }]);
+  });
+});
+
+describe("empty store", () => {
+  it("answers arrays empty, today zeros and costs null", () => {
+    const t = tel();
+    expect(t.today).toEqual({
+      tokens: 0,
+      cacheRead: 0,
+      costUsd: null,
+      toolCalls: 0,
+      turns: 0,
+      working: 0,
+      agents: 2,
+      merged7d: 0,
+    });
+    expect(t.throughput).toHaveLength(14);
+    expect(t.throughput.every((d) => d.merged === 0)).toBe(true);
+    expect(t.cycleTime).toEqual({
+      rows: ["XS", "S", "M", "L", "XL", "none"].map((size) => ({
+        size,
+        medianDays: null,
+        tickets: 0,
+      })),
+      excluded: 0,
+    });
+    expect(t.quality).toEqual({ ciGreenFirstPushPct: null, prs: 0 });
+    // Per-agent series are one per configured agent, all zero / idle.
+    expect(t.tokensPerMinute.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
+    expect(t.liveMinutes.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
+    expect(t.utilisation.map((u) => [u.working, u.waiting, u.idle])).toEqual([
+      [0, 0, 100],
+      [0, 0, 100],
+    ]);
+    expect(t.turnUsage.map((u) => u.turns)).toEqual([[], []]);
+    expect(t.toolLatency).toEqual([]);
+    expect(t.subagents).toEqual([]);
+    expect(t.quota).toEqual([]);
+    expect(t.machine).toEqual([]);
+    expect(t.tokensByTicket).toEqual([]);
+    expect(t.totals).toEqual([]);
+  });
+});
+
+describe("scope: agent and account", () => {
+  const seed = () => {
+    store.upsertRun(
+      run({
+        id: "ta",
+        startedAt: NOW - 2 * HOUR,
+        endedAt: NOW - HOUR,
+        costUsd: 1,
+        tokens: tok(100, 50, 400),
+      }),
+    );
+    store.setDigest(
+      "ta",
+      digest({
+        toolCalls: 4,
+        turns: 2,
+        tools: { Bash: { calls: 4, failed: 1, durationsMs: [10, 20, 30, 40] } },
+        subagents: [
+          {
+            taskId: "t1",
+            type: "Explore",
+            description: "d",
+            status: "completed",
+            tokens: null,
+            toolUses: null,
+            durationMs: null,
+          },
+        ],
+      }),
+    );
+    store.upsertRun(
+      run({
+        id: "st",
+        agentId: "studio-builder",
+        repoId: "site-builder",
+        startedAt: NOW - 2 * HOUR,
+        endedAt: NOW - HOUR,
+        costUsd: 3,
+        tokens: tok(1000, 500, 4000),
+      }),
+    );
+    store.setDigest(
+      "st",
+      digest({
+        toolCalls: 40,
+        turns: 20,
+        tools: { Read: { calls: 40, failed: 0, durationsMs: [5] } },
+        subagents: [
+          {
+            taskId: "t2",
+            type: "Explore",
+            description: "d",
+            status: "completed",
+            tokens: null,
+            toolUses: null,
+            durationMs: null,
+          },
+        ],
+      }),
+    );
+  };
+
+  it("an agent restricts today, tool latency, subagents and totals to that loop's runs", () => {
+    seed();
+    const all = tel();
+    expect(all.today.tokens).toBe(1650);
+    expect(all.today.cacheRead).toBe(4400);
+    const t = tel("6h", NOW, { agent: "shop-app-ta", account: null });
+    expect(t.today).toMatchObject({
+      tokens: 150,
+      cacheRead: 400,
+      costUsd: 1,
+      toolCalls: 4,
+      turns: 2,
+      agents: 1,
+    });
+    expect(t.toolLatency.map((r) => r.tool)).toEqual(["Bash"]);
+    expect(t.subagents.map((s) => s.agentId)).toEqual(["shop-app-ta"]);
+    expect(t.totals.map((r) => r.agentId)).toEqual(["shop-app-ta"]);
+    // Crew-wide parts stay crew-wide.
+    expect(t.tokensPerMinute.map((s) => s.agentId)).toEqual(["shop-app-ta", "studio-builder"]);
+  });
+
+  it("an account restricts to the loops that run on it; both together intersect", () => {
+    seed();
+    const t = tel("6h", NOW, { agent: null, account: "codex-pro" });
+    expect(t.today).toMatchObject({ tokens: 1500, cacheRead: 4000, agents: 1 });
+    expect(t.toolLatency.map((r) => r.tool)).toEqual(["Read"]);
+    expect(t.totals.map((r) => r.agentId)).toEqual(["studio-builder"]);
+    const none = tel("6h", NOW, { agent: "shop-app-ta", account: "codex-pro" });
+    expect(none.today).toMatchObject({ tokens: 0, agents: 0, working: 0, costUsd: null });
+    expect(none.totals).toEqual([]);
+  });
+
+  it("working counts only running loops in scope", () => {
+    store.upsertRun(
+      run({ id: "live", startedAt: NOW - 10 * MIN, endedAt: null, status: "running" }),
+    );
+    expect(tel().today.working).toBe(1);
+    expect(tel("6h", NOW, { agent: "studio-builder", account: null }).today.working).toBe(0);
+  });
+});
+
+describe("totals model key", () => {
+  it('a first-seen run with model "" makes a row whose model is null', () => {
+    // Newest first, so the "" run (seq 2) is the one that creates the row.
+    store.upsertRun(run({ id: "a", model: "", seq: 2, tokens: tok(10, 5) }));
+    store.upsertRun(run({ id: "b", seq: 1, model: null, tokens: tok(20, 5) }));
+    const rows = tel().totals.filter((r) => r.agentId === "shop-app-ta");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ model: null, input: 30, output: 10 });
+  });
+
+  it('a run with model "" takes the digest\'s model', () => {
+    store.upsertRun(run({ id: "a", model: "", tokens: tok(10, 5) }));
+    store.setDigest("a", digest({ model: "x" }));
+    const rows = tel().totals.filter((r) => r.agentId === "shop-app-ta");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ model: "x", input: 10 });
+  });
+});
+
+describe("totals rows", () => {
+  it("drops a row whose figures all round to zero", () => {
+    store.upsertRun(run({ id: "z", tokens: tok(0, 0) }));
+    store.upsertRun(run({ id: "n", agentId: "studio-builder", tokens: tok(10, 5) }));
+    expect(tel().totals.map((r) => r.agentId)).toEqual(["studio-builder"]);
+  });
+});
+
+describe("crew seats", () => {
+  beforeEach(() => {
+    config = {
+      ...config,
+      crew: {
+        worktrees: join(dir, "crew-wt"),
+        maxSeats: 4,
+        sessions: [
+          {
+            id: "s1",
+            repoId: "shop-app",
+            checkout: join(dir, "crew-co"),
+            seats: [
+              { id: "GUIDO-1", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+            ],
+          },
+        ],
+      },
+    };
+  });
+
+  it("totals, series and utilisation include a crew run", () => {
+    store.upsertRun(
+      run({
+        id: "c1",
+        agentId: "GUIDO-1",
+        startedAt: NOW - 30 * MIN,
+        endedAt: NOW - 20 * MIN,
+        tokens: tok(600, 400),
+      }),
+    );
+    const t = tel("1h");
+    expect(t.today.tokens).toBe(1000);
+    expect(t.today.agents).toBe(3);
+    expect(t.tokensPerMinute.map((s) => s.agentId)).toEqual([
+      "shop-app-ta",
+      "studio-builder",
+      "GUIDO-1",
+    ]);
+    expect(t.utilisation.map((u) => u.agentId)).toEqual([
+      "shop-app-ta",
+      "studio-builder",
+      "GUIDO-1",
+    ]);
+    expect(t.utilisation[2]?.working).toBeGreaterThan(0);
+    expect(t.totals.find((r) => r.agentId === "GUIDO-1")).toMatchObject({
+      accountId: "claude-main",
+      input: 600,
+      output: 400,
+    });
+  });
+
+  it("scopes to a seat by id or by its account", () => {
+    store.upsertRun(
+      run({
+        id: "c1",
+        agentId: "GUIDO-1",
+        startedAt: NOW - 30 * MIN,
+        endedAt: NOW - 20 * MIN,
+        tokens: tok(600, 400),
+      }),
+    );
+    expect(tel("1h", NOW, { agent: "GUIDO-1", account: null }).today.agents).toBe(1);
+    expect(tel("1h", NOW, { agent: null, account: "claude-main" }).today.agents).toBe(2);
+  });
+});

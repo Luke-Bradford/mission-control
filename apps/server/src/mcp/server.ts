@@ -1,0 +1,210 @@
+import {
+  type CrewMode,
+  MC_MCP_SERVER,
+  MCP_PATH,
+  MCP_PROTOCOL_VERSIONS,
+  TOOL_USE_ID_META,
+} from "@mc/core";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { z } from "zod";
+import type { RunIdentity, RunTokens } from "./tokens.ts";
+
+/** `/mcp` bodies carry tool arguments (a commit message, a PR body), so the route lifts the cap. */
+export const MCP_BODY_LIMIT = 256 * 1024;
+
+const JSONRPC_METHOD_NOT_FOUND = -32601;
+const JSONRPC_INVALID_PARAMS = -32602;
+
+export interface McToolContext {
+  seatId: string;
+  runId: string;
+  /** The model's tool_use id for this call, when the CLI sent one. */
+  toolUseId?: string;
+}
+
+export interface McTool {
+  name: string;
+  description: string;
+  inputSchema: object;
+  /** The seat modes that are offered (and may call) this tool. */
+  modes: readonly CrewMode[];
+  /** The modes where the tool shows only to a seat whose role is granted it. */
+  grantable?: readonly CrewMode[];
+  call(ctx: McToolContext, args: unknown): Promise<{ text: string; isError?: boolean }>;
+}
+
+export interface McpDeps {
+  tokens: RunTokens;
+  mcpTools: () => McTool[];
+  seatMode: (seatId: string) => CrewMode;
+  /** The extra tools a seat's role holds; default: none. */
+  seatGrants?: (seatId: string) => readonly string[];
+}
+
+const Message = z.looseObject({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string(), z.number()]).optional(),
+  method: z.string(),
+  params: z.unknown().optional(),
+});
+
+const CallParams = z.looseObject({
+  name: z.string(),
+  arguments: z.unknown().optional(),
+  _meta: z.looseObject({ [TOOL_USE_ID_META]: z.unknown().optional() }).optional(),
+});
+
+const InitParams = z.looseObject({ protocolVersion: z.string().optional() });
+
+/** The 401 text for a token that names no live run (the MCP log keeps 401 bodies: nothing more). */
+export const UNKNOWN_RUN = "unknown run";
+
+/** The bearer token of a request, or null. */
+export function bearer(req: FastifyRequest): string | null {
+  const m = /^Bearer ([^\s]+)$/i.exec(req.headers.authorization ?? "");
+  return m?.[1] ?? null;
+}
+
+/**
+ * `POST /mcp`: a stateless JSON-RPC 2.0 endpoint (MCP streamable HTTP, JSON replies only). The
+ * bearer token names the seat and run; nothing else about a request is trusted.
+ */
+export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
+  const { tokens } = deps;
+  // one call at a time per run: each call waits for the run's previous one
+  const tails = new Map<string, Promise<unknown>>();
+  const serialise = <T>(runId: string, fn: () => Promise<T>): Promise<T> => {
+    const prev = tails.get(runId) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
+    const tail = next.catch(() => undefined);
+    tails.set(runId, tail);
+    void tail.then(() => {
+      if (tails.get(runId) === tail) tails.delete(runId);
+    });
+    return next;
+  };
+
+  const visible = (who: RunIdentity) => {
+    const mode = deps.seatMode(who.seatId);
+    const grants = deps.seatGrants?.(who.seatId) ?? [];
+    return deps
+      .mcpTools()
+      .filter(
+        (t) =>
+          t.modes.includes(mode) ||
+          (t.grantable?.includes(mode) === true && grants.includes(t.name)),
+      );
+  };
+
+  const rpcError = (id: string | number | undefined, code: number, message: string) => ({
+    jsonrpc: "2.0",
+    id: id ?? null,
+    error: { code, message },
+  });
+
+  async function callTool(
+    who: RunIdentity,
+    id: string | number | undefined,
+    params: unknown,
+  ): Promise<object> {
+    const p = CallParams.safeParse(params);
+    if (!p.success) return rpcError(id, JSONRPC_INVALID_PARAMS, "invalid params");
+    const tool = visible(who).find((t) => t.name === p.data.name);
+    if (tool === undefined) return rpcError(id, JSONRPC_INVALID_PARAMS, "unknown tool");
+    const meta = p.data._meta?.[TOOL_USE_ID_META];
+    const ctx: McToolContext = {
+      seatId: who.seatId,
+      runId: who.runId,
+      ...(typeof meta === "string" ? { toolUseId: meta } : {}),
+    };
+    let result: { text: string; isError?: boolean };
+    try {
+      result = await serialise(who.runId, async () => {
+        // the run may have ended while this call waited its turn
+        if (!tokens.live(who.tokenHash)) return { text: "unknown run", isError: true };
+        return tool.call(ctx, p.data.arguments ?? {});
+      });
+    } catch (e) {
+      app.log.warn(
+        { tool: tool.name, err: e instanceof Error ? e.name : "unknown" },
+        "mc tool threw",
+      );
+      result = { text: "the tool failed", isError: true };
+    }
+    return {
+      jsonrpc: "2.0",
+      id: id ?? null,
+      result: {
+        content: [{ type: "text", text: result.text }],
+        ...(result.isError ? { isError: true } : {}),
+      },
+    };
+  }
+
+  async function handle(who: RunIdentity, msg: z.infer<typeof Message>): Promise<object> {
+    const { id } = msg;
+    switch (msg.method) {
+      case "initialize": {
+        const asked = InitParams.safeParse(msg.params);
+        const version = MCP_PROTOCOL_VERSIONS.find(
+          (v) => asked.success && v === asked.data.protocolVersion,
+        );
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            protocolVersion: version ?? MCP_PROTOCOL_VERSIONS[0],
+            capabilities: { tools: {} },
+            serverInfo: { name: MC_MCP_SERVER, version: "1" },
+          },
+        };
+      }
+      case "ping":
+        return { jsonrpc: "2.0", id: id ?? null, result: {} };
+      case "tools/list":
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            tools: visible(who).map((t) => ({
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema,
+            })),
+          },
+        };
+      case "tools/call":
+        return callTool(who, id, msg.params);
+      default:
+        // includes `server/discover`, which makes the CLI fall back to `initialize`
+        return rpcError(id, JSONRPC_METHOD_NOT_FOUND, "method not found");
+    }
+  }
+
+  const unauthorised = (reply: FastifyReply) => reply.code(401).send({ error: UNKNOWN_RUN });
+
+  app.post(
+    MCP_PATH,
+    {
+      bodyLimit: MCP_BODY_LIMIT,
+      // before the body is parsed: an unknown caller is refused without being read
+      onRequest: async (req, reply) => {
+        if (tokens.resolve(bearer(req)) === null) return unauthorised(reply);
+      },
+    },
+    async (req, reply) => {
+      const who = tokens.resolve(bearer(req));
+      if (who === null) return unauthorised(reply); // revoked while the body was in flight
+      const msg = Message.safeParse(req.body);
+      if (!msg.success) return reply.code(400).send({ error: "not a JSON-RPC 2.0 request" });
+      // a message without an id is a notification: accepted, no body
+      if (msg.data.id === undefined) return reply.code(202).send();
+      return reply.type("application/json").send(await handle(who, msg.data));
+    },
+  );
+
+  // no server-initiated stream: the CLI probes with GET and falls back on 405
+  app.get(MCP_PATH, async (_req, reply) =>
+    reply.code(405).header("allow", "POST").send({ error: "method not allowed" }),
+  );
+}

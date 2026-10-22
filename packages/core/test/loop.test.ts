@@ -1,0 +1,1659 @@
+import { describe, expect, it } from "vitest";
+import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
+import {
+  CI_FAILED_TEXT,
+  CI_PENDING_MAX_MS,
+  CI_TRIES,
+  fillLoopText,
+  LOOP_TEXT_CI,
+  LOOP_TEXT_CI_REF,
+  LOOP_TEXT_DONE,
+  LOOP_TEXT_DONE_PR,
+  LOOP_TEXT_PARKED,
+  LOOP_TEXT_REVIEW,
+  LOOP_TEXT_REVIEW_PR,
+  LOOP_TEXT_WORKING,
+  loopText,
+  NEW_LOOP,
+  NO_CI_AFTER_MS,
+  NO_NEW_COMMIT_TEXT,
+  NUDGE_TEXT,
+  REFUSAL_TRIES,
+  RESUME_TEXT,
+  reconcile,
+} from "../src/loop.ts";
+import {
+  fixText,
+  headMovedText,
+  type LoopReviewFacts,
+  type ReviewFact,
+  type ReviewFinding,
+  readyText,
+  readyWaivedText,
+  reviewFailedParkText,
+  reviewParkText,
+} from "../src/review.ts";
+import type { RunLoop } from "../src/types.ts";
+
+const SHA = "aaaaaaa1111";
+const SHA2 = "bbbbbbb2222";
+const REF = "owner/repo#7";
+const NOW = 10_000_000;
+
+function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): LoopSnapshot {
+  return {
+    runId: "r1",
+    runStartedAt: 1000,
+    loop: { ...NEW_LOOP, ...loop },
+    ticket: { ref: REF, title: "T", issue: 7 },
+    now: NOW,
+    tz: "UTC",
+    hubStartedAt: 5000,
+    seat: {
+      call: "SULU",
+      state: "running",
+      inTurn: false,
+      lastTurnEndedAt: null,
+      resumedAt: null,
+      rateLimitedUntil: null,
+      openQuestion: false,
+    },
+    evidence: null,
+    evidenceCount: 0,
+    headCommit: null,
+    pushed: null,
+    pr: null,
+    card: null,
+    claimed: {},
+    openNotes: [],
+    lastEngineLineAt: null,
+    tokens: 0,
+    budget: 1000,
+    ended: null,
+    ...over,
+  };
+}
+
+const seat = (s: LoopSnapshot, over: Partial<LoopSnapshot["seat"]>): LoopSnapshot["seat"] => ({
+  ...s.seat,
+  ...over,
+});
+
+const pr = (
+  over: Partial<NonNullable<LoopSnapshot["pr"]>> = {},
+): NonNullable<LoopSnapshot["pr"]> => ({
+  number: 12,
+  state: "open",
+  headSha: SHA,
+  ci: "pending",
+  mergeable: "MERGEABLE",
+  polledAt: NOW,
+  ...over,
+});
+
+/** A loop in `ci`, pushed and with its PR open, card already moved. */
+const inCi = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): LoopSnapshot =>
+  snap(
+    {
+      headCommit: SHA,
+      pushed: { sha: SHA, at: NOW - 60_000 },
+      pr: pr(),
+      evidence: { id: 1, at: 2000, ruling: false },
+      evidenceCount: 1,
+      ...over,
+    },
+    { phase: "ci", reportedEvidenceId: 1, pushStartedAt: NOW - 120_000, cardFor: "ci:0", ...loop },
+  );
+
+const events = (a: LoopAction[]): string[] =>
+  a.flatMap((x) => (x.kind === "event" ? [x.text] : []));
+const outstanding = (a: LoopAction[]): LoopAction[] => a.filter((x) => x.kind !== "event");
+const sends = (a: LoopAction[]): string[] => a.flatMap((x) => (x.kind === "send" ? [x.key] : []));
+/** The next pass after the loop was stored but every action was dropped. */
+const again = (s: LoopSnapshot, loop: RunLoop): ReturnType<typeof reconcile> =>
+  reconcile({ ...s, loop });
+
+describe("constants and texts", () => {
+  it("exports the tuning constants and fills templates", () => {
+    expect([CI_TRIES, REFUSAL_TRIES, CI_PENDING_MAX_MS, NO_CI_AFTER_MS]).toEqual([
+      3,
+      3,
+      30 * 60_000,
+      10 * 60_000,
+    ]);
+    expect(NEW_LOOP).toMatchObject({ phase: "working", epoch: 0, parked: null, cardFor: null });
+    expect(fillLoopText(NO_NEW_COMMIT_TEXT, { sha7: "abc1234" })).toContain("CI failed on abc1234");
+    expect(CI_FAILED_TEXT.endsWith("The failing output:\n")).toBe(true);
+    expect(RESUME_TEXT).toContain("{ref}");
+    expect(NUDGE_TEXT).toContain("{ref}");
+  });
+});
+
+describe("state step", () => {
+  it("1: a merged PR finishes the run", () => {
+    const s = snap(
+      { pr: pr({ state: "merged" }), openNotes: [`review:r1:${SHA}`] },
+      { phase: "review" },
+    );
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("done");
+    expect(r.actions).toEqual([
+      { kind: "end-run" },
+      { kind: "take-next" },
+      { kind: "event", text: "merged" },
+      { kind: "clear-note", key: `review:r1:${SHA}` },
+    ]);
+  });
+
+  it("1a: done stays done and repeats end-run and take-next, with no event", () => {
+    const r = reconcile(snap({}, { phase: "done" }));
+    expect(r.loop.phase).toBe("done");
+    expect(r.actions).toEqual([{ kind: "end-run" }, { kind: "take-next" }]);
+  });
+
+  it("1a: done sends no lines, moves no card and clears every note", () => {
+    const r = reconcile(
+      snap(
+        { openNotes: ["a", "b"], headCommit: SHA, seat: { ...snap().seat, resumedAt: 6000 } },
+        { phase: "done" },
+      ),
+    );
+    expect(r.actions).toEqual([
+      { kind: "end-run" },
+      { kind: "take-next" },
+      { kind: "clear-note", key: "a" },
+      { kind: "clear-note", key: "b" },
+    ]);
+  });
+
+  it("2: an ended run parks as ended, once", () => {
+    const s = snap({ ended: { reason: "stopped" } });
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("parked");
+    expect(r.loop.parked).toEqual({ kind: "ended", reason: "run ended (stopped)", ended: true });
+    expect(events(r.actions)).toEqual([]);
+    const r2 = again(s, r.loop);
+    expect(r2.loop).toEqual(r.loop);
+  });
+
+  it("2: an ended run that was parked for another reason is marked ended", () => {
+    const r = reconcile(
+      snap(
+        { ended: { reason: "x" } },
+        { phase: "parked", parked: { kind: "ci", reason: "r", ended: false } },
+      ),
+    );
+    expect(r.loop.parked?.ended).toBe(true);
+  });
+
+  it("3: parked stays parked", () => {
+    const l = { phase: "parked" as const, parked: { kind: "ci", reason: "r", ended: false } };
+    const r = reconcile(snap({ evidence: { id: 9, at: 1, ruling: false }, headCommit: SHA }, l));
+    expect(r.loop).toEqual({ ...NEW_LOOP, ...l });
+    expect(events(r.actions)).toEqual([]);
+  });
+
+  it("4: a closed PR parks", () => {
+    const r = reconcile(snap({ pr: pr({ state: "closed" }) }, { phase: "ci" }));
+    expect(r.loop.parked).toEqual({
+      kind: "pr-closed",
+      reason: "PR #12 was closed without merging",
+      ended: false,
+    });
+    expect(events(r.actions)).toEqual(["parked: PR #12 was closed without merging"]);
+  });
+
+  it("5: a report on the sha CI failed on, without a commit, stays working and asks for one", () => {
+    const s = snap(
+      {
+        headCommit: SHA,
+        evidence: { id: 3, at: NOW - 1000, ruling: false },
+        evidenceCount: 7,
+        claimed: { [`ci:r1:${SHA}`]: NOW - 5000 },
+        pr: pr(),
+      },
+      { phase: "working", reportedEvidenceId: 2, ciFailedSha: SHA, relayedSha: SHA, ciFails: 1 },
+    );
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("working");
+    expect(r.loop.reportedEvidenceId).toBe(3);
+    expect(r.actions).toContainEqual({
+      kind: "send",
+      key: "nonew:r1:3",
+      text: fillLoopText(NO_NEW_COMMIT_TEXT, { sha7: "aaaaaaa" }),
+    });
+    // the next pass, the send dropped, sends it again; once claimed it stops
+    const r2 = again(s, r.loop);
+    expect(sends(r2.actions)).toEqual(["nonew:r1:3"]);
+    const r3 = again({ ...s, claimed: { ...s.claimed, "nonew:r1:3": NOW } }, r.loop);
+    expect(sends(r3.actions)).toEqual([]);
+  });
+
+  it("5: a ruling on the failed sha parks", () => {
+    const r = reconcile(
+      snap(
+        { headCommit: SHA, evidence: { id: 3, at: 1, ruling: true }, evidenceCount: 3 },
+        { phase: "working", reportedEvidenceId: 2, ciFailedSha: SHA },
+      ),
+    );
+    expect(r.loop.phase).toBe("parked");
+    expect(r.loop.reportedEvidenceId).toBe(3);
+    expect(r.loop.parked).toEqual({
+      kind: "ruling",
+      reason: "SULU ruled on the CI failure on aaaaaaa instead of fixing it; see its last report",
+      ended: false,
+    });
+  });
+
+  it("6: a new report starts the push, in working and in review", () => {
+    for (const phase of ["working", "review"] as const) {
+      const r = reconcile(
+        snap(
+          { headCommit: SHA2, evidence: { id: 2, at: 1, ruling: false }, evidenceCount: 2 },
+          { phase, reportedEvidenceId: 1, ciFailedSha: SHA },
+        ),
+      );
+      expect(r.loop).toMatchObject({
+        phase: "ci",
+        reportedEvidenceId: 2,
+        pushStartedAt: NOW,
+      });
+      expect(events(r.actions)).toEqual(["reported; pushing"]);
+    }
+  });
+
+  it("6: a report with no commit at all parks at once, saying nothing was committed", () => {
+    for (const ruling of [false, true]) {
+      const r = reconcile(snap({ evidence: { id: 1, at: 1, ruling } }));
+      expect(r.loop.phase).toBe("parked");
+      expect(r.loop.parked).toEqual({
+        kind: "nothing",
+        reason: "SULU reported, but nothing was committed, so there is nothing to push",
+        ended: false,
+      });
+      expect(r.loop.reportedEvidenceId).toBe(1);
+      expect(r.actions.some((a) => a.kind === "push")).toBe(false);
+    }
+  });
+
+  it("6: a report starts the push clock for the newest commit", () => {
+    const r = reconcile(snap({ headCommit: SHA, evidence: { id: 1, at: 1, ruling: false } }));
+    expect(r.loop).toMatchObject({ phase: "ci", pushStartedAt: NOW, pushFor: SHA });
+  });
+
+  it("6: an already-handled report does nothing", () => {
+    const r = reconcile(
+      snap({ evidence: { id: 1, at: 1, ruling: false } }, { reportedEvidenceId: 1 }),
+    );
+    expect(r.loop.phase).toBe("working");
+  });
+
+  it("7: too many refusals park with the last refusal", () => {
+    const r = reconcile(inCi({}, { transient: REFUSAL_TRIES, lastRefusal: "push refused" }));
+    expect(r.loop.parked).toEqual({ kind: "refused", reason: "push refused", ended: false });
+    const r2 = reconcile(inCi({}, { transient: REFUSAL_TRIES - 1, lastRefusal: "x" }));
+    expect(r2.loop.phase).toBe("ci");
+  });
+
+  it("8: a push or PR that never shows up parks after ten minutes", () => {
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    const msg = "the push or PR for aaaaaaa has not shown up on GitHub after 10 minutes";
+    for (const over of [
+      { pushed: null },
+      { pr: null },
+      { pr: pr({ headSha: SHA2 }) },
+      { pushed: { sha: SHA2, at: NOW } },
+    ] as Partial<LoopSnapshot>[]) {
+      const r = reconcile(inCi(over, late));
+      expect(r.loop.parked).toEqual({ kind: "stuck", reason: msg, ended: false });
+    }
+  });
+
+  it("9: a push or PR not there yet, within ten minutes, waits", () => {
+    for (const over of [
+      { pushed: null },
+      { pr: null },
+      { pr: pr({ headSha: SHA2 }) },
+    ] as Partial<LoopSnapshot>[]) {
+      const r = reconcile(inCi(over, { pushStartedAt: NOW - NO_CI_AFTER_MS }));
+      expect(r.loop.phase).toBe("ci");
+    }
+  });
+
+  it("9: a stale passing CI on an older PR head is not trusted", () => {
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA2, ci: "passing" }) }));
+    expect(r.loop.phase).toBe("ci");
+  });
+
+  it("10: a conflicting PR parks", () => {
+    const r = reconcile(inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) }));
+    expect(r.loop.parked).toEqual({
+      kind: "conflict",
+      reason: "PR #12 conflicts with main",
+      ended: false,
+    });
+  });
+
+  it("11: passing CI moves to review and resets the failure count", () => {
+    const r = reconcile(inCi({ pr: pr({ ci: "passing" }) }, { ciFails: 2 }));
+    expect(r.loop).toMatchObject({ phase: "review", ciFails: 0 });
+    expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
+  });
+
+  it("12a: failing CI on an already-failed sha returns to working without counting", () => {
+    const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }, { ciFailedSha: SHA, ciFails: 1 }));
+    expect(r.loop).toMatchObject({ phase: "working", ciFails: 1, ciFailedSha: SHA });
+    expect(events(r.actions)).toEqual([]);
+  });
+
+  it("12: failing CI counts, records the sha and returns to working", () => {
+    const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }));
+    expect(r.loop).toMatchObject({ phase: "working", ciFails: 1, ciFailedSha: SHA });
+    expect(events(r.actions)).toEqual(["CI failed on aaaaaaa"]);
+    expect(r.actions).toContainEqual({ kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA });
+  });
+
+  it("12: the third failure parks", () => {
+    let s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 1, ciFailedSha: SHA2 });
+    const r = reconcile(s);
+    expect(r.loop.parked).toEqual({
+      kind: "ci",
+      reason: "CI failed 3 times; last on aaaaaaa",
+      ended: false,
+    });
+    s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 2, ciFailedSha: SHA2 });
+    expect(reconcile(s).loop.phase).toBe("working");
+  });
+
+  it("13: CI pending for thirty minutes parks", () => {
+    const old = { pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } };
+    const r = reconcile(inCi(old));
+    expect(r.loop.parked).toEqual({
+      kind: "ci-pending",
+      reason: "CI pending for 30 minutes on aaaaaaa",
+      ended: false,
+    });
+    const r2 = reconcile(inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS } }));
+    expect(r2.loop.phase).toBe("ci");
+  });
+
+  it("14: no CI reported within ten minutes of the push parks", () => {
+    const at = NOW - NO_CI_AFTER_MS - 1;
+    const r = reconcile(inCi({ pushed: { sha: SHA, at }, pr: pr({ ci: null, polledAt: NOW }) }));
+    expect(r.loop.parked).toEqual({
+      kind: "no-ci",
+      reason: "no CI reported for aaaaaaa",
+      ended: false,
+    });
+    const r2 = reconcile(
+      inCi({ pushed: { sha: SHA, at: NOW - NO_CI_AFTER_MS }, pr: pr({ ci: null }) }),
+    );
+    expect(r2.loop.phase).toBe("ci");
+  });
+
+  it("15: working over budget parks; budgetExtra raises the ceiling", () => {
+    const r = reconcile(snap({ tokens: 1001 }));
+    expect(r.loop.parked).toEqual({
+      kind: "budget",
+      reason: "over its 1000-token budget",
+      ended: false,
+    });
+    expect(reconcile(snap({ tokens: 1001 }, { budgetExtra: 1 })).loop.phase).toBe("working");
+    expect(reconcile(snap({ tokens: 1000 })).loop.phase).toBe("working");
+    expect(reconcile(inCi({ tokens: 5000 })).loop.phase).toBe("ci");
+  });
+
+  describe("16: silent after a nudge", () => {
+    const key = "nudge:r1:0:0";
+    const base = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) =>
+      snap(
+        {
+          claimed: { [key]: 5000 },
+          seat: { ...snap().seat, state: "idle", lastTurnEndedAt: 6000 },
+          ...over,
+        },
+        loop,
+      );
+
+    it("parks when the seat stopped again after the nudge", () => {
+      const r = reconcile(base());
+      expect(r.loop.parked).toEqual({
+        kind: "silent",
+        reason: "stopped twice without reporting",
+        ended: false,
+      });
+    });
+
+    it("never parks with an open question, mid-turn, not idle, or before the nudge", () => {
+      const s = base();
+      for (const sd of [
+        { openQuestion: true },
+        { inTurn: true },
+        { state: "running" as const },
+        { lastTurnEndedAt: 5000 },
+      ]) {
+        expect(reconcile({ ...s, seat: seat(s, sd) }).loop.phase).toBe("working");
+      }
+    });
+
+    it("applies in review when a fix is committed but not reported", () => {
+      const r = reconcile(
+        base(
+          { headCommit: SHA2, pushed: { sha: SHA, at: 1 }, evidenceCount: 0 },
+          { phase: "review" },
+        ),
+      );
+      expect(r.loop.phase).toBe("parked");
+      const r2 = reconcile(
+        base({ headCommit: SHA, pushed: { sha: SHA, at: 1 } }, { phase: "review" }),
+      );
+      expect(r2.loop.phase).toBe("review");
+    });
+  });
+
+  it("17: otherwise unchanged", () => {
+    const s = snap();
+    expect(reconcile(s).loop).toEqual(s.loop);
+  });
+});
+
+describe("desired-state step", () => {
+  it("moves the card once per phase and epoch, and not again once cardFor is set", () => {
+    const cases: [Partial<RunLoop>, string][] = [
+      [{ phase: "working" }, "In progress"],
+      [{ phase: "review" }, "In review"],
+      [{ phase: "parked", parked: { kind: "x", reason: "r", ended: false } }, "Blocked"],
+    ];
+    for (const [loop, column] of cases) {
+      const r = reconcile(snap({}, loop));
+      expect(r.actions).toContainEqual({ kind: "move-card", column });
+      const phase = loop.phase;
+      const done = reconcile(snap({}, { ...loop, cardFor: `${phase}:0` }));
+      expect(done.actions.some((a) => a.kind === "move-card")).toBe(false);
+      // a new epoch is a new move
+      const next = reconcile(snap({}, { ...loop, cardFor: `${phase}:0`, epoch: 1 }));
+      expect(next.actions).toContainEqual({ kind: "move-card", column });
+    }
+    expect(reconcile(snap({}, { phase: "working" })).actions).toContainEqual({
+      kind: "move-card",
+      column: "In progress",
+    });
+    expect(
+      reconcile(inCi({}, { cardFor: null })).actions.filter((a) => a.kind === "move-card"),
+    ).toEqual([{ kind: "move-card", column: "In progress" }]);
+  });
+
+  it("an ended run still gets its Blocked move and note", () => {
+    const r = reconcile(snap({ ended: { reason: "stopped" } }));
+    expect(r.actions).toContainEqual({ kind: "move-card", column: "Blocked" });
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: "blocked:r1:0",
+      noteKind: "blocked",
+      text: `${REF} parked: run ended (stopped)`,
+    });
+  });
+
+  it("emits a note for each missing desired key and clears those no longer wanted", () => {
+    const parked = {
+      phase: "parked" as const,
+      parked: { kind: "ci", reason: "boom", ended: false },
+      cardFor: "parked:0",
+    };
+    const r = reconcile(snap({ openNotes: ["old"] }, parked));
+    expect(r.actions).toEqual([
+      { kind: "note", key: "blocked:r1:0", noteKind: "blocked", text: `${REF} parked: boom` },
+      { kind: "clear-note", key: "old" },
+    ]);
+    expect(reconcile(snap({ openNotes: ["blocked:r1:0"] }, parked)).actions).toEqual([]);
+  });
+
+  it("a park's note key changes with the epoch", () => {
+    const parked = {
+      phase: "parked" as const,
+      parked: { kind: "ci", reason: "boom", ended: false },
+      cardFor: "parked:1",
+      epoch: 1,
+    };
+    const r = reconcile(snap({ openNotes: ["blocked:r1:0"] }, parked));
+    expect(r.actions).toEqual([
+      { kind: "note", key: "blocked:r1:1", noteKind: "blocked", text: `${REF} parked: boom` },
+      { kind: "clear-note", key: "blocked:r1:0" },
+    ]);
+  });
+
+  it("review note names the PR and sha; hard-rule flag follows touches", () => {
+    const s = snap(
+      { pushed: { sha: SHA, at: 1 }, headCommit: SHA, pr: pr({ ci: "passing" }) },
+      { phase: "review", cardFor: "review:0", touches: { sha: SHA, paths: ["a.yml", "b.ts"] } },
+    );
+    const r = reconcile(s);
+    expect(r.actions).toEqual([
+      {
+        kind: "note",
+        key: `review:r1:${SHA}`,
+        noteKind: "review",
+        text: `${REF}: PR #12 is ready for review (CI passed on aaaaaaa)`,
+      },
+      {
+        kind: "note",
+        key: `flag:r1:hard-rules:${SHA}`,
+        noteKind: "flag",
+        text: `${REF} touches hard-rule files: a.yml, b.ts`,
+      },
+    ]);
+    const empty = reconcile({
+      ...s,
+      loop: { ...s.loop, touches: { sha: SHA, paths: [] } },
+      openNotes: [`flag:r1:hard-rules:${SHA}`],
+    });
+    expect(empty.actions).toContainEqual({ kind: "clear-note", key: `flag:r1:hard-rules:${SHA}` });
+  });
+
+  it("a rate-limited seat gets a note, with the reset time when known", () => {
+    const base = snap({}, { cardFor: "working:0" });
+    const until = Date.UTC(2026, 9, 21, 14, 5);
+    const r = reconcile({
+      ...base,
+      now: until - 3_600_000,
+      tz: "Europe/London",
+      seat: seat(base, { state: "parked", rateLimitedUntil: until }),
+    });
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: "ratelimit:r1",
+      noteKind: "ratelimit",
+      text: "SULU is rate-limited until 15:05",
+    });
+    const r2 = reconcile({ ...base, seat: seat(base, { state: "parked" }) });
+    expect(r2.actions).toContainEqual({
+      kind: "note",
+      key: "ratelimit:r1",
+      noteKind: "ratelimit",
+      text: "SULU is rate-limited",
+    });
+    const gone = reconcile({ ...base, openNotes: ["ratelimit:r1"] });
+    expect(gone.actions).toEqual([{ kind: "clear-note", key: "ratelimit:r1" }]);
+  });
+
+  it("pushes the newest commit, then opens the PR, only in ci", () => {
+    const r = reconcile(inCi({ pushed: null, pr: null }));
+    expect(r.actions).toEqual([{ kind: "push" }]);
+    const r2 = reconcile(inCi({ pushed: { sha: SHA2, at: NOW }, pr: null, headCommit: SHA }));
+    expect(r2.actions).toEqual([{ kind: "push" }]);
+    const r3 = reconcile(inCi({ pr: null }));
+    expect(r3.actions).toEqual([{ kind: "open-pr" }]);
+    const w = reconcile(snap({ headCommit: SHA }, { cardFor: "working:0" }));
+    expect(w.actions).toEqual([]);
+  });
+
+  describe("lines", () => {
+    const fail = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) =>
+      snap(
+        { headCommit: SHA, pr: pr({ ci: "failing" }), ...over },
+        { cardFor: "working:0", ciFailedSha: SHA, ciFails: 1, ...loop },
+      );
+
+    it("relays the CI excerpt until the server marks it relayed", () => {
+      const r = reconcile(fail());
+      expect(r.actions).toEqual([{ kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA }]);
+      expect(reconcile(fail({}, { relayedSha: SHA })).actions).toEqual([]);
+      expect(reconcile(fail({ claimed: { [`ci:r1:${SHA}`]: 1 } })).actions).toEqual([]);
+    });
+
+    it("sends nothing while the seat is in a turn", () => {
+      const s = fail();
+      expect(reconcile({ ...s, seat: seat(s, { inTurn: true }) }).actions).toEqual([]);
+    });
+
+    it("sends one line per pass, the first due one", () => {
+      const s = fail({
+        seat: { ...snap().seat, resumedAt: 6000, state: "idle", lastTurnEndedAt: 5500 },
+      });
+      const r = reconcile(s);
+      expect(outstanding(r.actions)).toEqual([
+        { kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA },
+      ]);
+      const r2 = reconcile({ ...s, loop: { ...s.loop, relayedSha: SHA } });
+      expect(sends(r2.actions)).toEqual(["resume:r1:5000"]);
+    });
+
+    it("resumes a seat once per hub start, until its next turn ends", () => {
+      const s = snap({ seat: { ...snap().seat, resumedAt: 6000 } }, { cardFor: "working:0" });
+      expect(reconcile(s).actions).toEqual([
+        { kind: "send", key: "resume:r1:5000", text: fillLoopText(RESUME_TEXT, { ref: REF }) },
+      ]);
+      const claimed = { "resume:r1:5000": 6100 };
+      expect(reconcile({ ...s, claimed }).actions).toEqual([]);
+      // resumed before this hub started: nothing
+      expect(reconcile({ ...s, seat: seat(s, { resumedAt: 4000 }) }).actions).toEqual([]);
+      // its turn ended since: no resume line
+      expect(reconcile({ ...s, seat: seat(s, { lastTurnEndedAt: 6500 }) }).actions).toEqual([]);
+      // an open question: no resume line
+      expect(reconcile({ ...s, seat: seat(s, { openQuestion: true }) }).actions).toEqual([]);
+    });
+
+    it("a rate-limit reset sends one line; with no reset time, one try per hour", () => {
+      const base = snap({}, { cardFor: "working:0" });
+      const parkedSeat = (over: Partial<LoopSnapshot["seat"]>) =>
+        seat(base, { state: "parked", ...over });
+      const until = NOW - 1000;
+      const r = reconcile({
+        ...base,
+        seat: parkedSeat({ rateLimitedUntil: until }),
+        openNotes: ["ratelimit:r1"],
+      });
+      expect(r.actions).toEqual([
+        {
+          kind: "send",
+          key: `ratelimit:r1:${until}`,
+          text: fillLoopText(RESUME_TEXT, { ref: REF }),
+        },
+      ]);
+      const claimed = { [`ratelimit:r1:${until}`]: NOW };
+      expect(
+        reconcile({
+          ...base,
+          claimed,
+          seat: parkedSeat({ rateLimitedUntil: until }),
+          openNotes: ["ratelimit:r1"],
+        }).actions,
+      ).toEqual([]);
+      // not yet reset
+      expect(
+        sends(reconcile({ ...base, seat: parkedSeat({ rateLimitedUntil: NOW + 1000 }) }).actions),
+      ).toEqual([]);
+      expect(sends(reconcile({ ...base, seat: parkedSeat({}) }).actions)).toEqual([
+        "ratelimit:r1:after:0",
+      ]);
+    });
+
+    it("nudges an idle seat that stopped without reporting, once per epoch and report count", () => {
+      const s = snap(
+        { seat: { ...snap().seat, state: "idle", lastTurnEndedAt: 3000 } },
+        { cardFor: "working:0" },
+      );
+      expect(reconcile(s).actions).toEqual([
+        { kind: "send", key: "nudge:r1:0:0", text: fillLoopText(NUDGE_TEXT, { ref: REF }) },
+      ]);
+      // a turn that ended before the run started, the report or an engine line is not a stop
+      for (const over of [
+        { runStartedAt: 3000 },
+        { evidence: { id: 1, at: 3000, ruling: false } },
+        { lastEngineLineAt: 3000 },
+      ] as Partial<LoopSnapshot>[]) {
+        const o = { ...s, ...over };
+        // keep the evidence handled so row 6 does not fire
+        const loop = { ...o.loop, reportedEvidenceId: o.evidence?.id ?? 0 };
+        expect(sends(reconcile({ ...o, loop }).actions)).toEqual([]);
+      }
+      expect(sends(reconcile({ ...s, seat: seat(s, { openQuestion: true }) }).actions)).toEqual([]);
+      expect(sends(reconcile({ ...s, seat: seat(s, { state: "running" }) }).actions)).toEqual([]);
+      expect(sends(reconcile({ ...s, seat: seat(s, { lastTurnEndedAt: null }) }).actions)).toEqual(
+        [],
+      );
+      expect(sends(reconcile({ ...s, claimed: { "nudge:r1:0:0": 3500 } }).actions)).toEqual([]);
+    });
+
+    it("nudges in review only when a fix is committed but not reported", () => {
+      const s = snap(
+        {
+          headCommit: SHA2,
+          pushed: { sha: SHA, at: 1 },
+          pr: pr({ ci: "passing" }),
+          seat: { ...snap().seat, state: "idle", lastTurnEndedAt: 3000 },
+        },
+        { phase: "review", cardFor: "review:0" },
+      );
+      expect(sends(reconcile(s).actions)).toEqual(["nudge:r1:0:0"]);
+      expect(sends(reconcile({ ...s, headCommit: SHA }).actions)).toEqual([]);
+    });
+  });
+});
+
+describe("sequences", () => {
+  it("happy path: report, push, open-pr, CI pending, passing, review, merged", () => {
+    const s0 = snap({
+      headCommit: SHA,
+      evidence: { id: 1, at: 2000, ruling: false },
+      evidenceCount: 1,
+    });
+    const r0 = reconcile(s0);
+    expect(r0.actions).toEqual([
+      { kind: "event", text: "reported; pushing" },
+      { kind: "move-card", column: "In progress" },
+      { kind: "push" },
+    ]);
+
+    const l1 = { ...r0.loop, cardFor: "ci:0" };
+    const s1 = { ...s0, loop: l1, pushed: { sha: SHA, at: NOW } };
+    expect(reconcile(s1).actions).toEqual([{ kind: "open-pr" }]);
+
+    const s2 = { ...s1, pr: pr({ ci: "pending" }) };
+    expect(reconcile(s2).actions).toEqual([]);
+
+    const s3 = { ...s2, pr: pr({ ci: "passing" }) };
+    const r3 = reconcile(s3);
+    expect(r3.actions).toEqual([
+      { kind: "event", text: "CI passed on aaaaaaa" },
+      { kind: "move-card", column: "In review" },
+      {
+        kind: "note",
+        key: `review:r1:${SHA}`,
+        noteKind: "review",
+        text: `${REF}: PR #12 is ready for review (CI passed on aaaaaaa)`,
+      },
+    ]);
+
+    const s4 = {
+      ...s3,
+      loop: { ...r3.loop, cardFor: "review:0" },
+      openNotes: [`review:r1:${SHA}`],
+      pr: pr({ state: "merged", ci: "passing" }),
+    };
+    const r4 = reconcile(s4);
+    expect(r4.loop.phase).toBe("done");
+    expect(r4.actions).toEqual([
+      { kind: "end-run" },
+      { kind: "take-next" },
+      { kind: "event", text: "merged" },
+      { kind: "clear-note", key: `review:r1:${SHA}` },
+    ]);
+    expect(again(s4, r4.loop).actions).toEqual([
+      { kind: "end-run" },
+      { kind: "take-next" },
+      { kind: "clear-note", key: `review:r1:${SHA}` },
+    ]);
+  });
+
+  it("a crash after the state is stored repeats push, open-pr and the card move", () => {
+    const s0 = snap({
+      headCommit: SHA,
+      evidence: { id: 1, at: 2000, ruling: false },
+      evidenceCount: 1,
+    });
+    const r0 = reconcile(s0);
+    // the loop is stored, every action is dropped
+    const r1 = again(s0, r0.loop);
+    expect(outstanding(r1.actions)).toEqual(outstanding(r0.actions));
+    expect(events(r1.actions)).toEqual([]);
+    expect(r1.loop).toEqual(r0.loop);
+
+    const s1 = { ...s0, loop: { ...r0.loop, cardFor: "ci:0" }, pushed: { sha: SHA, at: NOW } };
+    const r2 = reconcile(s1);
+    expect(again(s1, r2.loop).actions).toEqual(r2.actions);
+  });
+
+  it("a crash after a park repeats the card move and the note", () => {
+    const s = inCi({ pr: pr({ mergeable: "CONFLICTING" }) });
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("parked");
+    const next = again(s, r.loop);
+    expect(outstanding(next.actions)).toEqual(outstanding(r.actions));
+    expect(outstanding(r.actions).map((a) => a.kind)).toEqual(["move-card", "note"]);
+    expect(events(next.actions)).toEqual([]);
+  });
+
+  it("a crash after a CI failure repeats the excerpt", () => {
+    const s = inCi({ pr: pr({ ci: "failing" }) });
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("working");
+    const next = again(s, r.loop);
+    expect(next.actions).toEqual([
+      { kind: "move-card", column: "In progress" },
+      { kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA },
+    ]);
+    expect(next.loop).toEqual(r.loop);
+    // the failure stays counted once however often the pass repeats
+    expect(next.loop.ciFails).toBe(1);
+  });
+
+  it("a busy send is re-emitted until its key is claimed", () => {
+    const s = snap({ seat: { ...snap().seat, resumedAt: 6000 } }, { cardFor: "working:0" });
+    for (let i = 0; i < 3; i++) expect(sends(reconcile(s).actions)).toEqual(["resume:r1:5000"]);
+    expect(sends(reconcile({ ...s, claimed: { "resume:r1:5000": NOW } }).actions)).toEqual([]);
+  });
+
+  it("CI failing three times parks, each failure on a new sha", () => {
+    let loop: RunLoop = { ...NEW_LOOP, cardFor: "ci:0" };
+    const shas = ["1111111aa", "2222222bb", "3333333cc"];
+    let last = reconcile(snap());
+    for (const [i, sha] of shas.entries()) {
+      const ci = inCi(
+        {
+          headCommit: sha,
+          pushed: { sha, at: NOW - 1000 },
+          pr: pr({ headSha: sha, ci: "failing" }),
+        },
+        { ...loop, phase: "ci", ciFails: i, ciFailedSha: i === 0 ? null : (shas[i - 1] ?? null) },
+      );
+      last = reconcile(ci);
+      loop = last.loop;
+    }
+    expect(last.loop.phase).toBe("parked");
+    expect(last.loop.ciFails).toBe(3);
+    expect(last.loop.parked?.reason).toBe("CI failed 3 times; last on 3333333");
+  });
+
+  it("a review-round report pushes only", () => {
+    const s = snap(
+      {
+        headCommit: SHA2,
+        pushed: { sha: SHA, at: 1000 },
+        pr: pr({ ci: "passing" }),
+        evidence: { id: 2, at: 9000, ruling: false },
+        evidenceCount: 2,
+        openNotes: [`review:r1:${SHA}`],
+      },
+      { phase: "review", reportedEvidenceId: 1, cardFor: "review:0" },
+    );
+    const r = reconcile(s);
+    expect(r.loop.phase).toBe("ci");
+    expect(r.actions.filter((a) => a.kind === "push")).toEqual([{ kind: "push" }]);
+    expect(r.actions.some((a) => a.kind === "open-pr")).toBe(false);
+    expect(r.actions).toContainEqual({ kind: "clear-note", key: `review:r1:${SHA}` });
+    expect(r.actions).toContainEqual({ kind: "move-card", column: "In progress" });
+  });
+
+  it("a resumed seat gets the resume line once, then the nudge rules apply", () => {
+    const base = snap(
+      { seat: { ...snap().seat, state: "idle", resumedAt: 6000, lastTurnEndedAt: 3000 } },
+      { cardFor: "working:0" },
+    );
+    // before its next turn ends: resume
+    expect(sends(reconcile(base).actions)).toEqual(["resume:r1:5000"]);
+    // resume claimed, seat still has not had a turn since: no further line
+    const claimed1 = { "resume:r1:5000": 6100 };
+    // the engine's own line (the resume) is stamped at its claim time
+    const s1 = { ...base, claimed: claimed1, lastEngineLineAt: 6100 };
+    expect(reconcile(s1).actions).toEqual([]);
+    // its turn ends without a report: the nudge
+    const s2 = { ...s1, seat: seat(s1, { lastTurnEndedAt: 7000 }) };
+    expect(sends(reconcile(s2).actions)).toEqual(["nudge:r1:0:0"]);
+    // nudge claimed, nothing yet
+    const s3 = { ...s2, claimed: { ...claimed1, "nudge:r1:0:0": 7100 } };
+    expect(reconcile(s3).loop.phase).toBe("working");
+    // it stops again: park, and no open question could have prevented the nudge
+    const s4 = { ...s3, seat: seat(s3, { lastTurnEndedAt: 8000 }) };
+    const r4 = reconcile(s4);
+    expect(r4.loop.parked?.kind).toBe("silent");
+    expect(sends(r4.actions)).toEqual([]);
+    // with an open question it neither nudges nor parks
+    const q = { ...s4, seat: seat(s4, { openQuestion: true }) };
+    expect(reconcile(q).loop.phase).toBe("working");
+    expect(sends(reconcile({ ...q, claimed: claimed1 }).actions)).toEqual([]);
+  });
+});
+
+describe("review round", () => {
+  const PARKED = { kind: "ci", reason: "r", ended: false };
+  const ENDED = { kind: "ended", reason: "run ended (stopped)", ended: true };
+  const touches = { sha: SHA, paths: ["a.yml"] };
+  const limited = (s: LoopSnapshot): LoopSnapshot["seat"] =>
+    seat(s, { state: "parked", rateLimitedUntil: null });
+
+  it("an ended run desires only its blocked note and clears the others", () => {
+    const loop = { phase: "parked" as const, parked: ENDED, cardFor: "parked:0", touches };
+    const base = snap({}, loop);
+    const s = { ...base, seat: limited(base) };
+    const r = reconcile(s);
+    expect(r.actions).toEqual([
+      {
+        kind: "note",
+        key: "blocked:r1:0",
+        noteKind: "blocked",
+        text: `${REF} parked: run ended (stopped)`,
+      },
+    ]);
+    const open = [`flag:r1:hard-rules:${SHA}`, "ratelimit:r1", "blocked:r1:0"];
+    expect(reconcile({ ...s, openNotes: open }).actions).toEqual([
+      { kind: "clear-note", key: `flag:r1:hard-rules:${SHA}` },
+      { kind: "clear-note", key: "ratelimit:r1" },
+    ]);
+  });
+
+  it("a parked run that has not ended keeps its flag and rate-limit notes", () => {
+    const base = snap({}, { phase: "parked", parked: PARKED, cardFor: "parked:0", touches });
+    const keys = reconcile({ ...base, seat: limited(base) }).actions.flatMap((a) =>
+      a.kind === "note" ? [a.key] : [],
+    );
+    expect(keys).toEqual(["blocked:r1:0", `flag:r1:hard-rules:${SHA}`, "ratelimit:r1"]);
+  });
+
+  it("6: a new report resets the refusal counter", () => {
+    const r = reconcile(
+      snap(
+        { headCommit: SHA2, evidence: { id: 2, at: 1, ruling: false }, evidenceCount: 2 },
+        { phase: "review", reportedEvidenceId: 1, transient: 2, lastRefusal: "old" },
+      ),
+    );
+    expect(r.loop).toMatchObject({ phase: "ci", transient: 0, lastRefusal: null });
+  });
+
+  it("returns a fresh loop object even when nothing changed", () => {
+    for (const loop of [{}, { phase: "done" as const }, { phase: "parked" as const }]) {
+      const s = snap({}, loop);
+      const r = reconcile(s);
+      expect(r.loop).toEqual(s.loop);
+      expect(r.loop).not.toBe(s.loop);
+    }
+  });
+
+  it("3: a parked run with a closed PR stays parked", () => {
+    const l = { phase: "parked" as const, parked: PARKED };
+    const r = reconcile(snap({ pr: pr({ state: "closed" }) }, l));
+    expect(r.loop.parked).toEqual(PARKED);
+    expect(events(r.actions)).toEqual([]);
+  });
+
+  it("5: a report on the failed sha in review goes back to working, or parks on a ruling", () => {
+    const loop = { phase: "review" as const, reportedEvidenceId: 2, ciFailedSha: SHA };
+    const mk = (ruling: boolean) =>
+      snap({ headCommit: SHA, evidence: { id: 3, at: 1, ruling }, evidenceCount: 3 }, loop);
+    expect(reconcile(mk(false)).loop).toMatchObject({ phase: "working", reportedEvidenceId: 3 });
+    expect(reconcile(mk(true)).loop).toMatchObject({ phase: "parked", reportedEvidenceId: 3 });
+  });
+
+  it("8: a pushed sha that is not the newest commit does not park or pass the old sha", () => {
+    const r = reconcile(
+      inCi(
+        {
+          headCommit: SHA2,
+          pushed: { sha: SHA, at: NOW },
+          pr: pr({ headSha: SHA, ci: "passing" }),
+        },
+        { pushStartedAt: NOW - 1000 },
+      ),
+    );
+    expect(r.loop.phase).toBe("ci");
+    expect(r.actions).toContainEqual({ kind: "push" });
+  });
+
+  it("13: pending is measured from now, not from the poll", () => {
+    const at = NOW - CI_PENDING_MAX_MS - 1;
+    const stale = reconcile(inCi({ pushed: { sha: SHA, at }, pr: pr({ polledAt: at }) }));
+    expect(stale.loop.parked?.kind).toBe("ci-pending");
+    const ahead = reconcile(
+      inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS }, pr: pr({ polledAt: NOW + 5 }) }),
+    );
+    expect(ahead.loop.phase).toBe("ci");
+  });
+
+  it("14: no CI is measured from the poll, not from now", () => {
+    const at = NOW - 1000;
+    const polled = reconcile(
+      inCi({
+        pushed: { sha: SHA, at },
+        pr: pr({ ci: null, polledAt: at + NO_CI_AFTER_MS + 1 }),
+      }),
+    );
+    expect(polled.loop.parked?.kind).toBe("no-ci");
+    const old = NOW - NO_CI_AFTER_MS - 100;
+    const fresh = reconcile(
+      inCi({ pushed: { sha: SHA, at: old }, pr: pr({ ci: null, polledAt: old + 1 }) }),
+    );
+    expect(fresh.loop.phase).toBe("ci");
+  });
+
+  it("15: only a working run parks over budget", () => {
+    const r = reconcile(
+      snap({ tokens: 5000, pushed: { sha: SHA, at: 1 }, headCommit: SHA }, { phase: "review" }),
+    );
+    expect(r.loop.phase).toBe("review");
+  });
+
+  it("done clears the flag and rate-limit notes and raises nothing", () => {
+    const base = snap(
+      { openNotes: [`flag:r1:hard-rules:${SHA}`, "ratelimit:r1"] },
+      { phase: "done", touches },
+    );
+    const r = reconcile({ ...base, seat: limited(base) });
+    expect(r.actions).toEqual([
+      { kind: "end-run" },
+      { kind: "take-next" },
+      { kind: "clear-note", key: `flag:r1:hard-rules:${SHA}` },
+      { kind: "clear-note", key: "ratelimit:r1" },
+    ]);
+  });
+
+  it("shows the rate-limit reset in the operator's zone, and leaves it out when it cannot", () => {
+    const base = snap({}, { cardFor: "working:0" });
+    const until = Date.UTC(2026, 9, 21, 13, 5);
+    const noteText = (tz: string | null, rateLimitedUntil: number | null): string | undefined => {
+      const r = reconcile({ ...base, tz, seat: seat(base, { state: "parked", rateLimitedUntil }) });
+      const n = r.actions.find((a) => a.kind === "note");
+      return n?.kind === "note" ? n.text : undefined;
+    };
+    // 13:05 UTC is 14:05 in London in October (BST)
+    expect(noteText("Europe/London", until)).toBe("SULU is rate-limited until 14:05");
+    expect(noteText(null, until)).toBe("SULU is rate-limited");
+    expect(noteText("Not/AZone", until)).toBe("SULU is rate-limited");
+    expect(noteText("Europe/London", 9e15)).toBe("SULU is rate-limited");
+    expect(noteText("Europe/London", Number.NaN)).toBe("SULU is rate-limited");
+  });
+
+  it("2: a seat resumed again in the same hub run still gets its nudge", () => {
+    const base = snap(
+      {
+        seat: { ...snap().seat, state: "idle", resumedAt: 7500, lastTurnEndedAt: 7000 },
+        claimed: { "resume:r1:5000": 6100 },
+        lastEngineLineAt: 6100,
+      },
+      { cardFor: "working:0" },
+    );
+    expect(sends(reconcile(base).actions)).toEqual(["nudge:r1:0:0"]);
+  });
+
+  it("the nudge key is epoch, then report count", () => {
+    const s = snap(
+      {
+        seat: { ...snap().seat, state: "idle", lastTurnEndedAt: 3000 },
+        evidence: { id: 1, at: 2000, ruling: false },
+        evidenceCount: 4,
+      },
+      { cardFor: "working:2", epoch: 2, reportedEvidenceId: 1 },
+    );
+    expect(sends(reconcile(s).actions)).toEqual(["nudge:r1:2:4"]);
+  });
+
+  it("the review note names the pushed sha, not the newest commit", () => {
+    const s = snap(
+      { headCommit: SHA2, pushed: { sha: SHA, at: 1 }, pr: pr({ ci: "passing" }) },
+      { phase: "review", cardFor: "review:0" },
+    );
+    const notes = reconcile(s).actions.flatMap((a) => (a.kind === "note" ? [a] : []));
+    expect(notes).toEqual([
+      {
+        kind: "note",
+        key: `review:r1:${SHA}`,
+        noteKind: "review",
+        text: `${REF}: PR #12 is ready for review (CI passed on aaaaaaa)`,
+      },
+    ]);
+  });
+
+  it("the review note never reads PR #null", () => {
+    const s = snap(
+      { headCommit: SHA, pushed: { sha: SHA, at: 1 }, pr: null },
+      { phase: "review", cardFor: "review:0" },
+    );
+    const text = (loop: Partial<RunLoop>): string | undefined => {
+      const n = reconcile({ ...s, loop: { ...s.loop, ...loop } }).actions.find(
+        (a) => a.kind === "note",
+      );
+      return n?.kind === "note" ? n.text : undefined;
+    };
+    expect(text({})).toBe(`${REF}: the PR is ready for review (CI passed on aaaaaaa)`);
+    expect(text({ prNumber: 9 })).toBe(`${REF}: PR #9 is ready for review (CI passed on aaaaaaa)`);
+  });
+
+  it("8: a report with no commit that never pushes parks with a readable text", () => {
+    const r = reconcile(
+      inCi(
+        { headCommit: null, pushed: null, pr: null },
+        { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 },
+      ),
+    );
+    expect(r.loop.parked?.reason).toBe(
+      "the push or PR has not shown up on GitHub after 10 minutes",
+    );
+  });
+
+  it("15: the budget text names the ceiling", () => {
+    const r = reconcile(snap({ tokens: 1500 }, { budgetExtra: 400 }));
+    expect(r.loop.parked?.reason).toBe("over its 1400-token budget");
+  });
+
+  describe("lines", () => {
+    const working = { cardFor: "working:0" };
+
+    it("nonew comes before resume; a claimed ci key falls through to the next line", () => {
+      const s = snap(
+        {
+          headCommit: SHA,
+          evidence: { id: 3, at: 9000, ruling: false },
+          evidenceCount: 3,
+          claimed: { [`ci:r1:${SHA}`]: 5000 },
+          seat: { ...snap().seat, resumedAt: 6000 },
+        },
+        { ...working, reportedEvidenceId: 3, ciFailedSha: SHA },
+      );
+      // relayedSha not yet set, but the excerpt key is claimed: no excerpt, the nonew line is next
+      expect(reconcile(s).actions).toEqual([
+        {
+          kind: "send",
+          key: "nonew:r1:3",
+          text: fillLoopText(NO_NEW_COMMIT_TEXT, { sha7: "aaaaaaa" }),
+        },
+      ]);
+      expect(
+        sends(reconcile({ ...s, claimed: { ...s.claimed, "nonew:r1:3": 9100 } }).actions),
+      ).toEqual(["resume:r1:5000"]);
+    });
+
+    it("boundaries: nonew needs a strictly later report, resume a turn before the resume, rate-limit a time strictly past", () => {
+      const nonew = snap(
+        {
+          headCommit: SHA,
+          evidence: { id: 3, at: 5000, ruling: false },
+          claimed: { [`ci:r1:${SHA}`]: 5000 },
+        },
+        { ...working, reportedEvidenceId: 3, ciFailedSha: SHA },
+      );
+      expect(sends(reconcile(nonew).actions)).toEqual([]);
+      const ev = { id: 3, at: 5001, ruling: false };
+      expect(sends(reconcile({ ...nonew, evidence: ev }).actions)).toEqual(["nonew:r1:3"]);
+
+      const resume = snap(
+        { seat: { ...snap().seat, resumedAt: 6000, lastTurnEndedAt: 6000 } },
+        working,
+      );
+      expect(sends(reconcile(resume).actions)).toEqual([]);
+      expect(
+        sends(reconcile({ ...resume, seat: seat(resume, { lastTurnEndedAt: 5999 }) }).actions),
+      ).toEqual(["resume:r1:5000"]);
+
+      const rl = snap({}, working);
+      const at = (until: number) =>
+        sends(
+          reconcile({ ...rl, seat: seat(rl, { state: "parked", rateLimitedUntil: until }) })
+            .actions,
+        );
+      expect(at(NOW)).toEqual([]);
+      expect(at(NOW - 1)).toEqual([`ratelimit:r1:${NOW - 1}`]);
+    });
+
+    it("no nonew line when the excerpt was claimed after the report", () => {
+      const s = snap(
+        {
+          headCommit: SHA,
+          evidence: { id: 3, at: 3000, ruling: false },
+          evidenceCount: 3,
+          claimed: { [`ci:r1:${SHA}`]: 5000 },
+        },
+        { ...working, reportedEvidenceId: 3, ciFailedSha: SHA, relayedSha: SHA },
+      );
+      expect(sends(reconcile(s).actions)).toEqual([]);
+    });
+
+    it("resume: resumedAt equal to hubStartedAt counts; not in ci or parked", () => {
+      const at = (loop: Partial<RunLoop>, resumedAt: number, over: Partial<LoopSnapshot> = {}) => {
+        const s = snap(over, loop);
+        return sends(reconcile({ ...s, seat: seat(s, { resumedAt }) }).actions);
+      };
+      expect(at(working, 5000)).toEqual(["resume:r1:5000"]);
+      expect(at(working, 4999)).toEqual([]);
+      expect(
+        at({ phase: "ci", cardFor: "ci:0", pushStartedAt: NOW }, 6000, {
+          headCommit: SHA,
+          pushed: { sha: SHA, at: NOW },
+          pr: pr(),
+        }),
+      ).toEqual([]);
+      expect(at({ phase: "parked", parked: PARKED, cardFor: "parked:0" }, 6000)).toEqual([]);
+    });
+
+    it("no rate-limit line while the loop is parked", () => {
+      const s = snap({}, { phase: "parked", parked: PARKED, cardFor: "parked:0" });
+      const r = reconcile({ ...s, seat: limited(s) });
+      expect(sends(r.actions)).toEqual([]);
+    });
+
+    it("order: the excerpt beats the nudge and the rate-limit line; resume beats rate-limit", () => {
+      const failed = { ...working, ciFailedSha: SHA, ciFails: 1 };
+      const idle = snap({ seat: { ...snap().seat, state: "idle", lastTurnEndedAt: 3000 } }, failed);
+      // both due: the excerpt wins
+      expect(reconcile(idle).actions).toEqual([
+        { kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA },
+      ]);
+      expect(
+        sends(reconcile({ ...idle, loop: { ...idle.loop, relayedSha: SHA } }).actions),
+      ).toEqual(["nudge:r1:0:0"]);
+      // excerpt vs rate-limit
+      const rl = snap({}, failed);
+      const r = reconcile({ ...rl, seat: limited(rl) });
+      expect(outstanding(r.actions).filter((a) => a.kind !== "note")).toEqual([
+        { kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA },
+      ]);
+      // resume vs rate-limit
+      const both = snap({}, working);
+      const r2 = reconcile({
+        ...both,
+        seat: seat(both, { state: "parked", resumedAt: 6000, rateLimitedUntil: NOW - 1 }),
+      });
+      expect(sends(r2.actions)).toEqual(["resume:r1:5000"]);
+    });
+  });
+});
+
+describe("amendments from the reviews of Task 5", () => {
+  const MIN = 60_000;
+
+  it("E3: a commit made in ci after the ten minutes starts a new push, not a park", () => {
+    const s = inCi(
+      { headCommit: SHA2, pr: pr({ headSha: SHA, ci: "pending" }) },
+      { pushFor: SHA, pushStartedAt: NOW - 11 * MIN },
+    );
+    const r = reconcile(s);
+    expect(r.loop).toMatchObject({ phase: "ci", pushFor: SHA2, pushStartedAt: NOW });
+    expect(r.actions).toEqual([{ kind: "push" }]);
+    // the clock now runs from the new commit: ten minutes on, with the push still missing, it parks
+    const later = reconcile({ ...s, now: NOW + 10 * MIN + 1, loop: r.loop });
+    expect(later.loop.parked?.kind).toBe("stuck");
+    // and a commit resets the refusals counted against the old one
+    const refused = reconcile({ ...s, loop: { ...s.loop, transient: 2, lastRefusal: "old" } });
+    expect(refused.loop).toMatchObject({ transient: 0, lastRefusal: null });
+  });
+
+  it("E3: without a new commit the old clock still parks", () => {
+    const s = inCi({ pushed: null, pr: null }, { pushFor: SHA, pushStartedAt: NOW - 11 * MIN });
+    expect(reconcile(s).loop.parked?.kind).toBe("stuck");
+  });
+
+  it("E4: the review note after a ruling says it was ruled, not that CI passed", () => {
+    const s = snap(
+      {
+        headCommit: SHA,
+        pushed: { sha: SHA, at: 1 },
+        pr: pr({ ci: "failing" }),
+        evidence: { id: 3, at: 1, ruling: true },
+      },
+      { phase: "review", cardFor: "review:1", epoch: 1, ciFailedSha: SHA, reportedEvidenceId: 3 },
+    );
+    const note = reconcile(s).actions.find((a) => a.kind === "note");
+    expect(note).toEqual({
+      kind: "note",
+      key: `review:r1:${SHA}`,
+      noteKind: "review",
+      text: `${REF}: PR #12 needs your review (SULU ruled on the CI failure on aaaaaaa instead of fixing it)`,
+    });
+    const passed = reconcile({
+      ...s,
+      loop: { ...s.loop, ciFailedSha: SHA2 },
+      pr: pr({ ci: "passing" }),
+    });
+    expect(JSON.stringify(passed.actions)).toContain("CI passed on aaaaaaa");
+  });
+
+  it("E5: a restart while rate-limited sends one Carry on, whichever line goes first", () => {
+    const base = snap({}, { cardFor: "working:0" });
+    const limited = seat(base, { state: "parked", resumedAt: 6000, rateLimitedUntil: null });
+    const first = reconcile({ ...base, seat: limited });
+    expect(sends(first.actions)).toEqual(["resume:r1:5000"]);
+    // the resume line is claimed; the rate-limit line (no reset time known) says the same
+    const HOUR = 3_600_000;
+    const sentAt = NOW - 1000;
+    const afterResume = { ...base, seat: limited, claimed: { "resume:r1:5000": sentAt } };
+    expect(sends(reconcile(afterResume).actions)).toEqual([]);
+    expect(sends(reconcile({ ...afterResume, now: sentAt + HOUR - 1 }).actions)).toEqual([]);
+    // the reset time arrives in a later turn: that is a new limit and a new line
+    const reset = { ...afterResume, seat: { ...limited, rateLimitedUntil: NOW - 1 } };
+    expect(sends(reconcile(reset).actions)).toEqual([`ratelimit:r1:${NOW - 1}`]);
+    // with no reset time the hourly try goes on: one line per hour, 1 h, 2 h and 5 h later
+    const claimed: Record<string, number> = { "resume:r1:5000": sentAt };
+    for (const hours of [1, 2, 5]) {
+      const now = sentAt + hours * HOUR;
+      const due = reconcile({ ...afterResume, now, claimed });
+      const key = `ratelimit:r1:after:${Math.max(...Object.values(claimed))}`;
+      expect(sends(due.actions)).toEqual([key]);
+      claimed[key] = now;
+      expect(sends(reconcile({ ...afterResume, now, claimed }).actions)).toEqual([]);
+    }
+    // the other way round: a rate-limit line sent since the resume makes the resume line redundant
+    const sentFirst = {
+      ...base,
+      seat: { ...limited, rateLimitedUntil: NOW - 1 },
+      claimed: { [`ratelimit:r1:${NOW - 1}`]: 6500 },
+    };
+    expect(sends(reconcile(sentFirst).actions)).toEqual([]);
+  });
+
+  it("E5: with no reset time the next try is an hour after the last, across a clock hour", () => {
+    const HOUR = 3_600_000;
+    const base = snap({}, { cardFor: "working:0" });
+    const limited = seat(base, { state: "parked", resumedAt: 6000, rateLimitedUntil: null });
+    // the resume goes at HH:59:30
+    const resumeAt = Date.UTC(2026, 9, 21, 10, 59, 30);
+    const claimed: Record<string, number> = { "resume:r1:5000": resumeAt };
+    const at = (now: number, c = claimed) =>
+      sends(reconcile({ ...base, now, seat: limited, claimed: c }).actions);
+    expect(at(resumeAt + 30_000)).toEqual([]); // 11:00:00
+    expect(at(resumeAt + 60_000)).toEqual([]); // 11:00:30
+    expect(at(resumeAt + HOUR - 1)).toEqual([]);
+    expect(at(resumeAt + HOUR)).toEqual([`ratelimit:r1:after:${resumeAt}`]);
+    // and a limit hit at HH:59:30 with nothing sent before goes at once, then waits the hour
+    const first = Date.UTC(2026, 9, 21, 10, 59, 30);
+    const key = "ratelimit:r1:after:0";
+    const noResume = (now: number, c: Record<string, number>) =>
+      sends(reconcile({ ...base, now, seat: { ...limited, resumedAt: null }, claimed: c }).actions);
+    expect(noResume(first, {})).toEqual([key]);
+    expect(noResume(first + 30_000, { [key]: first })).toEqual([]); // 11:00:00
+    expect(noResume(first + HOUR - 1, { [key]: first })).toEqual([]);
+    expect(noResume(first + HOUR, { [key]: first })).toEqual([`ratelimit:r1:after:${first}`]);
+  });
+
+  it("E6: an un-park to ci does not re-park at once on a push made long before", () => {
+    const old = NOW - 40 * MIN;
+    const pending = inCi(
+      { pushed: { sha: SHA, at: old }, pr: pr({ ci: "pending" }) },
+      { unparkedAt: NOW - 1000 },
+    );
+    expect(reconcile(pending).loop.phase).toBe("ci");
+    const never = { ...pending, loop: { ...pending.loop, unparkedAt: null } };
+    expect(reconcile(never).loop.parked?.kind).toBe("ci-pending");
+    const none = inCi(
+      { pushed: { sha: SHA, at: old }, pr: pr({ ci: null, polledAt: NOW }) },
+      { unparkedAt: NOW - 1000 },
+    );
+    expect(reconcile(none).loop.phase).toBe("ci");
+    // once the un-park is itself old enough, the limits apply again
+    const stale = {
+      ...pending,
+      loop: { ...pending.loop, unparkedAt: NOW - CI_PENDING_MAX_MS - 1 },
+    };
+    expect(reconcile(stale).loop.parked?.kind).toBe("ci-pending");
+  });
+
+  it("the returned loop shares no parked or touches object with the input", () => {
+    const touches = { sha: SHA, paths: ["a.yml"] };
+    const parked = { kind: "ci", reason: "r", ended: false };
+    const s = snap({}, { phase: "parked", parked, touches, cardFor: "parked:0" });
+    const r = reconcile(s);
+    expect(r.loop.parked).toEqual(parked);
+    expect(r.loop.parked).not.toBe(s.loop.parked);
+    expect(r.loop.touches).toEqual(touches);
+    expect(r.loop.touches).not.toBe(s.loop.touches);
+    expect(r.loop.touches?.paths).not.toBe(s.loop.touches?.paths);
+  });
+
+  it("the nonew rule leaves a ruling on the failed sha alone", () => {
+    const loop = {
+      phase: "working" as const,
+      cardFor: "working:1",
+      epoch: 1,
+      reportedEvidenceId: 3,
+      ciFailedSha: SHA,
+      relayedSha: SHA,
+    };
+    const s = snap(
+      {
+        headCommit: SHA,
+        evidence: { id: 3, at: NOW, ruling: true },
+        evidenceCount: 3,
+        claimed: { [`ci:r1:${SHA}`]: 5000 },
+      },
+      loop,
+    );
+    expect(sends(reconcile(s).actions)).toEqual([]);
+    const plain = { ...s, evidence: { id: 3, at: NOW, ruling: false } };
+    expect(sends(reconcile(plain).actions)).toEqual(["nonew:r1:3"]);
+  });
+});
+
+describe("loopText", () => {
+  const loop = (over: Partial<RunLoop> = {}): RunLoop => ({ ...NEW_LOOP, ...over });
+  it("working names the ticket", () => {
+    expect(loopText(REF, loop({ phase: "working" }))).toBe("Working on owner/repo#7");
+    expect(LOOP_TEXT_WORKING).toBe("Working on {ref}");
+  });
+  it("ci names the first 7 characters of the pushed sha, else the ticket", () => {
+    expect(loopText(REF, loop({ phase: "ci", pushFor: SHA }))).toBe("CI on aaaaaaa");
+    expect(loopText(REF, loop({ phase: "ci", pushFor: null }))).toBe("CI on owner/repo#7");
+    expect(LOOP_TEXT_CI).toBe("CI on {sha7}");
+    expect(LOOP_TEXT_CI_REF).toBe("CI on {ref}");
+  });
+  it("review names the PR when there is one", () => {
+    expect(loopText(REF, loop({ phase: "review", prNumber: 208 }))).toBe("In review · PR #208");
+    expect(loopText(REF, loop({ phase: "review", prNumber: null }))).toBe("In review");
+    expect(LOOP_TEXT_REVIEW_PR).toBe("In review · PR #{n}");
+    expect(LOOP_TEXT_REVIEW).toBe("In review");
+  });
+  it("parked gives the reason", () => {
+    const parked = { kind: "ci", reason: "CI failed 3 times", ended: false };
+    expect(loopText(REF, loop({ phase: "parked", parked }))).toBe("Blocked: CI failed 3 times");
+    expect(LOOP_TEXT_PARKED).toBe("Blocked: {reason}");
+  });
+  it("done names the PR when there is one", () => {
+    expect(loopText(REF, loop({ phase: "done", prNumber: 9 }))).toBe("Done · PR #9");
+    expect(loopText(REF, loop({ phase: "done", prNumber: null }))).toBe("Done");
+    expect(LOOP_TEXT_DONE_PR).toBe("Done · PR #{n}");
+    expect(LOOP_TEXT_DONE).toBe("Done");
+  });
+});
+
+describe("review decisions", () => {
+  const RETRO = "RETRO-1";
+  const fact = (over: Partial<ReviewFact> = {}): ReviewFact => ({
+    id: 1,
+    sha: SHA,
+    epoch: 0,
+    attempt: 1,
+    state: "reported",
+    blocking: 0,
+    minor: 0,
+    failure: null,
+    ...over,
+  });
+  const finding: ReviewFinding = {
+    severity: "Important",
+    file: "a.ts",
+    line: 3,
+    summary: "s",
+    scenario: "w",
+    fix: "f",
+  };
+  const withReview = (rows: ReviewFact[], findings: ReviewFinding[] = []): LoopReviewFacts => ({
+    retro: RETRO,
+    rows,
+    findings,
+  });
+  const inReview = (
+    review: LoopReviewFacts | null | undefined,
+    over: Partial<LoopSnapshot> = {},
+    loop: Partial<RunLoop> = {},
+  ): LoopSnapshot =>
+    snap(
+      {
+        headCommit: SHA,
+        pushed: { sha: SHA, at: NOW - 60_000 },
+        pr: pr({ ci: "passing" }),
+        evidence: { id: 1, at: 2000, ruling: false },
+        evidenceCount: 1,
+        review,
+        ...over,
+      },
+      { phase: "review", reportedEvidenceId: 1, cardFor: "review:0", ...loop },
+    );
+  const kinds = (a: LoopAction[], kind: LoopAction["kind"]): LoopAction[] =>
+    a.filter((x) => x.kind === kind);
+  const noteKinds = (a: LoopAction[]): string[] =>
+    a.flatMap((x) => (x.kind === "note" ? [x.key.split(":")[0] ?? ""] : []));
+
+  it("7a review note unchanged without a reviewer", () => {
+    for (const review of [undefined, null]) {
+      const a = reconcile(inReview(review)).actions;
+      expect(noteKinds(a)).toEqual(["review"]);
+      expect(kinds(a, "request-review")).toEqual([]);
+    }
+  });
+
+  it("requests the first review", () => {
+    const a = reconcile(inReview(withReview([]))).actions;
+    expect(outstanding(a)).toEqual([{ kind: "request-review", sha: SHA, attempt: 1 }]);
+  });
+
+  it("waits while queued, starting or running", () => {
+    for (const state of ["queued", "starting", "running"] as const) {
+      const a = reconcile(inReview(withReview([fact({ state })]))).actions;
+      expect(outstanding(a)).toEqual([]);
+    }
+  });
+
+  it("retries a failed review once, then parks", () => {
+    const one = reconcile(inReview(withReview([fact({ state: "failed", failure: "x" })])));
+    expect(outstanding(one.actions)).toEqual([{ kind: "request-review", sha: SHA, attempt: 2 }]);
+    const two = reconcile(
+      inReview(
+        withReview([
+          fact({ id: 1, state: "failed", failure: "x" }),
+          fact({ id: 2, attempt: 2, state: "failed", failure: "boom" }),
+        ]),
+      ),
+    );
+    expect(two.loop.phase).toBe("parked");
+    expect(two.loop.parked).toEqual({
+      kind: "review-failed",
+      reason: reviewFailedParkText(RETRO, SHA, 2, "boom"),
+      ended: false,
+    });
+    expect(kinds(two.actions, "request-review")).toEqual([]);
+  });
+
+  it("re-requests a superseded row with the next attempt", () => {
+    const a = reconcile(inReview(withReview([fact({ state: "superseded" })]))).actions;
+    expect(kinds(a, "request-review")).toEqual([{ kind: "request-review", sha: SHA, attempt: 2 }]);
+  });
+
+  it("blocking findings send one fix line, then the author owes a report", () => {
+    const rows = [fact({ id: 5, blocking: 2 })];
+    const r = reconcile(inReview(withReview(rows, [finding, finding])));
+    expect(r.actions.filter((x) => x.kind === "send")).toEqual([
+      {
+        kind: "send",
+        key: "fix:r1:0:5",
+        text: fixText({ retro: RETRO, sha: SHA, findings: [finding, finding] }),
+      },
+    ]);
+    const sent = inReview(withReview(rows, [finding]), { claimed: { "fix:r1:0:5": 1 } });
+    expect(sends(reconcile(sent).actions)).toEqual([]);
+    const idle = {
+      ...sent,
+      seat: seat(sent, { state: "idle" as const, lastTurnEndedAt: NOW - 1000 }),
+    };
+    expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1`]);
+  });
+
+  it("the third blocking review parks", () => {
+    const rows = [
+      fact({ id: 1, blocking: 1 }),
+      fact({ id: 2, blocking: 1, sha: SHA }),
+      fact({ id: 3, blocking: 1 }),
+    ];
+    const s = inReview(withReview(rows, [finding]), {
+      claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
+    });
+    const r = reconcile(s);
+    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA) });
+    expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a clean review raises the ready note and the PR body edit", () => {
+    const s = inReview(withReview([fact({ id: 4, minor: 2 })]));
+    const a = reconcile(s).actions;
+    expect(a).toContainEqual({
+      kind: "note",
+      key: `ready:r1:${SHA}`,
+      noteKind: "ready",
+      text: readyText(REF, 12, RETRO, SHA, 2),
+    });
+    expect(noteKinds(a)).toEqual(["ready"]);
+    expect(kinds(a, "pr-body")).toEqual([{ kind: "pr-body", reviewId: 4 }]);
+    const done = inReview(
+      withReview([fact({ id: 4, minor: 2 })]),
+      {},
+      { prBody: { reviewId: 4, minor: 2 } },
+    );
+    expect(kinds(reconcile(done).actions, "pr-body")).toEqual([]);
+    const none = inReview(withReview([fact({ id: 4, minor: 0 })]));
+    expect(kinds(reconcile(none).actions, "pr-body")).toEqual([]);
+  });
+
+  it("a later clean review clears the earlier list", () => {
+    const s = inReview(
+      withReview([fact({ id: 1, minor: 3 }), fact({ id: 2, minor: 0 })]),
+      {},
+      { prBody: { reviewId: 1, minor: 3 } },
+    );
+    expect(kinds(reconcile(s).actions, "pr-body")).toEqual([{ kind: "pr-body", reviewId: 2 }]);
+  });
+
+  it("a waived sha is ready with no request and no fix", () => {
+    const s = inReview(
+      withReview([fact({ blocking: 1 })], [finding]),
+      {},
+      { reviewWaivedSha: SHA },
+    );
+    const a = reconcile(s).actions;
+    expect(a).toContainEqual({
+      kind: "note",
+      key: `ready:r1:${SHA}`,
+      noteKind: "ready",
+      text: readyWaivedText(REF, 12, SHA),
+    });
+    expect(kinds(a, "request-review")).toEqual([]);
+    expect(sends(a)).toEqual([]);
+  });
+
+  it("a moved head flags, supersedes and requests nothing", () => {
+    const s = inReview(withReview([fact({ id: 8, state: "running" })]), {
+      pr: pr({ ci: "passing", headSha: SHA2 }),
+    });
+    const a = reconcile(s).actions;
+    expect(a).toContainEqual({
+      kind: "note",
+      key: `headmoved:r1:${SHA2}`,
+      noteKind: "flag",
+      text: headMovedText(REF, 12, SHA2, SHA),
+    });
+    expect(kinds(a, "supersede-review")).toEqual([{ kind: "supersede-review", reviewId: 8 }]);
+    expect(kinds(a, "request-review")).toEqual([]);
+  });
+
+  it("supersedes a running row when its facts no longer fit", () => {
+    const rows = withReview([fact({ id: 9, state: "running" })]);
+    const sup = [{ kind: "supersede-review", reviewId: 9 }];
+    expect(kinds(reconcile(inReview(rows)).actions, "supersede-review")).toEqual([]);
+    const cases: Partial<LoopSnapshot>[] = [
+      { pushed: { sha: SHA2, at: NOW } },
+      { ended: { reason: "exit" } },
+      { pr: pr({ state: "merged" }) },
+      { pr: pr({ state: "closed" }) },
+    ];
+    for (const over of cases) {
+      expect(
+        kinds(reconcile(inReview(rows, over)).actions, "supersede-review"),
+        JSON.stringify(over),
+      ).toEqual(sup);
+    }
+    const parked = inReview(
+      rows,
+      {},
+      { phase: "parked", parked: { kind: "x", reason: "y", ended: false } },
+    );
+    expect(kinds(reconcile(parked).actions, "supersede-review")).toEqual(sup);
+    const ci = inReview(rows, {}, { phase: "ci", cardFor: "ci:0" });
+    expect(kinds(reconcile(ci).actions, "supersede-review")).toEqual([]);
+  });
+
+  it("a ruling on blocking findings parks; with a new commit it goes to ci", () => {
+    const rows = withReview([fact({ blocking: 1 })], [finding]);
+    const ruling = { evidence: { id: 2, at: NOW, ruling: true }, evidenceCount: 2 };
+    const r = reconcile(inReview(rows, ruling));
+    expect(r.loop.parked?.kind).toBe("review-ruling");
+    expect(r.loop.reportedEvidenceId).toBe(2);
+    const c = reconcile(inReview(rows, { ...ruling, headCommit: SHA2 }));
+    expect(c.loop.phase).toBe("ci");
+  });
+
+  it("a crashed pass comes out again", () => {
+    for (const rows of [
+      withReview([]),
+      withReview([fact({ id: 2, blocking: 1 })], [finding]),
+      withReview([fact({ id: 3, minor: 1 })]),
+    ]) {
+      const s = inReview(rows);
+      const first = reconcile(s);
+      expect(again(s, first.loop).actions).toEqual(first.actions);
+    }
+  });
+});
