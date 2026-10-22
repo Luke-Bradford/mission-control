@@ -123,6 +123,16 @@ describe("ticketBrief", () => {
     expect(out.split("\n").at(-2)).toBe("You may not run commands here.");
   });
 
+  it("leaves the test lock out of a read-only seat's line", () => {
+    const out = ticketBrief({
+      ...input,
+      mode: "read-only",
+      commands: ["uv run pytest"],
+      fullSuite: ["uv run pytest"],
+    });
+    expect(out.split("\n").at(-2)).toBe("Commands you may run here: `uv run pytest`.");
+  });
+
   it("planner brief", () => {
     const last =
       ticketBrief({
