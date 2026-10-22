@@ -140,6 +140,10 @@ CREATE TABLE IF NOT EXISTS loop_events (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
+-- The Activity page's hub rows (an automatic update); the primary key keeps a line landing once.
+CREATE TABLE IF NOT EXISTS hub_events (
+  at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (at, text)
+);
 -- A seat's next issues; taken_at is set while a seat holds the head and has not started its run.
 CREATE TABLE IF NOT EXISTS queues (
   seat_id TEXT NOT NULL, pos INTEGER NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
@@ -1849,6 +1853,19 @@ export class Store {
       text: r.text as string,
       at: r.at as number,
     }));
+  }
+
+  /** Records a hub event (a line on the Activity page). */
+  addHubEvent(text: string, at: number): void {
+    this.db.prepare("INSERT OR IGNORE INTO hub_events (at, text) VALUES (?, ?)").run(at, text);
+  }
+
+  /** The hub events at or after `since`, oldest first. */
+  hubEvents(since: number): { at: number; text: string }[] {
+    const rows = this.db
+      .prepare("SELECT at, text FROM hub_events WHERE at >= ? ORDER BY at")
+      .all(since) as Row[];
+    return rows.map((r) => ({ at: r.at as number, text: r.text as string }));
   }
 
   /** The loop events at or after `since`, oldest first. */

@@ -65,6 +65,7 @@ import {
 import type { CcConfig } from "./config.ts";
 import { attentionItems, crew, NO_LOCK } from "./hud.ts";
 import type { Store } from "./store.ts";
+import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
   | "ta"
@@ -78,6 +79,7 @@ export type Job =
   | "flow"
   | "backfill"
   | "engine"
+  | "update"
   | "cli";
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
 export const JOBS: readonly Job[] = [
@@ -92,6 +94,7 @@ export const JOBS: readonly Job[] = [
   "flow",
   "backfill",
   "engine",
+  "update",
   "cli",
 ];
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
@@ -170,6 +173,8 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
+  /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
+  autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
   cliHold?: CliHold;
 }
@@ -544,6 +549,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     engine: async () => {
       await engine?.tick();
     },
+    update: async () => {
+      if (config.updates?.hub !== "auto") return;
+      await deps.autoUpdate?.();
+    },
     cli: async () => {
       if (config.updates?.cli !== "between_runs") return;
       // runs must not start on a version the smoke test has not passed: held from the upgrade on
@@ -730,6 +739,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_INTERVAL_MS,
     backfill: BACKFILL_INTERVAL_MS,
     engine: ENGINE_TICK_MS,
+    update: VERSION_CHECK_MS,
     cli: CLI_UPDATE_INTERVAL_MS,
   };
 
@@ -753,6 +763,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const job of JOBS) {
         // no engine, no engine timer (a scheduler without one has nothing to tick)
         if (job === "engine" && engine === null) continue;
+        // `updates.hub: off` (the default) starts no update timer
+        if (job === "update" && (deps.autoUpdate === undefined || config.updates?.hub !== "auto"))
+          continue;
         // `updates.cli: off` (the default) starts no update timer
         if (job === "cli" && config.updates?.cli !== "between_runs") continue;
         const every = () => {

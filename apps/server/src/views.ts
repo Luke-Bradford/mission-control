@@ -30,6 +30,8 @@ import type { Store } from "./store.ts";
 const MINUTE_MS = 60e3;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 export const METRICS_DAYS = 14;
+/** The `who` of an Activity row the hub itself wrote (an automatic update). */
+export const HUB_EVENT_WHO = "hub";
 const FORTNIGHT_MS = METRICS_DAYS * DAY_MS;
 
 /** Sum of the reported costs; null when no run reported one. */
@@ -242,6 +244,9 @@ export function activity(config: CcConfig, store: Store, now: number): ActivityE
       text: e.text,
       ref: run?.ticket ?? null,
     });
+  }
+  for (const e of store.hubEvents(since)) {
+    events.push({ ...plain, at: e.at, who: HUB_EVENT_WHO, kind: "state", text: e.text });
   }
   // A PR is the work of the agent whose run published it, else of its repo.
   const publisher = new Map<string, AgentId>();
