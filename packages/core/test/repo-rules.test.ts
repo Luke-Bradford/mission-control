@@ -23,6 +23,7 @@ describe("DEFAULT_REPO_RULES", () => {
       needs: ["done_when", "size"],
       areas: {},
       hardRules: DEFAULT_HARD_RULES,
+      hardRulesSet: false,
       alwaysAsk: [],
     });
   });
