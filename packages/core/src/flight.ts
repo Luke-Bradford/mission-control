@@ -1,4 +1,4 @@
-import type { HudColumn } from "./hud.ts";
+import { type HudColumn, TICKET_SIZES } from "./hud.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
 
@@ -71,6 +71,10 @@ export const FLIGHT_NOTED = "Noted in Decided without you.";
 
 export const READY_LABEL = "ready";
 export const hasPlanSection = (body: string): boolean => /^## Plan[ \t]*$/m.test(body);
+/** The sizes whose tickets get a plan before they reach Ready. */
+export const PLAN_SIZES: readonly string[] = TICKET_SIZES.filter(
+  (s) => s === "M" || s === "L" || s === "XL",
+);
 /** The board columns a ticket FLIGHT starts may be in. */
 export const FLIGHT_STARTABLE: readonly HudColumn[] = ["Backlog", "Refinement", "Ready"];
 /** The park kinds whose lifting is FLIGHT's call. */
@@ -101,7 +105,9 @@ export const ticketReadText = (
   column: string,
   body: string,
   cutNote: string | null,
-): string => `#${n} ${title} [${column}]\n\n${cutNote === null ? "" : `${cutNote}\n\n`}${body}`;
+  size?: string | null,
+): string =>
+  `#${n} ${title} [${column}${size === undefined || size === null ? "" : ` · Size ${size}`}]\n\n${cutNote === null ? "" : `${cutNote}\n\n`}${body}`;
 
 export const ANSWER_ONE_OF = "give answer or pass_to_operator, not both";
 export const noOpenQuestionText = (id: number): string =>
@@ -117,8 +123,19 @@ export const answerMessageText = (answer: string): string =>
 export const notSentText = (why: string): string => `Not sent: ${why}`;
 export const answeredText = (call: string): string => `Answered ${call}.`;
 
-export const notDeveloperSeatText = (call: string): string =>
-  `Not started: ${call} is not a developer seat.`;
+export const notStartableSeatText = (call: string): string =>
+  `Not started: ${call} is not a developer or planner seat.`;
+export const planAlreadyText = (ref: string): string =>
+  `Not started: ${ref} already has a ## Plan.`;
+export const planUnclosedText = (ref: string): string =>
+  `Not started: ${ref} has an unclosed code block, so a plan cannot be added; ask the operator to fix the body.`;
+export const startMissingNeedsText = (ref: string, missing: readonly string[]): string =>
+  `Not started: ${ref} has no ${missing.join(" or ")}; move it to Refinement and ask for it.`;
+export const smallNoPlanText = (ref: string, size: string): string =>
+  `Not started: ${ref} is Size ${size}; small tickets need no plan, so promote it to Ready.`;
+export const plannerStartedDecision = (call: string): string => `Started ${call} to plan`;
+export const START_SEAT_DESCRIPTION =
+  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column); the planner seat on a complete Size M, L or XL ticket with no ## Plan. At most 4 starts an hour, and one start of a ticket a day.";
 export const startsByRuleText = (repoId: string): string =>
   `Not started: ${repoId} takes its tickets from Ready by rule.`;
 export const seatHasRunText = (call: string): string => `Not started: ${call} already has a run.`;
@@ -177,6 +194,8 @@ export const moveTwoAreasText = (ref: string, labels: readonly string[]): string
 export const moveNoAreaText = (ref: string): string => `Not moved: ${ref} has no area label.`;
 export const moveWaitsOnText = (ref: string, open: readonly string[]): string =>
   `Not moved: ${ref} waits on ${open.join(", ")}.`;
+export const needsPlanText = (ref: string, size: string): string =>
+  `Not moved: ${ref} is Size ${size} and has no ## Plan; start the planner on it with mc start_seat first.`;
 export const moveFailedText = (reason: string): string => `Not moved: ${reason}`;
 export const movedDecision = (to: string): string => `Moved to ${to}`;
 export const movedText = (ref: string, to: string): string =>

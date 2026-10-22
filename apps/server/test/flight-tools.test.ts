@@ -392,6 +392,14 @@ describe("read_ticket", () => {
     expect(fetchCalls).toEqual([5]);
   });
 
+  it("shows the size when the card has one", async () => {
+    board(card(5, { size: "M" }));
+    fetchImpl = async (n) => ticket(n, { title: "Do it", body: "Text" });
+    expect((await call("read_ticket", { issue: 5 })).text).toBe(
+      "#5 Do it [Ready · Size M]\n\nText",
+    );
+  });
+
   it("says not on the board, and notes a cut body", async () => {
     fetchImpl = async (n) => ticket(n, { body: "abc", bodyTruncated: true, bodyLength: 50 });
     const r = await call("read_ticket", { issue: 6 });
@@ -709,7 +717,7 @@ describe("start_seat", () => {
 
   it("1: refuses a seat that is not a developer seat", async () => {
     expect(await start({ seat: "retro-1" })).toEqual(
-      refused("Not started: RETRO-1 is not a developer seat."),
+      refused("Not started: RETRO-1 is not a developer or planner seat."),
     );
   });
 
@@ -832,6 +840,92 @@ describe("start_seat", () => {
     };
     expect(await start()).toEqual(refused("Not started: the start failed."));
     expect(decisions()).toEqual([]);
+  });
+});
+
+describe("start_seat planner", () => {
+  const plan = (over: Record<string, unknown> = {}) =>
+    call("start_seat", { seat: "fao-1", issue: 7, basis: "complete", ...over });
+  const GOOD = "Body\n\n## Done when\n\n- it works\n";
+  const sized = (over: Partial<BoardItem> = {}) =>
+    card(7, { status: "Backlog", labels: [], size: "M", ...over });
+
+  beforeEach(() => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "merge";
+    engineOn = true;
+    board(sized());
+    fetchImpl = async (n) => ticket(n, { body: GOOD });
+  });
+
+  it("starts the planner with no loop on a complete Size M Backlog ticket", async () => {
+    expect(await plan()).toEqual({ text: "Started FAO-1 on mc#7." });
+    expect(startCalls).toEqual([["fao-1", 7]]);
+    expect(decisions()).toMatchObject([
+      { kind: "start", seatId: "fao-1", ref: "mc#7", decision: "Started FAO-1 to plan" },
+    ]);
+  });
+
+  it("refuses a ticket that has a plan", async () => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
+    expect(await plan()).toEqual(refused("Not started: mc#7 already has a ## Plan."));
+    expect(startCalls).toEqual([]);
+  });
+
+  it("refuses a body with an unclosed code fence", async () => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n\`\`\`\ncode\n` });
+    expect(await plan()).toEqual(
+      refused(
+        "Not started: mc#7 has an unclosed code block, so a plan cannot be added; ask the operator to fix the body.",
+      ),
+    );
+  });
+
+  it("refuses a ticket missing its needs", async () => {
+    fetchImpl = async (n) => ticket(n, { body: "No sections" });
+    expect(await plan()).toEqual(
+      refused("Not started: mc#7 has no done_when; move it to Refinement and ask for it."),
+    );
+    board(sized({ size: null }));
+    expect((await plan()).text).toContain("no done_when or size");
+  });
+
+  it("refuses Size S", async () => {
+    board(sized({ size: "S" }));
+    expect(await plan()).toEqual(
+      refused("Not started: mc#7 is Size S; small tickets need no plan, so promote it to Ready."),
+    );
+    expect(startCalls).toEqual([]);
+  });
+
+  it("refuses a card with two areas", async () => {
+    rulesNow = {
+      ...DEFAULT_REPO_RULES,
+      areas: { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] },
+    };
+    board(sized({ labels: ["area:server", "area:web"] }));
+    expect((await plan()).text).toContain("spans two areas");
+    expect(startCalls).toEqual([]);
+  });
+
+  it("refuses at the hourly cap", async () => {
+    for (let i = 0; i < 8; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
+    expect((await plan()).text).toContain("started tickets 8 times");
+    expect(startCalls).toEqual([]);
+  });
+
+  it("starts a build seat as before, and refuses a watch seat", async () => {
+    const mc = cfg.repos[0];
+    if (mc !== undefined) mc.autonomy = "draft";
+    board(card(7));
+    expect((await call("start_seat", { seat: "guido-1", issue: 7, basis: "b" })).isError).toBe(
+      undefined,
+    );
+    expect(startCalls).toEqual([["guido-1", 7, { loop: NEW_LOOP }]]);
+    expect(await call("start_seat", { seat: "flight-1", issue: 7, basis: "b" })).toEqual(
+      refused("Not started: FLIGHT-1 is not a developer or planner seat."),
+    );
   });
 });
 
@@ -1224,6 +1318,22 @@ describe("promote", () => {
       },
     ]);
     expect(seen).toContain("flight");
+  });
+
+  it("refuses Size M with no plan for Ready, and moves it with a plan or at Size S", async () => {
+    board(backlog({ size: "M" }));
+    expect(await call("promote", P())).toEqual(
+      refused(
+        "Not moved: mc#7 is Size M and has no ## Plan; start the planner on it with mc start_seat first.",
+      ),
+    );
+    expect(moveCalls).toEqual([]);
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    fetchImpl = async (n) => ticket(n, { body: GOOD });
+    board(backlog({ size: "S" }));
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls).toHaveLength(2);
   });
 
   it("refuses an incomplete ticket for Ready, then moves it to Refinement", async () => {
