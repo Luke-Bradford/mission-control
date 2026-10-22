@@ -216,6 +216,14 @@ export const MISSING_SCOPE_PREFIX = "gh token lacks the ";
 const DEFAULT_SCOPE = "read:project";
 const INSUFFICIENT_SCOPES = "INSUFFICIENT_SCOPES";
 
+/** The missing-scope line inside a health-row status (which may carry other failures and a time), or null. */
+export function missingScopeLine(status: string): string | null {
+  const i = status.indexOf(MISSING_SCOPE_PREFIX);
+  if (i < 0) return null;
+  const m = /^[^;]*? scope: run gh auth refresh -s project/.exec(status.slice(i));
+  return m?.[0] ?? null;
+}
+
 const errorMessage = (e: unknown): string => (isObj(e) ? String(e.message) : String(e));
 
 /**
@@ -364,6 +372,8 @@ export function errMsg(e: unknown): string {
 interface BoardResult {
   items: BoardItem[];
   unmapped: number;
+  /** Every item GitHub returned, before any is filtered out. */
+  raw: number;
 }
 
 async function fetchBoard(
@@ -374,6 +384,7 @@ async function fetchBoard(
   const [owner = "", repoName = ""] = repo.github.split("/");
   const items: BoardItem[] = [];
   let unmapped = 0;
+  let raw = 0;
   // Any page may carry the project id; it is applied to every item once the pages are read.
   let projectId: string | null = null;
   let after: string | null = null;
@@ -385,6 +396,7 @@ async function fetchBoard(
     }
     const projectNodeId = path(data, "user", "projectV2", "id");
     if (typeof projectNodeId === "string") projectId = projectNodeId;
+    raw += conn.nodes.length;
     for (const node of conn.nodes) {
       if (!isObj(node) || !isObj(node.content) || typeof node.content.number !== "number") continue;
       const c = node.content;
@@ -452,7 +464,7 @@ async function fetchBoard(
     }
     const pi = isObj(conn.pageInfo) ? conn.pageInfo : {};
     if (pi.hasNextPage !== true || typeof pi.endCursor !== "string") {
-      return { items: items.map((i) => ({ ...i, projectId })), unmapped };
+      return { items: items.map((i) => ({ ...i, projectId })), unmapped, raw };
     }
     after = pi.endCursor;
   }
@@ -834,6 +846,14 @@ export async function sweepPullRequests(
 }
 
 /**
+ * How long a board that had cards is kept while every board read comes back with no items. GitHub's
+ * project reads can flap between full and empty while it is degraded (22 Oct: one in six full).
+ */
+export const EMPTY_BOARD_GRACE_MS = 15 * 60_000;
+/** Per store, when each repo's board reads started coming back empty over a board that had cards. */
+const emptyBoards = new WeakMap<Store, Map<string, number>>();
+
+/**
  * Read-only refresh of one repo's board and escalations. Each part replaces its rows only when it
  * fully succeeded; a failure keeps the previous rows, is recorded in collector status, and never throws.
  * `now` is when the poll started; `clock` is read just before the PR read, to stamp those rows.
@@ -851,8 +871,20 @@ export async function collectGithub(
   let truncated: string[] = [];
   try {
     const board = await fetchBoard(repo, gql, now);
-    changes.boards = store.replaceBoard(repo.id, board.items);
-    unmapped = board.unmapped;
+    // GitHub can answer a board read with no items while it is degraded. Over a board that had
+    // cards, empty answers keep the board and say so until they have lasted EMPTY_BOARD_GRACE_MS.
+    const empties = emptyBoards.get(store) ?? new Map<string, number>();
+    emptyBoards.set(store, empties);
+    const kept = store.board(repo.id).length;
+    const since = empties.get(repo.id) ?? now;
+    if (board.raw === 0 && kept > 0 && now - since < EMPTY_BOARD_GRACE_MS) {
+      empties.set(repo.id, since);
+      failures.push(`board: board poll returned no items; kept the last board (${kept})`);
+    } else {
+      empties.delete(repo.id);
+      changes.boards = store.replaceBoard(repo.id, board.items);
+      unmapped = board.unmapped;
+    }
   } catch (e) {
     failures.push(`board: ${errMsg(e)}`);
   }

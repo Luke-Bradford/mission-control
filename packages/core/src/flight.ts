@@ -82,6 +82,7 @@ export const FLIGHT_UNPARK_KINDS = [
   "refused",
   "ci",
 ] as const;
+/** The tickets FLIGHT may start in an hour, per developer (build) seat in its session; at least this many. */
 export const FLIGHT_STARTS_PER_HOUR = 4;
 export const FLIGHT_TICKET_RESTART_MS = 24 * 60 * 60_000;
 /** Answer, message and un-park decisions together. */

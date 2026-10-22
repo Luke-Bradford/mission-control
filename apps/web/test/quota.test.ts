@@ -21,13 +21,25 @@ describe("timeToFull", () => {
   });
   it("a 5h window younger than the pace needs says there is too little history", () => {
     const young = (min: number) => limit5h({ resetAt: NOW + 5 * HOUR - min * 60_000 });
-    expect(timeToFull(young(10), NOW)).toBe("too little history to tell");
-    expect(timeToFull(young(29), NOW)).toBe("too little history to tell");
+    expect(timeToFull(young(10), NOW)).toBe("too little history for a pace");
+    expect(timeToFull(young(29), NOW)).toBe("too little history for a pace");
     expect(timeToFull(young(30), NOW)).toBe("not filling at this rate");
     // a 7d window is never judged by its age
     expect(timeToFull(limit7d({ fullAt: null, resetAt: NOW + 7 * 24 * HOUR - 60_000 }), NOW)).toBe(
       "not filling at this rate",
     );
+  });
+  it("a 5h row with paceReady false says there is too little history for a pace", () => {
+    expect(timeToFull(limit5h({ paceReady: false }), NOW)).toBe("too little history for a pace");
+    // even a window old enough by the clock: the server's word wins
+    expect(timeToFull(limit5h({ paceReady: false, resetAt: NOW + HOUR }), NOW)).toBe(
+      "too little history for a pace",
+    );
+  });
+  it("a 5h row with paceReady true, or missing, shows the pace as before", () => {
+    expect(timeToFull(limit5h({ paceReady: true, fullAt: NOW + 2 * HOUR }), NOW)).toBe("~2h00");
+    expect(timeToFull(limit5h({ fullAt: NOW + 2 * HOUR }), NOW)).toBe("~2h00");
+    expect(timeToFull(limit5h({ paceReady: true }), NOW)).toBe("not filling at this rate");
   });
   it("5h with fullAt reads like 7d", () => {
     expect(timeToFull(limit5h({ fullAt: NOW + 2 * HOUR }), NOW)).toBe("~2h00");

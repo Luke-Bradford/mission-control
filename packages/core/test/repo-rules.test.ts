@@ -26,13 +26,17 @@ describe("DEFAULT_REPO_RULES", () => {
     });
   });
 
-  it("holds exactly the eleven hard-rule globs", () => {
+  it("holds exactly the fifteen hard-rule globs", () => {
     expect(DEFAULT_HARD_RULES).toEqual([
       "apps/server/src/guard/**",
       "apps/server/src/mcp/**",
       "apps/server/src/runtime/**",
       "apps/server/src/engine/**",
       "packages/core/src/guard.ts",
+      "packages/core/src/flight.ts",
+      "packages/core/src/loop.ts",
+      "packages/core/src/review.ts",
+      "packages/core/src/repo-rules.ts",
       "packages/core/src/runtime.ts",
       "loops/**",
       "roles/**",
