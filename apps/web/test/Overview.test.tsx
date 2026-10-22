@@ -170,6 +170,7 @@ describe("Agents panel", () => {
     expect(within(flight).getByText("Head")).toBeTruthy();
     expect(within(flight).getByText("head agent")).toBeTruthy();
     expect(within(flight).getByText("Error")).toBeTruthy();
+    expect(flight.querySelector(".doing")?.textContent).toBe("Run failed");
     expect(flight.querySelector(".meters2")?.textContent).toContain("ctx");
     expect(agentRows(container)).toHaveLength(2);
     expect(screen.queryByText("flight-1")).toBeNull();
