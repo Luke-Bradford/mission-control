@@ -41,7 +41,7 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
   scratch: ["review"],
 };
 
-/** The mc tools only the FLIGHT seat (a `watch` role) holds; later FLIGHT tickets append to it. */
+/** The mc tools the FLIGHT seat (a `watch` role) holds; later FLIGHT tickets append to it. Only `read_ticket` may also go to a `plan` role. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.readTicket,
@@ -49,6 +49,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.startSeat,
   MC_TOOL_NAMES.messageSeat,
   MC_TOOL_NAMES.flightState,
+  MC_TOOL_NAMES.promote,
 ];
 
 /**
@@ -196,6 +197,25 @@ const GIT_READ_TOOLS = [
   "Bash(git show:*)",
 ] as const;
 
+/** The commands a seat may run: a writer's gates, and what a read-only or scratch seat may run. */
+export interface SeatCommands {
+  writer: readonly string[];
+  review: readonly string[];
+}
+
+export const DEFAULT_SEAT_COMMANDS: SeatCommands = Object.freeze({
+  writer: Object.freeze([
+    "pnpm -s lint",
+    "pnpm -s typecheck",
+    "pnpm -s test",
+    "pnpm -s build",
+    "pnpm -s vitest",
+  ]),
+  review: Object.freeze(["pnpm -s vitest"]),
+});
+
+const bashEntries = (cmds: readonly string[]): string[] => cmds.map((c) => `Bash(${c}:*)`);
+
 export const WRITER_TOOLS = [
   "Read",
   "Grep",
@@ -203,11 +223,7 @@ export const WRITER_TOOLS = [
   "Edit",
   "Write",
   "TodoWrite",
-  "Bash(pnpm -s lint:*)",
-  "Bash(pnpm -s typecheck:*)",
-  "Bash(pnpm -s test:*)",
-  "Bash(pnpm -s build:*)",
-  "Bash(pnpm -s vitest:*)",
+  ...bashEntries(DEFAULT_SEAT_COMMANDS.writer),
   ...GIT_READ_TOOLS,
   MC_TOOLS.commit,
   MC_TOOLS.askOperator,
@@ -220,7 +236,7 @@ export const READONLY_TOOLS = [
   "Glob",
   "TodoWrite",
   ...GIT_READ_TOOLS,
-  "Bash(pnpm -s vitest:*)",
+  ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
 ] as const;
@@ -233,7 +249,7 @@ export const SCRATCH_TOOLS = [
   "Write",
   "TodoWrite",
   ...GIT_READ_TOOLS,
-  "Bash(pnpm -s vitest:*)",
+  ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.reportFindings,
 ] as const;
 
@@ -332,10 +348,39 @@ export function anchoredGlob(cwd: string, glob: string): string {
   return `/${root}/${glob}`;
 }
 
-/** Every PROTECTED_FILES entry at the worktree top and at any depth below it. */
-const PROTECTED_GLOBS: readonly string[] = [
-  ...new Set(PROTECTED_FILES.flatMap((f) => (f.startsWith("**/") ? [f] : [f, `**/${f}`]))),
-];
+/** Plain words with single spaces; the program word has no `/`. */
+const SEAT_COMMAND = /^[A-Za-z0-9][A-Za-z0-9._=+,@-]*( [A-Za-z0-9._/=+,@-]+)*$/;
+
+function checkSeatCommands(cmds: readonly string[]): void {
+  for (const c of cmds) {
+    if (!SEAT_COMMAND.test(c)) throw new Error(`crew rules: ${c} is not a seat command`);
+  }
+}
+
+/** A repo-relative glob that stays inside the worktree and holds no rule syntax beyond `*`. */
+function checkProtectedGlobs(globs: readonly string[]): void {
+  for (const g of globs) {
+    if (
+      g.startsWith("/") ||
+      g.startsWith("./") ||
+      g.startsWith("~") ||
+      g.split("/").includes("..") ||
+      !/^[A-Za-z0-9._/*@+-]+$/.test(g)
+    ) {
+      throw new Error(`crew rules: ${g} is not a protected-file glob`);
+    }
+  }
+}
+
+/** Every PROTECTED_FILES entry and the repo's extra ones, at the worktree top and at any depth. */
+function protectedGlobs(extra: readonly string[]): readonly string[] {
+  checkProtectedGlobs(extra);
+  return [
+    ...new Set(
+      [...PROTECTED_FILES, ...extra].flatMap((f) => (f.startsWith("**/") ? [f] : [f, `**/${f}`])),
+    ),
+  ];
+}
 
 /**
  * Whether a repo-relative path matches an area glob as the CLI's Edit and Write rules read it,
@@ -375,9 +420,9 @@ export function pathInArea(area: readonly string[], path: string): boolean {
  * match folds case (`foldForMatch`): APFS reads `Package.json` as the same file a tool would load
  * as `package.json`.
  */
-export function isProtectedPath(path: string): boolean {
+export function isProtectedPath(path: string, extra: readonly string[] = []): boolean {
   const p = foldForMatch(path);
-  return PROTECTED_GLOBS.some(
+  return protectedGlobs(extra).some(
     (g) => globMatches(g, p, true) || (g.endsWith("/**") && globMatches(g.slice(0, -3), p, true)),
   );
 }
@@ -398,8 +443,8 @@ export const crewAuthorName = (call: string): string => `${call} (Mission Contro
  * Edit and Write denies for every PROTECTED_FILES entry, at the worktree top and at any depth below
  * it (a nested `biome.json` could switch off lint for its folder), anchored to the worktree.
  */
-export function protectedFileRules(cwd: string): string[] {
-  return PROTECTED_GLOBS.flatMap((f) => {
+export function protectedFileRules(cwd: string, extra: readonly string[] = []): string[] {
+  return protectedGlobs(extra).flatMap((f) => {
     const g = anchoredGlob(cwd, f);
     return [`Edit(${g})`, `Write(${g})`];
   });
@@ -606,6 +651,10 @@ export interface CrewCliInput {
   hook: CrewHook;
   /** Extra mc tools the seat's role holds, after the mode's own; each must be grantable. Default []. */
   mcTools?: readonly McToolName[];
+  /** The repo's own commands; they replace the default pnpm entries. Default DEFAULT_SEAT_COMMANDS. */
+  commands?: SeatCommands;
+  /** Extra Edit and Write denies, on top of PROTECTED_FILES. Default []. */
+  protectedFiles?: readonly string[];
 }
 
 /** What `guardHookCommand` builds the seat's hook command from. */
@@ -639,6 +688,12 @@ export function guardHookCommand(i: GuardHookInput): string {
 export function crewCliArgs(i: CrewCliInput): string[] {
   const base: readonly string[] =
     i.mode === "writer" ? WRITER_TOOLS : i.mode === "scratch" ? SCRATCH_TOOLS : READONLY_TOOLS;
+  const cmds = i.commands ?? DEFAULT_SEAT_COMMANDS;
+  const mine = i.mode === "writer" ? cmds.writer : cmds.review;
+  checkSeatCommands(mine);
+  const defaults = bashEntries(
+    i.mode === "writer" ? DEFAULT_SEAT_COMMANDS.writer : DEFAULT_SEAT_COMMANDS.review,
+  );
   const granted = i.mcTools ?? [];
   for (const t of granted) {
     if (!MC_TOOL_GRANTS[i.mode].grantable.includes(t)) {
@@ -646,11 +701,17 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     }
   }
   const globs = i.area.length > 0 ? i.area : ["**"];
-  const allowed = base.flatMap((t) =>
-    t === "Edit" || t === "Write"
-      ? globs.map((g) => `${t}(${anchoredGlob(i.sandbox.cwd, g)})`)
-      : [t],
-  );
+  // the repo's commands take the place of the default pnpm entries, in the same position
+  let placed = false;
+  const allowed = base.flatMap((t) => {
+    if (t === "Edit" || t === "Write") {
+      return globs.map((g) => `${t}(${anchoredGlob(i.sandbox.cwd, g)})`);
+    }
+    if (!defaults.includes(t)) return [t];
+    if (placed) return [];
+    placed = true;
+    return bashEntries(mine);
+  });
   allowed.push(...granted.map((t) => `mcp__${MC_MCP_SERVER}__${t}`));
   return [
     "-p",
@@ -673,7 +734,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     ...allowed,
     "--disallowedTools",
     ...DENIED_TOOLS,
-    ...protectedFileRules(i.sandbox.cwd),
+    ...protectedFileRules(i.sandbox.cwd, i.protectedFiles ?? []),
     "--append-system-prompt-file",
     i.rolePromptFile,
     i.resume ? "--resume" : "--session-id",

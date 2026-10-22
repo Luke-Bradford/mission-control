@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DEFAULT_HARD_RULES, DEFAULT_REPO_RULES } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,6 +63,15 @@ describe("parseRepoRules", () => {
     );
     expect(r.pickFrom).toEqual(["Ready", "Backlog"]);
     expect(r.alwaysAsk).toEqual(["migrations", "deps"]);
+  });
+
+  it("parses needs, defaults it, and refuses an unknown need", () => {
+    expect(parseRepoRules(block("mc:\n  needs: [done_when]\n")).needs).toEqual(["done_when"]);
+    expect(parseRepoRules(block("mc:\n  promote_backlog: true\n")).needs).toEqual([
+      "done_when",
+      "size",
+    ]);
+    expect(() => parseRepoRules(block("mc:\n  needs: [owner]\n"))).toThrow(/mc\.needs/);
   });
 
   it("names an unknown key", () => {
@@ -359,5 +369,13 @@ describe("readRepoRules", () => {
 
   it("returns an error when origin/HEAD does not resolve", async () => {
     expect(await readRepoRules("o/r", repo)).toBeInstanceOf(RepoRulesError);
+  });
+});
+
+describe("this repo's own rules", () => {
+  it("name every default hard-rule path, so an addition to the defaults is not lost here", () => {
+    const md = readFileSync(fileURLToPath(new URL("../../../CLAUDE.md", import.meta.url)), "utf8");
+    const own = parseRepoRules(md).hardRules;
+    expect(DEFAULT_HARD_RULES.filter((p) => !own.includes(p))).toEqual([]);
   });
 });

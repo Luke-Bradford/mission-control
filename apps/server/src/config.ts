@@ -35,6 +35,7 @@ import {
   type TicketState,
   WRITER_TOOLS,
   watchOnlyToolText,
+  watchOrPlanToolText,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -242,12 +243,12 @@ export const ticketState = z.enum([
 const DEFAULT_MAX_SEATS = 8;
 export const DEFAULT_RUN_TOKEN_BUDGET = 400_000;
 export const SEAT_ID = /^[a-z][a-z0-9-]{0,30}$/;
-const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
+export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
 const LAUNCHD_LABEL = /^[A-Za-z0-9._-]+$/;
 const nonEmpty = z.string().min(1);
 /** A repo-relative glob: no `/`, `./` or `~` start, no `..` segment, none of `{ [ ? ! , ( ) \\` or whitespace. */
-const areaGlob = nonEmpty.refine(
+export const areaGlob = nonEmpty.refine(
   (g) =>
     !g.startsWith("/") &&
     !g.startsWith("./") &&
@@ -643,7 +644,11 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
       if (!MC_TOOL_GRANTS[r.mode].grantable.includes(t)) {
         throw new ConfigError(`${at}.tools`, `${t} cannot be granted to a ${r.mode} role`);
       }
-      if (FLIGHT_TOOLS.includes(t) && r.loop !== "watch") {
+      if (t === MC_TOOL_NAMES.readTicket) {
+        if (r.loop !== "watch" && r.loop !== "plan") {
+          throw new ConfigError(`${at}.tools`, watchOrPlanToolText(t));
+        }
+      } else if (FLIGHT_TOOLS.includes(t) && r.loop !== "watch") {
         throw new ConfigError(`${at}.tools`, watchOnlyToolText(t));
       }
     }

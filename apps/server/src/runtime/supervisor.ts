@@ -1149,14 +1149,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
-      // Claim the ticket for this hub (another hub on the board skips an assigned card); a claim
-      // GitHub refuses stops the start, since an unclaimed run could meet another hub's.
-      try {
-        await deps.claim?.(info.repo, issue);
-      } catch (e) {
-        throw new SupervisorError(502, `could not claim ${info.repo.github}#${issue} on GitHub`, {
-          cause: e,
-        });
+      // A writer claims the ticket for this hub (another hub on the board skips an assigned card);
+      // a claim GitHub refuses stops the start, since an unclaimed run could meet another hub's.
+      // A planner or reviewer has no branch to share, so it leaves the assignee alone.
+      if (def.mode === "writer") {
+        try {
+          await deps.claim?.(info.repo, issue);
+        } catch (e) {
+          throw new SupervisorError(502, `could not claim ${info.repo.github}#${issue} on GitHub`, {
+            cause: e,
+          });
+        }
       }
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 

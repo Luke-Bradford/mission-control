@@ -28,6 +28,7 @@ import {
   crewPnpmStoreDir,
   crewSandboxSettings,
   crewSandboxTmp,
+  DEFAULT_SEAT_COMMANDS,
   DENIED_TOOLS,
   FLIGHT_TOOLS,
   foldForMatch,
@@ -226,6 +227,7 @@ describe("the allowlist in phase 2b", () => {
       startSeat: "mcp__mc__start_seat",
       messageSeat: "mcp__mc__message_seat",
       flightState: "mcp__mc__flight_state",
+      promote: "mcp__mc__promote",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit]);
   });
@@ -299,6 +301,82 @@ describe("crewMcpConfig", () => {
     });
     expect(MC_MCP_TIMEOUT_MS).toBe(600_000);
   });
+});
+
+describe("a repo's own commands and protected files", () => {
+  const commands = {
+    writer: ["uv run pytest", "uv run ruff check"],
+    review: ["uv run pytest"],
+  };
+  const bashEntries = (a: string[]) =>
+    a.filter((x) => x.startsWith("Bash(") && !x.includes("git "));
+
+  it("replaces the pnpm entries for a writer", () => {
+    const a = crewCliArgs({ ...base, commands });
+    expect(a).toContain("Bash(uv run pytest:*)");
+    expect(a).toContain("Bash(uv run ruff check:*)");
+    expect(a.some((x) => x.startsWith("Bash(pnpm"))).toBe(false);
+  });
+
+  it.each(["read-only", "scratch"] as const)("gives a %s seat only the review commands", (mode) => {
+    const a = crewCliArgs({ ...base, mode, commands });
+    const allowed = a.slice(a.indexOf("--allowedTools"), a.indexOf("--disallowedTools"));
+    expect(bashEntries(allowed)).toEqual(["Bash(uv run pytest:*)"]);
+  });
+
+  it("keeps the default argv without inputs", () => {
+    expect(crewCliArgs({ ...base, commands: DEFAULT_SEAT_COMMANDS })).toEqual(crewCliArgs(base));
+    expect(DEFAULT_SEAT_COMMANDS.writer).toEqual([
+      "pnpm -s lint",
+      "pnpm -s typecheck",
+      "pnpm -s test",
+      "pnpm -s build",
+      "pnpm -s vitest",
+    ]);
+    expect(DEFAULT_SEAT_COMMANDS.review).toEqual(["pnpm -s vitest"]);
+  });
+
+  it("adds extra protected files to the denies", () => {
+    const a = crewCliArgs({ ...base, protectedFiles: ["pyproject.toml"] });
+    expect(a).toContain("Edit(//mc/wt/guido-1/**/pyproject.toml)");
+    expect(a).toContain("Write(//mc/wt/guido-1/pyproject.toml)");
+  });
+
+  it("protectedFileRules and isProtectedPath take extra globs", () => {
+    const rules = protectedFileRules("/w/x", ["pyproject.toml"]);
+    for (const r of [
+      "Edit(//w/x/pyproject.toml)",
+      "Edit(//w/x/**/pyproject.toml)",
+      "Write(//w/x/pyproject.toml)",
+      "Write(//w/x/**/pyproject.toml)",
+    ]) {
+      expect(rules).toContain(r);
+    }
+    expect(rules).toEqual(expect.arrayContaining(protectedFileRules("/w/x")));
+    expect(isProtectedPath("pkg/Pyproject.toml", ["pyproject.toml"])).toBe(true);
+    expect(isProtectedPath("pkg/Pyproject.toml")).toBe(false);
+    expect(isProtectedPath("ci", ["ci/**"])).toBe(true);
+    expect(isProtectedPath("package.json", ["pyproject.toml"])).toBe(true);
+  });
+
+  it.each(["pnpm/x", "/usr/bin/uv", "uv  run", "uv run;ls", "", " uv", "uv run $X", "-x"])(
+    "refuses the command %j",
+    (c) => {
+      expect(() => crewCliArgs({ ...base, commands: { writer: [c], review: [] } })).toThrow(
+        `crew rules: ${c} is not a seat command`,
+      );
+    },
+  );
+
+  it.each(["/etc/x", "./x", "~/x", "../x", "a/../x", "a b", "a(b)", "a\\b", "x?"])(
+    "refuses the glob %j",
+    (g) => {
+      const msg = `crew rules: ${g} is not a protected-file glob`;
+      expect(() => protectedFileRules("/w/x", [g])).toThrow(msg);
+      expect(() => isProtectedPath("a", [g])).toThrow(msg);
+      expect(() => crewCliArgs({ ...base, protectedFiles: [g] })).toThrow(msg);
+    },
+  );
 });
 
 describe("protectedFileRules", () => {
@@ -389,6 +467,7 @@ describe("crew constants", () => {
           "start_seat",
           "message_seat",
           "flight_state",
+          "promote",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -463,6 +542,7 @@ describe("mc tool grants", () => {
       "start_seat",
       "message_seat",
       "flight_state",
+      "promote",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");

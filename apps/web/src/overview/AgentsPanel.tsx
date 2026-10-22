@@ -42,8 +42,26 @@ import { LoopStep } from "./LoopStep.tsx";
 
 const DASH = "—";
 
-function FlightRow() {
+/** The role of the one crew seat that is FLIGHT. */
+const FLIGHT_ROLE = "FLIGHT";
+
+/** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
+function FlightRow({
+  row,
+  limits,
+  now,
+  tz,
+}: {
+  row: Crew["rows"][number] | null;
+  limits: LimitRow[];
+  now: number;
+  tz: string | null;
+}) {
   const go = () => toggleDock(true);
+  const status = row ? seatStatus(row) : null;
+  const five = row ? limits.find((l) => l.accountId === row.accountId && l.window === "5h") : null;
+  const tpm = row ? tokensPerMinute(row.digest, now) : null;
+  const tokens = row?.run?.tokens ? row.run.tokens.input + row.run.tokens.output : null;
   return (
     // As the agent rows: the call sign is the control, a click elsewhere on the row a mouse shortcut.
     // biome-ignore lint/a11y/useKeyWithClickEvents: the call-sign button is the keyboard route
@@ -65,16 +83,31 @@ function FlightRow() {
       </span>
       <span>
         <Pill tone="neutral">Head</Pill>
+        {status && <Pill tone={status.tone}>{status.label}</Pill>}
       </span>
       <span className="min0">
-        <span className="ellip s">{FLIGHT_NOT_RUNNING}</span>
+        {row ? (
+          <span className="ellip xs fg2 doing" title={doingLine(row, now, tz, undefined)}>
+            <DoingLine row={row} now={now} tz={tz} repoPrs={undefined} />
+          </span>
+        ) : (
+          <span className="ellip s">{FLIGHT_NOT_RUNNING}</span>
+        )}
       </span>
       <span className="xs fg2">{DASH}</span>
       <span className="tok">
-        <span className="num s">{DASH}</span>
+        <span className="num s">{tokens === null ? DASH : kTokens(tokens)}</span>
+        {tpm !== null && <span className="xs muted num">{kTokens(tpm)}/min</span>}
       </span>
       <span className="meters2">
-        <span className="xs fg2">{DASH}</span>
+        {row ? (
+          <>
+            <Meter label="ctx" pct={contextPct(row)} />
+            <Meter label="5h" pct={five ? five.used : null} />
+          </>
+        ) : (
+          <span className="xs fg2">{DASH}</span>
+        )}
       </span>
     </div>
   );
@@ -228,9 +261,11 @@ export function AgentsPanel() {
   const now = useSecond();
   const [session] = useSession();
   const [selected] = useSelectedAgent();
+  // The config allows one watch seat, so at most one row is FLIGHT; it has its own row above.
+  const flight = crew.data?.rows.find((r) => r.role === FLIGHT_ROLE) ?? null;
   const rows = crew.data
     ? crewOrder(
-        crew.data.rows.filter((r) => inSession(session, r.repoId)),
+        crew.data.rows.filter((r) => r !== flight && inSession(session, r.repoId)),
         items,
       )
     : null;
@@ -254,7 +289,7 @@ export function AgentsPanel() {
           <span className="right">Tokens · ~cost</span>
           <span>Context · quota</span>
         </div>
-        <FlightRow />
+        <FlightRow row={flight} limits={limits} now={now} tz={tz} />
         <CrewOff className="pb muted s" />
         {rows?.map((row) => (
           <AgentRow

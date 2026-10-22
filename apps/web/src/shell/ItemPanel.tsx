@@ -4,13 +4,15 @@ import {
   type Crew,
   type Escalation,
   FLIGHT_NOT_RUNNING,
+  type FlightView,
   type TicketView,
 } from "@mc/core";
-import { useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { apiPost, errorNote } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
-import { RESOURCES, useResource } from "../data.ts";
+import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { dayMonth, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -37,6 +39,10 @@ export function ItemPanel() {
   const escRes = useResource<Escalation[]>(RESOURCES.escalations);
   const escalations = escRes.data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
+  const seat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
   const now = useNow();
   const head = useId();
@@ -53,6 +59,25 @@ export function ItemPanel() {
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
   const agentId = item?.agentId ?? null;
   const agentIndex = crew?.rows.find((r) => r.id === agentId)?.index ?? 0;
+  const live = seat?.live === true;
+  const send = async (ev: FormEvent) => {
+    ev.preventDefault();
+    const body = text.trim();
+    if (!seat?.live || body === "") return;
+    // Led by the item's title, so FLIGHT knows what the question is about.
+    const about = esc?.title ?? item?.text ?? "";
+    setBusy(true);
+    setErr(null);
+    try {
+      await apiPost(ACTIONS.seatMessage(seat.id), { text: `Re: ${about}\n\n${body}` });
+      setText("");
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      setErr(errorNote(error) ?? error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
   return (
@@ -120,18 +145,30 @@ export function ItemPanel() {
             </div>
           </div>
         )}
-        <form className="composer" id="dsForm" onSubmit={(e) => e.preventDefault()}>
+        <form className="composer" id="dsForm" onSubmit={(e) => void send(e)}>
           <input
             id="dsInput"
             autoComplete="off"
             aria-label="Ask FLIGHT about this"
             placeholder="Ask FLIGHT about this…"
-            title={FLIGHT_NOT_RUNNING}
-            disabled
+            title={live ? undefined : FLIGHT_NOT_RUNNING}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={!live}
           />
-          <button type="submit" className="primary" title={FLIGHT_NOT_RUNNING} disabled>
+          <button
+            type="submit"
+            className="primary"
+            title={live ? undefined : FLIGHT_NOT_RUNNING}
+            disabled={!live || busy}
+          >
             Send
           </button>
+          {err !== null && (
+            <p className="note err" role="alert">
+              {err}
+            </p>
+          )}
         </form>
       </div>
     </aside>

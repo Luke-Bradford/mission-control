@@ -11,6 +11,7 @@ import {
   type Escalation,
   type FlightDecision,
   type FlightDecisionKind,
+  type FlightMoveColumn,
   type FlowIssue,
   type FlowPr,
   GUARD_HITS_LIMIT,
@@ -315,7 +316,7 @@ export interface BoardMove {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn;
+  column: MoveColumn | FlightMoveColumn;
   state: BoardMoveState;
   detail: string | null;
   at: number;
@@ -762,14 +763,16 @@ export class Store {
 
   /**
    * The runs a loop drives that may still need the engine: every one not yet ended, and those
-   * that ended at or after `endedSince` with a loop that is not done. Oldest first.
+   * that ended at or after `endedSince` with a loop that is not done, or is done with merge steps
+   * recorded (the last of them may be owed). Oldest first.
    */
   loopRuns(endedSince: number): Run[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM runs WHERE loop IS NOT NULL
            AND (ended_at IS NULL
-             OR (ended_at >= ? AND json_extract(loop, '$.phase') != 'done'))
+             OR (ended_at >= ? AND (json_extract(loop, '$.phase') != 'done'
+               OR json_extract(loop, '$.merging') IS NOT NULL)))
          ORDER BY started_at, seq`,
       )
       .all(endedSince) as Row[];
@@ -1034,7 +1037,7 @@ export class Store {
       runId: r.run_id as string,
       repoId: r.repo_id as RepoId,
       issue: r.issue as number,
-      column: r.board_column as MoveColumn,
+      column: r.board_column as MoveColumn | FlightMoveColumn,
       state: r.state as BoardMoveState,
       detail: r.detail as string | null,
       at: r.at as number,
