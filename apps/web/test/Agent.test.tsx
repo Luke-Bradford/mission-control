@@ -14,7 +14,7 @@ import {
   type RunDigest,
   type RunView,
 } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { Agent } from "../src/pages/Agent.tsx";
@@ -1545,6 +1545,60 @@ describe("Agent page: loop steps", () => {
     const withPr = steps.filter((s) => s.querySelector("a[href*='/pull/77']"));
     expect(withPr).toHaveLength(1);
     expect(withPr[0]).toBe(withText[0]);
+  });
+
+  describe("End run on a set-aside run", () => {
+    const LOOP_PATH = "/api/runs/r-12/loop";
+    const END_PATH = "/api/runs/r-12/end";
+    const loopAnswer = (aside: unknown) => ({
+      [LOOP_PATH]: { runId: "r-12", loop: { phase: "review", aside }, events: [] },
+    });
+    const asideRun = async (extra: Record<string, unknown>) => {
+      const f = stub({
+        rows: [seat(loopOf({ phase: "review", text: "Waiting on review", prNumber: 77 }))],
+        runs: [],
+        extra,
+      });
+      render(<Agent id="shop-app-ta" />);
+      await loaded();
+      return f;
+    };
+
+    it("shows only for a set-aside run", async () => {
+      const f = await asideRun(loopAnswer(null));
+      await settled(f, LOOP_PATH);
+      expect(screen.queryByRole("button", { name: "End run" })).toBeNull();
+      cleanup();
+      const g = await asideRun(loopAnswer({ worktree: "/w/r-12", wake: false }));
+      await settled(g, LOOP_PATH);
+      expect(await screen.findByRole("button", { name: "End run" })).toBeTruthy();
+    });
+
+    it("confirms, then posts {} to the run", async () => {
+      const f = await asideRun({
+        ...loopAnswer({ worktree: "/w/r-12", wake: false }),
+        [`POST ${END_PATH}`]: { ok: true },
+      });
+      const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+      const end = await screen.findByRole("button", { name: "End run" });
+      fireEvent.click(end);
+      expect(ask).toHaveBeenCalledOnce();
+      expect(bodyOf(f, END_PATH)).toBeUndefined();
+      fireEvent.click(end);
+      await vi.waitFor(() => expect(bodyOf(f, END_PATH)).toBe("{}"));
+      ask.mockRestore();
+    });
+
+    it("shows the server's refusal text on a 409", async () => {
+      await asideRun({
+        ...loopAnswer({ worktree: "/w/r-12", wake: false }),
+        [`POST ${END_PATH}`]: () => ({ status: 409, body: { error: "NOT_ASIDE" } }),
+      });
+      const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
+      fireEvent.click(await screen.findByRole("button", { name: "End run" }));
+      expect((await screen.findByRole("alert")).textContent).toBe("NOT_ASIDE");
+      ask.mockRestore();
+    });
   });
 
   it("parked shows a held line and no current step", async () => {
