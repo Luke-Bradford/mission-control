@@ -24,7 +24,6 @@ import {
   FLIGHT_NOTES_PER_HOUR,
   FLIGHT_READS_PER_HOUR,
   FLIGHT_STARTABLE,
-  FLIGHT_STARTS_PER_HOUR,
   FLIGHT_TICKET_RESTART_MS,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_UNPARKS_PER_RUN,
@@ -92,7 +91,7 @@ import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import { flightSeat, flightState } from "./state.ts";
+import { flightSeat, flightStartCap, flightState } from "./state.ts";
 
 export interface FlightToolsDeps {
   config: CcConfig;
@@ -368,13 +367,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(accountStoppedText(call, cfg.accountId));
     }
     const started = lastHour(["start"], at);
-    // The cap guards against a runaway FLIGHT, so it grows with the seats there are to start.
-    const devSeats = (flightSeat(config)?.session.seats ?? []).filter(
-      (s) => seatDef(s).loop === "build",
-    ).length;
-    if (started >= FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats)) {
-      return fail(capText("started tickets", started));
-    }
+    if (started >= flightStartCap(config)) return fail(capText("started tickets", started));
     const again = store.countFlightDecisions({
       kinds: ["start"],
       since: at - FLIGHT_TICKET_RESTART_MS,
