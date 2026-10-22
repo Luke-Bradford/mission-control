@@ -29,7 +29,6 @@ import {
   loopText,
   modeOfSeat,
   OWNER_CONTROLLER,
-  OWNER_FLIGHT,
   OWNER_LOOP,
   OWNER_OPERATOR,
   type PullRequestView,
@@ -373,7 +372,11 @@ const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k
 type OwnedItem = Omit<AttentionItem, "acked" | "owner"> & { owner: AttentionOwner };
 
 /** Escalation kinds that name the operator; any other is a loop's own. */
-const OPERATOR_ESCALATIONS: readonly Escalation["kind"][] = ["operator-decision", "mvp-ready"];
+const OPERATOR_ESCALATIONS: readonly Escalation["kind"][] = [
+  "operator-decision",
+  "mvp-ready",
+  "autonomy-question",
+];
 
 /** The login a draft PR belongs to when it is not the hub's: its author, else an assignee. */
 function otherLogin(
@@ -410,7 +413,9 @@ export function attentionItems(
     // an escalation whose issue the board has since seen closed no longer holds
     if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
     items.push({
-      owner: OPERATOR_ESCALATIONS.includes(e.kind) ? OWNER_OPERATOR : OWNER_LOOP,
+      // a needs-you label asks the operator whatever the kind; only a [loop-blocked] title is the loop's
+      owner:
+        e.source === "label" || OPERATOR_ESCALATIONS.includes(e.kind) ? OWNER_OPERATOR : OWNER_LOOP,
       key: `esc:${e.id}`,
       kind: escalationKind(e),
       agentId: config.loops.find((l) => l.repoId === e.repoId)?.id ?? null,
@@ -612,14 +617,17 @@ function crewItems(
   const flightHolds = flightLive(config, store);
   const flightOwn = flightOwnSeatIds(config);
   for (const q of store.openQuestions()) {
-    const withFlight =
+    // Held back, not listed as FLIGHT's, until the web lists only the operator's items.
+    if (
       flightHolds &&
       flightOwn.has(q.agentId) &&
       q.passedAt === null &&
-      now - q.at < FLIGHT_ANSWER_WAIT_MS;
+      now - q.at < FLIGHT_ANSWER_WAIT_MS
+    ) {
+      continue;
+    }
     out.push(
       item({
-        owner: withFlight ? OWNER_FLIGHT : OWNER_OPERATOR,
         key: `ask:${q.id}`,
         kind: "question",
         agentId: q.agentId,

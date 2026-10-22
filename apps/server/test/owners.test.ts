@@ -155,7 +155,7 @@ afterEach(() => {
 });
 
 describe("Needs-you owners", () => {
-  it("a seat's question is FLIGHT's while a watch seat is live in its session, else the operator's", () => {
+  it("a seat's question is held back while a watch seat is live in its session, else the operator's", () => {
     const c = crewWith(["GUIDO-1", "FLIGHT-1"]);
     const id = store.addQuestion({ agentId: "GUIDO-1", runId: "c1", text: "Q?", at: NOW - MIN });
     const key = `ask:${id}`;
@@ -173,7 +173,7 @@ describe("Needs-you owners", () => {
       worktree: null,
       updatedAt: NOW,
     });
-    expect(owners(c)[key]).toBe("flight");
+    expect(owners(c)[key]).toBeUndefined();
     // FLIGHT passed it on
     store.passQuestion(id, NOW);
     expect(owners(c)[key]).toBe("operator");
@@ -219,10 +219,18 @@ describe("Needs-you owners", () => {
         kind: "loop-blocked",
         title: "[loop-blocked] x",
       }),
+      escalation({
+        id: "shop-app#11",
+        issueNumber: 11,
+        kind: "autonomy-question",
+        source: "label",
+        title: "x",
+      }),
     ]);
     const o = owners();
     expect(o["esc:shop-app#9"]).toBe("operator");
     expect(o["esc:shop-app#10"]).toBe("loop");
+    expect(o["esc:shop-app#11"]).toBe("operator");
   });
 
   it("a crew error and a stray are the operator's", () => {
