@@ -12,6 +12,7 @@ import {
   areaLabelsFor,
   askerRunEndedText,
   capText,
+  claimedText,
   ENGINE_OFF_TEXT,
   FLIGHT_ABOUT_MAX,
   FLIGHT_BASIS_MAX,
@@ -82,7 +83,7 @@ import { z } from "zod";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
-import { accountAtStop, areaLabelsOf } from "../engine/queue.ts";
+import { accountAtStop, areaLabelsOf, claimedByOther } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import type { McTool, McToolContext } from "../mcp/server.ts";
 import { badArgs, text } from "../mcp/tools.ts";
@@ -97,6 +98,8 @@ export interface FlightToolsDeps {
   store: Store;
   bus: ChangeBus;
   supervisor: Pick<Supervisor, "message" | "busy" | "startRun">;
+  /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
+  login: string | null;
   engine: Pick<Engine, "onOperatorMessage" | "status"> | null;
   /** The repo's rules (the area labels), as the engine reads them. */
   rules: (repoId: string) => Promise<RepoRules | RepoRulesError>;
@@ -371,6 +374,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(wrongAreaText(call, ref, areas));
     }
     if (store.activeTickets().has(ref)) return fail(ticketHasRunText(ref));
+    if (claimedByOther(card, deps.login)) {
+      return fail(claimedText(ref, (card.assignees ?? []).filter((a) => a !== deps.login)));
+    }
     const open = card.blockedBy.filter((b) => !b.closed).map((b) => b.ref);
     if (open.length > 0) return fail(waitsOnText(ref, open));
     if (column !== "Ready" && !card.labels.includes(READY_LABEL)) {

@@ -222,6 +222,7 @@ async function main(): Promise<void> {
     store,
     bus,
     supervisor,
+    login: hubLogin,
     engine,
     rules: engineRules,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),

@@ -115,7 +115,7 @@ export function seatMayTake(store: Store, seatId: string): boolean {
 }
 
 /** Whether the card is assigned to a login other than the hub's own (any login, when the hub's is unknown). */
-const claimedByOther = (card: Pick<BoardItem, "assignees">, login: string | null): boolean =>
+export const claimedByOther =(card: Pick<BoardItem, "assignees">, login: string | null): boolean =>
   (card.assignees ?? []).some((a) => a !== login);
 
 /** The cards in the Ready column (a closed card is Done, never Ready), in the order picked. */

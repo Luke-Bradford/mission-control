@@ -125,7 +125,9 @@ export const notOnBoardText = (ref: string): string => `Not started: ${ref} is n
 export const wrongColumnText = (ref: string, column: string): string =>
   `Not started: ${ref} is in ${column}.`;
 export const ticketHasRunText = (ref: string): string => `Not started: ${ref} already has a run.`;
-export const waitsOnText = (ref: string, open: readonly string[]): string =>
+export const claimedText = (ref: string, logins: readonly string[]): string =>
+  `Not started: ${ref} is assigned to ${logins.join(", ")}; another hub or person has it.`;
+export const waitsOnText =(ref: string, open: readonly string[]): string =>
   `Not started: ${ref} waits on ${open.join(", ")}.`;
 export const START_NO_GITHUB = "Not started: GitHub could not be reached.";
 export const notReadyText = (ref: string): string =>
