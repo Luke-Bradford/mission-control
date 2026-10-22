@@ -391,6 +391,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // The Origin hook covers POST only, and a cross-site no-cors GET (an <img>, fetch with
+  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
+  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
+  // callers that send no header (the guard hook, curl) are unaffected.
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.url.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site") {
+      return reply.code(403).send({ error: "cross-site request refused" });
+    }
+  });
+
   // Unmatched GET/HEAD outside /api: the web app.
   const serveWeb = deps.webRoot ? webHandler(deps.webRoot) : null;
   app.setNotFoundHandler((req, reply) => {
