@@ -1330,14 +1330,28 @@ const HEADER_LINE =
   /^(--- |\+\+\+ |index |new file mode|deleted file mode|old mode|new mode|similarity index|dissimilarity index|rename |copy |remerge CONFLICT |Binary files|GIT binary patch)/;
 const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
+/** A commit header: `\0commit ` then a full id (or the commit tool's `staged`) and a newline. */
+const COMMIT_HEADER = /\0commit (?=(?:[0-9a-f]{40}|staged)\n)/;
+
+/** The new path of a `diff --git a/old b/new` line (the part after `diff --git `). */
+function diffGitNewPath(rest: string): string {
+  if (rest.endsWith('"')) {
+    const open = rest.lastIndexOf(' "', rest.length - 2);
+    return stripPrefix(unquotePath(open < 0 ? rest : rest.slice(open + 1)));
+  }
+  const at = rest.lastIndexOf(" b/");
+  return stripPrefix(unquotePath(at < 0 ? rest : rest.slice(at + 1)));
+}
+
 /**
  * Scan `git log -p --text --no-textconv --no-ext-diff --format=%x00commit %H%n%B` output: every
- * added line (the file and its new line number) and every commit message (`commit <sha7>`).
+ * added line (the file and its new line number), the path of every file the change adds or
+ * modifies (line 0, name withheld) and every commit message (`commit <sha7>`).
  * Findings carry the place and the kind, never the match.
  */
 export function scanSecrets(text: string, known: readonly string[]): SecretFinding[] {
   const out: SecretFinding[] = [];
-  for (const chunk of text.split("\0commit ").slice(1)) {
+  for (const chunk of text.split(COMMIT_HEADER).slice(1)) {
     const lines = chunk.split("\n");
     const sha7 = (lines.shift() ?? "").trim().slice(0, 7);
     const commitWhere = `commit ${sha7}`;
@@ -1354,6 +1368,19 @@ export function scanSecrets(text: string, known: readonly string[]): SecretFindi
     let newLine = 0;
     let oldLeft = 0;
     let newLeft = 0;
+    // The current file's new path, until it has been scanned (once per file).
+    let pendingPath: string | null = null;
+    let deleted = false;
+    const scanPath = (p: string) => {
+      pendingPath = null;
+      for (const kind of kindsIn(p, known)) {
+        out.push({ where: "(name withheld)", line: 0, kind });
+      }
+    };
+    const flushPath = () => {
+      if (pendingPath !== null && !deleted) scanPath(pendingPath);
+      pendingPath = null;
+    };
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i] ?? "";
       if (state === "hunk" && oldLeft <= 0 && newLeft <= 0) state = "header";
@@ -1375,14 +1402,18 @@ export function scanSecrets(text: string, known: readonly string[]): SecretFindi
         continue;
       }
       if (l.startsWith("diff --git ")) {
+        flushPath();
         state = "header";
         oldPath = "";
         file = "";
+        deleted = false;
+        pendingPath = diffGitNewPath(l.slice("diff --git ".length));
         continue;
       }
       if (state === "header") {
         const hunk = HUNK.exec(l);
         if (hunk) {
+          flushPath();
           oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
           newLine = Number(hunk[2]);
           newLeft = hunk[3] === undefined ? 1 : Number(hunk[3]);
@@ -1396,13 +1427,18 @@ export function scanSecrets(text: string, known: readonly string[]): SecretFindi
         if (l.startsWith("+++ ")) {
           const p = unquotePath(l.slice(4));
           file = p === "/dev/null" ? oldPath : stripPrefix(p);
+          if (p === "/dev/null") pendingPath = null;
+          else scanPath(file);
           continue;
         }
+        if (l.startsWith("deleted file mode")) deleted = true;
         if (HEADER_LINE.test(l)) continue;
+        flushPath();
         state = "message";
       }
       message(l);
     }
+    flushPath();
   }
   return out;
 }

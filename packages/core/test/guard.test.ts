@@ -293,6 +293,30 @@ describe("scanSecrets", () => {
     );
     expect(out).toEqual([{ where: "src/a.ts", line: 3, kind: "GitHub token" }]);
   });
+  it("finds a token hidden behind a fake commit header inside a file", () => {
+    const body = diff("a.ts", [`x\0commit ${TOKEN}`]);
+    const found = [{ where: "a.ts", line: 2, kind: "GitHub token" }];
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${body}`), [])).toEqual(found);
+    expect(scanSecrets(log(`staged\n${body}`), [])).toEqual(found);
+  });
+  it("finds a token used as an added file's name", () => {
+    const out = scanSecrets(log(`${sha}\nmsg\n\n${diff(`d/${TOKEN}`, ["hi"])}`), []);
+    expect(out).toEqual([{ where: "(name withheld)", line: 0, kind: "GitHub token" }]);
+  });
+  it("finds a token in the name of an empty added file (no hunk)", () => {
+    const name = `${TOKEN}.empty`;
+    const empty = `diff --git a/${name} b/${name}\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${empty}`), [])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "GitHub token" },
+    ]);
+  });
+  it("ignores a deleted file named like a token", () => {
+    const name = `${TOKEN}.txt`;
+    const gone = `diff --git a/${name} b/${name}\ndeleted file mode 100644\nindex e69de29..0000000\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${gone}`), [])).toEqual([]);
+    const gone2 = `diff --git a/${name} b/${name}\ndeleted file mode 100644\nindex 1..0000000\n--- a/${name}\n+++ /dev/null\n@@ -1 +0,0 @@\n-hi\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${gone2}`), [])).toEqual([]);
+  });
   it("ignores a removed line", () => {
     expect(scanSecrets(log(`${sha}\nmsg\n\n${diff("a.ts", ["ok"], [TOKEN])}`), [])).toEqual([]);
   });
