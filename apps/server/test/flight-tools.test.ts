@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { type CcConfig, type CrewSeatConfig, SEAT_ID } from "../src/config.ts";
 import { createFlightTools, seatFree } from "../src/flight/tools.ts";
+import type { Move, MoveResult } from "../src/github-board.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -92,6 +93,8 @@ let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
 let fetchImpl: (n: number) => Promise<TicketView | null>;
+let moveCalls: Move[];
+let moveImpl: () => Promise<MoveResult>;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -153,6 +156,8 @@ beforeEach(() => {
   startImpl = async () => ({ runId: "", branch: "" });
   messageImpl = async () => {};
   fetchImpl = async () => null;
+  moveCalls = [];
+  moveImpl = async () => ({ ok: true, changed: true });
   tools = createFlightTools({
     config: cfg,
     store,
@@ -177,6 +182,12 @@ beforeEach(() => {
       status: () => ({ on: engineOn, note: null }),
     },
     rules: async () => rulesNow,
+    board: {
+      move: async (m) => {
+        moveCalls.push(m);
+        return moveImpl();
+      },
+    },
     fetchTicket: async (repo, n) => {
       fetchRepos.push(repo.id);
       fetchCalls.push(n);
@@ -332,7 +343,7 @@ const addDecision = (over: Partial<FlightDecision>) =>
 const refused = (text: string) => ({ text, isError: true });
 
 describe("tool list", () => {
-  it("adds the five tools, each shown only to a granted role", () => {
+  it("adds the six tools, each shown only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "log_decision",
       "read_ticket",
@@ -340,6 +351,7 @@ describe("tool list", () => {
       "start_seat",
       "message_seat",
       "flight_state",
+      "promote",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -1168,5 +1180,203 @@ describe("flight_state", () => {
       ["inco-1", false, true],
       ["retro-1", false, true],
     ]);
+  });
+});
+
+describe("promote", () => {
+  const area = { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] };
+  const GOOD = "Body\n\n## Done when\n\n- it works\n";
+  const P = (over: Record<string, unknown> = {}) => ({
+    issue: 7,
+    to: "Ready",
+    basis: "it is complete",
+    ...over,
+  });
+  const backlog = (over: Partial<BoardItem> = {}) =>
+    card(7, { status: "Backlog", labels: ["area:server"], size: "S", ...over });
+
+  beforeEach(() => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "merge";
+    engineOn = true;
+    rulesNow = { ...DEFAULT_REPO_RULES, promoteBacklog: true, areas: area };
+    fetchImpl = async (n) => ticket(n, { body: GOOD });
+    board(backlog());
+  });
+
+  it("is shown only to a granted role", () => {
+    expect(named("promote")).toMatchObject({ modes: [], grantable: ["read-only"] });
+  });
+
+  it("moves a complete Backlog ticket to Ready and records it", async () => {
+    expect(await call("promote", P())).toEqual({
+      text: "Moved mc#7 to Ready. Recorded in Decided without you.",
+    });
+    expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Ready" }]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "promote",
+        ref: "mc#7",
+        about: "mc#7: Ticket 7",
+        decision: "Moved to Ready",
+        basis: "it is complete",
+      },
+    ]);
+    expect(seen).toContain("flight");
+  });
+
+  it("refuses an incomplete ticket for Ready, then moves it to Refinement", async () => {
+    fetchImpl = async (n) => ticket(n, { body: "No plan" });
+    board(backlog({ size: null }));
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 has no done_when or size; move it to Refinement and ask for it."),
+    );
+    expect(moveCalls).toEqual([]);
+    expect((await call("promote", P({ to: "Refinement" }))).text).toBe(
+      "Moved mc#7 to Refinement. Recorded in Decided without you.",
+    );
+    expect(moveCalls[0]?.column).toBe("Refinement");
+  });
+
+  it("names only what is missing, and honours the rules' needs", async () => {
+    board(backlog({ size: null }));
+    expect((await call("promote", P())).text).toBe(
+      "Not moved: mc#7 has no size; move it to Refinement and ask for it.",
+    );
+    rulesNow = { ...rulesNow, needs: ["done_when"] };
+    expect((await call("promote", P())).isError).toBeUndefined();
+  });
+
+  it("moves Refinement to Ready, and back to Backlog only after its own move", async () => {
+    board(backlog({ status: "Refinement" }));
+    expect((await call("promote", P())).isError).toBeUndefined();
+    board(backlog({ status: "Ready" }));
+    expect((await call("promote", P({ to: "Backlog" }))).isError).toBeUndefined();
+    expect(moveCalls.map((m) => m.column)).toEqual(["Ready", "Backlog"]);
+  });
+
+  it("refuses an undo with no earlier promote", async () => {
+    board(backlog({ status: "Ready" }));
+    expect(await call("promote", P({ to: "Backlog" }))).toEqual(
+      refused(
+        "Not moved: mc#7 is in Ready; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.",
+      ),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses an undo when only another ticket was promoted", async () => {
+    addDecision({ kind: "promote", ref: "mc#8" });
+    board(backlog({ status: "Ready" }));
+    expect(await call("promote", P({ to: "Backlog" }))).toEqual(
+      refused(
+        "Not moved: mc#7 is in Ready; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.",
+      ),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses a move from a column outside the pairs", async () => {
+    board(backlog({ status: "In progress", state: "in progress" }));
+    expect((await call("promote", P({ to: "Refinement" }))).text).toContain(
+      "mc#7 is in In progress;",
+    );
+    board(backlog({ status: "Ready" }));
+    expect((await call("promote", P({ to: "Refinement" }))).isError).toBe(true);
+    board(backlog({ status: "Refinement" }));
+    expect((await call("promote", P({ to: "Refinement" }))).isError).toBe(true);
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses a bad argument or a stale run", async () => {
+    expect((await call("promote", P({ to: "Done" }))).isError).toBe(true);
+    expect((await call("promote", P({ basis: "" }))).isError).toBe(true);
+    expect((await call("promote", P({ x: 1 }))).isError).toBe(true);
+    expect(await call("promote", P(), ctx("guido-1", "r-guido"))).toEqual(refused(MC_RUN_ENDED));
+  });
+
+  it("refuses in a draft workspace", async () => {
+    const mc = cfg.repos[0];
+    if (mc !== undefined) mc.autonomy = "draft";
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc is a draft workspace, where Mission Control moves no cards."),
+    );
+  });
+
+  it("refuses with the engine off", async () => {
+    engineOn = false;
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: the loop engine is off on this server, so no card moves."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses when promote_backlog is off", async () => {
+    rulesNow = { ...rulesNow, promoteBacklog: false };
+    expect(await call("promote", P())).toEqual(
+      refused(
+        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with mc ask_operator.",
+      ),
+    );
+  });
+
+  it("refuses at the hourly cap", async () => {
+    for (let i = 0; i < 10; i++) addDecision({ kind: "promote" });
+    expect(await call("promote", P())).toEqual(
+      refused(
+        "Not done: you moved tickets 10 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    nowMs += 61 * 60_000;
+    expect((await call("promote", P())).isError).toBeUndefined();
+  });
+
+  it("refuses a card that is not on the board", async () => {
+    board();
+    expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 is not on the board."));
+  });
+
+  it("refuses a ticket with a run", async () => {
+    live("guido-1", "r-guido", { ticket: "mc#7" });
+    expect(await call("promote", P())).toEqual(refused("Not moved: mc#7 has a run."));
+  });
+
+  it("refuses Ready when GitHub cannot be reached, but not Refinement", async () => {
+    fetchImpl = async () => {
+      throw new Error("down");
+    };
+    expect(await call("promote", P())).toEqual(refused("Not moved: GitHub could not be reached."));
+    expect((await call("promote", P({ to: "Refinement" }))).isError).toBeUndefined();
+  });
+
+  it("refuses two area labels, or none", async () => {
+    board(backlog({ labels: ["area:server", "area:web"] }));
+    expect((await call("promote", P())).text).toBe(
+      "Not moved: mc#7 spans two areas (area:server, area:web); ask the operator to split it.",
+    );
+    board(backlog({ labels: [] }));
+    expect((await call("promote", P())).text).toBe("Not moved: mc#7 has no area label.");
+  });
+
+  it("refuses a ticket that waits on an open dependency", async () => {
+    board(
+      backlog({
+        blockedBy: [
+          { ref: "mc#3", closed: false },
+          { ref: "mc#4", closed: true },
+        ],
+      }),
+    );
+    expect((await call("promote", P())).text).toBe("Not moved: mc#7 waits on mc#3.");
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nDepends on #5, #6 and #9\n` });
+    board(backlog(), card(5, { closed: true, status: "Done" }), card(6, { status: "Ready" }));
+    expect((await call("promote", P())).text).toBe("Not moved: mc#7 waits on mc#6, mc#9.");
+  });
+
+  it("answers a failed move, and records nothing", async () => {
+    moveImpl = async () => ({ ok: false, reason: "card not on the project" });
+    expect(await call("promote", P())).toEqual(refused("Not moved: card not on the project"));
+    expect(decisions()).toEqual([]);
   });
 });

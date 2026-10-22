@@ -9,7 +9,13 @@
  */
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { DEFAULT_HARD_RULES, DEFAULT_REPO_RULES, freezeRules, type RepoRules } from "@mc/core";
+import {
+  DEFAULT_HARD_RULES,
+  DEFAULT_REPO_RULES,
+  freezeRules,
+  REPO_NEEDS,
+  type RepoRules,
+} from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { readRepoClaudeMd } from "../runtime/brief.ts";
@@ -30,7 +36,7 @@ const YAML_INFO = /^[ \t]*ya?ml(?:[ \t]|$)/i;
 const NO_BLOCK = "the Mission Control section has no yaml block";
 
 /** Keys accepted but not used here (other parts of the board automation own them). */
-const IGNORED_KEYS = ["needs", "templates", "ci"];
+const IGNORED_KEYS = ["templates", "ci"];
 
 /**
  * A label glob: repo-relative, and `**` only as a trailing `/**`, else it would match wrongly
@@ -48,6 +54,7 @@ const nonEmpty = z.string().min(1);
 const schema = z.strictObject({
   pick_from: z.array(nonEmpty).min(1).optional(),
   promote_backlog: z.boolean().optional(),
+  needs: z.array(z.enum(REPO_NEEDS)).optional(),
   areas: z.record(nonEmpty, z.array(labelGlob).min(1)).optional(),
   // `null` means the default only here (the example block writes `hard_rules: null`); `[]` is none.
   hard_rules: z.array(nonEmpty).nullable().optional(),
@@ -134,6 +141,7 @@ export function parseRepoRules(markdown: string | null): RepoRules {
   return freezeRules({
     pickFrom: r.pick_from ?? DEFAULT_REPO_RULES.pickFrom,
     promoteBacklog: r.promote_backlog ?? DEFAULT_REPO_RULES.promoteBacklog,
+    needs: r.needs ?? DEFAULT_REPO_RULES.needs,
     areas:
       r.areas === undefined
         ? DEFAULT_REPO_RULES.areas
