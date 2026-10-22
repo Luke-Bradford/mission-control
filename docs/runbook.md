@@ -546,6 +546,18 @@ Setup's board action also creates the board's fields and the repo's type labels,
     runs on. Fix the path and restart the hub.
   - A start is refused if the path holds a `'` or a line break.
 
+### Reloading the config
+
+Seat and role changes in `config.yaml` apply without a restart.
+
+- `curl -s -XPOST 127.0.0.1:7420/api/config/reload` re-reads the file the hub started with. A
+  file that doesn't load changes nothing, and the call answers with its error.
+- The reload answers with what it applied (`applied`), the seats as now loaded, any seat
+  changes still pending (a seat mid-run changes when its run ends), and `restartNeeded`: keys
+  that changed on disk but only apply after a restart, such as `loops` and `crew.deny_read`.
+- `curl -s 127.0.0.1:7420/api/crew/changes` shows the same picture without reloading.
+- Setup › Sessions (#22) will use both from the HUD.
+
 ### Before the first crew push
 
 List your own working folders under `crew.deny_read`, then restart the hub. Agent-run code can

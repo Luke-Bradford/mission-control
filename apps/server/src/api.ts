@@ -861,6 +861,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Re-reads the config.yaml the server started with now (no request names a path); a file that
       // does not load changes nothing.
+      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup › Sessions, #22, reads it)
       api.post("/config/reload", async (_req, reply) => {
         if (deps.crewReloader === undefined) {
           return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
@@ -870,6 +871,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return result;
       });
 
+      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup › Sessions, #22, reads it)
       api.get("/crew/changes", async (): Promise<CrewChanges> => {
         return (
           deps.crewReloader?.status() ?? {
