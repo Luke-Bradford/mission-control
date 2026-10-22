@@ -57,6 +57,26 @@ export type Gql = (query: string, vars: Record<string, unknown>) => Promise<unkn
 const singleSelectField = (alias: string, name: string) =>
   `${alias}: fieldValueByName(name: "${name}") { ... on ProjectV2ItemFieldSingleSelectValue { name } }`;
 
+/** What the board reads from a project item; the item list and an issue's own cards share it. */
+const ITEM_FIELDS = `
+          id
+          updatedAt
+          status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          priority: fieldValueByName(name: "Priority") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          ${singleSelectField("stage", STAGE_FIELD)}
+          ${singleSelectField("owner", OWNER_FIELD)}
+          ${singleSelectField("size", SIZE_FIELD)}`;
+
+/** What the board reads from an issue. */
+const ISSUE_FIELDS = `
+              number title url state updatedAt createdAt labels(first: 20) { nodes { name } }
+              assignees(first: 10) { nodes { login } }
+              repository { name owner { login } }
+              parent { number repository { name } }
+              subIssuesSummary { total completed }
+              blockedBy(first: 10) { nodes { number state repository { name } } }
+              milestone { title }`;
+
 const BOARD_QUERY = `query Board($owner: String!, $number: Int!, $after: String) {
   ${RATE_LIMIT_SELECTION}
   repositoryOwner(login: $owner) {
@@ -68,27 +88,34 @@ const BOARD_QUERY = `query Board($owner: String!, $number: Int!, $after: String)
       items(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id
-          updatedAt
-          status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-          priority: fieldValueByName(name: "Priority") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-          ${singleSelectField("stage", STAGE_FIELD)}
-          ${singleSelectField("owner", OWNER_FIELD)}
-          ${singleSelectField("size", SIZE_FIELD)}
+          ${ITEM_FIELDS}
           content {
             ... on Issue {
-              number title url state updatedAt createdAt labels(first: 20) { nodes { name } }
-              assignees(first: 10) { nodes { login } }
-              repository { name owner { login } }
-              parent { number repository { name } }
-              subIssuesSummary { total completed }
-              blockedBy(first: 10) { nodes { number state repository { name } } }
-              milestone { title }
+              ${ISSUE_FIELDS}
             }
           }
         }
       }
     }
+    }
+  }
+}`;
+
+/** The repo's open issues with their cards, for those the Project's item list leaves out. */
+const OPEN_ISSUES_QUERY = `query OpenIssues($owner: String!, $name: String!, $after: String) {
+  ${RATE_LIMIT_SELECTION}
+  repository(owner: $owner, name: $name) {
+    issues(states: OPEN, first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        ${ISSUE_FIELDS}
+        projectItems(first: 10) {
+          nodes {
+            project { id number }
+            ${ITEM_FIELDS}
+          }
+        }
+      }
     }
   }
 }`;
@@ -414,6 +441,8 @@ interface BoardResult {
   unmapped: number;
   /** Every item GitHub returned, before any is filtered out. */
   raw: number;
+  /** Items read from the open issues' own cards because the item list left them out; in `items`. */
+  recovered: number;
 }
 
 async function fetchBoard(
@@ -441,77 +470,118 @@ async function fetchBoard(
     if (typeof projectNodeUrl === "string") projectUrl = projectNodeUrl;
     raw += conn.nodes.length;
     for (const node of conn.nodes) {
-      if (!isObj(node) || !isObj(node.content) || typeof node.content.number !== "number") continue;
-      const c = node.content;
-      // a project can hold issues from other repos; their numbers would open the wrong ticket here
-      if (
-        str(path(c, "repository", "name")).toLowerCase() !== repoName.toLowerCase() ||
-        str(path(c, "repository", "owner", "login")).toLowerCase() !== owner.toLowerCase()
-      ) {
-        continue;
-      }
-      const status = singleSelect(node.status);
-      const state: TicketState | undefined =
-        status !== null && Object.hasOwn(repo.statusMap, status)
-          ? repo.statusMap[status]
-          : undefined;
-      // An item with no Status is kept (Backlog); one whose Status is not mapped is skipped.
-      if (status !== null && state === undefined) {
-        unmapped++;
-        continue;
-      }
-      const closed = c.state === "CLOSED";
-      const updatedAt = Math.max(ms(node.updatedAt), ms(c.updatedAt));
-      if ((closed || state === "done") && now - updatedAt > DONE_VISIBLE_MS) continue;
-      const labels = names(c.labels);
-      const field = singleSelect(node.priority);
-      const fromLabel = field === null ? labelPriority(labels) : null;
-      items.push({
-        repoId: repo.id,
-        issueNumber: c.number as number,
-        title: str(c.title),
-        status: status ?? "",
-        state: state ?? "planned",
-        labels,
-        assignees: logins(c.assignees),
-        priority: field ?? fromLabel,
-        prioritySource: field !== null ? "field" : fromLabel !== null ? "label" : null,
-        closed,
-        updatedAt,
-        createdAt: ms(c.createdAt),
-        itemId: typeof node.id === "string" ? node.id : null,
-        projectId: null,
-        url: str(c.url),
-        stage: option<Stage>(node.stage, STAGES),
-        owner: option<Owner>(node.owner, OWNERS),
-        size: singleSelect(node.size),
-        // Only a parent in this repo is shown; a cross-repo parent has no card here.
-        parent:
-          path(c, "parent", "repository", "name") === repoName &&
-          typeof path(c, "parent", "number") === "number"
-            ? (path(c, "parent", "number") as number)
-            : null,
-        subIssues:
-          num(path(c, "subIssuesSummary", "total")) > 0
-            ? {
-                done: num(path(c, "subIssuesSummary", "completed")),
-                total: num(path(c, "subIssuesSummary", "total")),
-              }
-            : null,
-        blockedBy: blockers(c.blockedBy),
-        milestone:
-          typeof path(c, "milestone", "title") === "string"
-            ? str(path(c, "milestone", "title"))
-            : null,
-      });
+      const mapped = boardItem(repo, node, now);
+      if (mapped === "unmapped") unmapped++;
+      else if (mapped !== null) items.push(mapped);
+    }
+    const pi = isObj(conn.pageInfo) ? conn.pageInfo : {};
+    if (pi.hasNextPage !== true || typeof pi.endCursor !== "string") break;
+    if (p === MAX_BOARD_PAGES - 1) throw new Error("project board has too many pages");
+    after = pi.endCursor;
+  }
+  // The item list can be stale (22 Oct: frozen for hours); an issue's own cards are not.
+  const listed = new Set(items.map((i) => i.issueNumber));
+  const recovered: BoardItem[] = [];
+  let issueAfter: string | null = null;
+  for (let p = 0; p < MAX_BOARD_PAGES; p++) {
+    const data = await call(gql, OPEN_ISSUES_QUERY, { owner, name: repoName, after: issueAfter });
+    const conn = path(data, "repository", "issues");
+    if (!isObj(conn) || !Array.isArray(conn.nodes)) {
+      throw new Error(`open issues not found for ${repo.github}`);
+    }
+    for (const issue of conn.nodes) {
+      if (!isObj(issue) || typeof issue.number !== "number" || listed.has(issue.number)) continue;
+      const cards = path(issue, "projectItems", "nodes");
+      const card = (Array.isArray(cards) ? cards : []).find(
+        (n) => isObj(n) && path(n, "project", "number") === repo.project,
+      );
+      if (!isObj(card)) continue;
+      const mapped = boardItem(repo, { ...card, content: issue }, now);
+      if (mapped === "unmapped") unmapped++;
+      else if (mapped !== null) recovered.push(mapped);
+      raw++;
     }
     const pi = isObj(conn.pageInfo) ? conn.pageInfo : {};
     if (pi.hasNextPage !== true || typeof pi.endCursor !== "string") {
-      return { url: projectUrl, items: items.map((i) => ({ ...i, projectId })), unmapped, raw };
+      return {
+        url: projectUrl,
+        items: [...items, ...recovered].map((i) => ({ ...i, projectId })),
+        unmapped,
+        raw,
+        recovered: recovered.length,
+      };
     }
-    after = pi.endCursor;
+    issueAfter = pi.endCursor;
   }
-  throw new Error("project board has too many pages");
+  throw new Error("open issues have too many pages");
+}
+
+/**
+ * One board item from a project item node whose `content` is its issue; null when the node is not
+ * an issue of this repo or is a stale done card, "unmapped" when its Status is not mapped.
+ */
+function boardItem(
+  repo: CcConfig["repos"][number],
+  node: unknown,
+  now: number,
+): BoardItem | "unmapped" | null {
+  const [owner = "", repoName = ""] = repo.github.split("/");
+  if (!isObj(node) || !isObj(node.content) || typeof node.content.number !== "number") return null;
+  const c = node.content;
+  // a project can hold issues from other repos; their numbers would open the wrong ticket here
+  if (
+    str(path(c, "repository", "name")).toLowerCase() !== repoName.toLowerCase() ||
+    str(path(c, "repository", "owner", "login")).toLowerCase() !== owner.toLowerCase()
+  ) {
+    return null;
+  }
+  const status = singleSelect(node.status);
+  const state: TicketState | undefined =
+    status !== null && Object.hasOwn(repo.statusMap, status) ? repo.statusMap[status] : undefined;
+  // An item with no Status is kept (Backlog); one whose Status is not mapped is skipped.
+  if (status !== null && state === undefined) return "unmapped";
+  const closed = c.state === "CLOSED";
+  const updatedAt = Math.max(ms(node.updatedAt), ms(c.updatedAt));
+  if ((closed || state === "done") && now - updatedAt > DONE_VISIBLE_MS) return null;
+  const labels = names(c.labels);
+  const field = singleSelect(node.priority);
+  const fromLabel = field === null ? labelPriority(labels) : null;
+  return {
+    repoId: repo.id,
+    issueNumber: c.number as number,
+    title: str(c.title),
+    status: status ?? "",
+    state: state ?? "planned",
+    labels,
+    assignees: logins(c.assignees),
+    priority: field ?? fromLabel,
+    prioritySource: field !== null ? "field" : fromLabel !== null ? "label" : null,
+    closed,
+    updatedAt,
+    createdAt: ms(c.createdAt),
+    itemId: typeof node.id === "string" ? node.id : null,
+    projectId: null,
+    url: str(c.url),
+    stage: option<Stage>(node.stage, STAGES),
+    owner: option<Owner>(node.owner, OWNERS),
+    size: singleSelect(node.size),
+    // Only a parent in this repo is shown; a cross-repo parent has no card here.
+    parent:
+      path(c, "parent", "repository", "name") === repoName &&
+      typeof path(c, "parent", "number") === "number"
+        ? (path(c, "parent", "number") as number)
+        : null,
+    subIssues:
+      num(path(c, "subIssuesSummary", "total")) > 0
+        ? {
+            done: num(path(c, "subIssuesSummary", "completed")),
+            total: num(path(c, "subIssuesSummary", "total")),
+          }
+        : null,
+    blockedBy: blockers(c.blockedBy),
+    milestone:
+      typeof path(c, "milestone", "title") === "string" ? str(path(c, "milestone", "title")) : null,
+  };
 }
 
 const openClosed = (v: unknown): "open" | "closed" => (v === "OPEN" ? "open" : "closed");
@@ -911,6 +981,7 @@ export async function collectGithub(
   const failures: string[] = [];
   const changes: GithubChanges = { boards: false, escalations: false };
   let unmapped = 0;
+  let recovered = 0;
   let truncated: string[] = [];
   try {
     const board = await fetchBoard(repo, gql, now);
@@ -932,6 +1003,7 @@ export async function collectGithub(
       empties.delete(repo.id);
       changes.boards = store.replaceBoard(repo.id, board.items);
       unmapped = board.unmapped;
+      recovered = board.recovered;
     }
   } catch (e) {
     const [owner = ""] = repo.github.split("/");
@@ -966,6 +1038,9 @@ export async function collectGithub(
   } else {
     const notes = [
       ...(unmapped > 0 ? [`skipped ${unmapped} board item(s) with unmapped status`] : []),
+      ...(recovered > 0
+        ? [`project list missed ${recovered} items; read them from the issues`]
+        : []),
       ...(truncated.length > 0 ? [`truncated: ${truncated.join(", ")} hit the page bound`] : []),
     ];
     store.setStatus(collector, true, notes.length > 0 ? notes.join("; ") : null);
