@@ -36,6 +36,7 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
   "apps/server/src/runtime/**",
   "apps/server/src/engine/**",
   "packages/core/src/guard.ts",
+  "packages/core/src/flight.ts",
   "packages/core/src/loop.ts",
   "packages/core/src/review.ts",
   "packages/core/src/repo-rules.ts",

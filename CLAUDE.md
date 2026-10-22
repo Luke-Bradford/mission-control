@@ -68,6 +68,7 @@ mc:
     - "apps/server/src/runtime/**"
     - "apps/server/src/engine/**"
     - "packages/core/src/guard.ts"
+    - "packages/core/src/flight.ts"
     - "packages/core/src/runtime.ts"
     - "packages/core/src/loop.ts"
     - "packages/core/src/review.ts"

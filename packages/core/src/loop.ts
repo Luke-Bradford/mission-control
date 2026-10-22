@@ -90,7 +90,11 @@ export const MERGE_STEP_WORDS = {
   merge: "merge",
   close: "close the issue",
   "delete-remote": "delete the remote branch",
-} as const;
+} as const satisfies Partial<Record<MergeStep, string>>;
+/** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
+export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
+export const noShaDeleteText = (ref: string): string =>
+  `${ref}: merged, but the remote branch could not be deleted (no sha to lease on); the operator can delete it`;
 export const mergeStepFailedText = (step: string, why: string): string => `${step} failed: ${why}`;
 /** The gate parks a run for these; the reason says which. */
 export const gateStrayParkText = (call: string, paths: readonly string[]): string =>
@@ -364,7 +368,15 @@ function afterMerge(s: LoopSnapshot): LoopAction[] {
   const sha = s.loop.merging?.sha ?? s.pr?.headSha ?? s.pushed?.sha ?? null;
   const actions: LoopAction[] = [];
   if (todo("close")) actions.push({ kind: "close-issue" });
-  if (todo("delete-remote") && sha !== null) actions.push({ kind: "delete-remote-branch", sha });
+  if (todo("delete-remote")) {
+    if (sha !== null) actions.push({ kind: "delete-remote-branch", sha });
+    else {
+      const key = noShaDeleteNoteKey(s.runId);
+      if (!s.openNotes.includes(key)) {
+        actions.push({ kind: "note", key, noteKind: "flag", text: noShaDeleteText(s.ticket.ref) });
+      }
+    }
+  }
   actions.push({ kind: "end-run" });
   if (todo("delete-local")) actions.push({ kind: "delete-local-branch" });
   actions.push({ kind: "take-next" });
@@ -377,9 +389,16 @@ function stateStep(s: LoopSnapshot): Step {
   const prNumber = pr?.number ?? loop.prNumber;
   const merged = pr?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
 
+  // the server parked this run after the merge: its step failed, and the operator decides
+  if (loop.phase === "parked" && loop.parked?.kind === "merge-step") return unchanged(loop);
   if (merged && loop.phase !== "done") {
+    const mergedSha = pr?.headSha ?? pushed?.sha ?? null;
+    const merging =
+      s.autoMerge === true && loop.merging == null && mergedSha !== null
+        ? { sha: mergedSha, done: ["merge" as const] }
+        : loop.merging;
     return {
-      loop: { ...loop, phase: "done" },
+      loop: { ...loop, phase: "done", ...(merging === undefined ? {} : { merging }) },
       actions:
         s.autoMerge === true
           ? [...afterMerge(s), { kind: "event", text: "merged" }]
@@ -478,12 +497,13 @@ function stateStep(s: LoopSnapshot): Step {
     }
   }
 
-  // A hard-rule touch is the operator's to merge, so the strays it brings are not a park.
+  // A hard-rule touch is the operator's to merge, so the hard-rule paths it brings are not strays;
+  // it does not hide foreign commits or other strays.
   const gv = gateView(s, loop);
-  if (gv.on && gv.clear && gv.gate !== null) {
-    if (gv.gate.strays.length > 0) {
-      return park(loop, "gate", gateStrayParkText(seat.call, gv.gate.strays));
-    }
+  if (gv.on && gv.touches !== null && gv.gate !== null) {
+    const hard = gv.touches.paths;
+    const strays = gv.gate.strays.filter((p) => !hard.includes(p));
+    if (strays.length > 0) return park(loop, "gate", gateStrayParkText(seat.call, strays));
     if (!gv.gate.hubOnly) return park(loop, "gate", GATE_FOREIGN_COMMITS_PARK);
   }
 
@@ -599,14 +619,24 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
         } else if (rv.cur !== null && rv.cur.state === "reported" && rv.cur.blocking === 0) {
           const gv = gateView(s, loop);
           if (!gv.on) {
-            notes.set(readyNoteKey(runId, rv.P), {
-              noteKind: "ready",
-              text:
-                loop.ciFailedSha === rv.P
-                  ? readyRuledText(ticket.ref, n, rv.R.retro, rv.P)
-                  : readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
-            });
-          } else if (gv.touches !== null && gv.touches.paths.length > 0) {
+            // a merge workspace's pending, failing or unreported CI is not ready; only a ruling is
+            if (loop.ciFailedSha === rv.P) {
+              notes.set(readyNoteKey(runId, rv.P), {
+                noteKind: "ready",
+                text: readyRuledText(ticket.ref, n, rv.R.retro, rv.P),
+              });
+            } else if (s.autoMerge !== true) {
+              notes.set(readyNoteKey(runId, rv.P), {
+                noteKind: "ready",
+                text: readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
+              });
+            }
+          } else if (
+            gv.touches !== null &&
+            gv.touches.paths.length > 0 &&
+            gv.gate?.hubOnly === true &&
+            gv.gate.strays.every((p) => gv.touches?.paths.includes(p))
+          ) {
             notes.set(readyNoteKey(runId, rv.P), {
               noteKind: "ready",
               text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
@@ -816,6 +846,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     if (!s.openNotes.includes(key)) actions.push({ kind: "note", key, noteKind, text });
   }
   for (const key of s.openNotes) {
+    // the flag for a merged PR's undeletable branch outlives the run's steps
+    if (loop.phase === "done" && key === noShaDeleteNoteKey(s.runId)) continue;
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {
@@ -839,7 +871,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   const gv = gateView(s, loop);
   if (gv.passes && gv.P !== null) {
     const done = loop.merging?.done ?? [];
-    if (s.pr?.isDraft !== false && !done.includes("ready")) actions.push({ kind: "mark-ready" });
+    const readyDone = loop.merging?.sha === gv.P && done.includes("ready");
+    if (s.pr?.isDraft !== false && !readyDone) actions.push({ kind: "mark-ready" });
     actions.push({ kind: "merge", sha: gv.P });
   }
   if (loop.phase !== "done") {
@@ -862,12 +895,14 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside } = step.loop;
+  const { parked, touches, aside, gate, merging } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
     touches: touches === null ? null : { sha: touches.sha, paths: [...touches.paths] },
     ...(aside ? { aside: { ...aside } } : {}),
+    ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
+    ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
   };
   if (loop.aside) {
     if (s.seat.holdsRun) {

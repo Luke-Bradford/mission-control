@@ -21,6 +21,7 @@ import {
   NO_CI_AFTER_MS,
   NO_NEW_COMMIT_TEXT,
   NUDGE_TEXT,
+  noShaDeleteText,
   REFUSAL_TRIES,
   RESUME_TEXT,
   reconcile,
@@ -1372,6 +1373,18 @@ describe("amendments from the reviews of Task 5", () => {
     expect(r.loop.touches).toEqual(touches);
     expect(r.loop.touches).not.toBe(s.loop.touches);
     expect(r.loop.touches?.paths).not.toBe(s.loop.touches?.paths);
+    const gate = { sha: SHA, mainSha: SHA2, containsMain: true, hubOnly: true, strays: ["a"] };
+    const merging = { sha: SHA, done: ["ready" as const] };
+    const m = reconcile(snap({}, { phase: "parked", parked, gate, merging, cardFor: "parked:0" }));
+    expect(m.loop.gate).toEqual(gate);
+    expect(m.loop.gate).not.toBe(gate);
+    expect(m.loop.gate?.strays).not.toBe(gate.strays);
+    expect(m.loop.merging).toEqual(merging);
+    expect(m.loop.merging).not.toBe(merging);
+    expect(m.loop.merging?.done).not.toBe(merging.done);
+    const bare = reconcile(snap({}, { phase: "parked", parked, cardFor: "parked:0" }));
+    expect("gate" in bare.loop).toBe(false);
+    expect("merging" in bare.loop).toBe(false);
   });
 
   it("the nonew rule leaves a ruling on the failed sha alone", () => {
@@ -1891,8 +1904,136 @@ describe("merge workspace", () => {
     expect(kindsOf(r.actions)).not.toContain("mark-ready");
   };
 
-  it("CI pending: no merge", () => {
-    noMerge(reconcile(merge({ pr: pr({ ci: "pending" }) })));
+  const readyNotes = (r: ReturnType<typeof reconcile>): LoopAction[] =>
+    r.actions.filter((x) => x.kind === "note" && x.noteKind === "ready");
+
+  it("CI pending or failing: no merge, no ready note", () => {
+    for (const ci of ["pending", "failing"] as const) {
+      const r = reconcile(merge({ pr: pr({ ci }) }));
+      noMerge(r);
+      expect(readyNotes(r), ci).toEqual([]);
+    }
+  });
+
+  it("an unreported head: no merge, no ready note", () => {
+    const r = reconcile(merge({ pr: pr({ ci: "passing", headSha: null }) }));
+    noMerge(r);
+    expect(readyNotes(r)).toEqual([]);
+    const draft = reconcile(merge({ autoMerge: false, pr: pr({ ci: "pending" }) }));
+    expect(readyNotes(draft)).toHaveLength(1);
+  });
+
+  it("mark-ready is skipped only when the ready step is for this sha", () => {
+    const old = reconcile(merge({}, { merging: { sha: SHA2, done: ["ready"] } })).actions;
+    expect(kindsOf(old)).toContain("mark-ready");
+  });
+
+  it("a hard-rule touch does not hide foreign commits or another stray", () => {
+    const touches = { sha: SHA, paths: ["CLAUDE.md"] };
+    const foreign = reconcile(merge({}, { touches, gate: gateOf({ hubOnly: false }) }));
+    noMerge(foreign);
+    expect(foreign.loop.parked).toEqual({
+      kind: "gate",
+      reason: "commits on the branch that Mission Control did not make",
+      ended: false,
+    });
+    const stray = reconcile(
+      merge({}, { touches, gate: gateOf({ strays: ["CLAUDE.md", "x/a.ts"] }) }),
+    );
+    noMerge(stray);
+    expect(stray.loop.parked).toEqual({
+      kind: "gate",
+      reason: "changes outside SULU's area: x/a.ts",
+      ended: false,
+    });
+  });
+
+  describe("parked after the merge", () => {
+    const parkedAfter = (prState: "open" | "merged"): LoopSnapshot =>
+      merge(
+        { pr: pr({ state: prState, ci: "passing" }), openNotes: ["blocked:r1:0"] },
+        {
+          phase: "parked",
+          cardFor: "parked:0",
+          parked: { kind: "merge-step", reason: "close the issue failed: x", ended: false },
+          merging: { sha: SHA, done: ["ready", "merge"] },
+        },
+      );
+    it("emits nothing and stays parked whatever the poll says", () => {
+      for (const st of ["open", "merged"] as const) {
+        const s = parkedAfter(st);
+        const r = reconcile(s);
+        expect(r.loop.phase, st).toBe("parked");
+        expect(r.loop.parked?.kind, st).toBe("merge-step");
+        expect(r.actions, st).toEqual([]);
+      }
+    });
+  });
+
+  describe("after the merge, in a merge workspace", () => {
+    const doneLoop = (done: ("ready" | "merge" | "close" | "delete-remote" | "delete-local")[]) =>
+      merge({}, { phase: "done", merging: { sha: SHA, done } });
+    const steps = (r: ReturnType<typeof reconcile>): string[] =>
+      r.actions.flatMap((x) => (x.kind === "clear-note" ? [] : [x.kind]));
+
+    it("a done run with a partly filled merging emits only the missing steps", () => {
+      const r = reconcile(doneLoop(["ready", "merge", "close"]));
+      expect(steps(r)).toEqual([
+        "delete-remote-branch",
+        "end-run",
+        "delete-local-branch",
+        "take-next",
+      ]);
+    });
+
+    it("delete-local already done: no delete-local-branch", () => {
+      const r = reconcile(doneLoop(["ready", "merge", "delete-local"]));
+      expect(steps(r)).toEqual(["close-issue", "delete-remote-branch", "end-run", "take-next"]);
+    });
+
+    it("a hand-merged PR records the merge", () => {
+      const r = reconcile(merge({ pr: pr({ state: "merged", ci: "passing" }) }));
+      expect(r.loop.merging).toEqual({ sha: SHA, done: ["merge"] });
+      const next = reconcile({ ...merge({ pr: pr({ state: "merged" }) }), loop: r.loop });
+      expect(steps(next)).toEqual([
+        "close-issue",
+        "delete-remote-branch",
+        "end-run",
+        "delete-local-branch",
+        "take-next",
+      ]);
+    });
+
+    it("no sha at all: the other steps, and a flag that the remote branch stays", () => {
+      const s = merge({ pr: pr({ state: "merged", headSha: null }), pushed: null });
+      const r = reconcile(s);
+      expect(steps(r)).toEqual([
+        "close-issue",
+        "note",
+        "end-run",
+        "delete-local-branch",
+        "take-next",
+        "event",
+      ]);
+      expect(r.actions).toContainEqual({
+        kind: "note",
+        key: "flag:r1:no-sha-delete",
+        noteKind: "flag",
+        text: noShaDeleteText(REF),
+      });
+      expect(kindsOf(r.actions)).not.toContain("delete-remote-branch");
+    });
+
+    it("a merge workspace with no review does not merge and keeps today's note", () => {
+      const r = reconcile(merge({ review: null }));
+      noMerge(r);
+      expect(r.actions).toContainEqual({
+        kind: "note",
+        key: `review:r1:${SHA}`,
+        noteKind: "review",
+        text: `${REF}: PR #12 is ready for review (CI passed on ${SHA.slice(0, 7)})`,
+      });
+    });
   });
 
   it("a ruling on CI: today's ruled note, no merge", () => {
