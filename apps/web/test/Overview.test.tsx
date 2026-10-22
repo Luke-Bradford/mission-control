@@ -915,6 +915,23 @@ describe("Account quota panel", () => {
     );
   });
 
+  it("a 5h bar's hover says too little history when paceReady is false, the pace when true", async () => {
+    stub({
+      limits: [
+        limit5h({ accountId: "claude-main", used: 40, paceReady: false }),
+        limit5h({ accountId: "codex-main", used: 40, paceReady: true, fullAt: NOW + 2 * HOUR }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    await waitFor(() =>
+      expect(
+        quota.querySelector('[title^="claude-main 5h: 40% used · too little history for a pace"]'),
+      ).toBeTruthy(),
+    );
+    expect(quota.querySelector('[title^="codex-main 5h: 40% used · ~2h00"]')).toBeTruthy();
+  });
+
   it("the GitHub row: what is left, the poll cost and the reset", async () => {
     stub({ limits, githubRate: GITHUB_RATE });
     const { container } = render(<Overview />);
