@@ -837,8 +837,13 @@ export async function sweepPullRequests(
   return { boards, escalations: false };
 }
 
-/** Per store, the repos whose last board poll came back empty over a board that had cards. */
-const emptyBoards = new WeakMap<Store, Set<string>>();
+/**
+ * How long a board that had cards is kept while every board read comes back with no items. GitHub's
+ * project reads can flap between full and empty while it is degraded (22 Oct: one in six full).
+ */
+export const EMPTY_BOARD_GRACE_MS = 15 * 60_000;
+/** Per store, when each repo's board reads started coming back empty over a board that had cards. */
+const emptyBoards = new WeakMap<Store, Map<string, number>>();
 
 /**
  * Read-only refresh of one repo's board and escalations. Each part replaces its rows only when it
@@ -858,13 +863,14 @@ export async function collectGithub(
   let truncated: string[] = [];
   try {
     const board = await fetchBoard(repo, gql, now);
-    // GitHub can answer a board read with no items while it is degraded. One empty answer over a
-    // board that had cards keeps the board and says so; a second one in a row is believed.
-    const empties = emptyBoards.get(store) ?? new Set<string>();
+    // GitHub can answer a board read with no items while it is degraded. Over a board that had
+    // cards, empty answers keep the board and say so until they have lasted EMPTY_BOARD_GRACE_MS.
+    const empties = emptyBoards.get(store) ?? new Map<string, number>();
     emptyBoards.set(store, empties);
     const kept = store.board(repo.id).length;
-    if (board.raw === 0 && kept > 0 && !empties.has(repo.id)) {
-      empties.add(repo.id);
+    const since = empties.get(repo.id) ?? now;
+    if (board.raw === 0 && kept > 0 && now - since < EMPTY_BOARD_GRACE_MS) {
+      empties.set(repo.id, since);
       failures.push(`board: board poll returned no items; kept the last board (${kept})`);
     } else {
       empties.delete(repo.id);
@@ -872,8 +878,6 @@ export async function collectGithub(
       unmapped = board.unmapped;
     }
   } catch (e) {
-    // A failed read in between means the empty answers were not in a row.
-    emptyBoards.get(store)?.delete(repo.id);
     failures.push(`board: ${errMsg(e)}`);
   }
   try {
