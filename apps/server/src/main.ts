@@ -35,6 +35,7 @@ import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { createFlightTools } from "./flight/tools.ts";
+import { createFlightWatch } from "./flight/watch.ts";
 import { moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
     bus,
     debug:
       process.env.MC_DEBUG === "1" ? (line) => process.stderr.write(`cc: ${line}\n`) : undefined,
+    log: (line) => log(line),
     lockState: () => lock.state(),
   });
   const preview = isPreview(port, process.env);
@@ -209,6 +211,16 @@ async function main(): Promise<void> {
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
   });
 
+  // Keeps FLIGHT running and wakes it with a digest; off with the engine (preview, no loop writes).
+  const flightWatch = createFlightWatch({
+    config,
+    store,
+    bus,
+    supervisor,
+    enabled: engineOn,
+    log: (line) => log(line),
+  });
+
   // Update runs in this process's own checkout, and never on a preview server.
   const updater =
     hubRoot === null
@@ -250,6 +262,7 @@ async function main(): Promise<void> {
   const shutdown = onSignal({
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
+      flightWatch.stop();
       engine.stop();
       await scheduler.stop();
     },
@@ -267,6 +280,7 @@ async function main(): Promise<void> {
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.
   engine.start();
+  flightWatch.start();
 }
 
 main().catch((e: unknown) => {

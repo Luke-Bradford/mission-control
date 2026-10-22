@@ -15,6 +15,7 @@ import {
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
   clashText,
+  closesIssue,
   commitNamedRefText,
   commitReferenceText,
   commitSecretText,
@@ -83,7 +84,6 @@ import {
   mcToolHitText,
   NOTHING_TO_COMMIT,
   NOTHING_TO_PUSH,
-  namesIssue,
   nonAsciiPathsText,
   notOnBranchText,
   originMovedText,
@@ -669,12 +669,13 @@ function repoOf(deps: McToolsDeps, run: Run): string {
 }
 
 /**
- * The PR body as opened: the seat's, the closing line when it names no `#issue` (anywhere), then
- * the hub's line. The caller has refused a body that ends in an open block.
+ * The PR body as opened: the seat's, the closing line unless it already closes the run's issue
+ * (a plain mention does not), then the hub's line. The caller has refused a body that ends in an
+ * open block.
  */
-function prBody(body: string, issue: number | null, call: string): string {
+function prBody(body: string, repo: string, issue: number | null, call: string): string {
   const parts = [body.trimEnd()];
-  if (issue !== null && !namesIssue(body, issue)) parts.push(prClosesLine(issue));
+  if (issue !== null && !closesIssue(body, { repo, issue })) parts.push(prClosesLine(issue));
   parts.push(prOpenedByLine(call));
   return `${parts.join("\n\n")}\n`;
 }
@@ -861,7 +862,7 @@ async function draftPr(
 
   const file = crewPrBodyPath(deps.dbPath);
   try {
-    await writeFile(file, prBody(pr.body, issue, call), { mode: 0o600, flag: "wx" });
+    await writeFile(file, prBody(pr.body, repo, issue, call), { mode: 0o600, flag: "wx" });
     const made = await deps.gh(
       [
         "pr",
@@ -942,7 +943,7 @@ export async function editRunPrBody(
 
   const file = crewPrBodyPath(deps.dbPath);
   try {
-    await writeFile(file, prBody(body, issue, seatCallSign(place.seat.id)), {
+    await writeFile(file, prBody(body, repo, issue, seatCallSign(place.seat.id)), {
       mode: 0o600,
       flag: "wx",
     });

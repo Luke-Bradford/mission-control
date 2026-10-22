@@ -228,6 +228,48 @@ export function currentReview(
   return null;
 }
 
+/** The commit status context the QA review sets (branch protection requires it). */
+export const REVIEW_STATUS_CONTEXT = "mc/review";
+export const REVIEW_STATUS_QUEUED = "QA review queued";
+export const REVIEW_STATUS_RUNNING = "QA review running";
+export const REVIEW_STATUS_PASSED = "QA review passed";
+export const REVIEW_STATUS_BLOCKED = "QA review found blocking issues";
+export const REVIEW_STATUS_WAIVED = "QA review waived by the operator";
+
+export type ReviewStatusState = "pending" | "success" | "failure";
+
+export interface ReviewStatus {
+  state: ReviewStatusState;
+  description: string;
+}
+
+/** The mc/review status `sha` should carry, or null when there is none to set. */
+export function reviewStatusOf(
+  rows: readonly ReviewFact[],
+  epoch: number,
+  sha: string,
+  waivedSha: string | null,
+): ReviewStatus | null {
+  if (waivedSha !== null && waivedSha === sha) {
+    return { state: "success", description: REVIEW_STATUS_WAIVED };
+  }
+  const cur = currentReview(rows, epoch, sha);
+  if (cur === null) return null;
+  switch (cur.state) {
+    case "queued":
+    case "starting":
+      return { state: "pending", description: REVIEW_STATUS_QUEUED };
+    case "running":
+      return { state: "pending", description: REVIEW_STATUS_RUNNING };
+    case "reported":
+      return cur.blocking > 0
+        ? { state: "failure", description: REVIEW_STATUS_BLOCKED }
+        : { state: "success", description: REVIEW_STATUS_PASSED };
+    default:
+      return null;
+  }
+}
+
 /** Rows of this epoch for `sha` in state failed. */
 export function failedAttempts(rows: readonly ReviewFact[], epoch: number, sha: string): number {
   return rows.filter((r) => r.epoch === epoch && r.sha === sha && r.state === "failed").length;

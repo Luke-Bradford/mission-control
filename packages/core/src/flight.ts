@@ -1,5 +1,6 @@
 import type { HudColumn } from "./hud.ts";
-import type { SeatState } from "./runtime.ts";
+import type { LoopKind, SeatState } from "./runtime.ts";
+import type { LoopPhase } from "./types.ts";
 
 // The FLIGHT seat: the head agent that runs the crew. It is the one `watch` seat, started with no
 // ticket, and it keeps a log of what it decided (`flight_decisions`).
@@ -59,6 +60,7 @@ export const FLIGHT_DECISION_MAX = 1000;
 export const FLIGHT_BASIS_MAX = 500;
 
 export const MC_FLIGHT_ONLY = "Not done: this tool is for the FLIGHT seat.";
+export const MC_TICKET_READERS_ONLY = "Not read: this tool is for the FLIGHT and planner seats.";
 export const notInSessionText = (seat: string): string =>
   `Not done: ${seat} is not a seat in your session.`;
 export const capText = (what: string, n: number): string =>
@@ -156,3 +158,79 @@ export const messageAboutText = (call: string): string => `Message to ${call}`;
 export const sentText = (call: string): string => `Sent to ${call}.`;
 export const sentUnparkedText = (call: string): string =>
   `Sent to ${call}, and its run is un-parked.`;
+
+export interface FlightSeatState {
+  id: string;
+  call: string;
+  role: string;
+  loop: LoopKind;
+  area: string[];
+  state: SeatState | null;
+  free: boolean;
+  ticket: string | null;
+  title: string | null;
+  phase: LoopPhase | null;
+  parked: { kind: string; reason: string } | null;
+  stalled: boolean;
+  idleMin: number | null;
+  openQuestion: boolean;
+  atStop: boolean;
+}
+
+/** The crew as FLIGHT reads it: in a wake line, and from the `flight_state` tool. */
+export interface FlightState {
+  time: string;
+  repo: string;
+  seats: FlightSeatState[];
+  questions: { id: number; seat: string; ticket: string | null; text: string; ageMin: number }[];
+  tickets: {
+    ref: string;
+    title: string;
+    column: HudColumn;
+    priority: string | null;
+    labels: string[];
+    ready: boolean;
+    blockedBy: string[];
+  }[];
+  prs: { ref: string; pr: number; seat: string; ready: boolean }[];
+  recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
+  limits: { startsLeft: number; messagesLeft: number };
+}
+
+export const FLIGHT_TICKETS_LISTED = 30;
+export const FLIGHT_RECENT_LISTED = 10;
+/** How long Needs you holds a seat's question back while FLIGHT runs. */
+export const FLIGHT_ANSWER_WAIT_MS = 20 * 60_000;
+export const FLIGHT_TICK_MS = 5 * 60_000;
+export const FLIGHT_DEBOUNCE_MS = 20_000;
+export const FLIGHT_REWAKE_MS = 60 * 60_000;
+/** Wakes of one FLIGHT run before it gets a fresh session. */
+export const FLIGHT_MAX_WAKES = 40;
+/** Starts of FLIGHT itself per hour, rotations not counted. */
+export const FLIGHT_STARTS_MAX = 3;
+export const FLIGHT_WAKE_HEAD = "[Mission Control] Wake:";
+export const wakeKey = (runId: string, n: number): string => `flight:wake:${runId}:${n}`;
+export const FLIGHT_NOTE_KEY = "flight:start-failed";
+export const flightStartFailedText = (reason: string): string =>
+  `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
+export const WAKE_ASK =
+  "Act on it with your mc tools (mc flight_state reads it again), then end your turn with your summary for the operator.";
+
+const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/** "2 questions · 1 free seat · 1 parked · 1 PR in review", with singulars; "nothing new" when all are 0. */
+export function wakeSummary(s: FlightState): string {
+  const free = s.seats.filter((x) => x.loop === "build" && x.free).length;
+  const parked = s.seats.filter((x) => x.parked !== null).length;
+  const parts = [
+    s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
+    free > 0 ? counted(free, "free seat", "free seats") : "",
+    parked > 0 ? `${parked} parked` : "",
+    s.prs.length > 0 ? counted(s.prs.length, "PR in review", "PRs in review") : "",
+  ].filter((p) => p !== "");
+  return parts.length === 0 ? "nothing new" : parts.join(" · ");
+}
+
+export function wakeLine(s: FlightState): string {
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)}\n${WAKE_ASK}\n${JSON.stringify(s)}`;
+}
