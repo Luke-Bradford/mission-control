@@ -2804,6 +2804,47 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       expect(asideRun()).toBeNull();
       expect(h.wakes).toEqual([]);
+      // the run is still in review on its seat: the next pass sets it aside again
+      expect(h.asides).toEqual([RUN]);
+      await h.engine.reconcileRun(RUN);
+      expect(h.asides).toEqual([RUN, RUN]);
+      expect(asideRun()).toMatchObject({ wake: false });
+      expect(store.seatSession(SEAT)?.runId).toBeNull();
+    });
+
+    it("the seat's free after B merged (ended by the engine): the waiting run is woken", async () => {
+      await setAside();
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes).toHaveLength(1));
+      expect(asideRun()).toEqual({ worktree: WT, wake: true });
+      h.wakeError = null;
+      emit({ kind: "run-ended", seatId: SEAT, runId: "guido-1:b", endedBy: "engine" });
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(1));
+      await vi.waitFor(() => expect(asideRun()).toBeNull());
+    });
+
+    it("a stale wake flag on a run the loop cannot read is cleared", async () => {
+      await setAside();
+      store.upsertRun({ ...need(store.run(RUN)), ticket: null });
+      store.setRunLoop(RUN, { ...loopOf(), aside: { worktree: WT, wake: true } });
+      await h.engine.reconcileRun(RUN);
+      expect(asideRun()).toEqual({ worktree: WT, wake: false });
+    });
+
+    it("an older run already done does not hold up a younger rework", async () => {
+      await setAside();
+      store.upsertRun(
+        run({
+          id: "guido-1:older",
+          startedAt: START - MIN,
+          seq: 0,
+          ticket: `${REPO}#6`,
+          loop: { ...NEW_LOOP, phase: "done", aside: { worktree: "/w/older", wake: true } },
+        }),
+      );
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
     });
   });
 });

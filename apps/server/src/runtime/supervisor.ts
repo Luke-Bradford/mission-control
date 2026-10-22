@@ -45,6 +45,7 @@ import {
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
   guardHookCommand,
+  HUD_STATE_LABEL,
   inferTicket,
   LOOPBACK_HOST,
   MCP_PATH,
@@ -320,6 +321,12 @@ export interface Supervisor {
    */
   wakeRun(runId: string): Promise<void>;
   /**
+   * The operator ends a run that is set aside, without waking a CLI: the run ends ok (endedBy
+   * operator), its worktree is removed and the seat is left as it is. A 409 when the run is not
+   * set aside.
+   */
+  endAsideRun(runId: string): Promise<void>;
+  /**
    * Takes the crew lock, then resumes every active run once, in the background. Does nothing when
    * disabled; never throws (a failure leaves crew off with a note, or one seat in error).
    */
@@ -407,8 +414,10 @@ interface Live {
   rateLimitedUntil: number | null;
   lastFoldAt: number;
   foldTimer: NodeJS.Timeout | undefined;
-  /** `Date.now()` at a resume's spawn; null for a fresh start. */
+  /** `Date.now()` at a resume's spawn; null for a fresh start, and for a woken run (no carry-on line). */
   resumedAt: number | null;
+  /** `Date.now()` at a resume's spawn, however it was resumed; null for a fresh start. */
+  spawnedAt: number | null;
   /** Stops this seat's events reaching the supervisor (a process being discarded). */
   off: () => void;
   /** The process's last stderr line (cleaned), for the reason when it crashes. */
@@ -631,7 +640,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // Neither a code nor a signal: the CLI never started (its stderr event says why).
       const how = e.code ?? e.signal;
       const resumeWindow = deps.resumeWindowMs ?? RESUME_WINDOW_MS;
-      const failedResume = l.resumedAt !== null && Date.now() - l.resumedAt < resumeWindow;
+      const failedResume = l.spawnedAt !== null && Date.now() - l.spawnedAt < resumeWindow;
       const why = failedResume
         ? RESUME_FAILED
         : how === null
@@ -949,6 +958,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       lastFoldAt: 0,
       foldTimer: undefined,
       resumedAt: resume ? Date.now() : null,
+      spawnedAt: resume ? Date.now() : null,
       off: () => {},
       lastStderr: null,
     };
@@ -1601,6 +1611,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
   }
 
+  /** Ends a run set aside in review: no process, no seat; its worktree is all it holds. */
+  async function endAside(
+    run: Run,
+    info: SeatInfo,
+    worktree: string,
+    endedBy: Exclude<EndedBy, "exit">,
+  ): Promise<void> {
+    const at = now();
+    store.upsertRun({ ...run, endedAt: at, status: "ok" });
+    store.setRunEnded(run.id, at, "ok", endedBy);
+    transcripts.delete(run.transcriptPath);
+    digests.delete(run.id);
+    emit({ kind: "run-ended", seatId: run.agentId, runId: run.id, endedBy });
+    await dropScratch(info, run.id, run.seq, worktree);
+  }
+
   async function endRunByEngine(runId: string): Promise<void> {
     if (!mayAct()) return;
     const run = store.run(runId);
@@ -1613,13 +1639,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // a run set aside in review: no process, no seat; its worktree is all it holds
       const aside = run.loop?.aside;
       if (aside && live.get(seatId)?.run.id !== runId) {
-        const at = now();
-        store.upsertRun({ ...run, endedAt: at, status: "ok" });
-        store.setRunEnded(runId, at, "ok", "engine");
-        transcripts.delete(run.transcriptPath);
-        digests.delete(run.id);
-        emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
-        await dropScratch(info, runId, run.seq, aside.worktree);
+        await endAside(run, info, aside.worktree, "engine");
       }
       return;
     }
@@ -1679,23 +1699,45 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (l === undefined || l.run.id !== runId || !l.session.alive) return null;
     if (l.inTurn || l.ending !== null) return null;
     const worktree = row.worktree;
-    fold(l, true);
-    l.off();
-    live.delete(seatId);
-    // the process's exit takes its token and files (`release`); the run goes on
-    setSeat(seatId, {
-      runId: null,
-      cliSessionId: null,
-      state: "idle",
-      reason: null,
-      worktree: null,
+    // In the seat's chain, behind any line already queued for it.
+    return enqueue(l, async () => {
+      // that line may have started a turn, or the run may be ending: it is not set aside then
+      if (l.inTurn || l.ending !== null || live.get(seatId) !== l || !l.session.alive) return null;
+      fold(l, true);
+      l.off();
+      live.delete(seatId);
+      // the process's exit takes its token and files (`release`); the run goes on
+      setSeat(seatId, {
+        runId: null,
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+      });
+      try {
+        await l.session.close();
+      } catch (e) {
+        log(`${seatId}: could not close the set-aside process: ${errText(e)}`);
+      }
+      return { worktree };
     });
-    try {
-      await l.session.close();
-    } catch (e) {
-      log(`${seatId}: could not close the set-aside process: ${errText(e)}`);
+  }
+
+  /** The operator ends a run set aside in review: no CLI is woken, the seat is left as it is. */
+  async function endAsideRun(runId: string): Promise<void> {
+    const run = store.run(runId);
+    const aside = run?.endedAt === null ? run.loop?.aside : null;
+    if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
+    const info = need(run.agentId);
+    if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+    if (
+      starting.has(run.agentId) ||
+      live.get(run.agentId)?.run.id === runId ||
+      store.seatSession(run.agentId)?.runId === runId
+    ) {
+      throw new SupervisorError(409, NOT_ASIDE);
     }
-    return { worktree };
+    await endAside(run, info, aside.worktree, "operator");
   }
 
   async function wakeRun(runId: string): Promise<void> {
@@ -1746,6 +1788,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       // no "carry on" line goes ahead of the fix the engine is about to send
       l.resumedAt = null;
+      // the seat's last word (a crash, a stop) is overwritten below: keep it as an Activity row
+      const prev = store.seatSession(seatId);
+      if (prev?.state === "error" || prev?.state === "stopped") {
+        const why = prev.reason ? `: ${prev.reason}` : "";
+        try {
+          store.addAgentEvent({
+            agentId: seatId,
+            at: now(),
+            from: prev.state,
+            to: "idle",
+            text: `${HUD_STATE_LABEL[prev.state]} → ${HUD_STATE_LABEL.idle}${why} (run #${run.seq} woken)`,
+          });
+        } catch (e) {
+          log(`${seatId}: could not record its previous state: ${errText(e)}`);
+        }
+      }
       try {
         setSeat(seatId, {
           runId,
@@ -1915,6 +1973,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     setAside,
 
     wakeRun,
+
+    endAsideRun,
 
     send,
 
