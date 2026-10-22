@@ -17,6 +17,13 @@ describe("lanesFor", () => {
     expect(lanes[1]?.url).toBe("https://github.com/users/octo-org/projects/2");
   });
 
+  it("a repo lane links the address GitHub reports for its Project", () => {
+    const projectUrl = "https://github.com/orgs/octo-org/projects/2";
+    const lanes = lanesFor(REPOS.map((r, i) => (i === 0 ? { ...r, projectUrl } : r)));
+    expect(lanes[1]?.url).toBe(projectUrl);
+    expect(lanes[2]?.url).toBe("https://github.com/users/octo-org/projects/3");
+  });
+
   it("a repo lane matches only its repo's items", () => {
     const [all, shopApp] = lanesFor(REPOS);
     const a = boardItem({ repoId: "shop-app" });

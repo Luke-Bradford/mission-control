@@ -1058,6 +1058,17 @@ describe("Setup › Repos", () => {
     await screen.findByRole("region", { name: "shop-app" });
   });
 
+  it("links an organisation Project at the address GitHub reports", async () => {
+    const projectUrl = "https://github.com/orgs/octo-org/projects/2";
+    withProfiles({
+      "/api/repos/profiles": PROFILES.map((p) => (p.id === "shop-app" ? { ...p, projectUrl } : p)),
+    });
+    at("repos");
+    const a = await screen.findByRole("region", { name: "shop-app" });
+    const link = within(a).getByRole("link", { name: "project 2" }) as HTMLAnchorElement;
+    expect(link.href).toBe(projectUrl);
+  });
+
   it("a card per repo: status table, Lacks, priority, budget and loops", async () => {
     withProfiles();
     at("repos");
