@@ -870,7 +870,7 @@ describe("merge steps", () => {
       store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
       gitAnswers = {
         "ls-remote": lsRemote(),
-        "cat-file": "",
+        [HAVE_MAIN]: "",
         [ANCESTOR]: "",
         "merge-base": `${BASE}\n`,
         "rev-list": `${SHA}\n`,
