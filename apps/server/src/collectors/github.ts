@@ -833,6 +833,9 @@ export async function sweepPullRequests(
   return { boards, escalations: false };
 }
 
+/** Per store, the repos whose last board poll came back empty over a board that had cards. */
+const emptyBoards = new WeakMap<Store, Set<string>>();
+
 /**
  * Read-only refresh of one repo's board and escalations. Each part replaces its rows only when it
  * fully succeeded; a failure keeps the previous rows, is recorded in collector status, and never throws.
@@ -851,8 +854,19 @@ export async function collectGithub(
   let truncated: string[] = [];
   try {
     const board = await fetchBoard(repo, gql, now);
-    changes.boards = store.replaceBoard(repo.id, board.items);
-    unmapped = board.unmapped;
+    // GitHub can answer a board read with no items while it is degraded. One empty answer over a
+    // board that had cards keeps the board and says so; a second one in a row is believed.
+    const empties = emptyBoards.get(store) ?? new Set<string>();
+    emptyBoards.set(store, empties);
+    const kept = store.board(repo.id).length;
+    if (board.items.length === 0 && kept > 0 && !empties.has(repo.id)) {
+      empties.add(repo.id);
+      failures.push(`board: board poll returned no items; kept the last board (${kept})`);
+    } else {
+      empties.delete(repo.id);
+      changes.boards = store.replaceBoard(repo.id, board.items);
+      unmapped = board.unmapped;
+    }
   } catch (e) {
     failures.push(`board: ${errMsg(e)}`);
   }

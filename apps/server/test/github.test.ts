@@ -269,6 +269,35 @@ afterEach(() => store.close());
 
 const statusOf = () => store.status().find((s) => s.collector === "github:shop-app");
 
+describe("collectGithub board, an empty answer", () => {
+  const full = () => stub({ pages: [page([item(1, "Todo"), item(2, "Todo")])] }).gql;
+  const empty = () => stub({ pages: [page([])] }).gql;
+
+  it("keeps the last board for one empty poll and marks the row not ok", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + 60_000);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 2]);
+    expect(statusOf()?.ok).toBe(false);
+    expect(statusOf()?.error).toContain("board poll returned no items; kept the last board (2)");
+  });
+
+  it("believes a second empty poll in a row", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + 60_000);
+    await collectGithub(repo, store, empty(), NOW + 120_000);
+    expect(store.board("shop-app")).toEqual([]);
+    expect(statusOf()).toMatchObject({ ok: true, error: null });
+  });
+
+  it("stores a full poll after an empty one, and the row is ok again", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + 60_000);
+    await collectGithub(repo, store, stub({ pages: [page([item(3, "Todo")])] }).gql, NOW + 120_000);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([3]);
+    expect(statusOf()).toMatchObject({ ok: true, error: null });
+  });
+});
+
 describe("collectGithub board", () => {
   it("maps status via statusMap, priority from the Priority field, and keeps labels", async () => {
     const { gql } = stub({
