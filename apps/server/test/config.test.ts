@@ -992,9 +992,13 @@ describe("guard config", () => {
   it("accepts a full_suite entry equal to, or a word-extension of, an allowed prefix", () => {
     const t = text.replace(
       FULL_SUITE_BLOCK,
-      'full_suite: ["pnpm -s test", "pnpm -s vitest run --coverage"]',
+      'full_suite: ["pnpm -s test", "pnpm -s vitest", "pnpm -s vitest run --coverage"]',
     );
-    expect(parse(t).repos[2]?.fullSuite).toEqual(["pnpm -s test", "pnpm -s vitest run --coverage"]);
+    expect(parse(t).repos[2]?.fullSuite).toEqual([
+      "pnpm -s test",
+      "pnpm -s vitest",
+      "pnpm -s vitest run --coverage",
+    ]);
   });
 
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
@@ -1178,6 +1182,23 @@ describe("repo commands and protected files", () => {
     const e = errorOf(() => parse(t));
     expect(e.path).toBe("repos[0].full_suite");
     expect(e.message).toContain('"uv run pytest -x" extends the writer command "uv run pytest"');
+  });
+
+  it("loads a full_suite entry that extends a writer command also listed in full_suite (M3)", () => {
+    const t = withRepo0(
+      '    full_suite: ["uv run pytest -x", "uv run pytest"]\n    commands:\n      writer: ["uv run pytest"]\n      review: []\n',
+    );
+    expect(parse(t).repos[0]?.fullSuite).toEqual(["uv run pytest -x", "uv run pytest"]);
+  });
+
+  it("checks the default writer list too: pnpm -s vitest run alone leaves pnpm -s vitest unlocked (M3)", () => {
+    const e = errorOf(() => parse(withRepo0('    full_suite: ["pnpm -s vitest run"]\n')));
+    expect(e.path).toBe("repos[0].full_suite");
+    expect(e.message).toContain('"pnpm -s vitest run" extends the writer command "pnpm -s vitest"');
+    expect(
+      parse(withRepo0('    full_suite: ["pnpm -s vitest run", "pnpm -s vitest"]\n')).repos[0]
+        ?.fullSuite,
+    ).toEqual(["pnpm -s vitest run", "pnpm -s vitest"]);
   });
 
   it.each(["a/", "a//b", "./a", "a/./b", "."])("refuses protected glob shape %j (M2)", (g) => {

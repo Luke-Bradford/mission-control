@@ -972,17 +972,14 @@ export function parseConfig(
   // A suite the guard would lock for but the CLI then refuses would hold the lock to no purpose.
   cfg.repos.forEach((r, i) => {
     for (const cmd of r.fullSuite ?? []) {
-      // the default writer list is exempt: a repo with no `commands` runs exactly as it did
-      const isDefault =
-        r.commands?.writer.length === DEFAULT_SEAT_COMMANDS.writer.length &&
-        r.commands.writer.every((w, k) => w === DEFAULT_SEAT_COMMANDS.writer[k]);
-      const shorter = isDefault
-        ? undefined
-        : r.commands?.writer.find((w) => cmd.startsWith(`${w} `));
+      // a shorter writer command also runs the suite: it must be a full_suite entry itself
+      const shorter = writerOf(r).find(
+        (w) => cmd.startsWith(`${w} `) && !(r.fullSuite ?? []).includes(w),
+      );
       if (shorter !== undefined) {
         throw new ConfigError(
           `repos[${i}].full_suite`,
-          `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${cmd}" as the writer command instead`,
+          `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${shorter}" in full_suite too, or name "${cmd}" as the writer command instead`,
         );
       }
       if (!seatsMayRun(writerOf(r), cmd)) {
