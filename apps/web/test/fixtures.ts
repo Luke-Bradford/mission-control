@@ -246,6 +246,35 @@ export const CREW_CONFIG: ConfigView = {
   ...CONFIG,
   crew: {
     worktrees: "/mc/crew",
+    roles: [
+      {
+        name: "GUIDO",
+        prompt: "g",
+        model: "sonnet",
+        mode: "writer",
+        loop: "build",
+        tools: [],
+        here: "",
+      },
+      {
+        name: "INCO",
+        prompt: "i",
+        model: "sonnet",
+        mode: "writer",
+        loop: "build",
+        tools: [],
+        here: "",
+      },
+      {
+        name: "RETRO",
+        prompt: "r",
+        model: "opus",
+        mode: "read-only",
+        loop: "none",
+        tools: [],
+        here: "",
+      },
+    ],
     sessions: [
       {
         id: "s1",
