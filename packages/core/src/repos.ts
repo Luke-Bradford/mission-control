@@ -19,6 +19,7 @@ export const MOVE_COLUMNS = [
   "In progress",
   "In review",
   "Blocked",
+  "Done",
 ] as const satisfies readonly HudColumn[];
 export type MoveColumn = (typeof MOVE_COLUMNS)[number];
 
