@@ -32,9 +32,15 @@ Renamed from Control Centre on 2026-10-18.
 
 ## Review
 
-There is no review bot on this repo. Every PR is reviewed by a fresh agent (task reviews plus a
-final whole-branch review on the most capable model) before merge; the operator's standing go-ahead
-stands as approval once that review is clean and CI is green.
+There is no review bot on this repo. Every PR is reviewed by a fresh agent (RETRO, or a fresh
+reviewer) before merge, and the operator's standing go-ahead stands as approval once that review is
+clean and CI is green.
+
+- **Small changes** (Size XS or S, or a `chore`, `test` or `docs` ticket): one review pass is enough,
+  on any capable model.
+- **Features, bug fixes and anything Size M or larger:** the final whole-branch review runs on the most
+  capable model.
+- **Tech sweeps:** periodic sweeps catch what a light review missed.
 
 ## Checks
 
