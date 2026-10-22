@@ -39,16 +39,20 @@ default so this repo is unchanged. Each entry is checked when the config loads:
   would let `uv run git …` past the guard's git rules. Refuse `sh` and `bash` too: the guard reads
   an `sh -c` script (`guard.ts` 875-880), but not a script file the seat wrote. `uv run pytest`
   and `uv run ruff check` are fine.
-- A tool that runs code the seat wrote (pytest running a test, `just test` running a recipe) adds
-  nothing new: seats already write and run test code, and that code is contained by the sandbox,
-  not the allowlist (`runtime.ts` 257-259).
+- This narrows what runs; it does not close it. An allowed `just test` or `make test` still takes
+  trailing words (`--justfile x`, `-f x.mk`, another recipe) that choose what runs, and a tool
+  that runs code the seat wrote (pytest running a test) runs whatever the seat put there. The
+  boundary for all of that is the sandbox (no git writes, no network), not the allowlist
+  (`runtime.ts` 257-259), as it already is for the test code seats write today.
 
 The real risks are elsewhere, and go in the same change:
 
 - **Gate files.** `PROTECTED_FILES` (`runtime.ts` 263) covers JS and pnpm config. A Python repo's
-  gates (`pyproject.toml`, `conftest.py`, `setup.cfg`, `ruff.toml`, `justfile`,
-  `.pre-commit-config.yaml`) are writable, so a seat could weaken a check to pass it. Each repo
-  needs its own protected list beside its commands.
+  gates and install inputs (`pyproject.toml`, `uv.lock`, `uv.toml`, `conftest.py`, `setup.cfg`,
+  `ruff.toml`, `justfile`, `.pre-commit-config.yaml`) are writable, so a seat could weaken a check
+  to pass it, or change what the hub installs (§2). Each repo needs its own protected list beside
+  its commands, and the hub needs it too: the commit tool's protected-path check
+  (`apps/server/src/mcp/tools.ts` 1143, 1256) and the guard context are server code.
 - **Nothing outside the sandbox.** `allowUnsandboxedCommands: false` (555) stays, and
   `excludedCommands` stays unset.
 - **The test lock** needs each runner's single-test form (`pytest tests/x.py::test_y`).
@@ -67,6 +71,13 @@ The hub installs dependencies only when the worktree has `pnpm-lock.yaml`
 The hub needs a per-repo install from the repo's lockfile with the same no-scripts rule; whether
 each tool has one (`uv sync --frozen` can build source packages, which runs their build code) is
 for that ticket to settle.
+
+That install runs on the host, with network, from a branch a seat can write, so it has to keep
+the pnpm path's other defences too: refuse a branch whose copy of any install input differs from
+origin's (`INSTALL_INPUTS`, `checkouts.ts` 33-46, checked at 153-190), and check the tree and the
+disk for symlinks and an installed folder before installing (208-260, run at 601-608), with
+`.venv` in place of `node_modules`. Each tool needs its own install-input set (for uv:
+`pyproject.toml`, `uv.lock`, `uv.toml`), and those files go on the repo's protected list.
 
 Only pnpm's store is moved out of the worktree (`apps/server/src/runtime/supervisor.ts` 712), and
 the commit tool's `add -A` leaves out only `.pnpm-store` (`apps/server/src/mcp/tools.ts` 275).
@@ -109,18 +120,23 @@ allowlist before it runs, so the probe has to be a committed test run through an
 command, which needs a seat run on a branch. The steps: outside the sandbox, `nc -lU
 /tmp/mc-probe.sock` and `python3 -m http.server 8765 --bind 127.0.0.1`; inside, a vitest case that
 calls `net.connect({ path: "/tmp/mc-probe.sock" })` and `net.connect({ host: "127.0.0.1", port: 8765 })`
-and logs `connect` or the error code within 3 s.
+and logs `connect` or the error code within 3 s. Run it twice: once with today's settings, and
+once with `allowUnixSockets` naming the probe socket, where a second socket must still fail.
 
 Decision:
 
 - **Localhost TCP stays closed.** The hub listens on 127.0.0.1:7420 with no sign-in
-  (`apps/server/src/main.ts` 3). Its only request checks are `Host` and `Origin`
-  (`apps/server/src/api.ts` 359-378), and a POST with no `Origin` passes them, as any local process
-  sends. Sandboxed code that could reach localhost could start seats and message them through the
-  API.
+  (`apps/server/src/main.ts` 3). Its only request checks are `Host`, `Content-Type` and `Origin`
+  (`apps/server/src/api.ts` 359-379), and a JSON POST with no `Origin` passes them, as any local
+  process can send. Sandboxed code that could reach localhost could start seats and message them
+  through the API (`api.ts` 965, 979).
 - **A test database** is reached over one named Unix socket (`allowUnixSockets`, per repo) only if
-  the probe shows that the setting admits that socket and nothing else. Until then, tests that need
-  a service don't run in seats; they stay in the repo's CI.
+  the probe shows that the setting admits that socket and nothing else, and only with a database
+  role that cannot reach files or programs. The service runs outside the sandbox with its own
+  rights: a Postgres superuser can `COPY … TO PROGRAM` or `COPY … TO '<file>'`, which gets round
+  `denyWrite`, since that binds only sandboxed code (2026-10-21 spike). So: no superuser, no file
+  or program access. Until then, tests that need a service don't run in seats; they stay in the
+  repo's CI.
 
 ## 5. Accounts
 
@@ -137,28 +153,40 @@ list.
 
 ## Also checked
 
-- **Hard rules.** A repo with no `## Mission Control` block gets `DEFAULT_HARD_RULES`
-  (`apps/server/src/engine/rules.ts` 106), which name this repo's paths; for another repo only
-  `CLAUDE.md` and `.github/**` match. Nothing auto-merges in `draft`, so no change: a repo crewed in
-  `merge` carries its own block.
+- **Hard rules.** A repo with no `## Mission Control` block gets `DEFAULT_REPO_RULES`
+  (`apps/server/src/engine/rules.ts` 106), and a block whose `hard_rules` is missing or `null` gets
+  the same list (`rules.ts` 141): `DEFAULT_HARD_RULES` (`packages/core/src/repo-rules.ts` 33), which
+  names this repo's paths, so for another repo only `CLAUDE.md` and `.github/**` match. Nothing
+  auto-merges in `draft`. Before another repo runs in `merge`, the hub should refuse it unless its
+  block sets `hard_rules` (follow-up 9).
 - **CI files.** `PROTECTED_FILES` holds `.github/**` for every repo. Edit and Write are denied
-  there, and the commit tool leaves protected files out of a commit
-  (`apps/server/src/mcp/tools.ts` 1256), so a seat's change to CI never reaches its branch, even
-  one its test code wrote.
+  there, and the commit tool refuses a commit that holds a protected path
+  (`apps/server/src/mcp/tools.ts` 1256, 1289-1306), so a seat's change to CI never reaches its
+  branch, even one its test code wrote.
 - **The repo's own agent settings.** `--restricted` ignores the repo's `.claude` settings and hooks
   (`runtime.ts` 178-183). The hub's guard and sandbox apply instead; the repo's own hooks don't run.
 
 ## Follow-ups
 
+Hard-rule files are marked; the operator merges those. Files outside a ticket's area (`roles/**`,
+`config.example.yaml`, docs) are listed in the ticket for the operator.
+
 1. **area:server**: `repos[].commands` and `repos[].protected` in the config, with the entry rules
-   in §1, defaulting to today's pnpm list.
+   in §1, defaulting to today's pnpm list (`config.example.yaml`: hard-rule).
 2. **area:core**: seat allowlists, protected-file rules and the test lock's single-file rule built
    from the repo's commands and protected list (hard-rule files). Depends on 1.
-3. **area:server**: the brief and role prompts take the repo's commands and areas, not pnpm and
-   this repo's (hard-rule files). Depends on 1.
-4. **area:server**: the hub installs a non-pnpm repo's dependencies from its lockfile without
-   running package code, and keeps tool caches out of the worktree and its commits.
-5. **area:server**: Projects read through `repositoryOwner` (collector, Setup, repo profile), and
+3. **area:server**: the hub passes each repo's lists through: `crewCliArgs`' input, the commit
+   tool's protected-path check, `seatsMayRun`, and the guard context (hard-rule files). Depends
+   on 2.
+4. **area:server**: the brief takes the repo's commands and areas, not pnpm and this repo's
+   (`brief.ts`: hard-rule; the matching `roles/**` text is the operator's). Depends on 1.
+5. **area:server**: the hub installs a non-pnpm repo's dependencies from its lockfile without
+   running package code, with the install-input and tree checks in §2, and keeps tool caches out
+   of the worktree and its commits (`runtime/**`, `mcp/**`: hard-rule).
+6. **area:server**: Projects read through `repositoryOwner` (collector, Setup, repo profile), and
    health names an SSO refusal with its fix.
-6. **area:web**: the board link uses `/orgs/` for an organisation's Project. Depends on 5.
-7. **research**: the Unix-socket probe in §4, and the `allowUnixSockets` decision it settles.
+7. **area:web**: the board link uses `/orgs/` for an organisation's Project. Depends on 6.
+8. **research** (no area: a probe, not a build): the Unix-socket probe in §4, and the
+   `allowUnixSockets` decision it settles, with the database-role rule.
+9. **area:server**: the hub refuses `merge` for a repo whose rules don't set `hard_rules`, naming
+   the key to add.
