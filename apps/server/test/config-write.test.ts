@@ -11,15 +11,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { NewRepo } from "@mc/core";
+import type { NewRepo, SeatInput } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig } from "../src/config.ts";
+import { loadConfig, seatInput } from "../src/config.ts";
 import {
   addRepo,
   CONFIG_BACKUPS_KEEP,
   ConfigWriteError,
   NewRepoBody,
+  noSessionText,
   RepoLocation,
+  SEATS_CHANGED,
+  SeatsBody,
+  setSessionSeats,
 } from "../src/config-write.ts";
 
 // Lets a test make the final rename fail (the disk or directory refusing the swap mid-write), or
@@ -419,5 +423,146 @@ describe("NewRepoBody", () => {
     expect(RepoLocation.safeParse({ github: "o/r", project: 0 }).success).toBe(false);
     expect(NewRepoBody.shape.github).toBe(RepoLocation.shape.github);
     expect(NewRepoBody.shape.project).toBe(RepoLocation.shape.project);
+  });
+});
+
+describe("setSessionSeats", () => {
+  const SESSION = "mission-control";
+  const read = () => loadConfig(path).crew?.sessions[0]?.seats.map(seatInput) ?? [];
+  const lines = () => readFileSync(path, "utf8").split("\n");
+  const line = (id: string) => lines().find((l) => l.includes(`id: ${id},`)) ?? "";
+  const seat = (id: string): SeatInput => {
+    const found = read().find((s) => s.id === id);
+    if (!found) throw new Error(`no seat ${id}`);
+    return found;
+  };
+  const inco2: SeatInput = {
+    id: "inco-2",
+    role: "INCO",
+    accountId: "claude-main",
+    model: "sonnet",
+    area: ["apps/docs/**"],
+  };
+  const set = (seats: SeatInput[], base = read()) =>
+    setSessionSeats(path, SESSION, base, seats, NOW);
+  const change = (id: string, over: Partial<SeatInput>) =>
+    set(read().map((s) => (s.id === id ? { ...s, ...over } : s)));
+
+  it("adds a seat", async () => {
+    const before = readFileSync(path);
+    const { config, backup } = await set([...read(), inco2]);
+    expect(line("inco-2")).toBe(
+      "        - { id: inco-2, role: INCO, account_id: claude-main, model: sonnet, area: [ apps/docs/** ] }",
+    );
+    const text = readFileSync(path, "utf8");
+    for (const comment of COMMENTED.split("\n").filter((l) => l.trim().startsWith("#"))) {
+      expect(text).toContain(comment);
+    }
+    expect(readFileSync(backup).equals(before)).toBe(true);
+    expect(statSync(backup).mode & 0o777).toBe(0o600);
+    expect(config.crew?.sessions[0]?.seats.map((s) => s.id)).toContain("inco-2");
+  });
+
+  it("edits a seat in place", async () => {
+    writeFileSync(
+      path,
+      COMMENTED.replace(
+        "        - { id: guido-1",
+        "        # the server seat\n        - { id: guido-1",
+      ),
+    );
+    const retro = line("retro-1");
+    await change("guido-1", { model: "opus" });
+    expect(seat("guido-1").model).toBe("opus");
+    const at = lines().findIndex((l) => l.includes("id: guido-1,"));
+    expect(lines()[at - 1]).toBe("        # the server seat");
+    expect(line("retro-1")).toBe(retro);
+  });
+
+  it("removes a seat", async () => {
+    const before = read();
+    await set(before.filter((s) => s.id !== "retro-1"));
+    expect(line("retro-1")).toBe("");
+    expect(read()).toEqual(before.filter((s) => s.id !== "retro-1"));
+  });
+
+  it("sets and clears optional keys", async () => {
+    await change("guido-1", { effort: "high" });
+    expect(line("guido-1")).toContain("effort: high");
+    expect(seat("guido-1").effort).toBe("high");
+    const { effort: _e, ...noEffort } = seat("guido-1");
+    await set(read().map((s) => (s.id === "guido-1" ? noEffort : s)));
+    expect(line("guido-1")).not.toContain("effort");
+    await change("retro-1", { mode: "scratch" });
+    expect(line("retro-1")).toContain("mode: scratch");
+    const { mode: _m, ...noMode } = seat("retro-1");
+    await set(read().map((s) => (s.id === "retro-1" ? noMode : s)));
+    expect(line("retro-1")).not.toContain("mode:");
+    await set(
+      read()
+        .filter((s) => s.id === "inco-1")
+        .map((s) => ({ ...s, area: [] })),
+    );
+    expect(line("inco-1")).not.toContain("area");
+  });
+
+  it("removes every seat as an empty list", async () => {
+    await set([]);
+    expect(lines()).toContain("      seats: []");
+    expect(read()).toEqual([]);
+  });
+
+  it("a stale base is a conflict", async () => {
+    const stale = read().filter((s) => s.id !== "retro-1");
+    const e = await writeError(set([], stale));
+    expect(e.kind).toBe("conflict");
+    expect(e.message).toBe(SEATS_CHANGED);
+    expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+    expect(backups()).toEqual([]);
+  });
+
+  it("an unknown session is missing", async () => {
+    const e = await writeError(setSessionSeats(path, "nope", [], [], NOW));
+    expect(e.kind).toBe("missing");
+    expect(e.message).toBe(noSessionText("nope"));
+  });
+
+  it("is refused by the loader with its message", async () => {
+    const e = await writeError(
+      set([...read(), { ...inco2, id: "inco-3", area: ["apps/web/src/**"] }]),
+    );
+    expect(e.kind).toBe("invalid");
+    expect(e.message).toContain("overlap");
+    expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+    expect(backups()).toEqual([]);
+  });
+
+  it("refuses a symlinked config", async () => {
+    const target = join(dir, "real.yaml");
+    writeFileSync(target, COMMENTED);
+    rmSync(path);
+    symlinkSync(target, path);
+    const e = await writeError(setSessionSeats(path, SESSION, [], [], NOW));
+    expect(e.kind).toBe("current");
+  });
+
+  it("is serialised with addRepo", async () => {
+    const base = read();
+    await Promise.all([addRepo(path, repo(), NOW), set([...base, inco2])]);
+    const loaded = loadConfig(path);
+    expect(loaded.repos.map((r) => r.id)).toContain("studio");
+    expect(loaded.crew?.sessions[0]?.seats.map((s) => s.id)).toContain("inco-2");
+  });
+});
+
+describe("SeatsBody", () => {
+  const s = { id: "a-1", role: "GUIDO", accountId: "x", model: "sonnet", area: [] };
+  it("needs unique ids, safe areas and no unknown keys", () => {
+    expect(SeatsBody.safeParse({ base: [], seats: [s] }).success).toBe(true);
+    expect(SeatsBody.safeParse({ base: [], seats: [s, s] }).success).toBe(false);
+    expect(SeatsBody.safeParse({ base: [], seats: [{ ...s, area: ["../x"] }] }).success).toBe(
+      false,
+    );
+    expect(SeatsBody.safeParse({ base: [], seats: [{ ...s, x: 1 }] }).success).toBe(false);
   });
 });

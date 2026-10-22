@@ -281,6 +281,8 @@ async function main(): Promise<void> {
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath,
     crewReloader,
+    // A preview writes only a config file it was explicitly pointed at, never the live one.
+    seatWrites: !preview || process.env.MC_CONFIG !== undefined,
     supervisor,
     engine,
     updater,

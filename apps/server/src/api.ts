@@ -78,6 +78,8 @@ import {
   duplicateReason,
   NewRepoBody,
   RepoLocation,
+  SeatsBody,
+  setSessionSeats,
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
@@ -178,6 +180,8 @@ export interface AppDeps {
   configPath?: string;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
   crewReloader?: CrewReloader;
+  /** True when this server may write crew seats to `configPath` (not a preview on the live file). */
+  seatWrites?: boolean;
   /** Starts, messages and ends the crew's seats; absent: crew routes answer 409 (disabled). */
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
@@ -870,6 +874,45 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (result.error !== null) return reply.code(400).send({ error: result.error });
         return result;
       });
+
+      // Replaces one session's seats in the config.yaml the server started with (no request names a
+      // path), then reloads so the change applies live. A POST so the CSRF hook covers it.
+      api.post<{ Params: { sessionId: string } }>(
+        "/crew/sessions/:sessionId/seats",
+        async (req, reply) => {
+          const { configPath, crewReloader, seatWrites } = deps;
+          if (configPath === undefined || crewReloader === undefined || !seatWrites) {
+            return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+          }
+          const body = SeatsBody.safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          let result: Awaited<ReturnType<typeof setSessionSeats>>;
+          try {
+            result = await setSessionSeats(
+              configPath,
+              req.params.sessionId,
+              body.data.base,
+              body.data.seats,
+              now(),
+            );
+          } catch (e) {
+            if (e instanceof ConfigWriteError) {
+              const status = { missing: 404, conflict: 409, invalid: 400, current: 409 }[
+                e.kind as string
+              ];
+              if (status !== undefined) return reply.code(status).send({ error: e.message });
+            }
+            const detail =
+              e instanceof ConfigWriteError
+                ? { kind: e.kind, reason: e.message }
+                : { kind: "unexpected", reason: e instanceof Error ? e.name : typeof e };
+            reply.log.warn(detail, "config write failed");
+            return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+          }
+          const changes = await crewReloader.reload();
+          return { backup: basename(result.backup), changes };
+        },
+      );
 
       // Reader: docs/runbook.md#reloading-the-config (by hand until Setup › Sessions, #22, reads it)
       api.get("/crew/changes", async (): Promise<CrewChanges> => {

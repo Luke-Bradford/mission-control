@@ -242,12 +242,12 @@ export const ticketState = z.enum([
 const DEFAULT_MAX_SEATS = 8;
 export const DEFAULT_RUN_TOKEN_BUDGET = 400_000;
 export const SEAT_ID = /^[a-z][a-z0-9-]{0,30}$/;
-const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
+export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
 const LAUNCHD_LABEL = /^[A-Za-z0-9._-]+$/;
 const nonEmpty = z.string().min(1);
 /** A repo-relative glob: no `/`, `./` or `~` start, no `..` segment, none of `{ [ ? ! , ( ) \\` or whitespace. */
-const areaGlob = nonEmpty.refine(
+export const areaGlob = nonEmpty.refine(
   (g) =>
     !g.startsWith("/") &&
     !g.startsWith("./") &&
