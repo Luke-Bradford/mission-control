@@ -464,6 +464,8 @@ export interface RepoView {
   github: string;
   /** GitHub Projects (v2) number. */
   project: number;
+  /** The Project's address as GitHub reports it (`ProjectV2.url`); null or absent until the hub has read the board. */
+  projectUrl?: string | null;
 }
 
 /** `POST /api/repos`: a repo to append to config.yaml (written as its snake_case fields). */
@@ -606,6 +608,8 @@ export interface RepoProfile {
   id: RepoId;
   github: string;
   project: number;
+  /** The Project's address as GitHub reports it (`ProjectV2.url`); null or absent until the hub has read the board. */
+  projectUrl?: string | null;
   statuses: { status: string; state: TicketState; column: HudColumn; items: number }[];
   missingColumns: HudColumn[];
   /** Stored board items by where their priority came from. */
