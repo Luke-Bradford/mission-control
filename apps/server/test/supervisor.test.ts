@@ -330,6 +330,20 @@ describe("startRun claims the ticket", () => {
     expect(calls).toEqual([["issue", "edit", "42", "--repo", "o/mc", "--add-assignee", "me"]]);
   });
 
+  it("claims once for a writer and never for a planner or a reviewer", async () => {
+    const rolesDir = join(dir, "roles");
+    mkdirSync(rolesDir);
+    for (const r of ["FAO", "GUIDO", "RETRO"]) writeFileSync(join(rolesDir, `${r}.md`), `# ${r}\n`);
+    const claim = vi.fn(async () => {});
+    const { sup } = make({ rolesDir, claim });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    expect(claim).toHaveBeenCalledTimes(1);
+    await sup.startRun("fao-1", 43);
+    await sup.startRun("retro", 44);
+    expect(claim).toHaveBeenCalledTimes(1);
+  });
+
   it("starts nothing when the hub's login is unknown", async () => {
     const { calls, gh } = fakeGh();
     const { sup } = make({ claim: claimAs(gh, dir, () => null) });
