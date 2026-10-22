@@ -1555,6 +1555,8 @@ describe("closesIssue", () => {
     ["closes **#42**", false],
     ["`Fixes #42`", false],
     ["```\nFixes #42\n```", false],
+    ["```\nfoo\nFixes #42\n```", false],
+    ["~~~\na\nFixes #42\n~~~", false],
     ["<!-- Fixes #42 -->", false],
     ["Fixes github.com/o/mc/pull/42", false],
     ["Fixes: #42", true],

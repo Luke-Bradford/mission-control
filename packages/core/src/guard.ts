@@ -1627,7 +1627,10 @@ export function unclosedMarkdown(md: string): boolean {
 export function closesIssue(md: string, { repo, issue }: { repo: string; issue: number }): boolean {
   const own = repo.toLowerCase();
   const text = decodeCharRefs(md)
-    .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/gm, "")
+    .replace(
+      /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|(?![\s\S]))/gm,
+      "",
+    )
     .replace(/`[^`\n]*`/g, "")
     .replace(/<!--[\s\S]*?-->/g, "");
   return [...text.matchAll(STRICT_CLOSING_REF)].some((m) => closesOwn(m, own, issue));
