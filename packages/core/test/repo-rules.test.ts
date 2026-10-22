@@ -24,6 +24,7 @@ describe("DEFAULT_REPO_RULES", () => {
       areas: {},
       hardRules: DEFAULT_HARD_RULES,
       hardRulesSet: false,
+      hardRulesBy: "operator",
       alwaysAsk: [],
     });
   });

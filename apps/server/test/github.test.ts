@@ -1189,6 +1189,28 @@ describe("collectGithub size", () => {
 describe("collectGithub pull requests", () => {
   const prs = () => store.pullRequests("shop-app");
 
+  it("stores each PR's author and assignees", async () => {
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(20, {
+            author: { login: "octo" },
+            assignees: { nodes: [{ login: "a" }, { login: "b" }] },
+          }),
+          pull(21, { author: null }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    const by = new Map(prs().map((p) => [p.number, p]));
+    expect(
+      [by.get(20), by.get(21)].map((p) => ({ author: p?.author, assignees: p?.assignees })),
+    ).toEqual([
+      { author: "octo", assignees: ["a", "b"] },
+      { author: null, assignees: [] },
+    ]);
+  });
+
   it("maps state, review, ci, branch and links the ticket by branch", async () => {
     const { gql } = stub({
       prPages: [

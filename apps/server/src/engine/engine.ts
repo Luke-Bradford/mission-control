@@ -24,6 +24,7 @@ import {
   EVIDENCE_RULING_PREFIX,
   fillLoopText,
   fixSentText,
+  hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
   hudColumnOf,
@@ -253,6 +254,12 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     ruleNotes.delete(repoId);
     hardRulesSet.set(repoId, r.hardRulesSet);
+    // kept for Needs you, which says who a hard-rule flag waits on without reading the rules
+    const bySetting = hardRulesBySettingKey(repoId);
+    if (store.getSetting(bySetting) !== r.hardRulesBy) {
+      store.setSetting(bySetting, r.hardRulesBy);
+      bus.emit("attention");
+    }
     noteHardRules(repoId, r.hardRulesSet);
     return r;
   }
@@ -1011,13 +1018,19 @@ export function createEngine(deps: EngineDeps): Engine {
     return findPr(run, loop)?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
   }
 
-  function sweepNotes(): void {
+  async function sweepNotes(): Promise<void> {
     const at = now();
     for (const n of store.notes()) {
       const run = n.runId === null ? null : store.run(n.runId);
       if (run === null || run.endedAt === null) continue;
-      // a merged run's leftover branch stays the operator's to clear: its PR is done by design
-      if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) continue;
+      // a merged run's leftover branch waits (its PR is done by design) until the branch is gone
+      if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) {
+        if (await publisher.localBranchGone(run)) {
+          store.clearNote(n.key, at);
+          bus.emit("attention");
+        }
+        continue;
+      }
       // (and a merged run's cleanup note: the PR is done, so the branch it names still waits)
       if (n.key === `cleanup:${run.id}` && mergedRun(run)) continue;
       if (n.kind === "blocked" ? blockedGone(run) : n.kind !== "question") {
@@ -1304,7 +1317,9 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         }
         for (const r of loopRuns()) void reconcileRun(r.id);
-        sweepNotes();
+        void sweepNotes().catch((e: unknown) => {
+          log(`start: ${e instanceof Error ? e.message : String(e)}`);
+        });
         void kickReviews();
       } catch (e) {
         log(`start: ${e instanceof Error ? e.message : String(e)}`);
@@ -1322,7 +1337,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const runs = loopRuns();
       await Promise.all(runs.map((r) => reconcileRun(r.id)));
       await refreshRuleNotes(runs);
-      sweepNotes();
+      await sweepNotes();
       untakeStale();
       await takeForSeats();
       await kickReviews();

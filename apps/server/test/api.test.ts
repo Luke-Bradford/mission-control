@@ -47,7 +47,7 @@ import {
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_PARKED_NOTE } from "../src/api.ts";
+import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_OPEN_NOTE } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
@@ -1724,14 +1724,24 @@ describe("crew and attention", () => {
     expect(items.find((i) => i.key === key)).toBeUndefined();
   });
 
-  it("POST /api/attention/:key/dismiss answers 404 for a key that is not an open parked note and 400 for a body", async () => {
-    store.raiseNote(parked("review:r1:abc", "review"));
+  it("POST /api/attention/:key/dismiss dismisses a hard-rule flag", async () => {
+    store.raiseNote({ ...parked("flag:r1:hard-rules:abc"), kind: "flag" });
+    const key = "note:flag:r1:hard-rules:abc";
+    const r = await postBody(`/api/attention/${encodeURIComponent(key)}/dismiss`, {});
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ dismissed: key });
+    const items = (await get("/api/attention")).json() as AttentionItem[];
+    expect(items.find((i) => i.key === key)).toBeUndefined();
+  });
+
+  it("POST /api/attention/:key/dismiss answers 404 for a key that is not an open note and 400 for a body", async () => {
     const events: string[] = [];
     bus.subscribe((t) => events.push(t));
-    for (const key of ["esc:shop-app#9", "note:nope", "note:review:r1:abc", "blocked:r1:0"]) {
+    // a seat's open question (ask:) and a bare note key are not open notes
+    for (const key of ["esc:shop-app#9", "ask:1", "note:nope", "blocked:r1:0"]) {
       const r = await postBody(`/api/attention/${encodeURIComponent(key)}/dismiss`, {});
       expect(r.statusCode, key).toBe(404);
-      expect(r.json(), key).toEqual({ error: NO_PARKED_NOTE });
+      expect(r.json(), key).toEqual({ error: NO_OPEN_NOTE });
     }
     store.raiseNote(parked("blocked:r1:0"));
     const bad = await postBody(
@@ -2182,6 +2192,8 @@ describe("boards, escalations, health", () => {
       mergedAt: null,
       headSha: null,
       mergeable: null,
+      author: null,
+      assignees: [] as string[],
     } as const;
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
@@ -2208,6 +2220,8 @@ describe("boards, escalations, health", () => {
       mergedAt: null,
       headSha: null,
       mergeable: null,
+      author: null,
+      assignees: [],
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
     expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([pr(4, "shop-app#9")]);

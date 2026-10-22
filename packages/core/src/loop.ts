@@ -93,6 +93,13 @@ export const MERGE_STEP_WORDS = {
 } as const satisfies Partial<Record<MergeStep, string>>;
 /** The blocked note for a merged run's local branch that could not be deleted. */
 export const cleanupBranchNoteKey = (runId: string): string => `cleanup-branch:${runId}`;
+/** A housekeeping note (a branch or a worktree that could not be removed): the controller's. */
+export const isCleanupNoteKey = (key: string): boolean =>
+  key.startsWith("cleanup-") || key.startsWith("cleanup:");
+/** The flag note while a run's PR touches hard-rule files, per pushed sha. */
+export const hardRulesFlagKey = (runId: string, sha: string): string =>
+  `flag:${runId}:hard-rules:${sha}`;
+export const isHardRulesFlagKey = (key: string): boolean => /^flag:[^:]+:hard-rules:/.test(key);
 /** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
 export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
 export const noShaDeleteText = (ref: string): string =>
@@ -725,7 +732,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
     });
   }
   if (loop.touches !== null && loop.touches.paths.length > 0) {
-    notes.set(`flag:${runId}:hard-rules:${loop.touches.sha}`, {
+    notes.set(hardRulesFlagKey(runId, loop.touches.sha), {
       noteKind: "flag",
       text: `${ticket.ref} touches hard-rule files: ${loop.touches.paths.join(", ")}`,
     });

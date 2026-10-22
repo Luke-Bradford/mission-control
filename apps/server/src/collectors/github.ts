@@ -172,6 +172,8 @@ const PRS_QUERY = `query PullRequests($owner: String!, $name: String!, $after: S
       pageInfo { hasNextPage endCursor }
       nodes {
         number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable
+        author { login }
+        assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 3) { nodes { number } }
         commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
       }
@@ -886,6 +888,8 @@ function mapPr(
     mergedAt: typeof n.mergedAt === "string" ? ms(n.mergedAt) : null,
     headSha: typeof headOid === "string" && headOid !== "" ? headOid : null,
     mergeable: lookup(MERGEABLE, n.mergeable),
+    author: str(path(n, "author", "login")) || null,
+    assignees: logins(n.assignees),
   };
 }
 

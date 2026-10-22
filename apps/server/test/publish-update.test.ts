@@ -240,4 +240,12 @@ describe("deleteLocalBranch (real git)", () => {
     expect(await publisher().deleteLocalBranch(r)).toEqual({ ok: true });
     expect(git(clone, "branch", "--list", BRANCH)).toBe("");
   });
+
+  it("localBranchGone is false while the branch exists and true once it is deleted", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    git(clone, "worktree", "remove", "--force", worktree);
+    expect(await publisher().localBranchGone(run({}))).toBe(false);
+    git(clone, "branch", "-D", BRANCH);
+    expect(await publisher().localBranchGone(run({}))).toBe(true);
+  });
 });
