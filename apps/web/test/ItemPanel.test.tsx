@@ -54,6 +54,48 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ItemPanel, Ask FLIGHT", () => {
+  const withFlight = (flight: unknown) => {
+    const fn = stubFetch({
+      "/api/attention": [item()],
+      "/api/escalations": [escalation({ question: QUESTION })],
+      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": flight,
+      "POST /api/seats/flight-1/message": {},
+    });
+    render(<ItemPanel />);
+    act(() => openItem(item().key));
+    return fn;
+  };
+
+  it("is switched off with no live seat", async () => {
+    withFlight({ seat: null, decisions: [] });
+    await screen.findByText("Which eviction policy should the quote cache use?");
+    expect((screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Send" }).getAttribute("title")).toBe(
+      FLIGHT_NOT_RUNNING,
+    );
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("posts the text, led by the item's title, to the live FLIGHT seat", async () => {
+    const fn = withFlight({
+      seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
+      decisions: [],
+    });
+    const input = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: " why? " } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(input.value).toBe(""));
+    const call = fn.mock.calls.find(([p]) => p === "/api/seats/flight-1/message");
+    const text = JSON.parse(call?.[1]?.body as string).text as string;
+    expect(text).toContain("Choose a cache eviction policy");
+    expect(text.endsWith("why?")).toBe(true);
+  });
+});
+
 describe("ItemPanel, an escalation with a question", () => {
   it("heads it with the kind, the agent and when it opened", async () => {
     const { container } = open([item()]);
