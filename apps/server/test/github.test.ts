@@ -289,6 +289,20 @@ describe("collectGithub board, an empty answer", () => {
     expect(statusOf()).toMatchObject({ ok: true, error: null });
   });
 
+  it("stores at once a poll whose items are all filtered out (GitHub did answer)", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, stub({ pages: [page([item(4, "Weird")])] }).gql, NOW + 60_000);
+    expect(store.board("shop-app")).toEqual([]);
+  });
+
+  it("does not count empty polls on either side of a failed read as in a row", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + 60_000);
+    await collectGithub(repo, store, stub({ boardError: new Error("boom") }).gql, NOW + 120_000);
+    await collectGithub(repo, store, empty(), NOW + 180_000);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 2]);
+  });
+
   it("stores a full poll after an empty one, and the row is ok again", async () => {
     await collectGithub(repo, store, full(), NOW);
     await collectGithub(repo, store, empty(), NOW + 60_000);

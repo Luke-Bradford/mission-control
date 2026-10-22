@@ -364,6 +364,8 @@ export function errMsg(e: unknown): string {
 interface BoardResult {
   items: BoardItem[];
   unmapped: number;
+  /** Every item GitHub returned, before any is filtered out. */
+  raw: number;
 }
 
 async function fetchBoard(
@@ -374,6 +376,7 @@ async function fetchBoard(
   const [owner = "", repoName = ""] = repo.github.split("/");
   const items: BoardItem[] = [];
   let unmapped = 0;
+  let raw = 0;
   // Any page may carry the project id; it is applied to every item once the pages are read.
   let projectId: string | null = null;
   let after: string | null = null;
@@ -385,6 +388,7 @@ async function fetchBoard(
     }
     const projectNodeId = path(data, "user", "projectV2", "id");
     if (typeof projectNodeId === "string") projectId = projectNodeId;
+    raw += conn.nodes.length;
     for (const node of conn.nodes) {
       if (!isObj(node) || !isObj(node.content) || typeof node.content.number !== "number") continue;
       const c = node.content;
@@ -452,7 +456,7 @@ async function fetchBoard(
     }
     const pi = isObj(conn.pageInfo) ? conn.pageInfo : {};
     if (pi.hasNextPage !== true || typeof pi.endCursor !== "string") {
-      return { items: items.map((i) => ({ ...i, projectId })), unmapped };
+      return { items: items.map((i) => ({ ...i, projectId })), unmapped, raw };
     }
     after = pi.endCursor;
   }
@@ -859,7 +863,7 @@ export async function collectGithub(
     const empties = emptyBoards.get(store) ?? new Set<string>();
     emptyBoards.set(store, empties);
     const kept = store.board(repo.id).length;
-    if (board.items.length === 0 && kept > 0 && !empties.has(repo.id)) {
+    if (board.raw === 0 && kept > 0 && !empties.has(repo.id)) {
       empties.add(repo.id);
       failures.push(`board: board poll returned no items; kept the last board (${kept})`);
     } else {
@@ -868,6 +872,8 @@ export async function collectGithub(
       unmapped = board.unmapped;
     }
   } catch (e) {
+    // A failed read in between means the empty answers were not in a row.
+    emptyBoards.get(store)?.delete(repo.id);
     failures.push(`board: ${errMsg(e)}`);
   }
   try {
