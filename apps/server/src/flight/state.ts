@@ -42,6 +42,13 @@ export function flightSeat(
   return null;
 }
 
+/** The ids FLIGHT can answer for: its own session's seats other than FLIGHT itself. */
+export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
+  const found = flightSeat(config);
+  if (found === null) return new Set();
+  return new Set(found.session.seats.filter((s) => s.id !== found.seat.id).map((s) => s.id));
+}
+
 /** That seat's row holds an unended run in a state of ACTIVE_SEAT_STATES. */
 export function flightLive(config: CcConfig, store: Store): boolean {
   const found = flightSeat(config);

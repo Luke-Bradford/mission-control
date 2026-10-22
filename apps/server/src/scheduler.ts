@@ -28,6 +28,7 @@ import {
   collectGithub,
   fetchTicket,
   githubToken,
+  MISSING_SCOPE_PREFIX,
   makeGql,
   missingScopeLine,
   sweepPullRequests,
@@ -479,13 +480,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
           });
-          // Once per repo, after its first poll: the health row has it, the server log should too.
-          if (!scopeLogged.has(repo.id)) {
-            scopeLogged.add(repo.id);
-            const error = store.status().find((s) => s.collector === collector)?.error;
-            const line = error ? missingScopeLine(error) : null;
-            if (line !== null) deps.log?.(`github ${repo.id}: ${line}`);
+          const error = store.status().find((s) => s.collector === collector)?.error;
+          if (error?.includes(MISSING_SCOPE_PREFIX)) {
+            // `gh auth refresh` issues a new token: read it again on the next tick.
+            gql = null;
+            // Once per repo, after its first poll: the health row has it, the server log should too.
+            if (!scopeLogged.has(repo.id)) {
+              const line = missingScopeLine(error);
+              if (line !== null) deps.log?.(`github ${repo.id}: ${line}`);
+            }
           }
+          scopeLogged.add(repo.id);
         }
       }
       if (!(client instanceof Error)) {
