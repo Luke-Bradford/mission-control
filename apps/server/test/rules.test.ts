@@ -64,6 +64,15 @@ describe("parseRepoRules", () => {
     expect(r.alwaysAsk).toEqual(["migrations", "deps"]);
   });
 
+  it("parses needs, defaults it, and refuses an unknown need", () => {
+    expect(parseRepoRules(block("mc:\n  needs: [done_when]\n")).needs).toEqual(["done_when"]);
+    expect(parseRepoRules(block("mc:\n  promote_backlog: true\n")).needs).toEqual([
+      "done_when",
+      "size",
+    ]);
+    expect(() => parseRepoRules(block("mc:\n  needs: [owner]\n"))).toThrow(/mc\.needs/);
+  });
+
   it("names an unknown key", () => {
     expect(() => parseRepoRules(block("mc:\n  foo: 1\n"))).toThrow(RepoRulesError);
     expect(() => parseRepoRules(block("mc:\n  foo: 1\n"))).toThrow(/foo/);

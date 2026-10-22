@@ -20,6 +20,7 @@ export const MC_TOOL_NAMES = {
   startSeat: "start_seat",
   messageSeat: "message_seat",
   flightState: "flight_state",
+  promote: "promote",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -39,6 +40,7 @@ export const MC_TOOLS = {
   startSeat: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.startSeat}`,
   messageSeat: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.messageSeat}`,
   flightState: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.flightState}`,
+  promote: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.promote}`,
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
