@@ -1082,7 +1082,7 @@ describe("scheduler", () => {
       await none.stop();
       const autoUpdate = vi.fn(async () => "waiting");
       const s = createScheduler({
-        config,
+        config: { ...config, updates: { hub: "auto", cli: "off" } },
         store,
         bus,
         now: () => NOW,
@@ -1094,6 +1094,24 @@ describe("scheduler", () => {
       expect(autoUpdate).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
       expect(autoUpdate).toHaveBeenCalledTimes(2);
+      await s.stop();
+    });
+
+    it("never runs the check with updates.hub off, timer or direct tick", async () => {
+      vi.useFakeTimers();
+      const autoUpdate = vi.fn(async () => "waiting");
+      const s = createScheduler({
+        config: { ...config, updates: { hub: "off", cli: "off" } },
+        store,
+        bus,
+        now: () => NOW,
+        collectors: stubs(),
+        autoUpdate,
+      });
+      s.start();
+      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
+      await s.tick("update");
+      expect(autoUpdate).not.toHaveBeenCalled();
       await s.stop();
     });
   });

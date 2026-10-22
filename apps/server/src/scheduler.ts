@@ -550,6 +550,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       await engine?.tick();
     },
     update: async () => {
+      if (config.updates?.hub !== "auto") return;
       await deps.autoUpdate?.();
     },
     cli: async () => {
@@ -762,7 +763,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const job of JOBS) {
         // no engine, no engine timer (a scheduler without one has nothing to tick)
         if (job === "engine" && engine === null) continue;
-        if (job === "update" && deps.autoUpdate === undefined) continue;
+        // `updates.hub: off` (the default) starts no update timer
+        if (job === "update" && (deps.autoUpdate === undefined || config.updates?.hub !== "auto"))
+          continue;
         // `updates.cli: off` (the default) starts no update timer
         if (job === "cli" && config.updates?.cli !== "between_runs") continue;
         const every = () => {

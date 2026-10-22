@@ -271,15 +271,15 @@ async function main(): Promise<void> {
 
   // `updates.hub: auto`: the scheduler's `update` job runs Update when it would pass (never on a preview).
   const autoUpdate =
-    updater === undefined || hubRoot === null || config.updates?.hub !== "auto"
+    updater === undefined
       ? undefined
       : createAutoUpdate({
-          enabled: true,
+          enabled: config.updates?.hub === "auto",
           updater,
           blocked: () =>
             crewRefusal(config, supervisor, (id) => store.seatSession(id)) ??
             (lock.state().holder !== null ? "the test lock is held" : null),
-          headSha: () => headSha(hubRoot),
+          headSha: () => (hubRoot === null ? Promise.resolve(null) : headSha(hubRoot)),
           // the hub restarts at once; the Activity page reads the line after it
           record: (text) => store.addHubEvent(text, Date.now()),
         });
