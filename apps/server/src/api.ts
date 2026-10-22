@@ -38,6 +38,7 @@ import {
   type McToolName,
   METER_FULL_PCT,
   NEW_LOOP,
+  pace5h,
   projectAtReset,
   type RepoProfile,
   type RepoView,
@@ -1216,6 +1217,7 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
           projected: null,
           stopForecast: null,
           fullAt: fullAt5h(fiveH, resetAt),
+          paceReady: pace5h(fiveH) !== null,
         });
         continue;
       }

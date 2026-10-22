@@ -1841,6 +1841,7 @@ describe("limits", () => {
       projected: null,
       stopForecast: null,
       fullAt: fullAt5h(fiveSamples, NOW + HOUR),
+      paceReady: true,
       resetAt: NOW + HOUR,
       alertAt: 70,
       stopAt: 80,
@@ -1850,6 +1851,19 @@ describe("limits", () => {
     });
     // No samples for claude-main: no rows rather than invented numbers.
     expect(rows.filter((r) => r.accountId === "claude-main")).toEqual([]);
+  });
+
+  it("a 5h row's paceReady is false when its samples span under 30 minutes, true from 30", async () => {
+    const resetAt = NOW + 2 * HOUR; // the window is 3h old
+    const fiveRow = async () =>
+      ((await get("/api/limits")).json() as Record<string, unknown>[]).find(
+        (r) => r.window === "5h",
+      );
+    store.addUsage(sample({ window: "5h", at: NOW - 40 * 60e3, pct: 10, resetAt }));
+    store.addUsage(sample({ window: "5h", at: NOW - 15 * 60e3, pct: 20, resetAt }));
+    expect(await fiveRow()).toMatchObject({ paceReady: false, fullAt: null });
+    store.addUsage(sample({ window: "5h", at: NOW - 10 * 60e3, pct: 21, resetAt }));
+    expect(await fiveRow()).toMatchObject({ paceReady: true });
   });
 
   it("a 7d row's fullAt is when a rising pace reaches 100%, before the reset", async () => {
