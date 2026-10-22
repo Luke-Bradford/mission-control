@@ -409,16 +409,26 @@ an `ask` payload; `@CAPCOM` in any message is parsed into a Needs-you item (spec
 is the CAPCOM↔FLIGHT thread, live over SSE. A message to a seat that is not running is queued and
 delivered at its next turn (CAT §2.4.4).
 
-## 11. Hub updates without stopping work (#10)
+## 11. Updates without stopping work (#10; built by #94-#97)
 
-Config gains `update: {auto: off|when_idle, cli: off|when_idle}`. With `when_idle`, the hub applies
-Update (pull, build, restart) when main is ahead and **no run is mid-turn, no hub check is running,
-the test lock is free, and no live loop is within 5 minutes of its next fire** (the collectors know
-the fire times). Seats
-resume on `--resume` as today. `cli: when_idle` does the same for `claude` (and later `codex`)
-version bumps through the existing updater, with the same idle rule, and records the version in each
-run. The Update button shows "queued · waiting for idle" when a run is mid-turn, and FLIGHT can say
-"update when idle" from its tools. The hub still never restarts itself for any other reason.
+Decided 22 Oct by the operator: updates never wait for the whole crew to be idle, and never
+interrupt a run in progress. Config gains `updates: {hub: off|auto, cli: off|between_runs}`; FLIGHT
+may apply either within that policy.
+
+- **The CLI (`cli: between_runs`).** Seats run with the CLI's own auto-updater off, so a run's CLI
+  never changes under it. The hub installs a newer `claude` when one is out, at any time: a seat
+  starts `claude` through `PATH` for each run and resume, so a running seat keeps the binary it
+  started with, and each seat picks up the new version when its next run starts (a fresh process
+  per ticket). After installing, a smoke test (`claude --version` and a one-line `claude -p` on the
+  cheapest model) must pass, or the hub starts no run on the new version and raises a note. Each
+  run records its CLI version.
+- **The hub (`hub: auto`).** Update must not stop running seats. Seats are detached from the hub's
+  process, so a seat survives the hub's restart and the hub reattaches to it. The guard hook and the
+  mc tools wait out a short hub gap, failing closed after a limit, rather than failing a tool call.
+  Until that is built, Update keeps today's behaviour: it waits until no seat is mid-turn, stops the
+  crew, restarts, and seats resume with `--resume`.
+
+The hub still never restarts itself for any other reason.
 
 ## 12. Security model
 
