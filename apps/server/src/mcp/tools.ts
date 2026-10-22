@@ -16,10 +16,12 @@ import {
   BLOCKING_SEVERITIES,
   clashText,
   closesIssue,
+  commitMarkersText,
   commitNamedRefText,
   commitReferenceText,
   commitSecretText,
   committedText,
+  commitUnresolvedText,
   crewAuthorName,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
@@ -49,6 +51,7 @@ import {
   formerSubmoduleText,
   isProtectedPath,
   MC_BAD_ARGS,
+  MC_COMMIT_MERGE_UNKNOWN,
   MC_COMMIT_TOO_BIG,
   MC_COMMIT_TOO_SLOW,
   MC_EVIDENCE_MAX,
@@ -282,6 +285,9 @@ export const COMMIT_ADD_PATHSPEC = [
   `:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`,
 ] as const;
 
+/** Paths named on one git command line, so a large commit stays inside the argument limit. */
+const PATHSPEC_CHUNK = 200;
+
 /** Index modes the commit tool refuses: a symlink, a gitlink (nested repository). */
 const SPECIAL_MODES = new Set(["120000", "160000"]);
 
@@ -354,6 +360,12 @@ function liveRunOf(store: Store, runId: string): Run | null {
   const run = store.run(runId);
   if (run === null || run.endedAt !== null) return null;
   return store.seatSession(run.agentId)?.runId === runId ? run : null;
+}
+
+/** The run, unended and set aside for review (off its seat), else null. */
+function asideRunOf(store: Store, runId: string): Run | null {
+  const run = store.run(runId);
+  return run !== null && run.endedAt === null && run.loop?.aside ? run : null;
 }
 
 /** The run's issue number from its ticket (`{repo}#{n}`), or null. */
@@ -478,7 +490,8 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
   const known = await readKnown(deps, "push");
 
   return deps.inClone(session.checkout, async () => {
-    const run = liveRunOf(store, runId);
+    // an aside run is off its seat; its branch is still the clone's to push
+    const run = liveRunOf(store, runId) ?? asideRunOf(store, runId);
     if (run === null || run.branch === null) return ENDED;
     const branch = run.branch;
     try {
@@ -564,14 +577,17 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         });
       if (commits.length === 0) return { text: NOTHING_TO_PUSH };
 
-      // 3. every new commit is the commit tool's, and none is a merge
+      // 3. every new commit is Mission Control's, and a merge commit only if it is in run_commits
+      // (the engine's merge of main, or the commit tool's after a conflict)
       const ours = store.branchCommits(run.repoId, branch);
+      if (commits.some((c) => c.parents > 1 && !ours.has(c.sha))) {
+        return { text: MC_PUSH_MERGE, isError: true };
+      }
       const foreign = commits.filter((c) => !ours.has(c.sha)).map((c) => c.sha);
       // A refusal reaches the operator once, as the engine's Blocked note (the push's text is its reason):
       // no Needs-you item of its own here.
       if (foreign.length > 0) return { text: pushForeignText(foreign), isError: true };
       if (commits.some((c) => c.parents === 0)) return { text: MC_PUSH_ROOT, isError: true };
-      if (commits.some((c) => c.parents > 1)) return { text: MC_PUSH_MERGE, isError: true };
 
       // 4. the clone's objects are sound
       try {
@@ -588,6 +604,8 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
         [
           "log",
           "-p",
+          // a merge commit shows no diff without this: the lines a resolution added are scanned
+          "--remerge-diff",
           "--text",
           "--no-textconv",
           "--no-ext-diff",
@@ -1073,13 +1091,29 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         a: string[],
         o: { env?: NodeJS.ProcessEnv; timeoutMs?: number; maxBuffer?: number } = {},
       ) => git(worktree, a, common, { gitDir, ...o });
-      const reset = () => g(["reset", "-q"], { timeoutMs: CREW_GIT_SLOW_MS });
+      /** The merge in progress in the worktree (MERGE_HEAD), or null. */
+      let mergeHead: string | null = null;
+      // A pathless reset deletes MERGE_HEAD: during a merge the index stays as the seat left it.
+      const reset = async (): Promise<void> => {
+        if (mergeHead === null) await g(["reset", "-q"], { timeoutMs: CREW_GIT_SLOW_MS });
+      };
 
       const head = await g(["symbolic-ref", "--quiet", "HEAD"]).then(
         (s) => s.trim(),
         () => null, // detached
       );
       if (head !== `refs/heads/${branch}`) return { text: notOnBranchText(branch), isError: true };
+      mergeHead = await g(["rev-parse", "-q", "--verify", "MERGE_HEAD^{commit}"]).then(
+        (s) => s.trim(),
+        (e: unknown) => {
+          if ((e as { code?: unknown } | null)?.code === 1) return null;
+          throw e;
+        },
+      );
+      // only the merge of main that Mission Control started may be committed
+      if (mergeHead !== null && mergeHead !== run.loop?.mainMerge?.mainSha) {
+        return { text: MC_COMMIT_MERGE_UNKNOWN, isError: true };
+      }
 
       let committed = false;
       /** HEAD before the commit ran; null until it starts. */
@@ -1208,6 +1242,35 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: clashNotes.length > 0 ? `${text}\n\n${clashNotes.join("\n")}` : text };
       }
 
+      /** Those of the staged `paths` with a conflict marker line (`<<<<<<< ` or `>>>>>>> `). */
+      async function withConflictMarkers(paths: readonly string[]): Promise<string[]> {
+        const found: string[] = [];
+        for (let i = 0; i < paths.length; i += PATHSPEC_CHUNK) {
+          const out = await g(
+            [
+              "--literal-pathspecs",
+              "grep",
+              "--cached",
+              "-I",
+              "-l",
+              "-z",
+              "-E",
+              "-e",
+              "^(<<<<<<<|>>>>>>>) ",
+              "--",
+              ...paths.slice(i, i + PATHSPEC_CHUNK),
+            ],
+            { timeoutMs: CREW_GIT_SLOW_MS },
+          ).catch((e: unknown) => {
+            // exit 1: no match
+            if ((e as { code?: unknown } | null)?.code === 1) return "";
+            throw e;
+          });
+          found.push(...out.split("\0").filter((p) => p !== ""));
+        }
+        return found;
+      }
+
       async function checkAndCommit(): Promise<Result> {
         // --ignore-submodules=none: a `.gitmodules` `ignore = all` would hide a staged gitlink
         const entries = stagedEntries(
@@ -1244,6 +1307,33 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           ),
         );
 
+        // During a merge of main, a staged path whose index entry equals MERGE_HEAD's brings in
+        // only main's version of it.
+        const fromMain = new Set<string>();
+        if (mergeHead !== null) {
+          const left = (
+            await g(["ls-files", "-u", "-z"], {
+              timeoutMs: CREW_GIT_SLOW_MS,
+              maxBuffer: INDEX_LIST_MAX_BUFFER,
+            })
+          )
+            .split("\0")
+            .flatMap((l) => (l.includes("\t") ? [l.slice(l.indexOf("\t") + 1)] : []));
+          if (left.length > 0) {
+            return { text: commitUnresolvedText([...new Set(left)]), isError: true };
+          }
+          const differs = new Set(
+            (
+              await g(["diff", "--cached", "--name-only", "--no-renames", "-z", mergeHead, "--"], {
+                timeoutMs: CREW_GIT_SLOW_MS,
+                maxBuffer: INDEX_LIST_MAX_BUFFER,
+              })
+            ).split("\0"),
+          );
+          for (const p of paths) if (!differs.has(p)) fromMain.add(p);
+        }
+        const own = paths.filter((p) => !fromMain.has(p));
+
         const outside: string[] = [];
         const others = new Map<string, string[]>();
         const kept: string[] = [];
@@ -1254,6 +1344,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           if (NOT_PRINTABLE_ASCII.test(p)) {
             // fail closed, before any other check: no name of this kind is committed
             foreign.push(p);
+          } else if (fromMain.has(p)) {
+            // main's own version of the path: no area, protected or stray check applies
+            if (special.has(p)) links.push(p);
           } else if (isProtectedPath(p)) {
             kept.push(p);
           } else if (!pathInArea(seat.area, p)) {
@@ -1306,12 +1399,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           ];
           return { text: lines.join("\n"), isError: true };
         }
-        if (paths.length === 0) return { text: NOTHING_TO_COMMIT };
+        // a merge commits even with nothing to add: it joins main's history
+        if (paths.length === 0 && mergeHead === null) return { text: NOTHING_TO_COMMIT };
+
+        if (mergeHead !== null) {
+          const marked = await withConflictMarkers(
+            entries.flatMap((e) =>
+              e.newPath !== null && !fromMain.has(e.newPath) ? [e.newPath] : [],
+            ),
+          );
+          if (marked.length > 0) return { text: commitMarkersText(marked), isError: true };
+        }
 
         // Two open runs changing one file may give two conflicting PRs. That is only worth a
         // note (the controller resolves a conflict at merge); it never stops a commit, and a run
         // whose changes cannot be read adds no note.
-        const clash = await clashesWith(deps, run, paths, known);
+        const clash = await clashesWith(deps, run, own, known);
         if (!("unreadable" in clash)) {
           clashNotes = clash.clashes.map((c) =>
             clashText(c.paths, seatCallSign(c.seatId), c.ticket),
@@ -1322,23 +1425,32 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         // only the operator can): every staged added line, read as the push reads them (as stored,
         // renames as whole files), and the message. `scanSecrets` reads log output, so the
         // staged diff goes in as one commit with no message.
-        const staged = await g(
-          [
-            "diff",
-            "--cached",
-            "--text",
-            "--no-textconv",
-            "--no-ext-diff",
-            "--no-renames",
-            "--no-color",
-            "--no-relative",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "HEAD",
-            "--",
-          ],
-          { timeoutMs: CREW_GIT_SLOW_MS, maxBuffer: PUSH_SCAN_MAX_BUFFER },
-        );
+        // (a merge leaves out the paths that are main's own: they are on GitHub already)
+        const stagedDiff = (only: readonly string[]) =>
+          g(
+            [
+              ...(only.length > 0 ? ["--literal-pathspecs"] : []),
+              "diff",
+              "--cached",
+              "--text",
+              "--no-textconv",
+              "--no-ext-diff",
+              "--no-renames",
+              "--no-color",
+              "--no-relative",
+              "--src-prefix=a/",
+              "--dst-prefix=b/",
+              "HEAD",
+              "--",
+              ...only,
+            ],
+            { timeoutMs: CREW_GIT_SLOW_MS, maxBuffer: PUSH_SCAN_MAX_BUFFER },
+          );
+        let staged = "";
+        if (fromMain.size === 0) staged = await stagedDiff([]);
+        for (let i = 0; fromMain.size > 0 && i < own.length; i += PATHSPEC_CHUNK) {
+          staged += await stagedDiff(own.slice(i, i + PATHSPEC_CHUNK));
+        }
         const secret = [
           ...scanSecrets(`\0commit staged\n${staged}`, known),
           ...scanText("commit message", message, known),

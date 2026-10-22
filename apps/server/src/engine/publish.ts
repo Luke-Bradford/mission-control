@@ -30,6 +30,7 @@ import {
   type Run,
 } from "@mc/core";
 import {
+  COMMIT_ADD_PATHSPEC,
   editRunPrBody,
   issueOf,
   type McToolsDeps,
@@ -42,7 +43,7 @@ import {
   readKnown,
   seatPlace,
 } from "../mcp/tools.ts";
-import { CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
+import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { crewDir } from "../store.ts";
 
@@ -72,6 +73,13 @@ export const MERGE_NOT_RUN_BRANCH = "the branch is not this run's own";
 export const MERGE_BRANCH_MOVED = "the branch has commits that were not merged";
 export const MERGE_PR_NOT_RUNS =
   "the PR is not this run's own branch into the repo's default branch";
+/** Why merging main into a run's branch was refused without a merge. */
+export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the session clone";
+export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
+export const UPDATE_FAILED = "merging main into the branch failed";
+export const UPDATE_UP_TO_DATE = "the branch already contains main";
+/** The author and committer of the merge commit the engine makes. */
+export const MC_MERGE_AUTHOR = "Mission Control";
 /** The most of gh's or git's stderr a refusal's text carries, in characters. */
 const STEP_STDERR_MAX = 300;
 
@@ -94,6 +102,17 @@ export interface GateFacts {
 }
 export type GateResult =
   | { ok: true; facts: GateFacts }
+  | { ok: false; text: string; transient: boolean };
+
+/**
+ * Merging main into a run's branch: `merged` (a new merge commit, recorded in run_commits),
+ * `conflict` (the markers and MERGE_HEAD stay in the worktree), or `wait` (the worktree has
+ * changes, so nothing was merged).
+ */
+export type UpdateBranchResult =
+  | { ok: true; kind: "merged"; sha: string }
+  | { ok: true; kind: "conflict"; files: string[] }
+  | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
 
 export interface Publisher {
@@ -126,6 +145,11 @@ export interface Publisher {
     sha: string,
     known?: (GateFacts & { sha: string }) | null,
   ): Promise<GateResult>;
+  /**
+   * Merges `mainSha` into the run's branch in `worktree` (the seat's, or the aside run's), never by
+   * moving the ref: a checked-out worktree's index would go stale.
+   */
+  updateBranch(run: Run, mainSha: string, worktree: string): Promise<UpdateBranchResult>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run): Promise<PublishResult>;
   /** Merges the run's PR with a merge commit, only if its head is `sha` and it contains main. */
@@ -564,6 +588,101 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const strays = names.filter((p) => !pathInArea(seat.area, p) || isProtectedPath(p));
         return { ok: true, facts: { mainSha, containsMain, hubOnly, strays } };
       });
+    },
+
+    async updateBranch(run, mainSha, worktree) {
+      const branch = ownBranch(run);
+      if (branch === null) return final(MERGE_NOT_RUN_BRANCH);
+      if (!SHA.test(mainSha)) return final(MERGE_BAD_SHA);
+      const place = seatPlace(deps.config, run.agentId);
+      if (place === null) return final(MERGE_NO_SEAT);
+      const git = deps.git ?? crewGit;
+      const checkout = place.session.checkout;
+      try {
+        return await deps.inClone(checkout, async (): Promise<UpdateBranchResult> => {
+          const common = await realpath(join(checkout, ".git"));
+          // the worktree's git dir as the clone registered it: never as the worktree's pointer says
+          const gitDir = await adminDirOf(common, worktree);
+          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+          const g: G = (a) =>
+            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          const w = (a: string[], env?: NodeJS.ProcessEnv): Promise<string> =>
+            git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS, env });
+          const unmerged = async (): Promise<string[]> =>
+            (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
+              .split("\0")
+              .filter((p) => p !== "");
+
+          const head = await w(["symbolic-ref", "--quiet", "HEAD"]).then(
+            (s) => s.trim(),
+            () => null, // detached
+          );
+          if (head !== `refs/heads/${branch}`) return final(MERGE_NOT_RUN_BRANCH);
+          const mergeHead = await w(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).then(
+            (s) => s.trim(),
+            (e: unknown) => {
+              if ((e as { code?: unknown } | null)?.code === 1) return null;
+              throw e;
+            },
+          );
+          if (mergeHead !== null) {
+            // this merge's conflict, left by a pass whose answer was lost: report it again
+            const files = mergeHead === mainSha ? await unmerged() : [];
+            return files.length > 0
+              ? { ok: true, kind: "conflict", files }
+              : final(UPDATE_MERGE_IN_PROGRESS);
+          }
+          const status = await w([
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            ...COMMIT_ADD_PATHSPEC,
+          ]);
+          if (status !== "") return { ok: true, kind: "wait" };
+
+          const { defaultBranch } = await originNow(g, null);
+          await fetchMain(g, defaultBranch, mainSha);
+          const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+          try {
+            await w(
+              [
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "rerere.enabled=false",
+                "merge",
+                "--no-ff",
+                "--no-edit",
+                "--no-verify",
+                "-m",
+                `Merge main into ${branch}`,
+                mainSha,
+              ],
+              { GIT_AUTHOR_NAME: MC_MERGE_AUTHOR, GIT_COMMITTER_NAME: MC_MERGE_AUTHOR },
+            );
+          } catch (e) {
+            if ((e as { code?: unknown } | null)?.code === 1) {
+              const files = await unmerged();
+              if (files.length > 0) return { ok: true, kind: "conflict", files };
+            }
+            await w(["merge", "--abort"]).catch(() => {});
+            return final(`${UPDATE_FAILED}: ${errText(e)}`);
+          }
+          const sha = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+          if (sha === before) return transient(UPDATE_UP_TO_DATE);
+          deps.store.addRunCommit({
+            runId: run.id,
+            repoId: run.repoId,
+            branch,
+            sha,
+            at: (deps.now ?? Date.now)(),
+          });
+          return { ok: true, kind: "merged", sha };
+        });
+      } catch (e) {
+        return transient(`git failed: ${errText(e)}`);
+      }
     },
 
     async markReady(run) {
