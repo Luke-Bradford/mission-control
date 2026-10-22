@@ -385,6 +385,22 @@ describe("collectGithub board, a stale project item list", () => {
     expect(statusOf()).toMatchObject({ ok: true, error: null });
   });
 
+  it("recovers an issue whose number another repo's card on the list shares", async () => {
+    const { gql } = stub({
+      pages: [
+        page([
+          item(1, "Todo"),
+          item(5, "Todo", {
+            extra: { repository: { name: "other", owner: { login: "octo-org" } } },
+          }),
+        ]),
+      ],
+      issues: [issue(5, [{ project: 2, status: "Todo" }])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 5]);
+  });
+
   it("counts an unmapped item once when both sources return it", async () => {
     const { gql } = stub({
       pages: [page([item(1, "Weird")])],

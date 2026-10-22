@@ -474,8 +474,15 @@ async function fetchBoard(
     if (typeof projectNodeUrl === "string") projectUrl = projectNodeUrl;
     raw += conn.nodes.length;
     for (const node of conn.nodes) {
-      const n = path(node, "content", "number");
-      if (typeof n === "number") listed.add(n);
+      // another repo's card can share a number with an issue of this repo the list left out
+      const content = path(node, "content");
+      if (
+        isObj(content) &&
+        typeof content.number === "number" &&
+        inRepo(content, owner, repoName)
+      ) {
+        listed.add(content.number);
+      }
       const mapped = boardItem(repo, node, now);
       if (mapped === "unmapped") unmapped++;
       else if (mapped !== null) items.push(mapped);
@@ -521,6 +528,11 @@ async function fetchBoard(
   throw new Error("open issues have too many pages");
 }
 
+/** Whether an issue node (with `repository { name owner { login } }`) belongs to owner/repoName. */
+const inRepo = (issue: Record<string, unknown>, owner: string, repoName: string): boolean =>
+  str(path(issue, "repository", "name")).toLowerCase() === repoName.toLowerCase() &&
+  str(path(issue, "repository", "owner", "login")).toLowerCase() === owner.toLowerCase();
+
 /**
  * One board item from a project item node whose `content` is its issue; null when the node is not
  * an issue of this repo or is a stale done card, "unmapped" when its Status is not mapped.
@@ -534,12 +546,7 @@ function boardItem(
   if (!isObj(node) || !isObj(node.content) || typeof node.content.number !== "number") return null;
   const c = node.content;
   // a project can hold issues from other repos; their numbers would open the wrong ticket here
-  if (
-    str(path(c, "repository", "name")).toLowerCase() !== repoName.toLowerCase() ||
-    str(path(c, "repository", "owner", "login")).toLowerCase() !== owner.toLowerCase()
-  ) {
-    return null;
-  }
+  if (!inRepo(c, owner, repoName)) return null;
   const status = singleSelect(node.status);
   const state: TicketState | undefined =
     status !== null && Object.hasOwn(repo.statusMap, status) ? repo.statusMap[status] : undefined;
