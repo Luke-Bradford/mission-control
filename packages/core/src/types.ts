@@ -384,7 +384,9 @@ interface LimitRowBase {
 /**
  * One `/api/limits` row. Projection applies to 7d windows only; a 5h row shows `used` + `resetAt`
  * and a `fullAt`. `fullAt`: when the window reaches 100% at its current pace (null when it will
- * not before the reset); the 7d pace is `pace24h`, the 5h pace `pace5h`.
+ * not before the reset); the 7d pace is `pace24h`, the 5h pace `pace5h`. A 5h row's `paceReady` is
+ * false when the server had too few samples to compute that pace (so a null `fullAt` means "too
+ * little history", not "not filling"). Optional only until the web reads it.
  */
 export type LimitRow =
   | (LimitRowBase & {
@@ -393,7 +395,13 @@ export type LimitRow =
       stopForecast: number | null;
       fullAt: number | null;
     })
-  | (LimitRowBase & { window: "5h"; projected: null; stopForecast: null; fullAt: number | null });
+  | (LimitRowBase & {
+      window: "5h";
+      projected: null;
+      stopForecast: null;
+      fullAt: number | null;
+      paceReady?: boolean;
+    });
 
 /** What changed, for SSE subscribers (`event: changed`): the web client refetches that topic. */
 export type Topic =
