@@ -464,19 +464,24 @@ describe("setSessionSeats", () => {
   });
 
   it("edits a seat in place", async () => {
+    const retroBlock =
+      "        - id: retro-1 # reviewer\n          role: RETRO\n          # which account\n          account_id: claude-main\n          model: opus";
     writeFileSync(
       path,
       COMMENTED.replace(
         "        - { id: guido-1",
         "        # the server seat\n        - { id: guido-1",
+      ).replace(
+        "        - { id: retro-1, role: RETRO, account_id: claude-main, model: opus }",
+        retroBlock,
       ),
     );
-    const retro = line("retro-1");
     await change("guido-1", { model: "opus" });
     expect(seat("guido-1").model).toBe("opus");
     const at = lines().findIndex((l) => l.includes("id: guido-1,"));
     expect(lines()[at - 1]).toBe("        # the server seat");
-    expect(line("retro-1")).toBe(retro);
+    // the untouched block seat keeps its own comments: its node is reused, not rebuilt
+    expect(readFileSync(path, "utf8")).toContain(`${retroBlock}\n`);
   });
 
   it("removes a seat", async () => {
