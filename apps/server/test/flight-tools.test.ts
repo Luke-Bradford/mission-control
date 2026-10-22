@@ -12,6 +12,7 @@ import {
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
+  MC_TICKET_READERS_ONLY,
   NEW_LOOP,
   type RepoRules,
   type Run,
@@ -39,7 +40,10 @@ const seat = (id: string, role: string, extra: Partial<CrewSeatConfig> = {}): Cr
 const config = (): CcConfig => ({
   operator: { id: "op", timezone: "Europe/London" },
   accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
-  repos: [{ id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "draft" }],
+  repos: [
+    { id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "draft" },
+    { id: "other", github: "o/other", project: 2, statusMap: {}, autonomy: "draft" },
+  ],
   loops: [],
   poll: { usageMinutes: 30, githubSeconds: 60 },
   crew: {
@@ -52,10 +56,17 @@ const config = (): CcConfig => ({
         checkout: "/tmp/none/clone",
         seats: [
           seat("flight-1", "FLIGHT"),
+          seat("fao-1", "FAO"),
           seat("guido-1", "GUIDO", { area: ["apps/**"] }),
           seat("inco-1", "INCO", { area: ["apps/web/**"] }),
           seat("retro-1", "RETRO", { mode: "scratch" }),
         ],
+      },
+      {
+        id: "s2",
+        repoId: "other",
+        checkout: "/tmp/none/clone2",
+        seats: [seat("fao-2", "FAO")],
       },
     ],
   },
@@ -73,6 +84,7 @@ let startCalls: unknown[][];
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
 let fetchCalls: number[];
+let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let engineOn: boolean;
 let lifts: boolean;
@@ -133,6 +145,7 @@ beforeEach(() => {
   messageCalls = [];
   engineCalls = [];
   fetchCalls = [];
+  fetchRepos = [];
   busyNow = [];
   engineOn = false;
   lifts = true;
@@ -163,7 +176,8 @@ beforeEach(() => {
       status: () => ({ on: engineOn, note: null }),
     },
     rules: async () => rulesNow,
-    fetchTicket: async (_repo, n) => {
+    fetchTicket: async (repo, n) => {
+      fetchRepos.push(repo.id);
       fetchCalls.push(n);
       return fetchImpl(n);
     },
@@ -399,10 +413,47 @@ describe("read_ticket", () => {
     expect(fetchCalls).toHaveLength(60);
   });
 
-  it("refuses a seat that is not FLIGHT and bad issue numbers", async () => {
+  it("answers a planner seat, from its own repo", async () => {
+    live("fao-1", "r-fao");
+    fetchImpl = async (n) => ticket(n, { title: "Referred", body: "Text" });
+    expect(await call("read_ticket", { issue: 7 }, ctx("fao-1", "r-fao"))).toEqual({
+      text: "#7 Referred [not on the board]\n\nText",
+    });
+    expect(fetchCalls).toEqual([7]);
+    expect(fetchRepos).toEqual(["mc"]);
+  });
+
+  it("reads a planner's own session's repo, not FLIGHT's", async () => {
+    live("fao-2", "r-fao2");
+    fetchImpl = async (n) => ticket(n);
+    expect(
+      (await call("read_ticket", { issue: 7 }, ctx("fao-2", "r-fao2"))).isError,
+    ).toBeUndefined();
+    expect(fetchRepos).toEqual(["other"]);
+  });
+
+  it("counts a planner's reads apart from FLIGHT's", async () => {
+    live("fao-1", "r-fao");
+    fetchImpl = async (n) => ticket(n);
+    for (let i = 0; i < 60; i++) await call("read_ticket", { issue: 1 });
+    expect((await call("read_ticket", { issue: 1 })).isError).toBe(true);
+    expect(
+      (await call("read_ticket", { issue: 1 }, ctx("fao-1", "r-fao"))).isError,
+    ).toBeUndefined();
+  });
+
+  it("refuses an ended planner run", async () => {
+    live("fao-1", "r-fao");
+    store.upsertRun(run("r-fao", "fao-1", { endedAt: NOW + 1, status: "ok" }));
+    expect(await call("read_ticket", { issue: 1 }, ctx("fao-1", "r-fao"))).toEqual(
+      refused(MC_RUN_ENDED),
+    );
+  });
+
+  it("refuses a seat that is neither FLIGHT nor a planner, and bad issue numbers", async () => {
     live("guido-1", "r-guido");
     expect(await call("read_ticket", { issue: 1 }, ctx("guido-1", "r-guido"))).toEqual(
-      refused(MC_FLIGHT_ONLY),
+      refused(MC_TICKET_READERS_ONLY),
     );
     for (const bad of [0, 1.5, 2 ** 31, "1"]) {
       expect((await call("read_ticket", { issue: bad })).text.startsWith(MC_BAD_ARGS)).toBe(true);
