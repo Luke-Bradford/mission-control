@@ -413,11 +413,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const started = lastHour(["start"], at);
     if (started >= flightStartCap(config)) return fail(capText("started tickets", started));
-    const again = store.countFlightDecisions({
-      kinds: ["start"],
-      since: at - FLIGHT_TICKET_RESTART_MS,
-      ref,
-    });
+    // a planner start and a developer start on one ticket are separate jobs: each counts only its own kind
+    const sameKind = (flightSeat(config)?.session.seats ?? []).filter(
+      (s) => (seatDef(s).loop === "plan") === planner,
+    );
+    const again = sameKind.reduce(
+      (n, s) =>
+        n +
+        store.countFlightDecisions({
+          kinds: ["start"],
+          since: at - FLIGHT_TICKET_RESTART_MS,
+          ref,
+          seatId: s.id,
+        }),
+      0,
+    );
     if (again > 0) return fail(restartRefusedText(ref));
     const card = store.board(repo.id).find((i) => i.issueNumber === issue);
     if (card === undefined) return fail(notOnBoardText(ref));
@@ -455,9 +465,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         n === "done_when" ? !hasDoneWhenSection(body) : card.size === null,
       );
       if (missing.length > 0) return fail(startMissingNeedsText(ref, missing));
-      if (card.size !== null && !PLAN_SIZES.includes(card.size)) {
-        return fail(smallNoPlanText(ref, card.size));
-      }
+      // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
+      if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
+      if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
     } else if (column !== "Ready" && !card.labels.includes(READY_LABEL)) {
       let body: string;
       try {

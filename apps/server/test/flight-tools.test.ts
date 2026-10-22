@@ -867,6 +867,22 @@ describe("start_seat planner", () => {
     ]);
   });
 
+  it("a planner start does not hold back a developer start on the same ticket", async () => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "draft";
+    expect(await plan()).toEqual({ text: "Started FAO-1 on mc#7." });
+    nowMs += 60 * 60_000;
+    board(sized({ status: "Ready" }));
+    expect(
+      await call("start_seat", { seat: "guido-1", issue: 7, basis: "planned, ready" }),
+    ).toEqual({ text: "Started GUIDO-1 on mc#7." });
+    expect(startCalls.map((c) => c.slice(0, 2))).toEqual([
+      ["fao-1", 7],
+      ["guido-1", 7],
+    ]);
+  });
+
   it("refuses a ticket that has a plan", async () => {
     fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
     expect(await plan()).toEqual(refused("Not started: mc#7 already has a ## Plan."));
@@ -889,6 +905,17 @@ describe("start_seat planner", () => {
     );
     board(sized({ size: null }));
     expect((await plan()).text).toContain("no done_when or size");
+  });
+
+  it("refuses a ticket with no Size even when the repo does not need one", async () => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    rulesNow = { ...rulesNow, needs: ["done_when"] };
+    board(sized({ size: null }));
+    expect(await plan()).toEqual(
+      refused("Not started: mc#7 has no size; move it to Refinement and ask for it."),
+    );
+    expect(startCalls).toEqual([]);
   });
 
   it("refuses Size S", async () => {
