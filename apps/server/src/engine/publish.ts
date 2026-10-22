@@ -315,7 +315,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     }
   }
 
-  const have = (g: G, sha: string) => yes(g, ["cat-file", "-e", `${sha}^{commit}`]);
+  /** Whether the clone has commit `sha` (rev-parse exits 1 when not; `cat-file -e` exits 128). */
+  const have = (g: G, sha: string) => yes(g, ["rev-parse", "-q", "--verify", `${sha}^{commit}`]);
 
   /** origin's default branch and tip, and `branch`'s tip, now (never a local ref). */
   async function originNow(g: G, branch: string | null) {
