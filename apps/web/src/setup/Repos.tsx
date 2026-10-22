@@ -63,7 +63,9 @@ export function Repos() {
 
 function ProfileCard({ profile: p }: { profile: RepoProfile }) {
   const owner = p.github.split("/")[0] ?? "";
-  const href = githubHref(`https://github.com/users/${owner}/projects/${p.project}`);
+  const href = githubHref(
+    p.projectUrl ?? `https://github.com/users/${owner}/projects/${p.project}`,
+  );
   const project = `project ${p.project}`;
   return (
     <Panel
