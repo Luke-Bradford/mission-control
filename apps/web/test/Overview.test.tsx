@@ -153,6 +153,30 @@ describe("Agents panel", () => {
     expect(flight.textContent).toContain("—");
   });
 
+  it("the FLIGHT row shows the live seat, once, and the subtitle leaves it out", async () => {
+    const seat = (over: Partial<CrewRow>) =>
+      crewRow({ kind: "crew", role: "Developer", mode: "writer", loopKind: "crew", ...over });
+    stub({
+      rows: [
+        seat({ id: "flight-1", index: 3, role: "FLIGHT", hudState: "error", ticket: null }),
+        seat({ id: "dev-1", index: 0 }),
+        seat({ id: "dev-2", index: 1, hudState: "idle" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("1 working · 2 agents · FLIGHT not counted");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(within(flight).queryByText(FLIGHT_NOT_RUNNING)).toBeNull();
+    expect(within(flight).getByText("Head")).toBeTruthy();
+    expect(within(flight).getByText("head agent")).toBeTruthy();
+    expect(within(flight).getByText("Error")).toBeTruthy();
+    expect(flight.querySelector(".doing")?.textContent).toBe("Run failed");
+    expect(flight.querySelector(".meters2")?.textContent).toContain("ctx");
+    expect(agentRows(container)).toHaveLength(2);
+    expect(screen.queryByText("flight-1")).toBeNull();
+    expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
+  });
+
   it("the FLIGHT row is not itself a button: its call sign is the button that opens the dock", async () => {
     stub({ rows: [crewRow()] });
     const { container } = render(<Overview />);

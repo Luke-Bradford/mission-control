@@ -763,14 +763,16 @@ export class Store {
 
   /**
    * The runs a loop drives that may still need the engine: every one not yet ended, and those
-   * that ended at or after `endedSince` with a loop that is not done. Oldest first.
+   * that ended at or after `endedSince` with a loop that is not done, or is done with merge steps
+   * recorded (the last of them may be owed). Oldest first.
    */
   loopRuns(endedSince: number): Run[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM runs WHERE loop IS NOT NULL
            AND (ended_at IS NULL
-             OR (ended_at >= ? AND json_extract(loop, '$.phase') != 'done'))
+             OR (ended_at >= ? AND (json_extract(loop, '$.phase') != 'done'
+               OR json_extract(loop, '$.merging') IS NOT NULL)))
          ORDER BY started_at, seq`,
       )
       .all(endedSince) as Row[];

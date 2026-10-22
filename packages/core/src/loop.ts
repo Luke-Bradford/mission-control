@@ -91,10 +91,21 @@ export const MERGE_STEP_WORDS = {
   close: "close the issue",
   "delete-remote": "delete the remote branch",
 } as const satisfies Partial<Record<MergeStep, string>>;
+/** The blocked note for a merged run's local branch that could not be deleted. */
+export const cleanupBranchNoteKey = (runId: string): string => `cleanup-branch:${runId}`;
 /** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
 export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
 export const noShaDeleteText = (ref: string): string =>
   `${ref}: merged, but the remote branch could not be deleted (no sha to lease on); the operator can delete it`;
+/** The Activity rows of the merge steps. */
+const prRef = (pr: number | null): string => (pr === null ? "the PR" : `PR #${pr}`);
+export const readyMarkedText = (pr: number | null): string => `marked ${prRef(pr)} ready`;
+export const mergedText = (pr: number | null): string => `merged ${prRef(pr)} (merge commit)`;
+export const closedIssueText = (issue: number): string => `closed #${issue}`;
+export const deletedRemoteText = (branch: string): string => `deleted origin's ${branch}`;
+export const deletedLocalText = (branch: string): string => `deleted the local branch ${branch}`;
+export const localNotDeletedText = (branch: string, why: string): string =>
+  `could not delete the local branch ${branch}: ${why}`;
 export const mergeStepFailedText = (step: string, why: string): string => `${step} failed: ${why}`;
 /** The gate parks a run for these; the reason says which. */
 export const gateStrayParkText = (call: string, paths: readonly string[]): string =>
@@ -850,7 +861,12 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   }
   for (const key of s.openNotes) {
     // the flag for a merged PR's undeletable branch outlives the run's steps
-    if (loop.phase === "done" && key === noShaDeleteNoteKey(s.runId)) continue;
+    if (
+      loop.phase === "done" &&
+      (key === noShaDeleteNoteKey(s.runId) || key === cleanupBranchNoteKey(s.runId))
+    ) {
+      continue;
+    }
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {
