@@ -2037,7 +2037,7 @@ describe("the engine runs reviews", () => {
       ]);
     });
 
-    it("an ended run keeps no status of its own", async () => {
+    it("an ended run keeps no status of its own and writes none", async () => {
       await toReview();
       reported(first().id, []);
       await vi.waitFor(() =>
@@ -2048,9 +2048,10 @@ describe("the engine runs reviews", () => {
       store.setRunEnded(RUN, clock, "ok", "operator");
       await h.engine.reconcileRun(RUN);
       expect(h.statusCalls.length).toBe(kept);
+      // its later ended passes write nothing either: the status is final once the run ends
       await h.engine.reconcileRun(RUN);
-      // nothing is remembered of it, so the same status is set afresh
-      expect(h.statusCalls.length).toBe(kept + 1);
+      await h.engine.reconcileRun(RUN);
+      expect(h.statusCalls.length).toBe(kept);
     });
 
     it("a failed status write is logged and tried again on the next tick", async () => {

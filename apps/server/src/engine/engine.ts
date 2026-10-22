@@ -618,10 +618,14 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  /** Logs a status failure unless it is the one logged last for the run: it is tried again every pass. */
+  /**
+   * Logs a status failure unless it is the one logged last for the run: it is tried again every pass.
+   * Compared on its first line, so a failure whose detail varies per call (a request id) logs once.
+   */
   function noteStatusFailure(runId: string, text: string): void {
-    if (reviewStatusFailures.get(runId) === text) return;
-    reviewStatusFailures.set(runId, text);
+    const head = text.split("\n", 1)[0] ?? text;
+    if (reviewStatusFailures.get(runId) === head) return;
+    reviewStatusFailures.set(runId, head);
     log(`${runId}: review status not set: ${text}`);
   }
 
@@ -629,6 +633,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const run = store.run(runId);
     const loop = run?.loop;
     if (run === null || loop === undefined || loop === null) return;
+    // an ended run's status is final: no more writes for it (its ended passes would repeat one)
+    if (run.endedAt != null) return;
     if (reviewerOf(config, run.agentId) === null) return;
     if (!config.repos.some((r) => r.id === run.repoId)) return;
     const sha = store.runPush(run.id)?.sha;
