@@ -385,6 +385,15 @@ describe("collectGithub board, a stale project item list", () => {
     expect(statusOf()).toMatchObject({ ok: true, error: null });
   });
 
+  it("counts an unmapped item once when both sources return it", async () => {
+    const { gql } = stub({
+      pages: [page([item(1, "Weird")])],
+      issues: [issue(1, [{ project: 2, status: "Weird" }])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(statusOf()?.error).toBe("skipped 1 board item(s) with unmapped status");
+  });
+
   it("counts recovered items towards the empty-board guard", async () => {
     await collectGithub(repo, store, stub({ pages: [page([item(1, "Todo")])] }).gql, NOW);
     const { gql } = stub({

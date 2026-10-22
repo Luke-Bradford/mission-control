@@ -452,6 +452,8 @@ async function fetchBoard(
 ): Promise<BoardResult> {
   const [owner = "", repoName = ""] = repo.github.split("/");
   const items: BoardItem[] = [];
+  // Every issue number the item list returned, mapped or not, so the issues pass skips them all.
+  const listed = new Set<number>();
   let unmapped = 0;
   let raw = 0;
   // Any page may carry the project id; it is applied to every item once the pages are read.
@@ -470,6 +472,8 @@ async function fetchBoard(
     if (typeof projectNodeUrl === "string") projectUrl = projectNodeUrl;
     raw += conn.nodes.length;
     for (const node of conn.nodes) {
+      const n = path(node, "content", "number");
+      if (typeof n === "number") listed.add(n);
       const mapped = boardItem(repo, node, now);
       if (mapped === "unmapped") unmapped++;
       else if (mapped !== null) items.push(mapped);
@@ -480,7 +484,6 @@ async function fetchBoard(
     after = pi.endCursor;
   }
   // The item list can be stale (22 Oct: frozen for hours); an issue's own cards are not.
-  const listed = new Set(items.map((i) => i.issueNumber));
   const recovered: BoardItem[] = [];
   let issueAfter: string | null = null;
   for (let p = 0; p < MAX_BOARD_PAGES; p++) {
