@@ -477,7 +477,11 @@ hub holding the crew lock) carries a loop. A writer run started without one cann
 - **Merged.** The engine ends the run itself and the seat goes idle; in a `merge` repo it then
   takes its next Ready ticket.
 - **Stop.** Stopping a looped run before its PR merges parks it as "run ended" with a Blocked
-  note, which clears once the PR is merged or closed.
+  note, which clears once the PR is merged or closed. Stop keeps the run's worktree (under
+  `crew.worktrees`) and its local branch on purpose: a later run on the same ticket resumes in
+  them. When the engine ends a run after its PR merges, it removes the worktree; the local branch
+  stays until the merge step tidies it. To clear a stopped run's leftovers by hand, from the crew's
+  clone: `git worktree remove --force <worktree>` then `git branch -D <branch>`.
 
 When an Update first brings Plan 7a Task 7 in, a seat run started before it loses `mc push` and
 `mc draft_pr` on resume and cannot publish: merge its PR first, or end it and push by hand.
