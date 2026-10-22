@@ -1288,6 +1288,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         branch: checkout.branch,
         area: info.seat.area,
+        commands:
+          def.mode === "writer"
+            ? (info.repo.commands?.writer ?? [])
+            : (info.repo.commands?.review ?? []),
+        fullSuite: info.repo.fullSuite ?? [],
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       if (!session.alive) {
@@ -1387,7 +1392,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktree: checkout.path,
       });
       const first = opts?.first;
-      const brief = watchBrief({ call: call(info), repo: info.repo.github });
+      const brief = watchBrief({
+        call: call(info),
+        repo: info.repo.github,
+        seats: info.session.seats
+          .filter((s) => seatDef(s).mode === "writer")
+          .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+      });
       await enqueue(l, () =>
         writeLine(l, first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief),
       ).catch(() => {});
@@ -1554,6 +1565,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
+        commands: info.repo.commands?.review ?? [],
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       if (!session.alive) {

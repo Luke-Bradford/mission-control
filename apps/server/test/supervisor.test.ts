@@ -495,6 +495,8 @@ describe("startRun", () => {
         bodyLength: TICKET.body.length,
         branch: BRANCH,
         area: ["apps/**"],
+        commands: [],
+        fullSuite: [],
       }),
     );
     expect(userLines()[0]).toMatch(
@@ -848,6 +850,23 @@ describe("startRun", () => {
     expect(allowed).not.toContain("Bash(pnpm -s lint:*)");
     const denied = argv.slice(argv.indexOf("--disallowedTools") + 1);
     expect(denied).toContain(`Edit(/${realpathSync(join(root, "guido-1-42"))}/pyproject.toml)`);
+  });
+
+  it("a writer's brief names its repo's own commands and whole suite", async () => {
+    const { sup } = make({
+      repo: {
+        commands: { writer: ["uv run pytest", "uv run ruff check"], review: ["uv run pytest"] },
+        fullSuite: ["uv run pytest"],
+      },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain(
+      "Commands you may run here: `uv run pytest`, `uv run ruff check`. A whole suite (`uv run pytest`) takes the test lock",
+    );
+    expect(brief).not.toContain("pnpm");
   });
 
   it("a planner run has no branch", async () => {
@@ -1551,7 +1570,21 @@ describe("startWatch", () => {
     writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
     return make({ rolesDir, extraSeat: FLIGHT });
   };
-  const BRIEF = watchBrief({ call: "FLIGHT-1", repo: "o/mc" });
+  const BRIEF = watchBrief({
+    call: "FLIGHT-1",
+    repo: "o/mc",
+    seats: [{ call: "GUIDO-1", area: ["apps/**"] }],
+  });
+
+  it("sends a brief that lists the session's developer seats and their areas", async () => {
+    const { sup } = flightMake();
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain(
+      "Developer seats and the files each may change: GUIDO-1: apps/**. start_seat refuses",
+    );
+  });
 
   it("is refused while the CLI is held, and starts no run", async () => {
     const hold = new CliHold();
@@ -2985,6 +3018,20 @@ describe("startReview", () => {
     return { ...m, ...r, runId };
   }
 
+  it("a review brief names the repo's review commands", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({
+      scratchRetro: true,
+      repo: { commands: { writer: ["uv run pytest"], review: ["uv run pytest"] } },
+    });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("`uv run pytest` followed by a test file path");
+    expect(brief).not.toContain("pnpm");
+  });
+
   it("startReview launches a scratch run", async () => {
     const r = reviewOfPush();
     const { sup } = make({ scratchRetro: true });
@@ -3027,6 +3074,7 @@ describe("startReview", () => {
         diffCut: false,
         since: false,
         touches: [],
+        commands: [],
       }),
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
