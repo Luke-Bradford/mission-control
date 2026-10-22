@@ -393,6 +393,7 @@ export function configView(config: CcConfig): ConfigView {
               accountId: seat.accountId,
               model: seat.model,
               area: [...seat.area],
+              ...(seat.retiring ? { retiring: true } : {}),
             })),
           })),
         }

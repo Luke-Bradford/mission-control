@@ -30,6 +30,7 @@ import {
   type RoleDef,
   resolveSeatDef,
   type SeatDef,
+  type SeatInput,
   seatDef,
   type TicketState,
   WRITER_TOOLS,
@@ -67,6 +68,8 @@ export interface CrewSeatConfig {
   mode?: ConfigSeatMode;
   /** Globs the seat may write in; [] = the whole checkout (writers) or nothing (read-only). */
   area: string[];
+  /** Set only by the crew reloader: removed from the file, kept until free. */
+  retiring?: true;
 }
 
 export interface CrewSessionConfig {
@@ -552,6 +555,32 @@ function areasOverlap(a: string[], b: string[]): boolean {
   });
 }
 
+/** The first writer pair (by `seatDef`) with different, overlapping areas, or null. */
+export function writerAreaConflict(seats: readonly CrewSeatConfig[]): [string, string] | null {
+  const writers: CrewSeatConfig[] = [];
+  for (const seat of seats) {
+    if (seatDef(seat).mode !== "writer") continue;
+    for (const w of writers) {
+      if (!sameArea(w.area, seat.area) && areasOverlap(w.area, seat.area)) return [w.id, seat.id];
+    }
+    writers.push(seat);
+  }
+  return null;
+}
+
+/** A seat as config.yaml says it (`effort` and `mode` only when set). */
+export function seatInput(seat: CrewSeatConfig): SeatInput {
+  return {
+    id: seat.id,
+    role: seat.role,
+    accountId: seat.accountId,
+    model: seat.model,
+    ...(seat.effort !== undefined ? { effort: seat.effort } : {}),
+    ...(seat.mode !== undefined ? { mode: seat.mode } : {}),
+    area: [...seat.area],
+  };
+}
+
 /** Whether `prompt` (relative to the hub) is a regular file whose real path lies in the roles folder. */
 function isPromptFile(hubRoot: string, prompt: string, rolesDirReal: string): boolean {
   try {
@@ -722,13 +751,12 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
         }
         return;
       }
-      for (const w of writers) {
-        if (!sameArea(w.area, seat.area) && areasOverlap(w.area, seat.area)) {
-          throw new ConfigError(
-            `${sp}.area`,
-            `areas overlap: ${w.id} and ${seat.id}; writers may share an area only when it is the same list of globs`,
-          );
-        }
+      const conflict = writerAreaConflict([...writers, seat]);
+      if (conflict !== null) {
+        throw new ConfigError(
+          `${sp}.area`,
+          `areas overlap: ${conflict[0]} and ${conflict[1]}; writers may share an area only when it is the same list of globs`,
+        );
       }
       writers.push(seat);
     });

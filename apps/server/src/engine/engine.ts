@@ -134,10 +134,13 @@ export interface Engine {
 /** onChain key for superviseReviews (never a run id). */
 const REVIEWS_CHAIN = "\0reviews";
 
-/** The review seat for a seat's runs: the first `scratch` seat (config order) of its crew session. */
+/**
+ * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
+ * that is not retiring; null when there is none (the operator reviews).
+ */
 export function reviewerOf(config: CcConfig, seatId: string): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
-  return session?.seats.find((x) => modeOfSeat(x) === "scratch") ?? null;
+  return session?.seats.find((x) => !x.retiring && seatDef(x).loop === "review") ?? null;
 }
 
 const reviewFact = (r: ReviewRow): ReviewFact => ({
@@ -802,7 +805,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const seats = (config.crew?.sessions ?? []).flatMap((s) => s.seats);
     await Promise.all(
       seats
-        .filter((s) => seatDef(s).loop === "build")
+        .filter((s) => !s.retiring && seatDef(s).loop === "build")
         .filter((s) => seatMayTake(store, s.id))
         .map((s) =>
           deps.takeNext(s.id).catch((e: unknown) => {
@@ -918,10 +921,26 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const row of store.reviewsWithLiveRun()) {
       if (row.runId !== null) await supervisor.endRunByEngine(row.runId);
     }
-    // 3. each free scratch seat starts its oldest wanted review
+    // 3. a queued review for a seat that is no longer its author's reviewer is dropped; the author's
+    // next pass requests it again for the current one
+    for (const row of store.reviewsIn(["queued"])) {
+      const author = store.run(row.authorRunId);
+      if (author === null || row.seatId === reviewerOf(config, author.agentId)?.id) continue;
+      const at = now();
+      if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
+        store.addLoopEvent(
+          reviewEventKey(row.authorRunId, row.id, "dropped"),
+          row.authorRunId,
+          reviewDroppedText(row.sha),
+          at,
+        );
+        void reconcileRun(author.id);
+      }
+    }
+    // 4. each free scratch seat starts its oldest wanted review
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
-      .filter((x) => modeOfSeat(x) === "scratch");
+      .filter((x) => !x.retiring && modeOfSeat(x) === "scratch");
     for (const seat of scratch) {
       const held = supervisor.seat(seat.id)?.runId ?? null;
       const heldRun = held === null ? null : store.run(held);
@@ -933,6 +952,11 @@ export function createEngine(deps: EngineDeps): Engine {
           dropReview(row);
           continue;
         }
+        // an earlier start awaited: the seat may have been removed or retired since the list was taken
+        const current = (config.crew?.sessions ?? [])
+          .flatMap((x) => x.seats)
+          .find((x) => x.id === seat.id);
+        if (current === undefined || current.retiring) break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
         let runId: string | null = null;
         try {
