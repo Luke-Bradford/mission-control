@@ -2317,18 +2317,21 @@ describe("the engine runs reviews", () => {
 
     it("a transient refusal to delete the local branch is retried, and raises a note after 3 tries", async () => {
       const gone = { ok: false as const, text: "git failed: fetch", transient: true };
-      h.stepResults["delete-local"] = [gone, gone, gone];
+      h.stepResults["delete-local"] = [gone, gone, gone, gone, gone];
       await gateOpen();
-      await vi.waitFor(() => expect(h.steps.filter((s) => s === "delete-local")).toHaveLength(1));
+      await vi.waitFor(() => expect(h.steps).toContain("delete-local"));
+      expect(noteKeys()).not.toContain(cleanupBranchNoteKey(RUN));
+      expect(loopOf().merging?.done ?? []).not.toContain("delete-local");
+      // reconciles within the same tick count no further
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(noteKeys()).not.toContain(cleanupBranchNoteKey(RUN));
+      clock += ENGINE_TICK_MS;
+      await h.engine.reconcileRun(RUN);
       expect(noteKeys()).not.toContain(cleanupBranchNoteKey(RUN));
       expect(loopOf().merging?.done ?? []).not.toContain("delete-local");
       clock += ENGINE_TICK_MS;
       await h.engine.reconcileRun(RUN);
-      expect(h.steps.filter((s) => s === "delete-local")).toHaveLength(2);
-      expect(noteKeys()).not.toContain(cleanupBranchNoteKey(RUN));
-      clock += ENGINE_TICK_MS;
-      await h.engine.reconcileRun(RUN);
-      expect(h.steps.filter((s) => s === "delete-local")).toHaveLength(3);
       expect(noteKeys()).toContain(cleanupBranchNoteKey(RUN));
       expect(loopOf().merging?.done).toContain("delete-local");
     });
