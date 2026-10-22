@@ -875,6 +875,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return result;
       });
 
+      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup's seat editor reads it)
       // Replaces one session's seats in the config.yaml the server started with (no request names a
       // path), then reloads so the change applies live. A POST so the CSRF hook covers it.
       api.post<{ Params: { sessionId: string } }>(
