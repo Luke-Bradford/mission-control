@@ -610,6 +610,38 @@ describe("Start a seat", () => {
     expect(screen.queryByRole("button", { name: /^Start / })).toBeNull();
   });
 
+  it("leaves scratch seats out", async () => {
+    const cfg = structuredClone(CREW_CONFIG);
+    const seats = cfg.crew?.sessions[0].seats ?? [];
+    seats[1].mode = "scratch";
+    stubStart({ "/api/config": cfg });
+    const { unmount } = render(
+      <TicketDetail repoId="shop-app" number={3349} item={boardItem()} agent={null} />,
+    );
+    const sec = await screen.findByRole("region", { name: "Start a seat" });
+    expect(
+      within(sec)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["GUIDO-1 · backend developer, test-first in its area"]);
+    unmount();
+    const busyGuido = seatRow({
+      id: "guido-1",
+      run: {
+        ...(crewRow().run as NonNullable<ReturnType<typeof crewRow>["run"]>),
+        status: "running",
+      },
+      hudState: "running",
+    });
+    stubStart({
+      "/api/config": cfg,
+      "/api/crew": { rows: [busyGuido, retro], firstRunToday: null },
+    });
+    render(<TicketDetail repoId="shop-app" number={3349} item={boardItem()} agent={null} />);
+    expect(await screen.findByText("Every seat in s/s1 is busy.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Start / })).toBeNull();
+  });
+
   // Renders the ticket beside a probe on the same config and crew resources, so "absent" is only
   // asserted once both have loaded and the section had its chance to appear.
   const absentOnceLoaded = async () => {
