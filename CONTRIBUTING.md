@@ -14,6 +14,27 @@ agents share one queue.
 - Work on one ticket at a time, and keep PRs small. Tickets say the outcome and when they are done.
   If one is unclear or too big, say so on the ticket rather than guessing.
 
+## Ticket shape
+
+A seat sees only the ticket body: it has no network and cannot open links. So a Ready ticket carries
+everything needed to build it.
+
+- **Title:** the outcome, said as what someone can see or measure afterwards, not the method.
+- **One area label:** `area:server`, `area:web` or `area:core`. A card with two area labels is
+  not dealt to any seat, so split work that spans areas into one ticket per area.
+- **Body sections:**
+  - `## Outcome`: what is true when it is done.
+  - `## Why`: the reason, in a sentence or two.
+  - `## What to change`: files and functions, with exact texts, names and limits wherever they matter.
+  - `## Done when`: the tests or checks that show the outcome holds.
+- **Self-contained:** paste the text you mean instead of linking to it. That covers spec sections,
+  another ticket's decisions and earlier review findings. Keep the body under 20,000 characters,
+  which is what a seat's brief carries.
+- **Dependencies:** say so in the body, and leave the card in Backlog or Refinement until the
+  ticket it depends on has merged.
+- **Plan:** a `## Plan` section, written by the FAO planner seat or by a person, may be added below
+  the body. It is the step-by-step build that a dev seat follows.
+
 ## Making the change
 
 1. Branch from `main`: `feature/<issue>-short-name`, `fix/<issue>-short-name`, `docs/<name>` or
