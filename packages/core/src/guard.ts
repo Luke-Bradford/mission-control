@@ -737,7 +737,9 @@ function heredocWord(s: string, from: number): { delim: string; quoted: boolean;
   return { delim, quoted, end: j };
 }
 
-const baseName = (w: string): string => (w.includes("/") ? (w.split("/").pop() ?? w) : w);
+/** A program name as the guard compares it: basename, lowercase (macOS runs `GIT` and `SH` as git and sh). */
+const baseName = (w: string): string =>
+  (w.includes("/") ? (w.split("/").pop() ?? w) : w).toLowerCase();
 
 /** `find` actions that run a command, up to `;` or `+`. */
 const FIND_EXEC = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
@@ -968,7 +970,7 @@ function matchedSuite(argv: readonly string[], fullSuite: readonly string[]): st
   for (const entry of fullSuite) {
     const words = entry.split(/\s+/).filter((w) => w !== "");
     if (words.length === 0 || argv.length < words.length) continue;
-    if (!words.every((w, i) => argv[i] === w)) continue;
+    if (!words.every((w, i) => (i === 0 ? argv[i] === w.toLowerCase() : argv[i] === w))) continue;
     const looksLikePath = (a: string) =>
       !a.startsWith("-") && TEST_FILE.test(a.split("::")[0] ?? "");
     const tail = argv.slice(words.length);

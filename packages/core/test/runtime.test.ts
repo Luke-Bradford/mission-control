@@ -370,6 +370,43 @@ describe("a repo's own commands and protected files", () => {
     },
   );
 
+  it.each([
+    "pnpm -s",
+    "pnpm -s exec x",
+    "npm exec foo",
+    "GIT -C .",
+    "SH",
+    "Bash",
+    "node -e x",
+    "python3 -c x",
+    "python3 script.py",
+    "python3.12 x.py",
+    "uv run python x.py",
+    "uv run bash x",
+    "osascript",
+    "ssh host",
+    "pytest -c x",
+    "tool a -p b",
+    "cargo",
+  ])("refuses the first-word, case, flag or package-manager rule: %j", (c) => {
+    expect(() => crewCliArgs({ ...base, commands: { writer: [c], review: [] } })).toThrow(
+      `crew rules: ${c} is not a seat command`,
+    );
+  });
+
+  it.each(["uv run python -m pytest", "python3 -m pytest", "pnpm -s vitest", "uv run ruff check"])(
+    "allows the seat command %j",
+    (c) => {
+      expect(() => crewCliArgs({ ...base, commands: { writer: [c], review: [] } })).not.toThrow();
+    },
+  );
+
+  it.each(["a/", "a//b", "./a", "a/./b", "."])("refuses the glob shape %j (M2)", (g) => {
+    const msg = `crew rules: ${g} is not a protected-file glob`;
+    expect(() => protectedFileRules("/w/x", [g])).toThrow(msg);
+    expect(() => crewCliArgs({ ...base, protectedFiles: [g] })).toThrow(msg);
+  });
+
   it.each(["/etc/x", "./x", "~/x", "../x", "a/../x", "a b", "a(b)", "a\\b", "x?"])(
     "refuses the glob %j",
     (g) => {

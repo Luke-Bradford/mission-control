@@ -1818,3 +1818,17 @@ describe("Task 9 fix round 5: named references, odd github.com URLs, written for
     expect(body("hi @octo")).toBe("@octo");
   });
 });
+
+describe("program names compare case-insensitively (PR #143 I1b)", () => {
+  it("reads GIT and SH as git and sh", () => {
+    expect(ruleOf(bash("GIT push"))).toBe("git-write");
+    expect(ruleOf(bash("/usr/bin/Git commit -m x"))).toBe("git-write");
+    expect(ruleOf(bash("SH -c 'git push'"))).toBe("git-write");
+    expect(ruleOf(bash("GH pr merge 1"))).toBe("github-write");
+    expect(ruleOf(bash("CURL x"))).toBe("network");
+    expect(splitCommands("Env GIT push")).toEqual([["git", "push"]]);
+  });
+  it("matches a full-suite entry whatever the case of its program", () => {
+    expect(ruleOf(bash("PNPM -s test", { run_in_background: true }))).toBe("full-suite");
+  });
+});

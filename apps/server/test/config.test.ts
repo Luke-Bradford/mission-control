@@ -1110,7 +1110,82 @@ describe("repo commands and protected files", () => {
     expect(e.message).toBe(`repos[0].commands.writer[0]: "${cmd}" ${why}`);
   });
 
-  it.each(["just test", "uv run ruff check"])("loads seat command %j", (cmd) => {
+  it.each([
+    ["pnpm -s", "names no tool after pnpm"],
+    ["pnpm -s exec y", "runs exec, which runs whatever follows it"],
+    ["pnpm dlx y", "runs dlx, which runs whatever follows it"],
+    ["npm exec y", "runs exec, which runs whatever follows it"],
+    ["GIT -C .", "runs git, which seats may never run"],
+    ["SH", "ends at sh, which runs whatever follows it"],
+    ["Bash", "ends at bash, which runs whatever follows it"],
+    ["sh x.sh", "runs sh, which seats may never run"],
+    ["node -e y", "has -e, which runs code given on the command line"],
+    ["node x.js", "runs node, which seats may never run"],
+    ["python3 -c y", "has -c, which runs code given on the command line"],
+    ["python3 x.py", "runs python3 without -m <module>, which runs arbitrary code"],
+    ["uv run python x.py", "runs python without -m <module>, which runs arbitrary code"],
+    ["uv run bash y", "runs bash, which seats may never run"],
+    ["pytest -p y", "has -p, which runs code given on the command line"],
+    ["tool --eval y", "has --eval, which runs code given on the command line"],
+    ["osascript", "ends at"],
+    ["osascript y", "runs osascript, which seats may never run"],
+    ["ssh h", "runs ssh, which seats may never run"],
+    ["find y", "runs find, which seats may never run"],
+    ["env X=1 pytest", "runs env, which seats may never run"],
+  ])("refuses the shell, interpreter, launcher or package-manager entry %j", (cmd, why) => {
+    const e = errorOf(() => parse(writer(cmd)));
+    expect(e.path).toBe("repos[0].commands.writer[0]");
+    expect(e.message).toContain(why === "ends at" ? "osascript" : why);
+  });
+
+  it.each(["uv run python -m pytest", "python3 -m pytest", "pnpm -s vitest", "uv run ruff check"])(
+    "loads seat command %j",
+    (cmd) => {
+      expect(parse(writer(cmd)).repos[0]?.commands?.writer).toEqual([cmd]);
+    },
+  );
+
+  it.each([
+    ["just test", ["justfile"], ".justfile"],
+    ["make test", ["Makefile"], "GNUmakefile"],
+    ["tox", ["tox.ini"], null],
+    ["nox", [], "noxfile.py"],
+    ["task test", ["Taskfile.yml"], "Taskfile.yaml"],
+  ])("a task runner entry %j needs its recipe files protected (M1)", (cmd, prot, missing) => {
+    const t = withRepo0(
+      `    commands:\n      writer: [${JSON.stringify(cmd)}]\n      review: []\n    protected: ${JSON.stringify(prot)}\n`,
+    );
+    if (missing === null) {
+      expect(parse(t).repos[0]?.commands?.writer).toEqual([cmd]);
+      return;
+    }
+    const e = errorOf(() => parse(t));
+    expect(e.path).toBe("repos[0].commands.writer[0]");
+    expect(e.message).toContain(`runs recipes from ${missing}, which must be listed in protected`);
+  });
+
+  it("loads a task runner entry once every recipe file is protected (M1)", () => {
+    const t = withRepo0(
+      '    commands:\n      writer: ["just test"]\n      review: []\n    protected: ["justfile", "Justfile", ".justfile"]\n',
+    );
+    expect(parse(t).repos[0]?.commands?.writer).toEqual(["just test"]);
+  });
+
+  it("refuses a full_suite entry that extends a writer command (M3)", () => {
+    const t = withRepo0(
+      '    full_suite: ["uv run pytest -x"]\n    commands:\n      writer: ["uv run pytest"]\n      review: []\n',
+    );
+    const e = errorOf(() => parse(t));
+    expect(e.path).toBe("repos[0].full_suite");
+    expect(e.message).toContain('"uv run pytest -x" extends the writer command "uv run pytest"');
+  });
+
+  it.each(["a/", "a//b", "./a", "a/./b", "."])("refuses protected glob shape %j (M2)", (g) => {
+    const e = errorOf(() => parse(withRepo0(`    protected: [${JSON.stringify(g)}]\n`)));
+    expect(e.path).toBe("repos[0].protected[0]");
+  });
+
+  it.each(["uv run ruff check"])("loads seat command %j", (cmd) => {
     expect(parse(writer(cmd)).repos[0]?.commands?.writer).toEqual([cmd]);
   });
 

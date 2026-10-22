@@ -24,6 +24,7 @@ import {
   type McToolName,
   MODE_LOOPS,
   oneWatchSeatText,
+  protectedGlobShapeProblem,
   type RepoId,
   ROLE_NAME,
   ROLE_PROMPT,
@@ -34,7 +35,9 @@ import {
   type SeatDef,
   type SeatInput,
   seatDef,
+  seatWordsProblem,
   type TicketState,
+  unprotectedRecipeFile,
   watchOnlyToolText,
   watchOrPlanToolText,
 } from "@mc/core";
@@ -270,38 +273,6 @@ export const defaultSeatCommands = (): SeatCommands => ({
   writer: [...DEFAULT_SEAT_COMMANDS.writer],
   review: [...DEFAULT_SEAT_COMMANDS.review],
 });
-/** Words that run whatever follows them: the guard does not look through them. */
-const RUNNER_WORDS = new Set([
-  "run",
-  "exec",
-  "dlx",
-  "x",
-  "-m",
-  "-c",
-  "-e",
-  "uvx",
-  "npx",
-  "bunx",
-  "python",
-  "python3",
-  "node",
-  "just",
-  "make",
-  "sh",
-  "bash",
-  "zsh",
-  "dash",
-  "env",
-  "xargs",
-  "eval",
-  "sudo",
-  "timeout",
-  "nice",
-  "nohup",
-  "command",
-]);
-/** Programs no seat may run, whatever follows them. */
-const NEVER_RUN = new Set(["git", "gh", "curl", "wget", "security"]);
 const PLAIN_WORDS = /^[A-Za-z0-9._/=+,@-]+( [A-Za-z0-9._/=+,@-]+)*$/;
 /** Why `e` may not be a seat command, or null when it may. */
 function seatCommandProblem(e: string): string | null {
@@ -309,25 +280,26 @@ function seatCommandProblem(e: string): string | null {
   if (!PLAIN_WORDS.test(e)) {
     return `"${e}" must be plain words (letters, digits and . _ / = + , @ -) separated by single spaces`;
   }
-  const words = e.split(" ");
-  const first = words[0] ?? "";
-  const last = words[words.length - 1] ?? "";
+  const first = e.split(" ")[0] ?? "";
   if (first.includes("/") || !/^[A-Za-z0-9]/.test(first)) {
     return `"${e}" must start with a program name, not a path`;
   }
-  if (RUNNER_WORDS.has(last)) return `"${e}" ends at ${last}, which runs whatever follows it`;
-  if (NEVER_RUN.has(first)) return `"${e}" runs ${first}, which seats may never run`;
-  return null;
+  return seatWordsProblem(e);
 }
 const seatCommand = z.string().superRefine((e, ctx) => {
   const problem = seatCommandProblem(e);
   if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 /** A `protected` entry: an area glob in the characters core accepts. */
-const protectedGlob = areaGlob.refine(
-  (g) => /^[A-Za-z0-9._/*@+-]+$/.test(g),
-  "must hold only letters, digits and . _ / * @ + -",
-);
+const protectedGlob = areaGlob
+  .refine(
+    (g) => /^[A-Za-z0-9._/*@+-]+$/.test(g),
+    "must hold only letters, digits and . _ / * @ + -",
+  )
+  .superRefine((g, ctx) => {
+    const problem = protectedGlobShapeProblem(g);
+    if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
+  });
 const percent = z.number().min(0).max(100);
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 const MC_TOOL_VALUES = Object.values(MC_TOOL_NAMES) as [McToolName, ...McToolName[]];
@@ -909,6 +881,9 @@ function isExecutableFile(p: string): boolean {
   }
 }
 
+const writerOf = (r: { commands?: { writer: readonly string[] } }): readonly string[] =>
+  r.commands?.writer ?? DEFAULT_SEAT_COMMANDS.writer;
+
 /** Whether the CLI would let a seat run `cmd`: one of the repo's writer commands is `cmd` or a word-prefix of it. */
 function seatsMayRun(writer: readonly string[], cmd: string): boolean {
   return writer.some((p) => cmd === p || cmd.startsWith(`${p} `));
@@ -980,10 +955,37 @@ export function parseConfig(
       throw new ConfigError(`loops[${i}].accountId`, `unknown account "${l.accountId}"`);
     }
   });
+  // A task runner reads a recipe file: a seat that can edit it can change what the entry runs.
+  cfg.repos.forEach((r, i) => {
+    for (const list of ["writer", "review"] as const) {
+      (r.commands?.[list] ?? []).forEach((cmd, at) => {
+        const file = unprotectedRecipeFile(cmd, r.protectedFiles ?? []);
+        if (file !== null) {
+          throw new ConfigError(
+            `repos[${i}].commands.${list}[${at}]`,
+            `"${cmd}" runs recipes from ${file}, which must be listed in protected`,
+          );
+        }
+      });
+    }
+  });
   // A suite the guard would lock for but the CLI then refuses would hold the lock to no purpose.
   cfg.repos.forEach((r, i) => {
     for (const cmd of r.fullSuite ?? []) {
-      if (!seatsMayRun(r.commands?.writer ?? DEFAULT_SEAT_COMMANDS.writer, cmd)) {
+      // the default writer list is exempt: a repo with no `commands` runs exactly as it did
+      const isDefault =
+        r.commands?.writer.length === DEFAULT_SEAT_COMMANDS.writer.length &&
+        r.commands.writer.every((w, k) => w === DEFAULT_SEAT_COMMANDS.writer[k]);
+      const shorter = isDefault
+        ? undefined
+        : r.commands?.writer.find((w) => cmd.startsWith(`${w} `));
+      if (shorter !== undefined) {
+        throw new ConfigError(
+          `repos[${i}].full_suite`,
+          `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${cmd}" as the writer command instead`,
+        );
+      }
+      if (!seatsMayRun(writerOf(r), cmd)) {
         throw new ConfigError(
           `repos[${i}].full_suite`,
           `${cmd} is not a command crew seats may run`,
