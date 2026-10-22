@@ -646,6 +646,55 @@ describe("postMinorFindings", () => {
   });
 });
 
+describe("fileMinorFindings", () => {
+  const prView =
+    (body: string, labels: string[] = ["area:server", "bug"]) =>
+    () => ({
+      code: 0,
+      stdout: JSON.stringify({ body, labels: labels.map((name) => ({ name })) }),
+    });
+  const section = `${MINOR_HEADING}\n\nRETRO reviewed aaaaaaa. These were logged, not sent back for fixing.\n\n- \`a.ts:3\` — one\n- \`b.ts\` — two`;
+
+  it("creates one issue with the title, the area label plus chore, and the findings", async () => {
+    let body = "";
+    ghAnswers = [
+      prView(`#7\n\n${section}\n\nCloses #7.`),
+      (args) => {
+        body = readFileSync(
+          String(args.find((a) => a.startsWith("--body-file="))).slice(12),
+          "utf8",
+        );
+        return { code: 0, stdout: "https://github.com/o/mc/issues/31\n" };
+      },
+    ];
+    const r = await createPublisher(deps()).fileMinorFindings(run(), 12);
+    expect(r).toEqual({ ok: true, issue: 31 });
+    expect(ghCalls[1]?.slice(0, 5)).toEqual([
+      "issue",
+      "create",
+      "--repo=o/mc",
+      "--title=Tech debt: minor findings from #12",
+      "--label=area:server,chore",
+    ]);
+    expect(body).toContain("- `a.ts:3` — one\n- `b.ts` — two");
+  });
+
+  it("files nothing for a body with no minor findings", async () => {
+    ghAnswers = [prView("#7\n\nCloses #7.")];
+    expect(await createPublisher(deps()).fileMinorFindings(run(), 12)).toEqual({
+      ok: true,
+      issue: null,
+    });
+    expect(ghCalls).toHaveLength(1);
+  });
+
+  it("answers a failed create with gh's words", async () => {
+    ghAnswers = [prView(section), () => ({ code: 1, stdout: "", stderr: "label not found" })];
+    const r = await createPublisher(deps()).fileMinorFindings(run(), 12);
+    expect(r).toEqual({ ok: false, text: "issue create failed: label not found" });
+  });
+});
+
 describe("setReviewStatus", () => {
   it("posts the status through gh api", async () => {
     ghAnswers = [() => ({ code: 0, stdout: "{}" })];

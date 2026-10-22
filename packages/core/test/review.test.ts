@@ -7,8 +7,12 @@ import {
   findingFileOk,
   fixesSent,
   fixText,
+  MINOR_HEADING,
+  minorIssueBody,
+  minorIssueTitle,
   minorLine,
   nextAttempt,
+  parseMinorFindings,
   REVIEW_NUDGE_TEXT,
   REVIEW_RESUME_TEXT,
   REVIEW_RUN_MAX_MS,
@@ -287,5 +291,33 @@ describe("reviewStatusOf", () => {
       state: "failure",
       description: "QA review found blocking issues",
     });
+  });
+});
+
+describe("parseMinorFindings", () => {
+  const body = (section: string) => `#7 — t\n\n## What changed\n\nx\n\n${section}\n\nCloses #7.`;
+  it("reads the list lines of the section, as written", () => {
+    const lines = [
+      minorLine({ file: "a.ts", line: 3, summary: "one" }),
+      minorLine({ file: "b.ts", line: 0, summary: "two" }),
+    ];
+    const intro = "RETRO reviewed abc1234. These were logged, not sent back for fixing.";
+    const section = [MINOR_HEADING, "", intro, "", ...lines].join("\n");
+    expect(parseMinorFindings(body(section))).toEqual(lines);
+  });
+  it("stops at the next heading and finds nothing without the section or a list", () => {
+    expect(parseMinorFindings(body(`${MINOR_HEADING}\n\n- x\n\n## Other\n\n- y`))).toEqual(["- x"]);
+    expect(parseMinorFindings(body(""))).toEqual([]);
+    const fallback = `${MINOR_HEADING}\n\nRETRO logged 2 minor findings; they are listed in Mission Control.`;
+    expect(parseMinorFindings(body(fallback))).toEqual([]);
+  });
+});
+
+describe("minor issue text", () => {
+  it("names the PR and lists the findings", () => {
+    expect(minorIssueTitle(12)).toBe("Tech debt: minor findings from #12");
+    const text = minorIssueBody(12, ["- `a.ts` — s"]);
+    expect(text).toContain("#12");
+    expect(text).toContain("- `a.ts` — s");
   });
 });

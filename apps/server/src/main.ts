@@ -38,7 +38,7 @@ import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
-import { type Move, moveCard } from "./github-board.ts";
+import { addCard, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { RunTokens } from "./mcp/tokens.ts";
@@ -172,6 +172,11 @@ async function main(): Promise<void> {
       // a card that moved shows on the boards now, not at the next poll
       if (moved.ok && moved.changed) void scheduler.tick("github");
       return moved;
+    },
+    add: async (m: Move) => {
+      const added = await addCard({ gql: makeGql(await githubToken()), store, config }, m);
+      if (added.ok && added.changed) void scheduler.tick("github");
+      return added;
     },
   };
   const engine = createEngine({

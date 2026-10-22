@@ -3,7 +3,7 @@
  * (Plan 6's `pushRun` and `openDraftPr`, called directly), a failed CI run's log excerpt, and the
  * hard-rule files a pushed sha touches. Nothing here throws for a refusal; it answers.
  */
-import { realpath } from "node:fs/promises";
+import { realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CI_EXCERPT_LINES,
@@ -16,12 +16,16 @@ import {
   MC_PUSH_FAILED,
   MC_PUSH_FIRST,
   MINOR_HEADING,
+  MINOR_ISSUE_LABEL,
   MINOR_LISTED_MAX,
   MINOR_WITHHELD,
   minorFallback,
   minorIntro,
+  minorIssueBody,
+  minorIssueTitle,
   minorLine,
   minorMoreLine,
+  parseMinorFindings,
   prNotRunsText,
   REVIEW_STATUS_CONTEXT,
   type ReviewStatusState,
@@ -39,7 +43,7 @@ import {
 } from "../mcp/tools.ts";
 import { CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
-import { crewDir } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
 export const NO_FAILED_RUN = "(no failed Actions run to read)";
@@ -66,6 +70,12 @@ export type OpenPrResult =
     }
   | { ok: false; text: string; transient: boolean };
 
+/** `issue`: the created issue's number; null when the PR body lists no minor findings. */
+export type FileMinorResult = { ok: true; issue: number | null } | { ok: false; text: string };
+
+/** The label prefix of a ticket's area (`area:server`). */
+const AREA_LABEL = /^area:/;
+
 export interface Publisher {
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
@@ -76,6 +86,11 @@ export interface Publisher {
     run: Run,
     review: { id: number; sha: string; retro: string },
   ): Promise<PublishResult>;
+  /**
+   * Reads the merged PR's body and files its minor findings as one tech-debt issue (the PR's area
+   * label and `chore`); nothing is filed when the section lists none. Never throws.
+   */
+  fileMinorFindings(run: Run, prNumber: number): Promise<FileMinorResult>;
   /** Sets the run's repo's mc/review commit status on `sha`. */
   setReviewStatus(
     run: Run,
@@ -292,6 +307,60 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
       }
       return { ok: true };
+    },
+
+    async fileMinorFindings(run, prNumber) {
+      const repo = deps.config.repos.find((r) => r.id === run.repoId)?.github;
+      if (repo === undefined) return { ok: false, text: "unknown repo" };
+      const fail = (what: string, r: { stderr: string }): FileMinorResult => ({
+        ok: false,
+        text: `${what} failed: ${cleanLog(r.stderr).trim().slice(0, STATUS_STDERR_MAX) || "no answer"}`,
+      });
+      try {
+        const viewed = await deps.gh(
+          ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=body,labels"],
+          { cwd: cwd() },
+        );
+        if (viewed.code !== 0) return fail("pr view", viewed);
+        const pr = JSON.parse(viewed.stdout) as { body?: unknown; labels?: unknown };
+        const findings = parseMinorFindings(typeof pr.body === "string" ? pr.body : "");
+        if (findings.length === 0) return { ok: true, issue: null };
+        const names = (list: unknown): string[] =>
+          Array.isArray(list)
+            ? list.flatMap((l: unknown) => {
+                const n = (l as { name?: unknown } | null)?.name;
+                return typeof n === "string" ? [n] : [];
+              })
+            : [];
+        const ticket = issueOf(run);
+        const ticketLabels =
+          deps.store.board(run.repoId).find((b) => b.issueNumber === ticket)?.labels ?? [];
+        const own = names(pr.labels).filter((n) => AREA_LABEL.test(n));
+        const area = own.length > 0 ? own : ticketLabels.filter((n) => AREA_LABEL.test(n));
+        const file = crewPrBodyPath(deps.dbPath);
+        try {
+          await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
+          const made = await deps.gh(
+            [
+              "issue",
+              "create",
+              `--repo=${repo}`,
+              `--title=${minorIssueTitle(prNumber)}`,
+              `--label=${[...area, MINOR_ISSUE_LABEL].join(",")}`,
+              `--body-file=${file}`,
+            ],
+            { cwd: cwd() },
+          );
+          if (made.code !== 0) return fail("issue create", made);
+          const n = /\/issues\/(\d+)\s*$/.exec(made.stdout.trim());
+          if (n?.[1] === undefined) return fail("issue create", { stderr: "no issue URL" });
+          return { ok: true, issue: Number(n[1]) };
+        } finally {
+          await rm(file, { force: true });
+        }
+      } catch (e) {
+        return { ok: false, text: e instanceof Error ? e.message : String(e) };
+      }
     },
 
     async setReviewStatus(run, sha, state, description) {

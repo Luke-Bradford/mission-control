@@ -95,6 +95,8 @@ export interface RunLoop {
     hubOnly: boolean;
     strays: string[];
   } | null;
+  /** The PR's minor-findings issue: its number; null once tried and none was filed. Absent: not tried. */
+  minorIssue?: number | null;
   /** The merge under way for `sha`, and the steps of it already done. */
   merging?: { sha: string; done: MergeStep[] } | null;
 }

@@ -52,7 +52,12 @@ import {
   reviewerOf,
   TIP_MOVED,
 } from "../src/engine/engine.ts";
-import type { OpenPrResult, Publisher, PublishResult } from "../src/engine/publish.ts";
+import type {
+  FileMinorResult,
+  OpenPrResult,
+  Publisher,
+  PublishResult,
+} from "../src/engine/publish.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -231,6 +236,11 @@ interface Harness {
   /** PR-body edits, and the next results of postMinorFindings (empty: success). */
   minorCalls: { id: number; sha: string; retro: string }[];
   minorResults: PublishResult[];
+  /** Minor-findings issues filed (PR numbers), the next results of the filing (empty: none to file), and the cards added. */
+  filed: number[];
+  fileResults: FileMinorResult[];
+  adds: Move[];
+  addFails: boolean;
   /** Commit-status writes, and the next results of setReviewStatus (empty: success). */
   statusCalls: { sha: string; state: string; description: string }[];
   statusResults: PublishResult[];
@@ -277,6 +287,10 @@ function harness(): Harness {
     duringStart: null,
     minorCalls: [],
     minorResults: [],
+    filed: [],
+    fileResults: [],
+    adds: [],
+    addFails: false,
     statusCalls: [],
     statusResults: [],
     statusThrows: null,
@@ -311,6 +325,10 @@ function harness(): Harness {
         async postMinorFindings(_r, review) {
           x.minorCalls.push(review);
           return x.minorResults.shift() ?? { ok: true };
+        },
+        async fileMinorFindings(_r, pr) {
+          x.filed.push(pr);
+          return x.fileResults.shift() ?? { ok: true, issue: null };
         },
         async setReviewStatus(_r, sha, state, description) {
           x.statusCalls.push({ sha, state, description });
@@ -394,6 +412,10 @@ function harness(): Harness {
             x.moves.push(m);
             if (x.moveFails) throw new Error("gh is down");
             return { ok: true, changed: true };
+          },
+          add: async (a) => {
+            x.adds.push(a);
+            return x.addFails ? { ok: false, reason: "gh is down" } : { ok: true, changed: true };
           },
         },
         rules: (repoId) => x.rules(repoId),
@@ -1089,6 +1111,67 @@ describe("merged", () => {
     // the seat is idle with no run now, so each tick asks it to take again (the real takeNext
     // does nothing without a queued ticket)
     expect(h.taken).toEqual([SEAT, SEAT, SEAT]);
+  });
+});
+
+describe("minor findings issue", () => {
+  const merge = async () => {
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    setPr({ state: "merged", ci: "passing", mergedAt: clock });
+    await h.engine.reconcileRun(RUN);
+  };
+
+  it("files one issue for the merged PR and adds it to Backlog", async () => {
+    h.fileResults.push({ ok: true, issue: 31 });
+    await merge();
+    expect(h.filed).toEqual([12]);
+    expect(h.adds).toEqual([{ runId: RUN, repoId: REPO, issue: 31, column: "Backlog" }]);
+    expect(loopOf().minorIssue).toBe(31);
+    expect(h.ended).toEqual([RUN]);
+    expect(noteKeys()).toEqual([]);
+  });
+
+  it("does not file again on a later pass or a restart", async () => {
+    h.fileResults.push({ ok: true, issue: 31 }, { ok: true, issue: 32 });
+    await merge();
+    await h.engine.tick();
+    await h.engine.reconcileRun(RUN);
+    h.engine.stop();
+    h.engine = h.make();
+    h.engine.start();
+    await h.engine.tick();
+    expect(h.filed).toEqual([12]);
+    expect(h.adds).toHaveLength(1);
+  });
+
+  it("files nothing for a PR with no minor findings", async () => {
+    await merge();
+    expect(h.adds).toEqual([]);
+    expect(loopOf().minorIssue).toBeNull();
+    expect(h.ended).toEqual([RUN]);
+  });
+
+  it("raises a note naming the PR when the create fails, and still ends the run", async () => {
+    h.fileResults.push({ ok: false, text: "gh: boom" });
+    await merge();
+    expect(noteKeys()).toEqual([`flag:${RUN}:minor-issue`]);
+    expect(store.notes()[0]?.text).toContain("PR #12");
+    expect(h.adds).toEqual([]);
+    expect(h.ended).toEqual([RUN]);
+    await h.engine.tick();
+    expect(h.filed).toEqual([12]);
+  });
+
+  it("keeps the issue number and raises a note when the Backlog add fails", async () => {
+    h.fileResults.push({ ok: true, issue: 31 });
+    h.addFails = true;
+    await merge();
+    expect(loopOf().minorIssue).toBe(31);
+    expect(noteKeys()).toEqual([`flag:${RUN}:minor-issue`]);
+    expect(h.ended).toEqual([RUN]);
   });
 });
 

@@ -167,6 +167,30 @@ export const minorMoreLine = (k: number): string => `- …and ${k} more in Missi
 export const minorFallback = (retro: string, m: number): string =>
   `${retro} logged ${m} minor ${m === 1 ? "finding" : "findings"}; they are listed in Mission Control.`;
 
+/** The list lines under MINOR_HEADING in a PR body, as the writer made them (the intro is not one). */
+export function parseMinorFindings(body: string): string[] {
+  const lines = body.replace(/\r\n?/g, "\n").split("\n");
+  const start = lines.indexOf(MINOR_HEADING);
+  if (start < 0) return [];
+  const out: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith("#")) break;
+    if (line.startsWith("- ")) out.push(line.trimEnd());
+  }
+  return out;
+}
+
+/** The tech-debt issue for a merged PR's minor findings: its title, labels (besides the area's) and body. */
+export const minorIssueTitle = (pr: number): string => `Tech debt: minor findings from #${pr}`;
+export const MINOR_ISSUE_LABEL = "chore";
+export const minorIssueBody = (pr: number, findings: readonly string[]): string =>
+  `RETRO logged these minor findings on #${pr}; they were not sent back for fixing.\n\n${findings.join("\n")}\n`;
+export const minorIssueFiledText = (issue: number, pr: number): string =>
+  `minor findings of #${pr} filed as #${issue}`;
+export const minorIssueNoteKey = (runId: string): string => `flag:${runId}:minor-issue`;
+export const minorIssueFailedText = (ref: string, pr: number, why: string): string =>
+  `${ref}: PR #${pr} merged, but its minor findings could not be filed as an issue (${why}); the operator can file them from the PR body`;
+
 export const REVIEW_ROUNDS = 3;
 export const REVIEW_ATTEMPTS = 2;
 

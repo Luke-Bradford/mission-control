@@ -80,6 +80,39 @@ async function findCard(
   return null;
 }
 
+const ISSUE_ID_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { issue(number: $number) { id } }
+}`;
+
+const ADD_ITEM = `mutation($input: AddProjectV2ItemByIdInput!) {
+  addProjectV2ItemById(input: $input) { item { id } }
+}`;
+
+/**
+ * Puts a new issue on the repo's project and moves its card to `m.column`. Only a `merge` repo's
+ * board is written. An issue already on the project is not added twice (GitHub returns its item).
+ */
+export async function addCard(deps: MoveDeps, m: Move): Promise<MoveResult> {
+  const { gql, config } = deps;
+  const repo = config.repos.find((r) => r.id === m.repoId);
+  if (!repo) return { ok: false, reason: "unknown repo" };
+  if (repo.autonomy !== "merge") return { ok: true, changed: false };
+  try {
+    const [owner = "", name = ""] = repo.github.split("/");
+    const found = await gql(ISSUE_ID_QUERY, { owner, name, number: m.issue });
+    const repository = isObj(found) ? found.repository : null;
+    const issueNode = isObj(repository) ? repository.issue : null;
+    const contentId = isObj(issueNode) ? issueNode.id : null;
+    if (typeof contentId !== "string") return { ok: false, reason: "issue not found" };
+    const field = await readStatusField(gql, owner, repo.project);
+    await gql(ADD_ITEM, { input: { projectId: field.projectId, contentId } });
+    const moved = await moveCard(deps, m);
+    return moved.ok ? { ok: true, changed: true } : moved;
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /**
  * Moves a run's card to a Status column. Only a `merge` repo's board is written; a `draft` repo is
  * left alone. Idempotent: a card already in the column is not touched. The attempt is recorded as

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gql, GqlError, GqlTransportError } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
-import { BOARD_IDS_TTL_MS, clearBoardIds, moveCard } from "../src/github-board.ts";
+import { addCard, BOARD_IDS_TTL_MS, clearBoardIds, moveCard } from "../src/github-board.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = 1_000_000_000;
@@ -123,6 +123,46 @@ const move = (gql: Gql, over: Partial<Parameters<typeof moveCard>[1]> = {}) =>
     { gql, store, config, now: () => now },
     { runId: "r1", repoId: "mc", issue: 7, column: "In review", ...over },
   );
+
+describe("addCard", () => {
+  /** The fake board, plus the answers for an issue's node id and the add-to-project mutation. */
+  function withAdd(b: ReturnType<typeof fakeBoard>, issueId: string | null = "I_31") {
+    const added: unknown[] = [];
+    const gql: Gql = async (query, vars) => {
+      if (query.includes("issue(number: $number) { id }")) {
+        return { repository: { issue: issueId === null ? null : { id: issueId } } };
+      }
+      if (query.includes("addProjectV2ItemById")) {
+        added.push(vars.input);
+        return { addProjectV2ItemById: { item: { id: "PVTI_1" } } };
+      }
+      return b.gql(query, vars);
+    };
+    return { gql, added };
+  }
+  const add = (gql: Gql, over: Partial<Parameters<typeof addCard>[1]> = {}) =>
+    addCard(
+      { gql, store, config, now: () => now },
+      { runId: "r1", repoId: "mc", issue: 31, column: "Backlog", ...over },
+    );
+
+  it("puts the issue on the project, then moves its card to the column", async () => {
+    const b = fakeBoard({ itemStatus: "O_prog" });
+    const w = withAdd(b);
+    expect(await add(w.gql)).toEqual({ ok: true, changed: true });
+    expect(w.added).toEqual([{ projectId: "PVT_5", contentId: "I_31" }]);
+    expect(b.mutations()).toHaveLength(1);
+    expect(sentOption(b.mutations()[0])).toBe("O_todo");
+  });
+
+  it("leaves a draft repo alone and fails for an issue it cannot find", async () => {
+    const b = fakeBoard();
+    const w = withAdd(b);
+    expect(await add(w.gql, { repoId: "dr" })).toEqual({ ok: true, changed: false });
+    expect(w.added).toEqual([]);
+    expect(await add(withAdd(b, null).gql)).toEqual({ ok: false, reason: "issue not found" });
+  });
+});
 
 describe("moveCard", () => {
   it("sends one mutation with the fixture ids and records a done row", async () => {

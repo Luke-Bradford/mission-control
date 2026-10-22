@@ -26,6 +26,9 @@ import {
   type LoopSnapshot,
   MINOR_CLEARED,
   MINOR_POSTED,
+  minorIssueFailedText,
+  minorIssueFiledText,
+  minorIssueNoteKey,
   minorNotPostedText,
   modeOfSeat,
   NEW_LOOP,
@@ -91,7 +94,11 @@ export interface EngineDeps {
   >;
   publisher: Publisher;
   /** `moveCard`, bound to the GitHub client, the store, the config and the poll. */
-  board: { move: (m: Move) => Promise<MoveResult> };
+  board: {
+    move: (m: Move) => Promise<MoveResult>;
+    /** Puts a new issue on the repo's project, in the column of `m`. */
+    add: (m: Move) => Promise<MoveResult>;
+  };
   /** A repo's board rules (read at origin/HEAD); an error is a note in `status()`. */
   rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** Rebuilds the writer seats' queues from the board (each tick). */
@@ -327,6 +334,50 @@ export function createEngine(deps: EngineDeps): Engine {
     };
   }
 
+  /**
+   * Files a merged PR's minor findings as one issue in Backlog, once per run (`minorIssue` is
+   * stored before anything else is tried). Only a `merge` repo's runs; a failure raises a note.
+   */
+  async function fileMinorFindings(run: Run, cur: RunLoop, at: number): Promise<void> {
+    if (cur.minorIssue !== undefined || cur.prNumber === null) return;
+    if (config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge") return;
+    const prNumber = cur.prNumber;
+    const flag = (why: string): void => {
+      store.raiseNote({
+        key: minorIssueNoteKey(run.id),
+        kind: "flag",
+        runId: run.id,
+        seatId: run.agentId,
+        repoId: run.repoId,
+        text: minorIssueFailedText(run.ticket ?? run.id, prNumber, why),
+        at,
+      });
+      bus.emit("attention");
+    };
+    const filed = await publisher.fileMinorFindings(run, prNumber);
+    if (!filed.ok) {
+      cur.minorIssue = null;
+      return flag(filed.text);
+    }
+    cur.minorIssue = filed.issue;
+    store.setRunLoop(run.id, cur);
+    if (filed.issue === null) return;
+    const issue = filed.issue;
+    store.addLoopEvent(
+      `${run.id}:minor-issue:${issue}`,
+      run.id,
+      minorIssueFiledText(issue, prNumber),
+      at,
+    );
+    const added = await deps.board.add({
+      runId: run.id,
+      repoId: run.repoId,
+      issue,
+      column: "Backlog",
+    });
+    if (!added.ok) flag(`#${issue} filed, but not added to Backlog: ${added.reason}`);
+  }
+
   /** What a pass changed for the next one to act on at once. */
   interface Outcome {
     again: boolean;
@@ -459,6 +510,12 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("attention");
         return;
       case "end-run":
+        // a failure is a note, never a reason to keep the run
+        await fileMinorFindings(run, cur, at).catch((e: unknown) => {
+          log(
+            `${run.id}: minor findings issue failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        });
         await supervisor.endRunByEngine(run.id);
         return;
       case "take-next": {
