@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BACKGROUND_SUITE_TEXT,
+  closesIssue,
   decodeCharRefs,
   engineHitText,
   FREE_SUITE_HINT,
@@ -15,7 +16,6 @@ import {
   guardDecision,
   isFullSuite,
   MC_WRITER_TOOLS,
-  namesIssue,
   scanSecrets,
   scanText,
   splitCommands,
@@ -1543,20 +1543,22 @@ describe("Task 9 fix round 1: unclosedMarkdown and namesIssue (finding 8)", () =
   ])("unclosedMarkdown(%j) is %s", (md, open) => {
     expect(unclosedMarkdown(md)).toBe(open);
   });
+});
 
+describe("closesIssue", () => {
   it.each([
-    ["Part of #42.", true],
-    ["(#42)", true],
-    // round 4: code and HTML count (plain text), and character references are decoded
-    ["`#42`", true],
-    ["```\n#42\n```", true],
-    ["<!--\n#42\n-->", true],
-    ["&#35;42", true],
-    ["&amp;num;42", false],
-    ["#420", false],
-    ["x#42", false],
-  ])("namesIssue(%j, 42) is %s", (md, named) => {
-    expect(namesIssue(md, 42)).toBe(named);
+    ["Refs #42", false],
+    ["#42", false],
+    ["Refs o/mc#42", false],
+    ["Fixes #42", true],
+    ["closes: **#42**", true],
+    ["Resolved o/mc#42", true],
+    ["Fixes #43", false],
+    ["Fixes other/repo#42", false],
+    ["Fixes &#35;42", true],
+    ["no mention", false],
+  ])("closesIssue(%j, o/mc, 42) is %s", (md, closes) => {
+    expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(closes);
   });
 });
 

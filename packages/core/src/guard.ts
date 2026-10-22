@@ -1607,9 +1607,14 @@ export function unclosedMarkdown(md: string): boolean {
   return fence !== null || rawEnd !== null;
 }
 
-/** Whether markdown names `#issue` anywhere (character references decoded; code counts too). */
-export function namesIssue(md: string, issue: number): boolean {
-  return new RegExp(`(?<!\\w)#${issue}(?!\\w)`).test(decodeCharRefs(md));
+/**
+ * Whether markdown has a closing keyword (`Fixes #n`, `Closes owner/repo#n`, …) aimed at the run's
+ * own issue in the run's own repo (character references decoded; code counts too). A plain
+ * mention does not close it.
+ */
+export function closesIssue(md: string, { repo, issue }: { repo: string; issue: number }): boolean {
+  const own = repo.toLowerCase();
+  return [...decodeCharRefs(md).matchAll(CLOSING_REF)].some((m) => closesOwn(m, own, issue));
 }
 
 /**
