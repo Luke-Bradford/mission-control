@@ -76,6 +76,14 @@ describe("loadConfig", () => {
     expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60 });
   });
 
+  it("reads updates.cli, defaulting to off", () => {
+    expect(loadConfig(EXAMPLE).updates).toEqual({ cli: "off" });
+    const on = tmpConfig((y) => `${y}\nupdates:\n  cli: between_runs\n`);
+    expect(loadConfig(on).updates).toEqual({ cli: "between_runs" });
+    const bad = tmpConfig((y) => `${y}\nupdates:\n  cli: sometimes\n`);
+    expect(errorOf(() => loadConfig(bad)).path).toBe("updates.cli");
+  });
+
   it('reads operator.id, defaulting to "operator"', () => {
     expect(loadConfig(EXAMPLE).operator.id).toBe("operator");
     const named = tmpConfig((y) => y.replace("  id: operator\n", "  id: op\n"));

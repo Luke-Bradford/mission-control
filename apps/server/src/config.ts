@@ -40,6 +40,7 @@ import {
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 
@@ -129,6 +130,8 @@ export interface CcConfig {
   poll: { usageMinutes: number; githubSeconds: number };
   /** Absent: no crew. */
   crew?: CrewConfig;
+  /** `between_runs`: the hub keeps the `claude` CLI current without stopping a run. Loaded: always set (default `off`). */
+  updates?: { cli: CliUpdates };
 }
 
 /** One configured agent: an observed loop, or a crew seat with its session. */
@@ -392,6 +395,7 @@ const fileSchema = z
       usage_minutes: z.number().min(5).max(240),
       github_seconds: z.number().min(30).max(3600),
     }),
+    updates: z.strictObject({ cli: z.enum(CLI_UPDATES).default("off") }).default({ cli: "off" }),
     crew: z
       .strictObject({
         worktrees: nonEmpty,
@@ -455,6 +459,7 @@ const fileSchema = z
         ...(l.logs_dir === undefined ? {} : { logsDir: expandHome(l.logs_dir) }),
       })),
       poll: { usageMinutes: f.poll.usage_minutes, githubSeconds: f.poll.github_seconds },
+      updates: { cli: f.updates.cli },
       ...(f.crew === undefined
         ? {}
         : {
