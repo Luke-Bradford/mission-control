@@ -16,6 +16,7 @@ import {
   type DriverStop,
   driverStopKey,
   escalationKind,
+  FLIGHT_ANSWER_WAIT_MS,
   hudState,
   LOCK_WAITING_TEXT,
   lockBlockedText,
@@ -39,6 +40,7 @@ import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
+import { flightLive, flightSeat } from "./flight/state.ts";
 import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
 import type { Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
@@ -454,7 +456,7 @@ export function attentionItems(
     }
   }
 
-  items.push(...crewItems(config, store, lock, rows));
+  items.push(...crewItems(config, store, now, lock, rows));
 
   return items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
@@ -465,6 +467,7 @@ export function attentionItems(
 function crewItems(
   config: CcConfig,
   store: Store,
+  now: number,
   lock: TestLockState,
   rows: CrewRow[],
 ): Omit<AttentionItem, "acked">[] {
@@ -507,7 +510,19 @@ function crewItems(
     );
   }
 
+  // While FLIGHT runs, it gets first go at a seat's question; the operator sees it once FLIGHT
+  // has passed it, or after FLIGHT_ANSWER_WAIT_MS.
+  const flightHolds = flightLive(config, store);
+  const flightId = flightSeat(config)?.seat.id;
   for (const q of store.openQuestions()) {
+    if (
+      flightHolds &&
+      q.agentId !== flightId &&
+      q.passedAt === null &&
+      now - q.at < FLIGHT_ANSWER_WAIT_MS
+    ) {
+      continue;
+    }
     out.push(
       item({
         key: `ask:${q.id}`,

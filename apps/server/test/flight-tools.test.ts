@@ -317,13 +317,14 @@ const addDecision = (over: Partial<FlightDecision>) =>
 const refused = (text: string) => ({ text, isError: true });
 
 describe("tool list", () => {
-  it("adds the four tools, each shown only to a granted role", () => {
+  it("adds the five tools, each shown only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "log_decision",
       "read_ticket",
       "answer_question",
       "start_seat",
       "message_seat",
+      "flight_state",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -912,5 +913,125 @@ describe("message_seat unpark", () => {
       refused("Not sent: the loop engine is off on this server, so nothing can be un-parked."),
     );
     expect(messageCalls).toEqual([]);
+  });
+});
+
+describe("flight_state", () => {
+  const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
+
+  it("is FLIGHT's alone, read-only and takes no arguments", async () => {
+    expect(named("flight_state")).toMatchObject({ modes: [], grantable: ["read-only"] });
+    live("guido-1", "r-guido");
+    expect(await call("flight_state", {}, ctx("guido-1", "r-guido"))).toEqual({
+      text: MC_FLIGHT_ONLY,
+      isError: true,
+    });
+    expect((await call("flight_state", { x: 1 })).isError).toBe(true);
+  });
+
+  it("answers the crew now", async () => {
+    live("inco-1", "r-inco", { ticket: "mc#5" });
+    store.setRunLoop("r-inco", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget", ended: false },
+    });
+    store.addQuestion({
+      agentId: "inco-1",
+      runId: "r-inco",
+      text: "Which lane?",
+      at: NOW - 5 * 60_000,
+    });
+    store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
+    store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
+    store.raiseNote({
+      key: "ready:r-pr",
+      kind: "ready",
+      runId: "r-pr",
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "ready",
+      at: NOW,
+    });
+    board(
+      card(1, { priority: "P1", blockedBy: [{ ref: "mc#8", closed: true }] }),
+      card(2, { status: "Backlog", labels: ["ready"], priority: "P0" }),
+      card(3, { status: "In progress" }),
+      card(4, { blockedBy: [{ ref: "mc#9", closed: false }] }),
+    );
+    addDecision({ kind: "message", about: "Message to GUIDO-1", decision: "go on" });
+    const bare = {
+      state: null,
+      ticket: null,
+      title: null,
+      phase: null,
+      parked: null,
+      stalled: false,
+      idleMin: null,
+      openQuestion: false,
+      atStop: false,
+    };
+    expect(await state()).toEqual({
+      time: "13:00",
+      repo: "mc",
+      seats: [
+        {
+          ...bare,
+          id: "guido-1",
+          call: "GUIDO-1",
+          role: "GUIDO",
+          loop: "build",
+          area: ["apps/**"],
+          free: true,
+        },
+        {
+          ...bare,
+          id: "inco-1",
+          call: "INCO-1",
+          role: "INCO",
+          loop: "build",
+          area: ["apps/web/**"],
+          free: false,
+          state: "idle",
+          ticket: "mc#5",
+          phase: "parked",
+          parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget" },
+          openQuestion: true,
+        },
+        {
+          ...bare,
+          id: "retro-1",
+          call: "RETRO-1",
+          role: "RETRO",
+          loop: "review",
+          area: [],
+          free: true,
+        },
+      ],
+      questions: [{ id: 1, seat: "inco-1", ticket: "mc#5", text: "Which lane?", ageMin: 5 }],
+      tickets: [
+        {
+          ref: "mc#2",
+          title: "Ticket 2",
+          column: "Backlog",
+          priority: "P0",
+          labels: ["ready"],
+          ready: true,
+          blockedBy: [],
+        },
+        {
+          ref: "mc#1",
+          title: "Ticket 1",
+          column: "Ready",
+          priority: "P1",
+          labels: [],
+          ready: true,
+          blockedBy: ["mc#8"],
+        },
+      ],
+      prs: [{ ref: "mc#7", pr: 9, seat: "guido-1", ready: true }],
+      recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
+      limits: { startsLeft: 4, messagesLeft: 29 },
+    });
   });
 });

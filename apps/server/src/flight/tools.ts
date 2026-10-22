@@ -90,7 +90,7 @@ import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import { flightSeat } from "./state.ts";
+import { flightSeat, flightState } from "./state.ts";
 
 export interface FlightToolsDeps {
   config: CcConfig;
@@ -120,6 +120,7 @@ const LogDecisionArgs = z.strictObject({
   decision: text(FLIGHT_DECISION_MAX),
   basis: basisArg,
 });
+const FlightStateArgs = z.strictObject({});
 const ReadTicketArgs = z.strictObject({ issue: issueNumber });
 const AnswerArgs = z
   .strictObject({
@@ -471,6 +472,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: sentUnparkedText(call) };
   }
 
+  async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, FlightStateArgs, args);
+    if (!c.ok) return c.result;
+    return {
+      text: JSON.stringify(
+        flightState({ config, store, busy: deps.supervisor.busy(), now: now() }),
+      ),
+    };
+  }
+
   return [
     {
       name: MC_TOOL_NAMES.logDecision,
@@ -549,6 +560,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: messageSeat,
+    },
+    {
+      name: MC_TOOL_NAMES.flightState,
+      description:
+        "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and limits.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      modes: [],
+      grantable: ["read-only"],
+      call: readState,
     },
   ];
 }
