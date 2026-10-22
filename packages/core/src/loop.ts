@@ -14,6 +14,7 @@ import {
   nextAttempt,
   REVIEW_ATTEMPTS,
   REVIEW_ROUNDS,
+  readyHardRuleText,
   readyNoteKey,
   readyRuledText,
   readyText,
@@ -23,7 +24,7 @@ import {
   reviewRulingParkText,
 } from "./review.ts";
 import type { SeatState } from "./runtime.ts";
-import type { RunLoop } from "./types.ts";
+import type { MergeStep, RunLoop } from "./types.ts";
 
 /** The run has no loop state: Mission Control is not driving it. */
 export const EVIDENCE_NO_LOOP =
@@ -83,6 +84,22 @@ export const blockedNoteKey = (runId: string, epoch: number): string => `blocked
 /** `{sha7}` is the first 7 characters of the failed sha; the excerpt follows. */
 export const CI_FAILED_TEXT = `CI failed on {sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
 export const NO_NEW_COMMIT_TEXT = `No new commit since CI failed on {sha7}. Fix it and commit first, then report; or report with a note starting "${EVIDENCE_RULING_PREFIX}" if the failure is not yours.`;
+/** How a failed merge step is named in the park reason; the server parks it with kind `merge-step`. */
+export const MERGE_STEP_WORDS = {
+  ready: "mark ready",
+  merge: "merge",
+  close: "close the issue",
+  "delete-remote": "delete the remote branch",
+} as const;
+export const mergeStepFailedText = (step: string, why: string): string => `${step} failed: ${why}`;
+/** The gate parks a run for these; the reason says which. */
+export const gateStrayParkText = (call: string, paths: readonly string[]): string =>
+  `changes outside ${call}'s area: ${paths.join(", ")}`;
+export const GATE_FOREIGN_COMMITS_PARK = "commits on the branch that Mission Control did not make";
+/** The flag note while a merge-ready PR is behind main. */
+export const behindNoteKey = (runId: string, sha: string): string => `behind:${runId}:${sha}`;
+export const behindMainText = (ref: string, pr: number, mainSha: string): string =>
+  `${ref}: PR #${pr} is behind main (${mainSha.slice(0, 7)}), so Mission Control has not merged it; it merges once the branch contains main`;
 /** The Activity row for a park. */
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
@@ -202,7 +219,10 @@ export interface LoopSnapshot {
     ci: "passing" | "failing" | "pending" | null;
     mergeable: string | null;
     polledAt: number;
+    isDraft?: boolean;
   } | null;
+  /** The repo is a `merge` workspace: the engine merges a PR that passes the gate. Absent: false. */
+  autoMerge?: boolean;
   /** The card's column from the poll. */
   card: string | null;
   /** This run's seat_lines keys, with the time each was claimed. */
@@ -235,7 +255,12 @@ export type LoopAction =
   | { kind: "supersede-review"; reviewId: number }
   | { kind: "pr-body"; reviewId: number }
   | { kind: "set-aside" }
-  | { kind: "wake" };
+  | { kind: "wake" }
+  | { kind: "mark-ready" }
+  | { kind: "merge"; sha: string }
+  | { kind: "close-issue" }
+  | { kind: "delete-remote-branch"; sha: string }
+  | { kind: "delete-local-branch" };
 
 interface Step {
   loop: RunLoop;
@@ -301,19 +326,71 @@ function reviewView(s: LoopSnapshot, loop: RunLoop) {
   return { R, P, cur, waived, on, blocked };
 }
 
+/**
+ * The merge gate's facts for the pushed sha in a `merge` workspace. `on`: the review, CI and head
+ * facts hold, so the engine's reads (`gate`, `touches`) decide; each is null when missing or for
+ * another sha.
+ */
+function gateView(s: LoopSnapshot, loop: RunLoop) {
+  const rv = reviewView(s, loop);
+  const P = rv.P;
+  const on =
+    s.autoMerge === true &&
+    rv.R !== null &&
+    P !== null &&
+    loop.phase === "review" &&
+    s.ended === null &&
+    s.pr?.state === "open" &&
+    s.pr.headSha === P &&
+    s.headCommit === P &&
+    s.pr.ci === "passing" &&
+    loop.ciFailedSha !== P &&
+    !rv.waived &&
+    rv.cur !== null &&
+    rv.cur.state === "reported" &&
+    rv.cur.blocking === 0;
+  const touches = P !== null && loop.touches?.sha === P ? loop.touches : null;
+  const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
+  const clear = touches !== null && touches.paths.length === 0;
+  const passes =
+    on && clear && gate?.containsMain === true && gate.hubOnly && gate.strays.length === 0;
+  return { on, P, touches, gate, clear, passes };
+}
+
+/** The steps after a merge, in order, minus those already done. */
+function afterMerge(s: LoopSnapshot): LoopAction[] {
+  const done = s.loop.merging?.done ?? [];
+  const todo = (step: MergeStep): boolean => !done.includes(step);
+  const sha = s.loop.merging?.sha ?? s.pr?.headSha ?? s.pushed?.sha ?? null;
+  const actions: LoopAction[] = [];
+  if (todo("close")) actions.push({ kind: "close-issue" });
+  if (todo("delete-remote") && sha !== null) actions.push({ kind: "delete-remote-branch", sha });
+  actions.push({ kind: "end-run" });
+  if (todo("delete-local")) actions.push({ kind: "delete-local-branch" });
+  actions.push({ kind: "take-next" });
+  return actions;
+}
+
 /** The state step: the first matching row of the table changes the loop. */
 function stateStep(s: LoopSnapshot): Step {
   const { loop, pr, evidence, headCommit, pushed, now, seat } = s;
   const prNumber = pr?.number ?? loop.prNumber;
+  const merged = pr?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
 
-  if (pr?.state === "merged" && loop.phase !== "done") {
+  if (merged && loop.phase !== "done") {
     return {
       loop: { ...loop, phase: "done" },
-      actions: [{ kind: "end-run" }, { kind: "take-next" }, { kind: "event", text: "merged" }],
+      actions:
+        s.autoMerge === true
+          ? [...afterMerge(s), { kind: "event", text: "merged" }]
+          : [{ kind: "end-run" }, { kind: "take-next" }, { kind: "event", text: "merged" }],
     };
   }
   if (loop.phase === "done") {
-    return { loop, actions: [{ kind: "end-run" }, { kind: "take-next" }] };
+    return {
+      loop,
+      actions: s.autoMerge === true ? afterMerge(s) : [{ kind: "end-run" }, { kind: "take-next" }],
+    };
   }
   if (s.ended !== null && !loop.parked?.ended) {
     return {
@@ -399,6 +476,15 @@ function stateStep(s: LoopSnapshot): Step {
     ) {
       return park(loop, "review", reviewParkText(R.retro, P));
     }
+  }
+
+  // A hard-rule touch is the operator's to merge, so the strays it brings are not a park.
+  const gv = gateView(s, loop);
+  if (gv.on && gv.clear && gv.gate !== null) {
+    if (gv.gate.strays.length > 0) {
+      return park(loop, "gate", gateStrayParkText(seat.call, gv.gate.strays));
+    }
+    if (!gv.gate.hubOnly) return park(loop, "gate", GATE_FOREIGN_COMMITS_PARK);
   }
 
   if (loop.phase === "ci") {
@@ -511,13 +597,27 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
             text: readyWaivedText(ticket.ref, n, rv.P),
           });
         } else if (rv.cur !== null && rv.cur.state === "reported" && rv.cur.blocking === 0) {
-          notes.set(readyNoteKey(runId, rv.P), {
-            noteKind: "ready",
-            text:
-              loop.ciFailedSha === rv.P
-                ? readyRuledText(ticket.ref, n, rv.R.retro, rv.P)
-                : readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
-          });
+          const gv = gateView(s, loop);
+          if (!gv.on) {
+            notes.set(readyNoteKey(runId, rv.P), {
+              noteKind: "ready",
+              text:
+                loop.ciFailedSha === rv.P
+                  ? readyRuledText(ticket.ref, n, rv.R.retro, rv.P)
+                  : readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
+            });
+          } else if (gv.touches !== null && gv.touches.paths.length > 0) {
+            notes.set(readyNoteKey(runId, rv.P), {
+              noteKind: "ready",
+              text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
+            });
+          } else if (gv.clear && gv.gate !== null && !gv.gate.containsMain) {
+            notes.set(behindNoteKey(runId, rv.P), {
+              noteKind: "flag",
+              text: behindMainText(ticket.ref, n, gv.gate.mainSha),
+            });
+          }
+          // otherwise the gate passes or its reads are due: the operator has nothing to do
         }
       }
     }
@@ -735,6 +835,12 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         actions.push({ kind: "pr-body", reviewId: cur.id });
       }
     }
+  }
+  const gv = gateView(s, loop);
+  if (gv.passes && gv.P !== null) {
+    const done = loop.merging?.done ?? [];
+    if (s.pr?.isDraft !== false && !done.includes("ready")) actions.push({ kind: "mark-ready" });
+    actions.push({ kind: "merge", sha: gv.P });
   }
   if (loop.phase !== "done") {
     // an aside run is off its seat: it comes back, or leaves it, instead of any line

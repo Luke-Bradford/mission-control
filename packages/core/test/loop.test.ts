@@ -15,6 +15,8 @@ import {
   LOOP_TEXT_REVIEW_PR,
   LOOP_TEXT_WORKING,
   loopText,
+  MERGE_STEP_WORDS,
+  mergeStepFailedText,
   NEW_LOOP,
   NO_CI_AFTER_MS,
   NO_NEW_COMMIT_TEXT,
@@ -30,6 +32,8 @@ import {
   type LoopReviewFacts,
   type ReviewFact,
   type ReviewFinding,
+  readyHardRuleText,
+  readyRuledText,
   readyText,
   readyWaivedText,
   reviewFailedParkText,
@@ -1797,5 +1801,253 @@ describe("set aside", () => {
   it("ended: no wake", () => {
     const r = reconcile(off({ ended: { reason: "stopped" } }, asideOf(true)));
     expect(kindsOf(r.actions)).not.toContain("wake");
+  });
+});
+
+describe("merge workspace", () => {
+  const RETRO = "RETRO-1";
+  const MAIN = "cccccccc3333";
+  const rows = (over: Partial<ReviewFact> = {}): LoopReviewFacts => ({
+    retro: RETRO,
+    rows: [
+      {
+        id: 1,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        state: "reported",
+        blocking: 0,
+        minor: 0,
+        failure: null,
+        ...over,
+      },
+    ],
+    findings: [],
+  });
+  const gateOf = (over: Partial<NonNullable<RunLoop["gate"]>> = {}): RunLoop["gate"] => ({
+    sha: SHA,
+    mainSha: MAIN,
+    containsMain: true,
+    hubOnly: true,
+    strays: [],
+    ...over,
+  });
+  const merge = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): LoopSnapshot =>
+    snap(
+      {
+        autoMerge: true,
+        headCommit: SHA,
+        pushed: { sha: SHA, at: NOW - 60_000 },
+        pr: pr({ ci: "passing", isDraft: true }),
+        evidence: { id: 1, at: 2000, ruling: false },
+        evidenceCount: 1,
+        review: rows(),
+        ...over,
+      },
+      {
+        phase: "review",
+        reportedEvidenceId: 1,
+        cardFor: "review:0",
+        gate: gateOf(),
+        touches: { sha: SHA, paths: [] },
+        ...loop,
+      },
+    );
+  const kindsOf = (a: LoopAction[]): string[] => a.map((x) => x.kind);
+  const readyKey = `ready:r1:${SHA}`;
+
+  it("all six facts: mark-ready then merge, and no ready note", () => {
+    const r = reconcile(merge());
+    expect(r.loop.phase).toBe("review");
+    expect(r.actions.filter((x) => x.kind === "mark-ready" || x.kind === "merge")).toEqual([
+      { kind: "mark-ready" },
+      { kind: "merge", sha: SHA },
+    ]);
+    expect(kindsOf(r.actions)).not.toContain("note");
+  });
+
+  it("skips mark-ready for a PR that is not a draft or already marked", () => {
+    const a = reconcile(merge({ pr: pr({ ci: "passing", isDraft: false }) })).actions;
+    expect(kindsOf(a).filter((k) => k === "mark-ready" || k === "merge")).toEqual(["merge"]);
+    const b = reconcile(merge({}, { merging: { sha: SHA, done: ["ready"] } })).actions;
+    expect(kindsOf(b).filter((k) => k === "mark-ready" || k === "merge")).toEqual(["merge"]);
+  });
+
+  it("draft workspace and absent autoMerge keep today's note and never merge", () => {
+    for (const autoMerge of [undefined, false]) {
+      const a = reconcile(merge({ autoMerge })).actions;
+      expect(kindsOf(a)).not.toContain("merge");
+      expect(a).toContainEqual({
+        kind: "note",
+        key: readyKey,
+        noteKind: "ready",
+        text: readyText(REF, 12, RETRO, SHA, 0),
+      });
+    }
+  });
+
+  const noMerge = (r: ReturnType<typeof reconcile>): void => {
+    expect(kindsOf(r.actions)).not.toContain("merge");
+    expect(kindsOf(r.actions)).not.toContain("mark-ready");
+  };
+
+  it("CI pending: no merge", () => {
+    noMerge(reconcile(merge({ pr: pr({ ci: "pending" }) })));
+  });
+
+  it("a ruling on CI: today's ruled note, no merge", () => {
+    const r = reconcile(merge({}, { ciFailedSha: SHA }));
+    noMerge(r);
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: readyKey,
+      noteKind: "ready",
+      text: readyRuledText(REF, 12, RETRO, SHA),
+    });
+  });
+
+  it("a blocking review: no merge, no ready note", () => {
+    const r = reconcile(merge({ review: rows({ blocking: 2 }) }));
+    noMerge(r);
+    expect(r.actions.some((x) => x.kind === "note" && x.noteKind === "ready")).toBe(false);
+  });
+
+  it("a waived review: today's waived note, no merge", () => {
+    const r = reconcile(merge({}, { reviewWaivedSha: SHA }));
+    noMerge(r);
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: readyKey,
+      noteKind: "ready",
+      text: readyWaivedText(REF, 12, SHA),
+    });
+  });
+
+  it("behind main: a flag note keyed behind, no merge", () => {
+    const r = reconcile(merge({}, { gate: gateOf({ containsMain: false }) }));
+    noMerge(r);
+    expect(r.loop.phase).toBe("review");
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: `behind:r1:${SHA}`,
+      noteKind: "flag",
+      text: `${REF}: PR #12 is behind main (${MAIN.slice(0, 7)}), so Mission Control has not merged it; it merges once the branch contains main`,
+    });
+  });
+
+  it("strays park the run with kind gate", () => {
+    const r = reconcile(merge({}, { gate: gateOf({ strays: ["x/a.ts", "y.ts"] }) }));
+    noMerge(r);
+    expect(r.loop.parked).toEqual({
+      kind: "gate",
+      reason: "changes outside SULU's area: x/a.ts, y.ts",
+      ended: false,
+    });
+  });
+
+  it("commits Mission Control did not make park the run with kind gate", () => {
+    const r = reconcile(merge({}, { gate: gateOf({ hubOnly: false }) }));
+    noMerge(r);
+    expect(r.loop.parked).toEqual({
+      kind: "gate",
+      reason: "commits on the branch that Mission Control did not make",
+      ended: false,
+    });
+  });
+
+  it("gate or touches missing or for another sha: nothing merges and nothing parks", () => {
+    const cases: Partial<RunLoop>[] = [
+      { gate: null },
+      { gate: gateOf({ sha: SHA2 }) },
+      { touches: null },
+      { touches: { sha: SHA2, paths: [] } },
+    ];
+    for (const loop of cases) {
+      const r = reconcile(merge({}, loop));
+      noMerge(r);
+      expect(r.loop.phase, JSON.stringify(loop)).toBe("review");
+    }
+  });
+
+  it("a hard-rule touch: the operator merges", () => {
+    const r = reconcile(
+      merge(
+        {},
+        { touches: { sha: SHA, paths: ["CLAUDE.md"] }, gate: gateOf({ strays: ["CLAUDE.md"] }) },
+      ),
+    );
+    noMerge(r);
+    expect(r.loop.phase).toBe("review");
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: readyKey,
+      noteKind: "ready",
+      text: readyHardRuleText(REF, 12, ["CLAUDE.md"]),
+    });
+    expect(r.actions).toContainEqual(
+      expect.objectContaining({ key: `flag:r1:hard-rules:${SHA}`, noteKind: "flag" }),
+    );
+  });
+
+  it("the head moved off the pushed sha: no merge", () => {
+    noMerge(reconcile(merge({ pr: pr({ ci: "passing", headSha: SHA2 }) })));
+    noMerge(reconcile(merge({ headCommit: SHA2 })));
+  });
+
+  const after = (r: ReturnType<typeof reconcile>): string[] =>
+    r.actions.flatMap((x) =>
+      x.kind === "event"
+        ? [`event:${x.text}`]
+        : x.kind === "move-card" || x.kind === "clear-note"
+          ? []
+          : [x.kind],
+    );
+
+  it("after the merge: the steps come out in order even while the poll says open", () => {
+    const r = reconcile(merge({}, { merging: { sha: SHA, done: ["ready", "merge"] } }));
+    expect(r.loop.phase).toBe("done");
+    expect(r.actions.filter((x) => x.kind !== "clear-note")).toEqual([
+      { kind: "close-issue" },
+      { kind: "delete-remote-branch", sha: SHA },
+      { kind: "end-run" },
+      { kind: "delete-local-branch" },
+      { kind: "take-next" },
+      { kind: "event", text: "merged" },
+    ]);
+  });
+
+  it("a step already done does not come out again", () => {
+    const r = reconcile(
+      merge({}, { merging: { sha: SHA, done: ["ready", "merge", "close", "delete-remote"] } }),
+    );
+    expect(after(r)).toEqual(["end-run", "delete-local-branch", "take-next", "event:merged"]);
+  });
+
+  it("a PR merged by hand gets the same sequence", () => {
+    const r = reconcile(merge({ pr: pr({ state: "merged", ci: "passing" }) }));
+    expect(after(r)).toEqual([
+      "close-issue",
+      "delete-remote-branch",
+      "end-run",
+      "delete-local-branch",
+      "take-next",
+      "event:merged",
+    ]);
+    expect(r.actions).toContainEqual({ kind: "delete-remote-branch", sha: SHA });
+  });
+
+  it("a draft workspace's merged PR is unchanged", () => {
+    const r = reconcile(merge({ autoMerge: false, pr: pr({ state: "merged" }) }));
+    expect(after(r)).toEqual(["end-run", "take-next", "event:merged"]);
+  });
+
+  it("mergeStepFailedText names the step and why", () => {
+    expect(mergeStepFailedText(MERGE_STEP_WORDS.merge, "conflict")).toBe("merge failed: conflict");
+    expect(MERGE_STEP_WORDS).toEqual({
+      ready: "mark ready",
+      merge: "merge",
+      close: "close the issue",
+      "delete-remote": "delete the remote branch",
+    });
   });
 });

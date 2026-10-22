@@ -262,6 +262,9 @@ export const readyRuledText = (ref: string, pr: number, retro: string, sha: stri
   `${ref}: PR #${pr} is ready to merge: ruled on the CI failure on ${sha.slice(0, 7)}, and ${retro} found no blocking issues`;
 export const readyWaivedText = (ref: string, pr: number, sha: string): string =>
   `${ref}: PR #${pr} is ready to merge (you waived the review findings on ${sha.slice(0, 7)})`;
+/** The ready note in a merge workspace when the PR touches hard-rule files: the operator merges it. */
+export const readyHardRuleText = (ref: string, pr: number, paths: readonly string[]): string =>
+  `${ref}: PR #${pr} passed every check but touches hard-rule files (${paths.join(", ")}); merge it yourself`;
 export const headMovedText = (ref: string, pr: number, head: string, pushed: string): string =>
   `${ref}: PR #${pr}'s head ${head.slice(0, 7)} is not the commit Mission Control pushed (${pushed.slice(0, 7)}); it is not reviewed, so check it before merging`;
 export const reviewParkText = (retro: string, sha: string): string =>
