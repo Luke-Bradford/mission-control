@@ -27,6 +27,7 @@ import {
   type CrewChanges,
   type CrewSessionFolders,
   DEFAULT_AWAY,
+  DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
   type FlightView,
@@ -568,6 +569,8 @@ describe("add a repo (POST /api/repos)", () => {
       statusMap: { Todo: "planned", Done: "done" },
       needsYouLabels: ["needs-human"],
       fullSuite: [],
+      commands: DEFAULT_SEAT_COMMANDS,
+      protectedFiles: [],
       autonomy: "draft",
     });
     expect(events).toContain("config");

@@ -40,6 +40,7 @@ import {
   MC_PLAN_ISSUE_CLOSED,
   MC_PLAN_MAX,
   MC_PLAN_NO_ROOM,
+  MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_WRITTEN,
   MC_PR_UNCLOSED,
@@ -53,6 +54,8 @@ import {
   NEW_LOOP,
   originMovedText,
   planByLine,
+  planFewTestsText,
+  planMissingPathsText,
   planTooLongText,
   prNamedRefText,
   prNotifyText,
@@ -457,6 +460,31 @@ describe("commit", () => {
     expect((await commit("ci")).text).toBe(
       `Not committed: apps/.github/workflows/ci.yml is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
     );
+  });
+
+  const withProtected = () => {
+    const c = config();
+    if (c.repos[0]) c.repos[0].protectedFiles = ["pyproject.toml"];
+    return make({ config: c });
+  };
+
+  it("refuses a file the repo lists as protected, and commits it in a repo that does not", async () => {
+    const base = head();
+    write("apps/pyproject.toml", "[project]\n");
+    expect((await commit("chore: py", withProtected())).text).toBe(
+      `Not committed: apps/pyproject.toml is protected (build, install and CI files); ask the operator if the ticket needs it.\n${REVERT}`,
+    );
+    expect(head()).toBe(base);
+    expect(store.strays()).toEqual([]);
+    expect((await commit("chore: py")).text).toMatch(/^Committed /);
+  });
+
+  it("refuses to remove a file the repo lists as protected", async () => {
+    write("apps/pyproject.toml", "[project]\n");
+    await commit("chore: py");
+    const r = await rm(["apps/pyproject.toml"], "chore: drop", withProtected());
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("Not committed: apps/pyproject.toml is protected");
   });
 
   it("names ten paths per group, then and {n} more", async () => {
@@ -2974,7 +3002,7 @@ describe("report_findings", () => {
 describe("report_plan", () => {
   const FAO_RUN = "fao-1:20261020T115000Z";
   const FAO_CTX: McToolContext = { seatId: "fao-1", runId: FAO_RUN };
-  const PLAN = "### Outcome\n\nDo X, then Y.";
+  const PLAN = "### Outcome\n\nDo X, then Y.\n\n### Tests\n\n- First, in `a.test.ts`.";
   let ghDir: string;
   let told: [string, string][];
   let pt: McTool[];
@@ -3083,6 +3111,92 @@ describe("report_plan", () => {
     expect(told).toEqual([]);
   });
 
+  describe("the plan is checked", () => {
+    const DONE = "Do X.\n\n## Done when\n\n- A works.\n- B works.\n";
+    let checkout: string;
+    beforeEach(() => {
+      checkout = join(dir, "planner-checkout");
+      mkdirSync(join(checkout, "src"), { recursive: true });
+      writeFileSync(join(checkout, "src", "a.ts"), "");
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: FAO_RUN,
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: checkout,
+        updatedAt: NOW,
+      });
+      ghState(view(DONE));
+    });
+    const TWO = "### Tests\n\n- A: `a.test.ts` first.\n- B: `b.test.ts` first.";
+
+    it("refuses a plan without ### Tests", async () => {
+      expect(await plan("### Outcome\n\nDo X.")).toEqual(refused(MC_PLAN_NO_TESTS));
+      expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+      expect(told).toEqual([]);
+    });
+
+    it("refuses fewer tests than Done when items", async () => {
+      expect(await plan("### Tests\n\n- A: `a.test.ts` first.")).toEqual(
+        refused(planFewTestsText(1, 2)),
+      );
+      expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+    });
+
+    it("refuses a path that is not in the checkout, listing five", async () => {
+      const r = await plan(
+        `${TWO}\n\nEdit \`src/a.ts\`, \`src/m1.ts\`, \`src/m2.ts\`, \`src/m3.ts\`, \`src/m4.ts\`, \`src/m5.ts\`, \`src/m6.ts\`.`,
+      );
+      expect(r).toEqual(
+        refused(
+          planMissingPathsText([
+            "src/m1.ts",
+            "src/m2.ts",
+            "src/m3.ts",
+            "src/m4.ts",
+            "src/m5.ts",
+            "src/m6.ts",
+          ]),
+        ),
+      );
+      expect(r.text).not.toContain("src/m6.ts");
+      expect(r.text).toContain("and 1 more");
+      expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+    });
+
+    it("counts only top-level Done when and Tests items", async () => {
+      ghState(view("Do X.\n\n## Done when\n\n- A works.\n  - detail.\n- B works.\n"));
+      expect(await plan(TWO)).toEqual({ text: MC_PLAN_WRITTEN });
+      ghState(view(DONE));
+      expect(await plan("### Tests\n\n- A: `a.test.ts`.\n  - more.\n  - even more.")).toEqual(
+        refused(planFewTestsText(1, 2)),
+      );
+    });
+
+    it("ignores bullets in a fenced block under Done when", async () => {
+      ghState(view("Do X.\n\n## Done when\n\n- A works.\n- B works.\n\n```\n- x\n- y\n- z\n```\n"));
+      expect(await plan(TWO)).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
+    it("ignores paths in a fenced block and strips :line suffixes", async () => {
+      expect(
+        await plan(`${TWO}\n\n\`\`\`\nsee \`src/nope.ts\`\n\`\`\`\nChange \`src/a.ts:3-9\`.`),
+      ).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
+    it("accepts a missing path the line says is new", async () => {
+      expect(await plan(`${TWO}\n\nAdd \`src/b.ts\` (new). Change \`src/a.ts\`.`)).toEqual({
+        text: MC_PLAN_WRITTEN,
+      });
+    });
+
+    it("writes a complete plan", async () => {
+      expect(await plan(`${TWO}\n\nChange \`src/a.ts\`.`)).toEqual({ text: MC_PLAN_WRITTEN });
+      expect(told).toEqual([["fao-1", FAO_RUN]]);
+    });
+  });
+
   it("refuses a plan that ends inside an unclosed code block", async () => {
     const r = await plan("```ts\nlet a");
     expect(r.isError).toBe(true);
@@ -3157,12 +3271,15 @@ describe("report_plan", () => {
   it("too long", async () => {
     ghState(view("b".repeat(15_000)));
     const overhead = 15_000 + 2 + "## Plan\n\n".length + 2 + planByLine("FAO-1").length + 1;
-    expect(await plan("p".repeat(6000))).toEqual(
+    const tests = "### Tests\n\n- t\n\n";
+    expect(await plan(tests + "p".repeat(6000 - tests.length))).toEqual(
       refused(planTooLongText(TICKET_BODY_MAX, TICKET_BODY_MAX - overhead)),
     );
     expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
     // a plan of exactly that room fits
-    expect((await plan("p".repeat(TICKET_BODY_MAX - overhead))).text).toBe(MC_PLAN_WRITTEN);
+    expect((await plan(tests + "p".repeat(TICKET_BODY_MAX - overhead - tests.length))).text).toBe(
+      MC_PLAN_WRITTEN,
+    );
   });
 
   it("says there is no room when the ticket alone is too long", async () => {

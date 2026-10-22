@@ -23,6 +23,7 @@ import {
   committedText,
   commitUnresolvedText,
   crewAuthorName,
+  doneWhenCount,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -62,6 +63,7 @@ import {
   MC_PLAN_ISSUE_CLOSED,
   MC_PLAN_MAX,
   MC_PLAN_NO_ROOM,
+  MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_WRITTEN,
   MC_PR_BODY_REFUSED,
@@ -97,6 +99,10 @@ import {
   PUSH_SCAN_MAX_BUFFER,
   pathInArea,
   planByLine,
+  planFewTestsText,
+  planMissingPathsText,
+  planPaths,
+  planTestCount,
   planTextText,
   planTooLongText,
   planWrittenText,
@@ -1120,6 +1126,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       let before: string | null = null;
       let result: Result;
       const writers = session.seats.filter((s) => s.id !== seat.id && seatDef(s).mode === "writer");
+      /** The repo's own protected globs, on top of PROTECTED_FILES. */
+      const extra = config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
       /** What this call has deleted so far: every answer from then on says so. */
       const removed: string[] = [];
       /** The advisory lines about files another open run changed; appended to a commit's answer. */
@@ -1175,7 +1183,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             foreign.push(p);
             continue;
           }
-          if (isProtectedPath(p)) {
+          if (isProtectedPath(p, extra)) {
             kept.push(p);
             continue;
           }
@@ -1347,7 +1355,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           } else if (fromMain.has(p)) {
             // main's own version of the path: no area, protected or stray check applies
             if (special.has(p)) links.push(p);
-          } else if (isProtectedPath(p)) {
+          } else if (isProtectedPath(p, extra)) {
             kept.push(p);
           } else if (!pathInArea(seat.area, p)) {
             const owner = writers.find((w) => pathInArea(w.area, p));
@@ -1679,6 +1687,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const body = String(issueJson.body ?? "");
       if (PLAN_HEADING_LINE.test(body)) return { text: MC_PLAN_ALREADY, isError: true };
       if (unclosedMarkdown(body)) return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
+
+      const tests = planTestCount(plan);
+      if (tests === null) return { text: MC_PLAN_NO_TESTS, isError: true };
+      const doneWhen = doneWhenCount(body);
+      if (tests < doneWhen) return { text: planFewTestsText(tests, doneWhen), isError: true };
+      if (live.worktree !== null) {
+        const missing: string[] = [];
+        for (const p of planPaths(plan)) {
+          try {
+            await lstat(join(live.worktree, p));
+          } catch {
+            missing.push(p);
+          }
+        }
+        if (missing.length > 0) return { text: planMissingPathsText(missing), isError: true };
+      }
 
       const next = [
         body.trim() === "" ? "" : `${body.trimEnd()}\n\n`,

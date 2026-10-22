@@ -12,7 +12,13 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { BUILTIN_ROLES, CREW_EFFORTS, DEFAULT_CREW_NODE, FLIGHT_TOOLS } from "@mc/core";
+import {
+  BUILTIN_ROLES,
+  CREW_EFFORTS,
+  DEFAULT_CREW_NODE,
+  DEFAULT_SEAT_COMMANDS,
+  FLIGHT_TOOLS,
+} from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   type CcConfig,
@@ -994,9 +1000,13 @@ describe("guard config", () => {
   it("accepts a full_suite entry equal to, or a word-extension of, an allowed prefix", () => {
     const t = text.replace(
       FULL_SUITE_BLOCK,
-      'full_suite: ["pnpm -s test", "pnpm -s vitest run --coverage"]',
+      'full_suite: ["pnpm -s test", "pnpm -s vitest", "pnpm -s vitest run --coverage"]',
     );
-    expect(parse(t).repos[2]?.fullSuite).toEqual(["pnpm -s test", "pnpm -s vitest run --coverage"]);
+    expect(parse(t).repos[2]?.fullSuite).toEqual([
+      "pnpm -s test",
+      "pnpm -s vitest",
+      "pnpm -s vitest run --coverage",
+    ]);
   });
 
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
@@ -1046,6 +1056,188 @@ describe("guard config", () => {
       expect(c.crew?.nodeNote).toBe(`crew.node: ${bad} is not an executable file`);
       expect(c.loops.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("repo commands and protected files", () => {
+  const text = readFileSync(EXAMPLE, "utf8");
+  const parse = (t: string) =>
+    parseConfig(t, "test", { hubRoot: mkdtempSync(join(tmpdir(), "mc-hub-")) });
+  const AT = "    github: octo-org/shop-app\n";
+  expect(text).toContain(AT);
+  const withRepo0 = (l: string) => text.replace(AT, AT + l);
+  const PROTECTED = [
+    "pyproject.toml",
+    "uv.lock",
+    "uv.toml",
+    "conftest.py",
+    "setup.cfg",
+    "ruff.toml",
+    "justfile",
+    ".pre-commit-config.yaml",
+  ];
+  const EXAMPLE_KEYS = [
+    '    full_suite: ["uv run pytest"]\n',
+    "    commands:\n",
+    '      writer: ["uv run pytest", "uv run ruff check", "uv run mypy"]\n',
+    '      review: ["uv run pytest"]\n',
+    `    protected: ${JSON.stringify(PROTECTED)}\n`,
+  ].join("");
+  const writer = (c: string) =>
+    withRepo0(`    commands:\n      writer: [${JSON.stringify(c)}]\n      review: []\n`);
+
+  it("a repo with neither key loads with the default commands and no extra protected files", () => {
+    const r = parse(text).repos[0];
+    expect(r?.commands).toEqual(DEFAULT_SEAT_COMMANDS);
+    expect(r?.protectedFiles).toEqual([]);
+  });
+
+  it("loads the ticket's example", () => {
+    expect(parse(withRepo0(EXAMPLE_KEYS)).repos[0]).toMatchObject({
+      fullSuite: ["uv run pytest"],
+      commands: {
+        writer: ["uv run pytest", "uv run ruff check", "uv run mypy"],
+        review: ["uv run pytest"],
+      },
+      protectedFiles: PROTECTED,
+    });
+  });
+
+  const PLAIN =
+    "must be plain words (letters, digits and . _ / = + , @ -) separated by single spaces";
+  it.each([
+    ["uv run", "ends at run, which runs whatever follows it"],
+    ["npx", "ends at npx, which runs whatever follows it"],
+    ["pnpm exec", "ends at exec, which runs whatever follows it"],
+    ["python", "ends at python, which runs whatever follows it"],
+    ["bash", "ends at bash, which runs whatever follows it"],
+    ["just", "ends at just, which runs whatever follows it"],
+    ["uv run pytest; git push", PLAIN],
+    ["pytest $X", PLAIN],
+    ["./run-tests", "must start with a program name, not a path"],
+    ["git status", "runs git, which seats may never run"],
+  ])("refuses seat command %j", (cmd, why) => {
+    const e = errorOf(() => parse(writer(cmd)));
+    expect(e.path).toBe("repos[0].commands.writer[0]");
+    expect(e.message).toBe(`repos[0].commands.writer[0]: "${cmd}" ${why}`);
+  });
+
+  it.each([
+    ["pnpm -s", "names no tool after pnpm"],
+    ["pnpm -s exec y", "runs exec, which runs whatever follows it"],
+    ["pnpm dlx y", "runs dlx, which runs whatever follows it"],
+    ["npm exec y", "runs exec, which runs whatever follows it"],
+    ["GIT -C .", "runs git, which seats may never run"],
+    ["SH", "ends at sh, which runs whatever follows it"],
+    ["Bash", "ends at bash, which runs whatever follows it"],
+    ["sh x.sh", "runs sh, which seats may never run"],
+    ["node -e y", "has -e, which runs code given on the command line"],
+    ["node x.js", "runs node, which seats may never run"],
+    ["python3 -c y", "has -c, which runs code given on the command line"],
+    ["python3 x.py", "runs python3 without -m <module>, which runs arbitrary code"],
+    ["uv run python x.py", "runs python without -m <module>, which runs arbitrary code"],
+    ["uv run bash y", "runs bash, which seats may never run"],
+    ["pytest -p y", "has -p, which runs code given on the command line"],
+    ["tool --eval y", "has --eval, which runs code given on the command line"],
+    ["osascript", "ends at"],
+    ["osascript y", "runs osascript, which seats may never run"],
+    ["ssh h", "runs ssh, which seats may never run"],
+    ["find y", "runs find, which seats may never run"],
+    ["env X=1 pytest", "runs env, which seats may never run"],
+  ])("refuses the shell, interpreter, launcher or package-manager entry %j", (cmd, why) => {
+    const e = errorOf(() => parse(writer(cmd)));
+    expect(e.path).toBe("repos[0].commands.writer[0]");
+    expect(e.message).toContain(why === "ends at" ? "osascript" : why);
+  });
+
+  it.each(["uv run python -m pytest", "python3 -m pytest", "pnpm -s vitest", "uv run ruff check"])(
+    "loads seat command %j",
+    (cmd) => {
+      expect(parse(writer(cmd)).repos[0]?.commands?.writer).toEqual([cmd]);
+    },
+  );
+
+  it.each([
+    ["just test", ["justfile"], ".justfile"],
+    ["make test", ["Makefile"], "GNUmakefile"],
+    ["tox", ["tox.ini"], null],
+    ["nox", [], "noxfile.py"],
+    ["task test", ["Taskfile.yml"], "Taskfile.yaml"],
+  ])("a task runner entry %j needs its recipe files protected (M1)", (cmd, prot, missing) => {
+    const t = withRepo0(
+      `    commands:\n      writer: [${JSON.stringify(cmd)}]\n      review: []\n    protected: ${JSON.stringify(prot)}\n`,
+    );
+    if (missing === null) {
+      expect(parse(t).repos[0]?.commands?.writer).toEqual([cmd]);
+      return;
+    }
+    const e = errorOf(() => parse(t));
+    expect(e.path).toBe("repos[0].commands.writer[0]");
+    expect(e.message).toContain(`runs recipes from ${missing}, which must be listed in protected`);
+  });
+
+  it("loads a task runner entry once every recipe file is protected (M1)", () => {
+    const t = withRepo0(
+      '    commands:\n      writer: ["just test"]\n      review: []\n    protected: ["justfile", "Justfile", ".justfile"]\n',
+    );
+    expect(parse(t).repos[0]?.commands?.writer).toEqual(["just test"]);
+  });
+
+  it("refuses a full_suite entry that extends a writer command (M3)", () => {
+    const t = withRepo0(
+      '    full_suite: ["uv run pytest -x"]\n    commands:\n      writer: ["uv run pytest"]\n      review: []\n',
+    );
+    const e = errorOf(() => parse(t));
+    expect(e.path).toBe("repos[0].full_suite");
+    expect(e.message).toContain('"uv run pytest -x" extends the writer command "uv run pytest"');
+  });
+
+  it("loads a full_suite entry that extends a writer command also listed in full_suite (M3)", () => {
+    const t = withRepo0(
+      '    full_suite: ["uv run pytest -x", "uv run pytest"]\n    commands:\n      writer: ["uv run pytest"]\n      review: []\n',
+    );
+    expect(parse(t).repos[0]?.fullSuite).toEqual(["uv run pytest -x", "uv run pytest"]);
+  });
+
+  it("checks the default writer list too: pnpm -s vitest run alone leaves pnpm -s vitest unlocked (M3)", () => {
+    const e = errorOf(() => parse(withRepo0('    full_suite: ["pnpm -s vitest run"]\n')));
+    expect(e.path).toBe("repos[0].full_suite");
+    expect(e.message).toContain('"pnpm -s vitest run" extends the writer command "pnpm -s vitest"');
+    expect(
+      parse(withRepo0('    full_suite: ["pnpm -s vitest run", "pnpm -s vitest"]\n')).repos[0]
+        ?.fullSuite,
+    ).toEqual(["pnpm -s vitest run", "pnpm -s vitest"]);
+  });
+
+  it.each(["a/", "a//b", "./a", "a/./b", "."])("refuses protected glob shape %j (M2)", (g) => {
+    const e = errorOf(() => parse(withRepo0(`    protected: [${JSON.stringify(g)}]\n`)));
+    expect(e.path).toBe("repos[0].protected[0]");
+  });
+
+  it.each(["uv run ruff check"])("loads seat command %j", (cmd) => {
+    expect(parse(writer(cmd)).repos[0]?.commands?.writer).toEqual([cmd]);
+  });
+
+  it("refuses commands with only writer", () => {
+    const e = errorOf(() => parse(withRepo0('    commands:\n      writer: ["uv run pytest"]\n')));
+    expect(e.path).toBe("repos[0].commands.review");
+  });
+
+  it("checks full_suite against the repo's own writer commands", () => {
+    const e = errorOf(() =>
+      parse(
+        withRepo0(
+          EXAMPLE_KEYS.replace('["uv run pytest"]\n    commands', '["pnpm -s test"]\n    commands'),
+        ),
+      ),
+    );
+    expect(e.message).toBe("repos[0].full_suite: pnpm -s test is not a command crew seats may run");
+    expect(() => parse(withRepo0(EXAMPLE_KEYS))).not.toThrow();
+  });
+
+  it.each(["/etc/x", "../x", "a[b]"])("refuses protected glob %j", (g) => {
+    const e = errorOf(() => parse(withRepo0(`    protected: [${JSON.stringify(g)}]\n`)));
+    expect(e.path).toBe("repos[0].protected[0]");
   });
 });
 

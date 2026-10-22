@@ -253,14 +253,15 @@ export function flightState(i: {
 
 /** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
 export function wakeFacts(s: FlightState): string {
+  const startable = s.tickets.filter((t) => t.ready);
   const free =
-    s.tickets.length > 0
+    startable.length > 0
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
   return JSON.stringify({
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
-    t: free.length > 0 ? s.tickets.map((t) => t.ref) : [],
+    t: free.length > 0 ? startable.map((t) => t.ref) : [],
     parked: s.seats
       .filter((x) => x.parked !== null)
       .map((x) => `${x.id}:${x.ticket}:${x.parked?.kind}`)
@@ -282,7 +283,7 @@ export function pending(s: FlightState): boolean {
   return (
     s.questions.length > 0 ||
     stoppedSeats(s).length > 0 ||
-    (s.tickets.length > 0 && s.seats.some((x) => x.loop === "build" && x.free)) ||
+    (s.tickets.some((t) => t.ready) && s.seats.some((x) => x.loop === "build" && x.free)) ||
     s.seats.some(
       (x) =>
         x.parked !== null && (FLIGHT_UNPARK_KINDS as readonly string[]).includes(x.parked.kind),

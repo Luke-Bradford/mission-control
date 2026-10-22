@@ -352,9 +352,194 @@ export function anchoredGlob(cwd: string, glob: string): string {
 /** Plain words with single spaces; the program word has no `/`. */
 const SEAT_COMMAND = /^[A-Za-z0-9][A-Za-z0-9._=+,@-]*( [A-Za-z0-9._/=+,@-]+)*$/;
 
+/** Words that run whatever follows them when they END an entry (the guard does not look through them). */
+const SEAT_RUNNER_WORDS: ReadonlySet<string> = new Set([
+  "run",
+  "exec",
+  "dlx",
+  "x",
+  "-m",
+  "-c",
+  "-e",
+  "uvx",
+  "npx",
+  "bunx",
+  "python",
+  "python3",
+  "node",
+  "just",
+  "make",
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "env",
+  "xargs",
+  "eval",
+  "sudo",
+  "timeout",
+  "nice",
+  "nohup",
+  "command",
+]);
+/** Flags that take code (or a module to load) as their value: refused as ANY word of an entry. */
+const SEAT_CODE_FLAGS: ReadonlySet<string> = new Set([
+  "-c",
+  "-e",
+  "-E",
+  "-p",
+  "-r",
+  "--eval",
+  "--print",
+  "--require",
+  "--import",
+  "--loader",
+]);
+/**
+ * Programs no seat command may start with: shells, interpreters, launchers, and IPC or network
+ * tools (all lowercase: a word is lowercased before the lookup, as macOS runs `GIT` as git).
+ * `python*` is the one exception, with `-m <module>` (see `seatWordsProblem`).
+ */
+const SEAT_FIRST_WORD_DENIED: ReadonlySet<string> = new Set([
+  "git",
+  "gh",
+  "curl",
+  "wget",
+  "security",
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "fish",
+  "ksh",
+  "node",
+  "bun",
+  "deno",
+  "perl",
+  "ruby",
+  "php",
+  "osascript",
+  "open",
+  "launchctl",
+  "ssh",
+  "scp",
+  "rsync",
+  "nc",
+  "tmux",
+  "screen",
+  "script",
+  "setsid",
+  "coproc",
+  "watch",
+  "find",
+  "awk",
+  "gawk",
+  "xargs",
+  "env",
+  "sudo",
+  "time",
+  "stdbuf",
+  "builtin",
+  "exec",
+  "command",
+  "eval",
+  "timeout",
+  "nice",
+  "nohup",
+  "npx",
+  "bunx",
+  "uvx",
+]);
+/** Package managers: an entry of one plus flags alone, or its exec/dlx forms, runs arbitrary programs. */
+const SEAT_PACKAGE_MANAGERS: ReadonlySet<string> = new Set([
+  "pnpm",
+  "npm",
+  "yarn",
+  "uv",
+  "poetry",
+  "cargo",
+  "go",
+  "pip",
+  "pipx",
+]);
+const SEAT_PM_LAUNCH_WORDS: ReadonlySet<string> = new Set(["exec", "dlx", "x"]);
+const PYTHON_WORD = /^python[0-9.]*$/;
+/** Task runners: the recipe file(s) the entry runs, which must be protected for the entry to load. */
+export const SEAT_RECIPE_FILES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  just: ["justfile", ".justfile"],
+  make: ["Makefile", "GNUmakefile"],
+  task: ["Taskfile.yml", "Taskfile.yaml"],
+  tox: ["tox.ini"],
+  nox: ["noxfile.py"],
+});
+
+/**
+ * Why the words of a seat command (already plain words) may not be one, or null. Every word is
+ * lowercased before a lookup; the first word may not be a shell, interpreter, launcher or
+ * network/IPC tool (`python* -m <module>`, also behind `uv run`, is allowed); no word may be a
+ * code-taking flag; a package manager must be followed by a named tool, not exec/dlx/x.
+ */
+export function seatWordsProblem(e: string): string | null {
+  const raw = e.split(" ");
+  const words = raw.map((w) => w.toLowerCase());
+  const first = words[0] ?? "";
+  const last = words[words.length - 1] ?? "";
+  if (SEAT_RUNNER_WORDS.has(last)) return `"${e}" ends at ${last}, which runs whatever follows it`;
+  const bad = raw.find((w) => SEAT_CODE_FLAGS.has(w));
+  if (bad !== undefined) return `"${e}" has ${bad}, which runs code given on the command line`;
+  // the program that actually starts: `uv run [flags] <prog>` starts <prog>
+  const positional = (from: number) => words.slice(from).findIndex((w) => !w.startsWith("-"));
+  const sub1 = positional(1);
+  const at =
+    first === "uv" && sub1 !== -1 && words[1 + sub1] === "run"
+      ? 2 + sub1 + positional(2 + sub1)
+      : 0;
+  const prog = at > 0 ? (words[at] ?? "") : first;
+  for (const w of at > 0 ? [first, prog] : [first]) {
+    if (SEAT_FIRST_WORD_DENIED.has(w)) return `"${e}" runs ${w}, which seats may never run`;
+  }
+  if (PYTHON_WORD.test(prog)) {
+    if (words[at + 1] !== "-m" || words[at + 2] === undefined) {
+      return `"${e}" runs ${prog} without -m <module>, which runs arbitrary code`;
+    }
+    return null;
+  }
+  if (SEAT_PACKAGE_MANAGERS.has(first)) {
+    const sub = words.slice(1).find((w) => !w.startsWith("-"));
+    if (sub === undefined) return `"${e}" names no tool after ${first}`;
+    if (SEAT_PM_LAUNCH_WORDS.has(sub)) {
+      return `"${e}" runs ${sub}, which runs whatever follows it`;
+    }
+  }
+  return null;
+}
+
+/**
+ * The recipe file of an entry's task runner (`just`, `make`, `task`, `tox`, `nox`) that
+ * `protectedFiles` (the repo's extras, on top of the built-in list) does not cover, or null.
+ */
+export function unprotectedRecipeFile(
+  entry: string,
+  protectedFiles: readonly string[],
+): string | null {
+  const files = SEAT_RECIPE_FILES[(entry.split(" ")[0] ?? "").toLowerCase()];
+  return files?.find((f) => !isProtectedPath(f, protectedFiles)) ?? null;
+}
+
+/** Why `g` may not be a protected-file glob (no trailing `/`, empty or `.` segments), or null. */
+export function protectedGlobShapeProblem(g: string): string | null {
+  if (g.endsWith("/")) return "must not end with /";
+  const segs = g.split("/");
+  if (segs.some((s) => s === "")) return "must not have an empty segment";
+  if (segs.includes(".")) return "must not have a . segment";
+  return null;
+}
+
 function checkSeatCommands(cmds: readonly string[]): void {
   for (const c of cmds) {
     if (!SEAT_COMMAND.test(c)) throw new Error(`crew rules: ${c} is not a seat command`);
+    const problem = seatWordsProblem(c);
+    if (problem !== null) throw new Error(`crew rules: ${c} is not a seat command: ${problem}`);
   }
 }
 
@@ -366,7 +551,8 @@ function checkProtectedGlobs(globs: readonly string[]): void {
       g.startsWith("./") ||
       g.startsWith("~") ||
       g.split("/").includes("..") ||
-      !/^[A-Za-z0-9._/*@+-]+$/.test(g)
+      !/^[A-Za-z0-9._/*@+-]+$/.test(g) ||
+      protectedGlobShapeProblem(g) !== null
     ) {
       throw new Error(`crew rules: ${g} is not a protected-file glob`);
     }
