@@ -30,6 +30,7 @@ import {
   githubToken,
   MISSING_SCOPE_PREFIX,
   makeGql,
+  missingScopeLine,
   sweepPullRequests,
 } from "./collectors/github.ts";
 import { type LaunchctlRunner, launchctl } from "./collectors/launchd.ts";
@@ -228,6 +229,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let sessionsRead = false;
   let gql: Promise<Gql | Error> | null = null;
   const rates = new RateLimits(store);
+  /** The repos whose missing-scope line is logged already. */
   const scopeLogged = new Set<string>();
   /** The GitHub poll interval is this many times the configured one while the rate limit is low. */
   let githubBackoff = 1;
@@ -483,7 +485,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             // `gh auth refresh` issues a new token: read it again on the next tick.
             gql = null;
             // Once per repo, after its first poll: the health row has it, the server log should too.
-            if (!scopeLogged.has(repo.id)) deps.log?.(`github ${repo.id}: ${error}`);
+            if (!scopeLogged.has(repo.id)) {
+              const line = missingScopeLine(error);
+              if (line !== null) deps.log?.(`github ${repo.id}: ${line}`);
+            }
           }
           scopeLogged.add(repo.id);
         }

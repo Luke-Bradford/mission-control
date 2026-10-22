@@ -45,7 +45,13 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { createEngine, type Engine, type EngineDeps, TIP_MOVED } from "../src/engine/engine.ts";
+import {
+  createEngine,
+  type Engine,
+  type EngineDeps,
+  reviewerOf,
+  TIP_MOVED,
+} from "../src/engine/engine.ts";
 import type { OpenPrResult, Publisher, PublishResult } from "../src/engine/publish.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
@@ -65,7 +71,7 @@ const HUB = START + 30 * 60_000;
 const REPO = "mc";
 const SEAT = "guido-1";
 const RETRO = "retro-1";
-const KNOWN_SEATS = [SEAT, RETRO, "guido-2"];
+const KNOWN_SEATS = [SEAT, RETRO, "guido-2", "retro-2"];
 const RUN = "guido-1:20261021T100000Z";
 const BRANCH = "feature/7-fix-the-thing";
 const SHA = "a".repeat(40);
@@ -228,6 +234,8 @@ interface Harness {
   /** Commit-status writes, and the next results of setReviewStatus (empty: success). */
   statusCalls: { sha: string; state: string; description: string }[];
   statusResults: PublishResult[];
+  /** Makes setReviewStatus throw (null: it answers). */
+  statusThrows: Error | null;
   /** setAside answers a worktree (else null, the 7b-1 behaviour), and records its calls. */
   asideOn: boolean;
   asides: string[];
@@ -271,6 +279,7 @@ function harness(): Harness {
     minorResults: [],
     statusCalls: [],
     statusResults: [],
+    statusThrows: null,
     asideOn: false,
     asides: [],
     wakes: [],
@@ -305,6 +314,7 @@ function harness(): Harness {
         },
         async setReviewStatus(_r, sha, state, description) {
           x.statusCalls.push({ sha, state, description });
+          if (x.statusThrows !== null) throw x.statusThrows;
           return x.statusResults.shift() ?? { ok: true };
         },
         async ciExcerpt(_repo, sha) {
@@ -1765,6 +1775,68 @@ describe("the engine runs reviews", () => {
     expect(h.starts).toEqual([]);
   });
 
+  it("reviewerOf skips a retiring seat", () => {
+    seats().push({ ...retroSeat(), id: "retro-2" });
+    expect(reviewerOf(config, "guido-1")?.id).toBe(RETRO);
+    const first = need(seats().find((s) => s.id === RETRO));
+    first.retiring = true;
+    expect(reviewerOf(config, "guido-1")?.id).toBe("retro-2");
+    need(seats().find((s) => s.id === "retro-2")).retiring = true;
+    expect(reviewerOf(config, "guido-1")).toBeNull();
+  });
+
+  it("a queued review for a removed reviewer is re-requested for the new one", async () => {
+    h.busyList = [{ seatId: RETRO, state: "running" }];
+    await toReview();
+    const old = first();
+    expect(old.state).toBe("queued");
+    seats().splice(
+      seats().findIndex((s) => s.id === RETRO),
+      1,
+      { ...retroSeat(), id: "retro-2" },
+    );
+    h.busyList = [];
+    await h.engine.tick();
+    expect(store.review(old.id)?.state).toBe("superseded");
+    await vi.waitFor(() => expect(h.starts).toEqual([{ seat: "retro-2", id: expect.any(Number) }]));
+    const rows = reviewRows();
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ seatId: "retro-2", sha: SHA });
+  });
+
+  it("a seat removed while an earlier seat's review starts is skipped, not failed", async () => {
+    seats().push({ ...retroSeat(), id: "retro-2" });
+    h.busyList = [{ seatId: RETRO, state: "running" }];
+    await toReview();
+    const one = first();
+    let two = 0;
+    h.busyList = [];
+    // while retro-1's start awaits, retro-2 is given a queued review and then removed
+    h.duringStart = () => {
+      h.duringStart = null;
+      two = need(
+        store.requestReview({
+          authorRunId: one.authorRunId,
+          repoId: one.repoId,
+          seatId: "retro-2",
+          prNumber: one.prNumber,
+          sha: one.sha,
+          epoch: one.epoch,
+          attempt: one.attempt + 1,
+          round: one.round,
+          at: clock,
+        }),
+      );
+      seats().splice(
+        seats().findIndex((s) => s.id === "retro-2"),
+        1,
+      );
+    };
+    await h.engine.tick();
+    expect(h.starts).toEqual([{ seat: RETRO, id: one.id }]);
+    expect(store.review(two)?.state).toBe("queued");
+  });
+
   describe("boot recovery", () => {
     it("a starting row with no run goes back to queued, then starts once", async () => {
       h.busyList = [{ seatId: RETRO, state: "running" }];
@@ -1984,13 +2056,70 @@ describe("the engine runs reviews", () => {
     });
 
     it("no review seat: no status", async () => {
+      await toReview();
+      expect(h.statusCalls.length).toBeGreaterThan(0);
+      // the review is in the store, and would be a status, were the seat still in the config
       seats().splice(
         seats().findIndex((s) => s.id === RETRO),
         1,
       );
+      reported(first().id, []);
+      h.statusCalls.length = 0;
+      await h.engine.tick();
+      await h.engine.reconcileRun(RUN);
+      expect(h.statusCalls).toEqual([]);
+    });
+
+    it("a PR that is not open: no status", async () => {
+      await toReview();
+      reported(first().id, []);
+      setPr({ ci: "passing", state: "closed" });
+      h.statusCalls.length = 0;
+      await h.engine.reconcileRun(RUN);
+      expect(h.statusCalls).toEqual([]);
+    });
+
+    it("a status write that throws is logged and tried again", async () => {
+      h.statusThrows = new Error("boom");
+      h.busyList = [{ seatId: RETRO, state: "running" }];
+      await expect(toReview()).resolves.toBeUndefined();
+      expect(h.logs).toContain(`${RUN}: review status not set: boom`);
+      await h.engine.tick();
+      expect(h.statusCalls.length).toBeGreaterThan(1);
+      expect(loopOf().phase).toBe("review");
+    });
+
+    it("a lasting failure is logged once, though tried on every pass", async () => {
+      h.statusResults = Array.from({ length: 4 }, () => ({
+        ok: false as const,
+        text: "gh is down",
+        transient: true,
+      }));
+      h.busyList = [{ seatId: RETRO, state: "running" }];
       await toReview();
       await h.engine.tick();
-      expect(h.statusCalls).toEqual([]);
+      await h.engine.tick();
+      expect(h.statusCalls.length).toBeGreaterThan(2);
+      expect(h.logs.filter((l) => l.includes("review status not set"))).toEqual([
+        `${RUN}: review status not set: gh is down`,
+      ]);
+    });
+
+    it("an ended run keeps no status of its own and writes none", async () => {
+      await toReview();
+      reported(first().id, []);
+      await vi.waitFor(() =>
+        expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_PASSED)),
+      );
+      await h.engine.reconcileRun(RUN);
+      const kept = h.statusCalls.length;
+      store.setRunEnded(RUN, clock, "ok", "operator");
+      await h.engine.reconcileRun(RUN);
+      expect(h.statusCalls.length).toBe(kept);
+      // its later ended passes write nothing either: the status is final once the run ends
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(h.statusCalls.length).toBe(kept);
     });
 
     it("a failed status write is logged and tried again on the next tick", async () => {

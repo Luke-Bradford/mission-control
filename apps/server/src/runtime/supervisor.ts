@@ -57,6 +57,7 @@ import {
   ROLE_PROMPT_DIR,
   type Run,
   type RunLoop,
+  retiringText,
   reworkFirstText,
   type SeatSessionRow,
   type SeatState,
@@ -354,6 +355,8 @@ export interface Supervisor {
    * the CLI's turn starts). Never throws.
    */
   busy(): SeatBusy[];
+  /** Whether the seat is starting, has a process, or its seat row is active; a store error counts as busy. */
+  seatBusy(seatId: string): boolean;
   status(): { enabled: boolean; note: string | null };
   /**
    * Runs `fn` after everything queued for the clone `checkout` (a checkout, a commit); a failure
@@ -440,11 +443,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
   const crew = config.crew;
-  const seats = new Map<string, SeatInfo>();
-  for (const session of crew?.sessions ?? []) {
-    const repo = config.repos.find((r) => r.id === session.repoId);
-    if (!repo) continue; // the config loader refuses this
-    for (const seat of session.seats) seats.set(seat.id, { seat, session, repo });
+
+  /** Read per call: the crew reloader changes the config's seats while the hub runs. */
+  function findSeat(seatId: string): SeatInfo | undefined {
+    for (const session of crew?.sessions ?? []) {
+      const seat = session.seats.find((s) => s.id === seatId);
+      if (seat === undefined) continue;
+      const repo = config.repos.find((r) => r.id === session.repoId);
+      return repo === undefined ? undefined : { seat, session, repo }; // the loader refuses a missing repo
+    }
+    return undefined;
   }
 
   const live = new Map<string, Live>();
@@ -485,7 +493,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** Throws unless this server runs crew; returns the seat. */
   function need(seatId: string): SeatInfo {
     if (!mayAct()) throw new SupervisorError(409, lockNote ?? CREW_DISABLED);
-    const info = seats.get(seatId);
+    const info = findSeat(seatId);
     if (!info) throw new SupervisorError(404, "unknown seat");
     return info;
   }
@@ -926,7 +934,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.setRunEnded(run.id, at, "failed", "exit");
     }
     setSeat(row.seatId, { state: "error", reason });
-    const info = seats.get(row.seatId);
+    const info = findSeat(row.seatId);
     if (info) closeRunItems(info);
     if (open) emit({ kind: "run-ended", seatId: row.seatId, runId: run.id, endedBy: "exit" });
     if (info && run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
@@ -981,7 +989,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return;
     }
     for (const session of crew.sessions) {
-      for (const seat of session.seats) {
+      for (const seat of [...session.seats]) {
         if (modeOfSeat(seat) !== "scratch") continue;
         const mine = `${seat.id}-review-`;
         for (const name of names) {
@@ -1030,7 +1038,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   async function resumeOne(row: SeatSessionRow): Promise<void> {
-    const info = seats.get(row.seatId);
+    const info = findSeat(row.seatId);
     if (!info) return failResume(row, "could not resume: seat removed");
     const run = row.runId === null ? null : store.run(row.runId);
     if (
@@ -1089,6 +1097,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startRun(seatId: string, issue: number, opts?: { loop: RunLoop }) {
     const info = need(seatId);
+    if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     const def = seatDef(info.seat);
     if (def.mode === "scratch") {
       throw new SupervisorError(409, scratchStartRefusedText(call(info)));
@@ -1240,6 +1249,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (seatDef(info.seat).loop !== "watch") {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
     }
+    if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
@@ -1332,6 +1342,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
+    if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     if (modeOfSeat(info.seat) !== "scratch") {
       throw new SupervisorError(409, notReviewSeatText(call(info)));
     }
@@ -1543,7 +1554,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const run = store.run(runId);
     if (run === null || run.endedAt !== null) return;
     const seatId = run.agentId;
-    const info = seats.get(seatId);
+    const info = findSeat(seatId);
     const row = store.seatSession(seatId);
     if (info === undefined) return;
     if (row?.runId !== runId) {
@@ -1882,6 +1893,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     seat(seatId) {
       need(seatId);
       return store.seatSession(seatId);
+    },
+
+    seatBusy(seatId) {
+      if (starting.has(seatId) || live.has(seatId)) return true;
+      try {
+        return isActive(store.seatSession(seatId));
+      } catch {
+        return true;
+      }
     },
 
     busy() {

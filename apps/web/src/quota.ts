@@ -10,6 +10,8 @@ const FIVE_HOURS = 5 * HOUR;
 /** Time until a window is full at the current pace. */
 export function timeToFull(row: LimitRow, now: number): string {
   if (row.used >= 100) return "at limit";
+  // A missing paceReady is ready: an older hub does not send it.
+  if (row.window === "5h" && row.paceReady === false) return "too little history for a pace";
   if (row.fullAt === null) {
     // The server gives a 5h window no pace until MIN_PACE_5H_MINUTES of it have passed.
     const young =

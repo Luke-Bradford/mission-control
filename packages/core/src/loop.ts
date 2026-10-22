@@ -14,6 +14,7 @@ import {
   nextAttempt,
   REVIEW_ATTEMPTS,
   REVIEW_ROUNDS,
+  readyHardRuleText,
   readyNoteKey,
   readyRuledText,
   readyText,
@@ -23,7 +24,7 @@ import {
   reviewRulingParkText,
 } from "./review.ts";
 import type { SeatState } from "./runtime.ts";
-import type { RunLoop } from "./types.ts";
+import type { MergeStep, RunLoop } from "./types.ts";
 
 /** The run has no loop state: Mission Control is not driving it. */
 export const EVIDENCE_NO_LOOP =
@@ -83,6 +84,26 @@ export const blockedNoteKey = (runId: string, epoch: number): string => `blocked
 /** `{sha7}` is the first 7 characters of the failed sha; the excerpt follows. */
 export const CI_FAILED_TEXT = `CI failed on {sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
 export const NO_NEW_COMMIT_TEXT = `No new commit since CI failed on {sha7}. Fix it and commit first, then report; or report with a note starting "${EVIDENCE_RULING_PREFIX}" if the failure is not yours.`;
+/** How a failed merge step is named in the park reason; the server parks it with kind `merge-step`. */
+export const MERGE_STEP_WORDS = {
+  ready: "mark ready",
+  merge: "merge",
+  close: "close the issue",
+  "delete-remote": "delete the remote branch",
+} as const satisfies Partial<Record<MergeStep, string>>;
+/** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
+export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
+export const noShaDeleteText = (ref: string): string =>
+  `${ref}: merged, but the remote branch could not be deleted (no sha to lease on); the operator can delete it`;
+export const mergeStepFailedText = (step: string, why: string): string => `${step} failed: ${why}`;
+/** The gate parks a run for these; the reason says which. */
+export const gateStrayParkText = (call: string, paths: readonly string[]): string =>
+  `changes outside ${call}'s area: ${paths.join(", ")}`;
+export const GATE_FOREIGN_COMMITS_PARK = "commits on the branch that Mission Control did not make";
+/** The flag note while a merge-ready PR is behind main. */
+export const behindNoteKey = (runId: string, sha: string): string => `behind:${runId}:${sha}`;
+export const behindMainText = (ref: string, pr: number, mainSha: string): string =>
+  `${ref}: PR #${pr} is behind main (${mainSha.slice(0, 7)}), so Mission Control has not merged it; it merges once the branch contains main`;
 /** The Activity row for a park. */
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
@@ -202,7 +223,10 @@ export interface LoopSnapshot {
     ci: "passing" | "failing" | "pending" | null;
     mergeable: string | null;
     polledAt: number;
+    isDraft?: boolean;
   } | null;
+  /** The repo is a `merge` workspace: the engine merges a PR that passes the gate. Absent: false. */
+  autoMerge?: boolean;
   /** The card's column from the poll. */
   card: string | null;
   /** This run's seat_lines keys, with the time each was claimed. */
@@ -235,7 +259,12 @@ export type LoopAction =
   | { kind: "supersede-review"; reviewId: number }
   | { kind: "pr-body"; reviewId: number }
   | { kind: "set-aside" }
-  | { kind: "wake" };
+  | { kind: "wake" }
+  | { kind: "mark-ready" }
+  | { kind: "merge"; sha: string }
+  | { kind: "close-issue" }
+  | { kind: "delete-remote-branch"; sha: string }
+  | { kind: "delete-local-branch" };
 
 interface Step {
   loop: RunLoop;
@@ -301,19 +330,86 @@ function reviewView(s: LoopSnapshot, loop: RunLoop) {
   return { R, P, cur, waived, on, blocked };
 }
 
+/**
+ * The merge gate's facts for the pushed sha in a `merge` workspace. `on`: the review, CI and head
+ * facts hold, so the engine's reads (`gate`, `touches`) decide; each is null when missing or for
+ * another sha.
+ */
+function gateView(s: LoopSnapshot, loop: RunLoop) {
+  const rv = reviewView(s, loop);
+  const P = rv.P;
+  const on =
+    s.autoMerge === true &&
+    rv.R !== null &&
+    P !== null &&
+    loop.phase === "review" &&
+    s.ended === null &&
+    s.pr?.state === "open" &&
+    s.pr.headSha === P &&
+    s.headCommit === P &&
+    s.pr.ci === "passing" &&
+    loop.ciFailedSha !== P &&
+    !rv.waived &&
+    rv.cur !== null &&
+    rv.cur.state === "reported" &&
+    rv.cur.blocking === 0;
+  const touches = P !== null && loop.touches?.sha === P ? loop.touches : null;
+  const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
+  const clear = touches !== null && touches.paths.length === 0;
+  const passes =
+    on && clear && gate?.containsMain === true && gate.hubOnly && gate.strays.length === 0;
+  return { on, P, touches, gate, clear, passes };
+}
+
+/** The steps after a merge, in order, minus those already done. */
+function afterMerge(s: LoopSnapshot): LoopAction[] {
+  const done = s.loop.merging?.done ?? [];
+  const todo = (step: MergeStep): boolean => !done.includes(step);
+  const sha = s.loop.merging?.sha ?? s.pr?.headSha ?? s.pushed?.sha ?? null;
+  const actions: LoopAction[] = [];
+  if (todo("close")) actions.push({ kind: "close-issue" });
+  if (todo("delete-remote")) {
+    if (sha !== null) actions.push({ kind: "delete-remote-branch", sha });
+    else {
+      const key = noShaDeleteNoteKey(s.runId);
+      if (!s.openNotes.includes(key)) {
+        actions.push({ kind: "note", key, noteKind: "flag", text: noShaDeleteText(s.ticket.ref) });
+      }
+    }
+  }
+  actions.push({ kind: "end-run" });
+  if (todo("delete-local")) actions.push({ kind: "delete-local-branch" });
+  actions.push({ kind: "take-next" });
+  return actions;
+}
+
 /** The state step: the first matching row of the table changes the loop. */
 function stateStep(s: LoopSnapshot): Step {
   const { loop, pr, evidence, headCommit, pushed, now, seat } = s;
   const prNumber = pr?.number ?? loop.prNumber;
+  const merged = pr?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
 
-  if (pr?.state === "merged" && loop.phase !== "done") {
+  // the server parked this run after the merge: its step failed, and the operator decides
+  if (loop.phase === "parked" && loop.parked?.kind === "merge-step") return unchanged(loop);
+  if (merged && loop.phase !== "done") {
+    const mergedSha = pr?.headSha ?? pushed?.sha ?? null;
+    const merging =
+      s.autoMerge === true && loop.merging == null && mergedSha !== null
+        ? { sha: mergedSha, done: ["merge" as const] }
+        : loop.merging;
     return {
-      loop: { ...loop, phase: "done" },
-      actions: [{ kind: "end-run" }, { kind: "take-next" }, { kind: "event", text: "merged" }],
+      loop: { ...loop, phase: "done", ...(merging === undefined ? {} : { merging }) },
+      actions:
+        s.autoMerge === true
+          ? [...afterMerge(s), { kind: "event", text: "merged" }]
+          : [{ kind: "end-run" }, { kind: "take-next" }, { kind: "event", text: "merged" }],
     };
   }
   if (loop.phase === "done") {
-    return { loop, actions: [{ kind: "end-run" }, { kind: "take-next" }] };
+    return {
+      loop,
+      actions: s.autoMerge === true ? afterMerge(s) : [{ kind: "end-run" }, { kind: "take-next" }],
+    };
   }
   if (s.ended !== null && !loop.parked?.ended) {
     return {
@@ -399,6 +495,16 @@ function stateStep(s: LoopSnapshot): Step {
     ) {
       return park(loop, "review", reviewParkText(R.retro, P));
     }
+  }
+
+  // A hard-rule touch is the operator's to merge, so the hard-rule paths it brings are not strays;
+  // it does not hide foreign commits or other strays.
+  const gv = gateView(s, loop);
+  if (gv.on && gv.touches !== null && gv.gate !== null) {
+    const hard = gv.touches.paths;
+    const strays = gv.gate.strays.filter((p) => !hard.includes(p));
+    if (strays.length > 0) return park(loop, "gate", gateStrayParkText(seat.call, strays));
+    if (!gv.gate.hubOnly) return park(loop, "gate", GATE_FOREIGN_COMMITS_PARK);
   }
 
   if (loop.phase === "ci") {
@@ -511,13 +617,40 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
             text: readyWaivedText(ticket.ref, n, rv.P),
           });
         } else if (rv.cur !== null && rv.cur.state === "reported" && rv.cur.blocking === 0) {
-          notes.set(readyNoteKey(runId, rv.P), {
-            noteKind: "ready",
-            text:
-              loop.ciFailedSha === rv.P
-                ? readyRuledText(ticket.ref, n, rv.R.retro, rv.P)
-                : readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
-          });
+          const gv = gateView(s, loop);
+          if (!gv.on) {
+            // a merge workspace's pending, failing or unreported CI is not ready; only a ruling is
+            if (loop.ciFailedSha === rv.P) {
+              notes.set(readyNoteKey(runId, rv.P), {
+                noteKind: "ready",
+                text: readyRuledText(ticket.ref, n, rv.R.retro, rv.P),
+              });
+            } else if (s.autoMerge !== true) {
+              notes.set(readyNoteKey(runId, rv.P), {
+                noteKind: "ready",
+                text: readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
+              });
+            }
+          } else {
+            // only hard-rule files hold it: the operator merges, once the branch has current main
+            const hardOnly =
+              gv.touches !== null &&
+              gv.touches.paths.length > 0 &&
+              gv.gate?.hubOnly === true &&
+              gv.gate.strays.every((p) => gv.touches?.paths.includes(p));
+            if ((gv.clear || hardOnly) && gv.gate !== null && !gv.gate.containsMain) {
+              notes.set(behindNoteKey(runId, rv.P), {
+                noteKind: "flag",
+                text: behindMainText(ticket.ref, n, gv.gate.mainSha),
+              });
+            } else if (hardOnly && gv.touches !== null) {
+              notes.set(readyNoteKey(runId, rv.P), {
+                noteKind: "ready",
+                text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
+              });
+            }
+          }
+          // otherwise the gate passes or its reads are due: the operator has nothing to do
         }
       }
     }
@@ -716,6 +849,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     if (!s.openNotes.includes(key)) actions.push({ kind: "note", key, noteKind, text });
   }
   for (const key of s.openNotes) {
+    // the flag for a merged PR's undeletable branch outlives the run's steps
+    if (loop.phase === "done" && key === noShaDeleteNoteKey(s.runId)) continue;
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {
@@ -735,6 +870,13 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         actions.push({ kind: "pr-body", reviewId: cur.id });
       }
     }
+  }
+  const gv = gateView(s, loop);
+  if (gv.passes && gv.P !== null) {
+    const done = loop.merging?.done ?? [];
+    const readyDone = loop.merging?.sha === gv.P && done.includes("ready");
+    if (s.pr?.isDraft !== false && !readyDone) actions.push({ kind: "mark-ready" });
+    actions.push({ kind: "merge", sha: gv.P });
   }
   if (loop.phase !== "done") {
     // an aside run is off its seat: it comes back, or leaves it, instead of any line
@@ -756,12 +898,14 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside } = step.loop;
+  const { parked, touches, aside, gate, merging } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
     touches: touches === null ? null : { sha: touches.sha, paths: [...touches.paths] },
     ...(aside ? { aside: { ...aside } } : {}),
+    ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
+    ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
   };
   if (loop.aside) {
     if (s.seat.holdsRun) {

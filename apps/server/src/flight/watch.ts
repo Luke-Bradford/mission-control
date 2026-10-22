@@ -41,6 +41,8 @@ export interface FlightWatchDeps {
   >;
   /** main.ts passes engineOn: off in a preview, with MC_NO_LOOP_WRITES=1, or with no crew. */
   enabled: boolean;
+  /** True while the seat has a pending change; FLIGHT is not started until it settles. */
+  blocked?: (seatId: string) => boolean;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -116,6 +118,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         bus.emit("attention");
         return;
       }
+      if (deps.blocked?.(id) === true) return;
       const state = flightState({ config, store, busy: supervisor.busy(), now: t });
       if (!rotating) starts.push(t);
       rotating = false;

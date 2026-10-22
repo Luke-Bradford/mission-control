@@ -1628,10 +1628,11 @@ export function closesIssue(md: string, { repo, issue }: { repo: string; issue: 
   const own = repo.toLowerCase();
   const text = decodeCharRefs(md)
     .replace(
-      /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|(?![\s\S]))/gm,
+      /^ {0,3}(?:(`{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1`*[ \t]*(?=\n|$)|(?![\s\S]))|(~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\2~*[ \t]*(?=\n|$)|(?![\s\S])))/gm,
       "",
     )
-    .replace(/`[^`\n]*`/g, "")
+    // a span opens with a run of n backticks and closes at the next run of exactly n
+    .replace(/(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g, "")
     .replace(/<!--[\s\S]*?-->/g, "");
   return [...text.matchAll(STRICT_CLOSING_REF)].some((m) => closesOwn(m, own, issue));
 }

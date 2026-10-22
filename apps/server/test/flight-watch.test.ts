@@ -5,6 +5,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_NOTE_KEY,
+  FLIGHT_STARTS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
   type FlightSeatState,
@@ -17,7 +18,13 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { flightOwnSeatIds, flightState, pending } from "../src/flight/state.ts";
+import {
+  flightOwnSeatIds,
+  flightSeat,
+  flightStartCap,
+  flightState,
+  pending,
+} from "../src/flight/state.ts";
 import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -201,6 +208,59 @@ describe("the FLIGHT watcher", () => {
     expect(JSON.parse(first.split("\n").at(-1) ?? "")).toEqual(state);
   });
 
+  it("a retiring watch seat is not FLIGHT; a retiring build seat is not free or counted", () => {
+    const cfg = structuredClone(config);
+    const seats = cfg.crew?.sessions[0]?.seats ?? [];
+    const byId = (id: string) => {
+      const x = seats.find((y) => y.id === id);
+      if (!x) throw new Error(id);
+      return x;
+    };
+    byId("flight-1").retiring = true;
+    expect(flightSeat(cfg)).toBeNull();
+    // two build seats count; a retiring one does not
+    delete byId("flight-1").retiring;
+    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR * 2);
+    byId("inco-1").retiring = true;
+    expect(flightStartCap(cfg)).toBe(FLIGHT_STARTS_PER_HOUR);
+    const state = flightState({ config: cfg, store, busy: [], now: T0 });
+    expect(state.seats.map((s) => s.id)).toEqual(["guido-1", "retro-1"]);
+    // a second watch seat takes over while the first retires
+    seats.push(seat("flight-2", "FLIGHT"));
+    byId("flight-1").retiring = true;
+    expect(flightSeat(cfg)?.seat.id).toBe("flight-2");
+  });
+
+  it("does not start FLIGHT while its seat has a pending change", async () => {
+    let blocked = true;
+    const w = createFlightWatch({
+      config,
+      store,
+      bus,
+      enabled: true,
+      blocked: (id) => blocked && id === "flight-1",
+      now: () => nowMs,
+      supervisor: {
+        status: () => ({ enabled: true, note: null }),
+        on: () => () => {},
+        busy: () => [],
+        seatFacts: () => facts,
+        startWatch: async (seatId, opts) => {
+          startCalls.push({ seatId, first: opts?.first });
+          return { runId: "x" };
+        },
+        send: async () => "sent",
+        endRunByEngine: async () => {},
+      },
+    });
+    await w.check();
+    expect(startCalls).toEqual([]);
+    blocked = false;
+    await w.check();
+    expect(startCalls).toHaveLength(1);
+    w.stop();
+  });
+
   it("the operator's Stop holds", async () => {
     store.setSeatSession(row("flight-1", null, "stopped"));
     await watch.check();
@@ -292,6 +352,20 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls[0]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 1 question\n`)).toBe(true);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
+  });
+
+  it("a question that goes away and comes back wakes again", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    // the seat's run ends: the question no longer counts, and the wake facts are empty
+    store.upsertRun(run("r-guido", "guido-1", { endedAt: nowMs, status: "ok" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.upsertRun(run("r-guido", "guido-1"));
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
   });
 
   it("does not wake mid-turn", async () => {
