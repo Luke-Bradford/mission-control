@@ -56,6 +56,7 @@ import type { Move, MoveResult } from "../github-board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { wakeDueAsideRun } from "./aside.ts";
 import { CI_LOG_UNREADABLE, EMPTY_LOG, NO_FAILED_RUN, type Publisher } from "./publish.ts";
 import { accountAtStop, isTransientStart, seatMayTake } from "./queue.ts";
 import type { RepoRulesError } from "./rules.ts";
@@ -520,14 +521,20 @@ export function createEngine(deps: EngineDeps): Engine {
           at,
         );
         kickAside(run.agentId, run.id);
+        // the freed seat takes its next ticket now, unless rework is due back on it first
+        if (wakeDueAsideRun(store, run.agentId) === undefined) {
+          deps.takeNext(run.agentId).catch((e: unknown) => {
+            log(
+              `${run.agentId}: take after set-aside failed: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          });
+        }
         return;
       }
       case "wake": {
         const accountId = seatConfig(run.agentId)?.accountId;
         if (accountId !== undefined && accountAtStop(config, store, accountId, at)) return;
-        const oldest = store
-          .asideRuns()
-          .find((r) => r.agentId === run.agentId && r.loop?.aside?.wake);
+        const oldest = wakeDueAsideRun(store, run.agentId);
         if (oldest !== undefined && oldest.id !== run.id) return;
         try {
           await supervisor.wakeRun(run.id);
@@ -924,6 +931,14 @@ export function createEngine(deps: EngineDeps): Engine {
         if (e.kind === "run-ended") kickAside(e.seatId);
         const rv = store.reviewOfRun(e.runId);
         if (rv !== null) {
+          if (e.kind === "findings") {
+            // The author run (aside or not) is looked at now, so its rework is flagged before a
+            // slow review start can let the seat take a new ticket; once is enough (a second
+            // pass would only retry a transient step ahead of its tick).
+            void reconcileRun(rv.authorRunId);
+            void kickReviews();
+            return;
+          }
           void kickReviews().then(() => reconcileRun(rv.authorRunId));
           return;
         }

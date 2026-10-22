@@ -729,6 +729,19 @@ export class Store {
   }
 
   /**
+   * The run the HUD shows for an agent: the one its seat holds when that is set and not ended
+   * (a run woken from aside can be older than a run that ended meanwhile), else the newest.
+   */
+  seatRun(agentId: AgentId): Run | undefined {
+    const heldId = this.seatSession(agentId)?.runId ?? null;
+    if (heldId !== null) {
+      const held = this.run(heldId);
+      if (held !== null && held.endedAt === null && held.agentId === agentId) return held;
+    }
+    return this.runs(agentId, 1)[0];
+  }
+
+  /**
    * The runs a loop drives that may still need the engine: every one not yet ended, and those
    * that ended at or after `endedSince` with a loop that is not done. Oldest first.
    */

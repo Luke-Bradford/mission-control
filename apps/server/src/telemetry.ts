@@ -113,7 +113,7 @@ export function telemetry(
   const runs = store.runsOverlapping(earliest, now + 1).filter((r) => known.has(r.agentId));
   const latestRuns = new Map<string, Run>();
   for (const id of ids) {
-    const r = store.runs(id, 1)[0];
+    const r = store.seatRun(id);
     if (r) latestRuns.set(id, r);
   }
   const digests: Map<string, RunDigest> = store.digests([

@@ -768,7 +768,8 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
       // a restart mid set-aside or mid wake left the run on its seat
       loop.aside = null;
     } else if (s.ended === null) {
-      loop.aside.wake = loop.phase === "parked" || fixDue(s, loop);
+      // (a session with no review seat has no review to wait for: the run comes back)
+      loop.aside.wake = loop.phase === "parked" || !s.asideOk || fixDue(s, loop);
     }
   }
   return { loop, actions: [...step.actions, ...desiredStep(s, loop)] };

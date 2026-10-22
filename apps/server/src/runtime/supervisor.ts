@@ -79,6 +79,7 @@ import {
   isInside,
   realish,
 } from "../config.ts";
+import { wakeDueAsideRun } from "../engine/aside.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
@@ -1092,7 +1093,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     // Rework goes first, and a ticket in review has its run already.
     const waiting = store.asideRuns();
-    const rework = waiting.find((r) => r.agentId === seatId && r.loop?.aside?.wake);
+    const rework = wakeDueAsideRun(store, seatId);
     if (rework) {
       throw new SupervisorError(409, reworkFirstText(call(info), rework.ticket ?? rework.id));
     }
@@ -1532,6 +1533,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "ok" });
         store.setRunEnded(runId, at, "ok", "engine");
+        transcripts.delete(run.transcriptPath);
+        digests.delete(run.id);
         emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
         await dropScratch(info, runId, run.seq, aside.worktree);
       }
@@ -1626,6 +1629,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       /** The run cannot go back: it ends `failed`, the seat (another run's now) untouched. */
       const fail = (reason: string, cause?: unknown): never => {
+        // its worktree is no one's now (a failed removal raises its own cleanup note)
+        if (existsSync(aside.worktree)) void dropScratch(info, runId, run.seq, aside.worktree);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
@@ -1633,6 +1638,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(500, reason, { cause });
       };
       if (run.branch === null || run.sessionId === null) return fail(RESUME_FAILED);
+      // a seat changed to scratch mode, or off the build loop, cannot take a writer run back
+      if (modeOfSeat(info.seat) === "scratch" || seatDef(info.seat).loop !== "build") {
+        return fail(RESUME_MODE_CHANGED);
+      }
       let checkout: { path: string; branch: string; gitDir: string };
       try {
         checkout = await existingCheckout(info.session.checkout, aside.worktree, run.branch);
@@ -1653,13 +1662,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       // no "carry on" line goes ahead of the fix the engine is about to send
       l.resumedAt = null;
-      setSeat(seatId, {
-        runId,
-        cliSessionId: run.sessionId,
-        state: "idle",
-        reason: null,
-        worktree: checkout.path,
-      });
+      try {
+        setSeat(seatId, {
+          runId,
+          cliSessionId: run.sessionId,
+          state: "idle",
+          reason: null,
+          worktree: checkout.path,
+        });
+      } catch (e) {
+        // not recorded on the seat: discard the process rather than leave one nobody can see
+        l.off();
+        if (live.get(seatId) === l) live.delete(seatId);
+        void l.session.close();
+        return fail(CANNOT_START, e);
+      }
     } finally {
       starting.delete(seatId);
     }

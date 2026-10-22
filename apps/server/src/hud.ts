@@ -66,6 +66,8 @@ function transcriptMtime(path: string): number | null {
 interface LoopView {
   agent: ConfiguredAgent;
   runs: Run[];
+  /** The run shown for the agent: the one its seat holds, else the newest. */
+  latest: Run | null;
   view: AgentView;
   /** Crew only: the seat's session row (null before it was ever started). */
   seatRow: SeatSessionRow | null;
@@ -112,7 +114,7 @@ function loopViews(
   const escalations = store.escalations();
   return configuredAgents(config).map((agent) => {
     const runs = store.runs(agent.id, AGENT_RUNS);
-    const latest = runs[0];
+    const latest = store.seatRun(agent.id);
     const lastOutput = latest
       ? lastOutputAt(
           store.digest(latest.id)?.lastEventAt ?? null,
@@ -147,7 +149,7 @@ function loopViews(
         stop: null,
         lastOutputAt: lastOutput,
       };
-      return { agent, runs, view, seatRow };
+      return { agent, runs, latest: latest ?? null, view, seatRow };
     }
     const loop = agent.loop;
     const st = status.get(collectorName(loop.kind, loop.id));
@@ -169,14 +171,14 @@ function loopViews(
       accountId: loop.accountId,
       state,
       stateSince: since,
-      currentRun: runs[0] ?? null,
+      currentRun: latest ?? null,
       paused,
       sourceError,
       note,
       stop,
       lastOutputAt: lastOutput,
     };
-    return { agent, runs, view, seatRow: null };
+    return { agent, runs, latest: latest ?? null, view, seatRow: null };
   });
 }
 
@@ -242,8 +244,7 @@ export function crew(
 
   const prCache: PrCache = new Map();
   const rows = loopViews(config, store, now, lock).map(
-    ({ agent, runs, view, seatRow }, index): CrewRow => {
-      const latest = runs[0] ?? null;
+    ({ agent, runs, latest, view, seatRow }, index): CrewRow => {
       const digests: Map<string, RunDigest> = store.digests(runs.map((r) => r.id));
       const digest = latest ? (digests.get(latest.id) ?? null) : null;
       let contextWindow: number | null = null;

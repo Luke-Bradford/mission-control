@@ -436,7 +436,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
-          const run = store.runs(agent.id, 1)[0];
+          const run = store.seatRun(agent.id);
           if (!run) {
             return {
               runId: null,
