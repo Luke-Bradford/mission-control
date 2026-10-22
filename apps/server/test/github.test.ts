@@ -1,14 +1,17 @@
 import { type BoardItem, columnOf, hudColumnOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  call,
   collectGithub,
   describeGqlErrors,
+  EMPTY_BOARD_GRACE_MS,
   fetchCardNow,
   fetchTicket,
   GqlError,
   GqlTransportError,
   isTransient,
   makeGql,
+  missingScopeLine,
   sweepPullRequests,
 } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -268,6 +271,53 @@ beforeEach(() => {
 afterEach(() => store.close());
 
 const statusOf = () => store.status().find((s) => s.collector === "github:shop-app");
+
+describe("collectGithub board, an empty answer", () => {
+  const full = () => stub({ pages: [page([item(1, "Todo"), item(2, "Todo")])] }).gql;
+  const empty = () => stub({ pages: [page([])] }).gql;
+  const MIN = 60_000;
+
+  it("keeps the last board for an empty poll and marks the row not ok", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + MIN);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 2]);
+    expect(statusOf()?.ok).toBe(false);
+    expect(statusOf()?.error).toContain("board poll returned no items; kept the last board (2)");
+  });
+
+  it("keeps it through empty answers that flap, for up to the grace period", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + MIN);
+    await collectGithub(repo, store, empty(), NOW + 2 * MIN);
+    await collectGithub(repo, store, stub({ boardError: new Error("boom") }).gql, NOW + 3 * MIN);
+    await collectGithub(repo, store, empty(), NOW + MIN + EMPTY_BOARD_GRACE_MS - 1);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 2]);
+  });
+
+  it("believes empty answers once they have lasted the grace period", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + MIN);
+    await collectGithub(repo, store, empty(), NOW + MIN + EMPTY_BOARD_GRACE_MS);
+    expect(store.board("shop-app")).toEqual([]);
+    expect(statusOf()).toMatchObject({ ok: true, error: null });
+  });
+
+  it("stores at once a poll whose items are all filtered out (GitHub did answer)", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, stub({ pages: [page([item(4, "Weird")])] }).gql, NOW + MIN);
+    expect(store.board("shop-app")).toEqual([]);
+  });
+
+  it("stores a full poll after empty ones, and starts the grace period afresh", async () => {
+    await collectGithub(repo, store, full(), NOW);
+    await collectGithub(repo, store, empty(), NOW + MIN);
+    await collectGithub(repo, store, stub({ pages: [page([item(3, "Todo")])] }).gql, NOW + 2 * MIN);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([3]);
+    expect(statusOf()).toMatchObject({ ok: true, error: null });
+    await collectGithub(repo, store, empty(), NOW + 2 * MIN + EMPTY_BOARD_GRACE_MS - 1);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([3]);
+  });
+});
 
 describe("collectGithub board", () => {
   it("maps status via statusMap, priority from the Priority field, and keeps labels", async () => {
@@ -817,9 +867,35 @@ describe("describeGqlErrors", () => {
       new Response(JSON.stringify({ errors: [scopeErr("id"), scopeErr("name")] }), {
         status: 200,
       })) as unknown as typeof fetch;
-    await expect(makeGql("t", f)("q", {})).rejects.toThrow(
+    await expect(makeGql("t", f)("q", {})).rejects.toMatchObject({
+      message: "gh token lacks the read:project scope: run gh auth refresh -s project",
+    });
+  });
+
+  it("falls back to read:project when the message names no scope", () => {
+    expect(describeGqlErrors([{ type: "INSUFFICIENT_SCOPES", message: "nope" }])).toBe(
       "gh token lacks the read:project scope: run gh auth refresh -s project",
     );
+  });
+
+  it("call() describes a response's errors the same way", async () => {
+    const gql = async () => ({
+      errors: [scopeErr("id"), scopeErr("name")],
+    });
+    await expect(call(gql, "q", {})).rejects.toMatchObject({
+      message: "gh token lacks the read:project scope: run gh auth refresh -s project",
+    });
+    const plain = async () => ({ errors: [{ message: "a" }, { message: "a" }, { message: "b" }] });
+    await expect(call(plain, "q", {})).rejects.toMatchObject({ message: "a; b" });
+  });
+
+  it("missingScopeLine picks the scope line out of a health-row status", () => {
+    expect(
+      missingScopeLine(
+        "board: gh token lacks the project scope: run gh auth refresh -s project; prs: boom at 2026-01-01T00:00:00.000Z",
+      ),
+    ).toBe("gh token lacks the project scope: run gh auth refresh -s project");
+    expect(missingScopeLine("board: boom at x")).toBeNull();
   });
 });
 

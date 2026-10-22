@@ -134,10 +134,13 @@ export interface Engine {
 /** onChain key for superviseReviews (never a run id). */
 const REVIEWS_CHAIN = "\0reviews";
 
-/** The review seat for a seat's runs: the first `scratch` seat (config order) of its crew session. */
+/**
+ * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
+ * that is not retiring; null when there is none (the operator reviews).
+ */
 export function reviewerOf(config: CcConfig, seatId: string): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
-  return session?.seats.find((x) => modeOfSeat(x) === "scratch") ?? null;
+  return session?.seats.find((x) => !x.retiring && seatDef(x).loop === "review") ?? null;
 }
 
 const reviewFact = (r: ReviewRow): ReviewFact => ({
@@ -178,6 +181,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const bodyTries = new Map<number, number>();
   /** The mc/review status last set for each run, as `<sha>:<state>:<description>` (in memory: a restart sets it once more). */
   const reviewStatuses = new Map<string, string>();
+  /** The last failure logged for each run's review status, so a lasting failure is logged once. */
+  const reviewStatusFailures = new Map<string, string>();
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
@@ -608,9 +613,31 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Keeps the mc/review commit status on the run's pushed sha in step with its review; never throws. */
   async function syncReviewStatus(runId: string): Promise<void> {
+    await setReviewStatus(runId);
+    // a run that has ended is done with its status: nothing of it is kept
+    if (store.run(runId)?.endedAt != null) {
+      reviewStatuses.delete(runId);
+      reviewStatusFailures.delete(runId);
+    }
+  }
+
+  /**
+   * Logs a status failure unless it is the one logged last for the run: it is tried again every pass.
+   * Compared on its first line, so a failure whose detail varies per call (a request id) logs once.
+   */
+  function noteStatusFailure(runId: string, text: string): void {
+    const head = text.split("\n", 1)[0] ?? text;
+    if (reviewStatusFailures.get(runId) === head) return;
+    reviewStatusFailures.set(runId, head);
+    log(`${runId}: review status not set: ${text}`);
+  }
+
+  async function setReviewStatus(runId: string): Promise<void> {
     const run = store.run(runId);
     const loop = run?.loop;
     if (run === null || loop === undefined || loop === null) return;
+    // an ended run's status is final: no more writes for it (its ended passes would repeat one)
+    if (run.endedAt != null) return;
     if (reviewerOf(config, run.agentId) === null) return;
     if (!config.repos.some((r) => r.id === run.repoId)) return;
     const sha = store.runPush(run.id)?.sha;
@@ -627,10 +654,12 @@ export function createEngine(deps: EngineDeps): Engine {
     if (reviewStatuses.get(run.id) === mark) return;
     try {
       const r = await publisher.setReviewStatus(run, sha, status.state, status.description);
-      if (r.ok) reviewStatuses.set(run.id, mark);
-      else log(`${run.id}: review status not set: ${r.text}`);
+      if (r.ok) {
+        reviewStatuses.set(run.id, mark);
+        reviewStatusFailures.delete(run.id);
+      } else noteStatusFailure(run.id, r.text);
     } catch (e) {
-      log(`${run.id}: review status not set: ${e instanceof Error ? e.message : String(e)}`);
+      noteStatusFailure(run.id, e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -776,7 +805,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const seats = (config.crew?.sessions ?? []).flatMap((s) => s.seats);
     await Promise.all(
       seats
-        .filter((s) => seatDef(s).loop === "build")
+        .filter((s) => !s.retiring && seatDef(s).loop === "build")
         .filter((s) => seatMayTake(store, s.id))
         .map((s) =>
           deps.takeNext(s.id).catch((e: unknown) => {
@@ -892,10 +921,26 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const row of store.reviewsWithLiveRun()) {
       if (row.runId !== null) await supervisor.endRunByEngine(row.runId);
     }
-    // 3. each free scratch seat starts its oldest wanted review
+    // 3. a queued review for a seat that is no longer its author's reviewer is dropped; the author's
+    // next pass requests it again for the current one
+    for (const row of store.reviewsIn(["queued"])) {
+      const author = store.run(row.authorRunId);
+      if (author === null || row.seatId === reviewerOf(config, author.agentId)?.id) continue;
+      const at = now();
+      if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
+        store.addLoopEvent(
+          reviewEventKey(row.authorRunId, row.id, "dropped"),
+          row.authorRunId,
+          reviewDroppedText(row.sha),
+          at,
+        );
+        void reconcileRun(author.id);
+      }
+    }
+    // 4. each free scratch seat starts its oldest wanted review
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
-      .filter((x) => modeOfSeat(x) === "scratch");
+      .filter((x) => !x.retiring && modeOfSeat(x) === "scratch");
     for (const seat of scratch) {
       const held = supervisor.seat(seat.id)?.runId ?? null;
       const heldRun = held === null ? null : store.run(held);
@@ -907,6 +952,11 @@ export function createEngine(deps: EngineDeps): Engine {
           dropReview(row);
           continue;
         }
+        // an earlier start awaited: the seat may have been removed or retired since the list was taken
+        const current = (config.crew?.sessions ?? [])
+          .flatMap((x) => x.seats)
+          .find((x) => x.id === seat.id);
+        if (current === undefined || current.retiring) break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
         let runId: string | null = null;
         try {

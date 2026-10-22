@@ -730,7 +730,22 @@ describe("start_seat", () => {
     );
   });
 
-  it("5: caps starts at 4 an hour", async () => {
+  it("5: caps starts at 4 an hour per developer seat (8 with two)", async () => {
+    for (let i = 0; i < 7; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
+    expect((await start()).isError).toBeUndefined();
+    expect(await start({ issue: 6 })).toEqual(
+      refused(
+        "Not done: you started tickets 8 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+  });
+
+  it("5: keeps the cap at 4 an hour with one developer seat", async () => {
+    const seats = cfg.crew?.sessions[0]?.seats ?? [];
+    seats.splice(
+      seats.findIndex((s) => s.id === "inco-1"),
+      1,
+    );
     for (let i = 0; i < 4; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
     expect(await start()).toEqual(
       refused(
@@ -1119,8 +1134,14 @@ describe("flight_state", () => {
       ],
       prs: [{ ref: "mc#7", pr: 9, seat: "guido-1", ready: true }],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
-      limits: { startsLeft: 4, messagesLeft: 29 },
+      limits: { startsLeft: 8, messagesLeft: 29 },
     });
+  });
+
+  it("counts starts left against the per-developer-seat cap", async () => {
+    for (let i = 0; i < 4; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
+    const s = (await state()) as { limits: { startsLeft: number } };
+    expect(s.limits.startsLeft).toBe(4);
   });
 
   it("marks a silent running seat stalled, and every seat on an account at its stop", async () => {

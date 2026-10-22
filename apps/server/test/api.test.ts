@@ -24,6 +24,7 @@ import {
   type ConfigView,
   CREW_FILES_NOTE,
   type Crew,
+  type CrewChanges,
   type CrewSessionFolders,
   DEFAULT_AWAY,
   type Escalation,
@@ -33,6 +34,7 @@ import {
   type MachineSample,
   NEW_LOOP,
   projectAtReset,
+  type ReloadResult,
   type Run,
   type RunDigest,
   type RunView,
@@ -44,10 +46,11 @@ import {
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp, CHECK_FAILED, NO_PARKED_NOTE } from "../src/api.ts";
+import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_PARKED_NOTE } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { type Gql, GqlError } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
+import type { CrewReloader } from "../src/crew-apply.ts";
 import { GitFailed } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -125,6 +128,20 @@ const withCrew = () => {
     ],
   };
 };
+const NO_CHANGES: CrewChanges = {
+  sessions: [],
+  pending: [],
+  restartNeeded: [],
+  error: null,
+  checkedAt: null,
+};
+const stubReloader = (result: Partial<ReloadResult> = {}): CrewReloader => ({
+  start: () => {},
+  stop: () => {},
+  reload: async () => ({ ...NO_CHANGES, applied: [], ...result }),
+  settle: () => [],
+  status: () => NO_CHANGES,
+});
 const stubSupervisor = (): Supervisor => {
   const call =
     <T>(name: string, value: T) =>
@@ -153,6 +170,7 @@ const stubSupervisor = (): Supervisor => {
     contextUsage: call("context", { categories: [], total: 10, window: 100 }),
     seat: () => null,
     busy: () => [],
+    seatBusy: () => false,
     status: () => supervisorStatus,
     inClone: (_checkout, fn) => fn(),
   };
@@ -318,6 +336,7 @@ beforeEach(async () => {
     heartbeatMs: 50,
     readStream: (path, limit) => streamReads(path, limit),
     configPath,
+    crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
     updater: stubUpdater(),
   });
@@ -417,6 +436,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
+  ["POST", "/api/config/reload"],
+  ["GET", "/api/crew/changes"],
   ["GET", "/api/telemetry?range=6h"],
   ["GET", "/api/stream"],
   ["POST", "/api/agents/shop-app-ta/pause"],
@@ -2443,6 +2464,119 @@ describe("config", () => {
       crew: null,
     } satisfies ConfigView);
     expect(r.body.toLowerCase()).not.toContain("password");
+  });
+
+  it("marks a retiring seat", async () => {
+    withCrew();
+    const seat = config.crew?.sessions[0]?.seats[0];
+    if (seat) seat.retiring = true;
+    const r = await get("/api/config");
+    expect(r.json().crew.sessions[0].seats[0].retiring).toBe(true);
+  });
+});
+
+describe("reload", () => {
+  const changes: CrewChanges = {
+    sessions: [{ id: "s1", seats: [] }],
+    pending: [],
+    restartNeeded: ["loops"],
+    error: null,
+    checkedAt: NOW,
+  };
+  const withReloader = (result: Partial<ReloadResult>) => {
+    const reload = vi.fn(
+      async (): Promise<ReloadResult> => ({ ...changes, applied: [], ...result }),
+    );
+    const reloader: CrewReloader = {
+      start: () => {},
+      stop: () => {},
+      reload,
+      settle: () => [],
+      status: () => changes,
+    };
+    return { reload, reloader, a: buildApp({ config, store, bus, crewReloader: reloader }) };
+  };
+  const reloadPost = (a: FastifyInstance) =>
+    a.inject({ method: "POST", url: "/api/config/reload", headers: json, payload: {} });
+
+  it("is 409 without a reloader", async () => {
+    const r = await reloadPost(buildApp({ config, store, bus }));
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toEqual({ error: CONFIG_WRITES_UNAVAILABLE });
+  });
+
+  it("is 400 with the error when the file does not load", async () => {
+    const { a } = withReloader({ error: "crew.sessions[0]: boom" });
+    const r = await reloadPost(a);
+    expect(r.statusCode).toBe(400);
+    expect(r.json()).toEqual({ error: "crew.sessions[0]: boom" });
+    await a.close();
+  });
+
+  it("is 200 with what was applied", async () => {
+    const { a, reload } = withReloader({ applied: ["seat guido-2 added"] });
+    const r = await reloadPost(a);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ...changes, applied: ["seat guido-2 added"] });
+    expect(reload).toHaveBeenCalledTimes(1);
+    await a.close();
+  });
+
+  it("refuses a foreign origin and a non-JSON body", async () => {
+    const { a } = withReloader({});
+    const origin = await a.inject({
+      method: "POST",
+      url: "/api/config/reload",
+      headers: { ...json, origin: "https://evil.example" },
+      payload: {},
+    });
+    expect(origin.statusCode).toBe(403);
+    const text = await a.inject({
+      method: "POST",
+      url: "/api/config/reload",
+      headers: { "content-type": "text/plain" },
+      payload: "x",
+    });
+    expect(text.statusCode).toBe(415);
+    await a.close();
+  });
+});
+
+describe("crew changes", () => {
+  it("is the empty shape without a reloader", async () => {
+    const r = await get("/api/crew/changes");
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({
+      sessions: [],
+      pending: [],
+      restartNeeded: [],
+      error: null,
+      checkedAt: null,
+    });
+  });
+
+  it("is the reloader's status", async () => {
+    const status: CrewChanges = {
+      sessions: [{ id: "s1", seats: [] }],
+      pending: [{ sessionId: "s1", seatId: "guido-2", change: "add", reason: "r" }],
+      restartNeeded: [],
+      error: "boom",
+      checkedAt: NOW,
+    };
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      crewReloader: {
+        start: () => {},
+        stop: () => {},
+        reload: async () => ({ ...status, applied: [] }),
+        settle: () => [],
+        status: () => status,
+      },
+    });
+    expect((await a.inject({ method: "GET", url: "/api/crew/changes" })).json()).toEqual(status);
+    await a.close();
   });
 });
 

@@ -51,6 +51,9 @@ export interface Run {
 
 export type LoopPhase = "working" | "ci" | "review" | "parked" | "done";
 
+/** The steps after a PR is ready, in the order the engine does them; `done` holds those finished. */
+export type MergeStep = "ready" | "merge" | "close" | "delete-remote" | "delete-local";
+
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
   phase: LoopPhase;
@@ -80,6 +83,20 @@ export interface RunLoop {
   prBody?: { reviewId: number; minor: number } | null;
   /** Off its seat while in review; `wake`: rework or a park is due, so it goes back first. */
   aside?: { worktree: string; wake: boolean } | null;
+  /**
+   * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
+   * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed
+   * paths outside the seat's area or protected.
+   */
+  gate?: {
+    sha: string;
+    mainSha: string;
+    containsMain: boolean;
+    hubOnly: boolean;
+    strays: string[];
+  } | null;
+  /** The merge under way for `sha`, and the steps of it already done. */
+  merging?: { sha: string; done: MergeStep[] } | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */
