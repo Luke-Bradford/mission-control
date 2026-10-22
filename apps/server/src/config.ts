@@ -34,6 +34,7 @@ import {
   type TicketState,
   WRITER_TOOLS,
   watchOnlyToolText,
+  watchOrPlanToolText,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -614,7 +615,11 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
       if (!MC_TOOL_GRANTS[r.mode].grantable.includes(t)) {
         throw new ConfigError(`${at}.tools`, `${t} cannot be granted to a ${r.mode} role`);
       }
-      if (FLIGHT_TOOLS.includes(t) && r.loop !== "watch") {
+      if (t === MC_TOOL_NAMES.readTicket) {
+        if (r.loop !== "watch" && r.loop !== "plan") {
+          throw new ConfigError(`${at}.tools`, watchOrPlanToolText(t));
+        }
+      } else if (FLIGHT_TOOLS.includes(t) && r.loop !== "watch") {
         throw new ConfigError(`${at}.tools`, watchOnlyToolText(t));
       }
     }

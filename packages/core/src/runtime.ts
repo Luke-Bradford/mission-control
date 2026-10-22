@@ -41,7 +41,7 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
   scratch: ["review"],
 };
 
-/** The mc tools only the FLIGHT seat (a `watch` role) holds; later FLIGHT tickets append to it. */
+/** The mc tools the FLIGHT seat (a `watch` role) holds; later FLIGHT tickets append to it. Only `read_ticket` may also go to a `plan` role. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.readTicket,

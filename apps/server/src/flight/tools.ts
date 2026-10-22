@@ -191,7 +191,7 @@ export function flightCall<S extends z.ZodType>(
   return { ok: true, args: parsed.data };
 }
 
-/** Each tool: `modes: []`, `grantable: ["read-only"]`, so #222's grant filter shows it only to FLIGHT. */
+/** Each tool: `modes: []`, `grantable: ["read-only"]`, so #222's grant filter shows it only to a seat whose role grants it (FLIGHT; `read_ticket` also a planner). */
 export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
