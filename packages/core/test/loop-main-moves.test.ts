@@ -50,6 +50,7 @@ function snap(over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): Lo
     ended: null,
     asideOk: true,
     autoMerge: true,
+    hardRulesSet: true,
     ...over,
   };
 }

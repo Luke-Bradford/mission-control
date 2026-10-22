@@ -24,6 +24,8 @@ import {
   EVIDENCE_RULING_PREFIX,
   fillLoopText,
   fixSentText,
+  hardRulesUnsetNoteKey,
+  hardRulesUnsetText,
   hudColumnOf,
   type LoopAction,
   type LoopReviewFacts,
@@ -193,6 +195,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
   const chains = new Map<string, Promise<void>>();
   const ruleNotes = new Map<RepoId, string>();
+  /** Whether each repo's rules set `hard_rules` at their last good read. */
+  const hardRulesSet = new Map<RepoId, boolean>();
   /** When each run last had a transient refusal counted: one counts per tick, however often it is tried. */
   const lastTransient = new Map<string, number>();
   /** A CI failure's excerpt, kept until its line is claimed, so a busy seat costs one gh read. */
@@ -244,10 +248,35 @@ export function createEngine(deps: EngineDeps): Engine {
     const r = await deps.rules(repoId);
     if (r instanceof Error) {
       ruleNotes.set(repoId, r.message);
+      hardRulesSet.delete(repoId);
       return null;
     }
     ruleNotes.delete(repoId);
+    hardRulesSet.set(repoId, r.hardRulesSet);
+    noteHardRules(repoId, r.hardRulesSet);
     return r;
+  }
+
+  /** The one note for a `merge` repo whose rules leave `hard_rules` unset; cleared once they set it. */
+  function noteHardRules(repoId: RepoId, set: boolean): void {
+    if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return;
+    const key = hardRulesUnsetNoteKey(repoId);
+    const open = store.notes().some((n) => n.key === key);
+    if (set && open) {
+      store.clearNote(key, now());
+      bus.emit("attention");
+    } else if (!set && !open) {
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId,
+        text: hardRulesUnsetText(repoId),
+        at: now(),
+      });
+      bus.emit("attention");
+    }
   }
 
   function saveLoop(runId: string, loop: RunLoop, stored: RunLoop | null | undefined): void {
@@ -256,7 +285,24 @@ export function createEngine(deps: EngineDeps): Engine {
     bus.emit("agents");
   }
 
-  function snapshot(run: Run, loop: RunLoop, at: number): LoopSnapshot | null {
+  /**
+   * Whether the hub may merge in the repo: a `merge` workspace whose rules set `hard_rules`. The
+   * last read of the rules answers (the tick and the pass's other reads keep it fresh), so a pass
+   * awaits only for a repo not read yet. Unreadable rules are not an answer: no merge.
+   */
+  function mayMerge(repoId: RepoId): boolean | Promise<boolean> {
+    if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return false;
+    const known = hardRulesSet.get(repoId);
+    if (known !== undefined) return known;
+    return rulesFor(repoId).then(() => hardRulesSet.get(repoId) === true);
+  }
+
+  function snapshot(
+    run: Run,
+    loop: RunLoop,
+    at: number,
+    mergeAllowed: boolean,
+  ): LoopSnapshot | null {
     const issue = issueOf(run);
     if (issue === null || run.ticket === null) return null;
     const ended = run.endedAt !== null;
@@ -337,6 +383,7 @@ export function createEngine(deps: EngineDeps): Engine {
               isDraft: pr.isDraft,
             },
       autoMerge: config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge",
+      hardRulesSet: mergeAllowed,
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),
       openNotes: store.openNoteKeys(run.id),
@@ -820,6 +867,11 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   async function pass(runId: string, round = 0): Promise<void> {
+    // read before the run's row is, so no await sits between the row and the loop saved from it
+    const repoId = store.run(runId)?.repoId;
+    const may = repoId === undefined ? false : mayMerge(repoId);
+    // (awaited only when the rules were not read yet: a pass otherwise starts in one turn)
+    const mergeAllowed = typeof may === "boolean" ? may : await may;
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
@@ -859,7 +911,7 @@ export function createEngine(deps: EngineDeps): Engine {
       if (g.ok) input.gate = { sha: pushed.sha, ...g.facts };
       else log(`${runId}: could not read the merge gate: ${g.text}`);
     }
-    const snap = snapshot(run, input, at);
+    const snap = snapshot(run, input, at, mergeAllowed);
     if (snap === null) return;
     const step = reconcile(snap);
     const cur = step.loop;
