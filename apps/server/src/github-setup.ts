@@ -59,14 +59,17 @@ const SPECS: FieldSpec[] = [
 ];
 
 const FIELDS_QUERY = `query($owner: String!, $number: Int!) {
-  user(login: $owner) {
-    projectV2(number: $number) {
-      id
-      fields(first: 50) {
-        pageInfo { hasNextPage }
-        nodes {
-          ... on ProjectV2FieldCommon { id name }
-          ... on ProjectV2SingleSelectField { options { id name } }
+  repositoryOwner(login: $owner) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        id
+        fields(first: 50) {
+          pageInfo { hasNextPage }
+          nodes {
+            ... on ProjectV2FieldCommon { id name }
+            ... on ProjectV2SingleSelectField { options { id name } }
+          }
         }
       }
     }
@@ -107,7 +110,7 @@ interface ReadField {
 /** Reads the project's fields (name -> id and options); throws on a missing project or a gql failure. */
 async function read(gql: Gql, owner: string, project: number) {
   const data = await gql(FIELDS_QUERY, { owner, number: project });
-  const p = isObj(data) && isObj(data.user) ? data.user.projectV2 : null;
+  const p = isObj(data) && isObj(data.repositoryOwner) ? data.repositoryOwner.projectV2 : null;
   if (!isObj(p) || typeof p.id !== "string") {
     throw new Error(`github: project ${project} not found for ${owner}`);
   }

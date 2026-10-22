@@ -309,6 +309,7 @@ const minutes = (ms: number): number => Math.round(ms / 60_000);
 const IN_PROGRESS = "In progress" satisfies MoveColumn;
 const IN_REVIEW = "In review" satisfies MoveColumn;
 const BLOCKED = "Blocked" satisfies MoveColumn;
+const DONE = "Done" satisfies MoveColumn;
 
 /** ` until HH:MM` in the operator's zone; nothing without a zone or for a time that has no clock. */
 function untilText(at: number | null, tz: string | null): string {
@@ -393,6 +394,11 @@ function gateView(s: LoopSnapshot, loop: RunLoop) {
   return { on, P, touches, gate, clear, passes };
 }
 
+/** The move of a merged run's card to Done, once per epoch: a later move by hand is left alone. */
+function doneMove(loop: RunLoop): LoopAction[] {
+  return loop.cardFor === cardMark("done", loop.epoch) ? [] : [{ kind: "move-card", column: DONE }];
+}
+
 /** The steps after a merge, in order, minus those already done. */
 function afterMerge(s: LoopSnapshot): LoopAction[] {
   const done = s.loop.merging?.done ?? [];
@@ -409,7 +415,7 @@ function afterMerge(s: LoopSnapshot): LoopAction[] {
       }
     }
   }
-  actions.push({ kind: "end-run" });
+  actions.push(...doneMove(s.loop), { kind: "end-run" });
   if (todo("delete-local")) actions.push({ kind: "delete-local-branch" });
   actions.push({ kind: "take-next" });
   return actions;
@@ -434,13 +440,21 @@ function stateStep(s: LoopSnapshot): Step {
       actions:
         s.autoMerge === true
           ? [...afterMerge(s), { kind: "event", text: "merged" }]
-          : [{ kind: "end-run" }, { kind: "take-next" }, { kind: "event", text: "merged" }],
+          : [
+              ...doneMove(loop),
+              { kind: "end-run" },
+              { kind: "take-next" },
+              { kind: "event", text: "merged" },
+            ],
     };
   }
   if (loop.phase === "done") {
     return {
       loop,
-      actions: s.autoMerge === true ? afterMerge(s) : [{ kind: "end-run" }, { kind: "take-next" }],
+      actions:
+        s.autoMerge === true
+          ? afterMerge(s)
+          : [...doneMove(loop), { kind: "end-run" }, { kind: "take-next" }],
     };
   }
   if (s.ended !== null && !loop.parked?.ended) {

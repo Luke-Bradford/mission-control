@@ -12,6 +12,7 @@ import {
   isTransient,
   makeGql,
   missingScopeLine,
+  projectUrlOf,
   sweepPullRequests,
 } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -215,10 +216,12 @@ const prPage = (nodes: unknown[], next: string | null = null) => ({
   },
 });
 
-const page = (nodes: unknown[], next: string | null = null) => ({
-  user: {
+const page = (nodes: unknown[], next: string | null = null, typename = "User") => ({
+  repositoryOwner: {
+    __typename: typename,
     projectV2: {
       id: "PVT_1",
+      url: "https://github.com/users/octo/projects/2",
       items: { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes },
     },
   },
@@ -463,7 +466,9 @@ describe("collectGithub board ids", () => {
   it("takes the project id from any page and applies it to every item", async () => {
     const first = page([item(1, "Todo")], "c1");
     // the first page carries no project id; the second does
-    const noId = { user: { projectV2: { items: first.user.projectV2.items } } };
+    const noId = {
+      repositoryOwner: { projectV2: { items: first.repositoryOwner.projectV2.items } },
+    };
     const { gql } = stub({ pages: [noId, page([item(2, "Todo")])] });
     await collectGithub(repo, store, gql, NOW);
     expect(store.board("shop-app").map((i) => [i.issueNumber, i.projectId])).toEqual([
@@ -478,6 +483,96 @@ describe("collectGithub board ids", () => {
     const q = calls.find((c) => c.q.includes("projectV2"))?.q ?? "";
     expect(q).toMatch(/projectV2\(number: \$number\) \{\s*id\b/);
     expect(q).toMatch(/nodes \{\s*id\b/);
+  });
+
+  it("reads an organisation's project", async () => {
+    const { gql } = stub({ pages: [page([item(1, "Todo")], null, "Organization")] });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
+    expect(statusOf()).toMatchObject({ ok: true, error: null });
+  });
+
+  it("reads a user's project", async () => {
+    const { gql } = stub({ pages: [page([item(1, "Todo")], null, "User")] });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
+    expect(statusOf()).toMatchObject({ ok: true, error: null });
+  });
+
+  it("asks repositoryOwner for the project and its url", async () => {
+    const { gql, calls } = stub({ pages: [page([])] });
+    await collectGithub(repo, store, gql, NOW);
+    const q = calls.find((c) => c.q.includes("projectV2"))?.q ?? "";
+    expect(q).toContain("repositoryOwner(login:");
+    expect(q).toContain("... on ProjectV2Owner");
+    expect(q).toMatch(/projectV2\(number: \$number\) \{\s*id\s+url\b/);
+    expect(q).not.toContain("user(login");
+  });
+});
+
+describe("projectUrlOf", () => {
+  it("is null before a read, the last read's url after, and kept when a poll fails", async () => {
+    expect(projectUrlOf(store, "shop-app")).toBeNull();
+    await collectGithub(repo, store, stub({ pages: [page([item(1, "Todo")])] }).gql, NOW);
+    expect(projectUrlOf(store, "shop-app")).toBe("https://github.com/users/octo/projects/2");
+    await collectGithub(repo, store, stub({ boardError: new Error("x") }).gql, NOW + 1);
+    expect(projectUrlOf(store, "shop-app")).toBe("https://github.com/users/octo/projects/2");
+  });
+});
+
+describe("collectGithub board, SAML single sign-on", () => {
+  const SSO = "required; url=https://github.com/orgs/octo-org/sso?authorization_request=x";
+  const fetchWith = (status: number, headers: Record<string, string>, body: unknown = {}) =>
+    (async () =>
+      new Response(JSON.stringify(body), { status, headers })) as unknown as typeof fetch;
+  const run = async (f: typeof fetch) => {
+    await collectGithub(repo, store, makeGql("t", f), NOW);
+    return statusOf()?.error ?? "";
+  };
+
+  it("names a 403 with X-GitHub-SSO and its url", async () => {
+    const e = await run(fetchWith(403, { "X-GitHub-SSO": SSO }));
+    expect(e).toContain(
+      "board: the gh token is not authorised for octo-org's single sign-on (SAML). Authorise it at https://github.com/orgs/octo-org/sso?authorization_request=x",
+    );
+    expect(e.split("; escalations:")[0]).not.toContain("HTTP 403");
+  });
+
+  it("names a GraphQL SAML enforcement error, without a url", async () => {
+    const e = await run(
+      fetchWith(
+        200,
+        {},
+        {
+          errors: [
+            {
+              type: "FORBIDDEN",
+              message:
+                "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization.",
+            },
+          ],
+        },
+      ),
+    );
+    expect(e).toContain(
+      "board: the gh token is not authorised for octo-org's single sign-on (SAML). Authorise the token for octo-org in GitHub settings (Applications), then run gh auth refresh",
+    );
+  });
+
+  it("keeps other failures' text", async () => {
+    expect(await run(fetchWith(403, {}))).toContain("board: github: HTTP 403");
+    await collectGithub(repo, store, stub({ boardError: new Error("board boom") }).gql, NOW);
+    expect(statusOf()?.error).toContain("board: board boom");
+  });
+
+  it("keeps the header on GqlTransportError", async () => {
+    const err = await makeGql("t", fetchWith(403, { "X-GitHub-SSO": SSO }))("q", {}).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(GqlTransportError);
+    expect((err as GqlTransportError).sso).toBe(SSO);
+    const plain = await makeGql("t", fetchWith(401, {}))("q", {}).catch((e: unknown) => e);
+    expect((plain as GqlTransportError).sso).toBeNull();
   });
 });
 
@@ -830,7 +925,7 @@ describe("collectGithub failure", () => {
 describe("describeGqlErrors", () => {
   const scopeErr = (field: string) => ({
     type: "INSUFFICIENT_SCOPES",
-    path: ["user", "projectV2", field],
+    path: ["repositoryOwner", "projectV2", field],
     message:
       "Your token has not been granted the required scopes to execute this query. The 'projectV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.",
   });

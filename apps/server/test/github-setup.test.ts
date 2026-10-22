@@ -6,7 +6,7 @@ import { ensureFields, ensureLabels, readStatusField, setupStatus } from "../src
 type Field = { name: string; options?: { name: string }[] };
 
 /** A fake GitHub project: records every call, applies createProjectV2Field to its own fields. */
-function fakeProject(initial: Field[] = [], failOn?: string) {
+function fakeProject(initial: Field[] = [], failOn?: string, type = "User") {
   const fields = [...initial];
   const calls: { query: string; vars: Record<string, unknown> }[] = [];
   const gql: Gql = async (query, vars) => {
@@ -18,7 +18,8 @@ function fakeProject(initial: Field[] = [], failOn?: string) {
       return { createProjectV2Field: { projectV2Field: { name: input.name } } };
     }
     return {
-      user: {
+      repositoryOwner: {
+        __typename: type,
         projectV2: { id: "PVT_1", fields: { pageInfo: { hasNextPage: false }, nodes: fields } },
       },
     };
@@ -135,7 +136,7 @@ describe("ensureFields", () => {
   });
 
   it("throws when the project does not exist", async () => {
-    const gql: Gql = async () => ({ user: null });
+    const gql: Gql = async () => ({ repositoryOwner: null });
     await expect(setupStatus(gql, "octo-org", 9)).rejects.toThrow("not found");
   });
 });
@@ -152,15 +153,30 @@ describe("setupStatus", () => {
     });
     expect(p.mutations()).toEqual([]);
   });
+
+  it("reads an organisation's project", async () => {
+    const p = fakeProject(
+      [{ name: "Owner", options: ["PM", "CTO", "Agent", "Operator"].map((name) => ({ name })) }],
+      undefined,
+      "Organization",
+    );
+    expect(await setupStatus(p.gql, "octo-org", 2)).toEqual({
+      projectId: "PVT_1",
+      missing: ["Stage", "Priority", "Size"],
+      mismatched: [],
+    });
+    expect(p.calls[0]?.query).toContain("repositoryOwner(login:");
+  });
 });
 
 describe("readStatusField", () => {
-  const gqlWith = (fields: unknown[]) => {
+  const gqlWith = (fields: unknown[], type = "User") => {
     const sent: string[] = [];
     const gql: Gql = async (query) => {
       sent.push(query);
       return {
-        user: {
+        repositoryOwner: {
+          __typename: type,
           projectV2: { id: "PVT_1", fields: { pageInfo: { hasNextPage: false }, nodes: fields } },
         },
       };
@@ -190,6 +206,30 @@ describe("readStatusField", () => {
     });
     expect(p.sent[0]).toMatch(/\.\.\. on ProjectV2FieldCommon \{ id name \}/);
     expect(p.sent[0]).toMatch(/options \{ id name \}/);
+  });
+
+  it("reads an organisation's project", async () => {
+    const p = gqlWith(
+      [
+        {
+          id: "F_status",
+          name: "Status",
+          options: [
+            { id: "O_todo", name: "Todo" },
+            { id: "O_review", name: "In review" },
+          ],
+        },
+      ],
+      "Organization",
+    );
+    expect(await readStatusField(p.gql, "octo-org", 2)).toEqual({
+      projectId: "PVT_1",
+      fieldId: "F_status",
+      options: [
+        { id: "O_todo", name: "Todo" },
+        { id: "O_review", name: "In review" },
+      ],
+    });
   });
 
   it("throws when there is no Status field with ids", async () => {
@@ -302,7 +342,7 @@ describe("setup field read fails closed", () => {
     const sent: string[] = [];
     const gql: Gql = async (query) => {
       sent.push(query);
-      return { user: { projectV2: { id: "PVT_1", fields } } };
+      return { repositoryOwner: { projectV2: { id: "PVT_1", fields } } };
     };
     return { gql, sent };
   };
