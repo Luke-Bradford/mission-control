@@ -44,6 +44,7 @@ import {
   reviewQueuedText,
   reviewRunStep,
   reviewStartedText,
+  reviewStatusOf,
   seatCallSign,
   seatDef,
   TAKE_STALE_MS,
@@ -175,6 +176,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const excerpts = new Map<string, string>();
   /** Transient refusals of each review's PR-body edit (in memory: a restart tries afresh). */
   const bodyTries = new Map<number, number>();
+  /** The mc/review status last set for each run, as `<sha>:<state>:<description>` (in memory: a restart sets it once more). */
+  const reviewStatuses = new Map<string, string>();
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
@@ -603,6 +606,34 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
+  /** Keeps the mc/review commit status on the run's pushed sha in step with its review; never throws. */
+  async function syncReviewStatus(runId: string): Promise<void> {
+    const run = store.run(runId);
+    const loop = run?.loop;
+    if (run === null || loop === undefined || loop === null) return;
+    if (reviewerOf(config, run.agentId) === null) return;
+    if (!config.repos.some((r) => r.id === run.repoId)) return;
+    const sha = store.runPush(run.id)?.sha;
+    if (sha === undefined) return;
+    if (findPr(run, loop)?.state !== "open") return;
+    const status = reviewStatusOf(
+      store.reviewsOfRun(run.id).map(reviewFact),
+      loop.epoch,
+      sha,
+      loop.reviewWaivedSha ?? null,
+    );
+    if (status === null) return;
+    const mark = `${sha}:${status.state}:${status.description}`;
+    if (reviewStatuses.get(run.id) === mark) return;
+    try {
+      const r = await publisher.setReviewStatus(run, sha, status.state, status.description);
+      if (r.ok) reviewStatuses.set(run.id, mark);
+      else log(`${run.id}: review status not set: ${r.text}`);
+    } catch (e) {
+      log(`${run.id}: review status not set: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function pass(runId: string, round = 0): Promise<void> {
     const run = store.run(runId);
     const stored = run?.loop;
@@ -663,6 +694,7 @@ export function createEngine(deps: EngineDeps): Engine {
       }
     }
     saveLoop(runId, cur, store.run(runId)?.loop);
+    await syncReviewStatus(runId);
     if (out.again && round + 1 < MAX_ROUNDS) await pass(runId, round + 1);
   }
 

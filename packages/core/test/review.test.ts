@@ -17,6 +17,7 @@ import {
   type ReviewFinding,
   type ReviewRunSnapshot,
   reviewRunStep,
+  reviewStatusOf,
 } from "../src/review.ts";
 
 describe("findingFileOk", () => {
@@ -213,5 +214,78 @@ describe("reviewRunStep", () => {
   });
   it("10: otherwise nothing", () => {
     expect(reviewRunStep(base())).toBeNull();
+  });
+});
+
+describe("reviewStatusOf", () => {
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+  const fact = (o: Partial<ReviewFact>): ReviewFact => ({
+    id: 1,
+    sha: A,
+    epoch: 0,
+    attempt: 1,
+    state: "queued",
+    blocking: 0,
+    minor: 0,
+    failure: null,
+    ...o,
+  });
+
+  it("no current row: null", () => {
+    for (const rows of [
+      [],
+      [fact({ state: "superseded" })],
+      [fact({ epoch: 1 })],
+      [fact({ sha: B })],
+    ]) {
+      expect(reviewStatusOf(rows, 0, A, null)).toBeNull();
+    }
+  });
+
+  it("queued and starting: pending queued", () => {
+    for (const state of ["queued", "starting"] as const) {
+      expect(reviewStatusOf([fact({ state })], 0, A, null)).toEqual({
+        state: "pending",
+        description: "QA review queued",
+      });
+    }
+  });
+
+  it("running: pending running", () => {
+    expect(reviewStatusOf([fact({ state: "running" })], 0, A, null)).toEqual({
+      state: "pending",
+      description: "QA review running",
+    });
+  });
+
+  it("reported clean: success", () => {
+    expect(reviewStatusOf([fact({ state: "reported", minor: 2 })], 0, A, null)).toEqual({
+      state: "success",
+      description: "QA review passed",
+    });
+  });
+
+  it("reported blocking: failure", () => {
+    expect(reviewStatusOf([fact({ state: "reported", blocking: 1 })], 0, A, null)).toEqual({
+      state: "failure",
+      description: "QA review found blocking issues",
+    });
+  });
+
+  it("failed: null", () => {
+    expect(reviewStatusOf([fact({ state: "failed" })], 0, A, null)).toBeNull();
+  });
+
+  it("waived wins", () => {
+    const rows = [fact({ state: "reported", blocking: 3 })];
+    expect(reviewStatusOf(rows, 0, A, A)).toEqual({
+      state: "success",
+      description: "QA review waived by the operator",
+    });
+    expect(reviewStatusOf(rows, 0, A, B)).toEqual({
+      state: "failure",
+      description: "QA review found blocking issues",
+    });
   });
 });

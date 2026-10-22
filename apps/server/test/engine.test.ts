@@ -23,6 +23,11 @@ import {
   prSecretText,
   pushReferenceText,
   pushSecretText,
+  REVIEW_STATUS_BLOCKED,
+  REVIEW_STATUS_PASSED,
+  REVIEW_STATUS_QUEUED,
+  REVIEW_STATUS_RUNNING,
+  REVIEW_STATUS_WAIVED,
   type ReviewFinding,
   type Run,
   type RunLoop,
@@ -220,6 +225,9 @@ interface Harness {
   /** PR-body edits, and the next results of postMinorFindings (empty: success). */
   minorCalls: { id: number; sha: string; retro: string }[];
   minorResults: PublishResult[];
+  /** Commit-status writes, and the next results of setReviewStatus (empty: success). */
+  statusCalls: { sha: string; state: string; description: string }[];
+  statusResults: PublishResult[];
   /** setAside answers a worktree (else null, the 7b-1 behaviour), and records its calls. */
   asideOn: boolean;
   asides: string[];
@@ -261,6 +269,8 @@ function harness(): Harness {
     duringStart: null,
     minorCalls: [],
     minorResults: [],
+    statusCalls: [],
+    statusResults: [],
     asideOn: false,
     asides: [],
     wakes: [],
@@ -292,6 +302,10 @@ function harness(): Harness {
         async postMinorFindings(_r, review) {
           x.minorCalls.push(review);
           return x.minorResults.shift() ?? { ok: true };
+        },
+        async setReviewStatus(_r, sha, state, description) {
+          x.statusCalls.push({ sha, state, description });
+          return x.statusResults.shift() ?? { ok: true };
         },
         async ciExcerpt(_repo, sha) {
           x.excerpts.push(sha);
@@ -1922,6 +1936,76 @@ describe("the engine runs reviews", () => {
     expect(loopOf()).toMatchObject({ phase: "review", reviewWaivedSha: SHA });
     const ready = store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`);
     expect(ready?.text).toBe(readyWaivedText(`${REPO}#7`, 12, SHA));
+  });
+
+  describe("the mc/review commit status", () => {
+    const status = (state: string, description: string) => ({ sha: SHA, state, description });
+
+    it("review requested: mc/review is pending", async () => {
+      h.busyList = [{ seatId: RETRO, state: "running" }];
+      await toReview();
+      expect(h.statusCalls).toEqual([status("pending", REVIEW_STATUS_QUEUED)]);
+      await h.engine.reconcileRun(RUN);
+      expect(h.statusCalls).toHaveLength(1);
+    });
+
+    it("a clean review: mc/review is success", async () => {
+      await toReview();
+      reported(first().id, []);
+      await vi.waitFor(() =>
+        expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_PASSED)),
+      );
+      expect(h.statusCalls).toContainEqual(status("pending", REVIEW_STATUS_RUNNING));
+    });
+
+    it("blocking findings: mc/review is failure", async () => {
+      await toReview();
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() =>
+        expect(h.statusCalls.at(-1)).toEqual(status("failure", REVIEW_STATUS_BLOCKED)),
+      );
+    });
+
+    it("waived: mc/review is success, waived", async () => {
+      await toReview();
+      for (const n of [901, 902]) {
+        store.claimLine(`fix:${RUN}:0:${n}`, {
+          runId: RUN,
+          seatId: SEAT,
+          origin: "engine",
+          text: "x",
+          at: clock,
+        });
+      }
+      reported(first().id, [finding("Critical")]);
+      await vi.waitFor(() => expect(loopOf().phase).toBe("parked"));
+      await h.engine.onOperatorMessage(RUN);
+      expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_WAIVED));
+    });
+
+    it("no review seat: no status", async () => {
+      seats().splice(
+        seats().findIndex((s) => s.id === RETRO),
+        1,
+      );
+      await toReview();
+      await h.engine.tick();
+      expect(h.statusCalls).toEqual([]);
+    });
+
+    it("a failed status write is logged and tried again on the next tick", async () => {
+      h.statusResults = [{ ok: false, text: "gh is down", transient: true }];
+      h.busyList = [{ seatId: RETRO, state: "running" }];
+      await expect(toReview()).resolves.toBeUndefined();
+      expect(h.logs).toContain(`${RUN}: review status not set: gh is down`);
+      expect(h.statusCalls).toHaveLength(1);
+      await h.engine.tick();
+      expect(h.statusCalls).toEqual([
+        status("pending", REVIEW_STATUS_QUEUED),
+        status("pending", REVIEW_STATUS_QUEUED),
+      ]);
+      expect(loopOf().phase).toBe("review");
+    });
   });
 
   describe("keeping RETRO's run going", () => {
