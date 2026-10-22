@@ -24,6 +24,7 @@ import {
   flightStartCap,
   flightState,
   pending,
+  wakeFacts,
 } from "../src/flight/state.ts";
 import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -594,6 +595,13 @@ describe("wakeSummary", () => {
       expect(
         pending(state({ seats: [s({ parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "x" } })] })),
       ).toBe(true);
+    });
+
+    it("is true for a stopped build seat even with no ticket, and the summary counts it", () => {
+      const stopped = state({ seats: [s({ state: "stopped", free: true })] });
+      expect(pending(stopped)).toBe(true);
+      expect(wakeSummary(stopped)).toBe("1 free seat · 1 stopped");
+      expect(wakeFacts(stopped)).not.toBe(wakeFacts(state({ seats: [s({ free: true })] })));
     });
 
     it("is false for a park that is the operator's, a free seat with no ticket, or nothing", () => {

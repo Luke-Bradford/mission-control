@@ -228,6 +228,7 @@ describe("the allowlist in phase 2b", () => {
       messageSeat: "mcp__mc__message_seat",
       flightState: "mcp__mc__flight_state",
       promote: "mcp__mc__promote",
+      endRun: "mcp__mc__end_run",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit]);
   });
@@ -469,6 +470,7 @@ describe("crew constants", () => {
           "message_seat",
           "flight_state",
           "promote",
+          "end_run",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -544,6 +546,7 @@ describe("mc tool grants", () => {
       "message_seat",
       "flight_state",
       "promote",
+      "end_run",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
