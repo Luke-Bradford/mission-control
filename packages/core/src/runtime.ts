@@ -234,6 +234,10 @@ export const SCRATCH_TOOLS = [
 export const scratchStartRefusedText = (call: string): string =>
   `${call} reviews the PRs Mission Control hands it; it is not started on a ticket.`;
 
+/** A seat removed from config.yaml while busy: it finishes its run and takes no new one. */
+export const retiringText = (call: string): string =>
+  `${call} is being removed from the crew; it takes no new work`;
+
 /** The built-in tools a seat has at all (`--tools`); `*_TOOLS` then narrow Bash by pattern. */
 export const WRITER_BUILTINS = [
   "Read",

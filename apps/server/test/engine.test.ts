@@ -37,7 +37,13 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { createEngine, type Engine, type EngineDeps, TIP_MOVED } from "../src/engine/engine.ts";
+import {
+  createEngine,
+  type Engine,
+  type EngineDeps,
+  reviewerOf,
+  TIP_MOVED,
+} from "../src/engine/engine.ts";
 import type { OpenPrResult, Publisher, PublishResult } from "../src/engine/publish.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
@@ -56,7 +62,7 @@ const HUB = START + 30 * 60_000;
 const REPO = "mc";
 const SEAT = "guido-1";
 const RETRO = "retro-1";
-const KNOWN_SEATS = [SEAT, RETRO, "guido-2"];
+const KNOWN_SEATS = [SEAT, RETRO, "guido-2", "retro-2"];
 const RUN = "guido-1:20261021T100000Z";
 const BRANCH = "feature/7-fix-the-thing";
 const SHA = "a".repeat(40);
@@ -1692,6 +1698,35 @@ describe("the engine runs reviews", () => {
     expect(noteKeys()).toContain(`review:${RUN}:${SHA}`);
     expect(reviewRows()).toEqual([]);
     expect(h.starts).toEqual([]);
+  });
+
+  it("reviewerOf skips a retiring seat", () => {
+    seats().push({ ...retroSeat(), id: "retro-2" });
+    expect(reviewerOf(config, "guido-1")?.id).toBe(RETRO);
+    const first = need(seats().find((s) => s.id === RETRO));
+    first.retiring = true;
+    expect(reviewerOf(config, "guido-1")?.id).toBe("retro-2");
+    need(seats().find((s) => s.id === "retro-2")).retiring = true;
+    expect(reviewerOf(config, "guido-1")).toBeNull();
+  });
+
+  it("a queued review for a removed reviewer is re-requested for the new one", async () => {
+    h.busyList = [{ seatId: RETRO, state: "running" }];
+    await toReview();
+    const old = first();
+    expect(old.state).toBe("queued");
+    seats().splice(
+      seats().findIndex((s) => s.id === RETRO),
+      1,
+      { ...retroSeat(), id: "retro-2" },
+    );
+    h.busyList = [];
+    await h.engine.tick();
+    expect(store.review(old.id)?.state).toBe("superseded");
+    await vi.waitFor(() => expect(h.starts).toEqual([{ seat: "retro-2", id: expect.any(Number) }]));
+    const rows = reviewRows();
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ seatId: "retro-2", sha: SHA });
   });
 
   describe("boot recovery", () => {

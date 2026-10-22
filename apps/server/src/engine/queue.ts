@@ -83,7 +83,7 @@ function writerSeats(config: CcConfig): { session: CrewSessionConfig; seat: Crew
   const out: { session: CrewSessionConfig; seat: CrewSeatConfig }[] = [];
   for (const session of config.crew?.sessions ?? []) {
     for (const seat of session.seats) {
-      if (seatDef(seat).loop === "build") out.push({ session, seat });
+      if (!seat.retiring && seatDef(seat).loop === "build") out.push({ session, seat });
     }
   }
   return out;

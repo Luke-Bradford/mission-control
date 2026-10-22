@@ -11,6 +11,7 @@ import {
   CREW_DISABLED,
   CREW_FILES_NOTE,
   type Crew,
+  type CrewChanges,
   type CrewMode,
   type CrewSessionFolders,
   DEFAULT_AWAY,
@@ -77,6 +78,7 @@ import {
   NewRepoBody,
   RepoLocation,
 } from "./config-write.ts";
+import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
 import { changedFiles, fileDiff, GitFailed } from "./files.ts";
 import { flightView } from "./flight/state.ts";
@@ -173,6 +175,8 @@ export interface AppDeps {
   noLoopWrites?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
+  /** Applies seat and role changes from config.yaml live; absent: no reload route. */
+  crewReloader?: CrewReloader;
   /** Starts, messages and ends the crew's seats; absent: crew routes answer 409 (disabled). */
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
@@ -850,6 +854,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/activity", async () => activity(config, store, now()));
 
       api.get("/config", async () => configView(config));
+
+      // Re-reads the config.yaml the server started with now (no request names a path); a file that
+      // does not load changes nothing.
+      api.post("/config/reload", async (_req, reply) => {
+        if (deps.crewReloader === undefined) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        const result = await deps.crewReloader.reload();
+        if (result.error !== null) return reply.code(400).send({ error: result.error });
+        return result;
+      });
+
+      api.get("/crew/changes", async (): Promise<CrewChanges> => {
+        return (
+          deps.crewReloader?.status() ?? {
+            sessions: [],
+            pending: [],
+            restartNeeded: [],
+            error: null,
+            checkedAt: null,
+          }
+        );
+      });
 
       api.get<{ Querystring: { range?: unknown; agent?: unknown; account?: unknown } }>(
         "/telemetry",
