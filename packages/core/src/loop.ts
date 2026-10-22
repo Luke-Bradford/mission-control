@@ -115,6 +115,16 @@ export const GATE_FOREIGN_COMMITS_PARK = "commits on the branch that Mission Con
 export const behindNoteKey = (runId: string, sha: string): string => `behind:${runId}:${sha}`;
 export const behindMainText = (ref: string, pr: number, mainSha: string): string =>
   `${ref}: PR #${pr} is behind main (${mainSha.slice(0, 7)}), so Mission Control has not merged it; it merges once the branch contains main`;
+/** The line a conflicted merge of main sends the seat, keyed so it goes once per main sha. */
+export const conflictKey = (runId: string, mainSha: string): string =>
+  `conflict:${runId}:${mainSha}`;
+export const conflictText = (files: readonly string[]): string =>
+  `Merging main into your branch conflicted in: ${files.join(", ")}. Resolve the conflict markers in those files, keeping what both sides meant, then call mc commit and mc report_evidence.`;
+/** The Activity rows for merging main into a run's branch. */
+export const mergedMainText = (mainSha: string): string =>
+  `merged main ${mainSha.slice(0, 7)} into the branch`;
+export const mainConflictText = (mainSha: string, n: number): string =>
+  `merging main ${mainSha.slice(0, 7)} conflicted in ${n} ${n === 1 ? "file" : "files"}`;
 /** The Activity row for a park. */
 export const parkedEventText = (reason: string): string => `parked: ${reason}`;
 export const RESUME_TEXT =
@@ -271,6 +281,7 @@ export type LoopAction =
   | { kind: "pr-body"; reviewId: number }
   | { kind: "set-aside" }
   | { kind: "wake" }
+  | { kind: "update-branch"; mainSha: string }
   | { kind: "mark-ready" }
   | { kind: "merge"; sha: string }
   | { kind: "close-issue" }
@@ -483,6 +494,7 @@ function stateStep(s: LoopSnapshot): Step {
         pushFor: headCommit,
         transient: 0,
         lastRefusal: null,
+        ...(loop.mainMerge ? { mainMerge: null } : {}),
       },
       actions: [{ kind: "event", text: "reported; pushing" }],
     };
@@ -544,6 +556,8 @@ function stateStep(s: LoopSnapshot): Step {
     }
     const short = sha7(pushed.sha);
     if (pr.mergeable === "CONFLICTING") {
+      // a merge workspace merges main into the branch instead (see branchUpdateDue)
+      if (s.autoMerge === true && !loop.mainMerge) return unchanged(loop);
       return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
     }
     if (pr.ci === "passing") {
@@ -728,6 +742,41 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   );
 }
 
+/**
+ * The main sha to merge into the run's branch now, or null. In a merge workspace, a run waiting at
+ * its pushed sha is updated when only main is missing from its branch, or its PR conflicts with
+ * main; its seat is between turns, or the run is aside.
+ */
+function branchUpdateDue(s: LoopSnapshot, loop: RunLoop): string | null {
+  const { seat, pr } = s;
+  const P = s.pushed?.sha ?? null;
+  const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
+  if (
+    s.autoMerge !== true ||
+    s.ended !== null ||
+    (loop.phase !== "review" && loop.phase !== "ci") ||
+    loop.mainMerge ||
+    P === null ||
+    gate === null ||
+    gate.containsMain ||
+    s.headCommit !== P ||
+    pr?.state !== "open" ||
+    pr.headSha !== P ||
+    fixDue(s, loop) ||
+    owesReport({ ...s, loop })
+  ) {
+    return null;
+  }
+  if (!loop.aside && !(seat.holdsRun && !seat.inTurn && seat.state === "idle")) return null;
+  const gv = gateView(s, loop);
+  const behindOnly =
+    gv.on &&
+    gv.touches !== null &&
+    gate.hubOnly &&
+    gate.strays.every((p) => gv.touches?.paths.includes(p));
+  return behindOnly || pr.mergeable === "CONFLICTING" ? gate.mainSha : null;
+}
+
 /** The one line due this pass, if any; the first due one wins. */
 function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   const { seat, claimed, runId, ticket } = s;
@@ -743,6 +792,11 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
       key: fixKey(runId, loop.epoch, rv.cur.id),
       text: fixText({ retro: rv.R.retro, sha: rv.P, findings: rv.R.findings }),
     };
+  }
+
+  if (working && loop.mainMerge) {
+    const key = conflictKey(runId, loop.mainMerge.mainSha);
+    if (free(key)) return { kind: "send", key, text: conflictText(loop.mainMerge.files) };
   }
 
   if (working && loop.ciFailedSha !== null && loop.relayedSha !== loop.ciFailedSha) {
@@ -896,12 +950,15 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   }
   if (loop.phase !== "done") {
     // an aside run is off its seat: it comes back, or leaves it, instead of any line
+    const updateSha = branchUpdateDue(s, loop);
     const line: LoopAction | null =
       loop.aside?.wake && s.ended === null
         ? { kind: "wake" }
-        : asideDue(s, loop)
-          ? { kind: "set-aside" }
-          : dueLine(s, loop);
+        : updateSha !== null
+          ? { kind: "update-branch", mainSha: updateSha }
+          : asideDue(s, loop)
+            ? { kind: "set-aside" }
+            : dueLine(s, loop);
     if (line !== null) actions.push(line);
   }
   return actions;
@@ -914,7 +971,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside, gate, merging } = step.loop;
+  const { parked, touches, aside, gate, merging, mainMerge } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
@@ -922,6 +979,7 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     ...(aside ? { aside: { ...aside } } : {}),
     ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
     ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
+    ...(mainMerge ? { mainMerge: { ...mainMerge, files: [...mainMerge.files] } } : {}),
   };
   if (loop.aside) {
     if (s.seat.holdsRun) {
@@ -929,7 +987,9 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
       loop.aside = null;
     } else if (s.ended === null) {
       // (a session with no review seat has no review to wait for: the run comes back)
-      loop.aside.wake = loop.phase === "parked" || !s.asideOk || fixDue(s, loop);
+      // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
+      loop.aside.wake =
+        loop.phase === "parked" || loop.phase === "working" || !s.asideOk || fixDue(s, loop);
     }
   }
   return { loop, actions: [...step.actions, ...desiredStep(s, loop)] };

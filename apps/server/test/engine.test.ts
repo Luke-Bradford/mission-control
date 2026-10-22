@@ -68,6 +68,7 @@ import type {
   OpenPrResult,
   Publisher,
   PublishResult,
+  UpdateBranchResult,
 } from "../src/engine/publish.ts";
 import { MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
@@ -233,6 +234,9 @@ interface Harness {
   stepEnded: Record<string, string[]>;
   /** The next results of each merge step, oldest first; empty: success. */
   stepResults: Record<string, PublishResult[]>;
+  /** The branch updates asked for, and their next results, oldest first; empty: wait. */
+  updates: { mainSha: string; worktree: string }[];
+  updateResults: UpdateBranchResult[];
   /** The paths of a polled-after-merge request. */
   polls: number;
   moveFails: boolean;
@@ -297,6 +301,8 @@ function harness(): Harness {
     steps: [],
     stepEnded: {},
     stepResults: {},
+    updates: [],
+    updateResults: [],
     polls: 0,
     moveFails: false,
     pushHang: false,
@@ -364,6 +370,21 @@ function harness(): Harness {
           x.gateReads.push({ sha, known: known != null });
           if (x.gate === null) return { ok: false, text: "git is down", transient: true };
           return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
+        },
+        async updateBranch(r, mainSha, worktree): Promise<UpdateBranchResult> {
+          x.updates.push({ mainSha, worktree });
+          const res = x.updateResults.shift() ?? { ok: true, kind: "wait" };
+          // like the real one, a clean merge is recorded
+          if (res.ok && res.kind === "merged") {
+            store.addRunCommit({
+              runId: r.id,
+              repoId: r.repoId,
+              branch: BRANCH,
+              sha: res.sha,
+              at: clock,
+            });
+          }
+          return res;
         },
         markReady: (r) => step("ready", r),
         merge: (r) => step("merge", r),
@@ -2043,6 +2064,74 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.steps).toEqual([]);
       expect(noteKeys().some((k) => k.startsWith("behind:"))).toBe(true);
+    });
+
+    describe("main moves", () => {
+      const MAIN = "d".repeat(40);
+      const behindMain = () => {
+        h.gate = { ...need(h.gate), mainSha: MAIN, containsMain: false };
+      };
+
+      it("a clean update moves the run to ci, pushes the merge, and reviews the new sha", async () => {
+        behindMain();
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B }];
+        await gateOpen();
+        await vi.waitFor(() => expect(h.pushes.length).toBeGreaterThanOrEqual(2));
+        expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
+        expect(loopOf()).toMatchObject({ phase: "ci", pushFor: SHA_B });
+        expect(loopOf().mainMerge ?? null).toBeNull();
+        expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+        expect(loopTexts()).toContain(`merged main ${MAIN.slice(0, 7)} into the branch`);
+        // the branch now has main: CI passes on the new sha, and it is reviewed
+        h.gate = { ...need(h.gate), containsMain: true };
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        await h.engine.reconcileRun(RUN);
+        expect(reviewRows().map((r) => r.sha)).toContain(SHA_B);
+        // nothing is merged into the branch twice
+        expect(h.updates).toHaveLength(1);
+      });
+
+      it("a conflict is left for the seat, and the line goes once", async () => {
+        behindMain();
+        h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
+        await gateOpen();
+        await vi.waitFor(() => expect(sentKeys()).toContain(`conflict:${RUN}:${MAIN}`));
+        expect(loopOf()).toMatchObject({
+          phase: "working",
+          mainMerge: { mainSha: MAIN, files: ["apps/a.ts", "apps/b.ts"] },
+        });
+        expect(loopTexts()).toContain(`merging main ${MAIN.slice(0, 7)} conflicted in 2 files`);
+        expect(h.sent.find((s) => s.key.startsWith("conflict:"))?.text).toContain(
+          "conflicted in: apps/a.ts, apps/b.ts",
+        );
+        await h.engine.tick();
+        expect(sentKeys().filter((k) => k.startsWith("conflict:"))).toHaveLength(1);
+        expect(h.updates).toHaveLength(1);
+      });
+
+      it("waits while the worktree has changes, and asks again on the next pass", async () => {
+        behindMain();
+        await gateOpen();
+        await vi.waitFor(() => expect(h.updates).toHaveLength(1));
+        expect(loopOf().phase).toBe("review");
+        await h.engine.tick();
+        expect(h.updates.length).toBeGreaterThanOrEqual(2);
+        expect(loopOf().phase).toBe("review");
+      });
+
+      it("a final refusal parks the run", async () => {
+        behindMain();
+        h.updateResults = [
+          { ok: false, text: "merging main into the branch failed", transient: false },
+        ];
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().phase).toBe("parked"));
+        expect(loopOf().parked).toMatchObject({
+          kind: "refused",
+          reason: "merging main into the branch failed",
+        });
+      });
     });
 
     it("reads origin's tip every pass but reuses the rest while sha and tip are unchanged", async () => {

@@ -197,7 +197,14 @@ export const pushForeignText = (shas: readonly string[]): string =>
 export const originMovedText = (branch: string): string =>
   `Not pushed: origin's ${branch} has commits this run doesn't have. If they are not wanted, reset origin's branch to the run's last push, then message the seat; if they are, end the run.`;
 export const MC_PUSH_MERGE =
-  "Not pushed: the branch has a merge commit, which the commit tool never makes, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.";
+  "Not pushed: the branch has a merge commit Mission Control did not make, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.";
+/** The worktree has a merge in progress that the engine did not start. */
+export const MC_COMMIT_MERGE_UNKNOWN =
+  "Not committed: your worktree has a merge in progress that Mission Control did not start. Ask the operator.";
+export const commitUnresolvedText = (paths: readonly string[]): string =>
+  `Not committed: ${pathList(paths)} ${isAre(paths)} still unmerged. Resolve the conflict, then commit again.`;
+export const commitMarkersText = (paths: readonly string[]): string =>
+  `Not committed: ${pathList(paths)} still ${paths.length === 1 ? "has" : "have"} conflict markers (lines starting <<<<<<< or >>>>>>>). Resolve them, then commit again.`;
 /** A new commit with no parent (a root commit): never made by the commit tool. */
 export const MC_PUSH_ROOT =
   "Not pushed: a new commit has no parent, which the commit tool never makes, so the branch cannot be pushed. Look at the branch in the seat's worktree, then message the seat.";
