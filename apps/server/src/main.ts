@@ -286,6 +286,7 @@ async function main(): Promise<void> {
     // A setup that created fields, or an added repo, refreshes the boards now, not at the next poll.
     refreshBoards: () => void scheduler.tick("github"),
     machine: () => scheduler.machine(),
+    hubLogin: () => hubLogin,
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath,

@@ -8,6 +8,7 @@ import {
   type AgentView,
   ATTENTION_KINDS,
   type AttentionItem,
+  type AttentionOwner,
   agentState,
   type BoardItem,
   type Crew,
@@ -15,13 +16,23 @@ import {
   crewHudState,
   type DriverStop,
   driverStopKey,
+  type Escalation,
   escalationKind,
   FLIGHT_ANSWER_WAIT_MS,
+  hardRulesBySettingKey,
   hudState,
+  isCleanupNoteKey,
+  isHardRulesFlagKey,
   LOCK_WAITING_TEXT,
+  laneOwner,
   lockBlockedText,
   loopText,
   modeOfSeat,
+  OWNER_CONTROLLER,
+  OWNER_FLIGHT,
+  OWNER_LOOP,
+  OWNER_OPERATOR,
+  type PullRequestView,
   pathInArea,
   prYouAction,
   questionText,
@@ -42,7 +53,7 @@ import { isPaused } from "./collectors/ta-loop.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
 import { flightLive, flightOwnSeatIds } from "./flight/state.ts";
 import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
-import type { Store } from "./store.ts";
+import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
 
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
@@ -358,6 +369,22 @@ export function crew(
 
 const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k);
 
+/** An attention item before its ack is read; the server always knows its owner. */
+type OwnedItem = Omit<AttentionItem, "acked" | "owner"> & { owner: AttentionOwner };
+
+/** Escalation kinds that name the operator; any other is a loop's own. */
+const OPERATOR_ESCALATIONS: readonly Escalation["kind"][] = ["operator-decision", "mvp-ready"];
+
+/** The login a draft PR belongs to when it is not the hub's: its author, else an assignee. */
+function otherLogin(
+  pr: Pick<PullRequestView, "author" | "assignees">,
+  hubLogin: string | null,
+): string | null {
+  if (hubLogin === null) return null;
+  const logins = [pr.author ?? null, ...(pr.assignees ?? [])];
+  return logins.find((l): l is string => l !== null && l !== hubLogin) ?? null;
+}
+
 /**
  * Needs-you items: every escalation, every stalled loop (keyed by run and last output, so a new
  * stall, on a new run or later in the same one, pulses again) and every loop in error (keyed by
@@ -372,13 +399,18 @@ export function attentionItems(
   lock: TestLockState = NO_LOCK,
   /** The crew rows at `now` (built with `lock`), when the caller has already built them. */
   rows: CrewRow[] = crew(config, store, now, lock).rows,
+  /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
+  hubLogin: string | null = null,
 ): AttentionItem[] {
   const acks = store.acks();
   const status = new Map(store.status().map((s) => [s.collector, s]));
-  const items: Omit<AttentionItem, "acked">[] = [];
+  const items: OwnedItem[] = [];
 
   for (const e of store.escalations()) {
+    // an escalation whose issue the board has since seen closed no longer holds
+    if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
     items.push({
+      owner: OPERATOR_ESCALATIONS.includes(e.kind) ? OWNER_OPERATOR : OWNER_LOOP,
       key: `esc:${e.id}`,
       kind: escalationKind(e),
       agentId: config.loops.find((l) => l.repoId === e.repoId)?.id ?? null,
@@ -395,6 +427,7 @@ export function attentionItems(
   for (const row of rows) {
     if (row.hudState === "stalled" && row.run && row.lastOutputAt !== null) {
       items.push({
+        owner: OWNER_OPERATOR,
         key: `stall:${row.id}:${row.run.id}:${row.lastOutputAt}`,
         kind: "stalled",
         agentId: row.id,
@@ -413,6 +446,7 @@ export function attentionItems(
       const st =
         row.loopKind === "crew" ? undefined : status.get(collectorName(row.loopKind, row.id));
       items.push({
+        owner: OWNER_OPERATOR,
         key:
           row.kind === "crew"
             ? `error:${row.id}:${row.stateSince}`
@@ -441,7 +475,10 @@ export function attentionItems(
       if (pr.ticket === null || !onBoard.has(pr.ticket)) continue;
       const action = prYouAction(pr, working.has(pr.ticket), now);
       if (action === null) continue;
+      // a draft another login's run opened is that lane's to decide
+      const lane = pr.isDraft ? otherLogin(pr, hubLogin) : null;
       items.push({
+        owner: lane === null ? OWNER_OPERATOR : laneOwner(lane),
         key: `pr:${pr.repoId}#${pr.number}:${pr.updatedAt}`,
         kind: "pr",
         agentId: null,
@@ -495,6 +532,22 @@ function endedParkGone(
   return item === undefined || item.closed;
 }
 
+/**
+ * Who an engine note waits on: housekeeping is the controller's; a hard-rule flag is the
+ * operator's, unless the repo's rules say the controller merges hard-rule PRs.
+ */
+function noteOwner(store: Store, n: Pick<AttentionNote, "key" | "repoId">): AttentionOwner {
+  if (isCleanupNoteKey(n.key)) return OWNER_CONTROLLER;
+  if (
+    isHardRulesFlagKey(n.key) &&
+    n.repoId !== null &&
+    store.getSetting(hardRulesBySettingKey(n.repoId)) === OWNER_CONTROLLER
+  ) {
+    return OWNER_CONTROLLER;
+  }
+  return OWNER_OPERATOR;
+}
+
 /** The crew's own Needs-you items: strays, questions, crew errors and a blocked test lock. */
 function crewItems(
   config: CcConfig,
@@ -502,20 +555,23 @@ function crewItems(
   now: number,
   lock: TestLockState,
   rows: CrewRow[],
-): Omit<AttentionItem, "acked">[] {
+): OwnedItem[] {
   const sessions = config.crew?.sessions ?? [];
   const repoOfSeat = (seatId: string) =>
     sessions.find((s) => s.seats.some((x) => x.id === seatId))?.repoId ?? null;
   const item = (
-    i: Pick<AttentionItem, "key" | "kind" | "agentId" | "repoId" | "text" | "at">,
-  ): Omit<AttentionItem, "acked"> => ({
+    i: Pick<AttentionItem, "key" | "kind" | "agentId" | "repoId" | "text" | "at"> & {
+      owner?: AttentionOwner;
+    },
+  ): OwnedItem => ({
     ...i,
+    owner: i.owner ?? OWNER_OPERATOR,
     tool: null,
     url: null,
     escalationId: null,
     ticket: null,
   });
-  const out: Omit<AttentionItem, "acked">[] = [];
+  const out: OwnedItem[] = [];
   const boards = new Map<string, BoardItem[]>();
   const boardOf = (repoId: string): BoardItem[] => {
     let b = boards.get(repoId);
@@ -551,21 +607,19 @@ function crewItems(
     );
   }
 
-  // While FLIGHT runs, it gets first go at a seat's question; the operator sees it once FLIGHT
+  // While FLIGHT runs, it gets first go at a seat's question; it is the operator's once FLIGHT
   // has passed it, or after FLIGHT_ANSWER_WAIT_MS.
   const flightHolds = flightLive(config, store);
   const flightOwn = flightOwnSeatIds(config);
   for (const q of store.openQuestions()) {
-    if (
+    const withFlight =
       flightHolds &&
       flightOwn.has(q.agentId) &&
       q.passedAt === null &&
-      now - q.at < FLIGHT_ANSWER_WAIT_MS
-    ) {
-      continue;
-    }
+      now - q.at < FLIGHT_ANSWER_WAIT_MS;
     out.push(
       item({
+        owner: withFlight ? OWNER_FLIGHT : OWNER_OPERATOR,
         key: `ask:${q.id}`,
         kind: "question",
         agentId: q.agentId,
@@ -588,6 +642,7 @@ function crewItems(
         ? undefined
         : store.pullRequests(run.repoId).find((p) => p.number === run.loop?.prNumber);
     out.push({
+      owner: noteOwner(store, n),
       key: `${NOTE_KEY}${n.key}`,
       kind: n.kind,
       agentId: n.seatId,

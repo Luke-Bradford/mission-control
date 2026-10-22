@@ -597,6 +597,8 @@ describe("Store", () => {
       mergedAt: 3,
       headSha: "0123abc",
       mergeable: "MERGEABLE" as const,
+      author: "octo",
+      assignees: ["a", "b"],
       ...over,
     });
     store.upsertPullRequests(

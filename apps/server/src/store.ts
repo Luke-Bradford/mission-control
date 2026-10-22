@@ -621,6 +621,9 @@ export class Store {
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
     this.addColumn("pull_requests", "head_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
+    // Who opened the PR and who is assigned: a PR run by another hub's login is that lane's.
+    this.addColumn("pull_requests", "author", "TEXT");
+    this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
     this.transaction(() => {
@@ -1301,14 +1304,16 @@ export class Store {
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
-         review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
+         assignees)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
          created_at = excluded.created_at, updated_at = excluded.updated_at,
          merged_at = excluded.merged_at, read_at = excluded.read_at,
-         head_sha = excluded.head_sha, mergeable = excluded.mergeable`,
+         head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
+         assignees = excluded.assignees`,
     );
     for (const p of prs) {
       ins.run(
@@ -1328,6 +1333,8 @@ export class Store {
         readAt,
         p.headSha,
         p.mergeable,
+        p.author ?? null,
+        JSON.stringify(p.assignees ?? []),
       );
     }
   }
@@ -1352,6 +1359,8 @@ export class Store {
       mergedAt: r.merged_at as number | null,
       headSha: r.head_sha as string | null,
       mergeable: r.mergeable as PullRequestView["mergeable"],
+      author: (r.author as string | null) ?? null,
+      assignees: JSON.parse(r.assignees as string) as string[],
     }));
   }
 
@@ -1977,13 +1986,13 @@ export class Store {
       .run(at, runId);
   }
 
-  /** Dismisses an open parked (`blocked`) note from Needs you; false when there is no such note. */
+  /** Dismisses an open note of any kind from Needs you; false when there is no such note. */
   dismissNote(key: string, at: number): boolean {
     return (
       Number(
         this.db
           .prepare(
-            "UPDATE attention_notes SET dismissed_at = ? WHERE key = ? AND kind = 'blocked' AND cleared_at IS NULL",
+            "UPDATE attention_notes SET dismissed_at = ? WHERE key = ? AND cleared_at IS NULL",
           )
           .run(at, key).changes,
       ) > 0
