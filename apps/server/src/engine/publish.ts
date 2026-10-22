@@ -561,7 +561,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
           .split("\0")
           .filter((p) => p !== "");
-        const strays = names.filter((p) => !pathInArea(seat.area, p) || isProtectedPath(p));
+        const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
+        const strays = names.filter((p) => !pathInArea(seat.area, p) || isProtectedPath(p, extra));
         return { ok: true, facts: { mainSha, containsMain, hubOnly, strays } };
       });
     },

@@ -22,6 +22,7 @@ import {
   areaGlob,
   type CcConfig,
   ConfigError,
+  defaultSeatCommands,
   MODEL_NAME,
   parseConfig,
   SEAT_ID,
@@ -299,6 +300,8 @@ async function add(
     statusMap: repo.statusMap,
     ...(repo.needsYouLabels === undefined ? {} : { needsYouLabels: repo.needsYouLabels }),
     fullSuite: [],
+    commands: defaultSeatCommands(),
+    protectedFiles: [],
     autonomy: "draft",
   };
   let next: CcConfig;

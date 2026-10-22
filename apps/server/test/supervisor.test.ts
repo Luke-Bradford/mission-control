@@ -211,12 +211,14 @@ function make(
     extraSeat?: CrewSeatConfig;
     autonomy?: "merge" | "draft";
     claim?: SupervisorDeps["claim"];
+    repo?: Partial<CcConfig["repos"][number]>;
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
   const log = vi.fn((_msg: string) => {});
   const cfg = config();
   if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
+  if (over.repo && cfg.repos[0]) Object.assign(cfg.repos[0], over.repo);
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;
   if (over.node !== undefined && cfg.crew) cfg.crew.node = over.node;
   if (over.nodeNote !== undefined && cfg.crew) cfg.crew.nodeNote = over.nodeNote;
@@ -746,6 +748,30 @@ describe("startRun", () => {
     ).toEqual([...READONLY_TOOLS]);
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
     expect(fs.denyWrite[0]).toBe(join(root, "retro-42"));
+  });
+
+  it("a writer on a repo with its own commands and protected files gets them", async () => {
+    const { sup } = make({
+      repo: {
+        commands: {
+          writer: ["uv run pytest", "uv run ruff check", "uv run mypy"],
+          review: ["uv run pytest"],
+        },
+        protectedFiles: ["pyproject.toml"],
+      },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const allowed = argv.slice(
+      argv.indexOf("--allowedTools") + 1,
+      argv.indexOf("--disallowedTools"),
+    );
+    expect(allowed).toContain("Bash(uv run pytest:*)");
+    expect(allowed).not.toContain("Bash(pnpm -s lint:*)");
+    const denied = argv.slice(argv.indexOf("--disallowedTools") + 1);
+    expect(denied).toContain(`Edit(/${realpathSync(join(root, "guido-1-42"))}/pyproject.toml)`);
   });
 
   it("a planner run has no branch", async () => {

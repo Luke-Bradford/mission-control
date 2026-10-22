@@ -1086,6 +1086,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       let before: string | null = null;
       let result: Result;
       const writers = session.seats.filter((s) => s.id !== seat.id && seatDef(s).mode === "writer");
+      /** The repo's own protected globs, on top of PROTECTED_FILES. */
+      const extra = config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
       /** What this call has deleted so far: every answer from then on says so. */
       const removed: string[] = [];
       /** The advisory lines about files another open run changed; appended to a commit's answer. */
@@ -1141,7 +1143,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             foreign.push(p);
             continue;
           }
-          if (isProtectedPath(p)) {
+          if (isProtectedPath(p, extra)) {
             kept.push(p);
             continue;
           }
@@ -1254,7 +1256,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           if (NOT_PRINTABLE_ASCII.test(p)) {
             // fail closed, before any other check: no name of this kind is committed
             foreign.push(p);
-          } else if (isProtectedPath(p)) {
+          } else if (isProtectedPath(p, extra)) {
             kept.push(p);
           } else if (!pathInArea(seat.area, p)) {
             const owner = writers.find((w) => pathInArea(w.area, p));

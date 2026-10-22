@@ -865,6 +865,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ]
           : [];
       const args = crewCliArgs({
+        commands: info.repo.commands,
+        protectedFiles: info.repo.protectedFiles,
         model: info.seat.model,
         effort: info.seat.effort,
         mode: def.mode,
