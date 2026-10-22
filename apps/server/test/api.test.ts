@@ -48,7 +48,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_PARKED_NOTE } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { type Gql, GqlError } from "../src/collectors/github.ts";
+import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
@@ -83,8 +83,8 @@ let gqlCalls: { query: string; vars: Record<string, unknown> }[];
 let gqlFail: boolean;
 /** The repo labels the fake GitHub answers the add-repo preview with. */
 let previewLabels: string[];
-/** The fake GitHub has no such user (an organisation owner): `user(login:)` is NOT_FOUND. */
-let gqlNoUser: boolean;
+/** The fake GitHub has no such owner: `repositoryOwner(login:)` is NOT_FOUND. */
+let gqlNoOwner: boolean;
 let gqlFailField: string | null;
 let refreshed: number;
 /** The stub supervisor's status, the calls it received, and the error its next call throws. */
@@ -163,6 +163,7 @@ const stubSupervisor = (): Supervisor => {
     endRunByEngine: call("endByEngine", undefined),
     setAside: call("setAside", null),
     wakeRun: call("wakeRun", undefined),
+    endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
     on: () => () => {},
     emitEvidence: () => {},
@@ -263,7 +264,7 @@ beforeEach(async () => {
   gqlCalls = [];
   gqlFail = false;
   previewLabels = [];
-  gqlNoUser = false;
+  gqlNoOwner = false;
   gqlFailField = null;
   refreshed = 0;
   streamReads = vi.fn(readStream);
@@ -297,17 +298,16 @@ beforeEach(async () => {
       return {};
     }
     if (query.includes("labels(first")) {
-      if (gqlNoUser) {
+      if (gqlNoOwner) {
         throw new GqlError(
           "github: Could not resolve to a User",
-          [{ type: "NOT_FOUND", path: ["user"] }],
-          {
-            user: null,
-          },
+          [{ type: "NOT_FOUND", path: ["repositoryOwner"] }],
+          { repositoryOwner: null },
         );
       }
       return {
-        user: {
+        repositoryOwner: {
+          __typename: "User",
           projectV2: {
             title: "Studio",
             items: { totalCount: 5 },
@@ -318,7 +318,8 @@ beforeEach(async () => {
       };
     }
     return {
-      user: {
+      repositoryOwner: {
+        __typename: "User",
         projectV2: {
           id: "PVT_1",
           fields: { pageInfo: { hasNextPage: false }, nodes: projectFields },
@@ -455,6 +456,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/message", { text: "hello", interrupt: true }],
   ["POST", "/api/seats/guido-1/interrupt"],
   ["POST", "/api/seats/guido-1/end"],
+  ["POST", "/api/runs/shop-app-ta/end", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
@@ -516,13 +518,11 @@ describe("repo profiles and the add-repo preview", () => {
     expect(gqlCalls).toEqual([]);
   });
 
-  it("answers 404 for an organisation project and 502 when GitHub fails", async () => {
-    gqlNoUser = true;
+  it("answers 404 for an unknown owner and 502 when GitHub fails", async () => {
+    gqlNoOwner = true;
     const org = await postBody("/api/repos/preview", body);
     expect(org.statusCode).toBe(404);
-    expect(org.json()).toEqual({
-      error: "project not found for octo-org (organisation projects are not supported yet)",
-    });
+    expect(org.json()).toEqual({ error: "owner octo-org not found" });
     gqlFail = true;
     const r = await postBody("/api/repos/preview", body);
     expect(r.statusCode).toBe(502);
@@ -551,15 +551,15 @@ describe("add a repo (POST /api/repos)", () => {
     const r = await postBody("/api/repos", { ...NEW_REPO, needsYouLabels: ["needs-human"] });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({
-      repo: { id: "studio", github: "octo-org/studio", project: 4 },
+      repo: { id: "studio", github: "octo-org/studio", project: 4, projectUrl: null },
       backup: BACKUP,
     });
     expect(readdirSync(dir)).toContain(BACKUP);
     expect(readFileSync(configPath, "utf8")).toContain("  - id: studio\n");
     expect((await get("/api/repos")).json()).toEqual([
-      { id: "shop-app", github: "o/shop-app", project: 2 },
-      { id: "site-builder", github: "o/ae", project: 3 },
-      { id: "studio", github: "octo-org/studio", project: 4 },
+      { id: "shop-app", github: "o/shop-app", project: 2, projectUrl: null },
+      { id: "site-builder", github: "o/ae", project: 3, projectUrl: null },
+      { id: "studio", github: "octo-org/studio", project: 4, projectUrl: null },
     ]);
     expect(config.repos.at(-1)).toEqual({
       id: "studio",
@@ -2217,13 +2217,45 @@ describe("boards, escalations, health", () => {
     expect(bad.json()).toEqual({ error: "linked must be 1" });
   });
 
-  it("repos returns the configured repos as id, github, project only", async () => {
+  it("repos returns the configured repos as id, github, project and projectUrl", async () => {
     const r = await get("/api/repos");
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual([
-      { id: "shop-app", github: "o/shop-app", project: 2 },
-      { id: "site-builder", github: "o/ae", project: 3 },
+      { id: "shop-app", github: "o/shop-app", project: 2, projectUrl: null },
+      { id: "site-builder", github: "o/ae", project: 3, projectUrl: null },
     ]);
+  });
+
+  it("GET /api/repos and /api/repos/profiles carry projectUrl after a board read", async () => {
+    const urlsOf = async (path: string) =>
+      ((await get(path)).json() as { id: string; projectUrl: string | null }[]).map((r) => [
+        r.id,
+        r.projectUrl,
+      ]);
+    expect(await urlsOf("/api/repos")).toEqual([
+      ["shop-app", null],
+      ["site-builder", null],
+    ]);
+    const boardGql: Gql = async (query) => {
+      if (!query.includes("projectV2")) throw new Error("not a board read");
+      return {
+        repositoryOwner: {
+          __typename: "Organization",
+          projectV2: {
+            id: "PVT_1",
+            url: "https://github.com/orgs/o/projects/2",
+            items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          },
+        },
+      };
+    };
+    await collectGithub(config.repos[0] as CcConfig["repos"][number], store, boardGql, clock);
+    const want = [
+      ["shop-app", "https://github.com/orgs/o/projects/2"],
+      ["site-builder", null],
+    ];
+    expect(await urlsOf("/api/repos")).toEqual(want);
+    expect(await urlsOf("/api/repos/profiles")).toEqual(want);
   });
 
   it("escalations and health return the store rows", async () => {
@@ -2829,6 +2861,28 @@ describe("crew routes", () => {
       ["end", "guido-1"],
     ]);
     expect(seen.filter((t) => t === "agents")).toHaveLength(4);
+  });
+
+  it("ends a set-aside run by id, and refuses an unknown run, a bad body and a supervisor refusal", async () => {
+    store.upsertRun(run({ id: "r-aside", agentId: "guido-1" }));
+    const seen: string[] = [];
+    bus.subscribe((t) => seen.push(t));
+    const ok = await postBody("/api/runs/r-aside/end", {});
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true });
+    expect(supervisorCalls).toEqual([["endAside", "r-aside"]]);
+    expect(seen).toContain("agents");
+    const unknown = await postBody("/api/runs/nope/end", {});
+    expect(unknown.statusCode).toBe(404);
+    const bad = await postBody("/api/runs/r-aside/end", { extra: 1 });
+    expect(bad.statusCode).toBe(400);
+    expect(supervisorCalls).toHaveLength(1);
+    supervisorFail = new SupervisorError(409, "the run is not waiting");
+    const refused = await postBody("/api/runs/r-aside/end", {});
+    expect([refused.statusCode, refused.json()]).toEqual([
+      409,
+      { error: "the run is not waiting" },
+    ]);
   });
 
   it("refuses bad bodies with 400 and calls nothing", async () => {

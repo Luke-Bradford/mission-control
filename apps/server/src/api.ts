@@ -61,7 +61,7 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ChangeBus } from "./bus.ts";
-import { fetchTicket, type Gql, githubToken, makeGql } from "./collectors/github.ts";
+import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import {
@@ -699,7 +699,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get(
         "/repos",
         async (): Promise<RepoView[]> =>
-          config.repos.map((r) => ({ id: r.id, github: r.github, project: r.project })),
+          config.repos.map((r) => ({
+            id: r.id,
+            github: r.github,
+            project: r.project,
+            projectUrl: projectUrlOf(store, r.id),
+          })),
       );
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
@@ -754,7 +759,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("config");
         bus.emit("boards");
         refreshBoards();
-        const view: RepoView = { id: repo.id, github: repo.github, project: repo.project };
+        const view: RepoView = {
+          id: repo.id,
+          github: repo.github,
+          project: repo.project,
+          projectUrl: projectUrlOf(store, repo.id),
+        };
         return { repo: view, backup: basename(result.backup) };
       });
 
@@ -1084,6 +1094,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
+      // The operator ends a run set aside in review, without waking it.
+      // Reader: apps/web/src/agent/LoopSteps.tsx (the End action on a set-aside run; the web part follows)
+      api.post<{ Params: { id: string } }>("/runs/:id/end", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null || !supervisor) return reply.code(404).send({ error: "unknown run" });
+        if (!crewGate(run.agentId, reply)) return reply;
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          await supervisor.endAsideRun(run.id);
+          bus.emit("agents");
+          return { ok: true };
+        } catch (e) {
+          return crewFail(e, reply);
+        }
+      });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view; it reads this once Plan 7a Task 8 lands)
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {

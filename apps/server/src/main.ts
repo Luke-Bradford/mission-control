@@ -22,6 +22,7 @@ import { LOOPBACK_HOST, type RepoId } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
+import { CliHold } from "./cli-update.ts";
 import { fetchCardNow, fetchTicket, githubToken, makeGql } from "./collectors/github.ts";
 import {
   ConfigError,
@@ -84,10 +85,13 @@ async function main(): Promise<void> {
   // one full suite at a time across every seat; the supervisor frees a run's hold when its call
   // ends, its turn ends or its process exits
   const lock = new TestLock({ onChange: lockChanged(bus) });
+  // set by the CLI update check while the CLI fails its smoke test: no run starts or resumes
+  const cliHold = new CliHold();
   const scheduler = createScheduler({
     config,
     store,
     bus,
+    cliHold,
     debug:
       process.env.MC_DEBUG === "1" ? (line) => process.stderr.write(`cc: ${line}\n`) : undefined,
     log: (line) => log(line),
@@ -113,6 +117,7 @@ async function main(): Promise<void> {
     enabled: crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null,
     tokens,
     lock,
+    cliHold,
     hubPort: port,
     hubRoot: hubRoot ?? "",
   });
@@ -243,7 +248,8 @@ async function main(): Promise<void> {
     supervisor,
     enabled: engineOn,
     // a seat with a pending change is not started until it settles; the reloader exists below
-    blocked: (seatId) => crewReloader.status().pending.some((p) => p.seatId === seatId),
+    blocked: (seatId) =>
+      cliHold.reason !== null || crewReloader.status().pending.some((p) => p.seatId === seatId),
     log: (line) => log(line),
   });
 

@@ -19,6 +19,8 @@ export interface RepoRules {
   areas: Record<string, string[]>;
   /** Globs of files that need the operator's sign-off. */
   hardRules: string[];
+  /** Whether the repo's block set `hard_rules` itself (`[]` counts); false on the defaults. */
+  hardRulesSet: boolean;
   alwaysAsk: string[];
 }
 
@@ -35,6 +37,12 @@ export function freezeRules(rules: RepoRules): RepoRules {
   Object.freeze(rules.alwaysAsk);
   return Object.freeze(rules);
 }
+
+/** The Needs you note for a `merge` repo whose rules leave `hard_rules` unset: one per repo. */
+export const hardRulesUnsetNoteKey = (repoId: string): string => `hard-rules-unset:${repoId}`;
+
+export const hardRulesUnsetText = (repo: string): string =>
+  `${repo}: set \`hard_rules\` in the repo's Mission Control block (a list of paths that never auto-merge, or \`[]\`) before the hub merges there.`;
 
 export const DEFAULT_HARD_RULES: string[] = Object.freeze([
   "apps/server/src/guard/**",
@@ -61,6 +69,7 @@ export const DEFAULT_REPO_RULES: RepoRules = freezeRules({
   needs: [...REPO_NEEDS],
   areas: {},
   hardRules: DEFAULT_HARD_RULES,
+  hardRulesSet: false,
   alwaysAsk: [],
 });
 

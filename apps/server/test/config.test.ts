@@ -70,6 +70,14 @@ describe("loadConfig", () => {
     expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60 });
   });
 
+  it("reads updates.cli, defaulting to off", () => {
+    expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
+    const on = tmpConfig((y) => `${y}\nupdates:\n  cli: between_runs\n`);
+    expect(loadConfig(on).updates).toEqual({ hub: "off", cli: "between_runs" });
+    const bad = tmpConfig((y) => `${y}\nupdates:\n  cli: sometimes\n`);
+    expect(errorOf(() => loadConfig(bad)).path).toBe("updates.cli");
+  });
+
   it('reads operator.id, defaulting to "operator"', () => {
     expect(loadConfig(EXAMPLE).operator.id).toBe("operator");
     const named = tmpConfig((y) => y.replace("  id: operator\n", "  id: op\n"));
@@ -87,9 +95,9 @@ describe("loadConfig", () => {
   });
 
   it("reads updates.hub: off by default, auto when set, nothing else", () => {
-    expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off" });
+    expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
     const auto = tmpConfig((y) => `${y}\nupdates:\n  hub: auto\n`);
-    expect(loadConfig(auto).updates).toEqual({ hub: "auto" });
+    expect(loadConfig(auto).updates).toEqual({ hub: "auto", cli: "off" });
     const bad = tmpConfig((y) => `${y}\nupdates:\n  hub: always\n`);
     expect(errorOf(() => loadConfig(bad)).path).toBe("updates.hub");
   });

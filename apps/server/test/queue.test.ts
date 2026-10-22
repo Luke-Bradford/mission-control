@@ -41,6 +41,7 @@ const RULES: RepoRules = freezeRules({
     "area:core": ["packages/core/**"],
   },
   hardRules: [],
+  hardRulesSet: true,
   alwaysAsk: [],
 });
 

@@ -22,6 +22,20 @@ import {
 } from "@mc/core";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
+import {
+  CLI_COLLECTOR,
+  CLI_NOTE_KEY,
+  CLI_RETRY_MS,
+  CLI_UPDATE_INTERVAL_MS,
+  CLI_UPGRADE_FAILED,
+  CLI_UPGRADE_NOTE_KEY,
+  type CliCheck,
+  CliHold,
+  checkCli,
+  cliFailedText,
+  NOT_A_CASK,
+  realExec,
+} from "./cli-update.ts";
 import { collectorName, DIGEST_RETENTION_MS, FOLD_WINDOW_MS } from "./collectors/common.ts";
 import { collectFlow } from "./collectors/flow.ts";
 import {
@@ -65,7 +79,8 @@ export type Job =
   | "flow"
   | "backfill"
   | "engine"
-  | "update";
+  | "update"
+  | "cli";
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
 export const JOBS: readonly Job[] = [
   "sessions",
@@ -80,6 +95,7 @@ export const JOBS: readonly Job[] = [
   "backfill",
   "engine",
   "update",
+  "cli",
 ];
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
@@ -132,6 +148,8 @@ export interface Collectors {
   backfill: typeof backfillRuns;
   /** The one-off rewrite of past crew runs' summaries. */
   rewriteSummaries: typeof rewriteCrewSummaries;
+  /** One CLI update check (`updates.cli: between_runs`): brew outdated, upgrade, smoke test. */
+  cli: (beforeUpgrade: () => void) => Promise<CliCheck>;
   /** The one-off fill of past crew runs' missing ticket titles, read from GitHub. */
   fillTitles: typeof fillTicketTitles;
   claude: (acct: AccountId, onError: OnError, now: number) => Promise<UsageSample[]>;
@@ -157,6 +175,8 @@ export interface SchedulerDeps {
   lockState?: () => TestLockState;
   /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
   autoUpdate?: () => Promise<unknown>;
+  /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
+  cliHold?: CliHold;
 }
 
 /** What the scheduler asks of the first loop's engine. */
@@ -198,6 +218,7 @@ export function realCollectors(config: CcConfig): Collectors {
     flow: collectFlow,
     backfill: backfillRuns,
     rewriteSummaries: rewriteCrewSummaries,
+    cli: (beforeUpgrade) => checkCli({ exec: realExec, beforeUpgrade }),
     fillTitles: fillTicketTitles,
     claude: (acct, onError, now) =>
       sampleClaude(
@@ -250,6 +271,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let summariesDone = false;
   let titlesDone = false;
   let engine: EngineHooks | null = null;
+  const cliHold = deps.cliHold ?? new CliHold();
+  /** The re-check armed while new runs are held. */
+  let cliRetry: NodeJS.Timeout | null = null;
+  // A hold from before a restart stands until a check passes: the supervisor's resume runs next.
+  const heldNote = store.notes().find((n) => n.key === CLI_NOTE_KEY);
+  if (heldNote !== undefined) {
+    if (config.updates?.cli === "between_runs") cliHold.hold(heldNote.text);
+    else store.clearNote(CLI_NOTE_KEY, now());
+  }
 
   /** Each agent's HUD state at its last recorded change or last look; seeded so a restart is no change. */
   const lastStates = new Map<AgentId, HudState>(store.latestAgentStates());
@@ -522,6 +552,66 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     update: async () => {
       await deps.autoUpdate?.();
     },
+    cli: async () => {
+      if (config.updates?.cli !== "between_runs") return;
+      // runs must not start on a version the smoke test has not passed: held from the upgrade on
+      const r = await c.cli(() =>
+        cliHold.hold("claude CLI is upgrading; no new runs start until it passes its smoke test"),
+      );
+      if (!r.cask) {
+        // nothing is changed, and a CLI we do not manage holds no run (an earlier hold ends)
+        recordStatus(CLI_COLLECTOR, false, r.found ? NOT_A_CASK : "claude is not on PATH");
+        store.clearNote(CLI_NOTE_KEY, now());
+        cliHold.release();
+        emit("health", "attention");
+        return;
+      }
+      const problems = [r.brewProblem].filter((p) => p !== null);
+      if (r.smokeFailure === null) {
+        const version = r.version === null ? "claude" : `claude ${r.version}`;
+        const notes = [`${version}${r.upgraded ? ", upgraded" : ""}`, ...problems];
+        recordStatus(CLI_COLLECTOR, problems.length === 0, notes.join("; "));
+        store.clearNote(CLI_NOTE_KEY, now());
+        if (r.brewProblem?.startsWith(CLI_UPGRADE_FAILED)) {
+          store.raiseNote({
+            key: CLI_UPGRADE_NOTE_KEY,
+            kind: "blocked",
+            runId: null,
+            seatId: null,
+            repoId: null,
+            text: `claude CLI upgrade failed: ${r.brewProblem}; runs stay on ${r.version ?? "the installed version"}`,
+            at: now(),
+          });
+        } else {
+          store.clearNote(CLI_UPGRADE_NOTE_KEY, now());
+        }
+        if (cliRetry !== null) clearTimeout(cliRetry);
+        cliRetry = null;
+        cliHold.release();
+      } else {
+        const text = cliFailedText(r.version, r.smokeFailure);
+        recordStatus(CLI_COLLECTOR, false, [text, ...problems].join("; "));
+        store.raiseNote({
+          key: CLI_NOTE_KEY,
+          kind: "blocked",
+          runId: null,
+          seatId: null,
+          repoId: null,
+          text,
+          at: now(),
+        });
+        cliHold.hold(text);
+        // a usage limit or a network blip passes sooner than the next 6-hourly check
+        if (cliRetry === null) {
+          cliRetry = setTimeout(() => {
+            cliRetry = null;
+            void tick("cli");
+          }, CLI_RETRY_MS);
+          cliRetry.unref();
+        }
+      }
+      emit("health", "attention");
+    },
     usage: async () => {
       for (const acct of config.accounts) {
         await guarded(usageCollector(acct.id), () => usageFor(acct));
@@ -649,6 +739,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     backfill: BACKFILL_INTERVAL_MS,
     engine: ENGINE_TICK_MS,
     update: VERSION_CHECK_MS,
+    cli: CLI_UPDATE_INTERVAL_MS,
   };
 
   const FIRST_DELAY_MS: Partial<Record<Job, number>> = {
@@ -672,6 +763,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         // no engine, no engine timer (a scheduler without one has nothing to tick)
         if (job === "engine" && engine === null) continue;
         if (job === "update" && deps.autoUpdate === undefined) continue;
+        // `updates.cli: off` (the default) starts no update timer
+        if (job === "cli" && config.updates?.cli !== "between_runs") continue;
         const every = () => {
           const t = setInterval(() => {
             if (job === "github" && !githubDue()) return;
@@ -702,6 +795,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const t of timers.splice(0)) clearTimeout(t); // also clears intervals
       unsubscribeCrew?.();
       unsubscribeCrew = null;
+      if (cliRetry !== null) clearTimeout(cliRetry);
+      cliRetry = null;
       if (crewTimer !== null) clearTimeout(crewTimer);
       crewTimer = null;
       await Promise.all([...inFlight.values()]);

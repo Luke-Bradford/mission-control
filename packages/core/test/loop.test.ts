@@ -147,6 +147,7 @@ describe("state step", () => {
     const r = reconcile(s);
     expect(r.loop.phase).toBe("done");
     expect(r.actions).toEqual([
+      { kind: "move-card", column: "Done" },
       { kind: "end-run" },
       { kind: "take-next" },
       { kind: "event", text: "merged" },
@@ -155,16 +156,27 @@ describe("state step", () => {
   });
 
   it("1a: done stays done and repeats end-run and take-next, with no event", () => {
-    const r = reconcile(snap({}, { phase: "done" }));
+    const r = reconcile(snap({}, { phase: "done", cardFor: "done:0" }));
     expect(r.loop.phase).toBe("done");
     expect(r.actions).toEqual([{ kind: "end-run" }, { kind: "take-next" }]);
+  });
+
+  it("1a: a done run whose card is not yet in Done moves it once, before end-run", () => {
+    const r = reconcile(snap({}, { phase: "done", cardFor: "review:0" }));
+    expect(r.actions).toEqual([
+      { kind: "move-card", column: "Done" },
+      { kind: "end-run" },
+      { kind: "take-next" },
+    ]);
+    const again = reconcile(snap({}, { ...r.loop, cardFor: "done:0" }));
+    expect(again.actions.some((a) => a.kind === "move-card")).toBe(false);
   });
 
   it("1a: done sends no lines, moves no card and clears every note", () => {
     const r = reconcile(
       snap(
         { openNotes: ["a", "b"], headCommit: SHA, seat: { ...snap().seat, resumedAt: 6000 } },
-        { phase: "done" },
+        { phase: "done", cardFor: "done:0" },
       ),
     );
     expect(r.actions).toEqual([
@@ -763,12 +775,13 @@ describe("sequences", () => {
     const r4 = reconcile(s4);
     expect(r4.loop.phase).toBe("done");
     expect(r4.actions).toEqual([
+      { kind: "move-card", column: "Done" },
       { kind: "end-run" },
       { kind: "take-next" },
       { kind: "event", text: "merged" },
       { kind: "clear-note", key: `review:r1:${SHA}` },
     ]);
-    expect(again(s4, r4.loop).actions).toEqual([
+    expect(again(s4, { ...r4.loop, cardFor: "done:0" }).actions).toEqual([
       { kind: "end-run" },
       { kind: "take-next" },
       { kind: "clear-note", key: `review:r1:${SHA}` },
@@ -1014,7 +1027,7 @@ describe("review round", () => {
   it("done clears the flag and rate-limit notes and raises nothing", () => {
     const base = snap(
       { openNotes: [`flag:r1:hard-rules:${SHA}`, "ratelimit:r1"] },
-      { phase: "done", touches },
+      { phase: "done", touches, cardFor: "done:0" },
     );
     const r = reconcile({ ...base, seat: limited(base) });
     expect(r.actions).toEqual([
@@ -1849,6 +1862,7 @@ describe("merge workspace", () => {
     snap(
       {
         autoMerge: true,
+        hardRulesSet: true,
         headCommit: SHA,
         pushed: { sha: SHA, at: NOW - 60_000 },
         pr: pr({ ci: "passing", isDraft: true }),
@@ -1980,6 +1994,7 @@ describe("merge workspace", () => {
       const r = reconcile(doneLoop(["ready", "merge", "close"]));
       expect(steps(r)).toEqual([
         "delete-remote-branch",
+        "move-card",
         "end-run",
         "delete-local-branch",
         "take-next",
@@ -1988,7 +2003,13 @@ describe("merge workspace", () => {
 
     it("delete-local already done: no delete-local-branch", () => {
       const r = reconcile(doneLoop(["ready", "merge", "delete-local"]));
-      expect(steps(r)).toEqual(["close-issue", "delete-remote-branch", "end-run", "take-next"]);
+      expect(steps(r)).toEqual([
+        "close-issue",
+        "delete-remote-branch",
+        "move-card",
+        "end-run",
+        "take-next",
+      ]);
     });
 
     it("a hand-merged PR records the merge", () => {
@@ -1998,6 +2019,7 @@ describe("merge workspace", () => {
       expect(steps(next)).toEqual([
         "close-issue",
         "delete-remote-branch",
+        "move-card",
         "end-run",
         "delete-local-branch",
         "take-next",
@@ -2010,6 +2032,7 @@ describe("merge workspace", () => {
       expect(steps(r)).toEqual([
         "close-issue",
         "note",
+        "move-card",
         "end-run",
         "delete-local-branch",
         "take-next",
@@ -2167,11 +2190,27 @@ describe("merge workspace", () => {
     expect(r.actions.filter((x) => x.kind !== "clear-note")).toEqual([
       { kind: "close-issue" },
       { kind: "delete-remote-branch", sha: SHA },
+      { kind: "move-card", column: "Done" },
       { kind: "end-run" },
       { kind: "delete-local-branch" },
       { kind: "take-next" },
       { kind: "event", text: "merged" },
     ]);
+  });
+
+  it("the card moves to Done once: after close-issue, before end-run, and not on a second pass", () => {
+    const r = reconcile(merge({ pr: pr({ state: "merged", ci: "passing" }) }));
+    const kinds = r.actions.map((x) => x.kind);
+    expect(r.actions.filter((x) => x.kind === "move-card")).toEqual([
+      { kind: "move-card", column: "Done" },
+    ]);
+    expect(kinds.indexOf("close-issue")).toBeLessThan(kinds.indexOf("move-card"));
+    expect(kinds.indexOf("move-card")).toBeLessThan(kinds.indexOf("end-run"));
+    const next = reconcile({
+      ...merge({ pr: pr({ state: "merged" }) }),
+      loop: { ...r.loop, cardFor: "done:0" },
+    });
+    expect(next.actions.some((x) => x.kind === "move-card")).toBe(false);
   });
 
   it("a step already done does not come out again", () => {
@@ -2197,6 +2236,12 @@ describe("merge workspace", () => {
   it("a draft workspace's merged PR is unchanged", () => {
     const r = reconcile(merge({ autoMerge: false, pr: pr({ state: "merged" }) }));
     expect(after(r)).toEqual(["end-run", "take-next", "event:merged"]);
+    expect(r.actions.filter((x) => x.kind === "move-card")).toEqual([
+      { kind: "move-card", column: "Done" },
+    ]);
+    expect(r.actions.map((x) => x.kind).indexOf("move-card")).toBeLessThan(
+      r.actions.map((x) => x.kind).indexOf("end-run"),
+    );
   });
 
   it("mergeStepFailedText names the step and why", () => {
