@@ -849,13 +849,90 @@ describe("Setup tabs", () => {
         }),
       });
       const form = await open(p);
-      const before = fetchFn.mock.calls.filter(([u]) => u === "/api/crew/changes").length;
+      const fetched = (path: string) => fetchFn.mock.calls.filter(([u]) => u === path).length;
+      const before = fetched("/api/crew/changes");
+      const configBefore = fetched("/api/config");
       fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-      await waitFor(() =>
-        expect(fetchFn.mock.calls.filter(([u]) => u === "/api/crew/changes").length).toBe(
-          before + 1,
-        ),
+      await waitFor(() => expect(fetched("/api/crew/changes")).toBe(before + 1));
+      await waitFor(() => expect(fetched("/api/config")).toBe(configBefore + 1));
+    });
+
+    it("Edit: a scratch seat opens with the scratch box checked", async () => {
+      const p = await seats({
+        "/api/crew/changes": {
+          ...CHANGES,
+          sessions: [{ id: "s1", seats: [GUIDO_SEAT, { ...RETRO_SEAT, mode: "scratch" }] }],
+        },
+      });
+      const row = within(p).getByRole("row", { name: /retro-1/ });
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      const form = await screen.findByRole("form", { name: "Edit retro-1" });
+      expect(within(form).getByLabelText(SCRATCH_LABEL)).toHaveProperty("checked", true);
+    });
+
+    it("a role change to a read-only role clears Area and resets Model; empty Model disables Save", async () => {
+      const p = await seats();
+      const form = await open(p);
+      fireEvent.click(within(p).getByRole("button", { name: /apps\// }));
+      expect(within(form).getByLabelText(/^Area/)).toHaveProperty("value", "apps/**");
+      fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "RETRO" } });
+      expect(within(form).getByLabelText(/^Area/)).toHaveProperty("value", "");
+      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "opus");
+      fireEvent.change(within(form).getByLabelText("Model"), { target: { value: " " } });
+      expect(within(form).getByRole("button", { name: "Add agent" })).toHaveProperty(
+        "disabled",
+        true,
       );
+    });
+
+    it("no claude account: the Account select is empty and Save is disabled", async () => {
+      const p = await seats({
+        "/api/config": {
+          ...SESSIONS_CFG,
+          accounts: SESSIONS_CFG.accounts.filter((a) => a.vendor !== "claude"),
+        },
+      });
+      const form = await open(p);
+      expect(within(form).getByLabelText("Account")).toHaveProperty("options.length", 0);
+      expect(within(form).getByRole("button", { name: "Add agent" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+    });
+
+    it("every save, remove and reload button is disabled while a post is out", async () => {
+      const p = await seats();
+      const real = fetchFn.getMockImplementation();
+      if (!real) throw new Error("no fetch stub");
+      let answer = () => {};
+      const gate = new Promise<void>((r) => {
+        answer = r;
+      });
+      fetchFn.mockImplementation(async (u, i) => {
+        if (i?.method === "POST") await gate;
+        return real(u, i);
+      });
+      const form = await open(p);
+      const submit = within(form).getByRole("button", { name: "Add agent" });
+      fireEvent.click(submit);
+      await waitFor(() => expect(submit).toHaveProperty("disabled", true));
+      expect(screen.getByRole("button", { name: "Reload config.yaml" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+      for (const b of within(p).getAllByRole("button", { name: "Remove" })) {
+        expect(b).toHaveProperty("disabled", true);
+      }
+      answer();
+      await waitFor(() => expect(toastText()).toBe(addedText("GUIDO-2", "s1", BACKUP)));
+    });
+
+    it("a refused reload shows the alert", async () => {
+      await seats({
+        "POST /api/config/reload": () => ({ status: 409, body: { error: "crew is off" } }),
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Reload config.yaml" }));
+      expect((await screen.findByRole("alert")).textContent).toBe(refusedText("crew is off"));
     });
 
     it("config.yaml state", async () => {
