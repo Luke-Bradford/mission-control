@@ -452,7 +452,10 @@ writes exist (each one an Activity row with its basis):
   login as the ticket's assignee**, in `merge` and `draft` repos alike — the claim that keeps a
   second hub on the same board off the ticket (#47). It never removes an assignee and never
   moves the card for it; (8) a planner (FAO) run **appends its `## Plan`** to the ticket's issue
-  body, once — the plan a dev seat then follows; FAO refuses where a plan already exists.
+  body, once — the plan a dev seat then follows; FAO refuses where a plan already exists. (9) after a run's PR merges in a
+  `merge` repo, the hub **files one tech-debt issue** listing the minor findings RETRO left in that PR
+  body (the PR's area label plus `chore`), and adds it to the board in Backlog — the hub's own text,
+  already checked when it entered the PR body (#80).
 - Still approval-gated: Priority changes, comments on anything, labels on existing issues,
   adding or stopping seats (FLIGHT's `start_seat` starts runs on configured seats in `draft` repos,
   §8.2), switching accounts.
