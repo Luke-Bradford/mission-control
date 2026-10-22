@@ -11,6 +11,7 @@ import {
   type Escalation,
   type FlightDecision,
   type FlightDecisionKind,
+  type FlightMoveColumn,
   type FlowIssue,
   type FlowPr,
   GUARD_HITS_LIMIT,
@@ -315,7 +316,7 @@ export interface BoardMove {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn;
+  column: MoveColumn | FlightMoveColumn;
   state: BoardMoveState;
   detail: string | null;
   at: number;
@@ -1034,7 +1035,7 @@ export class Store {
       runId: r.run_id as string,
       repoId: r.repo_id as RepoId,
       issue: r.issue as number,
-      column: r.board_column as MoveColumn,
+      column: r.board_column as MoveColumn | FlightMoveColumn,
       state: r.state as BoardMoveState,
       detail: r.detail as string | null,
       at: r.at as number,

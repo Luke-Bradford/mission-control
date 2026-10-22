@@ -27,6 +27,7 @@ export const FLIGHT_DECISION_KINDS = [
   "message",
   "unpark",
   "note",
+  "promote",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -145,6 +146,41 @@ export const startFailedText = (why: string): string => `Not started: ${why}`;
 export const START_FAILED = "Not started: the start failed.";
 export const startedDecision = (call: string): string => `Started ${call}`;
 export const startedText = (call: string, ref: string): string => `Started ${call} on ${ref}.`;
+
+/** The most tickets FLIGHT may move on the board in an hour. */
+export const FLIGHT_PROMOTES_PER_HOUR = 10;
+/** The columns `promote` moves a card between. */
+export const FLIGHT_MOVE_COLUMNS = [
+  "Backlog",
+  "Refinement",
+  "Ready",
+] as const satisfies readonly HudColumn[];
+export type FlightMoveColumn = (typeof FLIGHT_MOVE_COLUMNS)[number];
+export const hasDoneWhenSection = (body: string): boolean => /^## Done when[ \t]*$/m.test(body);
+
+export const promoteDraftText = (repoId: string): string =>
+  `Not moved: ${repoId} is a draft workspace, where Mission Control moves no cards.`;
+export const PROMOTE_ENGINE_OFF =
+  "Not moved: the loop engine is off on this server, so no card moves.";
+export const PROMOTE_NO_RULES = "Not moved: the repo's rules could not be read.";
+export const promoteOffText = (repoId: string): string =>
+  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with mc ask_operator.`;
+export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
+export const moveWrongColumnText = (ref: string, column: string): string =>
+  `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and back to Backlog only a ticket you moved.`;
+export const moveHasRunText = (ref: string): string => `Not moved: ${ref} has a run.`;
+export const PROMOTE_NO_GITHUB = "Not moved: GitHub could not be reached.";
+export const missingNeedsText = (ref: string, missing: readonly string[]): string =>
+  `Not moved: ${ref} has no ${missing.join(" or ")}; move it to Refinement and ask for it.`;
+export const moveTwoAreasText = (ref: string, labels: readonly string[]): string =>
+  `Not moved: ${ref} spans two areas (${labels.join(", ")}); ask the operator to split it.`;
+export const moveNoAreaText = (ref: string): string => `Not moved: ${ref} has no area label.`;
+export const moveWaitsOnText = (ref: string, open: readonly string[]): string =>
+  `Not moved: ${ref} waits on ${open.join(", ")}.`;
+export const moveFailedText = (reason: string): string => `Not moved: ${reason}`;
+export const movedDecision = (to: string): string => `Moved to ${to}`;
+export const movedText = (ref: string, to: string): string =>
+  `Moved ${ref} to ${to}. Recorded in Decided without you.`;
 
 export const OWN_SEAT_TEXT = "Not sent: that is your own seat.";
 export const scratchSeatText = (call: string): string =>

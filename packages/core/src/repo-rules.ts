@@ -5,11 +5,16 @@
  */
 import { pathInArea } from "./runtime.ts";
 
+export const REPO_NEEDS = ["done_when", "size"] as const;
+export type RepoNeed = (typeof REPO_NEEDS)[number];
+
 export interface RepoRules {
   /** Board statuses a seat may pick a ticket from. */
   pickFrom: string[];
   /** Whether the hub may promote Backlog tickets to a pickable status. */
   promoteBacklog: boolean;
+  /** What makes a Backlog ticket complete enough to promote to Ready. */
+  needs: RepoNeed[];
   /** Area label → the globs it covers. */
   areas: Record<string, string[]>;
   /** Globs of files that need the operator's sign-off. */
@@ -25,6 +30,7 @@ export function freezeRules(rules: RepoRules): RepoRules {
   for (const globs of Object.values(rules.areas)) Object.freeze(globs);
   Object.freeze(rules.areas);
   Object.freeze(rules.pickFrom);
+  Object.freeze(rules.needs);
   Object.freeze(rules.hardRules);
   Object.freeze(rules.alwaysAsk);
   return Object.freeze(rules);
@@ -35,6 +41,7 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
   "apps/server/src/mcp/**",
   "apps/server/src/runtime/**",
   "apps/server/src/engine/**",
+  "apps/server/src/flight/**",
   "packages/core/src/guard.ts",
   "packages/core/src/flight.ts",
   "packages/core/src/loop.ts",
@@ -51,6 +58,7 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
 export const DEFAULT_REPO_RULES: RepoRules = freezeRules({
   pickFrom: ["Ready"],
   promoteBacklog: false,
+  needs: [...REPO_NEEDS],
   areas: {},
   hardRules: DEFAULT_HARD_RULES,
   alwaysAsk: [],
