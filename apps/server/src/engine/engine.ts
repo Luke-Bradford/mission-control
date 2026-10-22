@@ -822,7 +822,14 @@ export function createEngine(deps: EngineDeps): Engine {
       else log(`${runId}: could not read the merge gate: ${g.text}`);
     }
     const snap = snapshot(run, input, at);
-    if (snap === null) return;
+    if (snap === null) {
+      // a run the loop cannot read is never woken: a stale flag must not hold up a younger rework
+      if (input.aside?.wake) {
+        input.aside = { ...input.aside, wake: false };
+        saveLoop(runId, input, stored);
+      }
+      return;
+    }
     const step = reconcile(snap);
     const cur = step.loop;
     const planned = { phase: cur.phase, epoch: cur.epoch };
