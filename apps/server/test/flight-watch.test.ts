@@ -218,6 +218,11 @@ describe("the FLIGHT watcher", () => {
     expect(notesOpen()).toMatchObject([
       { kind: "blocked", seatId: "flight-1", repoId: "mc", text: flightStartFailedText("boom") },
     ]);
+    // the open note holds past the hour, after the start count has expired
+    nowMs += 61 * MIN;
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+    expect(notesOpen()).toHaveLength(1);
     live("flight-1", "r-hand");
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
     await watch.check();
@@ -271,6 +276,11 @@ describe("the FLIGHT watcher", () => {
     bus.emit("boards");
     await vi.advanceTimersByTimeAsync(FLIGHT_DEBOUNCE_MS);
     expect(statusCalls).toBe(3);
+    listener?.({ kind: "idle", seatId: "guido-1", runId: "r", resumed: false });
+    await vi.advanceTimersByTimeAsync(FLIGHT_DEBOUNCE_MS - 1);
+    expect(statusCalls).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(statusCalls).toBe(4);
   });
 
   it("wakes on a new question, once", async () => {
