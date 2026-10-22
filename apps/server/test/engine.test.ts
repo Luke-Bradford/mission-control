@@ -1147,6 +1147,18 @@ describe("minor findings issue", () => {
     expect(h.adds).toHaveLength(1);
   });
 
+  it("files nothing in a draft repo", async () => {
+    const r0 = config.repos[0];
+    if (r0) r0.autonomy = "draft";
+    h.engine.stop();
+    h.engine = h.make();
+    h.engine.start();
+    h.fileResults.push({ ok: true, issue: 31 });
+    await merge();
+    expect(h.filed).toEqual([]);
+    expect(h.ended).toEqual([RUN]);
+  });
+
   it("files nothing for a PR with no minor findings", async () => {
     await merge();
     expect(h.adds).toEqual([]);

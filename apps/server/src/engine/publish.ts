@@ -323,8 +323,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         );
         if (viewed.code !== 0) return fail("pr view", viewed);
         const pr = JSON.parse(viewed.stdout) as { body?: unknown; labels?: unknown };
-        const findings = parseMinorFindings(typeof pr.body === "string" ? pr.body : "");
-        if (findings.length === 0) return { ok: true, issue: null };
+        const body = typeof pr.body === "string" ? pr.body : "";
+        const findings = parseMinorFindings(body);
+        if (findings.length === 0) {
+          // the writer adds the heading only when findings exist: no lines under it means unlisted
+          return body.split(/\r?\n/).includes(MINOR_HEADING)
+            ? {
+                ok: false,
+                text: "the PR body does not list its minor findings; they are in Mission Control",
+              }
+            : { ok: true, issue: null };
+        }
         const names = (list: unknown): string[] =>
           Array.isArray(list)
             ? list.flatMap((l: unknown) => {

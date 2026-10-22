@@ -12,6 +12,7 @@ import {
   MC_PUSH_FIRST,
   MINOR_HEADING,
   MINOR_WITHHELD,
+  minorFallback,
   minorIntro,
   minorMoreLine,
   prEditedText,
@@ -684,6 +685,16 @@ describe("fileMinorFindings", () => {
     expect(await createPublisher(deps()).fileMinorFindings(run(), 12)).toEqual({
       ok: true,
       issue: null,
+    });
+    expect(ghCalls).toHaveLength(1);
+  });
+
+  it("fails, rather than loses them, when the heading has no list under it", async () => {
+    ghAnswers = [prView(`${MINOR_HEADING}\n\n${minorFallback("RETRO-1", 2)}`)];
+    const r = await createPublisher(deps()).fileMinorFindings(run(), 12);
+    expect(r).toEqual({
+      ok: false,
+      text: "the PR body does not list its minor findings; they are in Mission Control",
     });
     expect(ghCalls).toHaveLength(1);
   });
