@@ -170,6 +170,24 @@ describe("activity: board moves", () => {
     ]);
   });
 
+  it("lists the hub's own automatic update lines", () => {
+    store.addHubEvent("Updated to abc123 (auto)", NOW - 10);
+    store.addHubEvent("Updated to old (auto)", 1);
+    expect(activity(config, store, NOW).filter((e) => e.who === "hub")).toEqual([
+      {
+        at: NOW - 10,
+        who: "hub",
+        kind: "state",
+        text: "Updated to abc123 (auto)",
+        ref: null,
+        url: null,
+        status: null,
+        prs: [],
+        summary: null,
+      },
+    ]);
+  });
+
   it("leaves out a pending move and one older than the window, and names the repo when the run is gone", () => {
     store.addBoardMove({ ...move, state: "pending", detail: null, at: NOW - 100 });
     const old = store.addBoardMove({ ...move, state: "pending", detail: null, at: 1 });

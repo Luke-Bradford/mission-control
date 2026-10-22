@@ -164,7 +164,7 @@ describe("the cli job", () => {
     repos: [],
     loops: [],
     poll: { usageMinutes: 30, githubSeconds: 60 },
-    updates: { cli },
+    updates: { hub: "off", cli },
   });
   /** The hold's reason at each `brew upgrade`. */
   let heldDuringUpgrade: (string | null)[];

@@ -77,9 +77,9 @@ describe("loadConfig", () => {
   });
 
   it("reads updates.cli, defaulting to off", () => {
-    expect(loadConfig(EXAMPLE).updates).toEqual({ cli: "off" });
+    expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
     const on = tmpConfig((y) => `${y}\nupdates:\n  cli: between_runs\n`);
-    expect(loadConfig(on).updates).toEqual({ cli: "between_runs" });
+    expect(loadConfig(on).updates).toEqual({ hub: "off", cli: "between_runs" });
     const bad = tmpConfig((y) => `${y}\nupdates:\n  cli: sometimes\n`);
     expect(errorOf(() => loadConfig(bad)).path).toBe("updates.cli");
   });
@@ -98,6 +98,14 @@ describe("loadConfig", () => {
     );
     const c = loadConfig(legacy);
     expect(c.operator).toEqual({ id: "operator", timezone: "UTC" });
+  });
+
+  it("reads updates.hub: off by default, auto when set, nothing else", () => {
+    expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
+    const auto = tmpConfig((y) => `${y}\nupdates:\n  hub: auto\n`);
+    expect(loadConfig(auto).updates).toEqual({ hub: "auto", cli: "off" });
+    const bad = tmpConfig((y) => `${y}\nupdates:\n  hub: always\n`);
+    expect(errorOf(() => loadConfig(bad)).path).toBe("updates.hub");
   });
 
   it("rejects an empty operator.id", () => {
