@@ -147,6 +147,7 @@ export function parseRepoRules(markdown: string | null): RepoRules {
         ? DEFAULT_REPO_RULES.areas
         : Object.fromEntries(Object.entries(r.areas)),
     hardRules: r.hard_rules ?? DEFAULT_HARD_RULES,
+    hardRulesSet: Array.isArray(r.hard_rules),
     alwaysAsk: r.always_ask ?? DEFAULT_REPO_RULES.alwaysAsk,
   });
 }

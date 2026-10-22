@@ -12,6 +12,8 @@ import {
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
   fixSentText,
+  hardRulesUnsetNoteKey,
+  hardRulesUnsetText,
   localNotDeletedText,
   MC_PR_UNCLOSED,
   MC_PUSH_FAILED,
@@ -326,7 +328,7 @@ function harness(): Harness {
     asides: [],
     wakes: [],
     wakeError: null,
-    rules: async () => DEFAULT_REPO_RULES,
+    rules: async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true }),
     make: (over = {}) => {
       const publisher: Publisher = {
         async push(r) {
@@ -2056,6 +2058,22 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       await h.engine.tick();
       expect(h.steps).toEqual(ALL);
+    });
+
+    it("does not merge while the rules leave hard_rules unset, and says which key to add", async () => {
+      h.rules = async () => DEFAULT_REPO_RULES;
+      await gateOpen();
+      await vi.waitFor(() => expect(noteKeys()).toContain(hardRulesUnsetNoteKey(REPO)));
+      await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
+      expect(h.steps).toEqual([]);
+      const unset = store.notes().filter((n) => n.key === hardRulesUnsetNoteKey(REPO));
+      expect(unset.map((n) => n.text)).toEqual([hardRulesUnsetText(REPO)]);
+      // once the rules set the key the run merges and the note clears
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true });
+      await h.engine.tick();
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(noteKeys()).not.toContain(hardRulesUnsetNoteKey(REPO));
     });
 
     it("a branch that is behind main is not merged", async () => {
