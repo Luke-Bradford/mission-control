@@ -869,6 +869,27 @@ describe("startRun", () => {
     expect(brief).not.toContain("pnpm");
   });
 
+  it("a planner's brief names the repo's review commands, not the writer's", async () => {
+    // roles/FAO.md is the controller's file; this test brings its own role brief
+    const rolesDir = join(dir, "roles");
+    mkdirSync(rolesDir);
+    writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
+    const { sup } = make({
+      rolesDir,
+      repo: {
+        commands: { writer: ["uv run ruff check"], review: ["uv run pytest"] },
+        fullSuite: [],
+      },
+    });
+    sup.start();
+    await sup.startRun("fao-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("Commands you may run here: `uv run pytest`.");
+    expect(brief).not.toContain("ruff");
+    expect(brief).not.toContain("test lock");
+  });
+
   it("a planner run has no branch", async () => {
     // roles/FAO.md is the controller's file; this test brings its own role brief
     const rolesDir = join(dir, "roles");
@@ -3022,7 +3043,7 @@ describe("startReview", () => {
     const r = reviewOfPush();
     const { sup } = make({
       scratchRetro: true,
-      repo: { commands: { writer: ["uv run pytest"], review: ["uv run pytest"] } },
+      repo: { commands: { writer: ["uv run ruff check"], review: ["uv run pytest"] } },
     });
     sup.start();
     await sup.startReview("retro", r.reviewId);
@@ -3030,6 +3051,7 @@ describe("startReview", () => {
     const brief = userLines()[0] as string;
     expect(brief).toContain("`uv run pytest` followed by a test file path");
     expect(brief).not.toContain("pnpm");
+    expect(brief).not.toContain("ruff");
   });
 
   it("startReview launches a scratch run", async () => {
