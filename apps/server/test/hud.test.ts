@@ -1540,6 +1540,16 @@ describe("the engine's notes in Needs you", () => {
     expect(keys()).toEqual([]);
   });
 
+  it("finds an ended park's PR by its branch when the loop has no PR number", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun({}, { prNumber: null });
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    expect(keys()).toEqual([KEY]);
+    pr12("merged");
+    expect(keys()).toEqual([]);
+  });
+
   it("keeps an ended park while its repo's board is unread", () => {
     endedRun({}, { prNumber: null });
     note("blocked:r1:0", "blocked");
