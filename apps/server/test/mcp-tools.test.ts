@@ -3165,6 +3165,26 @@ describe("report_plan", () => {
       expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
     });
 
+    it("counts only top-level Done when and Tests items", async () => {
+      ghState(view("Do X.\n\n## Done when\n\n- A works.\n  - detail.\n- B works.\n"));
+      expect(await plan(TWO)).toEqual({ text: MC_PLAN_WRITTEN });
+      ghState(view(DONE));
+      expect(await plan("### Tests\n\n- A: `a.test.ts`.\n  - more.\n  - even more.")).toEqual(
+        refused(planFewTestsText(1, 2)),
+      );
+    });
+
+    it("ignores bullets in a fenced block under Done when", async () => {
+      ghState(view("Do X.\n\n## Done when\n\n- A works.\n- B works.\n\n```\n- x\n- y\n- z\n```\n"));
+      expect(await plan(TWO)).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
+    it("ignores paths in a fenced block and strips :line suffixes", async () => {
+      expect(
+        await plan(`${TWO}\n\n\`\`\`\nsee \`src/nope.ts\`\n\`\`\`\nChange \`src/a.ts:3-9\`.`),
+      ).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
     it("accepts a missing path the line says is new", async () => {
       expect(await plan(`${TWO}\n\nAdd \`src/b.ts\` (new). Change \`src/a.ts\`.`)).toEqual({
         text: MC_PLAN_WRITTEN,

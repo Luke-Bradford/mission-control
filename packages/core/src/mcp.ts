@@ -315,7 +315,8 @@ export const planFewTestsText = (tests: number, doneWhen: number): string =>
 export const planMissingPathsText = (paths: readonly string[]): string =>
   `Not added: these paths are not in the checkout: ${paths.slice(0, PLAN_PATHS_LISTED).join(", ")}${paths.length > PLAN_PATHS_LISTED ? ` (and ${paths.length - PLAN_PATHS_LISTED} more)` : ""}. Fix them, or say the plan creates them.`;
 
-const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+\S/;
+/** A top-level list item: it starts at column 0 or 1, so nested detail lines are not counted. */
+const LIST_ITEM = /^ {0,1}(?:[-*+]|\d+[.)])[ \t]+\S/;
 
 /** The lines under the first heading `title` (at `level`), up to the next heading of that level or higher. */
 function sectionLines(text: string, level: number, title: RegExp): string[] | null {
@@ -323,8 +324,12 @@ function sectionLines(text: string, level: number, title: RegExp): string[] | nu
   let inside = false;
   let fenced = false;
   for (const line of text.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    const h = fenced ? null : /^(#{1,6})[ \t]+(.*?)[ \t]*$/.exec(line);
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const h = /^(#{1,6})[ \t]+(.*?)[ \t]*$/.exec(line);
     if (h !== null) {
       if (inside && (h[1] ?? "").length <= level) break;
       if (!inside && (h[1] ?? "").length === level && title.test(h[2] ?? "")) {
