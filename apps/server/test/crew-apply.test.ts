@@ -606,6 +606,22 @@ describe("the reloader", () => {
     expect(applied.crew?.maxSeats).toBe(3);
   });
 
+  it("lane and lane_default apply live, and unsetting the lane clears it", async () => {
+    const r = make();
+    loaded = config([{ id: "s1", seats: [seat("guido-1")] }]);
+    if (loaded.crew === undefined) throw new Error("no crew");
+    loaded.crew.lane = "work";
+    loaded.crew.laneDefault = true;
+    const out = await r.reload();
+    expect(out.restartNeeded).toEqual([]);
+    expect(applied.crew?.lane).toBe("work");
+    expect(applied.crew?.laneDefault).toBe(true);
+    loaded = config([{ id: "s1", seats: [seat("guido-1")] }]);
+    await r.reload();
+    expect(applied.crew?.lane).toBeUndefined();
+    expect(applied.crew?.laneDefault).toBe(false);
+  });
+
   it("a missing file is an error and the next poll after it returns reloads", async () => {
     const r = make();
     r.start();

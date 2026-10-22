@@ -10,8 +10,10 @@ import {
   CONFIG_SEAT_MODES,
   type ConfigSeatMode,
   CREW_EFFORTS,
+  CREW_LANES,
   CREW_MODES,
   type CrewEffort,
+  type CrewLane,
   type CrewMode,
   type CrewRole,
   DEFAULT_CREW_NODE,
@@ -105,6 +107,10 @@ export interface CrewConfig {
   denyRead?: string[];
   /** Input + output tokens one run may use. Loaded: always set (default DEFAULT_RUN_TOKEN_BUDGET). */
   runTokenBudget?: number;
+  /** Start only cards labelled `lane:<lane>`; absent: no lane check. */
+  lane?: CrewLane;
+  /** Also start cards with no lane label. Loaded: always set (default false). */
+  laneDefault?: boolean;
   /** The built-in roles plus `crew.roles`. Loaded: always set. */
   roles?: Record<string, RoleDef>;
   sessions: CrewSessionConfig[];
@@ -387,6 +393,8 @@ const fileSchema = z
         node: nonEmpty.default(DEFAULT_CREW_NODE),
         deny_read: z.array(nonEmpty).default([]),
         run_token_budget: z.number().int().positive().default(DEFAULT_RUN_TOKEN_BUDGET),
+        lane: z.enum(CREW_LANES).optional(),
+        lane_default: z.boolean().default(false),
         roles: z.record(z.string(), roleSchema).default({}),
         sessions: z.array(
           z.strictObject({
@@ -453,6 +461,8 @@ const fileSchema = z
               node: expandHome(f.crew.node),
               denyRead: f.crew.deny_read.map(expandHome),
               runTokenBudget: f.crew.run_token_budget,
+              ...(f.crew.lane === undefined ? {} : { lane: f.crew.lane }),
+              laneDefault: f.crew.lane_default,
               roles: {
                 ...BUILTIN_ROLES,
                 ...Object.fromEntries(
