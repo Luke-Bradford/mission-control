@@ -8,10 +8,26 @@
 import { type FileHandle, lstat, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { compactUtc, type NewRepo } from "@mc/core";
-import { isSeq, parseDocument } from "yaml";
+import {
+  CONFIG_SEAT_MODES,
+  CREW_EFFORTS,
+  compactUtc,
+  type NewRepo,
+  ROLE_NAME,
+  type SeatInput,
+} from "@mc/core";
+import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
-import { type CcConfig, parseConfig, ticketState } from "./config.ts";
+import {
+  areaGlob,
+  type CcConfig,
+  ConfigError,
+  MODEL_NAME,
+  parseConfig,
+  SEAT_ID,
+  seatInput,
+  ticketState,
+} from "./config.ts";
 
 /** Backups (`config.yaml.bak-<UTC>`) kept beside the file; older ones are deleted. */
 export const CONFIG_BACKUPS_KEEP = 10;
@@ -48,7 +64,36 @@ export const NewRepoBody = z.strictObject({
   needsYouLabels: z.array(z.string().min(1).max(50)).max(10).optional(),
 });
 
-export type ConfigWriteKind = "current" | "duplicate" | "write";
+export const SEATS_CHANGED = "the seats changed since this page loaded them; reload and try again";
+export const noSessionText = (id: string): string => `no crew session s/${id} in config.yaml`;
+
+export const SeatInputBody = z.strictObject({
+  id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
+  role: z.string().regex(ROLE_NAME, "must be a role name"),
+  accountId: z.string().min(1).max(64),
+  model: z.string().max(100).regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/"),
+  effort: z.enum(CREW_EFFORTS).optional(),
+  mode: z.enum(CONFIG_SEAT_MODES).optional(),
+  area: z.array(areaGlob).max(20),
+}) satisfies z.ZodType<SeatInput>;
+
+/** `POST /api/crew/sessions/:sessionId/seats`. */
+export const SeatsBody = z.strictObject({
+  /** The seats as the page last saw them in config.yaml (`CrewChanges.sessions`). */
+  base: z.array(SeatInputBody).max(32),
+  seats: z
+    .array(SeatInputBody)
+    .max(32)
+    .refine((l) => new Set(l.map((s) => s.id)).size === l.length, "seat ids must be unique"),
+});
+
+export type ConfigWriteKind =
+  | "current"
+  | "duplicate"
+  | "write"
+  | "missing"
+  | "conflict"
+  | "invalid";
 
 /**
  * Why a config write did not happen. `current`: the file on disk does not load (nothing written);
@@ -97,13 +142,13 @@ export function addRepo(
   return run;
 }
 
-async function add(
+/**
+ * The file as it is now, which may have been edited by hand since the server started. A link
+ * would make the backup and the write land somewhere other than the file named by the path.
+ */
+async function readCurrent(
   path: string,
-  repo: NewRepo,
-  now: number,
-): Promise<{ config: CcConfig; backup: string }> {
-  // 1. The file as it is now, which may have been edited by hand since the server started. A link
-  // would make the backup and the write land somewhere other than the file named by the path.
+): Promise<{ bytes: Buffer; text: string; current: CcConfig }> {
   let isLink: boolean;
   try {
     isLink = (await lstat(path)).isSymbolicLink();
@@ -111,16 +156,112 @@ async function add(
     throw new ConfigWriteError("current", "the current config.yaml does not load");
   }
   if (isLink) throw new ConfigWriteError("current", "config.yaml is a symbolic link");
-  let bytes: Buffer;
-  let text: string;
-  let current: CcConfig;
   try {
-    bytes = await readFile(path);
-    text = bytes.toString("utf8");
-    current = parseConfig(text, "config.yaml");
+    const bytes = await readFile(path);
+    const text = bytes.toString("utf8");
+    return { bytes, text, current: parseConfig(text, "config.yaml") };
   } catch {
     throw new ConfigWriteError("current", "the current config.yaml does not load");
   }
+}
+
+/** Sets s/<sessionId>'s seats to `seats`; resolves with the new config and the backup's path. */
+export function setSessionSeats(
+  path: string,
+  sessionId: string,
+  base: SeatInput[],
+  seats: SeatInput[],
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const run = queue.then(() => setSeats(path, sessionId, base, seats, now));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+async function setSeats(
+  path: string,
+  sessionId: string,
+  base: SeatInput[],
+  seats: SeatInput[],
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const { bytes, text, current } = await readCurrent(path);
+  const i = current.crew?.sessions.findIndex((s) => s.id === sessionId) ?? -1;
+  const session = current.crew?.sessions[i];
+  if (!session) throw new ConfigWriteError("missing", noSessionText(sessionId));
+  if (!isDeepStrictEqual(session.seats.map(seatInput), base)) {
+    throw new ConfigWriteError("conflict", SEATS_CHANGED);
+  }
+
+  const doc = parseDocument(text);
+  const seq = doc.getIn(["crew", "sessions", i, "seats"], true);
+  if (!isSeq(seq) || doc.errors.length > 0) {
+    throw new ConfigWriteError("current", `config.yaml has no seats list for s/${sessionId}`);
+  }
+  const nodes = seats.map((seat) => {
+    const existing = seq.items.find((item) => isMap(item) && item.get("id") === seat.id);
+    let node: YAMLMap;
+    if (isMap(existing)) node = existing;
+    else {
+      node = doc.createNode({ id: seat.id }, { aliasDuplicateObjects: false });
+      node.flow = true;
+    }
+    node.set("role", seat.role);
+    node.set("account_id", seat.accountId);
+    node.set("model", seat.model);
+    if (seat.effort === undefined) node.delete("effort");
+    else node.set("effort", seat.effort);
+    if (seat.mode === undefined) node.delete("mode");
+    else node.set("mode", seat.mode);
+    if (seat.area.length === 0) node.delete("area");
+    else {
+      const area = doc.createNode(seat.area);
+      area.flow = true;
+      node.set("area", area);
+    }
+    return node;
+  });
+  seq.items = nodes;
+  seq.flow = nodes.length === 0;
+  const newText = doc.toString({ lineWidth: 0 });
+
+  let next: CcConfig;
+  try {
+    next = parseConfig(newText, "the new config.yaml");
+  } catch (e) {
+    if (e instanceof ConfigError) throw new ConfigWriteError("invalid", e.message);
+    throw new ConfigWriteError("write", "the new config.yaml would not load");
+  }
+  const bare = (c: CcConfig): CcConfig => ({
+    ...c,
+    crew: c.crew && {
+      ...c.crew,
+      sessions: c.crew.sessions.map((s, n) => (n === i ? { ...s, seats: [] } : s)),
+    },
+  });
+  if (
+    !isDeepStrictEqual(bare(next), bare(current)) ||
+    !isDeepStrictEqual(next.crew?.sessions[i]?.seats.map(seatInput), seats)
+  ) {
+    throw new ConfigWriteError(
+      "write",
+      "the new config.yaml would change more than the session's seats",
+    );
+  }
+
+  const backup = await backUp(path, bytes, now);
+  await replace(path, newText);
+  await pruneBackups(path, basename(backup)).catch(() => undefined);
+  return { config: next, backup };
+}
+
+async function add(
+  path: string,
+  repo: NewRepo,
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  // 1.
+  const { bytes, text, current } = await readCurrent(path);
   // 2.
   const duplicate = duplicateReason(current.repos, repo);
   if (duplicate) throw new ConfigWriteError("duplicate", duplicate);
