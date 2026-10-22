@@ -408,7 +408,10 @@ writes exist (each one an Activity row with its basis):
   and labels** on the operator's click — that click is the approval; (4) FLIGHT moves **Backlog → Ready /
   Refinement** within the repo's rules — recorded in Decided without you, overturnable, and off
   with `promote_backlog: false`; (5) FLIGHT **raises issues** at home — they land in Backlog and go
-  through triage, and are listed in Decided without you.
+  through triage, and are listed in Decided without you; (6) the hub **sets the `mc/review` commit
+  status** on its own run's pushed sha while the run's PR is open — the hub's record of its own
+  review, so a branch rule can require it. Only crew runs get it, so it stays out of the required
+  checks while other PRs must merge.
 - Still approval-gated: Priority changes, comments on anything, labels on existing issues,
   starting/stopping seats, switching accounts.
 - **FLIGHT reads untrusted text** (issue bodies, PR text, seat messages) and holds write tools

@@ -407,6 +407,14 @@ clone under your account:
 3. **Board moves, in a `merge` repo only:** the run's own card to *In progress*, *In review* or
    *Blocked*, through `updateProjectV2ItemFieldValue` (see `autonomy` below). A `draft` repo gets
    none.
+4. **The run's own PR body:** `gh pr edit <number> --repo=<owner/name> --body-file=<0600 file>`,
+   after the same text checks as the draft PR: when the seat rewrites it with the mc tool, and
+   when the engine adds RETRO's minor findings.
+5. **The review status:** `gh api repos/<owner/name>/statuses/<sha> -f state=… -f context=mc/review -f description=…`,
+   on the run's own pushed sha while its PR is open: pending while RETRO's review is queued or
+   running, then success or failure from the review, and success when you waive it. Only crew
+   runs get it, so leave `mc/review` out of the required checks while PRs from people or
+   `docs/*` branches must merge.
 
 Two side effects follow on GitHub, both expected:
 - **CI runs on the draft PR.** Opening it triggers the repo's workflows, which run the seat's code
@@ -417,6 +425,8 @@ Two side effects follow on GitHub, both expected:
   issue when the push lands.
 
 There are no comments, labels, ready-for-review or merges. Those wait for later phases.
+Setup's board action also creates the board's fields and labels, on your click (see "Project
+fields").
 
 ### Config
 
