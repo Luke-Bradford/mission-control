@@ -225,6 +225,7 @@ describe("the allowlist in phase 2b", () => {
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
       messageSeat: "mcp__mc__message_seat",
+      flightState: "mcp__mc__flight_state",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit]);
   });
@@ -373,7 +374,7 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "plan",
-        tools: ["report_plan"],
+        tools: ["report_plan", "read_ticket"],
         here: "planner: writes each ticket's plan for the developers",
       },
       FLIGHT: {
@@ -381,7 +382,14 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "watch",
-        tools: ["log_decision", "read_ticket", "answer_question", "start_seat", "message_seat"],
+        tools: [
+          "log_decision",
+          "read_ticket",
+          "answer_question",
+          "start_seat",
+          "message_seat",
+          "flight_state",
+        ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
     });
@@ -401,7 +409,10 @@ describe("seatDef", () => {
   it("reads a built-in role", () => {
     expect(seatDef({ role: "GUIDO" })).toMatchObject({ mode: "writer", loop: "build" });
     expect(seatDef({ role: "RETRO" })).toMatchObject({ mode: "read-only", loop: "none" });
-    expect(seatDef({ role: "FAO" })).toMatchObject({ loop: "plan", mcTools: ["report_plan"] });
+    expect(seatDef({ role: "FAO" })).toMatchObject({
+      loop: "plan",
+      mcTools: ["report_plan", "read_ticket"],
+    });
   });
 
   it("scratch turns a read-only role into a reviewer, and leaves a writer", () => {
@@ -451,6 +462,7 @@ describe("mc tool grants", () => {
       "answer_question",
       "start_seat",
       "message_seat",
+      "flight_state",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");

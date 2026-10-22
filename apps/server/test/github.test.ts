@@ -2,6 +2,7 @@ import { type BoardItem, columnOf, hudColumnOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   collectGithub,
+  describeGqlErrors,
   fetchCardNow,
   fetchTicket,
   GqlError,
@@ -773,6 +774,52 @@ describe("collectGithub failure", () => {
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([99]);
     expect(store.escalations().map((i) => i.issueNumber)).toEqual([10]);
     expect(statusOf()?.error).toContain("board boom");
+  });
+});
+
+describe("describeGqlErrors", () => {
+  const scopeErr = (field: string) => ({
+    type: "INSUFFICIENT_SCOPES",
+    path: ["user", "projectV2", field],
+    message:
+      "Your token has not been granted the required scopes to execute this query. The 'projectV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.",
+  });
+
+  it("collapses several INSUFFICIENT_SCOPES errors into one line with the fix", () => {
+    expect(describeGqlErrors(["id", "updatedAt", "name"].map(scopeErr))).toBe(
+      "gh token lacks the read:project scope: run gh auth refresh -s project",
+    );
+  });
+
+  it("names the scope a card move needs", () => {
+    const e = {
+      type: "INSUFFICIENT_SCOPES",
+      message: "requires one of the following scopes: ['project'], but",
+    };
+    expect(describeGqlErrors([e, e])).toBe(
+      "gh token lacks the project scope: run gh auth refresh -s project",
+    );
+  });
+
+  it("collapses identical non-scope messages into one", () => {
+    expect(
+      describeGqlErrors([{ message: "Could not resolve" }, { message: "Could not resolve" }]),
+    ).toBe("Could not resolve");
+    expect(describeGqlErrors([{ message: "a" }, { message: "b" }, { message: "a" }])).toBe("a; b");
+  });
+
+  it("keeps the text when the errors are mixed", () => {
+    expect(describeGqlErrors([scopeErr("id"), { message: "other" }])).toContain("other");
+  });
+
+  it("reaches the GqlError message through makeGql", async () => {
+    const f = (async () =>
+      new Response(JSON.stringify({ errors: [scopeErr("id"), scopeErr("name")] }), {
+        status: 200,
+      })) as unknown as typeof fetch;
+    await expect(makeGql("t", f)("q", {})).rejects.toThrow(
+      "gh token lacks the read:project scope: run gh auth refresh -s project",
+    );
   });
 });
 

@@ -12,6 +12,7 @@ import {
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
+  MC_TICKET_READERS_ONLY,
   NEW_LOOP,
   type RepoRules,
   type Run,
@@ -39,7 +40,10 @@ const seat = (id: string, role: string, extra: Partial<CrewSeatConfig> = {}): Cr
 const config = (): CcConfig => ({
   operator: { id: "op", timezone: "Europe/London" },
   accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
-  repos: [{ id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "draft" }],
+  repos: [
+    { id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "draft" },
+    { id: "other", github: "o/other", project: 2, statusMap: {}, autonomy: "draft" },
+  ],
   loops: [],
   poll: { usageMinutes: 30, githubSeconds: 60 },
   crew: {
@@ -52,10 +56,17 @@ const config = (): CcConfig => ({
         checkout: "/tmp/none/clone",
         seats: [
           seat("flight-1", "FLIGHT"),
+          seat("fao-1", "FAO"),
           seat("guido-1", "GUIDO", { area: ["apps/**"] }),
           seat("inco-1", "INCO", { area: ["apps/web/**"] }),
           seat("retro-1", "RETRO", { mode: "scratch" }),
         ],
+      },
+      {
+        id: "s2",
+        repoId: "other",
+        checkout: "/tmp/none/clone2",
+        seats: [seat("fao-2", "FAO")],
       },
     ],
   },
@@ -73,6 +84,7 @@ let startCalls: unknown[][];
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
 let fetchCalls: number[];
+let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let engineOn: boolean;
 let lifts: boolean;
@@ -133,6 +145,7 @@ beforeEach(() => {
   messageCalls = [];
   engineCalls = [];
   fetchCalls = [];
+  fetchRepos = [];
   busyNow = [];
   engineOn = false;
   lifts = true;
@@ -164,7 +177,8 @@ beforeEach(() => {
       status: () => ({ on: engineOn, note: null }),
     },
     rules: async () => rulesNow,
-    fetchTicket: async (_repo, n) => {
+    fetchTicket: async (repo, n) => {
+      fetchRepos.push(repo.id);
       fetchCalls.push(n);
       return fetchImpl(n);
     },
@@ -318,13 +332,14 @@ const addDecision = (over: Partial<FlightDecision>) =>
 const refused = (text: string) => ({ text, isError: true });
 
 describe("tool list", () => {
-  it("adds the four tools, each shown only to a granted role", () => {
+  it("adds the five tools, each shown only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "log_decision",
       "read_ticket",
       "answer_question",
       "start_seat",
       "message_seat",
+      "flight_state",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -400,10 +415,47 @@ describe("read_ticket", () => {
     expect(fetchCalls).toHaveLength(60);
   });
 
-  it("refuses a seat that is not FLIGHT and bad issue numbers", async () => {
+  it("answers a planner seat, from its own repo", async () => {
+    live("fao-1", "r-fao");
+    fetchImpl = async (n) => ticket(n, { title: "Referred", body: "Text" });
+    expect(await call("read_ticket", { issue: 7 }, ctx("fao-1", "r-fao"))).toEqual({
+      text: "#7 Referred [not on the board]\n\nText",
+    });
+    expect(fetchCalls).toEqual([7]);
+    expect(fetchRepos).toEqual(["mc"]);
+  });
+
+  it("reads a planner's own session's repo, not FLIGHT's", async () => {
+    live("fao-2", "r-fao2");
+    fetchImpl = async (n) => ticket(n);
+    expect(
+      (await call("read_ticket", { issue: 7 }, ctx("fao-2", "r-fao2"))).isError,
+    ).toBeUndefined();
+    expect(fetchRepos).toEqual(["other"]);
+  });
+
+  it("counts a planner's reads apart from FLIGHT's", async () => {
+    live("fao-1", "r-fao");
+    fetchImpl = async (n) => ticket(n);
+    for (let i = 0; i < 60; i++) await call("read_ticket", { issue: 1 });
+    expect((await call("read_ticket", { issue: 1 })).isError).toBe(true);
+    expect(
+      (await call("read_ticket", { issue: 1 }, ctx("fao-1", "r-fao"))).isError,
+    ).toBeUndefined();
+  });
+
+  it("refuses an ended planner run", async () => {
+    live("fao-1", "r-fao");
+    store.upsertRun(run("r-fao", "fao-1", { endedAt: NOW + 1, status: "ok" }));
+    expect(await call("read_ticket", { issue: 1 }, ctx("fao-1", "r-fao"))).toEqual(
+      refused(MC_RUN_ENDED),
+    );
+  });
+
+  it("refuses a seat that is neither FLIGHT nor a planner, and bad issue numbers", async () => {
     live("guido-1", "r-guido");
     expect(await call("read_ticket", { issue: 1 }, ctx("guido-1", "r-guido"))).toEqual(
-      refused(MC_FLIGHT_ONLY),
+      refused(MC_TICKET_READERS_ONLY),
     );
     for (const bad of [0, 1.5, 2 ** 31, "1"]) {
       expect((await call("read_ticket", { issue: bad })).text.startsWith(MC_BAD_ARGS)).toBe(true);
@@ -924,5 +976,166 @@ describe("message_seat unpark", () => {
       refused("Not sent: the loop engine is off on this server, so nothing can be un-parked."),
     );
     expect(messageCalls).toEqual([]);
+  });
+});
+
+describe("flight_state", () => {
+  const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
+
+  it("is FLIGHT's alone, read-only and takes no arguments", async () => {
+    expect(named("flight_state")).toMatchObject({ modes: [], grantable: ["read-only"] });
+    live("guido-1", "r-guido");
+    expect(await call("flight_state", {}, ctx("guido-1", "r-guido"))).toEqual({
+      text: MC_FLIGHT_ONLY,
+      isError: true,
+    });
+    expect((await call("flight_state", { x: 1 })).isError).toBe(true);
+  });
+
+  it("answers the crew now", async () => {
+    live("inco-1", "r-inco", { ticket: "mc#5" });
+    store.setRunLoop("r-inco", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget", ended: false },
+    });
+    store.setSeatTurnEnded("inco-1", NOW - 7 * 60_000);
+    store.addQuestion({
+      agentId: "inco-1",
+      runId: "r-inco",
+      text: "Which lane?",
+      at: NOW - 5 * 60_000,
+    });
+    // asked in a run that has since ended: not listed
+    store.upsertRun(run("r-old", "guido-1", { endedAt: NOW - 1000, status: "ok" }));
+    store.addQuestion({ agentId: "guido-1", runId: "r-old", text: "Old?", at: NOW - 9 * 60_000 });
+    store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
+    store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
+    store.raiseNote({
+      key: "ready:r-pr",
+      kind: "ready",
+      runId: "r-pr",
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "ready",
+      at: NOW,
+    });
+    board(
+      card(1, { priority: "P1", blockedBy: [{ ref: "mc#8", closed: true }] }),
+      card(2, { status: "Backlog", labels: ["ready"], priority: "P0" }),
+      card(3, { status: "In progress" }),
+      card(4, { blockedBy: [{ ref: "mc#9", closed: false }] }),
+      card(6, { priority: "P1", createdAt: NOW - 1000 }),
+    );
+    addDecision({ kind: "message", about: "Message to GUIDO-1", decision: "go on" });
+    const bare = {
+      state: null,
+      ticket: null,
+      title: null,
+      phase: null,
+      parked: null,
+      stalled: false,
+      idleMin: null,
+      openQuestion: false,
+      atStop: false,
+    };
+    expect(await state()).toEqual({
+      time: "13:00",
+      repo: "mc",
+      seats: [
+        {
+          ...bare,
+          id: "guido-1",
+          call: "GUIDO-1",
+          role: "GUIDO",
+          loop: "build",
+          area: ["apps/**"],
+          free: true,
+          openQuestion: true,
+        },
+        {
+          ...bare,
+          id: "inco-1",
+          call: "INCO-1",
+          role: "INCO",
+          loop: "build",
+          area: ["apps/web/**"],
+          free: false,
+          state: "idle",
+          idleMin: 7,
+          ticket: "mc#5",
+          phase: "parked",
+          parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget" },
+          openQuestion: true,
+        },
+        {
+          ...bare,
+          id: "retro-1",
+          call: "RETRO-1",
+          role: "RETRO",
+          loop: "review",
+          area: [],
+          free: true,
+        },
+      ],
+      questions: [{ id: 1, seat: "inco-1", ticket: "mc#5", text: "Which lane?", ageMin: 5 }],
+      tickets: [
+        {
+          ref: "mc#2",
+          title: "Ticket 2",
+          column: "Backlog",
+          priority: "P0",
+          labels: ["ready"],
+          ready: true,
+          blockedBy: [],
+        },
+        {
+          ref: "mc#6",
+          title: "Ticket 6",
+          column: "Ready",
+          priority: "P1",
+          labels: [],
+          ready: true,
+          blockedBy: [],
+        },
+        {
+          ref: "mc#1",
+          title: "Ticket 1",
+          column: "Ready",
+          priority: "P1",
+          labels: [],
+          ready: true,
+          blockedBy: ["mc#8"],
+        },
+      ],
+      prs: [{ ref: "mc#7", pr: 9, seat: "guido-1", ready: true }],
+      recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
+      limits: { startsLeft: 4, messagesLeft: 29 },
+    });
+  });
+
+  it("marks a silent running seat stalled, and every seat on an account at its stop", async () => {
+    live("guido-1", "r-guido");
+    store.setSeatSession({
+      ...row("guido-1", "r-guido"),
+      state: "running",
+      updatedAt: NOW - 11 * 60_000,
+    });
+    for (const window of ["5h", "7d"] as const) {
+      store.addUsage({
+        accountId: "claude-main",
+        window,
+        at: NOW - 1000,
+        pct: 95,
+        resetAt: NOW + 60 * 60_000,
+        source: "test",
+      });
+    }
+    const s = (await state()) as { seats: { id: string; stalled: boolean; atStop: boolean }[] };
+    expect(s.seats.map((x) => [x.id, x.stalled, x.atStop])).toEqual([
+      ["guido-1", true, true],
+      ["inco-1", false, true],
+      ["retro-1", false, true],
+    ]);
   });
 });

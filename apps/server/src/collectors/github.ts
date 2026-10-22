@@ -210,6 +210,29 @@ export class GqlTransportError extends Error {
 export const isTransient = (e: unknown): boolean =>
   e instanceof GqlTransportError && (e.status === null || e.status >= 500);
 
+/** Starts the one line a token missing a scope gets; the scheduler looks for it to log at start-up. */
+export const MISSING_SCOPE_PREFIX = "gh token lacks the ";
+/** The scope GitHub asks for when its message does not name one (a board read). */
+const DEFAULT_SCOPE = "read:project";
+const INSUFFICIENT_SCOPES = "INSUFFICIENT_SCOPES";
+
+const errorMessage = (e: unknown): string => (isObj(e) ? String(e.message) : String(e));
+
+/**
+ * One line for a GraphQL `errors` list. When every error is INSUFFICIENT_SCOPES (GitHub sends one
+ * per queried field) it names the missing scope and the fix; otherwise the messages, each once.
+ */
+export function describeGqlErrors(errors: unknown[]): string {
+  if (errors.length > 0 && errors.every((e) => isObj(e) && e.type === INSUFFICIENT_SCOPES)) {
+    // "requires one of the following scopes: ['read:project']": a card move names `project`.
+    const named = errors
+      .map((e) => /following scopes: \['([^']+)'/.exec(errorMessage(e))?.[1])
+      .find((s) => s !== undefined);
+    return `${MISSING_SCOPE_PREFIX}${named ?? DEFAULT_SCOPE} scope: run gh auth refresh -s project`;
+  }
+  return [...new Set(errors.map(errorMessage))].join("; ");
+}
+
 /**
  * GraphQL over plain fetch. The token stays inside this closure: it is never logged and never
  * placed in an error message (errors carry fixed text, the HTTP status, or GitHub's own messages).
@@ -251,8 +274,9 @@ export function makeGql(
       if (body.errors.some(isRateLimitedError)) {
         rates?.record(queryName(query), exhaustedReading(res.headers, now()));
       }
+      const line = describeGqlErrors(body.errors);
       throw new GqlError(
-        `github: ${body.errors.map((e) => String(e.message)).join("; ")}`,
+        line.startsWith(MISSING_SCOPE_PREFIX) ? line : `github: ${line}`,
         body.errors,
         body.data ?? null,
       );
@@ -328,7 +352,7 @@ export async function call(
 ): Promise<unknown> {
   const res = await gql(query, vars);
   if (isObj(res) && Array.isArray(res.errors) && res.errors.length > 0) {
-    throw new Error(res.errors.map((e: unknown) => (isObj(e) ? str(e.message) : "")).join("; "));
+    throw new Error(describeGqlErrors(res.errors));
   }
   return res;
 }

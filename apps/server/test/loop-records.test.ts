@@ -319,7 +319,7 @@ describe("attention notes", () => {
   it("raiseNote opens a note; raising it again leaves it as it was", () => {
     store.raiseNote(note());
     store.raiseNote(note({ text: "still stuck", at: 20 }));
-    expect(store.notes()).toEqual([{ ...note(), clearedAt: null }]);
+    expect(store.notes()).toEqual([{ ...note(), clearedAt: null, dismissedAt: null }]);
   });
 
   it("clearNote closes it; raiseNote then re-opens it with the new text", () => {
@@ -328,7 +328,32 @@ describe("attention notes", () => {
     expect(store.notes()).toEqual([]);
     expect(store.openNoteKeys("r1")).toEqual([]);
     store.raiseNote(note({ text: "stuck again", at: 30 }));
-    expect(store.notes()).toEqual([{ ...note({ text: "stuck again", at: 30 }), clearedAt: null }]);
+    expect(store.notes()).toEqual([
+      { ...note({ text: "stuck again", at: 30 }), clearedAt: null, dismissedAt: null },
+    ]);
+  });
+
+  it("dismissNote marks an open blocked note, which stays dismissed until it is re-raised after a clear", () => {
+    store.raiseNote(note());
+    expect(store.dismissNote("blocked:r1:0", 50)).toBe(true);
+    expect(store.notes()).toEqual([{ ...note(), clearedAt: null, dismissedAt: 50 }]);
+    expect(store.openNoteKeys("r1")).toEqual(["blocked:r1:0"]);
+    store.raiseNote(note({ text: "x", at: 60 }));
+    expect(store.notes()).toEqual([{ ...note(), clearedAt: null, dismissedAt: 50 }]);
+    store.clearNote("blocked:r1:0", 70);
+    store.raiseNote(note({ text: "parked again", at: 80 }));
+    expect(store.notes()).toEqual([
+      { ...note({ text: "parked again", at: 80 }), clearedAt: null, dismissedAt: null },
+    ]);
+  });
+
+  it("dismissNote refuses a note that is not an open blocked note", () => {
+    store.raiseNote(note({ key: "review:r1:abc", kind: "review" }));
+    expect(store.dismissNote("review:r1:abc", 5)).toBe(false);
+    expect(store.dismissNote("nope", 5)).toBe(false);
+    store.raiseNote(note());
+    store.clearNote("blocked:r1:0", 6);
+    expect(store.dismissNote("blocked:r1:0", 7)).toBe(false);
   });
 
   it("clearNotesFor closes every open note of the run and no other", () => {

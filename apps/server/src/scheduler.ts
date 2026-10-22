@@ -28,6 +28,7 @@ import {
   collectGithub,
   fetchTicket,
   githubToken,
+  MISSING_SCOPE_PREFIX,
   makeGql,
   sweepPullRequests,
 } from "./collectors/github.ts";
@@ -146,6 +147,8 @@ export interface SchedulerDeps {
   collectors?: Partial<Collectors>;
   /** Debug lines (each backfill tick's count and duration); dropped when absent. */
   debug?: (line: string) => void;
+  /** Lines for the server log (a gh token missing a scope); dropped when absent. */
+  log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
 }
@@ -226,6 +229,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let gql: Promise<Gql | Error> | null = null;
   const rates = new RateLimits(store);
   /** The GitHub poll interval is this many times the configured one while the rate limit is low. */
+  const scopeLogged = new Set<string>();
   let githubBackoff = 1;
   let githubNotBefore = 0;
   /** The reset of the reading that caused the back-off; the back-off ends then, whoever reads next. */
@@ -474,6 +478,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
           });
+          // Once per repo, after its first poll: the health row has it, the server log should too.
+          if (!scopeLogged.has(repo.id)) {
+            scopeLogged.add(repo.id);
+            const error = store.status().find((s) => s.collector === collector)?.error;
+            if (error?.includes(MISSING_SCOPE_PREFIX)) deps.log?.(`github ${repo.id}: ${error}`);
+          }
         }
       }
       if (!(client instanceof Error)) {
