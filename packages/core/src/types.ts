@@ -99,6 +99,8 @@ export interface RunLoop {
   } | null;
   /** The merge under way for `sha`, and the steps of it already done. */
   merging?: { sha: string; done: MergeStep[] } | null;
+  /** Merging main into the branch conflicted: the markers are in the worktree, and the seat resolves them. */
+  mainMerge?: { mainSha: string; files: string[] } | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */

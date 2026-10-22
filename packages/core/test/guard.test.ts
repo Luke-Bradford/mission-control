@@ -296,6 +296,12 @@ describe("scanSecrets", () => {
   it("ignores a removed line", () => {
     expect(scanSecrets(log(`${sha}\nmsg\n\n${diff("a.ts", ["ok"], [TOKEN])}`), [])).toEqual([]);
   });
+  it("finds a token a merge resolution added (--remerge-diff), with the file and line", () => {
+    const remerge = `diff --git a/a.ts b/a.ts\nremerge CONFLICT (content): Merge conflict in a.ts\nindex 1..2 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1 @@\n-<<<<<<< x\n-a\n-=======\n+x = "${TOKEN}"\n`;
+    expect(scanSecrets(log(`${sha}\nmerge\n\n${remerge}`), [])).toEqual([
+      { where: "a.ts", line: 1, kind: "GitHub token" },
+    ]);
+  });
   it("finds a token in a commit message", () => {
     const out = scanSecrets(log(`${sha}\nsubject\n\nbody ${TOKEN}\n`), []);
     expect(out).toEqual([{ where: "commit 1234567", line: 3, kind: "GitHub token" }]);
