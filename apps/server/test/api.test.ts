@@ -49,7 +49,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_PARKED_NOTE } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { type Gql, GqlError } from "../src/collectors/github.ts";
-import type { CcConfig } from "../src/config.ts";
+import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
+import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
 import { GitFailed } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -437,6 +438,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["POST", "/api/config/reload"],
+  ["POST", "/api/crew/sessions/:sessionId/seats"],
   ["GET", "/api/crew/changes"],
   ["GET", "/api/telemetry?range=6h"],
   ["GET", "/api/stream"],
@@ -802,6 +804,7 @@ describe("local access", () => {
     withCrew();
     for (const [method, url, body] of API_ROUTES) {
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
         expect((await post(url, json, body)).statusCode).toBe(401);
@@ -2538,6 +2541,111 @@ describe("reload", () => {
       payload: "x",
     });
     expect(text.statusCode).toBe(415);
+    await a.close();
+  });
+});
+
+describe("set a session's seats (POST /api/crew/sessions/:sessionId/seats)", () => {
+  const URL = "/api/crew/sessions/mission-control/seats";
+  const seats = () => loadConfig(configPath).crew?.sessions[0]?.seats.map(seatInput) ?? [];
+  const reloading = (over: Partial<Parameters<typeof buildApp>[0]> = {}) => {
+    const reload = vi.fn(async () => ({ ...NO_CHANGES, applied: ["seat x added"] }));
+    const reloader: CrewReloader = { ...stubReloader(), reload };
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      configPath,
+      crewReloader: reloader,
+      seatWrites: true,
+      ...over,
+    });
+    return { a, reload };
+  };
+  const send = (a: FastifyInstance, body: unknown, url = URL) =>
+    a.inject({ method: "POST", url, headers: json, payload: JSON.stringify(body) });
+
+  it("needs a writable config", async () => {
+    const body = { base: seats(), seats: seats() };
+    for (const over of [
+      { seatWrites: undefined },
+      { configPath: undefined },
+      { crewReloader: undefined },
+    ]) {
+      const { a } = reloading(over);
+      const r = await send(a, body);
+      expect(r.statusCode).toBe(409);
+      expect(r.json()).toEqual({ error: CONFIG_WRITES_UNAVAILABLE });
+      await a.close();
+    }
+    expect(readFileSync(configPath, "utf8")).toBe(exampleText());
+  });
+
+  it("validates the body", async () => {
+    const { a, reload } = reloading();
+    const s = seats();
+    const dup = await send(a, { base: s, seats: [...s, s[0]] });
+    expect(dup.statusCode).toBe(400);
+    expect(dup.json()).toEqual({ error: "seats: seat ids must be unique" });
+    const far = await send(a, { base: s, seats: [{ ...s[0], area: ["../x"] }] });
+    expect(far.statusCode).toBe(400);
+    const extra = await send(a, { base: s, seats: s, x: 1 });
+    expect(extra.statusCode).toBe(400);
+    expect(reload).not.toHaveBeenCalled();
+    expect(readFileSync(configPath, "utf8")).toBe(exampleText());
+    await a.close();
+  });
+
+  it("writes, then reloads once", async () => {
+    const { a, reload } = reloading();
+    const base = seats();
+    const r = await send(a, { base, seats: base.filter((s) => s.id !== "retro-1") });
+    expect(r.statusCode).toBe(200);
+    const out = r.json<{ backup: string; changes: unknown }>();
+    expect(out.backup).toMatch(/^config\.yaml\.bak-/);
+    expect(out.changes).toMatchObject({ applied: ["seat x added"] });
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(seats().map((s) => s.id)).toEqual(["guido-1", "inco-1"]);
+    await a.close();
+  });
+
+  it("maps errors to statuses with their text", async () => {
+    const { a, reload } = reloading();
+    const base = seats();
+    const missing = await send(a, { base: [], seats: [] }, "/api/crew/sessions/nope/seats");
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toEqual({ error: noSessionText("nope") });
+    const conflict = await send(a, { base: [], seats: [] });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toEqual({ error: SEATS_CHANGED });
+    const clash = { ...base[1], id: "inco-3", area: ["apps/web/src/**"] };
+    const invalid = await send(a, { base, seats: [...base, clash] });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json<{ error: string }>().error).toContain("overlap");
+    expect(reload).not.toHaveBeenCalled();
+    expect(readFileSync(configPath, "utf8")).toBe(exampleText());
+    await a.close();
+  });
+
+  it("refuses cross-site writes", async () => {
+    const { a } = reloading();
+    const body = { base: seats(), seats: [] };
+    const text = await a.inject({
+      method: "POST",
+      url: URL,
+      headers: { "content-type": "text/plain" },
+      payload: JSON.stringify(body),
+    });
+    expect(text.statusCode).toBe(415);
+    const origin = await a.inject({
+      method: "POST",
+      url: URL,
+      headers: { ...json, origin: "https://evil.example" },
+      payload: JSON.stringify(body),
+    });
+    expect(origin.statusCode).toBe(403);
+    expect(readFileSync(configPath, "utf8")).toBe(exampleText());
     await a.close();
   });
 });
