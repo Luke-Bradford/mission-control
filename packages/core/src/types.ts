@@ -45,6 +45,8 @@ export interface Run {
   summary: string | null;
   /** The first loop's state (Plan 7a); absent or null on a run no loop drives. */
   loop?: RunLoop | null;
+  /** The `claude` CLI version the run started on; absent on a run that did not record it. */
+  cliVersion?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
   endedBy?: "operator" | "engine" | "exit" | null;
 }

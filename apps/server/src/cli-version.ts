@@ -27,9 +27,9 @@ interface Located {
   key: string;
 }
 
-/** The first executable named `name` on PATH, else null. */
-function resolveOnPath(name: string): string | null {
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+/** The first file named `name` on `path` (default: the hub's PATH), else null. */
+export function resolveOnPath(name: string, path = process.env.PATH ?? ""): string | null {
+  for (const dir of path.split(delimiter)) {
     if (dir === "") continue;
     const candidate = join(dir, name);
     try {

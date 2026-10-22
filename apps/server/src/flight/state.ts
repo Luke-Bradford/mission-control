@@ -265,14 +265,23 @@ export function wakeFacts(s: FlightState): string {
       .filter((x) => x.parked !== null)
       .map((x) => `${x.id}:${x.ticket}:${x.parked?.kind}`)
       .sort(),
+    stopped: stoppedSeats(s),
     prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}`).sort(),
   });
 }
 
-/** Something still waits on FLIGHT: a question, a free build seat with a listed ticket, or a park in FLIGHT_UNPARK_KINDS. */
+/** The build seats left stopped, which only a start (or the operator) brings back into rotation. */
+const stoppedSeats = (s: FlightState): string[] =>
+  s.seats
+    .filter((x) => x.loop === "build" && x.state === "stopped")
+    .map((x) => x.id)
+    .sort();
+
+/** Something still waits on FLIGHT: a question, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
 export function pending(s: FlightState): boolean {
   return (
     s.questions.length > 0 ||
+    stoppedSeats(s).length > 0 ||
     (s.tickets.length > 0 && s.seats.some((x) => x.loop === "build" && x.free)) ||
     s.seats.some(
       (x) =>
