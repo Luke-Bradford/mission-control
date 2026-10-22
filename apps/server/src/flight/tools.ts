@@ -53,20 +53,25 @@ import {
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
+  needsPlanText,
   noOpenQuestionText,
-  notDeveloperSeatText,
   notInSessionText,
   notOnBoardText,
   notParkedText,
   notReadyText,
   notSentText,
+  notStartableSeatText,
   OWN_SEAT_TEXT,
   PASSED_DECISION,
   PASSED_TEXT,
+  PLAN_SIZES,
   PROMOTE_ENGINE_OFF,
   PROMOTE_NO_GITHUB,
   PROMOTE_NO_RULES,
   parkNotYoursText,
+  planAlreadyText,
+  plannerStartedDecision,
+  planUnclosedText,
   promoteDraftText,
   promoteOffText,
   READ_NO_GITHUB,
@@ -77,6 +82,7 @@ import {
   START_FAILED,
   START_NO_GITHUB,
   START_NO_RULES,
+  START_SEAT_DESCRIPTION,
   scratchSeatText,
   seatCallSign,
   seatDef,
@@ -84,14 +90,17 @@ import {
   seatMessageCapText,
   sentText,
   sentUnparkedText,
+  smallNoPlanText,
   startedDecision,
   startedText,
   startFailedText,
+  startMissingNeedsText,
   startsByRuleText,
   type TicketView,
   ticketHasRunText,
   ticketReadText,
   twoAreasText,
+  unclosedMarkdown,
   unparkCapText,
   waitsOnText,
   wrongAreaText,
@@ -331,7 +340,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const card = store.board(repo.id).find((i) => i.issueNumber === number);
     const column = card === undefined ? NOT_ON_BOARD : hudColumnOf(card);
     const note = cutNoteText(t.body, t.bodyTruncated, t.bodyLength ?? Array.from(t.body).length);
-    return { text: ticketReadText(number, t.title, column, t.body, note) };
+    return { text: ticketReadText(number, t.title, column, t.body, note, card?.size) };
   }
 
   async function answerQuestion(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -394,19 +403,29 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const call = seatCallSign(seat);
     const ref = `${repo.id}#${issue}`;
     const at = now();
-    if (seatDef(cfg).loop !== "build") return fail(notDeveloperSeatText(call));
-    if (repo.autonomy === "merge") return fail(startsByRuleText(repo.id));
+    const loopKind = seatDef(cfg).loop;
+    if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
+    const planner = loopKind === "plan";
+    if (!planner && repo.autonomy === "merge") return fail(startsByRuleText(repo.id));
     if (!seatFree(store, deps.supervisor.busy(), seat)) return fail(seatHasRunText(call));
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
     }
     const started = lastHour(["start"], at);
     if (started >= flightStartCap(config)) return fail(capText("started tickets", started));
-    const again = store.countFlightDecisions({
-      kinds: ["start"],
-      since: at - FLIGHT_TICKET_RESTART_MS,
-      ref,
-    });
+    // A planner start and a developer start on one ticket are separate jobs, so a start by a seat
+    // known to be of the other kind does not count. Fail closed: every other start on the ticket
+    // counts, including one by a seat no longer in the config.
+    const since = at - FLIGHT_TICKET_RESTART_MS;
+    const otherKind = (flightSeat(config)?.session.seats ?? []).filter(
+      (s) => (seatDef(s).loop === "plan") !== planner,
+    );
+    const again =
+      store.countFlightDecisions({ kinds: ["start"], since, ref }) -
+      otherKind.reduce(
+        (n, s) => n + store.countFlightDecisions({ kinds: ["start"], since, ref, seatId: s.id }),
+        0,
+      );
     if (again > 0) return fail(restartRefusedText(ref));
     const card = store.board(repo.id).find((i) => i.issueNumber === issue);
     if (card === undefined) return fail(notOnBoardText(ref));
@@ -431,7 +450,23 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const open = card.blockedBy.filter((b) => !b.closed).map((b) => b.ref);
     if (open.length > 0) return fail(waitsOnText(ref, open));
-    if (column !== "Ready" && !card.labels.includes(READY_LABEL)) {
+    if (planner) {
+      let body: string;
+      try {
+        body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+      } catch {
+        return fail(START_NO_GITHUB);
+      }
+      if (hasPlanSection(body)) return fail(planAlreadyText(ref));
+      if (unclosedMarkdown(body)) return fail(planUnclosedText(ref));
+      const missing = rules.needs.filter((n) =>
+        n === "done_when" ? !hasDoneWhenSection(body) : card.size === null,
+      );
+      if (missing.length > 0) return fail(startMissingNeedsText(ref, missing));
+      // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
+      if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
+      if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
+    } else if (column !== "Ready" && !card.labels.includes(READY_LABEL)) {
       let body: string;
       try {
         body = (await deps.fetchTicket(repo, issue))?.body ?? "";
@@ -441,11 +476,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (!hasPlanSection(body)) return fail(notReadyText(ref));
     }
     try {
-      await deps.supervisor.startRun(
-        seat,
-        issue,
-        deps.engine?.status().on === true ? { loop: NEW_LOOP } : undefined,
-      );
+      // a planner starts with no loop: the engine never reconciles it or moves its card
+      if (planner) await deps.supervisor.startRun(seat, issue);
+      else {
+        await deps.supervisor.startRun(
+          seat,
+          issue,
+          deps.engine?.status().on === true ? { loop: NEW_LOOP } : undefined,
+        );
+      }
     } catch (e) {
       return fail(
         e instanceof SupervisorError || e instanceof CheckoutError
@@ -458,7 +497,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       seatId: seat,
       ref,
       about: `${ref}: ${card.title}`,
-      decision: startedDecision(call),
+      decision: planner ? plannerStartedDecision(call) : startedDecision(call),
       basis,
     });
     bus.emit("agents");
@@ -566,6 +605,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         n === "done_when" ? !hasDoneWhenSection(body) : card.size === null,
       );
       if (missing.length > 0) return fail(missingNeedsText(ref, missing));
+      if (card.size !== null && PLAN_SIZES.includes(card.size) && !hasPlanSection(body)) {
+        return fail(needsPlanText(ref, card.size));
+      }
       const areas = areaLabelsOf(rules, card);
       if (areas.length >= 2) return fail(moveTwoAreasText(ref, areas));
       if (areas.length === 0) return fail(moveNoAreaText(ref));
@@ -657,8 +699,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.startSeat,
-      description:
-        "Start a free developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). At most 4 starts an hour, and one start of a ticket a day.",
+      description: START_SEAT_DESCRIPTION,
       inputSchema: objectSchema({ seat: SEAT_SCHEMA, issue: ISSUE_SCHEMA, basis: BASIS_SCHEMA }, [
         "seat",
         "issue",
