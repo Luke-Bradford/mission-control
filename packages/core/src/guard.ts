@@ -955,7 +955,8 @@ const TEST_FILE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|jsx|py)$/;
  * argv starts with an entry's words, and either a later word is `--` or no later non-flag word
  * looks like a single test (one that, with any `::...` suffix cut (pytest's node id), ends
  * `.ts .tsx .mts .cts .js .mjs .cjs .jsx .py`). A folder (`tests/unit`, `./tests`, `apps/`) is not
- * one: it runs a whole suite, so the command keeps the lock. Flag values (`--reporter dot`) and
+ * one: it runs a whole suite, so the command keeps the lock. Any folder word keeps the lock, even
+ * next to a single test. Flag values (`--reporter dot`) and
  * `-t` filters therefore keep a command a full suite, and so does `-- x.test.ts` (vitest never
  * filters by it).
  */
@@ -973,7 +974,10 @@ function matchedSuite(argv: readonly string[], fullSuite: readonly string[]): st
     const tail = argv.slice(words.length);
     // vitest puts every word after `--` in options["--"], never in its file filters: the whole
     // suite runs, so any `--` makes it a full suite
-    if (tail.includes("--") || !tail.some(looksLikePath)) return entry;
+    const looksLikeFolder = (a: string) =>
+      !a.startsWith("-") && !looksLikePath(a) && (a.includes("/") || a === "." || a === "..");
+    if (tail.includes("--") || !tail.some(looksLikePath) || tail.some(looksLikeFolder))
+      return entry;
   }
   return null;
 }

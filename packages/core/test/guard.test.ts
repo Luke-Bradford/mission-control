@@ -1373,12 +1373,16 @@ describe("guard targeted fix 3 (Plan 7a review): vitest arguments after --", () 
   });
   describe("a repo's own suite command", () => {
     const py: GuardContext = { mode: "writer", repo: "dev", fullSuite: ["uv run pytest"] };
-    it.each(["uv run pytest tests/unit", "uv run pytest ./tests", "pnpm -s vitest run apps/web"])(
-      "locks the folder run %j",
-      (c) => {
-        expect(guardDecision(bash(c), c.startsWith("uv") ? py : writer).kind).toBe("lock");
-      },
-    );
+    it.each([
+      "uv run pytest tests/unit",
+      "uv run pytest ./tests",
+      "pnpm -s vitest run apps/web",
+      "uv run pytest tests/unit tests/x.py",
+      "uv run pytest . x.py",
+      "pnpm -s vitest run apps/web x.test.ts",
+    ])("locks the folder run %j", (c) => {
+      expect(guardDecision(bash(c), c.startsWith("uv") ? py : writer).kind).toBe("lock");
+    });
     it.each([
       "uv run pytest test_x.py",
       "uv run pytest test_x.py::test_y",
