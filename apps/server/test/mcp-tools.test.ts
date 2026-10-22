@@ -17,6 +17,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CREW_MODES,
+  commitMarkersText,
+  commitUnresolvedText,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -31,6 +33,7 @@ import {
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
   findingFileText,
+  MC_COMMIT_MERGE_UNKNOWN,
   MC_PLAN_ALREADY,
   MC_PLAN_BODY_UNCLOSED,
   MC_PLAN_GH_FAILED,
@@ -47,6 +50,7 @@ import {
   MC_RUN_ENDED,
   MC_TOOL_GRANTS,
   MC_TOOLS,
+  NEW_LOOP,
   originMovedText,
   planByLine,
   planTooLongText,
@@ -1634,13 +1638,76 @@ describe("push and draft_pr", () => {
       operatorPushes("docs/main.md", "main");
       git(clone, "fetch", "-q", "origin");
       git(wt, "merge", "-q", "--no-ff", "-m", "merge main", "origin/main");
-      const merge = head();
-      store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: merge, at: NOW });
       expect(await push()).toEqual({
         text: MC_PUSH_MERGE,
         isError: true,
       });
       expect(remoteTip()).toBeNull();
+    });
+
+    describe("a merge of main", () => {
+      /** The branch edits apps/a.ts; main (origin) edits `mainFile`; the merge is left uncommitted. */
+      const mergeMain = (mainFile: string): void => {
+        write("apps/a.ts", "branch\n");
+        git(wt, "commit", "-qam", "feat: branch");
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: head(), at: NOW });
+        operatorPushes(mainFile, "main");
+        git(clone, "fetch", "-q", "origin");
+        try {
+          git(wt, "merge", "--no-ff", "--no-commit", "origin/main");
+        } catch {
+          // a conflict: the resolution is the test's
+        }
+      };
+      const concludeMerge = (): string => {
+        git(wt, "add", "-A");
+        git(wt, "commit", "-qm", "merge main");
+        const sha = head();
+        expect(git(wt, "rev-list", "--parents", "-n1", sha).trim().split(" ")).toHaveLength(3);
+        return sha;
+      };
+
+      it("sends a merge commit that is in run_commits", async () => {
+        mergeMain("docs/main.md");
+        const sha = concludeMerge();
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha, at: NOW });
+        expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+        expect(remoteTip()).toBe(sha);
+      });
+
+      it("refuses one that is not in run_commits", async () => {
+        mergeMain("docs/main.md");
+        concludeMerge();
+        expect(await push()).toEqual({ text: MC_PUSH_MERGE, isError: true });
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("refuses a secret added in a merge resolution", async () => {
+        mergeMain("apps/a.ts");
+        write("apps/a.ts", `const t = "${TOKEN}";\n`);
+        const sha = concludeMerge();
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha, at: NOW });
+        const r = await push();
+        expect(r.isError).toBe(true);
+        expect(r.text).toMatch(/^Not pushed: apps\/a\.ts:\d+ looks like a GitHub token\./);
+        expect(remoteTip()).toBeNull();
+      });
+
+      it("pushes an aside run's branch", async () => {
+        mergeMain("docs/main.md");
+        const sha = concludeMerge();
+        store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha, at: NOW });
+        // off its seat: the seat row is free, and the run says where its worktree is
+        const row = store.seatSession("guido-1");
+        if (row === null) throw new Error("no seat row");
+        store.setSeatSession({ ...row, runId: null });
+        store.setRunLoop(RUN, {
+          ...NEW_LOOP,
+          phase: "review",
+          aside: { worktree: wt, wake: false },
+        });
+        expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+      });
     });
 
     it("refuses a clone that fails git fsck, for the operator, raising no item of its own", async () => {
@@ -3110,5 +3177,108 @@ describe("report_plan", () => {
       true,
     );
     expect(ghCalls()).toEqual([]);
+  });
+});
+
+describe("commit: a merge of main in progress", () => {
+  let tip: string;
+  let mainSha: string;
+  const mergeHead = (): string | null => {
+    try {
+      return git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD").trim();
+    } catch {
+      return null;
+    }
+  };
+  const parents = (): string[] =>
+    git(wt, "rev-list", "--parents", "-n1", "HEAD").trim().split(" ").slice(1);
+  const merging = (mainMerge: RunLoop["mainMerge"]) =>
+    store.setRunLoop(RUN, { ...NEW_LOOP, phase: "working", mainMerge });
+  const startMerge = () => {
+    try {
+      git(wt, "merge", "--no-ff", "--no-commit", mainSha);
+    } catch {
+      // the conflict is the point
+    }
+  };
+
+  /** The branch and main both edit apps/a.ts; main also edits docs/c.md. The merge conflicts. */
+  beforeEach(() => {
+    write("apps/a.ts", "branch\n");
+    git(wt, "commit", "-qam", "feat: branch");
+    tip = head();
+    store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: tip, at: NOW });
+    writeFileSync(join(clone, "apps/a.ts"), "main\n");
+    writeFileSync(join(clone, "docs/c.md"), "c from main\n");
+    git(clone, "commit", "-qam", "main moves");
+    mainSha = git(clone, "rev-parse", "main").trim();
+    startMerge();
+    merging({ mainSha, files: ["apps/a.ts"] });
+  });
+
+  it("commits the resolution with both parents; main's docs/c.md needs no area", async () => {
+    write("apps/a.ts", "both\n");
+    const r = await commit("merge: main into the branch");
+    expect(r.text).toMatch(/^Committed /);
+    expect(parents()).toEqual([tip, mainSha]);
+    expect(readFileSync(join(wt, "docs/c.md"), "utf8")).toBe("c from main\n");
+    expect(mergeHead()).toBeNull();
+    expect(store.strays()).toEqual([]);
+    expect(store.branchCommits("mc", BRANCH).has(head())).toBe(true);
+  });
+
+  it("refuses an outside path that differs from main's, and keeps the merge", async () => {
+    write("apps/a.ts", "both\n");
+    write("docs/c.md", "mine\n");
+    const r = await commit("merge: main into the branch");
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("docs/c.md");
+    expect(r.text).toContain(REVERT);
+    expect(mergeHead()).toBe(mainSha);
+    // putting main's version back lets it through
+    write("docs/c.md", "c from main\n");
+    expect((await commit("merge: main into the branch")).text).toMatch(/^Committed /);
+    expect(parents()).toEqual([tip, mainSha]);
+  });
+
+  it("refuses conflict markers left in a file, and keeps the merge", async () => {
+    const r = await commit("merge: main into the branch");
+    expect(r).toEqual({ text: commitMarkersText(["apps/a.ts"]), isError: true });
+    expect(mergeHead()).toBe(mainSha);
+    expect(head()).toBe(tip);
+  });
+
+  it("refuses a path still unmerged (one the commit tool never stages)", async () => {
+    git(wt, "merge", "--abort");
+    mkdirSync(join(wt, ".pnpm-store"), { recursive: true });
+    writeFileSync(join(wt, ".pnpm-store/x"), "branch\n");
+    git(wt, "add", "-f", ".pnpm-store/x");
+    git(wt, "commit", "-qm", "branch store");
+    tip = head();
+    mkdirSync(join(clone, ".pnpm-store"), { recursive: true });
+    writeFileSync(join(clone, ".pnpm-store/x"), "main\n");
+    git(clone, "add", "-f", ".pnpm-store/x");
+    git(clone, "commit", "-qm", "main store");
+    mainSha = git(clone, "rev-parse", "main").trim();
+    startMerge();
+    merging({ mainSha, files: [] });
+    write("apps/a.ts", "both\n");
+    expect(await commit("merge: main into the branch")).toEqual({
+      text: commitUnresolvedText([".pnpm-store/x"]),
+      isError: true,
+    });
+    expect(mergeHead()).toBe(mainSha);
+  });
+
+  it("refuses a merge Mission Control did not start: another sha, or none recorded", async () => {
+    write("apps/a.ts", "both\n");
+    for (const mainMerge of [{ mainSha: "f".repeat(40), files: [] }, null]) {
+      merging(mainMerge);
+      expect(await commit("merge: main into the branch")).toEqual({
+        text: MC_COMMIT_MERGE_UNKNOWN,
+        isError: true,
+      });
+      expect(mergeHead()).toBe(mainSha);
+    }
   });
 });
