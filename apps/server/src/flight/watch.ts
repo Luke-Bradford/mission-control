@@ -22,7 +22,14 @@ import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import { flightLive, flightSeat, flightState, pending, wakeFacts } from "./state.ts";
+import {
+  flightLive,
+  flightOwnSeatIds,
+  flightSeat,
+  flightState,
+  pending,
+  wakeFacts,
+} from "./state.ts";
 
 export interface FlightWatchDeps {
   config: CcConfig;
@@ -71,10 +78,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const id = found.seat.id;
     const t = now();
 
+    const own = flightOwnSeatIds(config);
     let added = false;
     for (const q of store.openQuestions()) {
       if (
-        q.agentId !== id &&
+        own.has(q.agentId) &&
         q.passedAt === null &&
         t - q.at >= FLIGHT_ANSWER_WAIT_MS &&
         !announced.has(q.id)
