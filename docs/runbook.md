@@ -510,6 +510,8 @@ clone under your account:
    running, then success or failure from the review, and success when you waive it. Only crew
    runs get it, so leave `mc/review` out of the required checks while PRs from people or
    `docs/*` branches must merge.
+7. **Minor findings, after a merge:** `gh issue create --repo=<owner/name> --title=<fixed> --label=<area>,chore --body-file=<0600 file>`,
+   one tech-debt issue per merged PR that lists minor findings, in a `merge` repo, for the hub's own runs only.
 6. **The plan, from a planner (FAO) run:** `gh issue edit <issue> --repo=<owner/name> --body-file=<0600 file>`,
    appending one `## Plan` section to the ticket's body. FAO refuses where a plan already exists.
 
