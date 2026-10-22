@@ -1630,7 +1630,7 @@ describe("scheduler scope log", () => {
       st.setStatus(
         `github:${r.id}`,
         false,
-        "board: gh token lacks the read:project scope: run gh auth refresh -s project at x",
+        "board: gh token lacks the read:project scope: run gh auth refresh -s project; prs: boom at 2026-01-01T00:00:00.000Z",
       );
       return { boards: false, escalations: false };
     });
@@ -1645,6 +1645,8 @@ describe("scheduler scope log", () => {
     await s.tick("github");
     await s.tick("github");
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("gh token lacks the read:project scope");
+    expect(lines[0]).toBe(
+      `github ${config.repos[0]?.id}: gh token lacks the read:project scope: run gh auth refresh -s project`,
+    );
   });
 });
