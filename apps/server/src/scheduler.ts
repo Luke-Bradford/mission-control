@@ -228,8 +228,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let sessionsRead = false;
   let gql: Promise<Gql | Error> | null = null;
   const rates = new RateLimits(store);
-  /** The GitHub poll interval is this many times the configured one while the rate limit is low. */
   const scopeLogged = new Set<string>();
+  /** The GitHub poll interval is this many times the configured one while the rate limit is low. */
   let githubBackoff = 1;
   let githubNotBefore = 0;
   /** The reset of the reading that caused the back-off; the back-off ends then, whoever reads next. */
@@ -478,12 +478,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
           });
-          // Once per repo, after its first poll: the health row has it, the server log should too.
-          if (!scopeLogged.has(repo.id)) {
-            scopeLogged.add(repo.id);
-            const error = store.status().find((s) => s.collector === collector)?.error;
-            if (error?.includes(MISSING_SCOPE_PREFIX)) deps.log?.(`github ${repo.id}: ${error}`);
+          const error = store.status().find((s) => s.collector === collector)?.error;
+          if (error?.includes(MISSING_SCOPE_PREFIX)) {
+            // `gh auth refresh` issues a new token: read it again on the next tick.
+            gql = null;
+            // Once per repo, after its first poll: the health row has it, the server log should too.
+            if (!scopeLogged.has(repo.id)) deps.log?.(`github ${repo.id}: ${error}`);
           }
+          scopeLogged.add(repo.id);
         }
       }
       if (!(client instanceof Error)) {
