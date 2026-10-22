@@ -60,7 +60,7 @@ const READONLY_CLOSE =
 
 /** A planner's last line: no branch, and it ends by `report_plan`, which Mission Control acts on. */
 const PLANNER_CLOSE =
-  "You are in a fresh checkout of the default branch, with no branch of your own: read only, change nothing. Read the ticket and the code it touches, then call mc report_plan once with the plan. Mission Control adds it to the ticket under ## Plan, where the developer's brief carries it, and ends this run. Ask the operator with mc ask_operator only for a decision you cannot make from the ticket and the code.";
+  "You are in a fresh checkout of the default branch, with no branch of your own: read only, change nothing. Read the ticket and the code it touches, then call mc report_plan once with the plan. The plan needs a ### Tests part with one entry for each item under the ticket's ## Done when, naming the test to write first and the file it goes in. Mission Control checks every file path the plan names against this checkout and refuses the plan, naming what to fix, unless the same line says the plan creates the file (write new or create on that line); fix it and call report_plan again. Mission Control adds a plan that passes to the ticket under ## Plan, where the developer's brief carries it, and ends this run. Ask the operator with mc ask_operator only for a decision you cannot make from the ticket and the code.";
 
 /**
  * One line saying the body is incomplete, or null when it is whole. The body goes to the seat up to

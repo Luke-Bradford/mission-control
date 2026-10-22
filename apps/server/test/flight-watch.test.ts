@@ -604,6 +604,18 @@ describe("wakeSummary", () => {
       expect(wakeFacts(stopped)).not.toBe(wakeFacts(state({ seats: [s({ free: true })] })));
     });
 
+    it("ignores a free seat next to tickets that are not ready, until one is", () => {
+      const seats = [s({ free: true }), s({ id: "b", free: true })];
+      const notReady = { ...ticket, ref: "mc#2", column: "Backlog" as const, ready: false };
+      const idle = state({ seats, tickets: [notReady] });
+      expect(pending(idle)).toBe(false);
+      expect(wakeFacts(idle)).toBe(wakeFacts(state({ seats })));
+      const woken = state({ seats, tickets: [notReady, ticket] });
+      expect(pending(woken)).toBe(true);
+      expect(wakeFacts(woken)).not.toBe(wakeFacts(idle));
+      expect(wakeFacts(woken)).toBe(wakeFacts(state({ seats, tickets: [ticket] })));
+    });
+
     it("is false for a park that is the operator's, a free seat with no ticket, or nothing", () => {
       expect(pending(state({ seats: [s({ parked: { kind: "operator", reason: "x" } })] }))).toBe(
         false,
