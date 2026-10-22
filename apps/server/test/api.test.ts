@@ -44,7 +44,7 @@ import {
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp, CHECK_FAILED } from "../src/api.ts";
+import { buildApp, CHECK_FAILED, NO_PARKED_NOTE } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { type Gql, GqlError } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -435,6 +435,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
+  ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
   ["GET", "/api/settings/away"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
@@ -796,6 +797,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
+      if (url.endsWith("/dismiss")) {
+        // the fixture has no such note: unknown is a 404, not a refusal
+        expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
     }
   });
@@ -894,7 +900,13 @@ describe("local access", () => {
     const table = new Set(
       API_ROUTES.map(
         ([m, u]) =>
-          `${m} ${u.split("?")[0]?.replace("/shop-app-ta/", "/:id/").replace("/guido-1/", "/:id/").replace("/shop-app", "/:repoId").replace("/items/7", "/items/:number")}`,
+          `${m} ${u
+            .split("?")[0]
+            ?.replace("/shop-app-ta/", "/:id/")
+            .replace("/guido-1/", "/:id/")
+            .replace("/shop-app", "/:repoId")
+            .replace("/items/7", "/items/:number")
+            .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")}`,
       ),
     );
     const registered = apiRoutes.filter((r) => !r.startsWith("HEAD "));
@@ -1462,6 +1474,7 @@ describe("crew and attention", () => {
     owner: null,
     parent: null,
     subIssues: null,
+    assignees: [],
     blockedBy: [],
     milestone: null,
     size: null,
@@ -1571,6 +1584,7 @@ describe("crew and attention", () => {
         owner: null,
         parent: null,
         subIssues: null,
+        assignees: [],
         blockedBy: [],
         milestone: null,
         size: null,
@@ -1658,6 +1672,50 @@ describe("crew and attention", () => {
       acked: 2,
     });
     expect((await get("/api/attention")).json()).toEqual([]);
+  });
+
+  const parked = (key: string, kind: "blocked" | "review" = "blocked") => ({
+    key,
+    kind,
+    runId: "r1",
+    seatId: "guido-1",
+    repoId: "shop-app",
+    text: "shop-app#7 parked",
+    at: NOW,
+  });
+
+  it("POST /api/attention/:key/dismiss dismisses an open parked note, emits attention, and the next GET leaves it out", async () => {
+    store.raiseNote(parked("blocked:r1:0"));
+    const events: string[] = [];
+    bus.subscribe((t) => events.push(t));
+    const key = "note:blocked:r1:0";
+    const r = await postBody(`/api/attention/${encodeURIComponent(key)}/dismiss`, {});
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ dismissed: key });
+    expect(events).toEqual(["attention"]);
+    const items = (await get("/api/attention")).json() as AttentionItem[];
+    expect(items.find((i) => i.key === key)).toBeUndefined();
+  });
+
+  it("POST /api/attention/:key/dismiss answers 404 for a key that is not an open parked note and 400 for a body", async () => {
+    store.raiseNote(parked("review:r1:abc", "review"));
+    const events: string[] = [];
+    bus.subscribe((t) => events.push(t));
+    for (const key of ["esc:shop-app#9", "note:nope", "note:review:r1:abc", "blocked:r1:0"]) {
+      const r = await postBody(`/api/attention/${encodeURIComponent(key)}/dismiss`, {});
+      expect(r.statusCode, key).toBe(404);
+      expect(r.json(), key).toEqual({ error: NO_PARKED_NOTE });
+    }
+    store.raiseNote(parked("blocked:r1:0"));
+    const bad = await postBody(
+      `/api/attention/${encodeURIComponent("note:blocked:r1:0")}/dismiss`,
+      {
+        x: 1,
+      },
+    );
+    expect(bad.statusCode).toBe(400);
+    expect(events).toEqual([]);
+    expect(store.notes().every((n) => n.dismissedAt === null)).toBe(true);
   });
 
   it("GET /api/crew and /api/attention see the test lock: a waiting seat is waiting, not stalled", async () => {
@@ -2059,6 +2117,7 @@ describe("boards, escalations, health", () => {
     owner: null,
     parent: null,
     subIssues: null,
+    assignees: [],
     blockedBy: [],
     milestone: null,
     size: null,

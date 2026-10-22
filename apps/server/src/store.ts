@@ -144,10 +144,10 @@ CREATE TABLE IF NOT EXISTS queues (
   seat_id TEXT NOT NULL, pos INTEGER NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
   taken_at INTEGER, PRIMARY KEY (seat_id, pos)
 );
--- Needs-you notes the engine raises; cleared_at is set once the cause is gone.
+-- Needs-you notes the engine raises; cleared_at is set once the cause is gone, dismissed_at when the operator dismissed it (reset when it is raised again).
 CREATE TABLE IF NOT EXISTS attention_notes (
   key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
-  text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER
+  text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER
 );
 -- One row per crew seat (phase 2a); run_id is null when no run is active.
 CREATE TABLE IF NOT EXISTS seat_sessions (
@@ -376,6 +376,8 @@ export interface NoteInput {
 
 export interface AttentionNote extends NoteInput {
   clearedAt: number | null;
+  /** When the operator dismissed it from Needs you, else null. */
+  dismissedAt: number | null;
 }
 
 /** One recorded HUD state change of an agent. */
@@ -581,6 +583,8 @@ export class Store {
       ["priority_source", "TEXT"],
     ];
     for (const [column, type] of boardColumns) this.addColumn("board_items", column, type);
+    // Logins assigned to the card's issue (a JSON list); the next GitHub poll fills it.
+    this.addColumn("board_items", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
     // into the row, so the backfill can skip it.
     const runColumns: [string, string][] = [
@@ -604,6 +608,8 @@ export class Store {
     this.addColumn("board_items", "project_id", "TEXT");
     // When FLIGHT passed the question to the operator (it stays open until they answer).
     this.addColumn("seat_questions", "passed_at", "INTEGER");
+    // When the operator dismissed the note from Needs you; a re-raised note is shown again.
+    this.addColumn("attention_notes", "dismissed_at", "INTEGER");
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
     this.addColumn("pull_requests", "head_sha", "TEXT");
@@ -1130,8 +1136,8 @@ export class Store {
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
            updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           closed, priority_source, created_at, item_id, project_id, assignees)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
            status = excluded.status, state = excluded.state, labels = excluded.labels,
            priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
@@ -1140,7 +1146,8 @@ export class Store {
            blocked_by = excluded.blocked_by, milestone = excluded.milestone,
            size = excluded.size, closed = excluded.closed,
            priority_source = excluded.priority_source, created_at = excluded.created_at,
-           item_id = excluded.item_id, project_id = excluded.project_id`,
+           item_id = excluded.item_id, project_id = excluded.project_id,
+           assignees = excluded.assignees`,
       );
       for (const i of items) {
         ins.run(
@@ -1166,6 +1173,7 @@ export class Store {
           i.createdAt,
           i.itemId,
           i.projectId,
+          JSON.stringify(i.assignees ?? []),
         );
       }
     });
@@ -1214,6 +1222,7 @@ export class Store {
       status: r.status as string,
       state: r.state as BoardItem["state"],
       labels: JSON.parse(r.labels as string) as string[],
+      assignees: JSON.parse(r.assignees as string) as string[],
       priority: r.priority as string | null,
       updatedAt: r.updated_at as number,
       url: r.url as string,
@@ -1930,7 +1939,7 @@ export class Store {
 
   /**
    * Opens the note. One already open is left as it is; a cleared one is re-opened with the new
-   * text and time.
+   * text and time. A re-opened note is no longer dismissed.
    */
   raiseNote(n: NoteInput): void {
     this.db
@@ -1939,7 +1948,7 @@ export class Store {
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
          ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
            seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
-           at = excluded.at, cleared_at = NULL
+           at = excluded.at, cleared_at = NULL, dismissed_at = NULL
          WHERE attention_notes.cleared_at IS NOT NULL`,
       )
       .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
@@ -1957,6 +1966,19 @@ export class Store {
       .run(at, runId);
   }
 
+  /** Dismisses an open parked (`blocked`) note from Needs you; false when there is no such note. */
+  dismissNote(key: string, at: number): boolean {
+    return (
+      Number(
+        this.db
+          .prepare(
+            "UPDATE attention_notes SET dismissed_at = ? WHERE key = ? AND kind = 'blocked' AND cleared_at IS NULL",
+          )
+          .run(at, key).changes,
+      ) > 0
+    );
+  }
+
   /** The open notes, oldest first. */
   notes(): AttentionNote[] {
     const rows = this.db
@@ -1971,6 +1993,7 @@ export class Store {
       text: r.text as string,
       at: r.at as number,
       clearedAt: null,
+      dismissedAt: (r.dismissed_at as number | null) ?? null,
     }));
   }
 

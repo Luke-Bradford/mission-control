@@ -26,6 +26,7 @@ import {
   EARLIER_PR_OPEN,
   EMPTY_LOG,
   NO_FAILED_RUN,
+  REVIEW_STATUS_FAILED,
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
@@ -642,5 +643,46 @@ describe("postMinorFindings", () => {
     answer();
     const r = await editRunPrBody(deps(), R.id, 12, "Hello.");
     expect(r).toEqual({ text: prEditedText(12) });
+  });
+});
+
+describe("setReviewStatus", () => {
+  it("posts the status through gh api", async () => {
+    ghAnswers = [() => ({ code: 0, stdout: "{}" })];
+    const r = await createPublisher(deps()).setReviewStatus(
+      run(),
+      SHA,
+      "success",
+      "QA review passed",
+    );
+    expect(r).toEqual({ ok: true });
+    expect(ghCalls).toEqual([
+      [
+        "api",
+        `repos/o/mc/statuses/${SHA}`,
+        "-f",
+        "state=success",
+        "-f",
+        "context=mc/review",
+        "-f",
+        "description=QA review passed",
+      ],
+    ]);
+  });
+
+  it("a gh failure is transient", async () => {
+    ghAnswers = [() => ({ code: 1, stdout: "" })];
+    const r = await createPublisher(deps()).setReviewStatus(run(), SHA, "pending", "x");
+    expect(r).toEqual({ ok: false, text: REVIEW_STATUS_FAILED, transient: true });
+  });
+
+  it("no repo or a bad sha: no call", async () => {
+    const p = createPublisher(deps());
+    const gone = await p.setReviewStatus(run({ repoId: "nope" }), SHA, "pending", "x");
+    const bad = await p.setReviewStatus(run(), "--x", "pending", "x");
+    const refused = { ok: false, text: REVIEW_STATUS_FAILED, transient: false };
+    expect(gone).toEqual(refused);
+    expect(bad).toEqual(refused);
+    expect(ghCalls).toEqual([]);
   });
 });

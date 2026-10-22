@@ -160,6 +160,11 @@ export interface BoardItem {
   status: string;
   state: TicketState;
   labels: string[];
+  /**
+   * Logins assigned to the issue; a hub claims a ticket by assigning its own. The poll and the
+   * store always set it; absent means none (a card built by hand, as the web's fixtures do).
+   */
+  assignees?: string[];
   priority: string | null;
   updatedAt: number;
   url: string;
