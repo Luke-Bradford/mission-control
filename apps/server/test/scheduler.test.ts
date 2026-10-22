@@ -1597,3 +1597,29 @@ describe("scheduler", () => {
     });
   });
 });
+
+describe("scheduler scope log", () => {
+  it("logs a missing gh scope once per repo, after the first poll", async () => {
+    const lines: string[] = [];
+    const github = vi.fn(async (r: { id: string }, st: Store) => {
+      st.setStatus(
+        `github:${r.id}`,
+        false,
+        "board: gh token lacks the read:project scope: run gh auth refresh -s project at x",
+      );
+      return { boards: false, escalations: false };
+    });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      log: (l) => lines.push(l),
+      collectors: stubs({ github: github as never }),
+    });
+    await s.tick("github");
+    await s.tick("github");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("gh token lacks the read:project scope");
+  });
+});
