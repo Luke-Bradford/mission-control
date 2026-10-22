@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BoardItem } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Gql, GqlError } from "../src/collectors/github.ts";
+import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
 import { PreviewError, repoPreview, repoProfiles } from "../src/repo-profile.ts";
 import { Store } from "../src/store.ts";
@@ -103,6 +103,28 @@ describe("repoProfiles", () => {
     // No needsYouLabels configured: the collector's default is one label.
     expect(ae?.budget.boardPerHour).toBe(60 * (0 + 3 + 1 + 1 + 1));
   });
+
+  it("carries projectUrl: null before a board read, the read's url after", async () => {
+    expect(repoProfiles(config(), store).map((r) => r.projectUrl)).toEqual([null, null]);
+    const gql: Gql = async (query) => {
+      if (!query.includes("projectV2")) throw new Error("not a board read");
+      return {
+        repositoryOwner: {
+          __typename: "User",
+          projectV2: {
+            id: "PVT_1",
+            url: "https://github.com/users/o/projects/2",
+            items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+          },
+        },
+      };
+    };
+    await collectGithub(config().repos[0] as CcConfig["repos"][number], store, gql, Date.now());
+    expect(repoProfiles(config(), store).map((r) => r.projectUrl)).toEqual([
+      "https://github.com/users/o/projects/2",
+      null,
+    ]);
+  });
 });
 
 type Call = { query: string; vars: Record<string, unknown> };
@@ -117,8 +139,8 @@ const project = () => ({
     ],
   },
 });
-const answer = (p: unknown, labels: string[] = []) => ({
-  user: { projectV2: p },
+const answer = (p: unknown, labels: string[] = [], type = "User") => ({
+  repositoryOwner: { __typename: type, projectV2: p },
   repository: { labels: { nodes: labels.map((name) => ({ name })) } },
 });
 const gqlOf =
@@ -189,24 +211,41 @@ describe("repoPreview", () => {
     });
   });
 
-  it("answers 404 for an organisation project, a missing project and a missing repo", async () => {
+  it("previews an organisation's project", async () => {
+    const calls: Call[] = [];
+    const p = await repoPreview(
+      gqlOf(answer(project(), [], "Organization"), calls),
+      NEW,
+      config(),
+      store,
+    );
+    expect(p).toMatchObject({ projectTitle: "shop-app board", items: 250 });
+    expect(calls[0]?.query).toContain("repositoryOwner(login:");
+  });
+
+  it("answers 404 for an unknown owner, a missing project and a missing repo", async () => {
     const loc = { github: "acme/new", project: 4 };
     const org = new GqlError(
-      "github: Could not resolve to a User with the login of 'acme'.",
-      [{ type: "NOT_FOUND", path: ["user"] }],
-      { user: null, repository: { labels: { nodes: [] } } },
+      "github: Could not resolve to a RepositoryOwner with the login of 'acme'.",
+      [{ type: "NOT_FOUND", path: ["repositoryOwner"] }],
+      { repositoryOwner: null, repository: { labels: { nodes: [] } } },
     );
     const orgErr = await repoPreview(failing(org), loc, config(), store).catch((e) => e);
     expect(orgErr).toBeInstanceOf(PreviewError);
-    expect(orgErr).toMatchObject({
-      status: 404,
-      message: "project not found for acme (organisation projects are not supported yet)",
-    });
-    // GitHub's real shape: an error at user.projectV2 and null data, thrown by makeGql.
+    expect(orgErr).toMatchObject({ status: 404, message: "owner acme not found" });
+    // GitHub's real shape for an unknown owner: null data and no error.
+    const nullOwner = await repoPreview(
+      gqlOf({ repositoryOwner: null, repository: { labels: { nodes: [] } } }),
+      loc,
+      config(),
+      store,
+    ).catch((e) => e);
+    expect(nullOwner).toMatchObject({ status: 404, message: "owner acme not found" });
+    // GitHub's real shape: an error at repositoryOwner.projectV2 and null data, thrown by makeGql.
     const noProject = new GqlError(
       "github: Could not resolve to a ProjectV2 with the number 4.",
-      [{ type: "NOT_FOUND", path: ["user", "projectV2"] }],
-      { user: { projectV2: null }, repository: { labels: { nodes: [] } } },
+      [{ type: "NOT_FOUND", path: ["repositoryOwner", "projectV2"] }],
+      { repositoryOwner: { projectV2: null }, repository: { labels: { nodes: [] } } },
     );
     const projErr = await repoPreview(failing(noProject), loc, config(), store).catch((e) => e);
     expect(projErr).toMatchObject({ status: 404, message: "project 4 not found for acme" });
@@ -214,17 +253,17 @@ describe("repoPreview", () => {
     const both = new GqlError(
       "github: not found",
       [
-        { type: "NOT_FOUND", path: ["user", "projectV2"] },
+        { type: "NOT_FOUND", path: ["repositoryOwner", "projectV2"] },
         { type: "NOT_FOUND", path: ["repository"] },
       ],
-      { user: { projectV2: null }, repository: null },
+      { repositoryOwner: { projectV2: null }, repository: null },
     );
     const bothErr = await repoPreview(failing(both), loc, config(), store).catch((e) => e);
     expect(bothErr).toMatchObject({ status: 404, message: "project 4 not found for acme" });
     const noRepo = new GqlError(
       "github: Could not resolve to a Repository with the name 'acme/new'.",
       [{ type: "NOT_FOUND", path: ["repository"] }],
-      { user: { projectV2: project() }, repository: null },
+      { repositoryOwner: { projectV2: project() }, repository: null },
     );
     const repoErr = await repoPreview(failing(noRepo), loc, config(), store).catch((e) => e);
     expect(repoErr).toMatchObject({ status: 404, message: "repository acme/new not found" });

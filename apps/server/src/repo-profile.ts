@@ -15,7 +15,13 @@ import {
   statusColumns,
 } from "@mc/core";
 import type { z } from "zod";
-import { DEFAULT_NEEDS_YOU_LABELS, type Gql, GqlError, isObj } from "./collectors/github.ts";
+import {
+  DEFAULT_NEEDS_YOU_LABELS,
+  type Gql,
+  GqlError,
+  isObj,
+  projectUrlOf,
+} from "./collectors/github.ts";
 import type { CcConfig } from "./config.ts";
 import type { RepoLocation } from "./config-write.ts";
 import type { Store } from "./store.ts";
@@ -33,6 +39,7 @@ export function repoProfiles(config: CcConfig, store: Store): RepoProfile[] {
       id: repo.id,
       github: repo.github,
       project: repo.project,
+      projectUrl: projectUrlOf(store, repo.id),
       statuses,
       missingColumns: missingColumns(repo.statusMap),
       priority: {
@@ -60,18 +67,22 @@ export class PreviewError extends Error {
   }
 }
 
-// Projects are read through user(login:), as the collector does: the project, its fields (single
-// selects with their options) and the repo's priority-looking labels, in one request.
+// Projects are read through repositoryOwner(login:), as the collector does, so a user's and an
+// organisation's both answer: the project, its fields (single selects with their options) and the
+// repo's priority-looking labels, in one request.
 const PREVIEW_QUERY = `query($owner: String!, $number: Int!, $name: String!) {
-  user(login: $owner) {
-    projectV2(number: $number) {
-      title
-      items { totalCount }
-      fields(first: 50) {
-        pageInfo { hasNextPage }
-        nodes {
-          ... on ProjectV2FieldCommon { name }
-          ... on ProjectV2SingleSelectField { options { name } }
+  repositoryOwner(login: $owner) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        title
+        items { totalCount }
+        fields(first: 50) {
+          pageInfo { hasNextPage }
+          nodes {
+            ... on ProjectV2FieldCommon { name }
+            ... on ProjectV2SingleSelectField { options { name } }
+          }
         }
       }
     }
@@ -101,24 +112,23 @@ export async function repoPreview(
   store: Store,
 ): Promise<RepoPreview> {
   const [owner = "", name = ""] = loc.github.split("/");
-  const orgText = `project not found for ${owner} (organisation projects are not supported yet)`;
   let data: unknown;
   try {
     data = await gql(PREVIEW_QUERY, { owner, number: loc.project, name });
   } catch (e) {
-    // `user` alone is no such user (an organisation owner); `user.projectV2` is a user without
-    // that project; `repository` is no such repo.
+    // `repositoryOwner` alone is no such user or organisation; `repositoryOwner.projectV2` is an
+    // owner without that project; `repository` is no such repo.
     const paths = e instanceof GqlError ? notFoundPaths(e) : null;
-    if (paths?.has("user")) throw new PreviewError(404, orgText);
-    if (paths?.has("user.projectV2")) {
+    if (paths?.has("repositoryOwner")) throw new PreviewError(404, `owner ${owner} not found`);
+    if (paths?.has("repositoryOwner.projectV2")) {
       throw new PreviewError(404, `project ${loc.project} not found for ${owner}`);
     }
     if (paths?.has("repository")) throw new PreviewError(404, `repository ${loc.github} not found`);
     throw new PreviewError(502, e instanceof Error ? e.message : String(e));
   }
   if (!isObj(data)) throw new PreviewError(502, "github: unexpected response");
-  if (!isObj(data.user)) throw new PreviewError(404, orgText);
-  const p = data.user.projectV2;
+  if (!isObj(data.repositoryOwner)) throw new PreviewError(404, `owner ${owner} not found`);
+  const p = data.repositoryOwner.projectV2;
   if (!isObj(p)) throw new PreviewError(404, `project ${loc.project} not found for ${owner}`);
   if (!isObj(data.repository)) {
     throw new PreviewError(404, `repository ${loc.github} not found`);
