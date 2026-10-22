@@ -65,6 +65,15 @@ describe("parseRepoRules", () => {
     expect(r.alwaysAsk).toEqual(["migrations", "deps"]);
   });
 
+  it("reads hard_rules_by, defaults it to the operator, and refuses an unknown value", () => {
+    const by = (v: string) =>
+      parseRepoRules(block(`mc:\n  hard_rules: []\n  hard_rules_by: ${v}\n`));
+    expect(by("controller").hardRulesBy).toBe("controller");
+    expect(by("operator").hardRulesBy).toBe("operator");
+    expect(parseRepoRules(block("mc:\n  hard_rules: []\n")).hardRulesBy).toBe("operator");
+    expect(() => by("flight")).toThrow(RepoRulesError);
+  });
+
   it("parses needs, defaults it, and refuses an unknown need", () => {
     expect(parseRepoRules(block("mc:\n  needs: [done_when]\n")).needs).toEqual(["done_when"]);
     expect(parseRepoRules(block("mc:\n  promote_backlog: true\n")).needs).toEqual([

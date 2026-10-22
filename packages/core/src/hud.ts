@@ -458,6 +458,14 @@ export const ATTENTION_KINDS = [
 ] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 
+/** Who an attention item waits on: the operator, FLIGHT, the controller, a lane's login or a loop. */
+export type AttentionOwner = "operator" | "flight" | "controller" | "loop" | `lane:${string}`;
+export const OWNER_OPERATOR = "operator" satisfies AttentionOwner;
+export const OWNER_FLIGHT = "flight" satisfies AttentionOwner;
+export const OWNER_CONTROLLER = "controller" satisfies AttentionOwner;
+export const OWNER_LOOP = "loop" satisfies AttentionOwner;
+export const laneOwner = (login: string): AttentionOwner => `lane:${login}`;
+
 export const ATTENTION_LABEL: Record<AttentionKind, string> = {
   person: "Asked of you",
   decision: "Decision",
