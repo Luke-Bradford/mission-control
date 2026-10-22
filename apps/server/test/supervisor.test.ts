@@ -1299,6 +1299,41 @@ describe("questions and strays", () => {
     expect(store.strays()).toEqual([]);
   });
 
+  it("endRun with hold on a run with no process stops the seat, out of rotation", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "guido-1:old",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "guido-1:old",
+      cliSessionId: "s",
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: 1,
+    });
+    await sup.endRun("guido-1", { hold: true });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(seatMayTake(store, "guido-1")).toBe(false);
+  });
+
   it("endRun on a run with no process folds its transcript, so a stale DONE. summary is replaced", async () => {
     const { sup } = make();
     sup.start();
@@ -1609,6 +1644,15 @@ describe("startWatch", () => {
       "mcp__mc__end_run",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
+  });
+
+  it("ending the watch seat's run stops it, so the watch does not restart it", async () => {
+    const { sup } = flightMake();
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await sup.endRun("flight-1");
+    expect(seatState("flight-1")).toBe("stopped");
   });
 
   it("appends first after a blank line", async () => {

@@ -1077,7 +1077,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
       seatAction("/seats/:id/end", EndBody, async (sup, id, b) => {
-        await sup.endRun(id, { hold: b.hold === true });
+        await sup.endRun(id, { hold: b.hold });
         return { ok: true };
       });
       api.get<{ Params: { id: string } }>(

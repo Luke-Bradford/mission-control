@@ -2861,7 +2861,7 @@ describe("crew routes", () => {
       ["message", "guido-1", "hi", { interrupt: false }],
       ["message", "guido-1", "now", { interrupt: true }],
       ["interrupt", "guido-1"],
-      ["end", "guido-1", { hold: false }],
+      ["end", "guido-1", { hold: undefined }],
     ]);
     expect(seen.filter((t) => t === "agents")).toHaveLength(4);
   });
@@ -2919,7 +2919,7 @@ describe("crew routes", () => {
     expect((await post5("end", {})).statusCode).toBe(200);
     expect((await post5("end", { hold: true })).statusCode).toBe(200);
     expect(supervisorCalls).toEqual([
-      ["end", "guido-1", { hold: false }],
+      ["end", "guido-1", { hold: undefined }],
       ["end", "guido-1", { hold: true }],
     ]);
   });

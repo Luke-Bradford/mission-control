@@ -1571,8 +1571,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   async function endRun(seatId: string, opts: { hold?: boolean } = {}): Promise<void> {
-    const hold = opts.hold === true;
     const info = need(seatId);
+    // FLIGHT's seat is never dealt a ticket: ending it always benches it, or the watch restarts it
+    const hold = opts.hold ?? seatDef(info.seat).loop === "watch";
     const l = live.get(seatId);
     if (l) {
       if (hold) l.hold = true;
