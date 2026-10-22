@@ -59,6 +59,7 @@ export const FLIGHT_DECISION_MAX = 1000;
 export const FLIGHT_BASIS_MAX = 500;
 
 export const MC_FLIGHT_ONLY = "Not done: this tool is for the FLIGHT seat.";
+export const MC_TICKET_READERS_ONLY = "Not read: this tool is for the FLIGHT and planner seats.";
 export const notInSessionText = (seat: string): string =>
   `Not done: ${seat} is not a seat in your session.`;
 export const capText = (what: string, n: number): string =>

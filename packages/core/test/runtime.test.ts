@@ -373,7 +373,7 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "plan",
-        tools: ["report_plan"],
+        tools: ["report_plan", "read_ticket"],
         here: "planner: writes each ticket's plan for the developers",
       },
       FLIGHT: {
@@ -401,7 +401,10 @@ describe("seatDef", () => {
   it("reads a built-in role", () => {
     expect(seatDef({ role: "GUIDO" })).toMatchObject({ mode: "writer", loop: "build" });
     expect(seatDef({ role: "RETRO" })).toMatchObject({ mode: "read-only", loop: "none" });
-    expect(seatDef({ role: "FAO" })).toMatchObject({ loop: "plan", mcTools: ["report_plan"] });
+    expect(seatDef({ role: "FAO" })).toMatchObject({
+      loop: "plan",
+      mcTools: ["report_plan", "read_ticket"],
+    });
   });
 
   it("scratch turns a read-only role into a reviewer, and leaves a writer", () => {
