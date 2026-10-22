@@ -365,6 +365,7 @@ describe("board item ids", () => {
     owner: null,
     parent: null,
     subIssues: null,
+    assignees: [],
     blockedBy: [],
     milestone: null,
     size: null,
