@@ -223,16 +223,16 @@ the operator's rule is that updates never wait for an idle crew and never interr
 
 ## Follow-ups
 
-Drafted for filing. Each is in `area:server`, and the keeper work touches hard-rule files
+Each is in `area:server`, and the keeper work touches hard-rule files
 (`apps/server/src/runtime/**`, `apps/server/src/guard/**`, `apps/server/src/mcp/**`).
 
-- **The guard hook waits out a hub restart.** It retries a refused or reset connection for up to
-  60 s, then denies as today. Independent; worth having before the keeper, since Update cuts the
+- **#146: the guard hook waits out a hub restart.** It retries a refused or reset connection for up
+  to 60 s, then denies as today. Independent; worth having before the keeper, since Update cuts the
   hook today.
-- **Run tokens and test-lock holds survive a hub restart.** A prerequisite for reattaching.
+- **#147: run tokens and test-lock holds survive a hub restart.** A prerequisite for reattaching.
 - **#97, rewritten from this design.** The keeper, reattach on start, and Update never stopping a
-  seat. Depends on the two above.
-- **For #95** (`updates.cli`, open as a PR): hold seat spawns while `brew upgrade` runs, because the
-  link is missing for part of the upgrade (§4).
+  seat. Depends on #146 and #147.
+- **#95** (`updates.cli`) needs no follow-up: as merged, it holds new starts and resumes from the
+  start of `brew upgrade` until the smoke test passes, which covers the window with no link (§4).
 - **#96** is unchanged. Once #97 lands, Update no longer refuses mid-turn, so automatic updates no
   longer wait for a quiet moment.
