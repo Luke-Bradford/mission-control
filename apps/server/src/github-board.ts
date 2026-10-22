@@ -1,4 +1,10 @@
-import { type MoveColumn, optionForColumn, type RepoId, STATUS_FIELD } from "@mc/core";
+import {
+  type FlightMoveColumn,
+  type MoveColumn,
+  optionForColumn,
+  type RepoId,
+  STATUS_FIELD,
+} from "@mc/core";
 import { type Gql, GqlError, isObj, isTransient } from "./collectors/github.ts";
 import type { CcConfig } from "./config.ts";
 import { readStatusField } from "./github-setup.ts";
@@ -45,7 +51,7 @@ export interface Move {
   runId: string;
   repoId: RepoId;
   issue: number;
-  column: MoveColumn;
+  column: MoveColumn | FlightMoveColumn;
 }
 
 export type MoveResult = { ok: true; changed: boolean } | { ok: false; reason: string };

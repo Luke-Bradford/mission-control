@@ -70,6 +70,7 @@ mc:
     - "apps/server/src/mcp/**"
     - "apps/server/src/runtime/**"
     - "apps/server/src/engine/**"
+    - "apps/server/src/flight/**"
     - "packages/core/src/guard.ts"
     - "packages/core/src/flight.ts"
     - "packages/core/src/runtime.ts"

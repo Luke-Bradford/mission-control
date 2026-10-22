@@ -20,18 +20,20 @@ describe("DEFAULT_REPO_RULES", () => {
     expect(DEFAULT_REPO_RULES).toEqual({
       pickFrom: ["Ready"],
       promoteBacklog: false,
+      needs: ["done_when", "size"],
       areas: {},
       hardRules: DEFAULT_HARD_RULES,
       alwaysAsk: [],
     });
   });
 
-  it("holds exactly the fifteen hard-rule globs", () => {
+  it("holds exactly the sixteen hard-rule globs", () => {
     expect(DEFAULT_HARD_RULES).toEqual([
       "apps/server/src/guard/**",
       "apps/server/src/mcp/**",
       "apps/server/src/runtime/**",
       "apps/server/src/engine/**",
+      "apps/server/src/flight/**",
       "packages/core/src/guard.ts",
       "packages/core/src/flight.ts",
       "packages/core/src/loop.ts",

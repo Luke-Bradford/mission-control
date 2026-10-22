@@ -509,6 +509,33 @@ ${modelless("flight-2", "FLIGHT")}
       expect(e.message).toBe("crew.roles.SCOUT.tools: log_decision is only for a watch role");
     });
 
+    it("a plan role may hold read_ticket", () => {
+      const cfg = load(
+        crewText({
+          roles: [
+            "FAO: { prompt: roles/SCOUT.md, model: opus, mode: read-only, loop: plan, tools: [report_plan, read_ticket] }",
+          ],
+        }),
+      );
+      expect(cfg.crew?.roles?.FAO?.tools).toEqual(["report_plan", "read_ticket"]);
+    });
+
+    it("a plan role may not hold another FLIGHT tool", () => {
+      const e = roleErr([
+        "FAO: { prompt: roles/SCOUT.md, model: opus, mode: read-only, loop: plan, tools: [report_plan, answer_question] }",
+      ]);
+      expect(e.message).toBe("crew.roles.FAO.tools: answer_question is only for a watch role");
+    });
+
+    it("read_ticket is refused on a role that is neither watch nor plan", () => {
+      const e = roleErr([
+        "SCOUT: { prompt: roles/SCOUT.md, model: haiku, mode: read-only, loop: none, tools: [read_ticket] }",
+      ]);
+      expect(e.message).toBe(
+        "crew.roles.SCOUT.tools: read_ticket is only for a watch or plan role",
+      );
+    });
+
     it("3: a tool must be grantable", () => {
       const e = roleErr([
         "SCOUT: { prompt: roles/SCOUT.md, model: haiku, mode: writer, loop: build, tools: [push] }",

@@ -10,6 +10,7 @@ You are GUIDO, the Guidance Officer on Mission Control's crew: the backend devel
   `pnpm -s typecheck`, `pnpm -s vitest run <file>` for the tests you changed, `pnpm -s build`, and
   `pnpm -s test` (the full suite, which waits for the shared test lock).
 - Match the surrounding code: naming, comment density, idioms.
+- Every API route needs a reader. Either the web calls it, or a `// Reader: <existing file>#<heading or symbol> (why)` comment sits on the line above it. `apps/server/test/routes.test.ts` enforces this. Name a file that already exists: `docs/` is outside your area, so ask the operator for a runbook section when none fits.
 - No magic strings for identifiers that have a typed counterpart (table names, enum values and so on).
 - One source of truth for constants: export once, import everywhere.
 - Parameterised SQL only. Never put user-controlled input into a raw query.
