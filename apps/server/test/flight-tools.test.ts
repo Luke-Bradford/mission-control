@@ -40,7 +40,10 @@ const seat = (id: string, role: string, extra: Partial<CrewSeatConfig> = {}): Cr
 const config = (): CcConfig => ({
   operator: { id: "op", timezone: "Europe/London" },
   accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
-  repos: [{ id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "draft" }],
+  repos: [
+    { id: "mc", github: "o/mc", project: 1, statusMap: {}, autonomy: "draft" },
+    { id: "other", github: "o/other", project: 2, statusMap: {}, autonomy: "draft" },
+  ],
   loops: [],
   poll: { usageMinutes: 30, githubSeconds: 60 },
   crew: {
@@ -59,6 +62,12 @@ const config = (): CcConfig => ({
           seat("retro-1", "RETRO", { mode: "scratch" }),
         ],
       },
+      {
+        id: "s2",
+        repoId: "other",
+        checkout: "/tmp/none/clone2",
+        seats: [seat("fao-2", "FAO")],
+      },
     ],
   },
 });
@@ -75,6 +84,7 @@ let startCalls: unknown[][];
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
 let fetchCalls: number[];
+let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let engineOn: boolean;
 let lifts: boolean;
@@ -135,6 +145,7 @@ beforeEach(() => {
   messageCalls = [];
   engineCalls = [];
   fetchCalls = [];
+  fetchRepos = [];
   busyNow = [];
   engineOn = false;
   lifts = true;
@@ -165,7 +176,8 @@ beforeEach(() => {
       status: () => ({ on: engineOn, note: null }),
     },
     rules: async () => rulesNow,
-    fetchTicket: async (_repo, n) => {
+    fetchTicket: async (repo, n) => {
+      fetchRepos.push(repo.id);
       fetchCalls.push(n);
       return fetchImpl(n);
     },
@@ -408,6 +420,16 @@ describe("read_ticket", () => {
       text: "#7 Referred [not on the board]\n\nText",
     });
     expect(fetchCalls).toEqual([7]);
+    expect(fetchRepos).toEqual(["mc"]);
+  });
+
+  it("reads a planner's own session's repo, not FLIGHT's", async () => {
+    live("fao-2", "r-fao2");
+    fetchImpl = async (n) => ticket(n);
+    expect(
+      (await call("read_ticket", { issue: 7 }, ctx("fao-2", "r-fao2"))).isError,
+    ).toBeUndefined();
+    expect(fetchRepos).toEqual(["other"]);
   });
 
   it("counts a planner's reads apart from FLIGHT's", async () => {
