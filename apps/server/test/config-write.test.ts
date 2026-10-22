@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { NewRepo, SeatInput } from "@mc/core";
+import { DEFAULT_SEAT_COMMANDS, type NewRepo, type SeatInput } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig, seatInput } from "../src/config.ts";
 import {
@@ -120,10 +120,14 @@ describe("addRepo", () => {
           statusMap: { Todo: "planned", "In Progress": "in progress", Done: "done" },
           needsYouLabels: ["needs-design"],
           fullSuite: [],
+          commands: DEFAULT_SEAT_COMMANDS,
+          protectedFiles: [],
           autonomy: "draft",
         },
       ],
     });
+    expect(config.repos.at(-1)?.commands).toEqual(DEFAULT_SEAT_COMMANDS);
+    expect(config.repos.at(-1)?.protectedFiles).toEqual([]);
     expect(backup).toBe(join(dir, "config.yaml.bak-20261019T120000Z"));
     expect(readFileSync(backup, "utf8")).toBe(COMMENTED);
     expect(statSync(path).mode & 0o777).toBe(0o600);
