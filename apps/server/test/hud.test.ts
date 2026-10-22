@@ -1348,6 +1348,55 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     expect(keys(NOW)).toContain(`ask:${held}`);
   });
 
+  it("FLIGHT holds only its own session's questions", () => {
+    const base = withCrew();
+    const session = base.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const c: CcConfig = {
+      ...base,
+      crew: {
+        ...base.crew,
+        worktrees: join(dir, "crew-wt"),
+        maxSeats: 4,
+        sessions: [
+          {
+            ...session,
+            seats: [
+              ...session.seats,
+              { id: "FLIGHT-1", role: "FLIGHT", accountId: "claude-main", model: "opus", area: [] },
+            ],
+          },
+          {
+            ...session,
+            id: "other",
+            seats: [
+              { id: "GUIDO-9", role: "GUIDO", accountId: "claude-main", model: "opus", area: [] },
+            ],
+          },
+        ],
+      },
+    };
+    store.upsertRun(run({ id: "f1", agentId: "FLIGHT-1", repoId: "shop-app" }));
+    store.setSeatSession({
+      seatId: "FLIGHT-1",
+      runId: "f1",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const asked = (agentId: string) =>
+      store.addQuestion({ agentId, runId: "c1", text: "Lanes?", at: NOW - 5 * MIN });
+    const mine = asked("GUIDO-1");
+    const other = asked("GUIDO-9");
+    const keys = attentionItems(c, store, NOW)
+      .filter((i) => i.kind === "question")
+      .map((i) => i.key);
+    expect(keys).toEqual([`ask:${other}`]);
+    expect(keys).not.toContain(`ask:${mine}`);
+  });
+
   it("lists an unacked crew error as an error item", () => {
     const c = withCrew();
     const id = store.addCrewError({
