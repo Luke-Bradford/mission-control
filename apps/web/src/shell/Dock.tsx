@@ -3,7 +3,7 @@ import { type FormEvent, Fragment, useEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
-import { type DockRow, dockRows, FLIGHT_KIND_LABEL } from "../flight/conversation.ts";
+import { type DockRow, dockRows, kindLabel } from "../flight/conversation.ts";
 import type { FlightSeat, FlightView } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -55,7 +55,7 @@ function Msg({ row, tz }: { row: DockRow; tz: string | null }) {
         ? "FLIGHT"
         : row.kind === "hub"
           ? "Mission Control"
-          : `FLIGHT · ${FLIGHT_KIND_LABEL[row.d.kind]}`;
+          : `FLIGHT · ${kindLabel(row.d.kind)}`;
   return (
     <div className={`dmsg ${row.kind}`}>
       <div className="who">

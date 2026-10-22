@@ -676,6 +676,22 @@ describe("setReviewStatus", () => {
     expect(r).toEqual({ ok: false, text: REVIEW_STATUS_FAILED, transient: true });
   });
 
+  it("a gh failure carries gh's stderr, cleaned and cut", async () => {
+    ghAnswers = [
+      () => ({
+        code: 1,
+        stdout: "",
+        stderr: `\u001b[31mHTTP 403: forbidden\u001b[0m\n${"x".repeat(400)}`,
+      }),
+    ];
+    const r = await createPublisher(deps()).setReviewStatus(run(), SHA, "pending", "x");
+    expect(r.ok).toBe(false);
+    const text = r.ok ? "" : r.text;
+    expect(text.startsWith(`${REVIEW_STATUS_FAILED}: HTTP 403: forbidden\n`)).toBe(true);
+    expect(text).not.toContain("\u001b");
+    expect(text.length).toBe(REVIEW_STATUS_FAILED.length + 2 + 300);
+  });
+
   it("no repo or a bad sha: no call", async () => {
     const p = createPublisher(deps());
     const gone = await p.setReviewStatus(run({ repoId: "nope" }), SHA, "pending", "x");

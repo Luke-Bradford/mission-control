@@ -31,6 +31,17 @@ import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { seatFree } from "./tools.ts";
 
+/**
+ * The tickets FLIGHT may start in an hour: FLIGHT_STARTS_PER_HOUR per developer (build) seat in its
+ * session, and never fewer. The cap guards against a runaway FLIGHT, so it grows with the seats.
+ */
+export function flightStartCap(config: CcConfig): number {
+  const devSeats = (flightSeat(config)?.session.seats ?? []).filter(
+    (s) => seatDef(s).loop === "build",
+  ).length;
+  return FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats);
+}
+
 /** The watch seat (the first seat whose seatDef loop is "watch") and its session, else null. */
 export function flightSeat(
   config: CcConfig,
@@ -40,6 +51,13 @@ export function flightSeat(
     if (seat !== undefined) return { seat, session };
   }
   return null;
+}
+
+/** The ids FLIGHT can answer for: its own session's seats other than FLIGHT itself. */
+export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
+  const found = flightSeat(config);
+  if (found === null) return new Set();
+  return new Set(found.session.seats.filter((s) => s.id !== found.seat.id).map((s) => s.id));
 }
 
 /** That seat's row holds an unended run in a state of ACTIVE_SEAT_STATES. */
@@ -87,7 +105,7 @@ export function flightState(i: {
   const limits = {
     startsLeft: Math.max(
       0,
-      FLIGHT_STARTS_PER_HOUR - store.countFlightDecisions({ kinds: ["start"], since }),
+      flightStartCap(config) - store.countFlightDecisions({ kinds: ["start"], since }),
     ),
     messagesLeft: Math.max(
       0,

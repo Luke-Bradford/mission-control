@@ -17,7 +17,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { flightState, pending } from "../src/flight/state.ts";
+import { flightOwnSeatIds, flightState, pending } from "../src/flight/state.ts";
 import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -294,6 +294,20 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("a question that goes away and comes back wakes again", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    // the seat's run ends: the question no longer counts, and the wake facts are empty
+    store.upsertRun(run("r-guido", "guido-1", { endedAt: nowMs, status: "ok" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.upsertRun(run("r-guido", "guido-1"));
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
   it("does not wake mid-turn", async () => {
     liveCrew();
     ask();
@@ -398,6 +412,31 @@ describe("the FLIGHT watcher", () => {
     enabled = false;
     await watch.check();
     expect(startCalls).toEqual([]);
+  });
+
+  it("leaves a question from another session's seat out of the digest and the announcement", async () => {
+    const sessions = config.crew?.sessions ?? [];
+    sessions.push({
+      id: "s2",
+      repoId: "mc",
+      checkout: "/tmp/none/clone2",
+      seats: [seat("guido-9", "GUIDO", { area: ["apps/**"] })],
+    });
+    try {
+      expect(flightOwnSeatIds(config)).toEqual(new Set(["guido-1", "inco-1", "retro-1"]));
+      liveCrew();
+      facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      ask("guido-9", "r-guido-9");
+      nowMs = T0 + 20 * MIN;
+      expect(flightState({ config, store, busy: [], now: nowMs }).questions).toEqual([]);
+      await watch.check();
+      expect(emitted.filter((t) => t === "attention")).toEqual([]);
+      store.addQuestion({ agentId: "guido-1", runId: "r-guido", text: "Which lane?", at: T0 });
+      await watch.check();
+      expect(emitted.filter((t) => t === "attention")).toEqual(["attention"]);
+    } finally {
+      sessions.pop();
+    }
   });
 
   it("announces a 20-minute question once", async () => {
