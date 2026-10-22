@@ -1460,4 +1460,126 @@ describe("the engine's notes in Needs you", () => {
       url: "https://github.com/o/shop-app/pull/12",
     });
   });
+
+  const endedRun = (over: Partial<Run> = {}, loop: Partial<RunLoop> = {}) =>
+    store.upsertRun({
+      id: "r1",
+      agentId: "guido-1",
+      repoId: "shop-app",
+      seq: 1,
+      startedAt: NOW - HOUR,
+      endedAt: NOW - MIN,
+      status: "failed",
+      sessionId: null,
+      model: null,
+      branch: "feature/7-x",
+      ticket: "shop-app#7",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      loop: {
+        ...NEW_LOOP,
+        phase: "parked",
+        prNumber: 12,
+        parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
+        ...loop,
+      },
+      ...over,
+    });
+  const pr12 = (state: "open" | "merged" | "closed") =>
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 12,
+          title: "t",
+          url: "https://github.com/o/shop-app/pull/12",
+          branch: "feature/7-x",
+          ticket: "shop-app#7",
+          state,
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: NOW - HOUR,
+          updatedAt: NOW - MIN,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+  const keys = () => noteItems().map((i) => i.key);
+  const KEY = "note:blocked:r1:0";
+
+  it("leaves out an ended park whose PR was merged or closed", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun();
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    expect(keys()).toEqual([KEY]);
+    pr12("merged");
+    expect(keys()).toEqual([]);
+    pr12("closed");
+    expect(keys()).toEqual([]);
+  });
+
+  it("leaves out an ended park whose ticket is closed, gone from the board, or in a repo no longer configured", () => {
+    endedRun({}, { prNumber: null });
+    note("blocked:r1:0", "blocked");
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7, closed: true })]);
+    expect(keys()).toEqual([]);
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 8 })]);
+    expect(keys()).toEqual([]);
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    expect(keys()).toEqual([KEY]);
+    endedRun({ repoId: "old-repo", ticket: "old-repo#225" }, { prNumber: null });
+    expect(keys()).toEqual([]);
+  });
+
+  it("keeps an ended park while its repo's board is unread", () => {
+    endedRun({}, { prNumber: null });
+    note("blocked:r1:0", "blocked");
+    expect(keys()).toEqual([KEY]);
+  });
+
+  it("keeps a park that is not ended, even with its PR merged", () => {
+    endedRun(
+      { endedAt: null, status: "running" },
+      { parked: { kind: "refused", reason: "Push refused.", ended: false } },
+    );
+    note("blocked:r1:0", "blocked");
+    pr12("merged");
+    expect(keys()).toEqual([KEY]);
+  });
+
+  it("a dismissed note stays dismissed", () => {
+    note("blocked:r1:0", "blocked");
+    expect(keys()).toEqual([KEY]);
+    expect(store.dismissNote("blocked:r1:0", NOW)).toBe(true);
+    expect(keys()).toEqual([]);
+    note("blocked:r1:0", "blocked");
+    expect(keys()).toEqual([]);
+  });
+
+  it("a new park of the same run is listed again", () => {
+    note("blocked:r1:0", "blocked");
+    store.dismissNote("blocked:r1:0", NOW);
+    store.clearNote("blocked:r1:0", NOW);
+    store.raiseNote({
+      key: "blocked:r1:0",
+      kind: "blocked",
+      runId: "r1",
+      seatId: "guido-1",
+      repoId: "shop-app",
+      text: "shop-app#7 parked: Push refused.",
+      at: NOW,
+    });
+    expect(noteItems().map((i) => [i.key, i.text])).toEqual([
+      [KEY, "shop-app#7 parked: Push refused."],
+    ]);
+  });
 });
