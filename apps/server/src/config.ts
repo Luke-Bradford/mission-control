@@ -133,9 +133,16 @@ export interface CcConfig {
   poll: { usageMinutes: number; githubSeconds: number };
   /** Absent: no crew. */
   crew?: CrewConfig;
-  /** `between_runs`: the hub keeps the `claude` CLI current without stopping a run. Loaded: always set (default `off`). */
-  updates?: { cli: CliUpdates };
+  /**
+   * `hub: auto`: the hub runs Update by itself. `cli: between_runs`: the hub keeps the `claude` CLI
+   * current without stopping a run. Loaded: always set (default `off` for both).
+   */
+  updates?: { hub: HubUpdates; cli: CliUpdates };
 }
+
+/** `auto`: the hub runs Update by itself when main has moved and Update's refusals do not apply. */
+export const HUB_UPDATES = ["off", "auto"] as const;
+export type HubUpdates = (typeof HUB_UPDATES)[number];
 
 /** One configured agent: an observed loop, or a crew seat with its session. */
 export type ConfiguredAgent = { id: AgentId; repoId: RepoId; accountId: AccountId } & (
@@ -367,7 +374,12 @@ const fileSchema = z
       usage_minutes: z.number().min(5).max(240),
       github_seconds: z.number().min(30).max(3600),
     }),
-    updates: z.strictObject({ cli: z.enum(CLI_UPDATES).default("off") }).default({ cli: "off" }),
+    updates: z
+      .strictObject({
+        hub: z.enum(HUB_UPDATES).default("off"),
+        cli: z.enum(CLI_UPDATES).default("off"),
+      })
+      .default({ hub: "off", cli: "off" }),
     crew: z
       .strictObject({
         worktrees: nonEmpty,
@@ -431,7 +443,7 @@ const fileSchema = z
         ...(l.logs_dir === undefined ? {} : { logsDir: expandHome(l.logs_dir) }),
       })),
       poll: { usageMinutes: f.poll.usage_minutes, githubSeconds: f.poll.github_seconds },
-      updates: { cli: f.updates.cli },
+      updates: { hub: f.updates.hub, cli: f.updates.cli },
       ...(f.crew === undefined
         ? {}
         : {

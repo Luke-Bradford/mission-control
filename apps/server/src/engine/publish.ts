@@ -160,6 +160,8 @@ export interface Publisher {
   deleteRemoteBranch(run: Run, sha: string): Promise<PublishResult>;
   /** Deletes the run's local branch, when its tip is the merged sha or already in main. */
   deleteLocalBranch(run: Run): Promise<PublishResult>;
+  /** Whether the run's local branch no longer exists; false when that cannot be read. */
+  localBranchGone(run: Run): Promise<boolean>;
 }
 
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
@@ -809,6 +811,25 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         await g(["branch", "-D", branch]);
         return { ok: true };
       });
+    },
+
+    async localBranchGone(run) {
+      const branch = ownBranch(run);
+      if (branch === null) return false;
+      try {
+        const r = await inGit(run, async (g): Promise<PublishResult> => {
+          try {
+            await g(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`]);
+          } catch (e) {
+            if ((e as { code?: unknown } | null)?.code === 1) return { ok: true };
+            throw e;
+          }
+          return final(MERGE_BRANCH_MOVED);
+        });
+        return r.ok;
+      } catch {
+        return false;
+      }
     },
   };
 }

@@ -13,6 +13,7 @@ import {
   DEFAULT_HARD_RULES,
   DEFAULT_REPO_RULES,
   freezeRules,
+  HARD_RULES_BY,
   REPO_NEEDS,
   type RepoRules,
 } from "@mc/core";
@@ -58,6 +59,7 @@ const schema = z.strictObject({
   areas: z.record(nonEmpty, z.array(labelGlob).min(1)).optional(),
   // `null` means the default only here (the example block writes `hard_rules: null`); `[]` is none.
   hard_rules: z.array(nonEmpty).nullable().optional(),
+  hard_rules_by: z.enum(HARD_RULES_BY).optional(),
   always_ask: z.array(nonEmpty).optional(),
 });
 
@@ -148,6 +150,7 @@ export function parseRepoRules(markdown: string | null): RepoRules {
         : Object.fromEntries(Object.entries(r.areas)),
     hardRules: r.hard_rules ?? DEFAULT_HARD_RULES,
     hardRulesSet: Array.isArray(r.hard_rules),
+    hardRulesBy: r.hard_rules_by ?? DEFAULT_REPO_RULES.hardRulesBy,
     alwaysAsk: r.always_ask ?? DEFAULT_REPO_RULES.alwaysAsk,
   });
 }

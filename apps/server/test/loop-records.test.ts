@@ -347,9 +347,9 @@ describe("attention notes", () => {
     ]);
   });
 
-  it("dismissNote refuses a note that is not an open blocked note", () => {
+  it("dismissNote takes an open note of any kind and refuses a missing or cleared one", () => {
     store.raiseNote(note({ key: "review:r1:abc", kind: "review" }));
-    expect(store.dismissNote("review:r1:abc", 5)).toBe(false);
+    expect(store.dismissNote("review:r1:abc", 5)).toBe(true);
     expect(store.dismissNote("nope", 5)).toBe(false);
     store.raiseNote(note());
     store.clearNote("blocked:r1:0", 6);
@@ -495,6 +495,8 @@ describe("pull request head sha and mergeable", () => {
     mergedAt: null,
     headSha: "a".repeat(40),
     mergeable: "CONFLICTING",
+    author: null,
+    assignees: [],
     ...over,
   });
 
