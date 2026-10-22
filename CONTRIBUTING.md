@@ -5,10 +5,12 @@ agents share one queue.
 
 ## Taking a ticket
 
-- Seats take tickets from **Ready** by rule: highest Priority first, matching the seat's area label
-  (`area:server`, `area:web` or `area:core`).
-- To take a ticket yourself, move its card to **In progress** before you start. Seats only take
-  Ready cards, so a card in progress is yours.
+- Seats take tickets from **Ready** by rule, oldest first, matching the seat's area label
+  (`area:server`, `area:web` or `area:core`). When the board has a Priority field, P0, P1 and P2
+  cards go first.
+- To take a ticket yourself, move its card to **In progress** and assign yourself before you
+  start. Seats only take Ready cards. The engine also moves its own runs' cards to In progress, so
+  the assignee shows who has it.
 - Work on one ticket at a time, and keep PRs small. Tickets say the outcome and when they are done.
   If one is unclear or too big, say so on the ticket rather than guessing.
 
@@ -17,6 +19,7 @@ agents share one queue.
 1. Branch from `main`: `feature/<issue>-short-name`, `fix/<issue>-short-name`, `docs/<name>` or
    `chore/<name>`.
 2. Before you open the PR, run `pnpm -s lint && pnpm -s typecheck && pnpm -s test && pnpm -s build`.
+   CI runs lint, typecheck and test, but not build.
 3. Open a PR with `Closes #<issue>`. The description says what changed and why, and it carries a
    security note whenever the change touches auth, the seats' tool grants or anything that writes to
    GitHub.
@@ -25,10 +28,15 @@ agents share one queue.
 
 - `main` takes changes only through a PR, with the `check` CI job passing. There is no bypass, for
   admins either, and no force-push.
-- Every PR gets a review: RETRO (the QA seat) or a fresh reviewer. Critical and Important findings
-  are fixed on the branch before merge. Minor ones are fixed or filed as a ticket.
-- Files that confine or drive the crew (`roles/**`, `CLAUDE.md`, `.github/**`,
-  `config.example.yaml`) are merged by a maintainer, never automatically.
+- Every PR gets a review: RETRO (the QA seat) or a fresh reviewer, agent or person. GitHub requires
+  no approvals, so this is a working rule, not a setting. Critical and Important findings are fixed
+  on the branch before merge. Minor ones are fixed or filed as a ticket.
+- Hard-rule files, the ones that confine or drive the crew, are merged by a maintainer, never
+  automatically. They are the guard, MCP, runtime and engine code (`apps/server/src/{guard,mcp,runtime,engine}/**`,
+  `packages/core/src/guard.ts`, `packages/core/src/runtime.ts`), `loops/**`, `roles/**`,
+  `CLAUDE.md`, `.github/**` and `config.example.yaml`. The list is `DEFAULT_HARD_RULES` in
+  `packages/core/src/repo-rules.ts`, and a repo can set its own in the `## Mission Control` block of
+  CLAUDE.md.
 
 ## Data
 
