@@ -4,7 +4,6 @@ import {
   collectGithub,
   fetchCardNow,
   fetchTicket,
-  type Gql,
   GqlError,
   GqlTransportError,
   isTransient,
@@ -72,7 +71,9 @@ function item(
 }
 
 describe("fetchCardNow", () => {
-  const answer = (issue: unknown): Gql => async () => ({ repository: { issue } });
+  const answer =
+    (issue: unknown): Gql =>
+    async () => ({ repository: { issue } });
   const onProject = (status: string | null, number = repo.project) => ({
     state: "OPEN",
     assignees: { nodes: [{ login: "luke" }] },
