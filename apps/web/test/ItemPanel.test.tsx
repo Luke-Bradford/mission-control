@@ -72,7 +72,9 @@ describe("ItemPanel, Ask FLIGHT", () => {
   it("is switched off with no live seat", async () => {
     withFlight({ seat: null, decisions: [] });
     await screen.findByText("Which eviction policy should the quote cache use?");
-    expect((screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement).disabled).toBe(
+      true,
+    );
     expect(screen.getByRole("button", { name: "Send" }).getAttribute("title")).toBe(
       FLIGHT_NOT_RUNNING,
     );
