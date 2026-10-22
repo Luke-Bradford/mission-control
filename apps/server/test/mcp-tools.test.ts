@@ -2226,10 +2226,12 @@ describe("push and draft_pr", () => {
       },
     );
 
-    it("adds no Closes when the body closes the issue inside code (finding 8, round 4)", async () => {
+    it("adds Closes when the only closing keyword is inside code", async () => {
       await pushed();
       await pr("feat: x", "Run `Fixes #42`.");
-      expect(ghCalls()[1]?.body).toBe("Run `Fixes #42`.\n\nOpened by GUIDO-1 (Mission Control).\n");
+      expect(ghCalls()[1]?.body).toBe(
+        "Run `Fixes #42`.\n\nCloses #42.\n\nOpened by GUIDO-1 (Mission Control).\n",
+      );
     });
 
     it("serialises a run's draft_pr calls: the second answers with the open PR (finding 10)", async () => {

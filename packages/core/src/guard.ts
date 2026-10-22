@@ -1428,6 +1428,16 @@ const CLOSING_REF = new RegExp(
   "gi",
 );
 
+/**
+ * What GitHub itself links as a closing keyword: the keyword, an optional `:`, blanks, then `#n`,
+ * `GH-n`, `owner/repo#n` or an issue URL. Same capture groups as `CLOSING_REF`. For deciding
+ * whether the hub still owes a closing line, so it under-matches where `CLOSING_REF` over-matches.
+ */
+const STRICT_CLOSING_REF = new RegExp(
+  `\\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?[ \\t]+(?:#(\\d+)|GH-(\\d+)|(${LOGIN})/([A-Za-z0-9._-]+)#(\\d+)|(?:https?://)?(?:www\\.)?github\\.com/(${LOGIN})/([A-Za-z0-9._-]+)/issues/(\\d+))(?![A-Za-z0-9])`,
+  "gi",
+);
+
 /** Whether a closing match targets the run's own issue in the run's own repo. */
 function closesOwn(m: RegExpExecArray, own: string, issue: number | null): boolean {
   const n = Number(m[1] ?? m[2] ?? m[5] ?? m[8]);
@@ -1609,12 +1619,18 @@ export function unclosedMarkdown(md: string): boolean {
 
 /**
  * Whether markdown has a closing keyword (`Fixes #n`, `Closes owner/repo#n`, …) aimed at the run's
- * own issue in the run's own repo (character references decoded; code counts too). A plain
- * mention does not close it.
+ * own issue in the run's own repo (character references decoded). A plain mention does not close
+ * it, and neither does a keyword GitHub ignores: in a code block or span, an HTML comment,
+ * emphasis, or a PR or discussion link. This under-matches on purpose: a duplicate closing line
+ * is harmless, a missing one leaves the issue open.
  */
 export function closesIssue(md: string, { repo, issue }: { repo: string; issue: number }): boolean {
   const own = repo.toLowerCase();
-  return [...decodeCharRefs(md).matchAll(CLOSING_REF)].some((m) => closesOwn(m, own, issue));
+  const text = decodeCharRefs(md)
+    .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/gm, "")
+    .replace(/`[^`\n]*`/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
+  return [...text.matchAll(STRICT_CLOSING_REF)].some((m) => closesOwn(m, own, issue));
 }
 
 /**
