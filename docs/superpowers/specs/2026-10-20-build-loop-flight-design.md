@@ -1,8 +1,8 @@
 # The build loop and FLIGHT — design
 
 Status: draft, written 2026-10-20 from the HUD mockup catalogue and the Mission Control spec, without
-questions to the operator (his choice: "fine tune anything later"). Calls made while writing are listed in §14
-for him to check whenever he likes. This is phase 2c (the loop engine) plus a first FLIGHT (phase 3),
+questions to the operator (the operator's choice: "fine tune anything later"). Calls made while writing are listed in §14
+for the operator to check whenever convenient. This is phase 2c (the loop engine) plus a first FLIGHT (phase 3),
 built as one design because the operator's goal needs both: "let the app build, no gaps, all working as
 planned in their loops from the board, flight ensuring we're working towards getting things over the
 line, being able to re-direct the plan via flight."
@@ -22,7 +22,7 @@ unless that session notices. After this design, Mission Control is the loop:
 - when every gate passes, Mission Control merges, closes the issue, moves the card to Done and the
   seat takes the next ticket;
 - FLIGHT keeps the board flowing (triage, queues, unblocking, answering agents) and brings the operator only
-  what needs him, each with a brief; the operator redirects by talking to FLIGHT.
+  what needs the operator, each with a brief; the operator redirects by talking to FLIGHT.
 
 Everything an agent "says" is evidence only; the engine decides every move from its own checks
 (CAT §2.7.2: "an agent saying it is done can only hold work back, never push it forward").
@@ -33,7 +33,7 @@ Goals
 - The mission-control repo builds itself from its board with no controller session in the loop.
 - Every move is recorded with its basis and visible on the HUD (Loop column, Work in flight, Agent
   Loop panel, FLIGHT page, Activity).
-- the operator redirects from the FLIGHT dock, and sees what changed.
+- The operator redirects from the FLIGHT dock, and sees what changed.
 - Every outward write is listed in §12. Most are what the spec's `merge` workspace already allows
   (§4.3, §8a.3); the six that go beyond it are declared there as deviations, each with its basis
   and its off-switch.
@@ -52,7 +52,7 @@ Anti-goals (would make this a failure even if it works)
 - A loop that keeps a stuck ticket spinning. Retries are bounded; a ticket parks and tells the operator why.
 - A review that only reads. RETRO runs the tests and mutation-checks the fixes; the five-round guard
   review in Plan 6 showed that reading alone misses most real bugs.
-- the operator having to answer questions to keep work flowing. Within the rules, FLIGHT decides and records;
+- The operator having to answer questions to keep work flowing. Within the rules, FLIGHT decides and records;
   the operator overturns.
 
 ## 3. Constraints
@@ -346,7 +346,7 @@ seat whose focus matches gets a Watch entry ("no seat covers `apps/mobile/**`").
 The operator talks to FLIGHT in the dock ("This week GUIDO-1 stays on the runtime; INCO-1 takes the HUD
 polish first"). FLIGHT turns it into **standing orders**: short rules stored by the hub, shown on the
 FLIGHT page, carried into every handoff, and applied by `assign` and `promote`. It re-plans the
-queues, replies with what changed ("GUIDO-1: #88 then #91; INCO-1: #78 then #84; I will ask you
+queues, replies with what changed ("GUIDO-1: #A then #B; INCO-1: #C then #D; I will ask you
 before changing Priority"), and raises asks for anything the order needs that is on the approval list
 (a Priority change, a new seat). An order that conflicts with a repo rule is refused with the rule
 named. Overturn (CAT §2.2.7) is a standing order too: "hold that point" to the seat, and the decision
@@ -405,7 +405,7 @@ writes exist (each one an Activity row with its basis):
   tidy-up of a branch it created; (1) a parked run's card moves to **Blocked** — the loop's own state, like the
   three moves above; (2) the hub edits **its own run's PR body** to list minor findings and
   hard-rule touches — the PR is the hub's, never a person's; (3) the setup action **creates fields
-  and labels** on the operator's click — his click is the approval; (4) FLIGHT moves **Backlog → Ready /
+  and labels** on the operator's click — that click is the approval; (4) FLIGHT moves **Backlog → Ready /
   Refinement** within the repo's rules — recorded in Decided without you, overturnable, and off
   with `promote_backlog: false`; (5) FLIGHT **raises issues** at home — they land in Backlog and go
   through triage, and are listed in Decided without you.
@@ -491,4 +491,4 @@ Plan 6 merges: the commit tool, `run_commits`, push and draft PR are Plan 6 Task
 4. **7d Update policy and polish**: §11, Situation and Watch re-checks, Setup › Loops read-only view,
    Telemetry's loop-derived tiles.
 5. **Later: the hub's sandboxed check runner**, for repos without CI and for the base-commit proof
-   without RETRO (the design and four review rounds are in git history: Plan 7a-1).
+   without RETRO (the design's review rounds were not carried into this repo).
