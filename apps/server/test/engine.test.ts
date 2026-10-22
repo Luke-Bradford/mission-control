@@ -2076,6 +2076,26 @@ describe("the engine runs reviews", () => {
       expect(noteKeys()).not.toContain(hardRulesUnsetNoteKey(REPO));
     });
 
+    it("with hard_rules unset, a PR the operator merged still gets its close and deletes", async () => {
+      h.rules = async () => DEFAULT_REPO_RULES;
+      await gateOpen();
+      await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
+      setPr({ state: "merged", ci: "passing", mergedAt: clock });
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.steps).toEqual(["close", "delete-remote", "delete-local"]));
+      expect(h.steps).not.toContain("merge");
+    });
+
+    it("a draft repo with hard_rules unset gets no note", async () => {
+      draftWorkspace();
+      h.rules = async () => DEFAULT_REPO_RULES;
+      await toReview();
+      reported(first().id, []);
+      await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
+      await h.engine.tick();
+      expect(noteKeys()).not.toContain(hardRulesUnsetNoteKey(REPO));
+    });
+
     it("a branch that is behind main is not merged", async () => {
       h.gate = { ...need(h.gate), containsMain: false };
       await gateOpen();
@@ -2140,6 +2160,18 @@ describe("the engine runs reviews", () => {
           phase: "working",
           mainMerge: { mainSha: MAIN, files: ["apps/a.ts"] },
         });
+        expect(loopOf().parked).toBeNull();
+      });
+
+      it("with hard_rules unset, a conflicting PR in ci is still merged with main", async () => {
+        h.rules = async () => DEFAULT_REPO_RULES;
+        report();
+        await h.engine.reconcileRun(RUN);
+        h.gate = { ...need(h.gate), mainSha: MAIN, containsMain: false };
+        setPr({ mergeable: "CONFLICTING", ci: null });
+        h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts"] }];
+        await h.engine.reconcileRun(RUN);
+        expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
         expect(loopOf().parked).toBeNull();
       });
 

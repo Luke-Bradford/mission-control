@@ -1849,6 +1849,7 @@ describe("merge workspace", () => {
     snap(
       {
         autoMerge: true,
+        hardRulesSet: true,
         headCommit: SHA,
         pushed: { sha: SHA, at: NOW - 60_000 },
         pr: pr({ ci: "passing", isDraft: true }),

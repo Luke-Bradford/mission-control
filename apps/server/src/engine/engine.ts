@@ -297,7 +297,12 @@ export function createEngine(deps: EngineDeps): Engine {
     return rulesFor(repoId).then(() => hardRulesSet.get(repoId) === true);
   }
 
-  function snapshot(run: Run, loop: RunLoop, at: number, autoMerge: boolean): LoopSnapshot | null {
+  function snapshot(
+    run: Run,
+    loop: RunLoop,
+    at: number,
+    mergeAllowed: boolean,
+  ): LoopSnapshot | null {
     const issue = issueOf(run);
     if (issue === null || run.ticket === null) return null;
     const ended = run.endedAt !== null;
@@ -377,7 +382,8 @@ export function createEngine(deps: EngineDeps): Engine {
               polledAt: store.pullRequestReadAt(run.repoId, pr.number) ?? 0,
               isDraft: pr.isDraft,
             },
-      autoMerge,
+      autoMerge: config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge",
+      hardRulesSet: mergeAllowed,
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),
       openNotes: store.openNoteKeys(run.id),
@@ -865,7 +871,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const repoId = store.run(runId)?.repoId;
     const may = repoId === undefined ? false : mayMerge(repoId);
     // (awaited only when the rules were not read yet: a pass otherwise starts in one turn)
-    const autoMerge = typeof may === "boolean" ? may : await may;
+    const mergeAllowed = typeof may === "boolean" ? may : await may;
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
@@ -905,7 +911,7 @@ export function createEngine(deps: EngineDeps): Engine {
       if (g.ok) input.gate = { sha: pushed.sha, ...g.facts };
       else log(`${runId}: could not read the merge gate: ${g.text}`);
     }
-    const snap = snapshot(run, input, at, autoMerge);
+    const snap = snapshot(run, input, at, mergeAllowed);
     if (snap === null) return;
     const step = reconcile(snap);
     const cur = step.loop;
