@@ -157,6 +157,7 @@ beforeEach(() => {
     config: cfg,
     store,
     bus,
+    login: "me",
     supervisor: {
       message: async (...a) => {
         messageCalls.push(a);
@@ -646,6 +647,17 @@ describe("start_seat", () => {
   it("starts with no options when the engine is off", async () => {
     await start();
     expect(startCalls).toEqual([["guido-1", 7, undefined]]);
+  });
+
+  it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {
+    board(card(7, { assignees: ["other"] }));
+    expect(await start()).toEqual(
+      refused("Not started: mc#7 is assigned to other; another hub or person has it."),
+    );
+    expect(startCalls).toEqual([]);
+    board(card(7, { assignees: ["me"] }));
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
   });
 
   it("refuses a seat outside its session", async () => {
