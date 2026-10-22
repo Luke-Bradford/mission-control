@@ -7,16 +7,19 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const FIVE_HOURS = 5 * HOUR;
 
+/** What a 5h window too young for a pace says, whether the hub or the clock found it so. */
+const TOO_YOUNG = "too little history for a pace";
+
 /** Time until a window is full at the current pace. */
 export function timeToFull(row: LimitRow, now: number): string {
   if (row.used >= 100) return "at limit";
   // A missing paceReady is ready: an older hub does not send it.
-  if (row.window === "5h" && row.paceReady === false) return "too little history for a pace";
+  if (row.window === "5h" && row.paceReady === false) return TOO_YOUNG;
   if (row.fullAt === null) {
     // The server gives a 5h window no pace until MIN_PACE_5H_MINUTES of it have passed.
     const young =
       row.window === "5h" && now - (row.resetAt - FIVE_HOURS) < MIN_PACE_5H_MINUTES * MINUTE;
-    return young ? "too little history to tell" : "not filling at this rate";
+    return young ? TOO_YOUNG : "not filling at this rate";
   }
   const ms = Math.max(0, row.fullAt - now);
   if (ms >= DAY) return `~${Math.floor(ms / DAY)}d`;
