@@ -5,6 +5,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_NOTE_KEY,
+  FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
   type FlightSeatState,
   type FlightState,
@@ -16,9 +17,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { flightState } from "../src/flight/state.ts";
+import { flightState, pending } from "../src/flight/state.ts";
 import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
-import type { SeatFacts, SendResult } from "../src/runtime/supervisor.ts";
+import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
 const T0 = Date.parse("2026-10-22T12:00:00Z");
@@ -70,6 +71,7 @@ let startFails: string | null;
 let facts: SeatFacts | null;
 let enabled: boolean;
 let started = 0;
+let listener: ((e: SupervisorEvent) => void) | null = null;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -135,6 +137,7 @@ beforeEach(() => {
   facts = null;
   enabled = true;
   started = 0;
+  listener = null;
   vi.setSystemTime(T0);
   watch = createFlightWatch({
     config,
@@ -147,7 +150,10 @@ beforeEach(() => {
         statusCalls++;
         return { enabled, note: null };
       },
-      on: () => () => {},
+      on: (fn) => {
+        listener = fn;
+        return () => {};
+      },
       busy: () => [],
       seatFacts: () => facts,
       startWatch: async (seatId, opts) => {
@@ -216,6 +222,55 @@ describe("the FLIGHT watcher", () => {
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
     await watch.check();
     expect(notesOpen()).toEqual([]);
+    // the clear emptied the start count: three more starts before the next note
+    noFlight();
+    for (let i = 0; i < 3; i++) await watch.check();
+    expect(startCalls).toHaveLength(6);
+    expect(notesOpen()).toEqual([]);
+  });
+
+  it("does not start FLIGHT at the account's stop", async () => {
+    for (const window of ["5h", "7d"] as const) {
+      store.addUsage({
+        accountId: "claude-main",
+        window,
+        at: T0 - 1000,
+        pct: 95,
+        resetAt: T0 + 60 * MIN,
+        source: "test",
+      });
+    }
+    await watch.check();
+    expect(startCalls).toEqual([]);
+  });
+
+  it("does not wake while FLIGHT is rate-limited", async () => {
+    liveCrew();
+    ask();
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: nowMs + MIN };
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: nowMs - 1 };
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("FLIGHT's own event checks at once; other seats' events and boards are debounced", async () => {
+    watch.start();
+    await vi.advanceTimersByTimeAsync(0);
+    statusCalls = 0;
+    listener?.({ kind: "idle", seatId: "flight-1", runId: "r", resumed: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(statusCalls).toBe(1);
+    listener?.({ kind: "idle", seatId: "guido-1", runId: "r", resumed: false });
+    bus.emit("boards");
+    await vi.advanceTimersByTimeAsync(FLIGHT_DEBOUNCE_MS - 1);
+    expect(statusCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(statusCalls).toBe(2);
+    bus.emit("boards");
+    await vi.advanceTimersByTimeAsync(FLIGHT_DEBOUNCE_MS);
+    expect(statusCalls).toBe(3);
   });
 
   it("wakes on a new question, once", async () => {
@@ -412,5 +467,32 @@ describe("wakeSummary", () => {
 
   it("does not count a free review seat", () => {
     expect(wakeSummary(state({ seats: [s({ loop: "review", free: true })] }))).toBe("nothing new");
+  });
+
+  describe("pending", () => {
+    const ticket = {
+      ref: "mc#1",
+      title: "t",
+      column: "Ready" as const,
+      priority: null,
+      labels: [],
+      ready: true,
+      blockedBy: [],
+    };
+    it("is true for a question, a free build seat with a ticket, or a park FLIGHT can lift", () => {
+      expect(pending(state({ questions: [q] }))).toBe(true);
+      expect(pending(state({ seats: [s({ free: true })], tickets: [ticket] }))).toBe(true);
+      expect(
+        pending(state({ seats: [s({ parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "x" } })] })),
+      ).toBe(true);
+    });
+
+    it("is false for a park that is the operator's, a free seat with no ticket, or nothing", () => {
+      expect(pending(state({ seats: [s({ parked: { kind: "operator", reason: "x" } })] }))).toBe(
+        false,
+      );
+      expect(pending(state({ seats: [s({ free: true })] }))).toBe(false);
+      expect(pending(state({}))).toBe(false);
+    });
   });
 });

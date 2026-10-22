@@ -936,12 +936,16 @@ describe("flight_state", () => {
       phase: "parked",
       parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget", ended: false },
     });
+    store.setSeatTurnEnded("inco-1", NOW - 7 * 60_000);
     store.addQuestion({
       agentId: "inco-1",
       runId: "r-inco",
       text: "Which lane?",
       at: NOW - 5 * 60_000,
     });
+    // asked in a run that has since ended: not listed
+    store.upsertRun(run("r-old", "guido-1", { endedAt: NOW - 1000, status: "ok" }));
+    store.addQuestion({ agentId: "guido-1", runId: "r-old", text: "Old?", at: NOW - 9 * 60_000 });
     store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
     store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
     store.raiseNote({
@@ -958,6 +962,7 @@ describe("flight_state", () => {
       card(2, { status: "Backlog", labels: ["ready"], priority: "P0" }),
       card(3, { status: "In progress" }),
       card(4, { blockedBy: [{ ref: "mc#9", closed: false }] }),
+      card(6, { priority: "P1", createdAt: NOW - 1000 }),
     );
     addDecision({ kind: "message", about: "Message to GUIDO-1", decision: "go on" });
     const bare = {
@@ -983,6 +988,7 @@ describe("flight_state", () => {
           loop: "build",
           area: ["apps/**"],
           free: true,
+          openQuestion: true,
         },
         {
           ...bare,
@@ -993,6 +999,7 @@ describe("flight_state", () => {
           area: ["apps/web/**"],
           free: false,
           state: "idle",
+          idleMin: 7,
           ticket: "mc#5",
           phase: "parked",
           parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget" },
@@ -1020,6 +1027,15 @@ describe("flight_state", () => {
           blockedBy: [],
         },
         {
+          ref: "mc#6",
+          title: "Ticket 6",
+          column: "Ready",
+          priority: "P1",
+          labels: [],
+          ready: true,
+          blockedBy: [],
+        },
+        {
           ref: "mc#1",
           title: "Ticket 1",
           column: "Ready",
@@ -1033,5 +1049,30 @@ describe("flight_state", () => {
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 4, messagesLeft: 29 },
     });
+  });
+
+  it("marks a silent running seat stalled, and every seat on an account at its stop", async () => {
+    live("guido-1", "r-guido");
+    store.setSeatSession({
+      ...row("guido-1", "r-guido"),
+      state: "running",
+      updatedAt: NOW - 11 * 60_000,
+    });
+    for (const window of ["5h", "7d"] as const) {
+      store.addUsage({
+        accountId: "claude-main",
+        window,
+        at: NOW - 1000,
+        pct: 95,
+        resetAt: NOW + 60 * 60_000,
+        source: "test",
+      });
+    }
+    const s = (await state()) as { seats: { id: string; stalled: boolean; atStop: boolean }[] };
+    expect(s.seats.map((x) => [x.id, x.stalled, x.atStop])).toEqual([
+      ["guido-1", true, true],
+      ["inco-1", false, true],
+      ["retro-1", false, true],
+    ]);
   });
 });
