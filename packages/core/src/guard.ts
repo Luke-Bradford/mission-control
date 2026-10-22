@@ -949,13 +949,15 @@ function judge(line: Line, walk: Walk, depth: number, background: boolean, mux: 
   return out;
 }
 
-const TEST_FILE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|jsx)$/;
+const TEST_FILE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|jsx|py)$/;
 
 /**
  * argv starts with an entry's words, and either a later word is `--` or no later non-flag word
- * looks like a test path (one containing `/`, or ending `.ts .tsx .mts .cts .js .mjs .cjs .jsx`;
- * a directory (`./`, `apps/`) is not one). Flag values (`--reporter dot`) and `-t` filters
- * therefore keep a command a full suite, and so does `-- x.test.ts` (vitest never filters by it).
+ * looks like a single test (one that, with any `::...` suffix cut (pytest's node id), ends
+ * `.ts .tsx .mts .cts .js .mjs .cjs .jsx .py`). A folder (`tests/unit`, `./tests`, `apps/`) is not
+ * one: it runs a whole suite, so the command keeps the lock. Flag values (`--reporter dot`) and
+ * `-t` filters therefore keep a command a full suite, and so does `-- x.test.ts` (vitest never
+ * filters by it).
  */
 export function isFullSuite(argv: readonly string[], fullSuite: readonly string[]): boolean {
   return matchedSuite(argv, fullSuite) !== null;
@@ -967,7 +969,7 @@ function matchedSuite(argv: readonly string[], fullSuite: readonly string[]): st
     if (words.length === 0 || argv.length < words.length) continue;
     if (!words.every((w, i) => argv[i] === w)) continue;
     const looksLikePath = (a: string) =>
-      !a.startsWith("-") && !a.endsWith("/") && (a.includes("/") || TEST_FILE.test(a));
+      !a.startsWith("-") && TEST_FILE.test(a.split("::")[0] ?? "");
     const tail = argv.slice(words.length);
     // vitest puts every word after `--` in options["--"], never in its file filters: the whole
     // suite runs, so any `--` makes it a full suite
