@@ -205,6 +205,7 @@ async function main(): Promise<void> {
     bus,
     supervisor,
     engine,
+    rules: engineRules,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
   });
 

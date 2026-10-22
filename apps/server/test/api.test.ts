@@ -2440,7 +2440,7 @@ describe("crew routes", () => {
           ? {}
           : {
               engine: {
-                onOperatorMessage: async () => {},
+                onOperatorMessage: async () => false,
                 status: () => ({ on: engineOn, note: null }),
               },
             }),
@@ -3065,7 +3065,10 @@ describe("the first loop's engine", () => {
       bus,
       supervisor: sup,
       engine: {
-        onOperatorMessage: async (runId) => void told.push(runId),
+        onOperatorMessage: async (runId) => {
+          told.push(runId);
+          return false;
+        },
         status: () => ({ on: true, note: "mc: the Mission Control section has no yaml block" }),
       },
     });

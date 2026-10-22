@@ -3,14 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
+  FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   NEW_LOOP,
+  type RepoRules,
   type Run,
   type RunLoop,
   type SeatSessionRow,
@@ -18,7 +21,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
+import { type CcConfig, type CrewSeatConfig, SEAT_ID } from "../src/config.ts";
 import { createFlightTools, seatFree } from "../src/flight/tools.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -72,6 +75,8 @@ let engineCalls: unknown[][];
 let fetchCalls: number[];
 let busyNow: SeatBusy[];
 let engineOn: boolean;
+let lifts: boolean;
+let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
 let fetchImpl: (n: number) => Promise<TicketView | null>;
@@ -130,6 +135,8 @@ beforeEach(() => {
   fetchCalls = [];
   busyNow = [];
   engineOn = false;
+  lifts = true;
+  rulesNow = DEFAULT_REPO_RULES;
   startImpl = async () => ({ runId: "", branch: "" });
   messageImpl = async () => {};
   fetchImpl = async () => null;
@@ -149,9 +156,13 @@ beforeEach(() => {
       },
     },
     engine: {
-      onOperatorMessage: async (...a) => void engineCalls.push(a),
+      onOperatorMessage: async (...a) => {
+        engineCalls.push(a);
+        return lifts;
+      },
       status: () => ({ on: engineOn, note: null }),
     },
+    rules: async () => rulesNow,
     fetchTicket: async (_repo, n) => {
       fetchCalls.push(n);
       return fetchImpl(n);
@@ -321,6 +332,17 @@ describe("tool list", () => {
   });
 });
 
+describe("seat schema", () => {
+  it("carries the seat id pattern on start_seat and message_seat", () => {
+    for (const name of ["start_seat", "message_seat"]) {
+      const props = (
+        named(name).inputSchema as { properties: Record<string, { pattern?: string }> }
+      ).properties;
+      expect(props.seat?.pattern).toBe(SEAT_ID.source);
+    }
+  });
+});
+
 describe("seatFree", () => {
   it("is false for a seat with an unended run or named busy", () => {
     expect(seatFree(store, [], "guido-1")).toBe(true);
@@ -404,7 +426,11 @@ describe("answer_question", () => {
     const id = ask();
     expect(await call("answer_question", A(id))).toEqual({ text: "Answered GUIDO-1." });
     expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT, answering for the operator: Lane 2", { interrupt: false }],
+      [
+        "guido-1",
+        "FLIGHT, answering for the operator: Lane 2",
+        { interrupt: false, questions: "unpassed" },
+      ],
     ]);
     expect(decisions()).toEqual([
       {
@@ -474,6 +500,45 @@ describe("answer_question", () => {
     );
   });
 
+  it("refuses a question from a seat outside FLIGHT's session", async () => {
+    cfg.crew?.sessions.push({
+      id: "s2",
+      repoId: "mc",
+      checkout: "/tmp/none/clone2",
+      seats: [seat("guido-2", "GUIDO")],
+    });
+    const id = ask("guido-2", "r-guido2");
+    expect(await call("answer_question", A(id))).toEqual(
+      refused(`Not answered: there is no open question ${id}.`),
+    );
+    expect(messageCalls).toEqual([]);
+    expect(store.question(id)?.answeredAt).toBeNull();
+  });
+
+  it("applies the per-seat message cap to the asker", async () => {
+    const id = ask();
+    for (let i = 0; i < 6; i++) addDecision({ kind: "message", seatId: "guido-1" });
+    expect((await call("answer_question", A(id))).isError).toBe(true);
+    expect(messageCalls).toEqual([]);
+  });
+
+  it("keeps a passed question open through later FLIGHT messages and answers", async () => {
+    const passed = ask();
+    await call("answer_question", { question_id: passed, pass_to_operator: true, basis: "spend" });
+    const other = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Two?",
+      at: NOW,
+    });
+    await call("answer_question", A(other));
+    expect(messageCalls.at(-1)?.[2]).toEqual({ interrupt: false, questions: "unpassed" });
+    // what the supervisor does with that option
+    store.answerQuestions("guido-1", NOW, true);
+    expect(store.question(passed)?.answeredAt).toBeNull();
+    expect(store.question(other)?.answeredAt).toBe(NOW);
+  });
+
   it("refuses FLIGHT's own question", async () => {
     const id = store.addQuestion({ agentId: "flight-1", runId: "r-flight", text: "q", at: NOW });
     expect(await call("answer_question", A(id))).toEqual(
@@ -535,6 +600,35 @@ describe("start_seat", () => {
     expect(await start({ seat: "nobody-9" })).toEqual(
       refused("Not done: nobody-9 is not a seat in your session."),
     );
+  });
+
+  describe("areas", () => {
+    beforeEach(() => {
+      rulesNow = {
+        ...DEFAULT_REPO_RULES,
+        areas: { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] },
+      };
+    });
+
+    it("refuses a card whose area is not the seat's", async () => {
+      board(card(7, { labels: ["area:server"] }));
+      expect(await start({ seat: "inco-1" })).toEqual(
+        refused("Not started: mc#7 is in area:server, not INCO-1's area."),
+      );
+      expect(startCalls).toEqual([]);
+      board(card(7, { labels: ["area:web"] }));
+      expect((await start({ seat: "inco-1" })).isError).toBeUndefined();
+    });
+
+    it("refuses a card with two area labels", async () => {
+      board(card(7, { labels: ["area:server", "area:web"] }));
+      expect(await start()).toEqual(
+        refused(
+          "Not started: mc#7 spans two areas (area:server, area:web); ask the operator to split it.",
+        ),
+      );
+      expect(startCalls).toEqual([]);
+    });
   });
 
   it("1: refuses a seat that is not a developer seat", async () => {
@@ -660,7 +754,9 @@ describe("message_seat", () => {
 
   it("sends with the FLIGHT prefix and records it", async () => {
     expect(await call("message_seat", M())).toEqual({ text: "Sent to GUIDO-1." });
-    expect(messageCalls).toEqual([["guido-1", "FLIGHT: Please push", { interrupt: false }]]);
+    expect(messageCalls).toEqual([
+      ["guido-1", "FLIGHT: Please push", { interrupt: false, questions: "none" }],
+    ]);
     expect(decisions()).toMatchObject([
       {
         kind: "message",
@@ -671,6 +767,11 @@ describe("message_seat", () => {
       },
     ]);
     expect(seen).toContain("flight");
+  });
+
+  it("asks the supervisor to close no questions", async () => {
+    await call("message_seat", M());
+    expect(messageCalls[0]?.[2]).toEqual({ interrupt: false, questions: "none" });
   });
 
   it("refuses its own seat, RETRO and a stranger", async () => {
@@ -738,8 +839,10 @@ describe("message_seat unpark", () => {
     expect(await call("message_seat", U())).toEqual({
       text: "Sent to GUIDO-1, and its run is un-parked.",
     });
-    expect(messageCalls).toEqual([["guido-1", "FLIGHT: Carry on", { interrupt: false }]]);
-    expect(engineCalls).toEqual([["r-g", "FLIGHT"]]);
+    expect(messageCalls).toEqual([
+      ["guido-1", "FLIGHT: Carry on", { interrupt: false, questions: "none" }],
+    ]);
+    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
     expect(decisions()).toMatchObject([
       {
         kind: "unpark",
@@ -749,6 +852,14 @@ describe("message_seat unpark", () => {
         decision: "Carry on",
       },
     ]);
+  });
+
+  it("records a message when the engine did not un-park", async () => {
+    parked("silent");
+    lifts = false;
+    expect(await call("message_seat", U())).toEqual({ text: "Sent to GUIDO-1." });
+    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
+    expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1" }]);
   });
 
   it("leaves a budget park to the operator", async () => {

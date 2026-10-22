@@ -130,6 +130,11 @@ export const waitsOnText = (ref: string, open: readonly string[]): string =>
 export const START_NO_GITHUB = "Not started: GitHub could not be reached.";
 export const notReadyText = (ref: string): string =>
   `Not started: ${ref} has no ## Plan section, no ready label, and is not in Ready.`;
+export const wrongAreaText = (call: string, ref: string, labels: readonly string[]): string =>
+  `Not started: ${ref} is in ${labels.join(", ")}, not ${call}'s area.`;
+export const twoAreasText = (ref: string, labels: readonly string[]): string =>
+  `Not started: ${ref} spans two areas (${labels.join(", ")}); ask the operator to split it.`;
+export const START_NO_RULES = "Not started: the repo's rules could not be read.";
 export const startFailedText = (why: string): string => `Not started: ${why}`;
 export const START_FAILED = "Not started: the start failed.";
 export const startedDecision = (call: string): string => `Started ${call}`;

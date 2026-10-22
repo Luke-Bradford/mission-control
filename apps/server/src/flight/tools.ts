@@ -9,6 +9,7 @@ import {
   accountStoppedText,
   answeredText,
   answerMessageText,
+  areaLabelsFor,
   askerRunEndedText,
   capText,
   ENGINE_OFF_TEXT,
@@ -52,9 +53,11 @@ import {
   READ_NO_GITHUB,
   READ_NO_ISSUE,
   READY_LABEL,
+  type RepoRules,
   restartRefusedText,
   START_FAILED,
   START_NO_GITHUB,
+  START_NO_RULES,
   scratchSeatText,
   seatCallSign,
   seatDef,
@@ -69,15 +72,18 @@ import {
   type TicketView,
   ticketHasRunText,
   ticketReadText,
+  twoAreasText,
   unparkCapText,
   waitsOnText,
+  wrongAreaText,
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
-import { accountAtStop } from "../engine/queue.ts";
+import { accountAtStop, areaLabelsOf } from "../engine/queue.ts";
+import { RepoRulesError } from "../engine/rules.ts";
 import type { McTool, McToolContext } from "../mcp/server.ts";
 import { badArgs, text } from "../mcp/tools.ts";
 import { cutNoteText } from "../runtime/brief.ts";
@@ -92,6 +98,8 @@ export interface FlightToolsDeps {
   bus: ChangeBus;
   supervisor: Pick<Supervisor, "message" | "busy" | "startRun">;
   engine: Pick<Engine, "onOperatorMessage" | "status"> | null;
+  /** The repo's rules (the area labels), as the engine reads them. */
+  rules: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   now?: () => number;
 }
@@ -141,7 +149,11 @@ const objectSchema = (properties: object, required: string[]) => ({
 });
 const BASIS_SCHEMA = { type: "string", minLength: 1, maxLength: FLIGHT_BASIS_MAX };
 const ISSUE_SCHEMA = { type: "integer", minimum: 1, maximum: MAX_ISSUE };
-const SEAT_SCHEMA = { type: "string", description: "The seat (e.g. guido-1)." };
+const SEAT_SCHEMA = {
+  type: "string",
+  pattern: SEAT_ID.source,
+  description: "The seat (e.g. guido-1).",
+};
 
 /** The seat row holds no unended run, and `busy` (in-memory starts and turns) does not name it. */
 export function seatFree(store: Store, busy: readonly SeatBusy[], seatId: string): boolean {
@@ -280,6 +292,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (q === null || q.answeredAt !== null || q.passedAt !== null) {
       return fail(noOpenQuestionText(id));
     }
+    if (seatCfg(q.agentId) === undefined) return fail(noOpenQuestionText(id));
     if (q.agentId === ctx.seatId) return fail(ANSWER_OWN_QUESTION);
     const call = seatCallSign(q.agentId);
     if (unendedRun(q.agentId)?.id !== q.runId) return fail(askerRunEndedText(call));
@@ -299,10 +312,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       bus.emit("flight");
       return { text: PASSED_TEXT };
     }
-    const capped = messageCap(at, call, null);
+    const capped = messageCap(at, call, q.agentId);
     if (capped !== null) return fail(capped);
     try {
-      await deps.supervisor.message(q.agentId, answerMessageText(answer), { interrupt: false });
+      await deps.supervisor.message(q.agentId, answerMessageText(answer), {
+        interrupt: false,
+        questions: "unpassed",
+      });
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
@@ -346,6 +362,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
     if (!FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
+    const rules = await deps.rules(repo.id);
+    if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
+    const areas = areaLabelsOf(rules, card);
+    if (areas.length >= 2) return fail(twoAreasText(ref, areas));
+    const label = areas[0];
+    if (label !== undefined && !areaLabelsFor(rules, cfg.area).includes(label)) {
+      return fail(wrongAreaText(call, ref, areas));
+    }
     if (store.activeTickets().has(ref)) return fail(ticketHasRunText(ref));
     const open = card.blockedBy.filter((b) => !b.closed).map((b) => b.ref);
     if (open.length > 0) return fail(waitsOnText(ref, open));
@@ -412,11 +436,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       lift = { runId: run.id, reason: parked.reason };
     }
     try {
-      await deps.supervisor.message(seat, `FLIGHT: ${body}`, { interrupt: false });
+      await deps.supervisor.message(seat, `FLIGHT: ${body}`, {
+        interrupt: false,
+        questions: "none",
+      });
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
-    if (lift === null) {
+    const lifted =
+      lift !== null &&
+      (await deps.engine?.onOperatorMessage(lift.runId, "FLIGHT", {
+        kinds: FLIGHT_UNPARK_KINDS,
+      })) === true;
+    if (lift === null || !lifted) {
       record(at, {
         kind: "message",
         seatId: seat,
@@ -427,7 +459,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       bus.emit("flight");
       return { text: sentText(call) };
     }
-    await deps.engine?.onOperatorMessage(lift.runId, "FLIGHT");
     record(at, {
       kind: "unpark",
       seatId: seat,
@@ -475,7 +506,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.answerQuestion,
       description:
-        "Answer a seat's question for the operator, or pass it to them (pass_to_operator: true) when it is his: irreversible, spending, outside the repo, or a product call the sources do not settle. The answer reaches the seat as a message. The basis is one line naming your source.",
+        "Answer a seat's question for the operator, or pass it to them (pass_to_operator: true) when it is theirs: irreversible, spending, outside the repo, or a product call the sources do not settle. The answer reaches the seat as a message. The basis is one line naming your source.",
       inputSchema: objectSchema(
         {
           question_id: { type: "integer", minimum: 1 },

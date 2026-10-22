@@ -2190,11 +2190,16 @@ export class Store {
     return Number(r.changes) > 0;
   }
 
-  /** Marks every open question of the seat answered at `at`. */
-  answerQuestions(agentId: AgentId, at: number): void {
+  /**
+   * Marks every open question of the seat answered at `at`; with `unpassedOnly`, leaves the ones
+   * passed to the operator open.
+   */
+  answerQuestions(agentId: AgentId, at: number, unpassedOnly = false): void {
     this.db
       .prepare(
-        "UPDATE seat_questions SET answered_at = ? WHERE agent_id = ? AND answered_at IS NULL",
+        `UPDATE seat_questions SET answered_at = ? WHERE agent_id = ? AND answered_at IS NULL${
+          unpassedOnly ? " AND passed_at IS NULL" : ""
+        }`,
       )
       .run(at, agentId);
   }

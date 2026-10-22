@@ -952,6 +952,19 @@ describe("questions and strays", () => {
     expect(emitted).toContain("attention");
   });
 
+  it("FLIGHT's message options spare passed questions, or close none", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    const passed = store.addQuestion({ agentId: "guido-1", runId, text: "passed?", at: 1 });
+    store.passQuestion(passed, 2);
+    store.addQuestion({ agentId: "guido-1", runId, text: "open?", at: 1 });
+    await sup.message("guido-1", "nudge", { interrupt: false, questions: "none" });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["passed?", "open?"]);
+    await sup.message("guido-1", "answer", { interrupt: false, questions: "unpassed" });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["passed?"]);
+  });
+
   it("an interrupt alone answers nothing", async () => {
     const { sup } = make();
     sup.start();

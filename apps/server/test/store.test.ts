@@ -1570,6 +1570,19 @@ describe("passQuestion", () => {
   });
 });
 
+describe("answerQuestions", () => {
+  it("with unpassedOnly leaves a passed question open", () => {
+    const passed = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "a?", at: 1 });
+    const open = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "b?", at: 1 });
+    store.passQuestion(passed, 2);
+    store.answerQuestions("guido-1", 5, true);
+    expect(store.question(passed)?.answeredAt).toBeNull();
+    expect(store.question(open)?.answeredAt).toBe(5);
+    store.answerQuestions("guido-1", 6);
+    expect(store.question(passed)?.answeredAt).toBe(6);
+  });
+});
+
 describe("flight decisions", () => {
   const dec = (over: Partial<FlightDecision> = {}): Omit<FlightDecision, "id"> => ({
     at: 1000,

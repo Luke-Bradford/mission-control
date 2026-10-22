@@ -901,6 +901,22 @@ describe("The operator's message", () => {
     expect(loopTexts()).not.toContain("resumed by CAPCOM");
   });
 
+  it("FLIGHT's un-park is limited to the kinds it names, re-checked after waiting", async () => {
+    await parkOnCi();
+    // the park changes to budget while the call waits its turn on the run's chain
+    const waiting = h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["ci"] });
+    setLoop({ phase: "parked", parked: { kind: "budget", reason: "over", ended: false } });
+    expect(await waiting).toBe(false);
+    expect(loopOf()).toMatchObject({ phase: "parked", epoch: 0, budgetExtra: 0 });
+    // FLIGHT never lifts a budget park, even when it names no kinds
+    expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toBe(false);
+    expect(loopOf().phase).toBe("parked");
+    // a kind it names is lifted, and the call says so
+    setLoop({ phase: "parked", parked: { kind: "ci", reason: "x", ended: false } });
+    expect(await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["ci"] })).toBe(true);
+    expect(loopOf().parked).toBeNull();
+  });
+
   it("a parked run whose push is on origin with its PR open goes back to ci, from now", async () => {
     await parkOnCi();
     clock += 40 * MIN;
