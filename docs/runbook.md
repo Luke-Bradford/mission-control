@@ -167,7 +167,8 @@ The API is under `/api/*`. A POST must be `application/json` (415 otherwise) and
 `/opt/homebrew/bin/node --experimental-strip-types <repo>/apps/server/src/main.ts` directly (no
 pnpm wrapper, so launchd's SIGTERM reaches the server and it shuts down cleanly), with
 `KeepAlive`, logging to `~/Library/Logs/mission-control/`, with the repo as its working
-directory. If node lives elsewhere, edit the first `ProgramArguments` entry. Update relies on
+directory. If node lives elsewhere, edit the first `ProgramArguments` entry and put its folder
+first on the plist's `PATH` (see "Setting up another machine"). Update relies on
 `KeepAlive` to start the hub again after it exits. Never set `CI` in the hub's launchd
 environment: under CI, pnpm purges a mismatched `node_modules` without asking. The hub runs its
 installs with `CI=false` and no other CI markers, but nothing else it starts should see `CI`
@@ -340,6 +341,97 @@ What each seat's process starts with:
   Files left by a hub that went down, these and any draft PR body file (`pr-<uuid>.md`), are
   removed when the next one takes the crew lock.
 
+## Setting up another machine
+
+These steps take a second Mac from nothing to a hub running crew on a board that another
+machine's hub also works. Do them in this order; the sections they name have the detail.
+
+1. **Toolchain.**
+   - Node: `brew install node` gives the current release at `/opt/homebrew/bin/node`, which CI
+     (25) and `engines` match, and needs none of step 6's node edits. The full suite also passes
+     on 24, with a pnpm `Unsupported engine` warning on each command; Homebrew's `node@24` is
+     keg-only, so it is neither at `/opt/homebrew/bin/node` nor on `PATH`. If you use it, put it
+     on your shell's `PATH` (`export PATH="/opt/homebrew/opt/node@24/bin:$PATH"` in
+     `~/.zprofile`); step 6 covers the hub.
+   - pnpm 11, the version CI uses. Homebrew offers pnpm 12, so install 11 with npm:
+     `npm install -g pnpm@11`.
+   - The `claude` CLI on `PATH`, for the seats. The copy bundled with the VS Code extension is
+     not on `PATH`; install the CLI on its own (`brew install --cask claude-code`), check
+     `claude --version`, then run `claude` once and sign in when it asks.
+   - `gh`, logged in with the `repo` and `project` scopes: `gh auth login -s project`, or
+     `gh auth refresh -s project` on an existing login (`gh auth status` lists them).
+   - `codex`, only if the config keeps a Codex account.
+2. **Access.** The account this machine's `gh` uses must be a collaborator on the repo, and that
+   alone does not let it see a user-owned Project: the Project's owner adds the account under
+   Project → Settings → Manage access, with Write. git must also push over HTTPS as that account
+   without a prompt, since the hub's git never prompts: run `gh auth setup-git`, or use a
+   credential manager that already holds the account.
+3. **Folders.** Keep the hub's and the crew's folders apart from your own working checkout of
+   this repo, so switching branches there never changes the running hub:
+
+   ```text
+   ~/code/mc-hub/mission-control    the hub's own clone: always on main; launchd runs it, Update keeps it current
+   ~/code/mc-crew/mission-control   the crew's clone
+   ~/code/mc-crew/worktrees         crew.worktrees
+   ```
+
+   Clone the repo from its owner's account (not this machine's) into both clone folders, and give
+   the crew's clone its git identity ("First crew", step 3). Never branch in the hub's clone:
+   Update refuses while it is off `main` or has changes.
+4. **Install** in the hub's clone: `pnpm install`, then `pnpm build`.
+5. **Configure** as in "Configure", then edit `config.yaml`:
+   - Remove the example's sample loops and repos, and any account you don't use. Keep the key as
+     `loops: []`: it is required.
+   - Copy the repo's entry from the other machine's `config.yaml`. Its `status_map` must name
+     every Status on the board: a card whose Status isn't in it is skipped, so it has no panel to
+     start a seat from. Set `autonomy: draft` (step 7).
+   - Edit the example's `crew` section rather than adding a second one: `worktrees` and the
+     session's `checkout` are the folders from step 3, the session's `repo_id` is the copied
+     entry's `id`, and no seat is FLIGHT. Add `node` if node is not at `/opt/homebrew/bin/node`
+     (step 6).
+   - Under `crew.deny_read`, list every folder that holds other work or data, and your own
+     checkout of this repo, which is not denied by default. An entry may not be or hold the
+     crew's folders, so keep `mc-crew` outside every folder you list.
+6. **Start** the hub with the launchd job, as in "As a launchd job", from the hub's clone. If node
+   is not at `/opt/homebrew/bin/node`, give its path (for `node@24`, the stable link
+   `/opt/homebrew/opt/node@24/bin/node`) in three places before `launchctl bootstrap`:
+   - the plist's first `ProgramArguments` entry. Without it launchd cannot start the hub:
+     `launchctl print gui/$(id -u)/com.missioncontrol.server` shows
+     `last exit code = 78: EX_CONFIG` and both logs stay empty;
+   - its folder (`/opt/homebrew/opt/node@24/bin`) at the front of the plist's `PATH`, since
+     pnpm starts with `#!/usr/bin/env node`: the hub runs pnpm itself (worktree installs,
+     Update), and the seats inherit that `PATH`;
+   - `crew.node` in `config.yaml` (see "Config"). Without it crew stays off with
+     `crew.node: /opt/homebrew/bin/node is not an executable file` in `server.err.log`.
+
+   To change a plist that is already loaded, load it again (`kickstart` keeps the old
+   definition). Then check that every collector reads `"ok": true`, and that crew status reads
+   `"enabled": true` (health doesn't show crew; when crew is off, `note` says why):
+
+   ```sh
+   launchctl bootout gui/$(id -u)/com.missioncontrol.server
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.server.plist
+   curl -s http://127.0.0.1:7420/api/health
+   curl -s http://127.0.0.1:7420/api/crew/status
+   ```
+
+7. **Take a ticket.** Each hub keeps its runs in its own database, so neither sees the other's
+   runs, and both would use the same branch for a ticket. That is why this machine's repo is
+   `autonomy: draft` with no FLIGHT seat: in a draft repo the engine deals no cards, and a FLIGHT
+   seat would start Ready tickets on its own. To take one:
+   1. Move its card to In progress and assign this machine's account.
+   2. Wait one of the other hub's GitHub polls (its `poll.github_seconds`; 60 in the example
+      config), so it sees the card has left Ready.
+   3. Check that no branch or PR exists for it:
+      `git ls-remote --heads origin 'feature/<issue>' 'feature/<issue>-*'` and the repo's open
+      PRs. If one does, the other hub started it first: unassign this machine's account and
+      leave the card to that hub.
+   4. Start a seat from the ticket's panel, which offers Start in any column. Pick the seat whose
+      `area` matches the ticket's `area:` label; the panel offers the first free seat.
+
+   The branch check in 3 above sees a run the other hub started only once that run has pushed. If it
+   could have started the ticket in the minute before you moved the card, ask whoever runs it.
+
 ## Crew pushes and PRs
 
 The seat-tool path (a seat calling push and draft PR) was checked end to end on the real CLI on
@@ -407,6 +499,15 @@ clone under your account:
 3. **Board moves, in a `merge` repo only:** the run's own card to *In progress*, *In review* or
    *Blocked*, through `updateProjectV2ItemFieldValue` (see `autonomy` below). A `draft` repo gets
    none.
+4. **The run's own PR body:** `gh pr edit <number> --repo=<owner/name> --body-file=<0600 file>`,
+   after the same text checks as the draft PR, when the engine adds RETRO's minor findings.
+5. **The review status:** `gh api repos/<owner/name>/statuses/<sha> -f state=… -f context=mc/review -f description=…`,
+   on the run's own pushed sha while its PR is open: pending while RETRO's review is queued or
+   running, then success or failure from the review, and success when you waive it. Only crew
+   runs get it, so leave `mc/review` out of the required checks while PRs from people or
+   `docs/*` branches must merge.
+6. **The plan, from a planner (FAO) run:** `gh issue edit <issue> --repo=<owner/name> --body-file=<0600 file>`,
+   appending one `## Plan` section to the ticket's body. FAO refuses where a plan already exists.
 
 Two side effects follow on GitHub, both expected:
 - **CI runs on the draft PR.** Opening it triggers the repo's workflows, which run the seat's code
@@ -417,6 +518,8 @@ Two side effects follow on GitHub, both expected:
   issue when the push lands.
 
 There are no comments, labels, ready-for-review or merges. Those wait for later phases.
+Setup's board action also creates the board's fields and the repo's type labels, on your click
+(see "Project fields").
 
 ### Config
 
@@ -556,8 +659,7 @@ options, on that repo's project, and the missing type labels on the repo (`type:
 `type:chore`, `type:test`, `type:docs`, `type:research`; it reads the repo's labels first and creates only those
 absent). It changes no item and no other field, and calling it again creates nothing; it answers
 `{ created, mismatched, labelsCreated }`. A field that already exists under that name with other
-options is left alone and named in a warning instead. The HUD has no button for it (Setup is
-read-only). An existing board's fourth Owner option (formerly a person's name) can be renamed *Operator* in GitHub; until it is,
+options is left alone and named in a warning instead. Setup › Repos runs it after a confirm. An existing board's fourth Owner option (formerly a person's name) can be renamed *Operator* in GitHub; until it is,
 the setup action names the Owner field in its warning. Area labels (`area:server` …) come from the repo's own rules (below).
 
 **Status moves (`autonomy`).** Each repo in the config has `autonomy: draft` (the default) or

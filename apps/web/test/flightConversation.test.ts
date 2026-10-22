@@ -1,6 +1,6 @@
 import type { AgentStream, StreamEvent } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { dockRows, overturnText } from "../src/flight/conversation.ts";
+import { dockRows, kindLabel, overturnText } from "../src/flight/conversation.ts";
 import { type FlightDecision, MC_LINE_PREFIX } from "../src/flight/flightTypes.ts";
 
 const ev = (
@@ -91,5 +91,13 @@ describe("overturnText", () => {
     expect(overturnText(d, null)).toBe(
       "I am overturning your decision 1 (a question: yes). Then ask me what I prefer.",
     );
+  });
+});
+
+describe("kindLabel", () => {
+  it("labels known kinds and shows an unknown kind as written", () => {
+    expect(kindLabel("promote")).toBe("Promoted");
+    expect(kindLabel("start")).toBe("Started");
+    expect(kindLabel("later-kind")).toBe("later-kind");
   });
 });

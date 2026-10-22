@@ -16,6 +16,7 @@ import {
   type DriverStop,
   driverStopKey,
   escalationKind,
+  FLIGHT_ANSWER_WAIT_MS,
   hudState,
   LOCK_WAITING_TEXT,
   lockBlockedText,
@@ -39,6 +40,7 @@ import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
+import { flightLive, flightOwnSeatIds } from "./flight/state.ts";
 import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
 import type { Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
@@ -66,6 +68,8 @@ function transcriptMtime(path: string): number | null {
 interface LoopView {
   agent: ConfiguredAgent;
   runs: Run[];
+  /** The run shown for the agent: the one its seat holds, else the newest. */
+  latest: Run | null;
   view: AgentView;
   /** Crew only: the seat's session row (null before it was ever started). */
   seatRow: SeatSessionRow | null;
@@ -112,7 +116,7 @@ function loopViews(
   const escalations = store.escalations();
   return configuredAgents(config).map((agent) => {
     const runs = store.runs(agent.id, AGENT_RUNS);
-    const latest = runs[0];
+    const latest = store.seatRun(agent.id);
     const lastOutput = latest
       ? lastOutputAt(
           store.digest(latest.id)?.lastEventAt ?? null,
@@ -147,7 +151,7 @@ function loopViews(
         stop: null,
         lastOutputAt: lastOutput,
       };
-      return { agent, runs, view, seatRow };
+      return { agent, runs, latest: latest ?? null, view, seatRow };
     }
     const loop = agent.loop;
     const st = status.get(collectorName(loop.kind, loop.id));
@@ -169,14 +173,14 @@ function loopViews(
       accountId: loop.accountId,
       state,
       stateSince: since,
-      currentRun: runs[0] ?? null,
+      currentRun: latest ?? null,
       paused,
       sourceError,
       note,
       stop,
       lastOutputAt: lastOutput,
     };
-    return { agent, runs, view, seatRow: null };
+    return { agent, runs, latest: latest ?? null, view, seatRow: null };
   });
 }
 
@@ -242,8 +246,7 @@ export function crew(
 
   const prCache: PrCache = new Map();
   const rows = loopViews(config, store, now, lock).map(
-    ({ agent, runs, view, seatRow }, index): CrewRow => {
-      const latest = runs[0] ?? null;
+    ({ agent, runs, latest, view, seatRow }, index): CrewRow => {
       const digests: Map<string, RunDigest> = store.digests(runs.map((r) => r.id));
       const digest = latest ? (digests.get(latest.id) ?? null) : null;
       let contextWindow: number | null = null;
@@ -453,17 +456,50 @@ export function attentionItems(
     }
   }
 
-  items.push(...crewItems(config, store, lock, rows));
+  items.push(...crewItems(config, store, now, lock, rows));
 
   return items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
     .map((i) => ({ ...i, acked: acks.has(i.key) }));
 }
 
+/**
+ * Whether an ended run's park is past acting on: its PR is merged or closed, or its ticket is
+ * closed, gone from its repo's board, or in a repo no longer configured. A repo whose board was
+ * never read keeps the note.
+ */
+function endedParkGone(
+  config: CcConfig,
+  store: Store,
+  run: Run,
+  boardOf: (repoId: string) => BoardItem[],
+): boolean {
+  const loop = run.loop;
+  if (loop?.phase !== "parked" || loop.parked?.kind !== "ended") return false;
+  const prs = store.pullRequests(run.repoId);
+  const pr =
+    loop.prNumber !== null
+      ? prs.find((p) => p.number === loop.prNumber)
+      : run.branch === null
+        ? undefined
+        : prs
+            .filter((p) => p.branch === run.branch && p.createdAt >= run.startedAt)
+            .sort((a, b) => b.number - a.number)[0];
+  if (pr !== undefined && pr.state !== "open") return true;
+  const t = run.ticket === null ? null : parseTicket(run.ticket);
+  if (!t) return false;
+  if (!config.repos.some((r) => r.id === t.repoId)) return true;
+  const board = boardOf(t.repoId);
+  if (board.length === 0) return false;
+  const item = board.find((b) => b.issueNumber === t.number);
+  return item === undefined || item.closed;
+}
+
 /** The crew's own Needs-you items: strays, questions, crew errors and a blocked test lock. */
 function crewItems(
   config: CcConfig,
   store: Store,
+  now: number,
   lock: TestLockState,
   rows: CrewRow[],
 ): Omit<AttentionItem, "acked">[] {
@@ -480,6 +516,15 @@ function crewItems(
     ticket: null,
   });
   const out: Omit<AttentionItem, "acked">[] = [];
+  const boards = new Map<string, BoardItem[]>();
+  const boardOf = (repoId: string): BoardItem[] => {
+    let b = boards.get(repoId);
+    if (!b) {
+      b = store.board(repoId);
+      boards.set(repoId, b);
+    }
+    return b;
+  };
 
   for (const s of store.strays()) {
     const session = sessions.find((x) => x.id === s.sessionId);
@@ -506,7 +551,19 @@ function crewItems(
     );
   }
 
+  // While FLIGHT runs, it gets first go at a seat's question; the operator sees it once FLIGHT
+  // has passed it, or after FLIGHT_ANSWER_WAIT_MS.
+  const flightHolds = flightLive(config, store);
+  const flightOwn = flightOwnSeatIds(config);
   for (const q of store.openQuestions()) {
+    if (
+      flightHolds &&
+      flightOwn.has(q.agentId) &&
+      q.passedAt === null &&
+      now - q.at < FLIGHT_ANSWER_WAIT_MS
+    ) {
+      continue;
+    }
     out.push(
       item({
         key: `ask:${q.id}`,
@@ -522,7 +579,10 @@ function crewItems(
   // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each
   // goes when the engine clears it.
   for (const n of store.notes()) {
+    if (n.dismissedAt !== null) continue;
     const run = n.runId === null ? null : store.run(n.runId);
+    if (n.kind === "blocked" && run !== null && endedParkGone(config, store, run, boardOf))
+      continue;
     const pr =
       run?.loop?.prNumber === undefined || run.loop.prNumber === null
         ? undefined

@@ -42,7 +42,14 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 };
 
 /** The mc tools only the FLIGHT seat (a `watch` role) holds; later FLIGHT tickets append to it. */
-export const FLIGHT_TOOLS: readonly McToolName[] = [MC_TOOL_NAMES.logDecision];
+export const FLIGHT_TOOLS: readonly McToolName[] = [
+  MC_TOOL_NAMES.logDecision,
+  MC_TOOL_NAMES.readTicket,
+  MC_TOOL_NAMES.answerQuestion,
+  MC_TOOL_NAMES.startSeat,
+  MC_TOOL_NAMES.messageSeat,
+  MC_TOOL_NAMES.flightState,
+];
 
 /**
  * The mc tools each mode has. `base`: every seat of the mode (`*_TOOLS` below lists the same);
@@ -117,7 +124,7 @@ export const BUILTIN_ROLES: Readonly<Record<string, RoleDef>> = {
     model: "opus",
     mode: "read-only",
     loop: "plan",
-    tools: ["report_plan"],
+    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket],
     here: hereOf("FAO"),
   },
 };

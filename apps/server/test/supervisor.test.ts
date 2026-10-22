@@ -23,6 +23,8 @@ import {
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
   guardDenyOutput,
+  NEW_LOOP,
+  NOT_ASIDE,
   PNPM_STORE_ENV,
   READONLY_BUILTINS,
   READONLY_TOOLS,
@@ -30,13 +32,17 @@ import {
   type Run,
   type RunLoop,
   retiringText,
+  reworkFirstText,
   type TicketView,
+  ticketInReviewText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { assignIssue, claimAs } from "../src/claim.ts";
 import { type CcConfig, type CrewSeatConfig, isInside } from "../src/config.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import type { GhRunner } from "../src/mcp/gh.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { CLAUDE_MD_HEADING, reviewBrief, ticketBrief, watchBrief } from "../src/runtime/brief.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -44,6 +50,7 @@ import {
   CREW_LOCK_FILE,
   createSupervisor,
   type Supervisor,
+  type SupervisorDeps,
   SupervisorError,
   type SupervisorEvent,
   seatDenyRead,
@@ -202,11 +209,14 @@ function make(
     nodeNote?: string;
     scratchRetro?: boolean;
     extraSeat?: CrewSeatConfig;
+    autonomy?: "merge" | "draft";
+    claim?: SupervisorDeps["claim"];
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
   const log = vi.fn((_msg: string) => {});
   const cfg = config();
+  if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;
   if (over.node !== undefined && cfg.crew) cfg.crew.node = over.node;
   if (over.nodeNote !== undefined && cfg.crew) cfg.crew.nodeNote = over.nodeNote;
@@ -227,6 +237,7 @@ function make(
       over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,
     fetchTicket,
+    ...(over.claim === undefined ? {} : { claim: over.claim }),
     enabled: over.enabled ?? true,
     stopGraceMs: 300,
     controlTimeoutMs: 500,
@@ -295,6 +306,49 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(sups.splice(0).map((s) => s.stopAll()));
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("startRun claims the ticket", () => {
+  /** A fake gh that records every call and answers with `code`. */
+  const fakeGh = (code = 0) => {
+    const calls: string[][] = [];
+    const gh: GhRunner = async (args) => {
+      calls.push(args);
+      return { code, stdout: "", stderr: "" };
+    };
+    return { calls, gh };
+  };
+
+  it.each(["merge", "draft"] as const)("assigns the hub's login in a %s repo", async (autonomy) => {
+    const { calls, gh } = fakeGh();
+    const { sup } = make({
+      autonomy,
+      claim: (repo, n) => assignIssue(gh, dir, "me", repo, n),
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    expect(calls).toEqual([["issue", "edit", "42", "--repo", "o/mc", "--add-assignee", "me"]]);
+  });
+
+  it("starts nothing when the hub's login is unknown", async () => {
+    const { calls, gh } = fakeGh();
+    const { sup } = make({ claim: claimAs(gh, dir, () => null) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(calls).toEqual([]);
+    expect(store.runs("guido-1", 1)).toEqual([]);
+  });
+
+  it("starts nothing when GitHub refuses the claim", async () => {
+    const { calls, gh } = fakeGh(1);
+    const { sup } = make({ claim: (repo, n) => assignIssue(gh, dir, "me", repo, n) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(calls).toHaveLength(1);
+    expect(store.runs("guido-1", 1)).toEqual([]);
+  });
 });
 
 describe("startRun", () => {
@@ -1005,6 +1059,19 @@ describe("questions and strays", () => {
     expect(emitted).toContain("attention");
   });
 
+  it("FLIGHT's message options spare passed questions, or close none", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    const passed = store.addQuestion({ agentId: "guido-1", runId, text: "passed?", at: 1 });
+    store.passQuestion(passed, 2);
+    store.addQuestion({ agentId: "guido-1", runId, text: "open?", at: 1 });
+    await sup.message("guido-1", "nudge", { interrupt: false, questions: "none" });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["passed?", "open?"]);
+    await sup.message("guido-1", "answer", { interrupt: false, questions: "unpassed" });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["passed?"]);
+  });
+
   it("an interrupt alone answers nothing", async () => {
     const { sup } = make();
     sup.start();
@@ -1388,7 +1455,15 @@ describe("startWatch", () => {
     expect(argv[argv.indexOf("--tools") + 1]).toBe(READONLY_BUILTINS.join(","));
     expect(
       argv.slice(argv.indexOf("--allowedTools") + 1, argv.indexOf("--disallowedTools")),
-    ).toEqual([...READONLY_TOOLS, "mcp__mc__log_decision"]);
+    ).toEqual([
+      ...READONLY_TOOLS,
+      "mcp__mc__log_decision",
+      "mcp__mc__read_ticket",
+      "mcp__mc__answer_question",
+      "mcp__mc__start_seat",
+      "mcp__mc__message_seat",
+      "mcp__mc__flight_state",
+    ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
 
@@ -2890,5 +2965,211 @@ describe("startReview", () => {
     sup.start();
     await until(() => expect(existsSync(scratch(r.reviewId))).toBe(false));
     expect(existsSync(join(root, "retro-review-notes"))).toBe(true);
+  });
+});
+
+describe("a run set aside in review", () => {
+  const REVIEW: RunLoop = { ...NEW_LOOP, phase: "review", prNumber: 12 };
+  const wt = () => join(root, "guido-1-42");
+  const starts = () => recorded().filter((l) => Array.isArray(l.argv));
+  const ended = (seen: SupervisorEvent[]) => seen.filter((e) => e.kind === "run-ended");
+
+  async function idleRun() {
+    const m = make();
+    m.sup.start();
+    const seen: SupervisorEvent[] = [];
+    m.sup.on((e) => seen.push(e));
+    const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    return { ...m, runId, seen };
+  }
+
+  /** The run set aside, its loop stored as the engine stores it. */
+  async function aside(wake = false) {
+    const r = await idleRun();
+    const set = await r.sup.setAside(r.runId);
+    expect(set).toEqual({ worktree: wt() });
+    store.setRunLoop(r.runId, { ...REVIEW, aside: { worktree: wt(), wake } });
+    return r;
+  }
+
+  it("setAside closes the process, frees the seat and keeps the run and its worktree", async () => {
+    const { sup, runId, seen } = await idleRun();
+    expect(existsSync(crewTokenPath(dbPath, runId))).toBe(true);
+    expect(await sup.setAside(runId)).toEqual({ worktree: wt() });
+    expect(store.seatSession("guido-1")).toMatchObject({
+      runId: null,
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+    });
+    expect(store.run(runId)).toMatchObject({ endedAt: null, status: "running" });
+    expect(existsSync(wt())).toBe(true);
+    expect(sup.seatFacts("guido-1")).toBeNull();
+    expect(ended(seen)).toEqual([]);
+    // the process's exit takes its token and files, and ends nothing
+    await until(() => expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false));
+    expect(store.run(runId)).toMatchObject({ endedAt: null, status: "running" });
+    expect(store.seatSession("guido-1")?.state).toBe("idle");
+  });
+
+  it("setAside answers null mid-turn, for an ended run and for a run the seat does not hold", async () => {
+    const { sup, runId } = await idleRun();
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    expect(await sup.setAside(runId)).toBeNull();
+    expect(sup.seatFacts("guido-1")).not.toBeNull();
+    expect(await sup.setAside("guido-1:nonesuch")).toBeNull();
+    await sup.endRunByEngine(runId);
+    expect(await sup.setAside(runId)).toBeNull();
+  });
+
+  it("wakeRun resumes the same session in place", async () => {
+    const { sup, runId } = await aside(true);
+    const sessionId = store.run(runId)?.sessionId as string;
+    expect(store.seatSession("guido-1")?.lastTurnEndedAt).not.toBeNull();
+    await sup.wakeRun(runId);
+    expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: false, resumedAt: null });
+    expect(store.seatSession("guido-1")).toMatchObject({
+      runId,
+      state: "idle",
+      reason: null,
+      lastTurnEndedAt: null,
+    });
+    await sup.message("guido-1", "rework", { interrupt: false });
+    await until(() => expect(starts()).toHaveLength(2));
+    const second = starts()[1];
+    const argv = second.argv as string[];
+    expect(argv[argv.indexOf("--resume") + 1]).toBe(sessionId);
+    expect(second.cwd).toBe(wt());
+    expect(store.seatSession("guido-1")).toMatchObject({
+      runId,
+      cliSessionId: sessionId,
+      worktree: wt(),
+    });
+    expect(userLines().filter((l) => l.startsWith("Carry on"))).toEqual([]);
+  });
+
+  it("wakeRun is refused for a run that is not aside and while the seat holds another run", async () => {
+    const { sup, runId } = await aside(false);
+    const none = await refusal(sup.wakeRun("guido-1:nonesuch"));
+    expect([none.status, none.message]).toEqual([409, NOT_ASIDE]);
+    store.setRunLoop(runId, { ...REVIEW, aside: null });
+    const notAside = await refusal(sup.wakeRun(runId));
+    expect([notAside.status, notAside.message]).toEqual([409, NOT_ASIDE]);
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
+    const other = await sup.startRun("guido-1", 43, { loop: NEW_LOOP });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const busy = await refusal(sup.wakeRun(runId));
+    expect([busy.status, busy.message]).toEqual([409, "GUIDO-1 already has a run"]);
+    expect(store.seatSession("guido-1")?.runId).toBe(other.runId);
+    expect(store.run(runId)).toMatchObject({ endedAt: null });
+  });
+
+  it("wakeRun, worktree gone: the run ends failed and the seat row is left alone", async () => {
+    const { sup, runId, seen } = await aside(true);
+    git(clone, "worktree", "remove", "--force", wt());
+    const before = store.seatSession("guido-1");
+    const e = await refusal(sup.wakeRun(runId));
+    expect(e.status).toBe(500);
+    expect(e.message).toContain("could not resume");
+    expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
+    expect(store.run(runId)?.endedAt).not.toBeNull();
+    expect(ended(seen)).toEqual([{ kind: "run-ended", seatId: "guido-1", runId, endedBy: "exit" }]);
+    expect(store.seatSession("guido-1")).toEqual(before);
+    expect(starts()).toHaveLength(1);
+  });
+
+  it("startRun is refused while rework waits and on a ticket in review", async () => {
+    const { sup, runId } = await aside(true);
+    const first = await refusal(sup.startRun("guido-1", 43));
+    expect([first.status, first.message]).toEqual([409, reworkFirstText("GUIDO-1", "mc#42")]);
+    store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: false } });
+    const same = await refusal(sup.startRun("guido-1", 42));
+    expect([same.status, same.message]).toEqual([409, ticketInReviewText("mc#42")]);
+    const next = await sup.startRun("guido-1", 43);
+    expect(store.run(next.runId)).toMatchObject({ endedAt: null });
+  });
+
+  it("endRunByEngine ends an aside run, removes its worktree and leaves the seat row", async () => {
+    const { sup, runId, seen } = await aside(false);
+    const other = await sup.startRun("guido-1", 43);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const row = store.seatSession("guido-1");
+    await sup.endRunByEngine(runId);
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
+    expect(store.run(runId)?.endedAt).not.toBeNull();
+    expect(ended(seen).filter((e) => e.runId === runId)).toEqual([
+      { kind: "run-ended", seatId: "guido-1", runId, endedBy: "engine" },
+    ]);
+    expect(existsSync(wt())).toBe(false);
+    expect(store.seatSession("guido-1")).toEqual(row);
+    expect(store.seatSession("guido-1")?.runId).toBe(other.runId);
+    expect(sup.seatFacts("guido-1")).not.toBeNull();
+  });
+
+  it("endRunByEngine leaves a note when an aside run's worktree will not go", async () => {
+    const { sup, runId } = await aside(false);
+    prep.failRemove = true;
+    await sup.endRunByEngine(runId);
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
+    expect(store.notes()).toEqual([expect.objectContaining({ key: `cleanup:${runId}` })]);
+    expect(existsSync(wt())).toBe(true);
+  });
+
+  it("a scratch seat is denied an aside worktree", async () => {
+    const seed = join(dir, "seed");
+    const r = await (async () => {
+      git(seed, "checkout", "-q", "-b", "pr");
+      writeFileSync(join(seed, "a.txt"), "a\n");
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "pr change");
+      git(seed, "push", "-q", "origin", "pr");
+      const sha = git(seed, "rev-parse", "HEAD");
+      git(seed, "checkout", "-q", "main");
+      return sha;
+    })();
+    const author: Run = {
+      id: "guido-1:20261020T000000Z",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      ticketTitle: TICKET.title,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: join(dir, "author.jsonl"),
+      prs: [],
+      summary: null,
+      loop: { ...REVIEW, aside: { worktree: wt(), wake: false } },
+    };
+    store.upsertRun(author);
+    store.setRunPush({ runId: author.id, sha: r, at: 1 });
+    const reviewId = store.requestReview({
+      authorRunId: author.id,
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 9,
+      sha: r,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 1,
+    }) as number;
+    store.setReviewState(reviewId, ["queued"], "starting", { at: 2 });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await sup.startReview("retro", reviewId);
+    await until(() => expect(starts()).toHaveLength(1));
+    const argv = starts()[0].argv as string[];
+    const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
+    expect(fs.denyRead).toContain(wt());
   });
 });

@@ -10,6 +10,7 @@
  * crew is disabled, in a preview, or with `MC_NO_LOOP_WRITES=1` (`enabled`).
  */
 import {
+  asideEventText,
   BLOCKING_SEVERITIES,
   blockedNoteKey,
   CI_FAILED_TEXT,
@@ -43,9 +44,12 @@ import {
   reviewQueuedText,
   reviewRunStep,
   reviewStartedText,
+  reviewStatusOf,
   seatCallSign,
   seatDef,
   TAKE_STALE_MS,
+  wakeFailedText,
+  wokenEventText,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../config.ts";
@@ -53,6 +57,7 @@ import type { Move, MoveResult } from "../github-board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { wakeDueAsideRun } from "./aside.ts";
 import { CI_LOG_UNREADABLE, EMPTY_LOG, NO_FAILED_RUN, type Publisher } from "./publish.ts";
 import { accountAtStop, isTransientStart, seatMayTake } from "./queue.ts";
 import type { RepoRulesError } from "./rules.ts";
@@ -74,7 +79,15 @@ export interface EngineDeps {
   bus: ChangeBus;
   supervisor: Pick<
     Supervisor,
-    "on" | "send" | "seat" | "seatFacts" | "endRunByEngine" | "startReview" | "busy"
+    | "on"
+    | "send"
+    | "seat"
+    | "seatFacts"
+    | "endRunByEngine"
+    | "startReview"
+    | "busy"
+    | "setAside"
+    | "wakeRun"
   >;
   publisher: Publisher;
   /** `moveCard`, bound to the GitHub client, the store, the config and the poll. */
@@ -103,8 +116,16 @@ export interface Engine {
   reconcileRun(runId: string): Promise<void>;
   /** After a poll: every active looped run of the repo. */
   reconcileRepo(repoId: RepoId): Promise<void>;
-  /** The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes. */
-  onOperatorMessage(runId: string): Promise<void>;
+  /**
+   * The operator wrote to the run's seat: a parked run (unless ended or its PR was closed) resumes.
+   * `opts.kinds` limits the park kinds that may be lifted, checked when the run's turn comes; FLIGHT
+   * never lifts a budget park. Resolves true only when it un-parked the run.
+   */
+  onOperatorMessage(
+    runId: string,
+    by?: "CAPCOM" | "FLIGHT",
+    opts?: { kinds?: readonly string[] },
+  ): Promise<boolean>;
   status(): { on: boolean; note: string | null };
   /** How many CI excerpts are held for a busy seat (a test seam). */
   excerptsHeld(): number;
@@ -158,10 +179,15 @@ export function createEngine(deps: EngineDeps): Engine {
   const excerpts = new Map<string, string>();
   /** Transient refusals of each review's PR-body edit (in memory: a restart tries afresh). */
   const bodyTries = new Map<number, number>();
+  /** The mc/review status last set for each run, as `<sha>:<state>:<description>` (in memory: a restart sets it once more). */
+  const reviewStatuses = new Map<string, string>();
   let started = false;
   let unsubscribe: (() => void) | null = null;
 
   const live = () => deps.enabled && started && (deps.crewOn?.() ?? true);
+
+  const seatConfig = (seatId: string): CrewSeatConfig | undefined =>
+    (config.crew?.sessions ?? []).flatMap((s) => s.seats).find((x) => x.id === seatId);
 
   /** Whether the seat is in the config: a seat removed from it leaves its runs alone. */
   const seatKnown = (seatId: string): boolean =>
@@ -255,7 +281,9 @@ export function createEngine(deps: EngineDeps): Engine {
       hubStartedAt: deps.hubStartedAt,
       seat: {
         call: seatCallSign(run.agentId),
-        state: row?.state ?? "stopped",
+        // a run off its seat is on no seat: the row is another run's, and so is its rate limit
+        state: loop.aside ? "stopped" : (row?.state ?? "stopped"),
+        holdsRun: current,
         inTurn: !current || facts === null ? true : facts.inTurn,
         lastTurnEndedAt:
           current && turnEnded !== null && turnEnded >= run.startedAt ? turnEnded : null,
@@ -293,6 +321,7 @@ export function createEngine(deps: EngineDeps): Engine {
       budget: config.crew?.runTokenBudget ?? Number.MAX_SAFE_INTEGER,
       ended: ended ? { reason: endReason(run) } : null,
       review,
+      asideOk: reviewer !== null,
     };
   }
 
@@ -487,6 +516,67 @@ export function createEngine(deps: EngineDeps): Engine {
         await kickReviews();
         return;
       }
+      case "set-aside": {
+        const worktree = supervisor.seat(run.agentId)?.worktree ?? null;
+        if (worktree === null) return;
+        // stored before the call: a restart in between finds the run on its seat, which clears it
+        cur.aside = { worktree, wake: false };
+        store.setRunLoop(run.id, cur);
+        const r = await supervisor.setAside(run.id);
+        if (r === null) {
+          cur.aside = null;
+          return;
+        }
+        const sha = store.runPush(run.id)?.sha ?? "";
+        store.addLoopEvent(
+          `${run.id}:${cur.epoch}:aside:${sha}`,
+          run.id,
+          asideEventText(seatCallSign(run.agentId)),
+          at,
+        );
+        kickAside(run.agentId, run.id);
+        // the freed seat takes its next ticket now, unless rework is due back on it first
+        if (wakeDueAsideRun(store, run.agentId) === undefined) {
+          deps.takeNext(run.agentId).catch((e: unknown) => {
+            log(
+              `${run.agentId}: take after set-aside failed: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          });
+        }
+        return;
+      }
+      case "wake": {
+        const accountId = seatConfig(run.agentId)?.accountId;
+        if (accountId !== undefined && accountAtStop(config, store, accountId, at)) return;
+        const oldest = wakeDueAsideRun(store, run.agentId);
+        if (oldest !== undefined && oldest.id !== run.id) return;
+        try {
+          await supervisor.wakeRun(run.id);
+        } catch (e) {
+          // the seat is busy or the hub is stopping: the next pass tries again
+          if (isTransientStart(e)) return;
+          const message = e instanceof Error ? e.message : String(e);
+          // (the supervisor ended the run: the next pass parks it ended)
+          store.addLoopEvent(
+            `${run.id}:wake-failed:${at}`,
+            run.id,
+            wakeFailedText(message.slice(0, 300)),
+            at,
+          );
+          out.again = true;
+          return;
+        }
+        cur.aside = null;
+        store.addLoopEvent(
+          `${run.id}:woken:${at}`,
+          run.id,
+          wokenEventText(seatCallSign(run.agentId)),
+          at,
+        );
+        // the fix line goes now
+        out.again = true;
+        return;
+      }
       case "pr-body": {
         const row = store.review(a.reviewId);
         const reviewer = reviewerOf(config, run.agentId);
@@ -516,6 +606,34 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         return;
       }
+    }
+  }
+
+  /** Keeps the mc/review commit status on the run's pushed sha in step with its review; never throws. */
+  async function syncReviewStatus(runId: string): Promise<void> {
+    const run = store.run(runId);
+    const loop = run?.loop;
+    if (run === null || loop === undefined || loop === null) return;
+    if (reviewerOf(config, run.agentId) === null) return;
+    if (!config.repos.some((r) => r.id === run.repoId)) return;
+    const sha = store.runPush(run.id)?.sha;
+    if (sha === undefined) return;
+    if (findPr(run, loop)?.state !== "open") return;
+    const status = reviewStatusOf(
+      store.reviewsOfRun(run.id).map(reviewFact),
+      loop.epoch,
+      sha,
+      loop.reviewWaivedSha ?? null,
+    );
+    if (status === null) return;
+    const mark = `${sha}:${status.state}:${status.description}`;
+    if (reviewStatuses.get(run.id) === mark) return;
+    try {
+      const r = await publisher.setReviewStatus(run, sha, status.state, status.description);
+      if (r.ok) reviewStatuses.set(run.id, mark);
+      else log(`${run.id}: review status not set: ${r.text}`);
+    } catch (e) {
+      log(`${run.id}: review status not set: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -579,6 +697,7 @@ export function createEngine(deps: EngineDeps): Engine {
       }
     }
     saveLoop(runId, cur, store.run(runId)?.loop);
+    await syncReviewStatus(runId);
     if (out.again && round + 1 < MAX_ROUNDS) await pass(runId, round + 1);
   }
 
@@ -846,6 +965,14 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
+  /** The seat is free (a run ended or left it): its runs waiting off it are looked at again. */
+  function kickAside(seatId: string, except?: string): void {
+    if (!live()) return;
+    for (const r of store.asideRuns()) {
+      if (r.agentId === seatId && r.id !== except) void reconcileRun(r.id);
+    }
+  }
+
   function kickReviews(): Promise<void> {
     if (!live()) return Promise.resolve();
     return onChain(REVIEWS_CHAIN, superviseReviews);
@@ -860,8 +987,17 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!deps.enabled || started) return;
       started = true;
       unsubscribe = supervisor.on((e) => {
+        if (e.kind === "run-ended") kickAside(e.seatId);
         const rv = store.reviewOfRun(e.runId);
         if (rv !== null) {
+          if (e.kind === "findings") {
+            // The author run (aside or not) is looked at now, so its rework is flagged before a
+            // slow review start can let the seat take a new ticket; once is enough (a second
+            // pass would only retry a transient step ahead of its tick).
+            void reconcileRun(rv.authorRunId);
+            void kickReviews();
+            return;
+          }
           void kickReviews().then(() => reconcileRun(rv.authorRunId));
           return;
         }
@@ -918,8 +1054,9 @@ export function createEngine(deps: EngineDeps): Engine {
       await Promise.all(runs.map((r) => reconcileRun(r.id)));
     },
 
-    onOperatorMessage(runId) {
-      if (!live()) return Promise.resolve();
+    onOperatorMessage(runId, by = "CAPCOM", opts) {
+      if (!live()) return Promise.resolve(false);
+      let lifted = false;
       return onChain(runId, async () => {
         const run = store.run(runId);
         const loop = run?.loop;
@@ -930,7 +1067,9 @@ export function createEngine(deps: EngineDeps): Engine {
           loop.phase !== "parked" ||
           loop.parked === null ||
           loop.parked.ended ||
-          kind === "pr-closed"
+          kind === "pr-closed" ||
+          (by === "FLIGHT" && kind === "budget") ||
+          (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
         ) {
           return;
         }
@@ -965,10 +1104,11 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
-        store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, "resumed by CAPCOM", at);
+        store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
+        lifted = true;
         await pass(run.id);
-      });
+      }).then(() => lifted);
     },
 
     excerptsHeld: () => excerpts.size,

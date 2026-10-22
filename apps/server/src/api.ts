@@ -39,6 +39,7 @@ import {
   type McToolName,
   METER_FULL_PCT,
   NEW_LOOP,
+  pace5h,
   projectAtReset,
   type RepoProfile,
   type RepoView,
@@ -84,7 +85,7 @@ import { changedFiles, fileDiff, GitFailed } from "./files.ts";
 import { flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
-import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK } from "./hud.ts";
+import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
 import { bearer, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
@@ -269,6 +270,9 @@ const AckBody = z.strictObject({
   keys: z.array(z.string().min(1).max(200)).min(1).max(ACK_BATCH_MAX),
 });
 
+/** The answer to a dismiss of a key that is not an open parked note. */
+export const NO_PARKED_NOTE = "no such parked note";
+
 /** `YYYY-MM-DD` naming a real calendar day. */
 const isCalendarDate = (s: string): boolean => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -440,7 +444,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
-          const run = store.runs(agent.id, 1)[0];
+          const run = store.seatRun(agent.id);
           if (!run) {
             return {
               runId: null,
@@ -1148,6 +1152,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { acked: keys.length };
       });
 
+      // Reader: apps/web/src/comms/NeedsList.tsx (the Needs-you Dismiss button; the web side is its own ticket)
+      api.post<{ Params: { key: string } }>("/attention/:key/dismiss", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const key = req.params.key;
+        const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
+        if (key.length > 200 || noteKey === "" || !store.dismissNote(noteKey, now())) {
+          return reply.code(404).send({ error: NO_PARKED_NOTE });
+        }
+        bus.emit("attention");
+        return { dismissed: key };
+      });
+
       api.get("/settings/away", async (): Promise<AwaySettings> => {
         const raw = store.getSetting(AWAY_SETTING);
         if (raw === null) return DEFAULT_AWAY;
@@ -1243,6 +1260,7 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
           projected: null,
           stopForecast: null,
           fullAt: fullAt5h(fiveH, resetAt),
+          paceReady: pace5h(fiveH) !== null,
         });
         continue;
       }

@@ -11,8 +11,15 @@ import {
   type SeatState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { CardNow } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
-import { dealQueues, refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
+import {
+  dealQueues,
+  refillQueues,
+  seatMayTake,
+  type TakeDeps,
+  takeNext,
+} from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
@@ -47,6 +54,12 @@ let noteCalls: number;
 let enabled: boolean;
 let logs: string[];
 let transientTakes: Map<string, number>;
+/** This hub's login. */
+const ME = "me";
+/** What the fresh read of a card finds; by default the stored card as it is. */
+let fresh: (issue: number) => CardNow | null;
+let readFails: boolean;
+let myLogin: string | null;
 
 function makeConfig(autonomy: "merge" | "draft" = "merge"): CcConfig {
   return {
@@ -93,6 +106,7 @@ const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
   status: "Ready",
   state: "planned",
   labels: ["area:server"],
+  assignees: [],
   priority: null,
   updatedAt: NOW,
   url: "u",
@@ -113,11 +127,23 @@ const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
 });
 
 const refill = (rulesOf: () => Promise<RepoRules | RepoRulesError> = async () => rules) =>
-  refillQueues({ config, store, rules: rulesOf, now: () => NOW, onNotes: () => void noteCalls++ });
+  refillQueues({
+    config,
+    store,
+    rules: rulesOf,
+    login: ME,
+    now: () => NOW,
+    onNotes: () => void noteCalls++,
+  });
 const takeDeps = (): TakeDeps => ({
   config,
   store,
   enabled,
+  login: myLogin,
+  readCard: async (_repoId, issue) => {
+    if (readFails) throw new Error("GitHub is down");
+    return fresh(issue);
+  },
   transientTakes,
   now: () => NOW,
   log: (l) => logs.push(l),
@@ -177,6 +203,12 @@ beforeEach(() => {
   enabled = true;
   logs = [];
   transientTakes = new Map();
+  readFails = false;
+  myLogin = ME;
+  fresh = (issue) => {
+    const c = store.board(REPO).find((x) => x.issueNumber === issue);
+    return c === undefined ? null : c;
+  };
 });
 
 afterEach(() => {
@@ -185,6 +217,17 @@ afterEach(() => {
 });
 
 describe("refillQueues", () => {
+  it("leaves out a Ready card assigned to another login and keeps one assigned to the hub", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { assignees: ["other"] }),
+      card(2, { assignees: [ME] }),
+      card(3, { assignees: [ME, "other"] }),
+      card(4),
+    ]);
+    await refill();
+    expect(issues(SERVER)).toEqual([2, 4]);
+  });
+
   it("queues a Ready area:server card for the server seat only", async () => {
     store.replaceBoard(REPO, [card(1)]);
     await refill();
@@ -388,6 +431,47 @@ describe("takeNext", () => {
     await refill();
   };
 
+  it("starts nothing when the fresh read finds the card In progress, and untakes the row", async () => {
+    await queued(card(1));
+    fresh = () => ({ status: "In progress", state: "in progress", closed: false, assignees: [] });
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER).map((q) => [q.issue, q.takenAt])).toEqual([[1, null]]);
+  });
+
+  it("starts nothing when the fresh read finds another login assigned", async () => {
+    await queued(card(1));
+    fresh = () => ({ status: "Ready", state: "planned", closed: false, assignees: ["other"] });
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER).map((q) => q.takenAt)).toEqual([null]);
+  });
+
+  it("starts nothing when the fresh read finds no card, or cannot be made", async () => {
+    await queued(card(1));
+    fresh = () => null;
+    await take();
+    expect(started).toEqual([]);
+    readFails = true;
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER).map((q) => q.takenAt)).toEqual([null]);
+  });
+
+  it("starts a card the fresh read finds Ready and assigned to the hub", async () => {
+    await queued(card(1));
+    fresh = () => ({ status: "Ready", state: "planned", closed: false, assignees: [ME] });
+    await take();
+    expect(started).toHaveLength(1);
+  });
+
+  it("starts nothing when the hub does not know its own login", async () => {
+    await queued(card(1));
+    myLogin = null;
+    await take();
+    expect(started).toEqual([]);
+  });
+
   it("starts the head of the queue as a looped run and drops the row", async () => {
     await queued(card(1), card(2));
     await take();
@@ -408,6 +492,26 @@ describe("takeNext", () => {
     await queued(card(1));
     await take();
     expect(started).toHaveLength(1);
+  });
+
+  it("rework first: an idle seat with a run waiting on rework takes nothing", async () => {
+    const aside = (wake: boolean) => ({ ...NEW_LOOP, aside: { worktree: "/w/x", wake } });
+    store.upsertRun(
+      run({ id: "r-aside", agentId: SERVER, ticket: `${REPO}#9`, loop: aside(false) }),
+    );
+    seatRow("idle");
+    await queued(card(1));
+    // a run in review, nothing due: the seat is free
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    store.setRunLoop("r-aside", aside(true));
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER)[0]?.takenAt).toBeNull();
+    // another seat's rework does not hold this one
+    store.upsertRun(run({ id: "r-other", agentId: WEB, ticket: `${REPO}#8`, loop: aside(true) }));
+    store.setRunLoop("r-aside", aside(false));
+    expect(seatMayTake(store, SERVER)).toBe(true);
   });
 
   it.each(["stopped", "error", "starting", "running", "parked"] as const)(

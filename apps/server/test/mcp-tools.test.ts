@@ -850,6 +850,7 @@ describe("ask_operator", () => {
         runId: RUN,
         text: "Lanes per customer, or one global list?",
         at: NOW,
+        passedAt: null,
       },
     ]);
     expect(emitted).toContain("attention");
@@ -1959,10 +1960,18 @@ describe("push and draft_pr", () => {
       expect(existsSync(create?.bodyFile ?? "")).toBe(false);
     });
 
-    it("adds no closing line when the body names the run's issue", async () => {
+    it("adds no closing line when the body already closes the run's issue", async () => {
       await pushed();
-      await pr("feat: x", "Part of #42.");
-      expect(ghCalls()[1]?.body).toBe("Part of #42.\n\nOpened by GUIDO-1 (Mission Control).\n");
+      await pr("feat: x", "Fixes #42.");
+      expect(ghCalls()[1]?.body).toBe("Fixes #42.\n\nOpened by GUIDO-1 (Mission Control).\n");
+    });
+
+    it("adds the closing line when the body only mentions the run's issue", async () => {
+      await pushed();
+      await pr("feat: x", "Refs #42.");
+      expect(ghCalls()[1]?.body).toBe(
+        "Refs #42.\n\nCloses #42.\n\nOpened by GUIDO-1 (Mission Control).\n",
+      );
     });
 
     it("refuses before a push, and after a commit the push has not sent", async () => {
@@ -2218,11 +2227,11 @@ describe("push and draft_pr", () => {
       },
     );
 
-    it("adds no Closes when the body names the issue anywhere, code included (finding 8, round 4)", async () => {
+    it("adds Closes when the only closing keyword is inside code", async () => {
       await pushed();
-      await pr("feat: x", "Run `gh issue view #42`.");
+      await pr("feat: x", "Run `Fixes #42`.");
       expect(ghCalls()[1]?.body).toBe(
-        "Run `gh issue view #42`.\n\nOpened by GUIDO-1 (Mission Control).\n",
+        "Run `Fixes #42`.\n\nCloses #42.\n\nOpened by GUIDO-1 (Mission Control).\n",
       );
     });
 

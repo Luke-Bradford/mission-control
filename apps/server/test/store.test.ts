@@ -15,6 +15,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
+import { NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -481,6 +482,7 @@ describe("Store", () => {
       owner: "CTO",
       parent: n + 100,
       subIssues: { done: 1, total: n + 1 },
+      assignees: ["luke"],
       blockedBy: [
         { ref: "other#12", closed: false },
         { ref: `${repoId}#3`, closed: true },
@@ -525,6 +527,7 @@ describe("Store", () => {
         owner: null,
         parent: null,
         subIssues: null,
+        assignees: [],
         blockedBy: [],
         milestone: null,
         size: null,
@@ -563,6 +566,7 @@ describe("Store", () => {
         owner: null,
         parent: null,
         subIssues: null,
+        assignees: [],
         blockedBy: [],
         milestone: null,
         size: "L",
@@ -651,6 +655,7 @@ describe("Store", () => {
       owner: null,
       parent: null,
       subIssues: null,
+      assignees: [],
       blockedBy: [],
       milestone: null,
       size: null,
@@ -1176,6 +1181,25 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")?.lastTurnEndedAt).toBe(77);
   });
 
+  it("clears when the last turn ended with null", () => {
+    store.setSeatSession(seat());
+    store.setSeatTurnEnded("guido", 77);
+    store.setSeatTurnEnded("guido", null);
+    expect(store.seatSession("guido")?.lastTurnEndedAt).toBeNull();
+  });
+
+  it("asideRuns: unended runs with an aside, oldest first", () => {
+    const aside = { worktree: "/w/x", wake: false };
+    store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, aside } }));
+    store.upsertRun(run({ id: "a", seq: 1, startedAt: 1000, loop: { ...NEW_LOOP, aside } }));
+    store.upsertRun(run({ id: "none", seq: 3, startedAt: 3000, loop: NEW_LOOP }));
+    store.upsertRun(run({ id: "plain", seq: 4, startedAt: 4000 }));
+    store.upsertRun(
+      run({ id: "ended", seq: 5, startedAt: 500, endedAt: 600, loop: { ...NEW_LOOP, aside } }),
+    );
+    expect(store.asideRuns().map((r) => r.id)).toEqual(["a", "b"]);
+  });
+
   it("round-trips a row and upserts on the seat id", () => {
     expect(store.seatSession("guido")).toBeNull();
     store.setSeatSession(seat());
@@ -1551,6 +1575,35 @@ describe("liveSeatRuns and branchCommitSpan", () => {
     c("r2", "sha3");
     expect(store.branchCommitSpan("repo", "feature/1-x")).toEqual({ first: "sha1", last: "sha3" });
     expect(store.branchCommitSpan("repo", "feature/2-y")).toBeNull();
+  });
+});
+
+describe("passQuestion", () => {
+  it("is true once, and false after the question is answered", () => {
+    const id = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "q?", at: 1 });
+    expect(store.question(id)).toMatchObject({ passedAt: null, answeredAt: null });
+    expect(store.passQuestion(id, 5)).toBe(true);
+    expect(store.passQuestion(id, 6)).toBe(false);
+    expect(store.question(id)).toMatchObject({ passedAt: 5 });
+    expect(store.openQuestions()).toMatchObject([{ id, passedAt: 5 }]);
+    const other = store.addQuestion({ agentId: "guido-2", runId: "r2", text: "q?", at: 1 });
+    store.answerQuestions("guido-2", 7);
+    expect(store.passQuestion(other, 8)).toBe(false);
+    expect(store.question(other)?.answeredAt).toBe(7);
+    expect(store.question(999)).toBeNull();
+  });
+});
+
+describe("answerQuestions", () => {
+  it("with unpassedOnly leaves a passed question open", () => {
+    const passed = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "a?", at: 1 });
+    const open = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "b?", at: 1 });
+    store.passQuestion(passed, 2);
+    store.answerQuestions("guido-1", 5, true);
+    expect(store.question(passed)?.answeredAt).toBeNull();
+    expect(store.question(open)?.answeredAt).toBe(5);
+    store.answerQuestions("guido-1", 6);
+    expect(store.question(passed)?.answeredAt).toBe(6);
   });
 });
 

@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { BUILTIN_ROLES, CREW_EFFORTS, DEFAULT_CREW_NODE } from "@mc/core";
+import { BUILTIN_ROLES, CREW_EFFORTS, DEFAULT_CREW_NODE, FLIGHT_TOOLS } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   type CcConfig,
@@ -475,8 +475,8 @@ ${seats.join("\n")}
       const cfg = load(crewText({ seats: [modelless("flight-1", "FLIGHT")] }));
       const s = cfg.crew?.sessions[0]?.seats[0];
       expect(s?.model).toBe("opus");
-      expect(s?.def).toMatchObject({ mode: "read-only", loop: "watch", mcTools: ["log_decision"] });
-      expect(crewSeatGrants(cfg, "flight-1")).toEqual(["log_decision"]);
+      expect(s?.def).toMatchObject({ mode: "read-only", loop: "watch", mcTools: FLIGHT_TOOLS });
+      expect(crewSeatGrants(cfg, "flight-1")).toEqual(FLIGHT_TOOLS);
     });
 
     it("only one seat may watch, in any session", () => {

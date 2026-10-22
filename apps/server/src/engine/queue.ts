@@ -27,10 +27,12 @@ import {
   seatCallSign,
   seatDef,
 } from "@mc/core";
+import type { CardNow } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { wakeDueAsideRun } from "./aside.ts";
 import { RepoRulesError } from "./rules.ts";
 
 export const TWO_AREAS_KEY_PREFIX = "question:two-areas:";
@@ -51,6 +53,8 @@ export interface QueueDeps {
   store: Store;
   /** A repo's board rules (read at origin/HEAD); an error means no queue is built for the repo. */
   rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
+  /** The hub's own `gh` login; null when it could not be read, so any assigned card is another's. */
+  login: string | null;
   now: () => number;
   /** Called when a note this module manages is raised or cleared. */
   onNotes?: () => void;
@@ -60,6 +64,10 @@ export interface TakeDeps {
   config: CcConfig;
   store: Store;
   supervisor: Pick<Supervisor, "startRun">;
+  /** The hub's own `gh` login; null when it could not be read, and then nothing is taken. */
+  login: string | null;
+  /** The card as GitHub has it now (the issue and its project item); null when it is not there. */
+  readCard: (repoId: RepoId, issue: number) => Promise<CardNow | null>;
   /** false: a preview, crew off, or loop writes disabled; nothing is taken. */
   enabled: boolean;
   now: () => number;
@@ -94,14 +102,21 @@ const isMerge = (config: CcConfig, repoId: RepoId): boolean =>
 
 /**
  * Whether the seat may take a ticket now: it has no seat row yet, or it is idle holding no run (or
- * only one that has ended). A run the store does not know counts as live.
+ * only one that has ended), and no run of its own waits off the seat for rework (flagged to wake,
+ * or its review has reported blocking findings not yet sent). A run the store
+ * does not know counts as live.
  */
 export function seatMayTake(store: Store, seatId: string): boolean {
+  if (wakeDueAsideRun(store, seatId) !== undefined) return false;
   const row = store.seatSession(seatId);
   if (row === null) return true;
   if (row.state !== "idle") return false;
   return row.runId === null || store.run(row.runId)?.endedAt != null;
 }
+
+/** Whether the card is assigned to a login other than the hub's own (any login, when the hub's is unknown). */
+export const claimedByOther = (card: Pick<BoardItem, "assignees">, login: string | null): boolean =>
+  (card.assignees ?? []).some((a) => a !== login);
 
 /** The cards in the Ready column (a closed card is Done, never Ready), in the order picked. */
 function readyCards(store: Store, repoId: RepoId): BoardItem[] {
@@ -117,7 +132,7 @@ function readyCards(store: Store, repoId: RepoId): BoardItem[] {
 }
 
 /** The area labels (those the rules name) on a card. */
-const areaLabelsOf = (rules: RepoRules, card: BoardItem): string[] =>
+export const areaLabelsOf = (rules: RepoRules, card: BoardItem): string[] =>
   card.labels.filter((l) => Object.hasOwn(rules.areas, l));
 
 /**
@@ -212,6 +227,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       const ref = refOf(repoId, card.issueNumber);
       if (takenRefs.has(ref) || active.has(ref)) return [];
       if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) return [];
+      if (claimedByOther(card, deps.login)) return [];
       if (card.labels.some((l) => RESEARCH_LABELS.includes(l))) return [];
       const labels = areaLabelsOf(rules, card);
       const label = labels[0];
@@ -284,7 +300,7 @@ export const isTransientStart = (e: unknown): boolean =>
  */
 export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const { config, store, supervisor } = deps;
-  if (!deps.enabled) return;
+  if (!deps.enabled || deps.login === null) return;
   const found = writerSeats(config).find((s) => s.seat.id === seatId);
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
   if (!seatMayTake(store, seatId)) return;
@@ -298,6 +314,21 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   // The card may have moved since the poll, and another seat may have been started on it by hand.
   if (card === undefined || hudColumnOf(card) !== "Ready" || store.activeTickets().has(ref)) {
     store.dropQueued(seatId, repoId, issue);
+    return;
+  }
+  // The poll is up to a minute old and another hub may have claimed the card since: read it fresh.
+  // The row goes back; the next refill, from a newer poll, decides whether it is dealt again.
+  let latest: CardNow | null;
+  try {
+    latest = await deps.readCard(repoId, issue);
+  } catch (e) {
+    store.untake(seatId, repoId, issue);
+    deps.log?.(`${seatId}: could not read ${ref} from GitHub: ${takeReason(e)}`);
+    return;
+  }
+  if (latest === null || hudColumnOf(latest) !== "Ready" || claimedByOther(latest, deps.login)) {
+    store.untake(seatId, repoId, issue);
+    deps.log?.(`${seatId}: ${ref} is no longer Ready and unclaimed on GitHub`);
     return;
   }
   try {

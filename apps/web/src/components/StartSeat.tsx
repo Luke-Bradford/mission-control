@@ -34,7 +34,7 @@ export function StartSeat({
   if (!session || !crew) return null;
   const free = session.seats.filter((seat) => {
     const row = crew.rows.find((r) => r.id === seat.id);
-    return !row || !hasActiveRun(row);
+    return seat.mode !== "scratch" && seat.loop !== "watch" && (!row || !hasActiveRun(row));
   });
   const seat = free.find((s) => s.id === picked) ?? free[0];
   const call = seat ? callSign({ id: seat.id, kind: "crew" }) : "";

@@ -28,6 +28,7 @@ import {
   collectGithub,
   fetchTicket,
   githubToken,
+  MISSING_SCOPE_PREFIX,
   makeGql,
   sweepPullRequests,
 } from "./collectors/github.ts";
@@ -146,6 +147,8 @@ export interface SchedulerDeps {
   collectors?: Partial<Collectors>;
   /** Debug lines (each backfill tick's count and duration); dropped when absent. */
   debug?: (line: string) => void;
+  /** Lines for the server log (a gh token missing a scope); dropped when absent. */
+  log?: (line: string) => void;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
 }
@@ -225,6 +228,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let sessionsRead = false;
   let gql: Promise<Gql | Error> | null = null;
   const rates = new RateLimits(store);
+  const scopeLogged = new Set<string>();
   /** The GitHub poll interval is this many times the configured one while the rate limit is low. */
   let githubBackoff = 1;
   let githubNotBefore = 0;
@@ -474,6 +478,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
           });
+          const error = store.status().find((s) => s.collector === collector)?.error;
+          if (error?.includes(MISSING_SCOPE_PREFIX)) {
+            // `gh auth refresh` issues a new token: read it again on the next tick.
+            gql = null;
+            // Once per repo, after its first poll: the health row has it, the server log should too.
+            if (!scopeLogged.has(repo.id)) deps.log?.(`github ${repo.id}: ${error}`);
+          }
+          scopeLogged.add(repo.id);
         }
       }
       if (!(client instanceof Error)) {

@@ -2,6 +2,8 @@ import { type BoardItem, columnOf, hudColumnOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   collectGithub,
+  describeGqlErrors,
+  fetchCardNow,
   fetchTicket,
   GqlError,
   GqlTransportError,
@@ -68,6 +70,34 @@ function item(
           },
   };
 }
+
+describe("fetchCardNow", () => {
+  const answer =
+    (issue: unknown): Gql =>
+    async () => ({ repository: { issue } });
+  const onProject = (status: string | null, number = repo.project) => ({
+    state: "OPEN",
+    assignees: { nodes: [{ login: "luke" }] },
+    projectItems: {
+      nodes: [{ project: { number }, status: status === null ? null : { name: status } }],
+    },
+  });
+
+  it("reads the Status, the issue state and the assignees of the card on the repo's project", async () => {
+    expect(await fetchCardNow(repo, 7, answer(onProject("Todo")))).toEqual({
+      status: "Todo",
+      state: "planned",
+      closed: false,
+      assignees: ["luke"],
+    });
+  });
+
+  it("is null for a missing issue, a card on another project, or an unmapped Status", async () => {
+    expect(await fetchCardNow(repo, 7, answer(null))).toBeNull();
+    expect(await fetchCardNow(repo, 7, answer(onProject("Todo", 99)))).toBeNull();
+    expect(await fetchCardNow(repo, 7, answer(onProject("Parked")))).toBeNull();
+  });
+});
 
 describe("fetchTicket repos", () => {
   const other: CcConfig["repos"][number] = {
@@ -454,6 +484,15 @@ describe("collectGithub board fields", () => {
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
   });
 
+  it("reads each card's assignee logins", async () => {
+    const assignees = { assignees: { nodes: [{ login: "luke" }, { login: "sam" }] } };
+    const { gql } = stub({
+      pages: [page([item(1, "Todo", { extra: assignees }), item(2, "Todo")])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.assignees)).toEqual([["luke", "sam"], []]);
+  });
+
   it("a project without Stage/Owner fields maps to null and counts as Ready", async () => {
     const { gql } = stub({ pages: [page([item(1, "Todo")])] });
     await collectGithub(repo, store, gql, NOW);
@@ -735,6 +774,52 @@ describe("collectGithub failure", () => {
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([99]);
     expect(store.escalations().map((i) => i.issueNumber)).toEqual([10]);
     expect(statusOf()?.error).toContain("board boom");
+  });
+});
+
+describe("describeGqlErrors", () => {
+  const scopeErr = (field: string) => ({
+    type: "INSUFFICIENT_SCOPES",
+    path: ["user", "projectV2", field],
+    message:
+      "Your token has not been granted the required scopes to execute this query. The 'projectV2' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes.",
+  });
+
+  it("collapses several INSUFFICIENT_SCOPES errors into one line with the fix", () => {
+    expect(describeGqlErrors(["id", "updatedAt", "name"].map(scopeErr))).toBe(
+      "gh token lacks the read:project scope: run gh auth refresh -s project",
+    );
+  });
+
+  it("names the scope a card move needs", () => {
+    const e = {
+      type: "INSUFFICIENT_SCOPES",
+      message: "requires one of the following scopes: ['project'], but",
+    };
+    expect(describeGqlErrors([e, e])).toBe(
+      "gh token lacks the project scope: run gh auth refresh -s project",
+    );
+  });
+
+  it("collapses identical non-scope messages into one", () => {
+    expect(
+      describeGqlErrors([{ message: "Could not resolve" }, { message: "Could not resolve" }]),
+    ).toBe("Could not resolve");
+    expect(describeGqlErrors([{ message: "a" }, { message: "b" }, { message: "a" }])).toBe("a; b");
+  });
+
+  it("keeps the text when the errors are mixed", () => {
+    expect(describeGqlErrors([scopeErr("id"), { message: "other" }])).toContain("other");
+  });
+
+  it("reaches the GqlError message through makeGql", async () => {
+    const f = (async () =>
+      new Response(JSON.stringify({ errors: [scopeErr("id"), scopeErr("name")] }), {
+        status: 200,
+      })) as unknown as typeof fetch;
+    await expect(makeGql("t", f)("q", {})).rejects.toThrow(
+      "gh token lacks the read:project scope: run gh auth refresh -s project",
+    );
   });
 });
 
