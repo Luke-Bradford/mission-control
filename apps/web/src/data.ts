@@ -110,6 +110,11 @@ export const RESOURCES = {
     path: `/api/agents/${enc(agentId)}/runs?limit=${RUNS_LIMIT}`,
     topic: "agents",
   }),
+  /** A run's loop state (`{ runId, loop, events }`); `loop.aside` is set while it is off its seat. */
+  runLoop: (runId: string): ResourceRef => ({
+    path: `/api/runs/${enc(runId)}/loop`,
+    topic: "agents",
+  }),
 } as const satisfies Record<
   string,
   | ResourceRef
@@ -140,6 +145,8 @@ export const ACTIONS = {
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,
   /** Body `{}`: ends the run. */
   seatEnd: (seatId: string) => `/api/seats/${enc(seatId)}/end`,
+  /** Body `{}`: ends a run set aside in review, without waking it; a 409 if it is not aside. */
+  runEnd: (runId: string) => `/api/runs/${enc(runId)}/end`,
   /** Body `{ base, seats }`; answers `{ backup, changes }` after writing config.yaml. */
   crewSeats: (sessionId: string) => `/api/crew/sessions/${enc(sessionId)}/seats`,
   /** Body `{}`; answers a ReloadResult. */
