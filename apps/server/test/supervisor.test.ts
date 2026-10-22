@@ -1474,6 +1474,21 @@ describe("startWatch", () => {
     await until(() => expect(userLines()).toEqual([`${BRIEF}\n\nX`]));
   });
 
+  it("is refused for a retiring watch seat", async () => {
+    const { sup, cfg } = flightMake();
+    sup.start();
+    const flight = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "flight-1");
+    if (flight) flight.retiring = true;
+    try {
+      const e = await refusal(sup.startWatch("flight-1"));
+      expect([e.status, e.message]).toEqual([409, retiringText("FLIGHT-1")]);
+      expect(store.seatSession("flight-1")).toBeNull();
+    } finally {
+      // FLIGHT is shared by the tests of this block
+      if (flight) delete flight.retiring;
+    }
+  });
+
   it("is refused for a seat that is not a watch seat, and startRun for FLIGHT", async () => {
     const { sup } = flightMake();
     sup.start();

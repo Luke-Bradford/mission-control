@@ -550,7 +550,7 @@ Setup's board action also creates the board's fields and the repo's type labels,
 
 Seat and role changes in `config.yaml` apply without a restart.
 
-- `curl -s -XPOST 127.0.0.1:7420/api/config/reload` re-reads the file the hub started with. A
+- `curl -s -XPOST -H 'content-type: application/json' -d '{}' 127.0.0.1:7420/api/config/reload` re-reads the file the hub started with. A
   file that doesn't load changes nothing, and the call answers with its error.
 - The reload answers with what it applied (`applied`), the seats as now loaded, any seat
   changes still waiting (`pending`, each with its reason), and `restartNeeded`: keys

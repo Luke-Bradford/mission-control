@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
-import type { CrewChanges, PendingSeatChange, ReloadResult } from "@mc/core";
+import { type CrewChanges, type PendingSeatChange, type ReloadResult, seatDef } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
 import {
   type CcConfig,
@@ -19,6 +19,7 @@ export const RETIRE_WAIT = "removed; leaves when it is free";
 export const EDIT_WAIT = "changed; applies when it is free";
 export const accountNewText = (a: string) => `account "${a}" is new; restart the hub to use it`;
 export const seatMovingText = (id: string, s: string) => `waits for ${id} to leave s/${s}`;
+export const watchWaitText = (id: string) => `waits for ${id} to leave the watch seat`;
 export const maxSeatsText = (n: number) => `max_seats ${n} is full until a removed seat leaves`;
 export const areaWaitText = (other: string) =>
   `its area overlaps ${other}'s, which has not changed yet`;
@@ -116,6 +117,10 @@ export function planCrew(
     for (const seat of [...edits, ...adds]) {
       const isAdd = !old.has(seat.id);
       const change = isAdd ? "add" : "edit";
+      if (!applied.accounts.some((a) => a.id === seat.accountId)) {
+        pend(seat.id, change, accountNewText(seat.accountId));
+        continue;
+      }
       if (isAdd) {
         const elsewhere = appliedSessions.find(
           (s) => s.id !== session.id && s.seats.some((x) => x.id === seat.id),
@@ -124,12 +129,18 @@ export function planCrew(
           pend(seat.id, change, seatMovingText(seat.id, elsewhere.id));
           continue;
         }
-        if (!applied.accounts.some((a) => a.id === seat.accountId)) {
-          pend(seat.id, change, accountNewText(seat.accountId));
-          continue;
-        }
         if (total >= maxSeats) {
           pend(seat.id, change, maxSeatsText(maxSeats));
+          continue;
+        }
+      }
+      if (seatDef(seat).loop === "watch") {
+        const rival = [
+          ...others(),
+          ...appliedSessions.filter((x) => x.id !== session.id).flatMap((x) => x.seats),
+        ].find((w) => w.id !== seat.id && seatDef(w).loop === "watch");
+        if (rival !== undefined) {
+          pend(seat.id, change, watchWaitText(rival.id));
           continue;
         }
       }
@@ -246,7 +257,12 @@ export function createCrewReloader(deps: {
 
   const busy = (seatId: string): boolean => {
     try {
-      return supervisor.seatBusy(seatId) || store.queue(seatId).some((q) => q.takenAt !== null);
+      return (
+        supervisor.seatBusy(seatId) ||
+        store.queue(seatId).some((q) => q.takenAt !== null) ||
+        // an aside run has no process or seat row, but the seat is working
+        store.asideRuns().some((r) => r.agentId === seatId)
+      );
     } catch {
       return true;
     }
@@ -334,6 +350,7 @@ export function createCrewReloader(deps: {
 
   return {
     start() {
+      if (timer !== undefined) return;
       try {
         last = statFile();
       } catch {

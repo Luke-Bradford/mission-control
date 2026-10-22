@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Topic } from "@mc/core";
+import { NEW_LOOP, type Run, type Topic } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { type CcConfig, ConfigError, type CrewSeatConfig } from "../src/config.ts";
@@ -16,6 +16,7 @@ import {
   RETIRE_WAIT,
   restartNeeded,
   seatMovingText,
+  watchWaitText,
 } from "../src/crew-apply.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -232,6 +233,65 @@ describe("planCrew", () => {
     ]);
     expect(planCrew(a, t, (id) => id === "guido-1").pending[0]?.change).toBe("edit");
     expect(planCrew(a, t, none).applied).toEqual(["seat guido-1 changed"]);
+  });
+});
+
+describe("planCrew: accounts and the watch seat", () => {
+  it("an edit moving a seat to an account the running config lacks waits", () => {
+    const a = config([{ id: "s1", seats: [seat("guido-1")] }]);
+    const t = config([{ id: "s1", seats: [seat("guido-1", { accountId: "claude-new" })] }]);
+    const out = planCrew(a, t, none);
+    expect(out.pending).toEqual([
+      { sessionId: "s1", seatId: "guido-1", change: "edit", reason: accountNewText("claude-new") },
+    ]);
+    expect(out.sessions.get("s1")?.[0]?.accountId).toBe("claude-main");
+    expect(out.applied).toEqual([]);
+  });
+
+  it("a second watch seat waits for the first, even a retiring one", () => {
+    const flight = (id: string) => seat(id, { role: "FLIGHT" });
+    const a = config([{ id: "s1", seats: [flight("flight-1"), seat("guido-1")] }]);
+    const t = config([
+      { id: "s1", seats: [flight("flight-1"), seat("guido-1"), flight("flight-2")] },
+    ]);
+    const out = planCrew(a, t, none);
+    expect(out.pending).toEqual([
+      { sessionId: "s1", seatId: "flight-2", change: "add", reason: watchWaitText("flight-1") },
+    ]);
+    // flight-1 is removed while busy: it retires and still holds the watch
+    const swap = config([{ id: "s1", seats: [seat("guido-1"), flight("flight-2")] }]);
+    const retiring = planCrew(a, swap, (id) => id === "flight-1");
+    expect(retiring.pending.map((p) => [p.seatId, p.reason])).toEqual([
+      ["flight-1", RETIRE_WAIT],
+      ["flight-2", watchWaitText("flight-1")],
+    ]);
+    // an edit turning a developer seat into a watch seat waits as well
+    const edit = config([
+      { id: "s1", seats: [flight("flight-1"), seat("guido-1", { role: "FLIGHT" })] },
+    ]);
+    expect(planCrew(a, edit, none).pending[0]).toMatchObject({
+      seatId: "guido-1",
+      change: "edit",
+      reason: watchWaitText("flight-1"),
+    });
+    // another session's watch seat counts too
+    const two = config([
+      { id: "s1", seats: [flight("flight-1")] },
+      { id: "s2", seats: [seat("guido-1")] },
+    ]);
+    const addTwo = config([
+      { id: "s1", seats: [flight("flight-1")] },
+      { id: "s2", seats: [seat("guido-1"), flight("flight-3")] },
+    ]);
+    expect(planCrew(two, addTwo, none).pending[0]?.reason).toBe(watchWaitText("flight-1"));
+  });
+
+  it("the watch seat itself can be edited", () => {
+    const a = config([{ id: "s1", seats: [seat("flight-1", { role: "FLIGHT" })] }]);
+    const t = config([
+      { id: "s1", seats: [seat("flight-1", { role: "FLIGHT", model: "sonnet" })] },
+    ]);
+    expect(planCrew(a, t, none).pending).toEqual([]);
   });
 });
 
@@ -469,6 +529,65 @@ describe("the reloader", () => {
     expect(applied.crew?.sessions[0]?.seats[1]?.retiring).toBe(true);
     expect(store.queue("guido-2").map((q) => q.issue)).toEqual([1]);
     expect(r.status().pending[0]?.change).toBe("remove");
+  });
+
+  it("an aside run keeps its seat busy: an edit waits, a removal retires", async () => {
+    applied = config([{ id: "s1", seats: [seat("guido-1"), seat("guido-2")] }]);
+    const aside: Run = {
+      id: "guido-1:1",
+      agentId: "guido-1",
+      repoId: "shop-app",
+      seq: 1,
+      startedAt: 1000,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "sonnet",
+      branch: null,
+      ticket: "shop-app#9",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+    };
+    store.upsertRun(aside);
+    expect(store.seatSession("guido-1")).toBeNull();
+    const r = make();
+    loaded = config([{ id: "s1", seats: [seat("guido-1", { model: "opus" }), seat("guido-2")] }]);
+    let out = await r.reload();
+    expect(out.applied).toEqual([]);
+    expect(out.pending).toEqual([
+      { sessionId: "s1", seatId: "guido-1", change: "edit", reason: EDIT_WAIT },
+    ]);
+    expect(applied.crew?.sessions[0]?.seats[0]?.model).toBe("sonnet");
+    loaded = config([{ id: "s1", seats: [seat("guido-2")] }]);
+    out = await r.reload();
+    expect(out.pending).toEqual([
+      { sessionId: "s1", seatId: "guido-1", change: "remove", reason: RETIRE_WAIT },
+    ]);
+    expect(seatsOf(applied)).toEqual(["guido-2", "guido-1"]);
+    expect(applied.crew?.sessions[0]?.seats[1]?.retiring).toBe(true);
+  });
+
+  it("start twice registers one interval and one listener", async () => {
+    const on = vi.fn(supervisor().on);
+    const r = createCrewReloader({
+      configPath: path,
+      config: applied,
+      store,
+      bus,
+      supervisor: { on, seatBusy: () => false },
+      log: () => {},
+      load: () => structuredClone(loaded as CcConfig),
+    });
+    r.start();
+    r.start();
+    expect(on).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+    r.stop();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("restart-only changes are listed and the observed config is untouched", async () => {

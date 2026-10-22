@@ -926,6 +926,11 @@ export function createEngine(deps: EngineDeps): Engine {
           dropReview(row);
           continue;
         }
+        // an earlier start awaited: the seat may have been removed or retired since the list was taken
+        const current = (config.crew?.sessions ?? [])
+          .flatMap((x) => x.seats)
+          .find((x) => x.id === seat.id);
+        if (current === undefined || current.retiring) break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
         let runId: string | null = null;
         try {

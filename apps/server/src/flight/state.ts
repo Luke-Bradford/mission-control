@@ -37,17 +37,17 @@ import { seatFree } from "./tools.ts";
  */
 export function flightStartCap(config: CcConfig): number {
   const devSeats = (flightSeat(config)?.session.seats ?? []).filter(
-    (s) => seatDef(s).loop === "build",
+    (s) => !s.retiring && seatDef(s).loop === "build",
   ).length;
   return FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats);
 }
 
-/** The watch seat (the first seat whose seatDef loop is "watch") and its session, else null. */
+/** The watch seat (the first seat that is not retiring and whose seatDef loop is "watch") and its session, else null. */
 export function flightSeat(
   config: CcConfig,
 ): { seat: CrewSeatConfig; session: CrewSessionConfig } | null {
   for (const session of config.crew?.sessions ?? []) {
-    const seat = session.seats.find((s) => seatDef(s).loop === "watch");
+    const seat = session.seats.find((s) => !s.retiring && seatDef(s).loop === "watch");
     if (seat !== undefined) return { seat, session };
   }
   return null;
@@ -138,7 +138,7 @@ export function flightState(i: {
       .rows.filter((r) => r.hudState === "stalled")
       .map((r) => r.id),
   );
-  const mine = session.seats.filter((s) => s.id !== found.seat.id);
+  const mine = session.seats.filter((s) => s.id !== found.seat.id && !s.retiring);
   const unended = (seatId: string) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
     const run = runId === null ? null : store.run(runId);

@@ -1800,6 +1800,39 @@ describe("the engine runs reviews", () => {
     expect(rows[1]).toMatchObject({ seatId: "retro-2", sha: SHA });
   });
 
+  it("a seat removed while an earlier seat's review starts is skipped, not failed", async () => {
+    seats().push({ ...retroSeat(), id: "retro-2" });
+    h.busyList = [{ seatId: RETRO, state: "running" }];
+    await toReview();
+    const one = first();
+    let two = 0;
+    h.busyList = [];
+    // while retro-1's start awaits, retro-2 is given a queued review and then removed
+    h.duringStart = () => {
+      h.duringStart = null;
+      two = need(
+        store.requestReview({
+          authorRunId: one.authorRunId,
+          repoId: one.repoId,
+          seatId: "retro-2",
+          prNumber: one.prNumber,
+          sha: one.sha,
+          epoch: one.epoch,
+          attempt: one.attempt + 1,
+          round: one.round,
+          at: clock,
+        }),
+      );
+      seats().splice(
+        seats().findIndex((s) => s.id === "retro-2"),
+        1,
+      );
+    };
+    await h.engine.tick();
+    expect(h.starts).toEqual([{ seat: RETRO, id: one.id }]);
+    expect(store.review(two)?.state).toBe("queued");
+  });
+
   describe("boot recovery", () => {
     it("a starting row with no run goes back to queued, then starts once", async () => {
       h.busyList = [{ seatId: RETRO, state: "running" }];

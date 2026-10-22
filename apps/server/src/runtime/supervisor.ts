@@ -989,7 +989,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return;
     }
     for (const session of crew.sessions) {
-      for (const seat of session.seats) {
+      for (const seat of [...session.seats]) {
         if (modeOfSeat(seat) !== "scratch") continue;
         const mine = `${seat.id}-review-`;
         for (const name of names) {
@@ -1249,6 +1249,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (seatDef(info.seat).loop !== "watch") {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
     }
+    if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
