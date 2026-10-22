@@ -1616,6 +1616,35 @@ describe("Agent page: loop steps", () => {
       ask.mockRestore();
     });
 
+    it("is in the Runs list only for an unended run that is not the seat's current one", async () => {
+      const loop = { phase: "review", aside: { worktree: "/w/x", wake: false } } as RunLoop;
+      stub({
+        rows: [
+          {
+            ...seat(loopOf({ phase: "working" })),
+            run: { ...crewRow().run, id: "r-13", seq: 13 },
+          } as CrewRow,
+        ],
+        runs: [
+          rv({ id: "r-13", seq: 13, loop }),
+          rv({ id: "r-12", seq: 12, loop, summary: "Did the thing" }),
+          rv({ id: "r-11", seq: 11, loop, endedAt: NOW - HOUR }),
+        ],
+      });
+      const { container } = render(<Agent id="shop-app-ta" />);
+      await loaded();
+      const panel = $(container, "#loopP") as HTMLElement;
+      fireEvent.click(within(panel).getByRole("button", { name: "Runs" }));
+      const buttons = await within(panel).findAllByRole("button", { name: "End run" });
+      expect(buttons).toHaveLength(1);
+      const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
+      fireEvent.click(buttons[0] as HTMLElement);
+      expect(ask).toHaveBeenCalledOnce();
+      // the click did not also toggle the row open
+      expect($(panel, ".rsummary")?.classList.contains("open")).toBe(false);
+      ask.mockRestore();
+    });
+
     it("shows the server's refusal text on a 409", async () => {
       await asideRun({
         ...loopAnswer({ worktree: "/w/r-12", wake: false }),
