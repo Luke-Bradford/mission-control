@@ -689,7 +689,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
 
       api.get("/limits", async () => limitRows(config, store, now()));
-      // Reader: apps/web/src/data.ts#RESOURCES (the Limits view's GitHub row; the web side is a follow-up to #105)
+      // Reader: apps/web/src/data.ts#RESOURCES (the Limits view's GitHub row)
       api.get("/limits/github", async () => githubRate(store));
 
       api.get(
