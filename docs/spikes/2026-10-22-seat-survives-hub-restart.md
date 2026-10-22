@@ -1,6 +1,6 @@
 # Spike: a seat that keeps working while the hub restarts, and a CLI swap under a running seat
 
-Date: 2026-10-22, against `main` at `5efaaa0`. Claude Code 2.1.308 (Homebrew cask), Node 24.22.1,
+Date: 2026-10-22. Line references are to `main` at `5efaaa0`; the follow-ups were checked at `3a78853`. Claude Code 2.1.308 (Homebrew cask), Node 24.22.1,
 Homebrew 7.0.10, macOS 27.0.1. Evidence comes from five sources:
 
 - `claude -p` processes driven the way the hub's session driver drives them (stream-json both ways);
@@ -17,7 +17,7 @@ launchd job's main process had exited. The next hub then replayed the missed lin
 Three changes go with it:
 
 - the new hub adopts each surviving run's token and test-lock holds;
-- the guard hook retries a refused connection for up to 60 s before it fails closed;
+- the guard hook retries a refused, reset or hung-up connection for up to 60 s before it fails closed;
 - Update stops refusing while a seat is mid-turn.
 
 Running seats need nothing for a CLI swap, because each keeps the binary it started on. A seat must
@@ -44,6 +44,13 @@ How it works today (code):
 
 Measured. A probe script ran a stream-json session whose turn was `sleep 20` (or `sleep 1` then
 `sleep 20`) through the Bash tool, then did to it what the hub and launchd do:
+
+```sh
+# the seat, stream-json both ways as the session driver drives it (the probe scripts are not committed)
+claude -p --input-format stream-json --output-format stream-json --verbose \
+  --model haiku --setting-sources project --allowedTools 'Bash(sleep:*)' Grep
+# then: end its stdin; or SIGKILL it and respawn with --resume <session-id>
+```
 
 | What was done | Result |
 |---|---|
@@ -91,7 +98,7 @@ launchctl bootout gui/$(id -u)/<label>
 | Child | Result |
 |---|---|
 | A dummy seat (each line is a 3 s turn) | Hub 1, a launchd job, sent "turn 1" and exited mid-turn. launchd showed the job "not running" and the keeper still running. Hub 2 replayed line 0, turn 1's result, which was written while no hub was attached. It then sent turn 2, got the result and sent close. The child exited 0, then the keeper exited and removed the socket |
-| `claude -p` 2.1.308 in stream-json, turn 1 a `sleep 15` Bash call | Hub 1 exited 0.5 s into the turn. Hub 2 attached about 5 s later and replayed the lines written so far, the tool call among them. It received the rest of turn 1 live, sent turn 2 and got its result. Close ended the CLI with exit 0 |
+| `claude -p` 2.1.308 in stream-json, turn 1 a `sleep 15` Bash call | Hub 1, a launchd job, exited 0.5 s into the turn. Hub 2 attached about 5 s later and replayed the lines written so far, the tool call among them. It received the rest of turn 1 live, sent turn 2 and got its result. Close ended the CLI with exit 0 |
 
 What broke, or has to be designed:
 
@@ -175,6 +182,12 @@ live seats. The test used copies instead:
 2. start a stream-json session through L;
 3. mid-turn, copy A to B, point L at B, and delete A.
 
+```sh
+cp "$A/claude" "$B/claude" && chmod 755 "$B/claude"
+rm L && ln -s "$B/claude" L && rm "$A/claude"   # while the session's Bash call runs
+./L --version                                     # the next spawn
+```
+
 | Check | Result |
 |---|---|
 | The running session | Finished its turn on the deleted binary. It then ran a second turn that used the Grep tool, and was still alive |
@@ -213,7 +226,7 @@ fails with "could not start the CLI" (`session.ts` 160).
   - with a keeper of an unknown version, the hub ends it, waits for its exit, then resumes.
 
   A run that is not attached loses its adopted token and lock holds.
-- **The guard hook waits.** It retries refused connections for 60 s, then denies.
+- **The guard hook waits.** It retries a refused, reset or hung-up connection for 60 s, then denies.
 - **Update stops waiting.** It drops the mid-turn refusal, keeps the refusal for a seat that is still
   starting, and lets in-flight `/mcp` calls finish before it exits.
 - **The CLI.** Running seats need nothing. Seat spawns wait while the hub's own `brew upgrade` runs.
@@ -223,8 +236,8 @@ the operator's rule is that updates never wait for an idle crew and never interr
 
 ## Follow-ups
 
-Each is in `area:server`, and the keeper work touches hard-rule files
-(`apps/server/src/runtime/**`, `apps/server/src/guard/**`, `apps/server/src/mcp/**`).
+Each is labelled `area:server`, and each touches hard-rule files (`apps/server/src/runtime/**`,
+`apps/server/src/guard/**`, `apps/server/src/mcp/**` or `packages/core/src/guard.ts`).
 
 - **#146: the guard hook waits out a hub restart.** It retries a refused or reset connection for up
   to 60 s, then denies as today. Independent; worth having before the keeper, since Update cuts the
