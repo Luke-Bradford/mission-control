@@ -147,7 +147,7 @@ const RUN_SECRET_FILE = /\.(token|mcp\.json)(\.tmp-[0-9a-f-]+)?$/;
 /**
  * What a seat of session `sessionId` may not read beyond the credential folders and the data dir,
  * deduped, in order: the hub's checkout, every loop's worktree, state dir and logs dir, every
- * other crew session's checkout, then `crew.deny_read`. The hub's checkout and each loop's
+ * other crew session's checkout and worktree folder (`<crew.worktrees>/<id>`), then `crew.deny_read`. The hub's checkout and each loop's
  * worktree are followed by their git common dir, which lies elsewhere when they are linked
  * worktrees (a loop's worktree of `~/code/shop-app`). A loop's common dir that is `<repo>/.git` is
  * followed by `<repo>` itself, the repo's main working tree (`~/code/shop-app`), unless that folder is
@@ -176,7 +176,9 @@ export function seatDenyRead(
       l.stateDir,
       ...(l.logsDir ? [l.logsDir] : []),
     ]),
-    ...(config.crew?.sessions ?? []).filter((x) => x.id !== sessionId).map((x) => x.checkout),
+    ...(config.crew?.sessions ?? [])
+      .filter((x) => x.id !== sessionId)
+      .flatMap((x) => [x.checkout, ...(config.crew ? [join(config.crew.worktrees, x.id)] : [])]),
     ...(config.crew?.denyRead ?? []),
     ...extra,
   ];
@@ -1021,25 +1023,54 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /**
+   * With more than one session, worktrees still directly in `crew.worktrees` (made before each
+   * session had a folder) are readable by every seat until their runs end: said once at start.
+   */
+  function noteFlatWorktrees(): void {
+    if (!crew || crew.sessions.length < 2) return;
+    const seatIds = crew.sessions.flatMap((s) => s.seats.map((x) => x.id));
+    let names: string[];
+    try {
+      names = readdirSync(crew.worktrees);
+    } catch {
+      return;
+    }
+    const n = names.filter((name) => seatIds.some((id) => name.startsWith(`${id}-`))).length;
+    if (n > 0) {
+      log(
+        `crew: ${n} worktrees of other sessions are in the old flat layout and stay readable until their runs end`,
+      );
+    }
+  }
+
+  /**
    * Review worktrees no active run owns (left by a crash, or by a run that ended while the hub
    * was down) are removed. Never throws.
    */
   async function sweepScratch(): Promise<void> {
     if (!crew) return;
-    let names: string[];
-    try {
-      names = readdirSync(crew.worktrees);
-    } catch (e) {
-      log(`could not list ${crew.worktrees}: ${errText(e)}`);
-      return;
-    }
+    const list = (dir: string): string[] => {
+      try {
+        return readdirSync(dir);
+      } catch (e) {
+        // a session folder not made yet is not worth a line
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT" || dir === crew.worktrees) {
+          log(`could not list ${dir}: ${errText(e)}`);
+        }
+        return [];
+      }
+    };
     for (const session of crew.sessions) {
+      // a review worktree is in its session's folder, or flat if it was made before the folders
+      const found = [crew.worktrees, join(crew.worktrees, session.id)].flatMap((dir) =>
+        list(dir).map((name) => join(dir, name)),
+      );
       for (const seat of [...session.seats]) {
         if (modeOfSeat(seat) !== "scratch") continue;
         const mine = `${seat.id}-review-`;
-        for (const name of names) {
+        for (const path of found) {
+          const name = basename(path);
           if (!name.startsWith(mine) || !/^\d+$/.test(name.slice(mine.length))) continue;
-          const path = join(crew.worktrees, name);
           try {
             await inClone(session.checkout, async () => {
               // read inside the queue: a review being started by now owns its path
@@ -1193,6 +1224,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const where = {
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
+          sessionId: info.session.id,
           seatId,
           issue,
         };
@@ -1320,6 +1352,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const c = await prepareDetachedCheckout({
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
+          sessionId: info.session.id,
           name: watchCheckoutName(seatId),
         });
         return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
@@ -1449,6 +1482,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const s = await prepareScratch({
           checkout,
           worktreesRoot: crew?.worktrees ?? "",
+          sessionId: info.session.id,
           seatId,
           reviewId,
           sha: review.sha,
@@ -1868,10 +1902,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       try {
         mkdirSync(crew.worktrees, { recursive: true });
+        for (const s of crew.sessions) {
+          mkdirSync(join(crew.worktrees, s.id), { recursive: true, mode: 0o700 });
+        }
       } catch (e) {
         cannot(e);
         return;
       }
+      noteFlatWorktrees();
       for (let attempt = 0; attempt < 2 && !holdsLock; attempt++) {
         try {
           writeFileSync(lockPath(), `${process.pid}\n`, { flag: "wx", mode: 0o600 });
