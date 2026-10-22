@@ -31,6 +31,7 @@ import {
   REVIEW_NOT_WANTED,
   type Run,
   type RunLoop,
+  retiringText,
   reworkFirstText,
   type TicketView,
   ticketInReviewText,
@@ -248,7 +249,7 @@ function make(
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),
   });
   sups.push(sup);
-  return { sup, fetchTicket, log, tokens, lock };
+  return { sup, fetchTicket, log, tokens, lock, cfg };
 }
 
 /** What the fake CLI received: its start line, then every stdin line, parsed. */
@@ -665,6 +666,58 @@ describe("startRun", () => {
     const e = await refusal(sup.startRun("guido-1", 42));
     expect(e.status).toBe(409);
     expect(e.message).toBe("GUIDO-1 already has a run");
+  });
+
+  it("retiring seat: startRun 409 retiringText", async () => {
+    const { sup, cfg } = make();
+    sup.start();
+    const guido = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1");
+    if (guido) guido.retiring = true;
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(409);
+    expect(e.message).toBe(retiringText("GUIDO-1"));
+    expect(store.seatSession("guido-1")).toBeNull();
+    const r = await refusal(sup.startReview("guido-1", 1));
+    expect(r.message).toBe(retiringText("GUIDO-1"));
+  });
+
+  it("a seat pushed onto the config's seats array after start can be started", async () => {
+    const { sup, cfg } = make();
+    sup.start();
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "guido-2",
+      role: "GUIDO",
+      accountId: "claude-main",
+      model: "haiku",
+      area: ["libs/**"],
+    });
+    const out = await sup.startRun("guido-2", 42);
+    expect(store.seatSession("guido-2")).toMatchObject({ runId: out.runId });
+    await until(() => expect(userLines()).toHaveLength(1));
+  });
+
+  it("seatBusy: starting, live and active; else false", async () => {
+    const { sup } = make();
+    sup.start();
+    expect(sup.seatBusy("guido-1")).toBe(false);
+    let open = () => {};
+    prep.gate = new Promise<void>((r) => {
+      open = r;
+    });
+    try {
+      const first = sup.startRun("guido-1", 42);
+      await until(() => expect(prep.inFlight).toBe(1));
+      expect(sup.seatBusy("guido-1")).toBe(true); // starting
+      open();
+      await first;
+      expect(sup.seatBusy("guido-1")).toBe(true); // live, its row active
+      expect(sup.seatBusy("retro")).toBe(false);
+      await sup.endRun("guido-1");
+      await until(() => expect(sup.seatBusy("guido-1")).toBe(false));
+    } finally {
+      open();
+      prep.gate = null;
+    }
   });
 
   it("a RETRO seat with no mode still launches read-only", async () => {
@@ -1420,6 +1473,21 @@ describe("startWatch", () => {
     sup.start();
     await sup.startWatch("flight-1", { first: "X" });
     await until(() => expect(userLines()).toEqual([`${BRIEF}\n\nX`]));
+  });
+
+  it("is refused for a retiring watch seat", async () => {
+    const { sup, cfg } = flightMake();
+    sup.start();
+    const flight = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "flight-1");
+    if (flight) flight.retiring = true;
+    try {
+      const e = await refusal(sup.startWatch("flight-1"));
+      expect([e.status, e.message]).toEqual([409, retiringText("FLIGHT-1")]);
+      expect(store.seatSession("flight-1")).toBeNull();
+    } finally {
+      // FLIGHT is shared by the tests of this block
+      if (flight) delete flight.retiring;
+    }
   });
 
   it("is refused for a seat that is not a watch seat, and startRun for FLIGHT", async () => {

@@ -1,4 +1,4 @@
-import type { CrewMode, CrewRole, LoopKind } from "./runtime.ts";
+import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from "./runtime.ts";
 import type {
   AccountId,
   AgentId,
@@ -143,9 +143,47 @@ export interface ConfigView {
         accountId: AccountId;
         model: string;
         area: string[];
+        /** Removed from config.yaml, kept until free: it takes no new work. */
+        retiring?: boolean;
       }[];
     }[];
   } | null;
+}
+
+/** A seat as config.yaml says it (what Setup edits). */
+export interface SeatInput {
+  id: string;
+  role: string;
+  accountId: string;
+  model: string;
+  effort?: CrewEffort;
+  mode?: ConfigSeatMode;
+  area: string[];
+}
+
+/** A seat change from config.yaml that waits for something. */
+export interface PendingSeatChange {
+  sessionId: string;
+  seatId: string;
+  change: "add" | "edit" | "remove";
+  reason: string;
+}
+
+/** `GET /api/crew/changes`: what the last read of config.yaml says against what runs. */
+export interface CrewChanges {
+  /** config.yaml's seats, as last loaded. */
+  sessions: { id: string; seats: SeatInput[] }[];
+  pending: PendingSeatChange[];
+  /** Changed on disk, applies after a restart: `loops`, `crew.deny_read`, … */
+  restartNeeded: string[];
+  /** Why the last read failed. */
+  error: string | null;
+  checkedAt: number | null;
+}
+
+/** `POST /api/config/reload`. */
+export interface ReloadResult extends CrewChanges {
+  applied: string[];
 }
 
 /** One issue in full, read live from GitHub for the board's detail pane. */

@@ -21,8 +21,8 @@ describe("timeToFull", () => {
   });
   it("a 5h window younger than the pace needs says there is too little history", () => {
     const young = (min: number) => limit5h({ resetAt: NOW + 5 * HOUR - min * 60_000 });
-    expect(timeToFull(young(10), NOW)).toBe("too little history to tell");
-    expect(timeToFull(young(29), NOW)).toBe("too little history to tell");
+    expect(timeToFull(young(10), NOW)).toBe("too little history for a pace");
+    expect(timeToFull(young(29), NOW)).toBe("too little history for a pace");
     expect(timeToFull(young(30), NOW)).toBe("not filling at this rate");
     // a 7d window is never judged by its age
     expect(timeToFull(limit7d({ fullAt: null, resetAt: NOW + 7 * 24 * HOUR - 60_000 }), NOW)).toBe(

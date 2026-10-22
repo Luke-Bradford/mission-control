@@ -31,6 +31,7 @@ import {
   loadConfig,
   portFromEnv,
 } from "./config.ts";
+import { createCrewReloader } from "./crew-apply.ts";
 import { createEngine } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -238,6 +239,8 @@ async function main(): Promise<void> {
     bus,
     supervisor,
     enabled: engineOn,
+    // a seat with a pending change is not started until it settles; the reloader exists below
+    blocked: (seatId) => crewReloader.status().pending.some((p) => p.seatId === seatId),
     log: (line) => log(line),
   });
 
@@ -257,6 +260,16 @@ async function main(): Promise<void> {
           exit: () => void shutdown("update"),
         });
 
+  // Seat and role changes in config.yaml apply live; the file it reads is the one this process loaded.
+  const crewReloader = createCrewReloader({
+    configPath,
+    config,
+    store,
+    bus,
+    supervisor,
+    log: (line) => log(`crew: ${line}`),
+  });
+
   const app = buildApp({
     config,
     store,
@@ -269,6 +282,7 @@ async function main(): Promise<void> {
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath,
+    crewReloader,
     supervisor,
     engine,
     updater,
@@ -282,6 +296,7 @@ async function main(): Promise<void> {
   const shutdown = onSignal({
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
+      crewReloader.stop();
       flightWatch.stop();
       engine.stop();
       await scheduler.stop();
@@ -300,6 +315,7 @@ async function main(): Promise<void> {
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.
   engine.start();
+  crewReloader.start();
   flightWatch.start();
 }
 

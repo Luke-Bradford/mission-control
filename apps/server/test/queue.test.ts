@@ -534,6 +534,18 @@ describe("takeNext", () => {
     expect(started).toEqual([]);
   });
 
+  it("a retiring seat is neither queued nor started", async () => {
+    await queued(card(1));
+    expect(issues(SERVER)).toEqual([1]);
+    const seat = config.crew?.sessions[0]?.seats.find((s) => s.id === SERVER);
+    if (seat) seat.retiring = true;
+    await take();
+    expect(started).toEqual([]);
+    store.replaceQueues([{ seatId: SERVER, items: [] }]);
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+  });
+
   it("takes nothing for a read-only seat or an unknown one", async () => {
     await queued(card(1));
     await take("retro");
