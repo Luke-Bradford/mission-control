@@ -556,8 +556,12 @@ function stateStep(s: LoopSnapshot): Step {
     }
     const short = sha7(pushed.sha);
     if (pr.mergeable === "CONFLICTING") {
-      // a merge workspace merges main into the branch instead (see branchUpdateDue)
-      if (s.autoMerge === true && !loop.mainMerge) return unchanged(loop);
+      // a merge workspace merges main into the branch instead (see branchUpdateDue), for as long
+      // as CI may stay pending
+      const waitedFrom = Math.max(pushed.at, loop.unparkedAt ?? 0);
+      if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= CI_PENDING_MAX_MS) {
+        return unchanged(loop);
+      }
       return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
     }
     if (pr.ci === "passing") {

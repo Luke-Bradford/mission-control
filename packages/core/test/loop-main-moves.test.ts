@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
+  CI_PENDING_MAX_MS,
   conflictKey,
   conflictText,
   mainConflictText,
@@ -210,6 +211,21 @@ describe("main moves", () => {
     expect(r.loop.phase).toBe("ci");
     expect(r.loop.parked).toBeNull();
     expect(kinds(r.actions)).not.toContain("update-branch");
+  });
+
+  it("a conflicting PR in ci with no gate parks once CI could have stayed pending that long", () => {
+    const s = behind(
+      {
+        pr: pr({ mergeable: "CONFLICTING" }),
+        pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 },
+      },
+      { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - CI_PENDING_MAX_MS - 1, gate: null },
+    );
+    expect(reconcile(s).loop.parked).toEqual({
+      kind: "conflict",
+      reason: "PR #12 conflicts with main",
+      ended: false,
+    });
   });
 
   describe("a conflicted merge waits on the seat", () => {

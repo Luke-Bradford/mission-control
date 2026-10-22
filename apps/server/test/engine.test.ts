@@ -2110,6 +2110,21 @@ describe("the engine runs reviews", () => {
         expect(h.updates).toHaveLength(1);
       });
 
+      it("a conflicting PR in ci is merged with main", async () => {
+        report();
+        await h.engine.reconcileRun(RUN);
+        h.gate = { ...need(h.gate), mainSha: MAIN, containsMain: false };
+        setPr({ mergeable: "CONFLICTING", ci: null });
+        h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts"] }];
+        await h.engine.reconcileRun(RUN);
+        expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
+        expect(loopOf()).toMatchObject({
+          phase: "working",
+          mainMerge: { mainSha: MAIN, files: ["apps/a.ts"] },
+        });
+        expect(loopOf().parked).toBeNull();
+      });
+
       it("waits while the worktree has changes, and asks again on the next pass", async () => {
         behindMain();
         await gateOpen();
