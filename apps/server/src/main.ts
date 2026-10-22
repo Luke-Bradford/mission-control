@@ -270,7 +270,9 @@ async function main(): Promise<void> {
       : createAutoUpdate({
           enabled: true,
           updater,
-          lockBusy: () => lock.state().holder !== null,
+          blocked: () =>
+            crewRefusal(config, supervisor, (id) => store.seatSession(id)) ??
+            (lock.state().holder !== null ? "the test lock is held" : null),
           headSha: () => headSha(hubRoot),
           // the hub restarts at once; the Activity page reads the line after it
           record: (text) => store.addHubEvent(text, Date.now()),

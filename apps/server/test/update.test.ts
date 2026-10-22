@@ -1022,7 +1022,7 @@ describe("auto update", () => {
     const tick = createAutoUpdate({
       enabled: true,
       updater: upd.u,
-      lockBusy: () => false,
+      blocked: () => null,
       headSha: async () => head(),
       record,
       ...over,
@@ -1064,11 +1064,30 @@ describe("auto update", () => {
   it("waits while the test lock is held", async () => {
     upstreamCommit("b.txt");
     let held = true;
-    const a = auto({ lockBusy: () => held });
+    const a = auto({ blocked: () => (held ? "the test lock is held" : null) });
     await expect(a.tick()).resolves.toBe("waiting");
     expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
     held = false;
     await expect(a.tick()).resolves.toBe("updated");
+  });
+
+  it("holds the restart while a turn that started during the build is in flight", async () => {
+    upstreamCommit("b.txt");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let calls = 0;
+    let busy: string | null = null;
+    // free for the look before update(); a seat is mid-turn by the time the build is done
+    const a = auto({ blocked: () => (++calls <= 1 ? null : busy) });
+    busy = "GUIDO-1 is mid-turn";
+    await expect(a.tick()).resolves.toBe("updated");
+    expect(a.restart).not.toHaveBeenCalled();
+    expect(a.record).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(VERSION_CHECK_FLOOR_MS);
+    expect(a.restart).not.toHaveBeenCalled();
+    busy = null;
+    await vi.advanceTimersByTimeAsync(VERSION_CHECK_FLOOR_MS);
+    expect(a.restart).toHaveBeenCalledTimes(1);
+    expect(a.record).toHaveBeenCalledTimes(1);
   });
 
   it("never runs when off", async () => {
