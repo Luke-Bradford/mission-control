@@ -87,6 +87,7 @@ async function main(): Promise<void> {
     bus,
     debug:
       process.env.MC_DEBUG === "1" ? (line) => process.stderr.write(`cc: ${line}\n`) : undefined,
+    log: (line) => log(line),
     lockState: () => lock.state(),
   });
   const preview = isPreview(port, process.env);
