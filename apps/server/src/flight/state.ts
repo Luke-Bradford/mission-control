@@ -69,7 +69,7 @@ export function flightView(config: CcConfig, store: Store, now: number): FlightV
 }
 
 const priorityRank = (p: string | null): number => {
-  const i = PRIORITIES.findIndex((x) => x === p);
+  const i = (PRIORITIES as readonly (string | null)[]).indexOf(p);
   return i === -1 ? PRIORITIES.length : i;
 };
 
