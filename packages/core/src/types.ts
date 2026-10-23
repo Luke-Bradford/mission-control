@@ -102,6 +102,21 @@ export interface RunLoop {
   merging?: { sha: string; done: MergeStep[] } | null;
   /** Merging main into the branch conflicted: the markers are in the worktree, and the seat resolves them. */
   mainMerge?: { mainSha: string; files: string[] } | null;
+  /**
+   * The one re-run of a failed CI on `sha`: when it was asked for, and the Actions runs it re-ran.
+   * `flaked`: the re-run passed, so the failure is recorded as a flake.
+   */
+  rerun?: {
+    sha: string;
+    at: number;
+    runs: { id: number; name: string }[];
+    flaked?: boolean;
+  } | null;
+  /**
+   * The hub's conflict-free merges of main made `to` from `from` (each merge's first parent the
+   * one before) and left the PR's own diff as it was at `from`: `to` goes by `from`'s review.
+   */
+  carry?: { from: string; to: string } | null;
 }
 
 /** One `loop_events` row. */
@@ -617,6 +632,21 @@ export interface Crew {
   firstRunToday: number | null;
 }
 
+/** One answer FLIGHT suggests for an item that is a choice. */
+export interface BriefOption {
+  label: string;
+  answer: string;
+}
+
+/** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
+export interface AttentionBrief {
+  context: string;
+  recommendation: string;
+  options: BriefOption[];
+  basis: string;
+  at: number;
+}
+
 export interface AttentionItem {
   key: string;
   kind: AttentionKind;
@@ -635,6 +665,8 @@ export interface AttentionItem {
    * until every client that builds an item sets it.
    */
   owner?: AttentionOwner;
+  /** FLIGHT's brief, once it has written one. */
+  brief?: AttentionBrief;
   acked: boolean;
 }
 

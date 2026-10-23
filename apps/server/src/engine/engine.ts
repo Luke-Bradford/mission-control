@@ -14,10 +14,11 @@ import {
   BLOCKING_SEVERITIES,
   blockedNoteKey,
   CI_FAILED_TEXT,
+  COMMS_MC,
   cardMark,
+  carriedFrom,
   cleanupBranchNoteKey,
   closedIssueText,
-  currentReview,
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
@@ -53,9 +54,11 @@ import {
   type RunLoop,
   readyMarkedText,
   reconcile,
+  reviewCarriedText,
   reviewDroppedText,
   reviewEventKey,
   reviewFailedText,
+  reviewFor,
   reviewQueuedText,
   reviewRunStep,
   reviewStartedText,
@@ -328,7 +331,14 @@ export function createEngine(deps: EngineDeps): Engine {
     let review: LoopReviewFacts | null = null;
     if (reviewer !== null) {
       const rows = store.reviewsOfRun(run.id).map(reviewFact);
-      const cur = pushed ? currentReview(rows, loop.epoch, pushed.sha) : null;
+      const cur = pushed
+        ? reviewFor(
+            rows,
+            loop.epoch,
+            pushed.sha,
+            carriedFrom(loop.carry, loop.reviewWaivedSha, pushed.sha),
+          )
+        : null;
       review = {
         retro: seatCallSign(reviewer.id),
         rows,
@@ -469,6 +479,11 @@ export function createEngine(deps: EngineDeps): Engine {
       );
       out.again = true;
     };
+    /** A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. */
+    const handOff = (from: string, text: string): void => {
+      store.addComms({ at, from, to: run.agentId, ticket: run.ticket ?? null, text });
+      bus.emit("agents");
+    };
     /** The run as the merge steps see it: its stored row, with the loop this pass is writing. */
     const live = (): Run => ({ ...run, loop: cur });
     /** A merge step that went through: kept in the loop, with its Activity row. */
@@ -534,8 +549,10 @@ export function createEngine(deps: EngineDeps): Engine {
               fixSentText(rv.blocking, seatCallSign(run.agentId)),
               at,
             );
+            handOff(rv.seatId, a.text);
           }
         }
+        if (sent === "sent" && a.key.startsWith("conflict:")) handOff(COMMS_MC, a.text);
         return;
       }
       case "ci-excerpt": {
@@ -545,10 +562,29 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const text = fillLoopText(CI_FAILED_TEXT, { sha7: a.sha.slice(0, 7) }) + excerpt;
         const sent = await supervisor.send(run.id, a.key, text);
+        if (sent === "sent") handOff(COMMS_MC, text);
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
         }
+        return;
+      }
+      case "rerun-ci": {
+        // once per sha: the loop marked it before this ran, so a refusal is not tried again
+        const runs = await publisher.rerunFailed(repo?.github ?? "", a.sha);
+        // stamped once gh has answered: a poll taken during the call still shows the old failure
+        if (cur.rerun?.sha === a.sha) {
+          cur.rerun.runs = runs ?? [];
+          cur.rerun.at = now();
+        }
+        store.addLoopEvent(
+          `${run.id}:rerun:${a.sha}`,
+          run.id,
+          runs === null || runs.length === 0
+            ? `CI failed on ${a.sha.slice(0, 7)}; no run could be re-run`
+            : `CI failed on ${a.sha.slice(0, 7)}; re-ran ${runs.map((r) => r.name).join(", ")}`,
+          at,
+        );
         return;
       }
       case "move-card": {
@@ -712,8 +748,24 @@ export function createEngine(deps: EngineDeps): Engine {
           cur.phase = "ci";
           cur.pushFor = r.sha;
           cur.pushStartedAt = at;
+          // a chain of merges collapses to the sha that was reviewed
+          cur.carry = r.prSame
+            ? { from: cur.carry?.to === r.parent ? cur.carry.from : r.parent, to: r.sha }
+            : null;
           store.setRunLoop(run.id, cur);
           store.addLoopEvent(`${run.id}:update:${r.sha}`, run.id, mergedMainText(a.mainSha), at);
+          const from = carriedFrom(cur.carry, cur.reviewWaivedSha, r.sha);
+          if (
+            from !== null &&
+            reviewFor(store.reviewsOfRun(run.id).map(reviewFact), cur.epoch, r.sha, from) !== null
+          ) {
+            store.addLoopEvent(
+              `${run.id}:carry:${r.sha}`,
+              run.id,
+              reviewCarriedText(from, r.sha),
+              at,
+            );
+          }
         } else {
           cur.phase = "working";
           cur.mainMerge = { mainSha: a.mainSha, files: r.files };
@@ -869,6 +921,7 @@ export function createEngine(deps: EngineDeps): Engine {
       loop.epoch,
       sha,
       loop.reviewWaivedSha ?? null,
+      carriedFrom(loop.carry, loop.reviewWaivedSha, sha),
     );
     if (status === null) return;
     const mark = `${sha}:${status.state}:${status.description}`;
@@ -1118,11 +1171,17 @@ export function createEngine(deps: EngineDeps): Engine {
     const author = store.run(row.authorRunId);
     const loop = author?.loop;
     if (author === null || loop === undefined || loop === null) return false;
-    if (author.endedAt !== null || loop.phase !== "review" || loop.epoch !== row.epoch)
-      return false;
-    if (store.runPush(author.id)?.sha !== row.sha) return false;
+    if (author.endedAt !== null || loop.epoch !== row.epoch) return false;
+    const head = store.runPush(author.id)?.sha;
+    if (head === undefined) return false;
+    const own = head === row.sha && loop.phase === "review";
+    // a review of the sha the head carries stays wanted through the merge's `ci` phase
+    const carried =
+      carriedFrom(loop.carry, loop.reviewWaivedSha, head) === row.sha &&
+      (loop.phase === "review" || loop.phase === "ci");
+    if (!own && !carried) return false;
     const pr = findPr(author, loop);
-    return pr !== null && pr.state === "open" && pr.headSha === row.sha;
+    return pr !== null && pr.state === "open" && (pr.headSha === row.sha || pr.headSha === head);
   }
 
   /** Keeps the running reviews going, ends the finished ones' runs and starts the queued ones. */

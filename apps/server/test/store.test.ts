@@ -15,7 +15,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
-import { NEW_LOOP } from "@mc/core";
+import { COMMS_TEXT_MAX, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -621,26 +621,6 @@ describe("Store", () => {
     expect(store.pullRequests("r2")).toHaveLength(1);
   });
 
-  it("goals round-trip, replace, clear and scope to the repo", () => {
-    const g = (repoId: string, due: number | null) => ({
-      repoId,
-      title: "MVP's",
-      dueOn: due,
-      open: 3,
-      closed: 4,
-    });
-    expect(store.goal("r1")).toBeNull();
-    store.replaceGoal("r1", g("r1", 1000));
-    store.replaceGoal("r2", g("r2", null));
-    expect(store.goal("r1")).toEqual(g("r1", 1000));
-    expect(store.goal("r2")).toEqual(g("r2", null));
-    store.replaceGoal("r1", { ...g("r1", 2000), title: "next" });
-    expect(store.goal("r1")?.title).toBe("next");
-    store.replaceGoal("r1", null);
-    expect(store.goal("r1")).toBeNull();
-    expect(store.goal("r2")).not.toBeNull();
-  });
-
   // #26 A1: the scheduler emits `boards` / `escalations` only when a write changed a row.
   it("the GitHub writers report whether any stored row changed", () => {
     const item = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
@@ -726,13 +706,6 @@ describe("Store", () => {
     expect(store.replaceEscalations("r1", [esc("a", "renamed"), esc("b")])).toBe(true);
     expect(store.replaceEscalations("r1", [])).toBe(true);
     expect(store.replaceEscalations("r1", [])).toBe(false);
-
-    const goal = { repoId: "r1", title: "MVP", dueOn: null, open: 3, closed: 4 };
-    expect(store.replaceGoal("r1", goal)).toBe(true);
-    expect(store.replaceGoal("r1", goal)).toBe(false);
-    expect(store.replaceGoal("r1", { ...goal, closed: 5 })).toBe(true);
-    expect(store.replaceGoal("r1", null)).toBe(true);
-    expect(store.replaceGoal("r1", null)).toBe(false);
   });
 
   it("offsets default to 0 and persist across reopen", () => {
@@ -1651,5 +1624,47 @@ describe("flight decisions", () => {
     expect(count({ ref: "mc#6" })).toBe(1);
     expect(count({ targetRunId: "r1" })).toBe(1);
     expect(count({ kinds: [] })).toBe(0);
+  });
+});
+
+describe("comms", () => {
+  const row = (text: string, at = 100) => ({
+    at,
+    from: "CAPCOM",
+    to: "guido-1",
+    ticket: null,
+    text,
+  });
+
+  it("keeps a text of COMMS_TEXT_MAX characters whole", () => {
+    const text = "x".repeat(COMMS_TEXT_MAX);
+    store.addComms(row(text));
+    expect(store.comms(0)[0]?.text).toBe(text);
+  });
+
+  it("cuts a longer text to that length, ending with an ellipsis", () => {
+    store.addComms(row("y".repeat(COMMS_TEXT_MAX + 50)));
+    const text = store.comms(0)[0]?.text ?? "";
+    expect(Array.from(text)).toHaveLength(COMMS_TEXT_MAX);
+    expect(text.endsWith("…")).toBe(true);
+  });
+
+  it("makes whitespace runs one space and trims", () => {
+    store.addComms(row("  a \n\n b\t\tc  "));
+    expect(store.comms(0)[0]?.text).toBe("a b c");
+  });
+
+  it("returns the rows at or after since, oldest first", () => {
+    store.addComms({ ...row("late"), at: 300, ticket: "mc#1" });
+    store.addComms(row("early", 100));
+    expect(store.comms(100).map((c) => c.text)).toEqual(["early", "late"]);
+    expect(store.comms(101).map((c) => c.text)).toEqual(["late"]);
+    expect(store.comms(300)[0]).toEqual({
+      at: 300,
+      from: "CAPCOM",
+      to: "guido-1",
+      ticket: "mc#1",
+      text: "late",
+    });
   });
 });

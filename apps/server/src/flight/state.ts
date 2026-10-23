@@ -4,8 +4,11 @@
  * reads it (`flightState`, the wake digest and the `flight_state` tool).
  */
 import {
+  type AttentionItem,
   clockHm,
+  FLIGHT_ABOUT_MAX,
   FLIGHT_HOUR_MS,
+  FLIGHT_ITEMS_LISTED,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_RECENT_LISTED,
   FLIGHT_STARTABLE,
@@ -19,6 +22,7 @@ import {
   type FlightView,
   hudColumnOf,
   inLane,
+  OWNER_OPERATOR,
   PRIORITIES,
   READY_LABEL,
   seatCallSign,
@@ -26,11 +30,24 @@ import {
 } from "@mc/core";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { crew, NO_LOCK } from "../hud.ts";
+import { attentionItems, crew, NO_LOCK } from "../hud.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
-import { seatFree } from "./tools.ts";
+import { cut, seatFree } from "./tools.ts";
+
+/** The Needs-you items that wait on the operator (the owner is the operator's), briefed or not. */
+export function operatorItems(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  hubLogin: string | null,
+  rows = crew(config, store, now, NO_LOCK, () => null).rows,
+): AttentionItem[] {
+  return attentionItems(config, store, now, NO_LOCK, rows, hubLogin).filter(
+    (i) => i.owner === OWNER_OPERATOR,
+  );
+}
 
 /**
  * The tickets FLIGHT may start in an hour: FLIGHT_STARTS_PER_HOUR per developer (build) seat in its
@@ -102,9 +119,15 @@ const shownPrs = (store: Store): Set<string> => {
 const shownKey = (p: { repoId: string; number: number; state: string }): string =>
   `${p.repoId}#${p.number}:${p.state}`;
 
-/** FLIGHT has received `s`: each merged or closed PR in it is not listed again. */
+const holdKey = (ref: string, waitsOn: number, prState: string): string =>
+  `hold:${ref}:${waitsOn}:${prState}`;
+
+/** FLIGHT has received `s`: each merged or closed PR in it is not listed again, nor a hold re-announced. */
 export function markPrsShown(store: Store, s: FlightState): void {
   const shown = shownPrs(store);
+  for (const h of s.holds) {
+    if (h.prState !== "open") shown.add(holdKey(h.ref, h.waitsOn, h.prState));
+  }
   for (const p of s.prs) {
     if (p.state !== "open") shown.add(shownKey({ repoId: s.repo, number: p.pr, state: p.state }));
   }
@@ -112,7 +135,11 @@ export function markPrsShown(store: Store, s: FlightState): void {
 
 /** The facts a delivered state leaves behind: the PRs that will leave the list are not counted. */
 export const deliveredFacts = (s: FlightState): string =>
-  wakeFacts({ ...s, prs: s.prs.filter((p) => p.state === "open") });
+  wakeFacts({
+    ...s,
+    prs: s.prs.filter((p) => p.state === "open"),
+    holds: s.holds.map((h) => ({ ...h, told: true })),
+  });
 
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
 export function flightState(i: {
@@ -120,6 +147,7 @@ export function flightState(i: {
   store: Store;
   busy: readonly SeatBusy[];
   now: number;
+  hubLogin?: string | null;
 }): FlightState {
   const { config, store, busy, now } = i;
   const tz = config.operator.timezone;
@@ -150,17 +178,16 @@ export function flightState(i: {
       questions: [],
       tickets: [],
       prs: [],
+      items: [],
+      holds: [],
       recent,
       limits,
     };
   }
   const { session } = found;
   const board = store.board(session.repoId);
-  const stalled = new Set(
-    crew(config, store, now, NO_LOCK, () => null)
-      .rows.filter((r) => r.hudState === "stalled")
-      .map((r) => r.id),
-  );
+  const crewRows = crew(config, store, now, NO_LOCK, () => null).rows;
+  const stalled = new Set(crewRows.filter((r) => r.hudState === "stalled").map((r) => r.id));
   const mine = session.seats.filter((s) => s.id !== found.seat.id && !s.retiring);
   const unended = (seatId: string) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -280,6 +307,48 @@ export function flightState(i: {
       };
     });
 
+  const prStates = new Map(store.pullRequests(session.repoId).map((p) => [p.number, p.state]));
+  // A hold ends when the board has moved its card past Backlog (or closed or dropped it). A PR
+  // gone from the stored read left the poll's lists, so its hold is ready to release.
+  const holds = store.activeHolds().flatMap((h) => {
+    const card = board.find((b) => `${b.repoId}#${b.issueNumber}` === h.ref);
+    // The stored board lags the move to Backlog until the next poll, so a card is only past its
+    // hold once the board has shown it in Backlog.
+    // a card a run has taken is past its hold, wherever the board shows it
+    if (
+      card === undefined ||
+      card.closed ||
+      active.has(h.ref) ||
+      (h.seen && hudColumnOf(card) !== "Backlog")
+    ) {
+      store.releaseHold(h.ref, now);
+      return [];
+    }
+    if (!h.seen && hudColumnOf(card) === "Backlog") store.markHoldSeen(h.ref);
+    const prState = prStates.get(h.waitsOn) ?? "closed";
+    return [
+      {
+        ref: h.ref,
+        waitsOn: h.waitsOn,
+        ageMin: Math.floor((now - h.at) / 60_000),
+        prState,
+        told: shownPrs(store).has(holdKey(h.ref, h.waitsOn, prState)),
+      },
+    ];
+  });
+  const briefed = store.briefs();
+  const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
+    .filter((x) => !briefed.has(x.key))
+    .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .slice(0, FLIGHT_ITEMS_LISTED)
+    .map((x) => ({
+      key: x.key,
+      kind: x.kind,
+      ticket: x.ticket,
+      text: cut(x.text, FLIGHT_ABOUT_MAX),
+      ageMin: Math.floor((now - x.at) / 60_000),
+    }));
+
   return {
     time: clockHm(now, tz),
     repo: session.repoId,
@@ -287,6 +356,8 @@ export function flightState(i: {
     questions,
     tickets,
     prs,
+    items,
+    holds,
     recent,
     limits,
   };
@@ -309,8 +380,17 @@ export function wakeFacts(s: FlightState): string {
       .sort(),
     stopped: stoppedSeats(s),
     prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}`).sort(),
+    items: s.items.map((x) => x.key).sort(),
+    release: releasable(s),
   });
 }
+
+/** The held cards whose PR has merged or closed, ready for FLIGHT to promote again. */
+const releasable = (s: FlightState): string[] =>
+  s.holds
+    .filter((h) => h.prState !== "open" && !h.told)
+    .map((h) => `${h.ref}:${h.waitsOn}:${h.prState}`)
+    .sort();
 
 /** The build seats left stopped, which only a start (or the operator) brings back into rotation. */
 const stoppedSeats = (s: FlightState): string[] =>
@@ -319,10 +399,12 @@ const stoppedSeats = (s: FlightState): string[] =>
     .map((x) => x.id)
     .sort();
 
-/** Something still waits on FLIGHT: a question, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
+/** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
 export function pending(s: FlightState): boolean {
   return (
     s.questions.length > 0 ||
+    s.items.length > 0 ||
+    releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
     (s.tickets.some((t) => t.ready) && s.seats.some((x) => x.loop === "build" && x.free)) ||
     s.seats.some(

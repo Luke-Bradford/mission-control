@@ -299,6 +299,10 @@ describe("collectStudioLoop", () => {
 
     // No branch in the transcript at all: the worktree HEAD (linked-worktree layout) is used.
     writeFileSync(join(logsDir, F43), `${strip.join("\n")}\n`);
+    const strip42 = readFileSync(join(logsDir, F42), "utf8")
+      .split("\n")
+      .filter((l) => !l.includes("vcs_state_changed"));
+    writeFileSync(join(logsDir, F42), `${strip42.join("\n")}\n`);
     const gitdir = join(dir, "main-git");
     mkdirSync(gitdir, { recursive: true });
     writeFileSync(join(gitdir, "HEAD"), "ref: refs/heads/fix/42-from-head\n");
@@ -309,6 +313,12 @@ describe("collectStudioLoop", () => {
       branch: "fix/42-from-head",
       ticket: "site-builder#42",
     });
+    // The ended fire F42 keeps no branch from the worktree HEAD.
+    const f42 = byId().get("studio-builder:20261017-112003");
+    expect(f42?.seq).toBe(42);
+    expect(f42?.status).not.toBe("running");
+    expect(f42?.branch).not.toBe("fix/42-from-head");
+    expect(f42?.ticket).not.toBe("site-builder#42");
   });
 
   // #26 A3: a re-fold from a transcript that names no branch must not null what was known.
