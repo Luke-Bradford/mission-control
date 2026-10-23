@@ -1594,6 +1594,7 @@ describe("flight_state", () => {
         },
       ],
       items: [{ key: "note:ready:r-pr", kind: "ready", ticket: "mc#7", text: "ready", ageMin: 0 }],
+      holds: [],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
     });
@@ -1843,6 +1844,89 @@ describe("promote", () => {
     moveImpl = async () => ({ ok: false, reason: "card not on the project" });
     expect(await call("promote", P())).toEqual(refused("Not moved: card not on the project"));
     expect(decisions()).toEqual([]);
+  });
+
+  describe("holds", () => {
+    const pr = (number: number, state: "open" | "merged" | "closed" = "open") => ({
+      repoId: "mc",
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch: `feature/${number}-x`,
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: "abc",
+      mergeable: null,
+      author: null,
+      assignees: [],
+    });
+    const H = (over: Record<string, unknown> = {}) => P({ to: "Backlog", waits_on: 246, ...over });
+
+    beforeEach(() => {
+      board(backlog({ status: "Ready" }));
+      store.upsertPullRequests("mc", [pr(246), pr(247, "merged"), pr(248, "closed")], NOW);
+    });
+
+    it("holds a Ready card FLIGHT did not move, behind an open PR", async () => {
+      expect((await call("promote", H())).isError).toBeUndefined();
+      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Backlog" }]);
+      expect(store.activeHolds()).toMatchObject([
+        { ref: "mc#7", waitsOn: 246, basis: "it is complete", releasedAt: null },
+      ]);
+      expect(decisions()).toMatchObject([
+        { kind: "promote", ref: "mc#7", decision: "Held in Backlog behind PR #246" },
+      ]);
+    });
+
+    it("holds a Refinement card too, and counts under the promote cap", async () => {
+      board(backlog({ status: "Refinement" }));
+      expect((await call("promote", H())).isError).toBeUndefined();
+      for (let i = 0; i < 9; i++) addDecision({ kind: "promote" });
+      expect((await call("promote", H())).text).toContain("moved tickets 10 times");
+    });
+
+    it("refuses a hold on a card with a run", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      expect(await call("promote", H())).toEqual(refused("Not moved: mc#7 has a run."));
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("refuses a hold behind a merged, closed or unknown PR", async () => {
+      for (const n of [247, 248, 999]) {
+        expect(await call("promote", H({ waits_on: n }))).toEqual(
+          refused(`Not moved: PR #${n} is not an open PR in mc.`),
+        );
+      }
+      expect(moveCalls).toEqual([]);
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("refuses waits_on on a move that is not to Backlog, and a hold from Backlog", async () => {
+      expect((await call("promote", P({ waits_on: 246 }))).isError).toBe(true);
+      board(backlog());
+      expect((await call("promote", H())).isError).toBe(true);
+      expect(moveCalls).toEqual([]);
+    });
+
+    it("releases the hold when the card is promoted again", async () => {
+      await call("promote", H());
+      board(backlog());
+      expect((await call("promote", P())).isError).toBeUndefined();
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("keeps the hold when the promote again is refused", async () => {
+      await call("promote", H());
+      board(backlog({ labels: [] }));
+      expect((await call("promote", P())).isError).toBe(true);
+      expect(store.activeHolds()).toHaveLength(1);
+    });
   });
 });
 

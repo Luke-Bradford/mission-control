@@ -227,6 +227,10 @@ export const needsPlanText = (ref: string, size: string): string =>
   `Not moved: ${ref} is Size ${size} and has no ## Plan; start the planner on it with mc start_seat first.`;
 export const moveFailedText = (reason: string): string => `Not moved: ${reason}`;
 export const movedDecision = (to: string): string => `Moved to ${to}`;
+export const heldDecision = (pr: number): string => `Held in Backlog behind PR #${pr}`;
+export const holdNotOpenPrText = (repoId: string, pr: number): string =>
+  `Not moved: PR #${pr} is not an open PR in ${repoId}.`;
+export const WAITS_ON_ONLY_BACKLOG = "Not moved: waits_on is only for a move to Backlog.";
 export const movedText = (ref: string, to: string): string =>
   `Moved ${ref} to ${to}. Recorded in Decided without you.`;
 
@@ -362,6 +366,11 @@ export interface FlightState {
     text: string;
     ageMin: number;
   }[];
+  /**
+   * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
+   * the PR waited on: once it is not "open", the hold is ready to release.
+   */
+  holds: { ref: string; waitsOn: number; ageMin: number; prState: "open" | "merged" | "closed" }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
 }
@@ -394,6 +403,7 @@ export function wakeSummary(s: FlightState): string {
   const parked = s.seats.filter((x) => x.parked !== null).length;
   const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
   const inReview = s.prs.filter((p) => p.state === "open").length;
+  const toRelease = s.holds.filter((h) => h.prState !== "open").length;
   const parts = [
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
@@ -401,6 +411,7 @@ export function wakeSummary(s: FlightState): string {
     parked > 0 ? `${parked} parked` : "",
     inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
     s.items.length > 0 ? `${counted(s.items.length, "item", "items")} to brief` : "",
+    toRelease > 0 ? `${counted(toRelease, "hold", "holds")} to release` : "",
   ].filter((p) => p !== "");
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }

@@ -169,6 +169,7 @@ export function flightState(i: {
       tickets: [],
       prs: [],
       items: [],
+      holds: [],
       recent,
       limits,
     };
@@ -296,6 +297,7 @@ export function flightState(i: {
       };
     });
 
+  const prStates = new Map(store.pullRequests(session.repoId).map((p) => [p.number, p.state]));
   const briefed = store.briefs();
   const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
     .filter((x) => !briefed.has(x.key))
@@ -317,6 +319,13 @@ export function flightState(i: {
     tickets,
     prs,
     items,
+    // A PR gone from the stored read left the poll's lists, so its hold is ready to release.
+    holds: store.activeHolds().map((h) => ({
+      ref: h.ref,
+      waitsOn: h.waitsOn,
+      ageMin: Math.floor((now - h.at) / 60_000),
+      prState: prStates.get(h.waitsOn) ?? "closed",
+    })),
     recent,
     limits,
   };
@@ -340,8 +349,16 @@ export function wakeFacts(s: FlightState): string {
     stopped: stoppedSeats(s),
     prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}`).sort(),
     items: s.items.map((x) => x.key).sort(),
+    release: releasable(s),
   });
 }
+
+/** The held cards whose PR has merged or closed, ready for FLIGHT to promote again. */
+const releasable = (s: FlightState): string[] =>
+  s.holds
+    .filter((h) => h.prState !== "open")
+    .map((h) => `${h.ref}:${h.waitsOn}:${h.prState}`)
+    .sort();
 
 /** The build seats left stopped, which only a start (or the operator) brings back into rotation. */
 const stoppedSeats = (s: FlightState): string[] =>
@@ -355,6 +372,7 @@ export function pending(s: FlightState): boolean {
   return (
     s.questions.length > 0 ||
     s.items.length > 0 ||
+    releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
     (s.tickets.some((t) => t.ready) && s.seats.some((x) => x.loop === "build" && x.free)) ||
     s.seats.some(

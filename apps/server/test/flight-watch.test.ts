@@ -313,6 +313,48 @@ describe("FLIGHT's PR list", () => {
   });
 });
 
+describe("FLIGHT's holds", () => {
+  const hold = () => store.addHold({ ref: "mc#9", waitsOn: 7, basis: "same files", at: T0 });
+
+  it("lists a hold in the digest with its age", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    nowMs = T0 + 5 * MIN;
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([
+      { ref: "mc#9", waitsOn: 7, ageMin: 5, prState: "open" },
+    ]);
+  });
+
+  it("wakes once when the waited-on PR merges, with the hold listed", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    await watch.check();
+    expect(sendCalls[0]?.text).not.toContain("to release");
+    sendCalls = [];
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    nowMs = T0 + MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("1 hold to release");
+    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightState;
+    expect(sent.holds).toMatchObject([{ ref: "mc#9", waitsOn: 7, prState: "merged" }]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("wakes when the PR closes unmerged, and a released hold wakes nothing", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    store.upsertPullRequests("mc", [stored(7, { state: "closed" })], T0 + MIN);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.releaseHold("mc#9", T0 + 2 * MIN);
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
+  });
+});
+
 const raiseBlocked = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
   store.raiseNote({
     key,
@@ -786,6 +828,7 @@ describe("wakeSummary", () => {
     tickets: [],
     prs: [],
     items: [],
+    holds: [],
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
     ...over,
