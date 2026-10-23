@@ -1196,12 +1196,20 @@ describe("merge steps", () => {
       expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: false });
     });
 
-    it("sends nothing and refuses transiently when main has moved past the branch", async () => {
+    it("merges when main has moved past the branch without checking ancestry", async () => {
       mainSame();
       gitAnswers[`merge-base --is-ancestor ${MAIN} ${SHA}`] = exit1;
-      ghAnswers = [view("OPEN")];
-      expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: true });
-      expect(ghCalls).toHaveLength(1);
+      ghAnswers = [view("OPEN"), ok];
+      expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
+      expect(ghCalls).toContainEqual([
+        "pr",
+        "merge",
+        "12",
+        "--repo=o/mc",
+        "--merge",
+        `--match-head-commit=${SHA}`,
+      ]);
+      expect(gitCalls.some((args) => args[0] === "merge-base")).toBe(false);
     });
 
     it("refuses transiently when gh merge fails", async () => {

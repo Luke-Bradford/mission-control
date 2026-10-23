@@ -122,24 +122,29 @@ describe("main moves", () => {
     expect(mainConflictText(MAIN, 2)).toBe("merging main ccccccc conflicted in 2 files");
   });
 
-  it("behind main only: update-branch, and no merge, mark-ready or set-aside", () => {
+  it("behind main only: merge without updating the branch", () => {
     const a = reconcile(behind()).actions;
-    expect(a).toContainEqual(update);
-    expect(kinds(a)).not.toContain("merge");
-    expect(kinds(a)).not.toContain("mark-ready");
-    expect(kinds(a)).not.toContain("set-aside");
+    expect(kinds(a)).not.toContain("update-branch");
+    expect(a).toContainEqual({ kind: "merge", sha: SHA });
+    expect(kinds(a)).toContain("mark-ready");
   });
 
-  it("hard-rule paths behind main also update", () => {
+  it("hard-rule paths behind main do not update without a conflict", () => {
     const s = behind(
       {},
       { touches: { sha: SHA, paths: ["a/x.ts"] }, gate: gateOf({ strays: ["a/x.ts"] }) },
     );
-    expect(reconcile(s).actions).toContainEqual(update);
+    expect(kinds(reconcile(s).actions)).not.toContain("update-branch");
+  });
+
+  it("a conflicting PR in review updates to main", () => {
+    expect(reconcile(behind({ pr: pr({ mergeable: "CONFLICTING" }) })).actions).toContainEqual(
+      update,
+    );
   });
 
   it("not while the seat is in a turn or not idle", () => {
-    const b = behind();
+    const b = behind({ pr: pr({ mergeable: "CONFLICTING" }) });
     for (const seatOver of [{ inTurn: true }, { state: "running" as const }]) {
       const a = reconcile({ ...b, seat: { ...b.seat, ...seatOver } }).actions;
       expect(kinds(a)).not.toContain("update-branch");
@@ -147,7 +152,9 @@ describe("main moves", () => {
   });
 
   it("not in a draft workspace", () => {
-    expect(kinds(reconcile(behind({ autoMerge: false })).actions)).not.toContain("update-branch");
+    expect(
+      kinds(reconcile(behind({ autoMerge: false, pr: pr({ mergeable: "CONFLICTING" }) })).actions),
+    ).not.toContain("update-branch");
   });
 
   it("not while a fix is due: the fix line goes instead", () => {
@@ -157,22 +164,32 @@ describe("main moves", () => {
   });
 
   it("not while the head is not the pushed sha", () => {
-    expect(kinds(reconcile(behind({ headCommit: SHA2 })).actions)).not.toContain("update-branch");
+    expect(
+      kinds(reconcile(behind({ headCommit: SHA2, pr: pr({ mergeable: "CONFLICTING" }) })).actions),
+    ).not.toContain("update-branch");
   });
 
   it("not with strays outside the hard rules", () => {
-    const s = behind({}, { gate: gateOf({ strays: ["x/y.ts"] }) });
+    const s = behind(
+      { pr: pr({ mergeable: "CONFLICTING" }) },
+      { gate: gateOf({ strays: ["x/y.ts"] }) },
+    );
     expect(kinds(reconcile(s).actions)).not.toContain("update-branch");
   });
 
   it("not once the branch contains main, or with no gate", () => {
-    const has = behind({}, { gate: gateOf({ containsMain: true }) });
+    const has = behind(
+      { pr: pr({ mergeable: "CONFLICTING" }) },
+      { gate: gateOf({ containsMain: true }) },
+    );
     expect(kinds(reconcile(has).actions)).not.toContain("update-branch");
-    expect(kinds(reconcile(behind({}, { gate: null })).actions)).not.toContain("update-branch");
+    expect(
+      kinds(reconcile(behind({ pr: pr({ mergeable: "CONFLICTING" }) }, { gate: null })).actions),
+    ).not.toContain("update-branch");
   });
 
-  it("an aside run updates, and stays aside", () => {
-    const r = reconcile(aside(behind()));
+  it("a conflicting aside run updates, and stays aside", () => {
+    const r = reconcile(aside(behind({ pr: pr({ mergeable: "CONFLICTING" }) })));
     expect(r.actions).toContainEqual(update);
     expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
   });

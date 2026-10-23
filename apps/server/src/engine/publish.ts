@@ -71,7 +71,6 @@ export const MERGE_NO_SEAT = "the run's seat is no longer configured";
 export const MERGE_BAD_SHA = "not a commit sha";
 export const MERGE_HEAD_MOVED = "the PR's head is not the commit that passed the gate";
 export const MERGE_PR_NOT_OPEN = "the PR is not open";
-export const MERGE_BEHIND_MAIN = "main has moved past the branch";
 export const MERGE_NOT_RUN_BRANCH = "the branch is not this run's own";
 export const MERGE_BRANCH_MOVED = "the branch has commits that were not merged";
 export const MERGE_PR_NOT_RUNS =
@@ -991,15 +990,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (pr.isCrossRepository !== false || pr.headRefName !== ownBranch(run)) {
           return final(MERGE_PR_NOT_RUNS);
         }
-        const behind = await inGit(run, async (g): Promise<PublishResult> => {
-          const { defaultBranch, mainSha } = await originNow(g, null);
-          if (pr.baseRefName !== defaultBranch) return final(MERGE_PR_NOT_RUNS);
-          await fetchMain(g, defaultBranch, mainSha);
-          return (await yes(g, ["merge-base", "--is-ancestor", mainSha, sha]))
-            ? { ok: true }
-            : transient(MERGE_BEHIND_MAIN);
+        const base = await inGit(run, async (g): Promise<PublishResult> => {
+          const { defaultBranch } = await originNow(g, null);
+          return pr.baseRefName === defaultBranch ? { ok: true } : final(MERGE_PR_NOT_RUNS);
         });
-        if (!behind.ok) return behind;
+        if (!base.ok) return base;
         const merged = await ghDo(
           ["pr", "merge", String(n), `--repo=${repo}`, "--merge", `--match-head-commit=${sha}`],
           "pr merge",

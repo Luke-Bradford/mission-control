@@ -181,10 +181,6 @@ export const mergeStepFailedText = (step: string, why: string): string => `${ste
 export const gateStrayParkText = (call: string, paths: readonly string[]): string =>
   `changes outside ${call}'s area: ${paths.join(", ")}`;
 export const GATE_FOREIGN_COMMITS_PARK = "commits on the branch that Mission Control did not make";
-/** The flag note while a merge-ready PR is behind main. */
-export const behindNoteKey = (runId: string, sha: string): string => `behind:${runId}:${sha}`;
-export const behindMainText = (ref: string, pr: number, mainSha: string): string =>
-  `${ref}: PR #${pr} is behind main (${mainSha.slice(0, 7)}), so Mission Control has not merged it; it merges once the branch contains main`;
 /** The line a conflicted merge of main sends the seat, keyed so it goes once per main sha. */
 export const conflictKey = (runId: string, mainSha: string): string =>
   `conflict:${runId}:${mainSha}`;
@@ -487,12 +483,7 @@ function gateView(s: LoopSnapshot, loop: RunLoop) {
   const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
   const clear = touches !== null && touches.paths.length === 0;
   const passes =
-    on &&
-    s.hardRulesSet === true &&
-    clear &&
-    gate?.containsMain === true &&
-    gate.hubOnly &&
-    gate.strays.length === 0;
+    on && s.hardRulesSet === true && clear && gate?.hubOnly === true && gate.strays.length === 0;
   return { on, P, touches, gate, clear, passes };
 }
 
@@ -823,18 +814,13 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
               });
             }
           } else {
-            // only hard-rule files hold it: the operator merges, once the branch has current main
+            // only hard-rule files hold it: the operator merges
             const hardOnly =
               gv.touches !== null &&
               gv.touches.paths.length > 0 &&
               gv.gate?.hubOnly === true &&
               gv.gate.strays.every((p) => gv.touches?.paths.includes(p));
-            if ((gv.clear || hardOnly) && gv.gate !== null && !gv.gate.containsMain) {
-              notes.set(behindNoteKey(runId, rv.P), {
-                noteKind: "flag",
-                text: behindMainText(ticket.ref, n, gv.gate.mainSha),
-              });
-            } else if (hardOnly && gv.touches !== null) {
+            if (hardOnly && gv.touches !== null) {
               notes.set(readyNoteKey(runId, rv.P), {
                 noteKind: "ready",
                 text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
@@ -915,8 +901,8 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
 
 /**
  * The main sha to merge into the run's branch now, or null. In a merge workspace, a run waiting at
- * its pushed sha is updated when only main is missing from its branch, or its PR conflicts with
- * main; its seat is between turns, or the run is aside.
+ * its pushed sha is updated when its PR conflicts with main; its seat is between turns, or the
+ * run is aside.
  */
 function branchUpdateDue(s: LoopSnapshot, loop: RunLoop): string | null {
   const { seat, pr } = s;
@@ -939,13 +925,7 @@ function branchUpdateDue(s: LoopSnapshot, loop: RunLoop): string | null {
     return null;
   }
   if (!loop.aside && !(seat.holdsRun && !seat.inTurn && seat.state === "idle")) return null;
-  const gv = gateView(s, loop);
-  const behindOnly =
-    gv.on &&
-    gv.touches !== null &&
-    gate.hubOnly &&
-    gate.strays.every((p) => gv.touches?.paths.includes(p));
-  return behindOnly || pr.mergeable === "CONFLICTING" ? gate.mainSha : null;
+  return pr.mergeable === "CONFLICTING" ? gate.mainSha : null;
 }
 
 /** The one line due this pass, if any; the first due one wins. */
