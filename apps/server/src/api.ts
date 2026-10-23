@@ -300,7 +300,17 @@ const MessageBody = z.strictObject({
 const NoBody = z.strictObject({});
 
 // Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
-const EndBody = z.strictObject({ hold: z.boolean().optional() });
+const EndBody = z.strictObject({
+  hold: z.boolean().optional(),
+  watch: z
+    .strictObject({
+      id: z.string().min(1).max(100),
+      runId: z.string().min(1).max(200),
+      toolUseId: z.string().min(1).max(200),
+      since: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
 
 /**
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
@@ -1394,6 +1404,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
       seatAction("/seats/:id/end", EndBody, async (sup, id, b) => {
+        if (b.watch) {
+          const action = flightBriefView(
+            config,
+            store,
+            deps.lock?.state() ?? NO_LOCK,
+            now(),
+          ).watch?.find((entry) => entry.id === b.watch?.id)?.action;
+          if (
+            action?.kind !== "lock-hold" ||
+            action.runId !== b.watch.runId ||
+            action.toolUseId !== b.watch.toolUseId ||
+            action.since !== b.watch.since ||
+            store.seatSession(id)?.runId !== action.runId
+          )
+            throw new SupervisorError(
+              409,
+              "Watch target changed; refresh before stopping the run.",
+            );
+        }
         await sup.endRun(id, { hold: b.hold });
         return { ok: true };
       });
@@ -1411,7 +1440,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT ticket 4)
       api.get("/flight", async () => flightView(config, store, Date.now()));
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief, web follow-up of #225)
-      api.get("/flight/brief", async () => flightBriefView(config, store));
+      api.get("/flight/brief", async () =>
+        flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
+      );
+      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes, web follow-up)
+      api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),

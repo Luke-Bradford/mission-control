@@ -20,6 +20,8 @@ import {
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
+  type FlightArrivalDisposition,
+  type FlightArrivalOperation,
   type FlightBriefSection,
   type FlightBriefView,
   type FlightSeatState,
@@ -36,6 +38,7 @@ import {
   type Run,
   seatCallSign,
   seatDef,
+  type TestLockState,
   wakeKeyPrefix,
 } from "@mc/core";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
@@ -165,9 +168,81 @@ export function flightBriefSections(store: Store, sessionId: string | null): Fli
   });
 }
 
-export function flightBriefView(config: CcConfig, store: Store): FlightBriefView {
+export function flightBriefView(
+  config: CcConfig,
+  store: Store,
+  lock: TestLockState = NO_LOCK,
+  now = Date.now(),
+): FlightBriefView {
   const session = flightSeat(config)?.session.id ?? null;
-  return { session, sections: flightBriefSections(store, session) };
+  const drafts = store.drafts(true);
+  const rows = crew(config, store, now, lock, () => null).rows;
+  const watch = (session === null ? [] : store.flightWatch(session)).filter((entry) => {
+    const action = entry.action;
+    if (!action) return true;
+    if (action.kind === "draft") {
+      const draft = store.drafts().find((d) => d.id === action.draftId);
+      if (draft?.state !== "pending" || draft.target !== action.target) return false;
+      const source = store.draftSource(draft.id);
+      if (!source) return true;
+      const match = /^person:(\d+):(\d+)$/.exec(source.itemKey);
+      const n = match ? store.notification(match[1] as string) : null;
+      return (
+        !!n &&
+        n.unread &&
+        n.updatedAt === Number(match?.[2]) &&
+        (n.handledThrough === null || n.updatedAt > n.handledThrough) &&
+        JSON.stringify(n.message?.source) === JSON.stringify(source.source)
+      );
+    }
+    const h = lock.holder;
+    return (
+      h !== null &&
+      h.runId === action.runId &&
+      h.since === action.since &&
+      store
+        .lockHolds()
+        .some(
+          (r) =>
+            r.runId === action.runId &&
+            r.toolUseId === action.toolUseId &&
+            r.since === action.since,
+        ) &&
+      store.run(action.runId)?.endedAt === null &&
+      store.seatSession(h.seatId)?.runId === action.runId &&
+      rows.some((r) => r.id === h.seatId && r.hudState === "stalled") &&
+      lock.waiting.length > 0
+    );
+  });
+  return { session, sections: flightBriefSections(store, session), watch, drafts };
+}
+
+/** Source records supply identity and text; a notification alone never implies an action. */
+export function flightArrivalSource(
+  config: CcConfig,
+  store: Store,
+  operation: FlightArrivalOperation,
+): Pick<FlightArrivalDisposition, "text" | "arrivedAt"> | null {
+  if (operation.source === "Board") {
+    const repo = flightSeat(config)?.session.repoId;
+    const card =
+      repo === undefined
+        ? undefined
+        : store.board(repo).find((c) => `${repo}#${c.issueNumber}` === operation.arrivalId);
+    return card && String(card.createdAt) === operation.version
+      ? { text: card.title, arrivedAt: card.createdAt }
+      : null;
+  }
+  const n = store.notification(operation.arrivalId);
+  const source = n?.message?.source;
+  if (
+    !n ||
+    n.repoId !== flightSeat(config)?.session.repoId ||
+    (operation.source === "Teams" ? source?.kind !== "teams" : source?.kind === "teams") ||
+    operation.version !== (source?.revision ?? String(n.updatedAt))
+  )
+    return null;
+  return { text: n.title, arrivedAt: n.updatedAt };
 }
 
 const priorityRank = (p: string | null): number => {
@@ -345,6 +420,12 @@ export function flightState(i: {
       const column = hudColumnOf(b);
       return {
         ref: `${b.repoId}#${b.issueNumber}`,
+        arrival: {
+          source: "Board" as const,
+          arrivalId: `${b.repoId}#${b.issueNumber}`,
+          version: String(b.createdAt),
+          arrivedAt: b.createdAt,
+        },
         title: b.title,
         column,
         priority: b.priority,
