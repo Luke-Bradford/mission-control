@@ -132,6 +132,8 @@ export const briefClearedText = (title: string): string =>
   `Cleared the ${title} section of your brief. Recorded in Decided without you.`;
 export const briefAboutText = (title: string): string => `Brief: ${title}`;
 export const BRIEF_CLEARED_DECISION = "Cleared";
+/** A saved section in the decision log: its size, not its text (the brief itself holds that). */
+export const briefSavedDecision = (chars: number): string => `Saved (${chars} characters)`;
 export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, which comes back in every wake (brief in mc flight_state). Sections: ${FLIGHT_BRIEF_SECTIONS.join(", ")}. text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
 
 export const READ_OTHER_REPO =

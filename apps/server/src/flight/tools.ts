@@ -23,6 +23,7 @@ import {
   briefAboutText,
   briefClearedText,
   briefNoItemText,
+  briefSavedDecision,
   briefSavedText,
   briefTooLongText,
   COMMENTED_DECISION,
@@ -1070,7 +1071,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     record(at, {
       kind: "brief",
       about: briefAboutText(title),
-      decision: body === "" ? BRIEF_CLEARED_DECISION : body,
+      decision: body === "" ? BRIEF_CLEARED_DECISION : briefSavedDecision(body.length),
       basis,
     });
     bus.emit("flight");

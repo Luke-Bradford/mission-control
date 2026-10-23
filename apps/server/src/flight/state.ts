@@ -190,12 +190,17 @@ export function flightState(i: {
         store.countFlightDecisions({ kinds: ["answer", "message", "unpark"], since }),
     ),
   };
-  const recent = store.flightDecisions(0, FLIGHT_RECENT_LISTED).map((d) => ({
-    time: clockHm(d.at, tz),
-    kind: d.kind,
-    about: d.about,
-    decision: d.decision,
-  }));
+  // brief edits stay out of `recent`: the brief itself is in the state, and edits would crowd it
+  const recent = store
+    .flightDecisions(0, FLIGHT_RECENT_LISTED * 4)
+    .filter((d) => d.kind !== "brief")
+    .slice(0, FLIGHT_RECENT_LISTED)
+    .map((d) => ({
+      time: clockHm(d.at, tz),
+      kind: d.kind,
+      about: d.about,
+      decision: d.decision,
+    }));
   const brief = flightBriefSections(store, found?.session.id ?? null).map((b) => ({
     section: b.section,
     title: b.title,

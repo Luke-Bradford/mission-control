@@ -6,6 +6,7 @@ import {
   BRIEF_CLEARED_DECISION,
   BRIEFED_TEXT,
   briefClearedText,
+  briefSavedDecision,
   briefSavedText,
   briefTooLongText,
   capText,
@@ -2477,8 +2478,17 @@ describe("update_brief", () => {
       },
     ]);
     expect(briefDecisions()).toHaveLength(3);
-    expect(briefDecisions()[0]).toMatchObject({ about: "Brief: Goals and priorities" });
+    expect(briefDecisions()[0]).toMatchObject({
+      about: "Brief: Goals and priorities",
+      decision: briefSavedDecision(20),
+    });
     expect(seen).toContain("flight");
+    // the log keeps the size, not the text; flight_state's recent leaves brief edits out
+    expect(briefDecisions().map((d) => d.decision)).not.toContain("Ship the merge step.");
+    const state = JSON.parse((await call("flight_state", {}, ctx())).text) as {
+      recent: { kind: string }[];
+    };
+    expect(state.recent.filter((d) => d.kind === "brief")).toEqual([]);
   });
 
   it("clears a section with an empty text", async () => {
