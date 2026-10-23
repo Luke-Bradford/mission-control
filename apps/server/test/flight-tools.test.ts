@@ -3033,6 +3033,57 @@ describe("brief_item", () => {
     expect(ghCalls).toEqual([]);
   });
 
+  it("records stored Teams replies as drafted while keeping them copy-only", async () => {
+    const source = { kind: "teams" as const, messageId: "555", revision: "teams-v1" };
+    store.upsertNotifications(
+      [
+        {
+          id: "102",
+          repoId: "mc",
+          subjectType: "Issue",
+          title: "Teams review",
+          number: null,
+          reason: "mention",
+          url: "https://teams.microsoft.com/message/555",
+          author: "Reviewer",
+          snippet: "Please review",
+          updatedAt: NOW,
+          lastReadAt: null,
+          message: {
+            source,
+            author: "Reviewer",
+            at: NOW,
+            text: "Please review",
+            url: "https://teams.microsoft.com/message/555",
+          },
+        },
+      ],
+      false,
+      NOW,
+    );
+    const key = `person:102:${NOW}`;
+    const replies = [{ id: "review", label: "Review", text: "I will review." }];
+    expect(await call("brief_item", B({ key, person: { source, replies } }))).toEqual({
+      text: BRIEFED_TEXT,
+    });
+    expect(store.briefs().get(key)?.person?.replies).toEqual(replies);
+    expect(store.drafts()).toEqual([]);
+    expect(ghCalls).toEqual([]);
+    expect(store.flightIncoming()).toEqual([
+      expect.objectContaining({
+        source: "Teams",
+        arrivalId: "102",
+        version: source.revision,
+        outcome: "Reply drafted",
+      }),
+    ]);
+    expect(
+      await call("brief_item", B({ key, person: { source, assessment: ["Needs a decision"] } })),
+    ).toEqual({ text: BRIEFED_TEXT });
+    expect(store.flightIncoming()[0]?.outcome).toBe("Asked of you");
+    expect(ghCalls).toEqual([]);
+  });
+
   it("takes no options, and cuts long texts at MC_TEXT_MAX", async () => {
     const long = "x".repeat(MC_TEXT_MAX + 50);
     await call("brief_item", B({ context: long, options: undefined }));
@@ -3966,5 +4017,46 @@ it("supplies Board arrival identity in flight_state so outcomes need no guessed 
     arrivalId: "mc#41",
     version: String(NOW),
     arrivedAt: NOW,
+  });
+});
+
+it("serves every pending watch draft while bounding only finished draft history", () => {
+  const pending = Array.from({ length: 101 }, (_, i) =>
+    store.addDraft(`mc#${i + 1}`, "issue", "Pending reply", NOW + i),
+  );
+  const finished = Array.from({ length: 101 }, (_, i) => {
+    const id = store.addDraft("mc#200", "issue", "Finished reply", NOW + 200 + i);
+    store.finishDraft(id, "copied", undefined, NOW + 400 + i);
+    return id;
+  });
+  store.setFlightWatch(
+    "s1",
+    {
+      upsert: [
+        {
+          id: "old-pending",
+          state: "info",
+          title: "Reply ready",
+          detail: "Prepared reply",
+          catchUp: { kind: "old", line: "Still pending" },
+          next: "See draft",
+          action: { kind: "draft", draftId: pending[0] as number, target: "mc#1" },
+        },
+      ],
+    },
+    NOW,
+  );
+  const brief = flightBriefView(cfg, store);
+  expect(brief.watch).toHaveLength(1);
+  if (!brief.drafts) throw new Error("Missing served drafts");
+  expect(brief.drafts.filter((d) => d.state === "pending").map((d) => d.id)).toEqual(
+    [...pending].reverse(),
+  );
+  expect(brief.drafts.filter((d) => d.state !== "pending").map((d) => d.id)).toEqual(
+    finished.slice(1).reverse(),
+  );
+  expect(brief.drafts.find((d) => d.id === pending[0])).toMatchObject({
+    target: "mc#1",
+    state: "pending",
   });
 });

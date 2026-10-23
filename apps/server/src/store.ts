@@ -2979,7 +2979,14 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT id, target, kind, text, created_at AS createdAt, state, metadata, completed_at AS completedAt
-       FROM drafts ${includeDone ? "ORDER BY created_at DESC, id DESC LIMIT 100" : "WHERE state = 'pending' ORDER BY created_at, id"}`,
+       FROM drafts ${
+         includeDone
+           ? `WHERE state = 'pending' OR id IN (
+               SELECT id FROM drafts WHERE state != 'pending'
+               ORDER BY created_at DESC, id DESC LIMIT 100
+             ) ORDER BY created_at DESC, id DESC`
+           : "WHERE state = 'pending' ORDER BY created_at, id"
+       }`,
       )
       .all() as Row[];
     return rows.map(({ metadata, completedAt, ...r }) => ({
