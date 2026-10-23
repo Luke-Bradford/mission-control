@@ -1782,6 +1782,27 @@ describe("Agent page: loop steps", () => {
       expect($(ci, ".titer")?.textContent).toBe("×2");
     });
 
+    it("budget header", async () => {
+      const ci = loopOf({ phase: "ci", text: "CI is running", prNumber: 77 });
+      const tries = [triesAt("working", 1, "pass")];
+      const tokens = { input: 30_000, output: 20_000, cacheRead: 0, cacheCreate: 0 };
+      const panel = await openLoop(ci, viewOf("ci", tries, { budget: 200_000 }), {
+        run: { tokens },
+      });
+      await waitFor(() => expect($(panel, ".budget")).not.toBeNull());
+      const header = $(panel, ".budget") as HTMLElement;
+      expect(header.textContent).toContain("Tokens 50.0k of 200k");
+      expect(($(header, ".mbar i") as HTMLElement).style.width).toBe("25%");
+      cleanup();
+      const open = await openLoop(ci, viewOf("ci", tries, { budget: null }), { run: { tokens } });
+      await waitFor(() => expect($(open, ".budget")).not.toBeNull());
+      const bare = $(open, ".budget") as HTMLElement;
+      expect(bare.textContent).toContain("Tokens 50.0k");
+      expect(bare.textContent).not.toContain(" of 2");
+      expect(bare.textContent).not.toMatch(/Tokens 50\.0k of/);
+      expect(bare.querySelectorAll(".mbar")).toHaveLength(1);
+    });
+
     it("timeline", async () => {
       const s = NOW - 40 * MIN;
       const tries = [
