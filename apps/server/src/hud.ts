@@ -22,6 +22,7 @@ import {
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
+  isFlakeNoteKey,
   isHardRulesFlagKey,
   LOCK_WAITING_TEXT,
   laneOwner,
@@ -544,7 +545,7 @@ function endedParkGone(
  * operator's, unless the repo's rules say the controller merges hard-rule PRs.
  */
 function noteOwner(store: Store, n: Pick<AttentionNote, "key" | "repoId">): AttentionOwner {
-  if (isCleanupNoteKey(n.key)) return OWNER_CONTROLLER;
+  if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key)) return OWNER_CONTROLLER;
   if (
     isHardRulesFlagKey(n.key) &&
     n.repoId !== null &&

@@ -333,6 +333,38 @@ describe("cleanLog", () => {
   });
 });
 
+describe("rerunFailed", () => {
+  const listed =
+    (...r: { databaseId: number; name: string; conclusion: string }[]) =>
+    () => ({
+      code: 0,
+      stdout: JSON.stringify(r),
+    });
+
+  it("re-runs the failed jobs of each failed run, argv only", async () => {
+    ghAnswers = [
+      listed(
+        { databaseId: 11, name: "test", conclusion: "failure" },
+        { databaseId: 12, name: "lint", conclusion: "success" },
+      ),
+      () => ({ code: 0, stdout: "" }),
+    ];
+    const out = await createPublisher(deps()).rerunFailed("o/mc", SHA);
+    expect(out).toEqual([{ id: 11, name: "test" }]);
+    expect(ghCalls[1]).toEqual(["run", "rerun", "--repo=o/mc", "11", "--failed"]);
+    expect(ghCalls).toHaveLength(2);
+  });
+
+  it("answers null when gh refuses and nothing was re-run, or the sha is not a commit", async () => {
+    ghAnswers = [
+      listed({ databaseId: 11, name: "test", conclusion: "failure" }),
+      () => ({ code: 1, stdout: "" }),
+    ];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toBeNull();
+    expect(await createPublisher(deps()).rerunFailed("o/mc", "--bad")).toBeNull();
+  });
+});
+
 describe("ciExcerpt", () => {
   const runs =
     (...r: { databaseId: number; name: string; conclusion: string }[]) =>

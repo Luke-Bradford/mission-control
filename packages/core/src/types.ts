@@ -101,6 +101,16 @@ export interface RunLoop {
   merging?: { sha: string; done: MergeStep[] } | null;
   /** Merging main into the branch conflicted: the markers are in the worktree, and the seat resolves them. */
   mainMerge?: { mainSha: string; files: string[] } | null;
+  /**
+   * The one re-run of a failed CI on `sha`: when it was asked for, and the Actions runs it re-ran.
+   * `flaked`: the re-run passed, so the failure is recorded as a flake.
+   */
+  rerun?: {
+    sha: string;
+    at: number;
+    runs: { id: number; name: string }[];
+    flaked?: boolean;
+  } | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */

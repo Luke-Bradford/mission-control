@@ -551,6 +551,20 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         return;
       }
+      case "rerun-ci": {
+        // once per sha: the loop marked it before this ran, so a refusal is not tried again
+        const runs = await publisher.rerunFailed(repo?.github ?? "", a.sha);
+        if (cur.rerun?.sha === a.sha) cur.rerun.runs = runs ?? [];
+        store.addLoopEvent(
+          `${run.id}:rerun:${a.sha}`,
+          run.id,
+          runs === null || runs.length === 0
+            ? `CI failed on ${a.sha.slice(0, 7)}; no run could be re-run`
+            : `CI failed on ${a.sha.slice(0, 7)}; re-ran ${runs.map((r) => r.name).join(", ")}`,
+          at,
+        );
+        return;
+      }
       case "move-card": {
         await deps.board.move({ runId: run.id, repoId: run.repoId, issue, column: a.column });
         // moved or failed (a failure is its Activity row): not tried again until the phase changes
