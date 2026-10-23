@@ -235,8 +235,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * folder, the CLI's names the spec's `cliSessionId`, and each started no later than its pid file
  * was written (a pid reused since is none of these). Any other pid is logged and left alone. A live
  * pid that cannot be identified (`ps` cannot read it, or the spec has no `cliSessionId` to know
- * the CLI by) is left alone too, and makes the result false: it may be the run's own process, so
- * the caller must not treat the run as ended. The CLI is signalled as its process group, so its
+ * the CLI by) is left alone too, and makes the result false while it lives: it may be the run's
+ * own process, so the caller must not treat the run as ended. The CLI is signalled as its process group, so its
  * children go with it.
  */
 export async function endKeeper(
@@ -314,17 +314,18 @@ export async function endKeeper(
     }
   };
   const { found: first, unknown } = targets(false);
-  // a live pid that could not be identified may still be this run's CLI: not ended, so not "true"
-  const allEnded = unknown.length === 0;
-  if (first.length === 0) return allEnded;
+  // A pid that could not be identified is never signalled, but while it lives it may be this run's
+  // CLI: the run is not ended. (An older keeper's SIGTERM ends its own CLI, so that one goes.)
+  const allEnded = () => !unknown.some((t) => pidAlive(t.pid));
+  if (first.length === 0) return allEnded();
   signal(first, "SIGTERM");
   await waitDead(first, waitMs);
   // checked again: a pid that went and was reused during the wait is not ours to kill
   const left = targets(true).found.filter((t) => first.some((f) => f.pid === t.pid));
-  if (left.length === 0) return allEnded;
+  if (left.length === 0) return allEnded();
   signal(left, "SIGKILL");
   await waitDead(left, 2000);
-  return allEnded && !left.some((t) => pidAlive(t.pid));
+  return !left.some((t) => pidAlive(t.pid)) && allEnded();
 }
 
 type Json = Record<string, unknown>;
