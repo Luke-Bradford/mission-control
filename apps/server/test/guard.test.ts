@@ -24,7 +24,6 @@ import {
   MC_TOOLS,
   MCP_PATH,
   TEST_LOCK_UNAVAILABLE_TEXT,
-  type TestLockState,
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -681,9 +680,24 @@ describe("POST /api/guard/check", () => {
     await until(() => lock.state().waiting.length === 1);
     const r = await app.inject({ method: "GET", url: "/api/test-lock" });
     expect(r.statusCode).toBe(200);
-    expect(r.json<TestLockState>()).toEqual({
-      holder: { runId: "run-a", seatId: "guido-1", command: "pnpm -s test", since: NOW },
-      waiting: [{ runId: "run-b", seatId: "guido-2", command: "pnpm -s test", since: NOW }],
+    expect(r.json()).toEqual({
+      holder: {
+        runId: "run-a",
+        seatId: "guido-1",
+        command: "pnpm -s test",
+        label: "dev full suite",
+        since: NOW,
+        usualMs: null,
+      },
+      waiting: [
+        {
+          runId: "run-b",
+          seatId: "guido-2",
+          command: "pnpm -s test",
+          label: "dev full suite",
+          since: NOW,
+        },
+      ],
     });
     lock.releaseRun("run-b");
   });
