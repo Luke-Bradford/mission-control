@@ -159,10 +159,16 @@ export interface Publisher {
   /** The tail of the failed Actions logs for `sha`, as one line-safe text. */
   ciExcerpt(repo: string, sha: string): Promise<string>;
   /**
-   * Re-runs the failed Actions jobs of every run on `sha` that failed or timed out (`gh run rerun
-   * --failed`), and returns each one's attempt from before. NO_FAILED_RUN when none failed.
+   * Re-runs the failed jobs of every failed Actions run on `sha`; the runs re-run (none: nothing
+   * failed to re-run), or null when gh could not be read or refused.
    */
-  rerunFailed(repo: string, sha: string): Promise<RerunResult>;
+  rerunFailed(repo: string, sha: string): Promise<{ id: number; name: string }[] | null>;
+  /**
+   * FLIGHT's re-run of a ruled sha: like `rerunFailed` (failed or timed-out runs only), but it
+   * returns each run's attempt from before, so `rerunState` can tell the re-run from the first
+   * run. NO_FAILED_RUN when none failed.
+   */
+  rerunRuling(repo: string, sha: string): Promise<RerunResult>;
   /** What those re-runs came to: pending until each run is on a later attempt and completed. */
   rerunState(repo: string, sha: string, runs: CiRerun["runs"]): Promise<RerunStateResult>;
   /** The paths changed between origin's default branch and `sha` that match `hardRules`. */
@@ -622,6 +628,38 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     },
 
     async rerunFailed(repo, sha) {
+      if (!SHA.test(sha)) return null;
+      try {
+        const listed = await deps.gh(
+          ["run", "list", `--repo=${repo}`, `--commit=${sha}`, "--json=databaseId,name,conclusion"],
+          { cwd: cwd() },
+        );
+        if (listed.code !== 0) return null;
+        const runs: unknown = JSON.parse(listed.stdout);
+        if (!Array.isArray(runs)) return null;
+        const failed = runs.flatMap((r: unknown) => {
+          const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
+          return x?.conclusion === "failure" &&
+            typeof x.databaseId === "number" &&
+            Number.isSafeInteger(x.databaseId)
+            ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX) }]
+            : [];
+        });
+        const done: { id: number; name: string }[] = [];
+        for (const f of failed) {
+          const r = await deps.gh(["run", "rerun", `--repo=${repo}`, String(f.id), "--failed"], {
+            cwd: cwd(),
+          });
+          if (r.code !== 0) return done.length === 0 ? null : done;
+          done.push(f);
+        }
+        return done;
+      } catch {
+        return null;
+      }
+    },
+
+    async rerunRuling(repo, sha) {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       const listed = await actionsRuns(repo, sha, "databaseId,conclusion,attempt");
       if (isRefusal(listed)) return listed;

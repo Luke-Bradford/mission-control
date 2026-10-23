@@ -112,12 +112,25 @@ export interface RunLoop {
   /** Merging main into the branch conflicted: the markers are in the worktree, and the seat resolves them. */
   mainMerge?: { mainSha: string; files: string[] } | null;
   /**
+   * The one re-run of a failed CI on `sha`: when it was asked for, and the Actions runs it re-ran.
+   * `flaked`: the re-run passed, so the failure is recorded as a flake.
+   */
+  rerun?: {
+    sha: string;
+    at: number;
+    runs: { id: number; name: string }[];
+    flaked?: boolean;
+  } | null;
+  /**
    * The hub's conflict-free merges of main made `to` from `from` (each merge's first parent the
    * one before) and left the PR's own diff as it was at `from`: `to` goes by `from`'s review.
    */
   carry?: { from: string; to: string } | null;
-  /** FLIGHT's one re-run of the failed jobs on `ciFailedSha`, for a ruling it was asked to settle. */
-  rerun?: CiRerun | null;
+  /**
+   * FLIGHT's one re-run of the failed jobs on `ciFailedSha`, for a ruling it was asked to settle
+   * (not `rerun`, the hub's own re-run of a first failure).
+   */
+  rulingRerun?: CiRerun | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */

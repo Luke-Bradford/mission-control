@@ -333,6 +333,38 @@ describe("cleanLog", () => {
   });
 });
 
+describe("rerunFailed", () => {
+  const listed =
+    (...r: { databaseId: number; name: string; conclusion: string }[]) =>
+    () => ({
+      code: 0,
+      stdout: JSON.stringify(r),
+    });
+
+  it("re-runs the failed jobs of each failed run, argv only", async () => {
+    ghAnswers = [
+      listed(
+        { databaseId: 11, name: "test", conclusion: "failure" },
+        { databaseId: 12, name: "lint", conclusion: "success" },
+      ),
+      () => ({ code: 0, stdout: "" }),
+    ];
+    const out = await createPublisher(deps()).rerunFailed("o/mc", SHA);
+    expect(out).toEqual([{ id: 11, name: "test" }]);
+    expect(ghCalls[1]).toEqual(["run", "rerun", "--repo=o/mc", "11", "--failed"]);
+    expect(ghCalls).toHaveLength(2);
+  });
+
+  it("answers null when gh refuses and nothing was re-run, or the sha is not a commit", async () => {
+    ghAnswers = [
+      listed({ databaseId: 11, name: "test", conclusion: "failure" }),
+      () => ({ code: 1, stdout: "" }),
+    ];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toBeNull();
+    expect(await createPublisher(deps()).rerunFailed("o/mc", "--bad")).toBeNull();
+  });
+});
+
 describe("ciExcerpt", () => {
   const runs =
     (...r: { databaseId: number; name: string; conclusion: string }[]) =>
@@ -474,7 +506,7 @@ describe("ciExcerpt", () => {
   });
 });
 
-describe("rerunFailed and rerunState", () => {
+describe("rerunRuling and rerunState", () => {
   type R = { databaseId: number; conclusion: string; attempt: number; status?: string };
   const runs =
     (...r: R[]) =>
@@ -490,7 +522,7 @@ describe("rerunFailed and rerunState", () => {
       () => ({ code: 0, stdout: "" }),
       () => ({ code: 0, stdout: "" }),
     ];
-    const r = await createPublisher(deps()).rerunFailed("o/mc", SHA);
+    const r = await createPublisher(deps()).rerunRuling("o/mc", SHA);
     expect(r).toEqual({
       ok: true,
       runs: [
@@ -513,12 +545,12 @@ describe("rerunFailed and rerunState", () => {
 
   it("refuses when no run failed, and when gh cannot list", async () => {
     ghAnswers = [runs({ databaseId: 12, conclusion: "success", attempt: 1 })];
-    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toMatchObject({
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toMatchObject({
       ok: false,
       text: NO_FAILED_RUN,
     });
     ghAnswers = [() => ({ code: 1, stdout: "", stderr: "boom" })];
-    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toMatchObject({
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toMatchObject({
       ok: false,
       transient: true,
     });

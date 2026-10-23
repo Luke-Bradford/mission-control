@@ -253,6 +253,11 @@ interface Harness {
   openCalls: number;
   /** The next answers of ciExcerpt, oldest first; empty: a real excerpt. */
   excerptTexts: string[];
+  /** The shas whose failed runs were re-run, and what rerunFailed answers. */
+  reruns: string[];
+  /** Runs inside rerunFailed (a poll landing mid-call). */
+  duringRerun: (() => void) | null;
+  rerunRuns: { id: number; name: string }[] | null;
   busy: boolean;
   facts: SeatFacts | null;
   /** The review seat's process facts. */
@@ -283,8 +288,8 @@ interface Harness {
   wakeError: Error | null;
   /** The run's local branch no longer exists (localBranchGone answers true). */
   branchGone: boolean;
-  /** FLIGHT's CI re-runs asked for, and the next answers of rerunFailed and rerunState (empty: one run, pending). */
-  reruns: { repo: string; sha: string }[];
+  /** FLIGHT's CI re-runs asked for, and the next answers of rerunRuling and rerunState (empty: one run, pending). */
+  rulingReruns: { repo: string; sha: string }[];
   rerunResults: RerunResult[];
   rerunStates: RerunStateResult[];
   /** What worktreeChanges answers (a path list, or a refusal). */
@@ -323,6 +328,9 @@ function harness(): Harness {
     duringOpenPr: null,
     openCalls: 0,
     excerptTexts: [],
+    reruns: [],
+    duringRerun: null,
+    rerunRuns: [{ id: 77, name: "CI" }],
     busy: false,
     facts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
     retroFacts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
@@ -341,7 +349,7 @@ function harness(): Harness {
     wakes: [],
     wakeError: null,
     branchGone: false,
-    reruns: [],
+    rulingReruns: [],
     rerunResults: [],
     rerunStates: [],
     changes: [],
@@ -382,8 +390,13 @@ function harness(): Harness {
           x.excerpts.push(sha);
           return x.excerptTexts.shift() ?? "EXCERPT";
         },
-        async rerunFailed(repo, sha) {
-          x.reruns.push({ repo, sha });
+        async rerunFailed(_repo, sha) {
+          x.reruns.push(sha);
+          x.duringRerun?.();
+          return x.rerunRuns;
+        },
+        async rerunRuling(repo, sha) {
+          x.rulingReruns.push({ repo, sha });
           return x.rerunResults.shift() ?? { ok: true, runs: [{ id: 11, attempt: 1 }] };
         },
         async rerunState() {
@@ -554,6 +567,13 @@ const report = (note = "Changed the thing", sha = SHA) => {
 };
 const setPr = (over: Partial<PullRequestView> = {}) =>
   store.upsertPullRequests(REPO, [prRow(over)], clock);
+/** CI fails on the pushed sha, is re-run once, and fails again on a later poll: the real failure. */
+async function failCi(): Promise<void> {
+  setPr({ ci: "failing" });
+  await h.engine.reconcileRun(RUN);
+  clock += 1000;
+  setPr({ ci: "failing" });
+}
 const noteKeys = () => store.notes().map((n) => n.key);
 const loopTexts = () => store.loopEvents(0).map((e) => e.text);
 const sentKeys = () => h.sent.map((s) => s.key);
@@ -670,7 +690,7 @@ describe("CI and review", () => {
 
   it("failing CI sends one line with the excerpt, again while the seat was busy, never once claimed", async () => {
     await inCi();
-    setPr({ ci: "failing" });
+    await failCi();
     h.busy = true;
     await h.engine.reconcileRun(RUN);
     expect(loopOf()).toMatchObject({
@@ -694,9 +714,70 @@ describe("CI and review", () => {
     expect(h.excerpts).toHaveLength(excerpts);
   });
 
-  it("a seat in a turn is not written to", async () => {
+  it("a first CI failure is re-run once, without a word to the seat", async () => {
     await inCi();
     setPr({ ci: "failing" });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.reconcileRun(RUN);
+    expect(h.reruns).toEqual([SHA]);
+    expect(h.sent).toEqual([]);
+    expect(h.excerpts).toEqual([]);
+    expect(loopOf()).toMatchObject({ phase: "ci", ciFails: 0, rerun: { sha: SHA } });
+    expect(loopTexts()).toContain("CI failed on aaaaaaa; re-ran CI");
+  });
+
+  it("a poll that lands while gh re-runs still shows the old failure and is waited out", async () => {
+    await inCi();
+    h.duringRerun = () => {
+      clock += 500;
+      setPr({ ci: "failing" });
+      clock += 500;
+    };
+    setPr({ ci: "failing" });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent).toEqual([]);
+    expect(loopOf().ciFails).toBe(0);
+  });
+
+  it("a pass on the re-run is recorded as a flake, owned by the controller, and the run goes on", async () => {
+    await inCi();
+    setPr({ ci: "failing" });
+    await h.engine.reconcileRun(RUN);
+    clock += 1000;
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("review");
+    expect(h.sent).toEqual([]);
+    expect(h.reruns).toEqual([SHA]);
+    expect(loopTexts()).toContain("CI flaked on aaaaaaa: passed on re-run");
+    const flake = store.notes().find((n) => n.key === `flake:${RUN}:${SHA}`);
+    expect(flake?.text).toContain("CI run 77");
+  });
+
+  it("a second failure reaches the seat, and the sha is not re-run again", async () => {
+    await inCi();
+    await failCi();
+    await h.engine.reconcileRun(RUN);
+    expect(h.reruns).toEqual([SHA]);
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.text).toMatch(/^CI failed on aaaaaaa\./);
+    expect(loopOf()).toMatchObject({ ciFails: 1, ciFailedSha: SHA });
+  });
+
+  it("a re-run gh refused is not tried again; the next failure is the real one", async () => {
+    h.rerunRuns = null;
+    await inCi();
+    await failCi();
+    await h.engine.reconcileRun(RUN);
+    expect(h.reruns).toEqual([SHA]);
+    expect(h.sent).toHaveLength(1);
+    expect(loopTexts()).toContain("CI failed on aaaaaaa; no run could be re-run");
+  });
+
+  it("a seat in a turn is not written to", async () => {
+    await inCi();
+    await failCi();
     h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
     await h.engine.reconcileRun(RUN);
     expect(h.sent).toEqual([]);
@@ -1043,7 +1124,7 @@ describe("The operator's message", () => {
   async function parkOnCi(): Promise<void> {
     report();
     await h.engine.reconcileRun(RUN);
-    setPr({ ci: "failing" });
+    await failCi();
     await h.engine.reconcileRun(RUN);
     setLoop({
       phase: "parked",
@@ -1557,8 +1638,8 @@ describe("FLIGHT settles a ruling", () => {
   it("re-runs once, waits while it runs, then accepts a pass and clears the failure", async () => {
     await ruled();
     expect(await accept()).toEqual({ kind: "rerun", sha: SHA });
-    expect(h.reruns).toEqual([{ repo: "o/mc", sha: SHA }]);
-    expect(loopOf().rerun).toEqual({
+    expect(h.rulingReruns).toEqual([{ repo: "o/mc", sha: SHA }]);
+    expect(loopOf().rulingRerun).toEqual({
       sha: SHA,
       runs: [{ id: 11, attempt: 1 }],
       outcome: "pending",
@@ -1574,7 +1655,7 @@ describe("FLIGHT settles a ruling", () => {
       epoch: 1,
       unparkedAt: clock,
     });
-    expect(h.reruns).toHaveLength(1);
+    expect(h.rulingReruns).toHaveLength(1);
     expect(h.polls).toBeGreaterThan(0);
     expect(sentKeys()).toEqual([]);
   });
@@ -1606,13 +1687,13 @@ describe("FLIGHT settles a ruling", () => {
       kind: "not",
       text: `${SHA.slice(0, 7)} was already re-run once; pass this ruling to the operator`,
     });
-    expect(h.reruns).toHaveLength(1);
+    expect(h.rulingReruns).toHaveLength(1);
   });
 
   it("does not re-run when the hourly cap is used, and says so", async () => {
     await ruled();
     expect(await accept(false)).toEqual({ kind: "capped" });
-    expect(h.reruns).toEqual([]);
+    expect(h.rulingReruns).toEqual([]);
   });
 
   it("refuses a run that is not parked on a ruling, or whose ruled commit is not the PR's head", async () => {
@@ -1630,14 +1711,14 @@ describe("FLIGHT settles a ruling", () => {
       kind: "not",
       text: "the ruled commit is no longer its open PR's head",
     });
-    expect(h.reruns).toEqual([]);
+    expect(h.rulingReruns).toEqual([]);
   });
 
   it("refuses a rerun gh would not start, leaving no re-run recorded", async () => {
     await ruled();
     h.rerunResults = [{ ok: false, text: "no failed Actions run", transient: false }];
     expect(await accept()).toEqual({ kind: "not", text: "no failed Actions run" });
-    expect(loopOf().rerun ?? null).toBeNull();
+    expect(loopOf().rulingRerun ?? null).toBeNull();
   });
 
   it("does nothing while the engine is off", async () => {
@@ -1673,7 +1754,7 @@ describe("review round", () => {
   it("fetches a failure's CI log once while the seat is busy", async () => {
     report();
     await h.engine.reconcileRun(RUN);
-    setPr({ ci: "failing" });
+    await failCi();
     h.busy = true;
     for (let i = 0; i < 3; i++) await h.engine.reconcileRun(RUN);
     expect(h.excerpts).toHaveLength(1);
@@ -1689,7 +1770,7 @@ describe("review round", () => {
     async function failedAndBusy(): Promise<void> {
       report();
       await h.engine.reconcileRun(RUN);
-      setPr({ ci: "failing" });
+      await failCi();
       h.busy = true;
     }
 
@@ -1736,7 +1817,7 @@ describe("review round", () => {
   it("writes nothing to a seat that has moved on to another run", async () => {
     report();
     await h.engine.reconcileRun(RUN);
-    setPr({ ci: "failing" });
+    await failCi();
     h.busy = true;
     await h.engine.reconcileRun(RUN);
     h.busy = false;

@@ -646,6 +646,24 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         return;
       }
+      case "rerun-ci": {
+        // once per sha: the loop marked it before this ran, so a refusal is not tried again
+        const runs = await publisher.rerunFailed(repo?.github ?? "", a.sha);
+        // stamped once gh has answered: a poll taken during the call still shows the old failure
+        if (cur.rerun?.sha === a.sha) {
+          cur.rerun.runs = runs ?? [];
+          cur.rerun.at = now();
+        }
+        store.addLoopEvent(
+          `${run.id}:rerun:${a.sha}`,
+          run.id,
+          runs === null || runs.length === 0
+            ? `CI failed on ${a.sha.slice(0, 7)}; no run could be re-run`
+            : `CI failed on ${a.sha.slice(0, 7)}; re-ran ${runs.map((r) => r.name).join(", ")}`,
+          at,
+        );
+        return;
+      }
       case "move-card": {
         await deps.board.move({ runId: run.id, repoId: run.repoId, issue, column: a.column });
         // moved or failed (a failure is its Activity row): not tried again until the phase changes
@@ -1531,14 +1549,17 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const at = now();
-        const rerun = loop.rerun?.sha === sha ? loop.rerun : null;
+        const rerun = loop.rulingRerun?.sha === sha ? loop.rulingRerun : null;
         if (rerun === null) {
           if (!opts.mayRerun) return { kind: "capped" };
-          const r = await publisher.rerunFailed(github, sha);
+          const r = await publisher.rerunRuling(github, sha);
           if (!r.ok) return not(r.text);
-          store.setRunLoop(run.id, { ...loop, rerun: { sha, runs: r.runs, outcome: "pending" } });
+          store.setRunLoop(run.id, {
+            ...loop,
+            rulingRerun: { sha, runs: r.runs, outcome: "pending" },
+          });
           store.addLoopEvent(
-            `${run.id}:rerun:${sha}`,
+            `${run.id}:ruling-rerun:${sha}`,
             run.id,
             `FLIGHT re-ran the failed CI jobs on ${sha.slice(0, 7)}`,
             at,
@@ -1566,11 +1587,11 @@ export function createEngine(deps: EngineDeps): Engine {
           transient: 0,
           lastRefusal: null,
           unparkedAt: at,
-          rerun: { ...rerun, outcome: state.outcome },
+          rulingRerun: { ...rerun, outcome: state.outcome },
         };
         store.setRunLoop(run.id, next);
         store.addLoopEvent(
-          `${run.id}:rerun:${sha}:${state.outcome}`,
+          `${run.id}:ruling-rerun:${sha}:${state.outcome}`,
           run.id,
           passed
             ? `CI passed on the re-run of ${sha.slice(0, 7)}; FLIGHT accepted the ruling`
