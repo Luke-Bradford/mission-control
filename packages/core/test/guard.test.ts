@@ -55,6 +55,62 @@ describe("scratch mode", () => {
     expect(ruleOf(bash("pnpm -s vitest run a.test.ts"), scratch)).toBe("allow");
   });
 
+  it("scratch: restoring files in the copy is allowed, and refused for a writer", () => {
+    for (const c of [
+      "git restore a.ts",
+      "git restore --staged --worktree a.ts b.ts",
+      "git restore --source=HEAD -- a.ts",
+      "git checkout -- a.ts",
+      "git checkout -- .",
+      "git diff",
+      "git status",
+      "git log",
+      "git show HEAD",
+      "git restore a.ts && pnpm -s vitest run a.test.ts",
+    ]) {
+      expect(ruleOf(bash(c), scratch), c).toBe("allow");
+    }
+    for (const c of ["git restore a.ts", "git checkout -- a.ts"]) {
+      expect(ruleOf(bash(c), writer), c).toBe("git-write");
+      expect(ruleOf(bash(c), readOnly), c).toBe("git-write");
+    }
+  });
+
+  it("scratch: history, refs, remotes, config and the shared stash stay refused", () => {
+    for (const c of [
+      "git commit -m x",
+      "git commit -am x",
+      "git push",
+      "git push origin HEAD",
+      "git merge main",
+      "git rebase main",
+      "git reset --hard",
+      "git reset --hard HEAD~1",
+      "git checkout main",
+      "git checkout -b x",
+      "git checkout a.ts",
+      "git checkout",
+      "git checkout --",
+      "git checkout -- a.ts && git push",
+      "git restore a.ts; git commit -m x",
+      "git restore --output=x a.ts",
+      "git -C ../other restore a.ts",
+      "git -c core.hooksPath=/x restore a.ts",
+      "git --git-dir=/x restore a.ts",
+      "git config user.name x",
+      "git fetch",
+      "git pull",
+      "git stash",
+      "git stash pop",
+      "git stash drop",
+      "git stash push",
+      "git stash push origin",
+      "git stash apply",
+    ]) {
+      expect(ruleOf(bash(c), scratch), c).toBe("git-write");
+    }
+  });
+
   it("scratch: ask_operator, report_evidence and report_plan denied, report_findings allowed", () => {
     for (const tool of [MC_TOOLS.askOperator, MC_TOOLS.reportEvidence, MC_TOOLS.reportPlan]) {
       expect(guardDecision({ tool, input: {} }, scratch)).toEqual({

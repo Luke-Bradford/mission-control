@@ -1179,6 +1179,19 @@ function gitReadOnly(sub: string, rest: readonly string[]): boolean {
   }
 }
 
+/**
+ * What a scratch seat may write with git, beyond the reads: put files back in its throwaway copy
+ * (`restore <path>`, `checkout -- <path>`). No global options (`-C`, `-c`, `--git-dir` point git
+ * elsewhere or set config). Never `stash`: the copy is a worktree of the crew clone, so
+ * `refs/stash` is shared with the writer seats.
+ */
+function gitScratchRestore(args: readonly string[], sub: string, rest: readonly string[]): boolean {
+  if (args[0] !== sub) return false;
+  if (rest.some((a) => a === "--output" || a.startsWith("--output="))) return false;
+  if (sub === "restore") return rest.length > 0;
+  return sub === "checkout" && rest[0] === "--" && rest.length > 1;
+}
+
 /** `gh` group verbs that only read. */
 const GH_READ_VERBS = new Set(["view", "list", "diff", "checks", "status", "show"]);
 const GH_API_WRITE_FLAGS = new Set(["-f", "-F", "--field", "--raw-field", "--input"]);
@@ -1330,7 +1343,11 @@ export function guardDecision(e: GuardEvent, ctx: GuardContext): GuardVerdict {
     if (program === BRACE_WORD) return deny("git-write", "brace expansion");
     if (program === "git") {
       const g = gitSubcommand(args);
-      if (g !== null && !gitReadOnly(g.sub, g.rest)) {
+      if (
+        g !== null &&
+        !gitReadOnly(g.sub, g.rest) &&
+        !(ctx.mode === "scratch" && gitScratchRestore(args, g.sub, g.rest))
+      ) {
         return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
       }
     } else if (program === "gh") {
