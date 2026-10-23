@@ -537,8 +537,8 @@ describe("Agent page: need banner", () => {
           "/api/test-lock": {
             holder: { runId: "r-12", seatId: "guido-1", command: "pnpm -s test", since: NOW - MIN },
             waiting: [
-              { runId: "r-2", seatId: "retro-1", since: NOW - MIN },
-              { runId: "r-3", seatId: "inco-1", since: NOW - MIN },
+              { runId: "r-2", seatId: "retro-1", command: "pnpm -s test", since: NOW - MIN },
+              { runId: "r-3", seatId: "inco-1", command: "pnpm -s test", since: NOW - MIN },
             ],
           },
         }),
@@ -1495,6 +1495,32 @@ describe("Agent page: activity stream", () => {
     );
     await act(async () => {});
     expect(top).toBe(790);
+  });
+
+  it("the live call bar names the waiting suite, command, timer and holder", async () => {
+    // the queued Bash call is still the live tool while its hook waits for the lock
+    const row = crewRow({
+      digest: digest({ liveTool: { name: "Bash", since: NOW - 125_000 } }),
+      hudState: "waiting",
+    });
+    stub({
+      rows: [row],
+      extra: {
+        "/api/test-lock": {
+          holder: { runId: "other", seatId: "guido-2", command: "pnpm test", since: NOW },
+          waiting: [
+            { runId: row.run?.id, seatId: row.id, command: "pnpm -s test", since: NOW - 125_000 },
+          ],
+        },
+      },
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    await waitFor(() =>
+      expect($(container, "#liveCall .livecall")?.textContent).toBe(
+        "⏸ Waiting for the test lock: shop-app full suite (pnpm -s test) 2:05 behind GUIDO-2",
+      ),
+    );
   });
 
   it("the live call bar shows the running tool and its elapsed time", async () => {

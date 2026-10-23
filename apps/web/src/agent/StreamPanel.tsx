@@ -9,9 +9,11 @@ import {
   STALL_MS,
   type StreamEvent,
   type StreamKind,
+  seatCallSign,
 } from "@mc/core";
 import { type FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { agentComms, commsKeys, commsLine, MentionText } from "../comms/messages.tsx";
+import { useTestLock } from "../components/LockLines.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { callSign, seatTurn } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -150,12 +152,24 @@ function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Rela
 /**
  * The live call bar: the running tool and its time, only while the latest run is running (a
  * tool_use left open by an ended run is not live); a stalled agent's bar says since when nothing
- * was written.
+ * was written; a waiting run names its queued full suite and the lock holder.
  */
 function LiveCall({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+  const lock = useTestLock();
   const running = row.run?.status === "running";
+  const waiting = running ? lock?.waiting.find((w) => w.runId === row.run?.id) : undefined;
   const live = running ? (row.digest?.liveTool ?? null) : null;
   const stalled = running && row.hudState === "stalled";
+  // The waiting Bash call is still the live tool while its hook waits for the lock: waiting wins.
+  if (waiting && lock?.holder) {
+    return (
+      <div id="liveCall">
+        <div className="livecall">
+          {`⏸ Waiting for the test lock: ${row.repoId} full suite (${waiting.command}) ${mss(now - waiting.since)} behind ${seatCallSign(lock.holder.seatId)}`}
+        </div>
+      </div>
+    );
+  }
   if (!live && !stalled) return <div id="liveCall" />;
   const since = row.lastOutputAt;
   return (
