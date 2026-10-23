@@ -719,6 +719,35 @@ describe("desired-state step", () => {
       expect(reconcile(fail({ claimed: { [`ci:r1:${SHA}`]: 1 } })).actions).toEqual([]);
     });
 
+    it("relays the failure of FLIGHT's re-run once, keyed by the sha, ahead of the first excerpt", () => {
+      const rerun = { sha: SHA, runs: [{ id: 11, attempt: 1 }] };
+      const again = { kind: "ci-excerpt", key: `rerun:r1:${SHA}`, sha: SHA, again: true };
+      const failed = fail({}, { relayedSha: SHA, rulingRerun: { ...rerun, outcome: "failed" } });
+      expect(reconcile(failed).actions).toEqual([again]);
+      expect(reconcile({ ...failed, claimed: { [`rerun:r1:${SHA}`]: 1 } }).actions).toEqual([]);
+      // a re-run still going, or one that passed, or one on another sha, says nothing
+      for (const outcome of ["pending", "passed"] as const) {
+        expect(
+          reconcile(fail({}, { relayedSha: SHA, rulingRerun: { ...rerun, outcome } })).actions,
+        ).toEqual([]);
+      }
+      const other = { ...rerun, sha: SHA2, outcome: "failed" as const };
+      expect(reconcile(fail({}, { relayedSha: SHA, rulingRerun: other })).actions).toEqual([]);
+    });
+
+    it("keeps the re-run on the loop it hands back, sharing nothing with the input", () => {
+      const s = fail(
+        {},
+        {
+          relayedSha: SHA,
+          rulingRerun: { sha: SHA, runs: [{ id: 11, attempt: 1 }], outcome: "pending" },
+        },
+      );
+      const out = reconcile(s).loop.rulingRerun;
+      expect(out).toEqual(s.loop.rulingRerun);
+      expect(out?.runs).not.toBe(s.loop.rulingRerun?.runs);
+    });
+
     it("sends nothing while the seat is in a turn", () => {
       const s = fail();
       expect(reconcile({ ...s, seat: seat(s, { inTurn: true }) }).actions).toEqual([]);

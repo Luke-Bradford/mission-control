@@ -56,6 +56,16 @@ export type LoopPhase = "working" | "ci" | "review" | "parked" | "done";
 /** The steps after a PR is ready, in the order the engine does them; `done` holds those finished. */
 export type MergeStep = "ready" | "merge" | "close" | "delete-remote" | "delete-local";
 
+/**
+ * FLIGHT's re-run of the failed Actions jobs on a ruled sha: the runs it re-ran (with the attempt
+ * each was on before), and what they came to.
+ */
+export interface CiRerun {
+  sha: string;
+  runs: { id: number; attempt: number }[];
+  outcome: "pending" | "passed" | "failed";
+}
+
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
   phase: LoopPhase;
@@ -116,6 +126,11 @@ export interface RunLoop {
    * one before) and left the PR's own diff as it was at `from`: `to` goes by `from`'s review.
    */
   carry?: { from: string; to: string } | null;
+  /**
+   * FLIGHT's one re-run of the failed jobs on `ciFailedSha`, for a ruling it was asked to settle
+   * (not `rerun`, the hub's own re-run of a first failure).
+   */
+  rulingRerun?: CiRerun | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */
