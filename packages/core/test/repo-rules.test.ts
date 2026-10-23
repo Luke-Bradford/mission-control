@@ -252,6 +252,12 @@ describe("eligibleToStart", () => {
     expect(eligibleToStart({ ...m, seat: { ...m.seat, loop: "plan" } })).toBeNull();
   });
 
+  it("a profile that needs no plan lets an M build start without one", () => {
+    const m = base(card({ size: "M" }));
+    expect(eligibleToStart({ ...m, planRequired: false })).toBeNull();
+    expect(eligibleToStart({ ...m, planRequired: true })).toBe(startNeedsPlanText(ref, "M"));
+  });
+
   it("gives the first refusal", () => {
     expect(eligibleToStart(base({ lane: "work", hasRun: true }))).toBe(
       otherLaneText(ref, [], "work"),

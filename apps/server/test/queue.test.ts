@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  DEFAULT_PROFILES,
   fillLoopText,
   freezeRules,
   NEW_LOOP,
@@ -31,6 +32,7 @@ import {
   takeNext,
 } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
+import { ProfilesError } from "../src/profiles.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -164,6 +166,7 @@ const refill = (
     const body = bodyOf(n);
     return body === null ? null : ticketWith(n, body);
   },
+  profiles?: QueueDeps["profiles"],
 ) =>
   refillQueues({
     config,
@@ -171,9 +174,16 @@ const refill = (
     rules: rulesOf,
     login: ME,
     fetchTicket,
+    ...(profiles === undefined ? {} : { profiles }),
     now: () => NOW,
     onNotes: () => void noteCalls++,
   });
+const refillWith = (profiles: NonNullable<QueueDeps["profiles"]>) =>
+  refill(
+    async () => rules,
+    async (_repo, n) => ticketWith(n, bodyOf(n) ?? ""),
+    profiles,
+  );
 const takeDeps = (): TakeDeps => ({
   config,
   store,
@@ -301,6 +311,25 @@ describe("refillQueues", () => {
             : "## Done when\n- x\n";
     await refill();
     expect(issues(SERVER)).toEqual([1, 4]);
+  });
+
+  it("deals a Size M chore with no plan (its profile needs none) but not an unlabelled one", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { size: "M", labels: ["area:server", "chore"] }),
+      card(2, { size: "M" }),
+    ]);
+    bodyOf = () => "## Done when\n- x\n";
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+  });
+
+  it("deals nothing while the profiles file cannot be read, or the ticket's stored override is unknown", async () => {
+    store.replaceBoard(REPO, [card(1), card(2)]);
+    store.setProfileOverride(REPO, 2, { profile: "zzz", reason: "r", by: "FLIGHT" }, NOW);
+    await refillWith(() => new ProfilesError("boom"));
+    expect(issues(SERVER)).toEqual([]);
+    await refillWith(() => DEFAULT_PROFILES);
+    expect(issues(SERVER)).toEqual([1]);
   });
 
   it("reads a card's body once while the card is unchanged, and again once it changes", async () => {
