@@ -135,10 +135,16 @@ const since = NOW - FLOW_DAYS * DAY;
 const run = (gql: Gql) => collectFlow(repo, store, gql, NOW);
 
 describe("collectFlow issues", () => {
-  it("starts at In Progress for shop-app's '' -> In Progress -> In Review -> Done", async () => {
+  it("starts at Ready before In Progress, In Review and Done", async () => {
     store.replaceBoard("shop-app", [board(1, { size: "M" })]);
     const { gql } = stub({
-      1: timeline(ev("", 6), ev("In Progress", 5), ev("In Review", 3), ev("Done", 1)),
+      1: timeline(
+        ev("", 7),
+        ev("Ready", 5),
+        ev("In Progress", 4),
+        ev("In Review", 3),
+        ev("Done", 1),
+      ),
     });
     await run(gql);
     expect(store.flowIssues(since)).toEqual([
@@ -153,17 +159,11 @@ describe("collectFlow issues", () => {
     expect(status()).toMatchObject({ ok: true, error: null });
   });
 
-  it("does not start at Todo (planned), and keeps the first In Progress across a bounce", async () => {
+  it("does not start at Todo (planned), and keeps the first Ready across a bounce", async () => {
     store.replaceBoard("shop-app", [board(1), board(2)]);
     const { gql } = stub({
-      1: timeline(ev("", 9), ev("Todo", 8), ev("In Progress", 6), ev("Done", 1)),
-      2: timeline(
-        ev("In Progress", 9),
-        ev("Todo", 8),
-        ev("In Progress", 7),
-        ev("In Review", 5),
-        ev("Done", 2),
-      ),
+      1: timeline(ev("", 9), ev("Todo", 8), ev("Ready", 6), ev("In Progress", 5), ev("Done", 1)),
+      2: timeline(ev("Ready", 7), ev("Todo", 8), ev("Ready", 9), ev("In Review", 5), ev("Done", 2)),
     });
     await run(gql);
     const by = new Map(store.flowIssues(since).map((i) => [i.number, i]));
@@ -193,9 +193,9 @@ describe("collectFlow issues", () => {
     store.replaceBoard("shop-app", [board(1)]);
     const { gql } = stub({
       1: timeline(
-        ev("In Progress", 9, 7),
+        ev("Ready", 9, 7),
         ev("Done", 8, 7),
-        ev("In Progress", 6),
+        ev("Ready", 6),
         ev("Done", 4),
         ev("In Review", 3),
         ev("Done", 2),
@@ -205,6 +205,60 @@ describe("collectFlow issues", () => {
     const [i] = store.flowIssues(since);
     expect(i?.startAt).toBe(Date.parse(at(6)));
     expect(i?.doneAt).toBe(Date.parse(at(2)));
+  });
+
+  it.each(["In progress", "In review", "Ready for QA", "Active", "Checking", "Queued", "Unknown"])(
+    "excludes %s without an observed Ready, including custom mappings",
+    async (later) => {
+      store.replaceBoard("shop-app", [board(1)]);
+      const custom: typeof repo = {
+        ...repo,
+        statusMap: {
+          ...repo.statusMap,
+          Active: "in progress",
+          Checking: "review",
+          Queued: "planned",
+          Shipped: "done",
+        },
+      };
+      await collectFlow(
+        custom,
+        store,
+        stub({ 1: timeline(ev(later, 5), ev("Shipped", 1)) }).gql,
+        NOW,
+      );
+      expect(store.flowIssues(since)).toEqual([
+        { repoId: "shop-app", number: 1, size: null, startAt: null, doneAt: Date.parse(at(1)) },
+      ]);
+      expect(status()?.error).toContain("1 done issue(s) without a start");
+    },
+  );
+
+  it("does not infer Ready from creation, missing history or another project's Ready", async () => {
+    store.replaceBoard("shop-app", [board(1), board(2), board(3)]);
+    await run(
+      stub({
+        1: timeline(ev("Ready", 8, 7), ev("In Progress", 5), ev("Done", 1)),
+        2: timeline(ev("Done", 1)),
+        3: {},
+      }).gql,
+    );
+    expect(store.flowIssues(since).map((i) => [i.number, i.startAt])).toEqual([
+      [1, null],
+      [2, null],
+    ]);
+    expect(status()?.error).toContain("2 done issue(s) without a start");
+  });
+
+  it("replaces cached fallback starts when recollected", async () => {
+    store.replaceBoard("shop-app", [board(1)]);
+    store.replaceFlow(
+      "shop-app",
+      [{ repoId: "shop-app", number: 1, size: null, startAt: NOW - 5 * DAY, doneAt: NOW - DAY }],
+      [],
+    );
+    await run(stub({ 1: timeline(ev("In Progress", 5), ev("Done", 1)) }).gql);
+    expect(store.flowIssues(since)[0]?.startAt).toBeNull();
   });
 
   it("does not store an issue with no move into Done", async () => {
@@ -319,7 +373,7 @@ describe("collectFlow pull requests", () => {
 describe("collectFlow failure", () => {
   it("keeps the old rows and records not-ok when a batch fails", async () => {
     store.replaceBoard("shop-app", [board(1)]);
-    await run(stub({ 1: timeline(ev("In Progress", 3), ev("Done", 1)) }).gql);
+    await run(stub({ 1: timeline(ev("Ready", 3), ev("Done", 1)) }).gql);
     expect(store.flowIssues(since)).toHaveLength(1);
 
     store.upsertPullRequests("shop-app", [pr(10)], 0);
@@ -337,7 +391,7 @@ describe("collectFlow failure", () => {
     store.replaceBoard("shop-app", [board(1)]);
     await run(stub({}, {}, () => true).gql);
     expect(status()?.ok).toBe(false);
-    await run(stub({ 1: timeline(ev("In Progress", 3), ev("Done", 1)) }).gql);
+    await run(stub({ 1: timeline(ev("Ready", 3), ev("Done", 1)) }).gql);
     expect(status()).toMatchObject({ ok: true, error: null });
   });
 });
@@ -369,7 +423,7 @@ describe("collectFlow with a missing item", () => {
         ]
       : [];
   };
-  const done = timeline(ev("In Progress", 3), ev("Done", 1));
+  const done = timeline(ev("Ready", 3), ev("Done", 1));
 
   it("skips a deleted or transferred issue and keeps the rest of its batch", async () => {
     store.replaceBoard("shop-app", [board(1), board(2), board(3)]);
@@ -436,7 +490,7 @@ describe("collectFlow timeline paging", () => {
   it("pages past the first 100 events and reads a Done on a later page", async () => {
     store.replaceBoard("shop-app", [board(1)]);
     const { gql, calls } = paged({
-      first: page([...filler(99), ev("In Progress", 5)], "C1"),
+      first: page([...filler(99), ev("Ready", 5)], "C1"),
       C1: page(filler(100), "C2"),
       C2: page([ev("Done", 1)], null),
     });
@@ -459,13 +513,16 @@ describe("collectFlow timeline paging", () => {
 
   it("stops at the page bound and flags the truncated timeline", async () => {
     store.replaceBoard("shop-app", [board(1)]);
-    const pages: Record<string, unknown> = { first: page(filler(100), "C1") };
+    const pages: Record<string, unknown> = {
+      first: page([...filler(98), ev("In Progress", 5), ev("Done", 1)], "C1"),
+    };
     for (let i = 1; i <= 9; i++) pages[`C${i}`] = page(filler(100), `C${i + 1}`);
     const { gql, calls } = paged(pages);
     await run(gql);
     expect(calls).toHaveLength(FLOW_TIMELINE_MAX_PAGES);
     expect(status()).toMatchObject({ ok: true });
     expect(status()?.error).toContain("timeline truncated");
+    expect(store.flowIssues(since)[0]?.startAt).toBeNull();
   });
 
   it("a malformed later page fails the collection and keeps the old rows", async () => {
