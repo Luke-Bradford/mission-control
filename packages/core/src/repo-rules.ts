@@ -172,6 +172,8 @@ export interface StartCheck {
   hasRun: boolean;
   lane: CrewLane | undefined;
   laneDefault: boolean;
+  /** The run's profile needs a plan at Size M or larger; absent: it does. */
+  planRequired?: boolean;
   /** The ticket body; null skips the checks that read it. */
   body: string | null;
   closed: (issue: number) => boolean | undefined;
@@ -216,7 +218,13 @@ export function eligibleToStart(c: StartCheck): string | null {
     );
     if (missing.length > 0) return startMissingNeedsText(ref, missing);
   }
-  if (build && card.size !== null && PLAN_SIZES.includes(card.size) && !hasPlanSection(body)) {
+  if (
+    build &&
+    c.planRequired !== false &&
+    card.size !== null &&
+    PLAN_SIZES.includes(card.size) &&
+    !hasPlanSection(body)
+  ) {
     return startNeedsPlanText(ref, card.size);
   }
   return null;

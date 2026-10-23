@@ -6,6 +6,7 @@ export * from "./guard.ts";
 export * from "./hud.ts";
 export * from "./loop.ts";
 export * from "./mcp.ts";
+export * from "./profiles.ts";
 export * from "./repo-rules.ts";
 export * from "./repos.ts";
 export * from "./review.ts";
