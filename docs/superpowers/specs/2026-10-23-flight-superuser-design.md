@@ -52,7 +52,7 @@ The hub enforces these even for a `superuser` FLIGHT. They are a recommendation;
 2. **The safety net.** No changes to branch protection, rulesets, secrets, collaborators, keys, repo settings or the CI workflow. That means FLIGHT doesn't merge a PR that touches `.github/workflows/**`; it gives the operator its recommendation instead.
 3. **Untrusted code.** No merging a PR from a fork whose author isn't a collaborator, and no approving a fork's workflow runs.
 4. **The operator's decisions.** An operator's pause, stop, hold or answer wins. So do money budgets and account stops. Each tool names the record it checks: seat state `stopped` versus `error`, budget and account parks, and the operator's holds. Away mode joins this list with #340.
-5. **Its own powers.** FLIGHT can't change `flight_powers`, the user config, or anything the operator approves.
+5. **Its own powers.** FLIGHT can't change `flight_powers`, the user config, or anything the operator approves. The one exception is #402's priority approval on `superuser` repos (#458).
 6. **Going live.**
    - **Auto-Update is an allowlist.** It applies only ranges whose every path is under `apps/web/src/**`, `apps/web/public/**`, `apps/web/index.html` or `docs/**`.
    - **Everything else waits:** server, packages, roles, any `package.json`, lockfiles, workspace and npm config, and build config. The operator, or the controller session on this repo, runs that Update after reading the held range, never FLIGHT. While a range is held, later web-only commits wait behind it.
@@ -98,7 +98,7 @@ Each slice is one ticket. Order:
 - **Merge order.**
   - A "queue front" fact is required in `gateView.passes`.
   - `sync_main` is refused for queued PRs that aren't at the front.
-  - A PR that left the queue rejoins only on a new head, or when FLIGHT re-adds it.
+  - A PR that left the queue rejoins only on a new head.
 - **Bringing the front up to date.** Only the front PR is brought up to date, by the engine's worktree merge of main. `branchUpdateDue` returns null for queued PRs behind the front.
 - **Leaving the queue.** A PR leaves on a conflict, on red CI, or after 45 minutes at the front without merging. The queue then moves on.
 - **Main moving underneath.** A merge to main by another hub or a person just moves main.
@@ -119,9 +119,9 @@ Each slice is one ticket. Order:
 - **`settle_park { runId, action, basis }`.** The actions are:
   - `lift`: a stuck park whose head descends from the push;
   - `rereview`: a fresh RETRO review;
-  - `accept`: accepts a ruling or a review through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"), and the queue admits the accepted head. It is refused for a blocked RETRO review of the hard-rule files that enforce the floor: `apps/server/src/{guard,flight,mcp,engine}/**`, `update.ts`, `config.ts`, `crew-apply.ts`, and `packages/core/src/{guard,flight,runtime,loop}.ts`, so RETRO stays the independent check on FLIGHT's own powers;
+  - `accept`: accepts a ruling or a review through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"), and the queue admits the accepted head. It is refused for a blocked RETRO review of the hard-rule files that enforce the floor: `apps/server/src/{guard,flight,mcp,engine}/**`, `update.ts`, `config.ts`, `crew-apply.ts`, `apps/server/src/runtime/**`, and `packages/core/src/{guard,flight,runtime,loop,repo-rules}.ts`, so RETRO stays the independent check on FLIGHT's own powers;
   - `rework`: sends the findings to the seat.
-- **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, 4 an hour.
+- **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, and 4 an hour shared with `accept_ruling`.
 - **Untrusted authors.** `read_ticket` and the digest mark text written by people who aren't collaborators, from a cached `GET collaborators/{login}/permission`. The role doesn't act on that text without the operator.
 
 ### #458: FLIGHT runs the board and Needs you (M; depends on #198)
@@ -138,7 +138,7 @@ Each slice is one ticket. Order:
   - It restarts a crew seat in state `error`.
   - It never restarts one that is `stopped` by the operator, an account or a budget, FLIGHT itself, or an observed loop.
 
-### #459: FLIGHT reads GitHub and the web (M; depends on #198 and #203's home-read build tickets)
+### #459: FLIGHT reads GitHub and the web (M; depends on #198, and on #203's home-read build tickets or #203's recorded "accepted" decision)
 
 - **`gh_read { path }`.**
   - GET only, on fixed path templates, for the repo FLIGHT is raised on.
@@ -164,7 +164,7 @@ Each slice is one ticket. Order:
 - **The memory store:** a store per repo of lessons, the repo profile, the crew and playbooks.
   - Notes are evidence, never authority.
   - The operator can edit and delete them.
-- **The retrospective.** The hub raises a retrospective wake fact at 03:00 local, so it runs even when nothing else wakes FLIGHT. FLIGHT files tickets or acts with its tools.
+- **The retrospective.** The hub raises a retrospective wake fact at 03:00 local, so it runs even when nothing else wakes FLIGHT. FLIGHT files a ticket for each missing-power gap, and writes lessons, files tickets or acts with its tools on up to three other items.
 - **The FLIGHT page panel** is a follow-on web ticket.
 
 ### Later
