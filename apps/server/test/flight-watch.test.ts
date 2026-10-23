@@ -400,6 +400,24 @@ describe("FLIGHT's holds", () => {
     expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
   });
 
+  it("reports a hold whose PR is not in the stored read as unknown", () => {
+    hold();
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
+      { ref: "mc#9", prState: "unknown", told: false },
+    ]);
+  });
+
+  it("remembers a hold was told across a store reopen", () => {
+    store.upsertPullRequests("mc", [stored(7, { state: "closed", updatedAt: T0 - 120 * MIN })], T0);
+    hold();
+    markPrsShown(store, flightState({ config, store, busy: [], now: nowMs }));
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
+      { ref: "mc#9", prState: "closed", told: true },
+    ]);
+  });
+
   it("drops a hold whose card the board has moved past, and does not wake for it", async () => {
     liveCrew();
     store.upsertPullRequests("mc", [stored(7)], T0);
