@@ -57,9 +57,11 @@ import {
   startOfLocalDay,
   strayText,
   type TestLockState,
+  type TokenUsage,
 } from "@mc/core";
 import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
+import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
 import { asideWakeDue } from "./engine/aside.ts";
@@ -251,6 +253,37 @@ function reviewingOf(store: Store, latest: Run | null): CrewRow["reviewing"] {
   if (latest === null || latest.endedAt !== null || latest.reviewId == null) return null;
   const rv = store.review(latest.reviewId);
   return rv === null ? null : { prNumber: rv.prNumber, sha: rv.sha, ref: latest.ticket };
+}
+
+const allTokens = (t: TokenUsage): number => t.input + t.output + t.cacheRead + t.cacheCreate;
+
+/** How many of a seat's earlier runs are looked through for a cost rate. */
+const COST_RATE_RUNS = 20;
+
+/**
+ * A running run's cost so far, for the ~Cost tile: a crew run's `costUsd` comes only from `result`
+ * lines, so it lags a turn. Its own cost per token (at its latest `result`) carried over the tokens
+ * folded since; with none yet, the newest earlier run of the seat and model that has a cost gives
+ * the rate. Null when the run has ended (its `costUsd` is final) or no rate is known.
+ */
+function costEstimate(
+  store: Store,
+  seatId: string,
+  run: Run,
+  digest: RunDigest | null,
+): number | null {
+  if (run.status !== "running" || run.tokens === null) return null;
+  const now = allTokens(run.tokens);
+  const atResult = digest?.costTokens ?? null;
+  if (run.costUsd !== null && atResult !== null && atResult > 0) {
+    return (run.costUsd * now) / atResult;
+  }
+  for (const prev of store.runs(seatId, COST_RATE_RUNS)) {
+    if (prev.id === run.id || prev.model !== run.model || prev.costUsd === null) continue;
+    if (prev.tokens === null || allTokens(prev.tokens) <= 0) continue;
+    return (now * prev.costUsd) / allTokens(prev.tokens);
+  }
+  return null;
 }
 
 /** A review in one of these states is on the review seat now. */
@@ -449,8 +482,17 @@ export function crew(
               branch: latest.branch,
               tokens: latest.tokens,
               costUsd: latest.costUsd,
+              costEstimateUsd:
+                agent.kind === "crew" ? costEstimate(store, agent.id, latest, digest) : null,
             }
           : null,
+        work:
+          agent.kind === "crew" && latest
+            ? {
+                commits: store.runCommits(latest.id).length,
+                denials: store.guardHitCount(latest.id),
+              }
+            : null,
         prs,
         summary: latest?.summary ?? null,
         digest,
@@ -609,6 +651,25 @@ export function attentionItems(
         ticket: pr.ticket,
       });
     }
+  }
+
+  // A person waits on you: an open GitHub notification thread of a configured repo.
+  const crewed = new Set(config.repos.map((r) => r.id));
+  for (const n of store.notifications()) {
+    if (!crewed.has(n.repoId) || !notificationOpen(n)) continue;
+    items.push({
+      owner: OWNER_OPERATOR,
+      key: personKey(n),
+      kind: "person",
+      agentId: null,
+      repoId: n.repoId,
+      text: personText(n),
+      tool: null,
+      at: n.updatedAt,
+      url: n.url,
+      escalationId: null,
+      ticket: n.subjectType === "Issue" && n.number !== null ? `${n.repoId}#${n.number}` : null,
+    });
   }
 
   items.push(...crewItems(config, store, now, lock, rows));

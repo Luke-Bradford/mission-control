@@ -96,6 +96,12 @@ interface DigestState {
   cwd: string | null;
   /** leadSentence of the newest top-level assistant text block. */
   lastText: string | null;
+  /** `all` tokens at the latest `result` line with a numeric cost; null before one. */
+  costTokens: number | null;
+  /** The newest top-level `user` frame's time since the last top-level assistant message. */
+  asked: number | null;
+  /** Top-level message id → when it was asked, when its last frame came, its output tokens. */
+  replies: Map<string, { asked: number; last: number | null; output: number }>;
 }
 
 const digestStates = new WeakMap<TranscriptFacts, DigestState>();
@@ -116,6 +122,9 @@ const emptyDigestState = (): DigestState => ({
   compactions: 0,
   cwd: null,
   lastText: null,
+  costTokens: null,
+  asked: null,
+  replies: new Map(),
 });
 
 function copyDigestState(d: DigestState): DigestState {
@@ -133,6 +142,7 @@ function copyDigestState(d: DigestState): DigestState {
     subagents: new Map([...d.subagents].map(([id, s]) => [id, { ...s }])),
     finals: new Set(d.finals),
     background: new Map(d.background),
+    replies: new Map([...d.replies].map(([id, r]) => [id, { ...r }])),
   };
 }
 
@@ -225,6 +235,24 @@ function digestFrame(d: DigestState, ev: Json): void {
   const top = isTopLevel(ev);
   const msg = isObj(ev.message) ? ev.message : null;
   const content = msg && Array.isArray(msg.content) ? msg.content : [];
+
+  if (ev.type === "user" && top && at !== null) d.asked = at;
+  if (ev.type === "assistant" && top && msg && isObj(msg.usage)) {
+    const id = str(msg.id);
+    if (id !== null) {
+      let reply = d.replies.get(id);
+      // The first frame of a message takes the ask; a message with none is left out.
+      if (!reply && !d.turns.has(id) && d.asked !== null) {
+        reply = { asked: d.asked, last: null, output: 0 };
+        d.replies.set(id, reply);
+      }
+      if (!d.turns.has(id)) d.asked = null;
+      if (reply) {
+        reply.output = num(msg.usage.output_tokens);
+        if (at !== null && (reply.last === null || at > reply.last)) reply.last = at;
+      }
+    }
+  }
 
   if (ev.type === "assistant" && msg && isObj(msg.usage)) {
     const u = msg.usage;
@@ -361,6 +389,25 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
     turnUsage: [...d.turns.values()].slice(-TURN_USAGE_KEEP).map((u) => ({ ...u })),
     background: [...d.background.values()].map((b) => ({ ...b })),
     compactions: d.compactions,
+    costTokens: d.costTokens,
+    speed: replySpeed(d),
+  };
+}
+
+/** Output tokens per second and the mean turn time over the replies with an ask and a last frame. */
+function replySpeed(d: DigestState): NonNullable<RunDigest["speed"]> {
+  let output = 0;
+  let ms = 0;
+  let n = 0;
+  for (const r of d.replies.values()) {
+    if (r.last === null) continue;
+    output += r.output;
+    ms += Math.max(0, r.last - r.asked);
+    n += 1;
+  }
+  return {
+    tokensPerSec: n > 0 && ms > 0 ? output / (ms / 1000) : null,
+    turnMs: n > 0 ? ms / n : null,
   };
 }
 
@@ -471,7 +518,12 @@ export function foldTranscript(
       });
     } else if (ev.type === "result") {
       facts.resultCount += 1;
-      if (typeof ev.total_cost_usd === "number") facts.costUsd = ev.total_cost_usd;
+      if (typeof ev.total_cost_usd === "number") {
+        facts.costUsd = ev.total_cost_usd;
+        const t = sumTokens(seen);
+        d.costTokens = t.input + t.output + t.cacheRead + t.cacheCreate;
+      }
+      d.asked = null;
       facts.isError = ev.is_error === true;
       if (typeof ev.result === "string") facts.summary = workSummary(cleanText(ev.result));
       // The turn is over: a call still without a result is not live any more. It stays pending,

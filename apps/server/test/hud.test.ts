@@ -212,6 +212,7 @@ describe("crew", () => {
       asideRuns: [],
       queue: [],
       run: null,
+      work: null,
       prs: [],
       summary: null,
       digest: null,
@@ -275,6 +276,7 @@ describe("crew", () => {
         "branch",
         "tokens",
         "costUsd",
+        "costEstimateUsd",
       ].sort(),
     );
   });
@@ -938,6 +940,82 @@ describe("crew seats in the rows", () => {
     ]);
     expect(rowOf(c, "RETRO-1")?.queue).toEqual([]);
     expect(rowOf(c, "shop-app-ta")?.queue).toEqual([]);
+  });
+
+  const tokens = (n: number) => ({ input: n, output: 0, cacheRead: 0, cacheCreate: 0 });
+
+  it("work counts only the latest run's commits and guard refusals; a loop or no run has none", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun({ id: "c0", startedAt: NOW - 3 * HOUR, endedAt: NOW - 2 * HOUR }));
+    store.upsertRun(crewRun({ id: "c1", seq: 2 }));
+    store.setSeatSession(seat({}));
+    const commit = (runId: string, sha: string) =>
+      store.addRunCommit({ runId, repoId: "shop-app", branch: "b", sha, at: NOW });
+    commit("c0", "a".repeat(40));
+    commit("c1", "b".repeat(40));
+    commit("c1", "c".repeat(40));
+    const hit = (runId: string) =>
+      store.addGuardHit({ agentId: "GUIDO-1", runId, rule: "network", text: "x", at: NOW });
+    hit("c0");
+    hit("c0");
+    hit("c1");
+    expect(rowOf(c, "GUIDO-1")?.work).toEqual({ commits: 2, denials: 1 });
+    expect(rowOf(c, "RETRO-1")?.work).toBeNull();
+    store.upsertRun(run({ id: "l1" }));
+    expect(rowOf(c, "shop-app-ta")?.work).toBeNull();
+  });
+
+  describe("a running crew run's cost estimate", () => {
+    const costRun = (over: Partial<Run>) =>
+      crewRun({ model: "sonnet", tokens: tokens(150_000), ...over });
+    const estimate = () => rowOf(withCrew(), "GUIDO-1")?.run?.costEstimateUsd;
+
+    it("carries the run's cost per token over the tokens since its last result", () => {
+      store.upsertRun(costRun({ costUsd: 1 }));
+      store.setSeatSession(seat({}));
+      store.setDigest("c1", digest({ costTokens: 100_000 }));
+      expect(estimate()).toBeCloseTo(1.5, 10);
+    });
+
+    it("with no cost yet, prices the tokens at the newest earlier same-model run's rate", () => {
+      store.upsertRun(
+        crewRun({
+          id: "c0",
+          startedAt: NOW - 5 * HOUR,
+          endedAt: NOW - 4 * HOUR,
+          status: "ok",
+          model: "sonnet",
+          costUsd: 2,
+          tokens: tokens(400_000),
+        }),
+      );
+      store.upsertRun(
+        crewRun({
+          id: "cx",
+          startedAt: NOW - 3 * HOUR,
+          endedAt: NOW - 2 * HOUR,
+          status: "ok",
+          model: "opus",
+          costUsd: 90,
+          tokens: tokens(1000),
+        }),
+      );
+      store.upsertRun(costRun({ seq: 2 }));
+      store.setSeatSession(seat({}));
+      expect(estimate()).toBeCloseTo((150_000 * 2) / 400_000, 10);
+    });
+
+    it("is null for an ended run, a loop row, and when no rate exists", () => {
+      store.upsertRun(costRun({ costUsd: 1 }));
+      store.setSeatSession(seat({}));
+      expect(estimate()).toBeNull();
+      store.upsertRun(run({ id: "l1", costUsd: 1, tokens: tokens(10) }));
+      store.setDigest("l1", digest({ costTokens: 5 }));
+      expect(rowOf(withCrew(), "shop-app-ta")?.run?.costEstimateUsd).toBeNull();
+      store.setDigest("c1", digest({ costTokens: 100_000 }));
+      store.setRunEnded("c1", NOW, "ok", "engine");
+      expect(estimate()).toBeNull();
+    });
   });
 
   it("a scratch seat's crew row says scratch", () => {

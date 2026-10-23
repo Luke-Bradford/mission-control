@@ -1,4 +1,4 @@
-import { readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   ACK_BATCH_MAX,
@@ -10,7 +10,6 @@ import {
   COMMS_CAPCOM,
   type ContextUsage,
   CREW_DISABLED,
-  CREW_FILES_NOTE,
   type Crew,
   type CrewChanges,
   type CrewMode,
@@ -43,6 +42,7 @@ import {
   NEW_LOOP,
   pace5h,
   projectAtReset,
+  READONLY_FILES_NOTE,
   REVIEW_ROUNDS,
   type RepoProfile,
   type RepoView,
@@ -67,6 +67,12 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
+import {
+  NO_OPEN_THREAD,
+  type NotificationsView,
+  notificationsView,
+  parsePersonKey,
+} from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import {
@@ -88,7 +94,7 @@ import {
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
-import { changedFiles, fileDiff, GitFailed } from "./files.ts";
+import { changedFiles, fileDiff, type GitExec, GitFailed, NO_WORKTREE_NOTE } from "./files.ts";
 import { flightBriefView, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -98,7 +104,8 @@ import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./
 import type { RunTokens } from "./mcp/tokens.ts";
 import { profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { CheckoutError } from "./runtime/checkouts.ts";
+import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
+import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
 import type { Store } from "./store.ts";
@@ -177,9 +184,9 @@ export interface AppDeps {
   /** Reads a transcript for `/api/agents/:id/stream`; default: `readStream`. */
   readStream?: typeof readStream;
   /** Reads a worktree's changed files for `/api/agents/:id/files`; default: read-only git. */
-  changedFiles?: (worktree: string) => Promise<ChangedFiles>;
+  changedFiles?: (worktree: string, exec?: GitExec) => Promise<ChangedFiles>;
   /** Reads one listed file's diff for `/api/agents/:id/files/diff`; default: read-only git. */
-  fileDiff?: (worktree: string, path: string) => Promise<FileDiff | null>;
+  fileDiff?: (worktree: string, path: string, exec?: GitExec) => Promise<FileDiff | null>;
   /**
    * Preview servers (`MC_NO_LOOP_WRITES=1`): Pause/Resume answer 409 before touching any loop file,
    * so a preview can never write into a live loop.
@@ -368,8 +375,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const refreshBoards = deps.refreshBoards ?? (() => bus.emit("boards"));
   const machine = deps.machine ?? (() => null);
   const readTranscript = deps.readStream ?? readStream;
-  const worktreeFiles = deps.changedFiles ?? ((wt: string) => changedFiles(wt));
-  const worktreeDiff = deps.fileDiff ?? ((wt: string, path: string) => fileDiff(wt, path));
+  const worktreeFiles = deps.changedFiles ?? changedFiles;
+  const worktreeDiff = deps.fileDiff ?? fileDiff;
   const streamCache = new Map<string, StreamCacheEntry>();
 
   const app = Fastify({
@@ -527,24 +534,66 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // A seat's worktree is the seat's to write, so no host git runs there in 2a (its attributes
-      // could name diff drivers): Files answers CREW_FILES_NOTE until the guard (phase 2b).
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 
-      // Read-only git in the loop's worktree, on demand. Responses carry fixed text, never the path.
+      /**
+       * Where a writer seat's files are read: its worktree (the seat's own, else the one its run
+       * set aside in review is in), and a git runner that goes through `crewGit`, so the worktree
+       * must still be the clone's own (a seat can write its `.git` pointer). Null: no such worktree.
+       */
+      const seatTree = async (
+        id: string,
+      ): Promise<{ worktree: string; exec: GitExec; redirected: () => boolean } | null> => {
+        const agent = agentById(id);
+        if (agent?.kind !== "crew") return null;
+        const checkout = config.crew?.sessions.find((s) => s.id === agent.sessionId)?.checkout;
+        const worktree =
+          store.seatSession(id)?.worktree ?? store.seatRun(id)?.loop?.aside?.worktree;
+        if (!checkout || !worktree) return null;
+        const isDir = await stat(worktree).then(
+          (st) => st.isDirectory(),
+          () => false,
+        );
+        const common = isDir ? await realpath(join(checkout, ".git")).catch(() => null) : null;
+        const gitDir =
+          common === null ? null : await adminDirOf(common, worktree).catch(() => null);
+        if (common === null || gitDir === null) return null;
+        let redirected = false;
+        const exec: GitExec = (args) =>
+          crewGit(worktree, args, common, { gitDir }).catch((e: unknown) => {
+            if (e instanceof CrewGitError) redirected = true;
+            throw e;
+          });
+        return { worktree, exec, redirected: () => redirected };
+      };
+
+      // Read-only git in the loop's or the writer seat's worktree, on demand. Responses carry fixed
+      // text, never the path.
       api.get<{ Params: { id: string } }>(
         "/agents/:id/files",
         async (req, reply): Promise<ChangedFiles | FastifyReply> => {
-          if (isSeat(req.params.id)) return { files: [], note: CREW_FILES_NOTE, sha: null };
-          const loop = loopById(req.params.id);
-          if (!loop) return reply.code(404).send({ error: "unknown agent" });
-          const isDir = await stat(loop.worktree).then(
-            (st) => st.isDirectory(),
-            () => false,
-          );
-          if (!isDir) return reply.code(503).send({ error: "worktree missing" });
+          let worktree: string;
+          let exec: GitExec | undefined;
+          let redirected = () => false;
+          if (isSeat(req.params.id)) {
+            if (crewSeatMode(config, req.params.id) !== "writer") {
+              return { files: [], note: READONLY_FILES_NOTE, sha: null };
+            }
+            const tree = await seatTree(req.params.id);
+            if (tree === null) return { files: [], note: NO_WORKTREE_NOTE, sha: null };
+            ({ worktree, exec, redirected } = tree);
+          } else {
+            const loop = loopById(req.params.id);
+            if (!loop) return reply.code(404).send({ error: "unknown agent" });
+            const isDir = await stat(loop.worktree).then(
+              (st) => st.isDirectory(),
+              () => false,
+            );
+            if (!isDir) return reply.code(503).send({ error: "worktree missing" });
+            worktree = loop.worktree;
+          }
           try {
-            return await worktreeFiles(loop.worktree);
+            return await worktreeFiles(worktree, exec);
           } catch (e) {
             // Only the command, exit code and signal: git's message and any path stay out of the log.
             const git = e instanceof GitFailed ? e : null;
@@ -554,12 +603,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 exitCode: git?.exitCode ?? null,
                 signal: git?.signal ?? null,
               },
-              `file list failed for ${loop.id}`,
+              `file list failed for ${req.params.id}`,
             );
-            // The filter check's fixed note survives a total failure.
+            // The filter check's fixed note survives a total failure, unless git never ran at all
+            // because the checkout's git dir is not the clone's.
             return reply
               .code(502)
-              .send(git?.note ? { error: "git failed", note: git.note } : { error: "git failed" });
+              .send(
+                git?.note && !redirected()
+                  ? { error: "git failed", note: git.note }
+                  : { error: "git failed" },
+              );
           }
         },
       );
@@ -568,23 +622,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { id: string }; Querystring: { path?: unknown } }>(
         "/agents/:id/files/diff",
         async (req, reply): Promise<FileDiff | FastifyReply> => {
-          if (isSeat(req.params.id)) return reply.code(409).send({ error: CREW_FILES_NOTE });
+          let worktree: string;
+          let exec: GitExec | undefined;
+          const seat = isSeat(req.params.id);
           const loop = loopById(req.params.id);
-          if (!loop) return reply.code(404).send({ error: "unknown agent" });
+          if (!seat && !loop) return reply.code(404).send({ error: "unknown agent" });
           const path = DiffPath.safeParse(req.query.path);
           if (!path.success) return reply.code(400).send({ error: "path required" });
-          const isDir = await stat(loop.worktree).then(
-            (st) => st.isDirectory(),
-            () => false,
-          );
-          if (!isDir) return reply.code(503).send({ error: "worktree missing" });
+          if (loop === undefined) {
+            // a read-only seat, or one with no worktree, has no file to show
+            const tree =
+              crewSeatMode(config, req.params.id) === "writer"
+                ? await seatTree(req.params.id)
+                : null;
+            if (tree === null) return reply.code(404).send({ error: "unknown file" });
+            ({ worktree, exec } = tree);
+          } else {
+            const isDir = await stat(loop.worktree).then(
+              (st) => st.isDirectory(),
+              () => false,
+            );
+            if (!isDir) return reply.code(503).send({ error: "worktree missing" });
+            worktree = loop.worktree;
+          }
           let diff: FileDiff | null;
           try {
-            diff = await worktreeDiff(loop.worktree, path.data);
+            diff = await worktreeDiff(worktree, path.data, exec);
           } catch (e) {
             // GitFailed's message is git's own, the worktree path already taken out
             const git = e instanceof GitFailed ? e.message : "not git";
-            reply.log.warn({ git }, `file diff failed for ${loop.id}`);
+            reply.log.warn({ git }, `file diff failed for ${req.params.id}`);
             return reply.code(502).send({ error: "git failed" });
           }
           if (diff === null) return reply.code(404).send({ error: "unknown file" });
@@ -1308,6 +1375,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         bus.emit("attention");
         return { dismissed: key };
+      });
+
+      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)
+      api.get(
+        "/notifications",
+        async (): Promise<NotificationsView> => notificationsView(config, store, now()),
+      );
+
+      // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled; the web side is its own ticket)
+      api.post<{ Params: { key: string } }>("/attention/:key/handled", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const key = req.params.key;
+        const thread = key.length > 200 ? null : parsePersonKey(key);
+        // Local only: the thread stays unread on GitHub.
+        if (
+          thread === null ||
+          !store.markNotificationHandled(thread.id, thread.updatedAt, "marked", now())
+        ) {
+          return reply.code(404).send({ error: NO_OPEN_THREAD });
+        }
+        bus.emit("attention");
+        return { handled: key };
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => {

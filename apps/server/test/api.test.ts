@@ -26,7 +26,6 @@ import {
   type BoardItem,
   type ChangedFiles,
   type ConfigView,
-  CREW_FILES_NOTE,
   type Crew,
   type CrewChanges,
   type CrewSessionFolders,
@@ -43,6 +42,7 @@ import {
   otherLaneText,
   type PrCheck,
   projectAtReset,
+  READONLY_FILES_NOTE,
   type ReloadResult,
   type Run,
   type RunDigest,
@@ -58,14 +58,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_OPEN_NOTE } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
+import {
+  NO_OPEN_THREAD,
+  type NotificationsView,
+  personKey,
+} from "../src/collectors/notifications.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
-import { GitFailed } from "../src/files.ts";
+import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
-import { Store } from "../src/store.ts";
+import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 
@@ -471,6 +476,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/attention"],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
+  ["GET", "/api/notifications"],
+  ["POST", "/api/attention/person:101:1/handled", {}],
   ["GET", "/api/settings/away"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
@@ -861,7 +868,7 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
-      if (url.endsWith("/dismiss")) {
+      if (url.endsWith("/dismiss") || url.endsWith("/handled")) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -995,7 +1002,8 @@ describe("local access", () => {
             .replace("/guido-1/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
-            .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")}`,
+            .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
+            .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")}`,
       ),
     );
     const registered = apiRoutes.filter((r) => !r.startsWith("HEAD "));
@@ -1790,6 +1798,84 @@ describe("crew and attention", () => {
     repoId: "shop-app",
     text: "shop-app#7 parked",
     at: NOW,
+  });
+
+  const seedThread = (over: Partial<NotificationRead> = {}) =>
+    store.upsertNotifications(
+      [
+        {
+          id: "101",
+          repoId: "shop-app",
+          subjectType: "Issue",
+          title: "Fix the stop race",
+          number: 12,
+          reason: "mention",
+          url: "https://github.com/o/shop-app/issues/12",
+          author: "alice",
+          snippet: "can you look?",
+          updatedAt: NOW - 60_000,
+          lastReadAt: null,
+          ...over,
+        },
+      ],
+      false,
+      NOW,
+    );
+
+  it("POST /api/attention/:key/handled closes the thread locally, emits attention, and calls no GitHub", async () => {
+    seedThread();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const key = personKey({ id: "101", updatedAt: NOW - 60_000 });
+    const before = (await get("/api/attention")).json() as AttentionItem[];
+    expect(before.some((i) => i.key === key)).toBe(true);
+    const events: string[] = [];
+    bus.subscribe((t) => events.push(t));
+    const r = await postBody(`/api/attention/${encodeURIComponent(key)}/handled`, {});
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ handled: key });
+    expect(events).toEqual(["attention"]);
+    const items = (await get("/api/attention")).json() as AttentionItem[];
+    expect(items.find((i) => i.kind === "person")).toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/attention/:key/handled answers 404 for a stale or unknown key", async () => {
+    seedThread();
+    const events: string[] = [];
+    bus.subscribe((t) => events.push(t));
+    const stale = personKey({ id: "101", updatedAt: NOW - 120_000 });
+    const keys = [
+      stale,
+      "person:999:1",
+      "person:x:1",
+      "esc:shop-app#9",
+      `person:101:${"9".repeat(30)}`,
+    ];
+    for (const key of keys) {
+      const r = await postBody(`/api/attention/${encodeURIComponent(key)}/handled`, {});
+      expect(r.statusCode, key).toBe(404);
+      expect(r.json(), key).toEqual({ error: NO_OPEN_THREAD });
+    }
+    expect(events).toEqual([]);
+    const live = encodeURIComponent(personKey({ id: "101", updatedAt: NOW - 60_000 }));
+    expect((await postBody(`/api/attention/${live}/handled`, {})).statusCode).toBe(200);
+    // already closed
+    expect((await postBody(`/api/attention/${live}/handled`, {})).statusCode).toBe(404);
+  });
+
+  it("GET /api/notifications lists open threads and the ones handled today", async () => {
+    seedThread();
+    seedThread({ id: "102", number: 13, title: "Other", updatedAt: NOW - 30_000 });
+    store.markNotificationHandled("102", NOW - 30_000, "marked", NOW);
+    const v = (await get("/api/notifications")).json() as NotificationsView;
+    expect(v.open.map((n) => n.id)).toEqual(["101"]);
+    expect(v.open[0]).toMatchObject({
+      repoId: "shop-app",
+      number: 12,
+      author: "alice",
+      reason: "mention",
+    });
+    expect(v.handledToday.map((n) => [n.id, n.how])).toEqual([["102", "marked handled"]]);
   });
 
   it("POST /api/attention/:key/dismiss dismisses an open parked note, emits attention, and the next GET leaves it out", async () => {
@@ -3571,31 +3657,137 @@ describe("seat ids in the agent routes", () => {
     });
   });
 
-  it("files and a file's diff for a seat answer the fixed phase-2b line, never git", async () => {
-    const seen: string[] = [];
-    const a = buildApp({
-      config,
-      store,
-      bus,
-      changedFiles: async (wt) => {
-        seen.push(wt);
-        return { files: [], note: null, sha: null };
-      },
+  describe("a seat's Files tab", () => {
+    const gitIn = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", ...args], {
+        cwd,
+        encoding: "utf8",
+      });
+    let clone: string;
+    let wt: string;
+    const seatRow = (worktree: string | null) => ({
+      seatId: "guido-1",
+      runId: "c1",
+      cliSessionId: null,
+      state: "running" as const,
+      reason: null,
+      worktree,
+      updatedAt: NOW,
     });
-    await a.ready();
-    const files = await a.inject({ method: "GET", url: "/api/agents/guido-1/files" });
-    expect(files.statusCode).toBe(200);
-    expect(files.json<ChangedFiles>()).toEqual({
-      files: [],
-      note: CREW_FILES_NOTE,
-      sha: null,
+    // a clone with origin/HEAD at its first commit
+    const makeClone = (name: string) => {
+      const r = join(dir, name);
+      mkdirSync(r, { recursive: true });
+      gitIn(r, "init", "-q");
+      writeFileSync(join(r, "a.txt"), "one\n");
+      gitIn(r, "add", "-A");
+      gitIn(r, "commit", "-qm", "init");
+      gitIn(r, "update-ref", "refs/remotes/origin/main", "HEAD");
+      gitIn(r, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+      return r;
+    };
+    // the seat's worktree: one commit ahead, with an uncommitted edit and an untracked file
+    beforeEach(() => {
+      clone = makeClone("clone");
+      wt = join(dir, "seat-wt");
+      gitIn(clone, "worktree", "add", "-q", "-b", "seat", wt);
+      writeFileSync(join(wt, "done.txt"), "x\n");
+      gitIn(wt, "add", "-A");
+      gitIn(wt, "commit", "-qm", "done");
+      writeFileSync(join(wt, "a.txt"), "two\n");
+      writeFileSync(join(wt, "new.txt"), "n1\nn2\n");
+      store.upsertRun(run({ id: "c1", agentId: "guido-1", repoId: "shop-app" }));
+      store.setSeatSession(seatRow(wt));
     });
-    const diff = await a.inject({ method: "GET", url: "/api/agents/guido-1/files/diff?path=a" });
-    expect(diff.statusCode).toBe(409);
-    expect(diff.json()).toEqual({ error: CREW_FILES_NOTE });
-    expect(seen).toEqual([]);
-    expect(CREW_FILES_NOTE).toBe("Files for crew seats arrive with the mailbox (phase 2d).");
-    await a.close();
+
+    it("a writer seat lists its committed, uncommitted and untracked files, and diffs one", async () => {
+      const list = await get("/api/agents/guido-1/files");
+      expect(list.statusCode).toBe(200);
+      const body = list.json<ChangedFiles>();
+      expect(body.note).toBeNull();
+      expect(body.sha).toBe(gitIn(wt, "rev-parse", "HEAD").trim());
+      expect([...body.files].sort((x, y) => x.path.localeCompare(y.path))).toEqual([
+        { path: "a.txt", add: 1, del: 1, state: "uncommitted" },
+        { path: "done.txt", add: 1, del: 0, state: "committed" },
+        { path: "new.txt", add: null, del: null, state: "untracked" },
+      ]);
+      const diff = await get("/api/agents/guido-1/files/diff?path=a.txt");
+      expect(diff.statusCode).toBe(200);
+      const text = diff.json<FileDiff>().text;
+      expect(text).toContain("-one");
+      expect(text).toContain("+two");
+      expect((await get("/api/agents/guido-1/files/diff?path=nope.txt")).statusCode).toBe(404);
+    });
+
+    it("a run set aside in review, with no seat worktree, is read from the run's aside", async () => {
+      store.setSeatSession(seatRow(null));
+      store.setRunLoop("c1", {
+        ...NEW_LOOP,
+        phase: "review",
+        aside: { worktree: wt, wake: false },
+      });
+      const body = (await get("/api/agents/guido-1/files")).json<ChangedFiles>();
+      expect(body.files.map((f) => f.path)).toContain("done.txt");
+    });
+
+    it("answers 502 when the worktree's .git pointer was rewritten to another repository", async () => {
+      const other = makeClone("other");
+      gitIn(other, "worktree", "add", "-q", "-b", "evil", join(dir, "evil-wt"));
+      writeFileSync(join(wt, ".git"), `gitdir: ${join(other, ".git", "worktrees", "evil-wt")}\n`);
+      const list = await get("/api/agents/guido-1/files");
+      expect(list.statusCode).toBe(502);
+      expect(list.json()).toEqual({ error: "git failed" });
+      const diff = await get("/api/agents/guido-1/files/diff?path=a.txt");
+      expect(diff.statusCode).toBe(502);
+      expect(diff.json()).toEqual({ error: "git failed" });
+    });
+
+    it("a writer seat with no worktree answers the no-worktree note, and 404 for a diff", async () => {
+      store.setSeatSession(seatRow(null));
+      expect((await get("/api/agents/guido-1/files")).json()).toEqual({
+        files: [],
+        note: NO_WORKTREE_NOTE,
+        sha: null,
+      });
+      store.setSeatSession(seatRow(join(dir, "gone")));
+      expect((await get("/api/agents/guido-1/files")).json<ChangedFiles>().note).toBe(
+        NO_WORKTREE_NOTE,
+      );
+      const diff = await get("/api/agents/guido-1/files/diff?path=a.txt");
+      expect(diff.statusCode).toBe(404);
+      expect(diff.json()).toEqual({ error: "unknown file" });
+    });
+
+    it("a read-only seat answers the read-only note and runs no git", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "retro-1",
+        role: "RETRO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: [],
+      });
+      store.setSeatSession({ ...seatRow(wt), seatId: "retro-1" });
+      const seen: string[] = [];
+      const a = buildApp({
+        config,
+        store,
+        bus,
+        changedFiles: async (w) => {
+          seen.push(w);
+          return { files: [], note: null, sha: null };
+        },
+      });
+      await a.ready();
+      const files = await a.inject({ method: "GET", url: "/api/agents/retro-1/files" });
+      expect(files.statusCode).toBe(200);
+      expect(files.json()).toEqual({ files: [], note: READONLY_FILES_NOTE, sha: null });
+      const diff = await a.inject({ method: "GET", url: "/api/agents/retro-1/files/diff?path=a" });
+      expect(diff.statusCode).toBe(404);
+      expect(diff.json()).toEqual({ error: "unknown file" });
+      expect(seen).toEqual([]);
+      expect(READONLY_FILES_NOTE).toBe("Read-only agent: no file changes.");
+      await a.close();
+    });
   });
 
   it("GET /api/telemetry?agent=<seat id> is accepted", async () => {
