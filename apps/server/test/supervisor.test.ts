@@ -72,6 +72,7 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, reviewBrief, ticketBrief, watchBrief } from "../src/runtime/brief.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
+import { restoreRuns } from "../src/runtime/restore.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -2270,6 +2271,29 @@ describe("reattach after a restart", () => {
     const transcript = readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8");
     return { runId, row, transcript };
   }
+
+  it("drops the token and test-lock hold restored for a run it does not reattach", async () => {
+    const { runId } = await leftActive();
+    writeFileSync(crewTokenPath(dbPath, runId), "c".repeat(64), { mode: 0o600 });
+    store.addLockHold({
+      runId,
+      toolUseId: "t1",
+      seatId: "guido-1",
+      command: "pnpm -s test",
+      since: 1,
+    });
+    const tokens = new RunTokens();
+    const lock = new TestLock({ holds: store });
+    restoreRuns({ store, dbPath, tokens, lock, log: () => {} });
+    expect(tokens.resolve("c".repeat(64))).not.toBeNull();
+    expect(lock.state().holder?.runId).toBe(runId);
+    const { sup } = make({ tokens, lock });
+    sup.start();
+    expect(tokens.resolve("c".repeat(64))).toBeNull();
+    expect(lock.state().holder).toBeNull();
+    expect(store.lockHolds()).toEqual([]);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+  });
 
   it("fails a non-review run whose seat became a scratch seat", async () => {
     const first = make();
