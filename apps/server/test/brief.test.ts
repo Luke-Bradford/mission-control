@@ -342,8 +342,8 @@ describe("reviewBrief", () => {
         "- Below: the ticket and the author's report notes.",
         "",
         "How to review:",
-        "1. Read the ticket and the diff, then each changed file in full and the code that calls it.",
-        "2. Run the tests that cover the change. For each new test, and for each fix the author made for a finding below, revert or break the code it covers in this copy and confirm a test fails; then put it back. A test that still passes is a finding.",
+        "1. Read the ticket and .mc-review/pr.diff. Open a whole file, or the code that calls it, only where the diff leaves a doubt.",
+        "2. Run the test files that cover the change, and check that each new behaviour has a test that would fail without it. Mutation-check only to prove a finding: break the code in this copy, confirm a test fails, then put it back.",
         "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
         "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and the fix: the exact change the author should make, so that it can be applied without redesigning anything.",
         "5. Call mc report_findings once, with every finding and your verdict on spec (does it do what the ticket asks) and quality (is it correct and tested). Then stop.",
@@ -359,6 +359,8 @@ describe("reviewBrief", () => {
     );
     expect(t).not.toContain("since-last-review");
     expect(t).not.toContain("Findings the author was asked");
+    expect(t).not.toContain("revert or break");
+    expect(t).not.toContain("each changed file in full");
   });
 
   it("round 2", () => {
@@ -376,6 +378,11 @@ describe("reviewBrief", () => {
     });
     expect(t).toContain("to aaaaaaa. It was cut at 1 MiB; read the changed files for the rest.");
     expect(t).toContain(
+      "1. Read the ticket and .mc-review/since-last-review.diff first, and check that each finding below was fixed as asked. Go back to .mc-review/pr.diff only for code those changes reach. Open a whole file, or the code that calls it, only where a diff leaves a doubt.",
+    );
+    expect(t).not.toContain("revert or break");
+    expect(t).not.toContain("each changed file in full");
+    expect(t).toContain(
       "- .mc-review/since-last-review.diff: what changed since the last review (ccccccc..aaaaaaa).",
     );
     expect(t).toContain(
@@ -387,6 +394,14 @@ describe("reviewBrief", () => {
     expect(t).toContain(
       "## Findings the author was asked to fix after the last review\n\n1. [Critical] a.ts — s1\n   Fix asked: f1\n\n2. [Important] b.ts:4 — s2\n   Fix asked: f2",
     );
+  });
+
+  it("round 2 with no findings leaves out the findings clause", () => {
+    const t = reviewBrief({ ...review, round: 2, prevSha: "c".repeat(40), since: true });
+    expect(t).toContain(
+      "1. Read the ticket and .mc-review/since-last-review.diff first. Go back to .mc-review/pr.diff only for code those changes reach.",
+    );
+    expect(t).not.toContain("fixed as asked");
   });
 
   it("cuts notes oldest first", () => {

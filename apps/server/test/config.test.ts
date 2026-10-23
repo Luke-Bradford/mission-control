@@ -875,6 +875,15 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
     expect(e.path).toBe("crew.sessions[1].checkout");
   });
 
+  it("reads a seat's light_model", () => {
+    const seatOf = (extra: string) =>
+      load(crewText({ seats: [seat("retro-1", "RETRO", extra)] })).crew?.sessions[0]?.seats[0];
+    expect(seatOf(", light_model: sonnet")?.lightModel).toBe("sonnet");
+    expect(seatOf("")?.lightModel).toBeUndefined();
+    const e = fails(crewText({ seats: [seat("retro-1", "RETRO", ', light_model: "bad model"')] }));
+    expect(e.message).toContain("must match");
+  });
+
   it("validates model names and areas", () => {
     const bad = (extra: string, path: string) =>
       expect(fails(crewText({ seats: [seat("guido-1", "GUIDO", extra)] })).path).toBe(path);

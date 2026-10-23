@@ -64,6 +64,7 @@ import {
   type Run,
   type RunLoop,
   retiringText,
+  reviewDepth,
   reworkFirstText,
   type SeatSessionRow,
   type SeatState,
@@ -857,6 +858,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     checkout: { path: string; branch: string; gitDir: string },
     resume: boolean,
     claudeMd: string | null,
+    model?: string,
   ): Live {
     const def = seatDef(info.seat);
     const tokenPath = crewTokenPath(deps.dbPath, run.id);
@@ -935,7 +937,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const args = crewCliArgs({
         commands: info.repo.commands,
         protectedFiles: info.repo.protectedFiles,
-        model: info.seat.model,
+        model: model ?? info.seat.model,
         effort: info.seat.effort,
         mode: def.mode,
         mcTools: def.mcTools,
@@ -1540,6 +1542,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
+      const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
+      const model =
+        info.seat.lightModel !== undefined &&
+        reviewDepth({ labels: ticket.labels, size: card?.size ?? null }) === "light"
+          ? info.seat.lightModel
+          : info.seat.model;
 
       const checkout = info.session.checkout;
       const prev =
@@ -1591,7 +1599,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         endedAt: null,
         status: "running",
         sessionId: cliSessionId,
-        model: info.seat.model,
+        model,
         ...on,
         branch: null,
         ticket: author.ticket,
@@ -1613,6 +1621,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           { path: scratch.path, branch: "", gitDir: scratch.gitDir },
           false,
           claudeMd,
+          model,
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
