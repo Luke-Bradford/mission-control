@@ -34,6 +34,7 @@ import { settled, stubFetch } from "./fetchStub.ts";
 import {
   boardItem,
   CONFIG,
+  CREW_CONFIG,
   crewRow,
   HOUR,
   item,
@@ -2706,6 +2707,8 @@ describe("Agent page: header and tile mockup", () => {
     checkedAt: NOW,
   };
   const removalRoutes = {
+    // Applied config still has RETRO-1; config.yaml has INCO-2 and GUIDO-1's new area.
+    "/api/config": CREW_CONFIG,
     "/api/crew/changes": changes,
     "POST /api/crew/sessions/s1/seats": { backup: "/tmp/config.bak", changes },
   };
@@ -2718,6 +2721,7 @@ describe("Agent page: header and tile mockup", () => {
       render(<Agent id="guido-1" />);
       const remove = await screen.findByRole("button", { name: "Remove" });
       await settled(f, "/api/crew/changes");
+      expect(screen.queryByText("Not in config.yaml")).toBeNull();
       fireEvent.click(remove);
       expect(ask).toHaveBeenCalledWith(
         "Remove GUIDO-1 from s/s1? Its area will be freed when its run ends.",
@@ -2734,15 +2738,41 @@ describe("Agent page: header and tile mockup", () => {
     },
   );
 
-  it.each(["running", "stalled", "blocked", "waiting", "parked", "error"] as const)(
-    "Remove is absent for a %s seat",
-    async (hudState) => {
-      stub({ rows: [seat({ hudState })], extra: SEAT_ROUTES(removalRoutes) });
-      render(<Agent id="guido-1" />);
-      await seatLoaded();
-      expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
-    },
-  );
+  it.each([
+    ["idle", true],
+    ["stopped", true],
+    ["running", false],
+    ["stalled", false],
+    ["blocked", false],
+    ["waiting", false],
+    ["parked", false],
+    ["error", false],
+  ] as const)("Remove visibility for a %s seat", async (hudState, visible) => {
+    stub({ rows: [seat({ hudState })], extra: SEAT_ROUTES(removalRoutes) });
+    render(<Agent id="guido-1" />);
+    await seatLoaded();
+    expect(screen.queryByRole("button", { name: "Remove" }) !== null).toBe(visible);
+  });
+
+  it.each([
+    { id: "s1", seats: [] },
+    { id: "other-session", seats: changes.sessions[0]?.seats ?? [] },
+  ])("Remove explains when the seat is absent from config.yaml (%j)", async (session) => {
+    const f = stub({
+      rows: [idleSeat()],
+      extra: SEAT_ROUTES({
+        ...removalRoutes,
+        "/api/crew/changes": { ...changes, sessions: [session] },
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    await settled(f, "/api/crew/changes");
+    const remove = screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement;
+    expect(remove.disabled).toBe(true);
+    const note = screen.getByText("Not in config.yaml");
+    expect(note.classList.contains("muted")).toBe(true);
+    expect(remove.nextElementSibling).toBe(note);
+  });
 
   it("observed loops have neither Remove nor Rename", async () => {
     stub({ rows: [studio()] });
@@ -2818,6 +2848,47 @@ describe("Agent page: header and tile mockup", () => {
     ]);
   });
 
+  it("Now shows a dash for parked step time even with an earlier CI try", async () => {
+    const view: RunLoopView = {
+      runId: "r-12",
+      loop: null,
+      events: [],
+      round: 1,
+      budget: null,
+      review: null,
+      tries: [
+        {
+          step: "ci",
+          fix: false,
+          n: 1,
+          startedAt: NOW - 10 * MIN,
+          endedAt: NOW - MIN,
+          outcome: "parked",
+          reason: "Check failed",
+        },
+      ],
+    };
+    const f = stub({
+      rows: [
+        seat({
+          hudState: "parked",
+          loop: {
+            phase: "parked",
+            text: "Held: Check failed",
+            parked: "Check failed",
+            prNumber: 77,
+          },
+        }),
+      ],
+      extra: SEAT_ROUTES({ "/api/runs/r-12/loop": view }),
+    });
+    const { container } = render(<Agent id="guido-1" />);
+    await settled(f, "/api/runs/r-12/loop");
+    const tile = $(container, ".tile2.now") as HTMLElement;
+    expect(tile.textContent).toContain("— in this step");
+    expect(tile.textContent).not.toContain("in this run");
+  });
+
   it.each([
     null,
     { categories: [{ name: "Messages", tokens: 100_000 }], total: 100_000, window: 200_000 },
@@ -2871,6 +2942,25 @@ describe("Agent page: header and tile mockup", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
     expect(await screen.findByText("None yet.")).toBeTruthy();
   });
+
+  it.each([49, 50])(
+    "Queue Done hints at the limit only for a full page of %i runs",
+    async (count) => {
+      const f = stub({
+        rows: [seat()],
+        runs: Array.from({ length: count }, (_, i) =>
+          rv({ id: `r-${i}`, status: "ok", endedAt: NOW - MIN, ticket: "shop-app#2" }),
+        ),
+        extra: SEAT_ROUTES(),
+      });
+      const { container } = render(<Agent id="guido-1" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
+      await settled(f, "/api/agents/guido-1/runs?limit=50");
+      const side = $(container, "#sideP") as HTMLElement;
+      expect(within(side).getAllByRole("link", { name: "shop-app #2" })).toHaveLength(1);
+      expect(side.textContent?.includes("latest 50")).toBe(count === 50);
+    },
+  );
 });
 
 describe("Agent page: driving a crew seat", () => {

@@ -85,6 +85,7 @@ function SeatSettings({ row }: { row: CrewRow }) {
   const removable = row.hudState === "idle" || row.hudState === "stopped";
   const changes = useResource<CrewChanges>(removable ? RESOURCES.crewChanges : null);
   const base = changes.data?.sessions.find((s) => s.id === row.sessionId)?.seats;
+  const inConfig = base?.some((s) => s.id === row.id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const remove = async () => {
@@ -119,7 +120,7 @@ function SeatSettings({ row }: { row: CrewRow }) {
         <button
           type="button"
           className="sm"
-          disabled={busy || !base?.some((s) => s.id === row.id)}
+          disabled={busy || !inConfig}
           onClick={() => {
             if (
               window.confirm(
@@ -131,6 +132,9 @@ function SeatSettings({ row }: { row: CrewRow }) {
         >
           Remove
         </button>
+      )}
+      {removable && changes.data && !inConfig && (
+        <span className="s muted">Not in config.yaml</span>
       )}
       <button
         type="button"

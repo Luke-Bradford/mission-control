@@ -28,7 +28,7 @@ export interface ResourceRef {
   topic: Topic | null;
 }
 
-const RUNS_LIMIT = 50;
+export const RUNS_LIMIT = 50;
 /** How often a running seat's context is asked of its CLI (each fetch is a live control request). */
 export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 const enc = encodeURIComponent;
