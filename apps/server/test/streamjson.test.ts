@@ -201,7 +201,7 @@ describe("foldTranscript digest", () => {
     expect(mid.liveTool).toEqual({
       name: "Agent",
       since: T("2026-10-18T10:02:00Z"),
-      detail: null,
+      detail: "Explore",
     });
     expect(mid.toolCalls).toBe(3);
   });
@@ -209,10 +209,30 @@ describe("foldTranscript digest", () => {
   it("records per-tool calls, failures and durations, subagent frames included", () => {
     expect(Object.getPrototypeOf(d.tools)).toBeNull();
     expect({ ...d.tools }).toEqual({
-      Bash: { calls: 2, failed: 0, durationsMs: [30_000] },
-      Read: { calls: 1, failed: 1, durationsMs: [1000] },
-      Agent: { calls: 1, failed: 0, durationsMs: [100_000] },
-      Grep: { calls: 1, failed: 0, durationsMs: [1000] },
+      Bash: {
+        calls: 2,
+        failed: 0,
+        durationsMs: [30_000],
+        slowest: { detail: "pnpm test", durationMs: 30_000 },
+      },
+      Read: {
+        calls: 1,
+        failed: 1,
+        durationsMs: [1000],
+        slowest: { detail: "missing.ts", durationMs: 1000 },
+      },
+      Agent: {
+        calls: 1,
+        failed: 0,
+        durationsMs: [100_000],
+        slowest: { detail: "Explore", durationMs: 100_000 },
+      },
+      Grep: {
+        calls: 1,
+        failed: 0,
+        durationsMs: [1000],
+        slowest: { detail: "foldTranscript", durationMs: 1000 },
+      },
     });
   });
 
@@ -830,4 +850,28 @@ describe("foldTranscript: reply speed and the cost's token count", () => {
     // a result with no numeric cost is not one
     expect(foldTranscript(null, [m1, result("x")], 1).digest.costTokens).toBeNull();
   });
+});
+
+it("retains the maximum timed command across chunks and the bounded duration window", () => {
+  const frame = (id: string, at: number, result = false) =>
+    JSON.stringify({
+      type: result ? "user" : "assistant",
+      timestamp: new Date(at).toISOString(),
+      message: {
+        content: [
+          result
+            ? { type: "tool_result", tool_use_id: id }
+            : { type: "tool_use", id, name: "Bash", input: { command: "just test" } },
+        ],
+      },
+    });
+  const start = Date.parse("2026-10-17T12:00:00Z");
+  const first = foldTranscript(null, [frame("slow", start)], start);
+  const rest = [frame("slow", start + 60000, true)];
+  for (let i = 0; i < 60; i++)
+    rest.push(frame(`fast-${i}`, start), frame(`fast-${i}`, start + 1, true));
+  const result = foldTranscript(first, rest, start);
+  expect(result.digest.tools.Bash?.slowest).toEqual({ detail: "just test", durationMs: 60000 });
+  expect(result.digest.tools.Bash?.durationsMs).toHaveLength(50);
+  expect(first.digest.tools.Bash?.slowest).toBeUndefined();
 });
