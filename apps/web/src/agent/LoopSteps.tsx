@@ -1,6 +1,6 @@
 import type { CrewRow, PullRequestView, RunLoop, RunLoopView } from "@mc/core";
 import { useState } from "react";
-import { LOOP_PATH, LOOP_PHASE_LABEL, loopMarks, NO_LOOP, type StepMark } from "../crew.ts";
+import { loopSteps, NO_LOOP, type StepMark, stepMarks } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import {
@@ -8,7 +8,6 @@ import {
   CHECK_ICON,
   heldStep,
   type LoopLimits,
-  type LoopStep,
   loopNote,
   loopRule,
   stepChecks,
@@ -81,9 +80,10 @@ export function LoopSteps({
   limits: LoopLimits;
   now: number;
 }) {
-  const [toggled, setToggled] = useState<ReadonlySet<LoopStep>>(new Set());
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(new Set());
   const loop = row.loop;
   if (!loop) return <p className="s muted">{NO_LOOP}</p>;
+  const steps = loopSteps(loop);
   const runLoop = view?.loop;
   const tries = view?.tries ?? [];
   const endAside = row.run && row.run.endedAt === null && (
@@ -97,10 +97,9 @@ export function LoopSteps({
 
   if (!runLoop || tries.length === 0) {
     // a parked loop does not say which step it held at: its held line stands, and no step is current
-    const marks =
-      loop.phase === "parked"
-        ? LOOP_PATH.map(() => "todo" as const)
-        : loopMarks(loop, row.hudState);
+    const marks = stepMarks(loop, row.hudState).map((mark) =>
+      loop.phase === "parked" && mark === "held" ? "todo" : mark,
+    );
     const n = loop.tries?.n ?? 0;
     return (
       <>
@@ -112,19 +111,20 @@ export function LoopSteps({
         )}
         {endAside}
         <div className="vsteps">
-          {LOOP_PATH.map((step, i) => {
+          {steps.map((step, i) => {
             const mark = marks[i] as StepMark;
             const current = mark === "cur" || mark === "held";
             return (
               <div
                 className={`vstep ${mark === "held" ? "warn" : mark}`}
-                key={step}
+                // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
+                key={`${i}:${step.name}`}
                 aria-current={current ? "step" : undefined}
               >
                 <span className="tdot">{dotOf(mark, i)}</span>
                 <div className="vhead">
                   <span className="vname">
-                    {LOOP_PHASE_LABEL[step]}
+                    {step.name}
                     {current && n > 1 && <span className="titer">×{n}</span>}
                   </span>
                 </div>
@@ -138,12 +138,12 @@ export function LoopSteps({
     );
   }
 
-  const marks = loopMarks(
+  const marks = stepMarks(
     loop,
     row.hudState,
     loop.phase === "parked" ? (heldStep(tries) ?? undefined) : undefined,
   );
-  const toggle = (step: LoopStep) =>
+  const toggle = (step: string) =>
     setToggled((prev) => {
       const next = new Set(prev);
       if (!next.delete(step)) next.add(step);
@@ -153,20 +153,24 @@ export function LoopSteps({
     <>
       {endAside}
       <div className="vsteps">
-        {LOOP_PATH.map((step, i) => {
+        {steps.map((step, i) => {
           const mark = marks[i] as StepMark;
           const current = mark === "cur" || mark === "held";
-          const open = current || toggled.has(step);
-          const own = stepTries(tries, step);
+          const open = current || toggled.has(step.name);
+          const own = step.phase === null ? [] : stepTries(tries, step.phase);
           const count = own.filter((t) => !t.fix).length;
           const minutes = own.reduce((sum, t) => sum + tryMinutes(t, now), 0);
           const failure = own.findLast((t) => t.outcome === "fail" && t.reason);
-          const rule = loopRule(step, limits);
-          const checks = current ? stepChecks(step, runLoop, view?.review ?? null, prs) : [];
+          const rule = step.phase === null ? null : loopRule(step.phase, limits);
+          const checks =
+            current && step.phase !== null
+              ? stepChecks(step.phase, runLoop, view?.review ?? null, prs)
+              : [];
           return (
             <div
               className={`vstep ${mark === "held" ? "warn" : mark}`}
-              key={step}
+              // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
+              key={`${i}:${step.name}`}
               aria-current={current ? "step" : undefined}
             >
               <span className="tdot">{dotOf(mark, i)}</span>
@@ -174,10 +178,10 @@ export function LoopSteps({
                 type="button"
                 className="vhead"
                 aria-expanded={open}
-                onClick={() => toggle(step)}
+                onClick={() => toggle(step.name)}
               >
                 <span className="vname">
-                  {LOOP_PHASE_LABEL[step]}
+                  {step.name}
                   {count > 1 && <span className="titer">×{count}</span>}
                 </span>
                 {own.length > 0 && <span className="vmeta">{minutes}m</span>}
