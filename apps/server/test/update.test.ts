@@ -1359,6 +1359,9 @@ describe("auto update", () => {
     const a = auto();
     await expect(a.tick()).resolves.toBe("waiting");
     expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
+    const held = a.held.mock.calls.at(-1)?.[0];
+    expect(held?.unsafePaths).toEqual(["docs/linked"]);
+    expect(hubCodeHeldText(held)).toContain("symlink or submodule");
     await expect(a.u.update({ auto: true })).rejects.toMatchObject({
       status: 409,
       message: HUB_CODE_NEEDS_PERSON,

@@ -401,6 +401,8 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
           v.reason === NOT_ON_MAIN ||
           v.reason === UNCOMMITTED_CHANGES)
       ) {
+        // a preview never touches the live note; an off-main or dirty checkout can't be updated
+        if (v.reason !== PREVIEW_SERVER) deps.held(null);
         return "waiting";
       }
       // only the allowlist goes live without a person; update() checks again after its own fetch
@@ -408,7 +410,11 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
       if (range === null) return "waiting";
       const held = heldPaths(range);
       if (held.length > 0) {
-        deps.held({ commits: range.commits, paths: held });
+        deps.held({
+          commits: range.commits,
+          paths: held,
+          ...(range.unsafePaths?.length ? { unsafePaths: range.unsafePaths } : {}),
+        });
         return "waiting";
       }
       if (!v.canUpdate) return "waiting";
@@ -766,10 +772,15 @@ export function createUpdater(deps: UpdaterDeps): Updater {
             throw new UpdateError(409, HUB_CODE_NEEDS_PERSON);
           }
           const held = [...new Set([...heldPaths(range), ...heldPaths(local)])];
+          const unsafe = [...new Set([...(range.unsafePaths ?? []), ...(local.unsafePaths ?? [])])];
           if (held.length > 0) {
             await log(`held for a person: ${held.join(", ")}\n`);
             throw new UpdateError(409, HUB_CODE_NEEDS_PERSON, {
-              held: { commits: [...new Set([...range.commits, ...local.commits])], paths: held },
+              held: {
+                commits: [...new Set([...range.commits, ...local.commits])],
+                paths: held,
+                ...(unsafe.length > 0 ? { unsafePaths: unsafe } : {}),
+              },
             });
           }
           // HEAD on tip's history and both ranges checked: a retry after a failed install or build
