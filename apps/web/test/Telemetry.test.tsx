@@ -3,6 +3,7 @@ import {
   LIVE_MINUTES,
   TELEMETRY_POINTS,
   type Telemetry as TelemetryData,
+  type TestLockState,
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,8 +11,9 @@ import { RESOURCES } from "../src/data.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { setSelectedAgent } from "../src/shell/selection.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
+import { Kpis } from "../src/telemetry/Kpis.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, HOUR, MIN, NOW } from "./fixtures.ts";
+import { boardItem, CONFIG, HOUR, MIN, NOW, seatRow } from "./fixtures.ts";
 
 const LOOP = CONFIG.loops[0] as ConfigView["loops"][number];
 const CFG: ConfigView = {
@@ -361,6 +363,29 @@ const quality = () =>
   ]);
 
 describe("KPI tiles", () => {
+  it.each([false, true])("animates changed live values only (reduced motion: %s)", (reduced) => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: reduced })),
+    );
+    stub();
+    const data = tel();
+    const { container, rerender } = render(<Kpis t={data} />);
+    expect(container.querySelector(".kpi-change")).toBeNull();
+    const changed = tel({ today: { ...data.today, tokens: 72_000 } });
+    rerender(<Kpis t={changed} />);
+    expect(screen.getByText("72.0k").classList.contains("kpi-change")).toBe(!reduced);
+    expect(container.querySelectorAll(".kpi-change")).toHaveLength(reduced ? 0 : 1);
+    fireEvent.animationEnd(screen.getByText("72.0k"));
+    // jsdom has no AnimationEvent, so React subscribes to the prefixed event.
+    fireEvent(screen.getByText("72.0k"), new Event("webkitAnimationEnd", { bubbles: true }));
+    expect(container.querySelector(".kpi-change")).toBeNull();
+    rerender(<Kpis t={{ ...changed }} />);
+    expect(container.querySelector(".kpi-change")).toBeNull();
+    rerender(<Kpis t={data} />);
+    expect(screen.getByText("61.2k").classList.contains("kpi-change")).toBe(!reduced);
+  });
+
   it("Commits shows today’s count with commits per run in its title", async () => {
     const a = await loaded(tel({ today: { ...tel().today, commits: 7 }, quality: Q }));
     expect(kpi(a.container, "Commits")).toEqual({
@@ -716,6 +741,106 @@ describe("Capacity and cost", () => {
       "shop-app-taclaude-mainclaude-opus-4-112.0k3.4k1.20M96%40500~$2.47",
       "codex-tacodex-main—9001000—34—",
     ]);
+  });
+
+  it("renders all twelve ticket rows with titles joined by repo and issue, as inert text", async () => {
+    const items = Array.from({ length: 12 }, (_, i) =>
+      boardItem({
+        repoId: i % 2 === 0 ? "shop-app" : "site-builder",
+        issueNumber: Math.floor(i / 2) + 1,
+        title: i === 11 ? '<img src=x onerror="alert(1)">' : `Ticket title ${i}`,
+      }),
+    );
+    stubFetch({
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.telemetry("6h").path]: tel({
+        tokensByTicket: items.map((item) => ({
+          ticket: `${item.repoId}#${item.issueNumber}`,
+          tokens: 1000,
+          costUsd: null,
+        })),
+      }),
+      ...Object.fromEntries(
+        ["shop-app", "site-builder"].map((id) => [
+          RESOURCES.boards(id).path,
+          items.filter((item) => item.repoId === id),
+        ]),
+      ),
+    });
+    render(<Telemetry />);
+    await within(panel("tTicketBars")).findByText(items[11]?.title as string);
+    const rows = panel("tTicketBars").querySelectorAll(".hrow");
+    expect(rows).toHaveLength(12);
+    await waitFor(() => {
+      items.forEach((item, i) => {
+        const title = rows[i]?.querySelector(".ticket-bar-title");
+        expect(title?.textContent).toBe(item.title);
+        expect(title?.previousElementSibling?.className).toBe("rref");
+        expect(title?.parentElement?.className).toBe("ellip");
+      });
+    });
+    expect(panel("tTicketBars").querySelector("img")).toBeNull();
+  });
+
+  it("fetches ticket titles only for configured repos, leaving unknown tickets visible", async () => {
+    const item = boardItem({ repoId: "shop-app", issueNumber: 1, title: "Configured ticket" });
+    const fetch = stubFetch({
+      [RESOURCES.config.path]: { ...CFG, repos: CFG.repos.filter((r) => r.id === "shop-app") },
+      [RESOURCES.telemetry("6h").path]: tel({
+        tokensByTicket: [
+          { ticket: "shop-app#1", tokens: 1000, costUsd: null },
+          { ticket: "site-builder#2", tokens: 500, costUsd: null },
+          { ticket: "unknown#3", tokens: 100, costUsd: null },
+        ],
+      }),
+      [RESOURCES.boards("shop-app").path]: [item],
+    });
+    render(<Telemetry />);
+    await within(panel("tTicketBars")).findByText(item.title);
+    expect(panel("tTicketBars").querySelectorAll(".hrow")).toHaveLength(3);
+    within(panel("tTicketBars")).getByText("site-builder");
+    within(panel("tTicketBars")).getByText("unknown");
+    expect(
+      fetch.mock.calls.map(([url]) => url).filter((url) => url.startsWith("/api/boards/")),
+    ).toEqual([RESOURCES.boards("shop-app").path]);
+  });
+
+  it("shows the live holder and queue without history, with a ticking elapsed time", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    const lock: TestLockState = {
+      holder: {
+        runId: "live",
+        seatId: "inco-1",
+        command: "pnpm test <script>agent text</script>",
+        since: NOW - MIN,
+      },
+      waiting: [{ runId: "queued", seatId: "guido-1", command: "pnpm test", since: NOW - 30_000 }],
+    };
+    stubFetch({
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.telemetry("6h").path]: tel(),
+      [RESOURCES.testLock.path]: lock,
+      [RESOURCES.crew.path]: { rows: [seatRow({ id: "inco-1", hudState: "stalled" })] },
+    });
+    render(<Telemetry />);
+    const p = within(panel("tLock"));
+    const row = (await p.findByText("no output")).closest("tr") as HTMLTableRowElement;
+    expect([...row.querySelectorAll("td")].map((cell) => cell.textContent)).toEqual([
+      "12:59",
+      "inco-1",
+      lock.holder?.command,
+      "—",
+      "1:00",
+      "no output",
+    ]);
+    expect(panel("tLock").querySelector("script")).toBeNull();
+    p.getByText("GUIDO-1 waiting · 0:30");
+    p.getByText("History: not tracked yet");
+    act(() => vi.advanceTimersByTime(1000));
+    expect(row.querySelectorAll("td")[4]?.textContent).toBe("1:01");
+    p.getByText("GUIDO-1 waiting · 0:31");
   });
 });
 
