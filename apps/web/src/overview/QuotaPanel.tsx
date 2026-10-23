@@ -1,6 +1,7 @@
 import type { ConfigView, LimitRow } from "@mc/core";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { rel } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -52,13 +53,23 @@ export function QuotaPanel() {
   return (
     <Panel id="quotaP" title="Account quota" sub="5-hour and 7-day windows">
       <div className="pb">
-        {accounts.map((a) => (
-          <div className="quotarow" key={a}>
-            <span className="ellip">{a}</span>
-            {cell(a, "5h")}
-            {cell(a, "7d")}
-          </div>
-        ))}
+        {accounts.map((a) => {
+          const mine = rows.filter((r) => r.accountId === a);
+          const read =
+            tz && mine.length > 0
+              ? `read ${rel(Math.max(...mine.map((r) => r.sampledAt)), now, tz)}`
+              : null;
+          return (
+            <div className="quotarow" key={a}>
+              <span className="min0">
+                <span className="ellip">{a}</span>
+                {read && <span className="xs muted block">{read}</span>}
+              </span>
+              {cell(a, "5h")}
+              {cell(a, "7d")}
+            </div>
+          );
+        })}
         <GithubRateRow />
         {warnings.length > 0 && (
           <p className="s quotawarn">
