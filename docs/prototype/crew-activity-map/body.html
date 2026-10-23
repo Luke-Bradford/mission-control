@@ -1,0 +1,50 @@
+<div class="app">
+  <header>
+    <h1>Crew Activity Map <span>· prototype</span></h1>
+    <label class="field" for="repo">Repo
+      <select id="repo">
+        <option value="mission-control" selected>mission-control · 6 crew seats</option>
+      </select>
+    </label>
+    <div class="clock" id="clock">--:--<small id="clockday"></small></div>
+  </header>
+  <div class="main">
+    <div class="stage" id="stage">
+      <div class="labels" id="labels"></div>
+      <div class="tip" id="tip" hidden></div>
+      <div class="drawer" id="drawer" hidden aria-live="polite"></div>
+      <div class="toast" id="toast" hidden role="status"></div>
+      <div class="stage-note" id="note">drag to tilt · scroll to zoom · click a file, an orb or a message · ⌖ zooms to an agent</div>
+      <div class="legend">
+        <span><i style="background:var(--area-server)"></i>apps/server</span>
+        <span><i style="background:var(--area-web)"></i>apps/web</span>
+        <span><i style="background:var(--area-core)"></i>packages/core</span>
+        <span><i style="background:var(--area-docs)"></i>docs · roles</span>
+        <span><i style="border:2px solid #fff;box-sizing:border-box"></i>being accessed now</span>
+        <span><b style="color:#ff4d4d">▲</b><b style="color:#ffa63d">▲</b><b style="color:#9aa6bf">▲</b> review findings</span>
+        <span>→ particles: a read flows from the file into the agent, a write from the agent into the file, sized by the tokens it carried · <b class="add">✦</b> lines added spark in, <b class="rem">✦</b> removed spark out · ▲ burst: the change grew a level</span>
+        <span>bright: modified, sized by lines changed, <b class="add">+n</b> <b class="rem">−m</b> · dim: in scope (read on the branch) · ◌ shared · ◎ write overlap · ● orb: the agent, ◆ CAPCOM and HUB · arcs: a message</span>
+      </div>
+    </div>
+    <aside>
+      <div class="card">
+        <h2>Agents · work in flight</h2>
+        <div id="agents"></div>
+      </div>
+      <div class="card">
+        <h2>Selected</h2>
+        <input class="find" id="find" type="search" placeholder="Find a file or folder" aria-label="Find a file or folder">
+        <div class="found" id="found"></div>
+        <div class="detail" id="detail">Click a node, or find one, to see who read or wrote it.</div>
+      </div>
+    </aside>
+  </div>
+  <div class="deck">
+    <div class="controls">
+      <span class="live"><i></i>Real time (1×) · recorded activity from <select id="stretch" aria-label="Which recorded stretch to play"></select></span>
+      <button id="home" type="button">Home view</button>
+      <label class="kinds"><input type="checkbox" id="spin"> rotate</label>
+    </div>
+    <div class="footnote" id="foot"></div>
+  </div>
+</div>
