@@ -21,6 +21,7 @@ import {
   BRIEFED_TEXT,
   briefNoItemText,
   COMMENTED_DECISION,
+  COMMS_CAPCOM,
   CREATE_NO_REPO,
   capText,
   commentedText,
@@ -519,6 +520,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const about = `${call}: ${q.text}`;
     if (answer === undefined) {
       if (!store.passQuestion(id, at)) return fail(noOpenQuestionText(id));
+      store.addComms({
+        at,
+        from: ctx.seatId,
+        to: COMMS_CAPCOM,
+        ticket: store.run(q.runId)?.ticket ?? null,
+        text: q.text,
+      });
+      bus.emit("agents");
       record(at, {
         kind: "pass",
         seatId: q.agentId,
@@ -541,6 +550,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      to: q.agentId,
+      ticket: store.run(q.runId)?.ticket ?? null,
+      text: answer,
+    });
+    bus.emit("agents");
     record(at, {
       kind: "answer",
       seatId: q.agentId,
@@ -646,6 +663,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           : START_FAILED,
       );
     }
+    store.addComms({
+      at: now(),
+      from: ctx.seatId,
+      to: seat,
+      ticket: ref,
+      text: `Assigned ${ref}: ${card.title}`,
+    });
     record(at, {
       kind: "start",
       seatId: seat,
@@ -710,6 +734,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         return fail(notSentText(e instanceof Error ? e.message : String(e)));
       }
     }
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      to: seat,
+      ticket: unendedRun(seat)?.ticket ?? null,
+      text: body,
+    });
+    bus.emit("agents");
     const lifted =
       lift !== null &&
       (await deps.engine?.onOperatorMessage(lift.runId, "FLIGHT", {

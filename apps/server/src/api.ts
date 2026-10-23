@@ -7,6 +7,7 @@ import {
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
+  COMMS_CAPCOM,
   type ContextUsage,
   CREW_DISABLED,
   CREW_FILES_NOTE,
@@ -1081,7 +1082,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
       seatAction("/seats/:id/message", MessageBody, async (sup, id, b) => {
         const runId = sup.seat(id)?.runId ?? null;
+        const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
         await sup.message(id, b.text, { interrupt: b.interrupt === true });
+        store.addComms({ at: now(), from: COMMS_CAPCOM, to: id, ticket, text: b.text });
         // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
         if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
         return { ok: true };

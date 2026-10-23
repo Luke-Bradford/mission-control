@@ -15,6 +15,7 @@ import {
   blockedNoteKey,
   CI_FAILED_TEXT,
   CI_RERUN_FAILED_TEXT,
+  COMMS_MC,
   cardMark,
   carriedFrom,
   cleanupBranchNoteKey,
@@ -563,6 +564,11 @@ export function createEngine(deps: EngineDeps): Engine {
       );
       out.again = true;
     };
+    /** A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. */
+    const handOff = (from: string, text: string): void => {
+      store.addComms({ at, from, to: run.agentId, ticket: run.ticket ?? null, text });
+      bus.emit("agents");
+    };
     /** The run as the merge steps see it: its stored row, with the loop this pass is writing. */
     const live = (): Run => ({ ...run, loop: cur });
     /** A merge step that went through: kept in the loop, with its Activity row. */
@@ -628,8 +634,10 @@ export function createEngine(deps: EngineDeps): Engine {
               fixSentText(rv.blocking, seatCallSign(run.agentId)),
               at,
             );
+            handOff(rv.seatId, a.text);
           }
         }
+        if (sent === "sent" && a.key.startsWith("conflict:")) handOff(COMMS_MC, a.text);
         return;
       }
       case "ci-excerpt": {
@@ -640,6 +648,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const text = fillLoopText(head, { sha7: a.sha.slice(0, 7) }) + excerpt;
         const sent = await supervisor.send(run.id, a.key, text);
+        if (sent === "sent") handOff(COMMS_MC, text);
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
