@@ -1,15 +1,16 @@
-import "@fontsource/barlow-semi-condensed/500.css";
-import "@fontsource/barlow-semi-condensed/600.css";
-import "@fontsource/ibm-plex-sans/400.css";
-import "@fontsource/ibm-plex-sans/500.css";
-import "@fontsource/ibm-plex-sans/600.css";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
-import "@fontsource/ibm-plex-mono/600.css";
+import "@fontsource/barlow-semi-condensed/latin-500.css";
+import "@fontsource/barlow-semi-condensed/latin-600.css";
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
+import "@fontsource/ibm-plex-mono/latin-600.css";
 import "./hud.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { BrowserNotifications } from "./browserNotifications.ts";
 import { applyThemeColor, getTheme } from "./theme.ts";
 
 applyThemeColor(getTheme()); // public/theme-init.js already applied a remembered theme itself
@@ -19,5 +20,6 @@ if (!root) throw new Error("#root missing");
 createRoot(root).render(
   <StrictMode>
     <App />
+    <BrowserNotifications />
   </StrictMode>,
 );

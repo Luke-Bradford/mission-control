@@ -2,7 +2,7 @@
  * The guard hook's entry: the file a seat's hook command runs, always, with no "am I main?" gate
  * (a node without `import.meta.main` would otherwise run nothing, exit 0, and let the tool run).
  *
- * The seat's hook command (Task 6 builds it from this; each part single-quoted):
+ * The seat's hook command (each part single-quoted):
  *
  *   '<crew.node>' --experimental-strip-types '<hub root>/apps/server/src/guard/hook-cli.ts' \
  *     '<token file>' 'http://127.0.0.1:<port>/api/guard/check' || exit 2

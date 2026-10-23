@@ -8,7 +8,6 @@ export type DockRow =
   | { kind: "hub"; id: string; at: number | null; text: string }
   | { kind: "decision"; id: string; at: number; d: FlightDecision };
 
-const HUB_LINE_MAX = 160;
 const KEPT_WITHOUT_RUN = 20;
 
 export const FLIGHT_KIND_LABEL: Readonly<Record<string, string>> = {
@@ -31,12 +30,6 @@ export const overturnText = (
   call: string | null,
 ): string =>
   `I am overturning your decision ${d.id} (${d.about}: ${d.decision}).${call === null ? "" : ` Tell ${call} to hold that point.`} Then ask me what I prefer.`;
-
-function hubLine(text: string): string {
-  const rest = text.slice(MC_LINE_PREFIX.length).replace(/^ /, "");
-  const line = rest.split("\n")[0] ?? "";
-  return line.length > HUB_LINE_MAX ? `${line.slice(0, HUB_LINE_MAX - 1)}…` : line;
-}
 
 /**
  * The operator's items that FLIGHT has put to them: ones it briefed, and ones it passed on
@@ -119,7 +112,12 @@ export function dockRows(
     if (e.kind === "op") {
       rows.push(
         e.text.startsWith(MC_LINE_PREFIX)
-          ? { kind: "hub", id: e.id, at: e.at, text: hubLine(e.text) }
+          ? {
+              kind: "hub",
+              id: e.id,
+              at: e.at,
+              text: e.text.slice(MC_LINE_PREFIX.length).replace(/^ /, ""),
+            }
           : { kind: "you", id: e.id, at: e.at, text: e.text },
       );
     } else if (e.kind === "msg") {

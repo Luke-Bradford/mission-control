@@ -5,14 +5,12 @@ import { NeedsList } from "../comms/NeedsList.tsx";
 import { FLIGHT_THREAD, Threads } from "../comms/Threads.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
-import { openItem } from "../shell/overlays.ts";
+import { ITEM_GONE, openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 /** Where `.cgrid` stacks to one column (hud.css). */
 const STACKED_QUERY = "(max-width: 999px)";
-
-export const ITEM_GONE = "That item is no longer waiting.";
 
 /** Comms (catalogue §2.5): what needs you, and one thread per agent. `item` is `/comms/:itemKey`. */
 export function Comms({ item }: { item: string | null }) {

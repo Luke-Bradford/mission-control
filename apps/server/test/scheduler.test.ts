@@ -10,6 +10,7 @@ import {
   MACHINE_COLLECTOR,
   type MachineSample,
   type Run,
+  type TestLockState,
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -131,6 +132,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
     notifications: vi.fn(async () => ({ changed: true })),
     github: vi.fn(async () => ({ boards: true, escalations: true })),
     githubPrs: vi.fn(async () => ({ boards: false, escalations: false })),
+    followPrs: vi.fn(async () => false),
     prSweep: vi.fn(async () => ({ boards: true, escalations: false })),
     flow: vi.fn(async () => undefined),
     backfill: vi.fn(() => ({ folded: 0, left: 0, failed: 0 })),
@@ -925,6 +927,29 @@ describe("scheduler", () => {
   });
 
   describe("machine job", () => {
+    it("passes the current test-lock command to the collector, or null when free", async () => {
+      let lock: TestLockState = {
+        holder: { runId: "r", seatId: "guido-1", command: "pnpm -s test", since: 0 },
+        waiting: [],
+      };
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        lockState: () => lock,
+      });
+      await s.tick("machine");
+      expect(c.machine).toHaveBeenLastCalledWith(null, null, NOW, "pnpm -s test");
+
+      lock = hud.NO_LOCK;
+      const prev = s.machine();
+      await s.tick("machine");
+      expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null);
+    });
+
     it("runs every 2 s, keeps the latest sample in memory and emits machine", async () => {
       vi.useFakeTimers();
       expect(JOBS).toContain("machine");
@@ -1886,4 +1911,11 @@ describe("scheduler scope log", () => {
       `github ${config.repos[0]?.id}: gh token lacks the read:project scope: run gh auth refresh -s project`,
     );
   });
+});
+
+it("maintenance prunes hub history on the existing sweep", async () => {
+  const prune = vi.spyOn(store, "pruneHistory");
+  const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+  await s.tick("maintenance");
+  expect(prune).toHaveBeenCalledWith(NOW);
 });

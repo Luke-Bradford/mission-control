@@ -7,6 +7,7 @@ import {
   type CrewEffort,
   type CrewRow,
   type CrewSessionFolders,
+  errorText,
   HUD_STATE_LABEL,
   HUD_STATE_TONE,
   type ReloadResult,
@@ -54,7 +55,6 @@ export const removedText = (call: string, s: string, backup: string) =>
 export const RELOADED = "Reloaded config.yaml.";
 
 const CALL_SIGN = /^[a-z][a-z0-9-]{0,30}$/;
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 type SessionView = NonNullable<ConfigView["crew"]>["sessions"][number];
 type RoleView = NonNullable<NonNullable<ConfigView["crew"]>["roles"]>[number];

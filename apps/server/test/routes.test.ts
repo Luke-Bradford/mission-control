@@ -151,7 +151,12 @@ describe("the route table", () => {
     const routes = await registeredRoutes();
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
+    expect(routes).toContain("GET /api/activity");
+    expect(routes).toContain("GET /api/stream");
     expect(routes).toContain("GET /api/drafts/history");
+    expect(routes).toContain("POST /api/drafts/:id/copied");
+    expect(routes).toContain("GET /api/sources/teams");
+    expect(routes).toContain("POST /api/sources/teams/selection");
     expect(routes).toContain("GET /api/notification-preferences");
     expect(routes).toContain("POST /api/notification-preferences");
     expect(routes).toContain("GET /api/notifications/events");
@@ -160,6 +165,7 @@ describe("the route table", () => {
     expect(routes).toContain("POST /api/accounts/:id/check");
     expect(routes).toContain("POST /api/accounts");
     expect(routes).toContain("GET /api/flight/incoming");
+    expect(routes).toContain("GET /api/flight/schedule");
     expect(routes).toContain("POST /api/seats/:id/start");
     expect(routes).toContain("GET /api/attention/:key/discussion");
     expect(routes).toContain("POST /api/attention/:key/discussion");
@@ -181,6 +187,13 @@ describe("the route table", () => {
   it("POST /api/github/refresh has a Reader comment that names a real reader", () => {
     const text = readerComments().get("POST /api/github/refresh");
     expect(text).toBeDefined();
+    expect(readerProblem(text as string)).toBeNull();
+  });
+
+  it("GET /api/stream names its EventSource reader", () => {
+    const text = readerComments().get("GET /api/stream");
+    expect(text).toBeDefined();
+    expect(text).toContain("apps/web/src/data.ts#startStream");
     expect(readerProblem(text as string)).toBeNull();
   });
 

@@ -137,25 +137,7 @@ const noFlight = () => {
   store.setSeatSession(row("flight-1", null));
 };
 
-beforeEach(() => {
-  vi.useFakeTimers();
-  dir = mkdtempSync(join(tmpdir(), "mc-flight-watch-"));
-  store = new Store(join(dir, "mc.sqlite"));
-  bus = new ChangeBus();
-  emitted = [];
-  bus.subscribe((t) => emitted.push(t));
-  nowMs = T0;
-  startCalls = [];
-  sendCalls = [];
-  endCalls = [];
-  statusCalls = 0;
-  startFails = null;
-  sendFails = false;
-  facts = null;
-  enabled = true;
-  started = 0;
-  listener = null;
-  vi.setSystemTime(T0);
+const makeWatch = () => {
   watch = createFlightWatch({
     config,
     store,
@@ -201,6 +183,28 @@ beforeEach(() => {
       },
     },
   });
+};
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  dir = mkdtempSync(join(tmpdir(), "mc-flight-watch-"));
+  store = new Store(join(dir, "mc.sqlite"));
+  bus = new ChangeBus();
+  emitted = [];
+  bus.subscribe((t) => emitted.push(t));
+  nowMs = T0;
+  startCalls = [];
+  sendCalls = [];
+  endCalls = [];
+  statusCalls = 0;
+  startFails = null;
+  sendFails = false;
+  facts = null;
+  enabled = true;
+  started = 0;
+  listener = null;
+  vi.setSystemTime(T0);
+  makeWatch();
 });
 afterEach(() => {
   watch.stop();
@@ -855,6 +859,72 @@ describe("the FLIGHT watcher", () => {
     expect(statusCalls).toBe(3);
     await vi.advanceTimersByTimeAsync(1);
     expect(statusCalls).toBe(4);
+  });
+
+  it("wakes for due plans once, retains overdue labels and retries pending work hourly after restart", async () => {
+    liveCrew();
+    store.setFlightPlans(
+      "s1",
+      {
+        upsert: [
+          {
+            id: "recheck",
+            dueAt: T0 + MIN,
+            kind: "PR recheck",
+            target: "mc#2368",
+            label: "Re-check PR #2368 after the nudge",
+            status: "pending",
+          },
+        ],
+      },
+      T0,
+    );
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    expect(flightState({ config, store, busy: [], now: nowMs }).planned?.[0]).toMatchObject({
+      id: "recheck",
+      minutesFromNow: 1,
+      overdue: false,
+    });
+    nowMs += MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("Re-check PR #2368 after the nudge");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    watch.stop();
+    makeWatch();
+    nowMs += 61 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const state = flightState({ config, store, busy: [], now: nowMs });
+    expect(state.planned?.[0]).toMatchObject({
+      status: "pending",
+      overdue: true,
+      label: "Re-check PR #2368 after the nudge",
+      target: "mc#2368",
+    });
+    store.setFlightPlans(
+      "s1",
+      {
+        upsert: [
+          {
+            id: "recheck",
+            dueAt: T0 + MIN,
+            kind: "PR recheck",
+            target: "mc#2368",
+            label: "Re-check PR #2368 after the nudge",
+            status: "cancelled",
+          },
+        ],
+      },
+      nowMs,
+    );
+    nowMs += 61 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
   });
 
   it("wakes on a new question, once", async () => {

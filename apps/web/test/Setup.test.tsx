@@ -696,7 +696,7 @@ describe("Setup tabs", () => {
     );
     const teams = screen.getByRole("region", { name: "Microsoft Teams" });
     expect(teams.textContent).toContain("P5");
-    expect(teams.textContent).toContain("Work only; arrives in phase 5.");
+    expect(teams.textContent).toContain("Work only · phase 5.");
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(agents.textContent).toContain(
       "Claude (Agent SDK): messages, tool calls, usage per call, run totals with cost and timing, rate-limit events, context breakdown, subagent progress, task-list updates, hooks.",
@@ -716,12 +716,12 @@ describe("Setup tabs", () => {
       "Notifications: mentions of you or your team, review requests, and comments on your issues, PRs and threads feed Needs you, for the repos in your config.",
     );
     const teams = screen.getByRole("region", { name: "Microsoft Teams" });
-    expect(teams.textContent).toContain("Work only; arrives in phase 5.");
+    expect(teams.textContent).toContain("Work only · phase 5.");
     expect(teams.textContent).toContain(
-      'Will watch the chats and channels you pick for: your name or @mentions, your ticket and PR numbers, and words like "bug", "broken" or "urgent" near your areas.',
+      'Watches the chats and channels you pick for: your name or @mentions, your ticket and PR numbers, and words like "bug", "broken" or "urgent" near your areas.',
     );
     expect(teams.textContent).toContain(
-      "Matches will become Needs you items or a FLIGHT digest, with a link to the message. FLIGHT will be able to draft a GitHub issue from one for you to approve.",
+      "Matches become Needs you items or a FLIGHT digest, with a link to the message. FLIGHT can draft a GitHub issue from one for you to approve.",
     );
     expect(teams.textContent).toContain("Mission Control never posts to Teams.");
     const agents = screen.getByRole("region", { name: "Agents" });
@@ -768,7 +768,7 @@ describe("Setup tabs", () => {
     expect(scroll.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("Access: the Mac only, and disabled notification choices", async () => {
+  it("Access: the Mac only and an honest browser delivery description", async () => {
     load();
     at("access");
     const dev = await screen.findByRole("table");
@@ -777,11 +777,10 @@ describe("Setup tabs", () => {
     expect(rows[1]?.textContent).toContain("runs Mission Control and the agents");
     expect(rows[1]?.textContent).toContain("this machine");
     expect(screen.getByText("Other devices arrive with Tailscale (phase 4).")).toBeTruthy();
-    expect(screen.getByText("Notifications arrive in phase 4.")).toBeTruthy();
-    const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
-    expect(boxes).toHaveLength(8);
-    expect(boxes.filter((b) => b.checked)).toHaveLength(6);
-    expect(boxes.every((b) => b.disabled)).toBe(true);
+    expect(screen.getByText("in this open browser on this machine")).toBeTruthy();
+    expect(
+      screen.getByText("Keep this browser open for delivery. No closed-tab remote push delivery."),
+    ).toBeTruthy();
   });
 
   it("Access: previews person, decision and stalled-run notifications with sample actions", async () => {
@@ -791,22 +790,34 @@ describe("Setup tabs", () => {
     expect(within(previews).getByText("samples")).toBeTruthy();
     expect(within(previews).getAllByText("Mission Control")).toHaveLength(3);
     expect(
-      within(previews).getByText("A teammate asked you in Teams: is this change ready to review?"),
-    ).toBeTruthy();
-    expect(within(previews).getByText("Read the brief · Open in Teams · Later")).toBeTruthy();
-    expect(
       within(previews).getByText(
-        "Decision for you: ship this change now, or wait for the next release?",
+        "Example colleague asked you in Product rollout: per-client lanes before the Example customer pilot?",
       ),
     ).toBeTruthy();
-    expect(within(previews).getByText("Read the brief · Discuss · Later")).toBeTruthy();
     expect(
       within(previews).getByText(
-        "An agent's full-suite run has printed nothing for 11 min and holds the test lock.",
+        "Decision for you: lanes per customer, or one global list? (GUIDO-3, NW #2358)",
       ),
     ).toBeTruthy();
-    expect(within(previews).getByText("Stop the run · Open")).toBeTruthy();
-    expect(within(previews).queryAllByRole("button")).toHaveLength(0);
+    expect(
+      within(previews).getByText(
+        "GUIDO-2's full-suite run has printed nothing for 11 min and holds the test lock.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(previews)
+        .getAllByRole("button")
+        .map((b) => b.textContent?.trim()),
+    ).toEqual([
+      "Read the brief",
+      "Open in Teams",
+      "Later",
+      "Read the brief",
+      "Discuss",
+      "Later",
+      "Stop the run",
+      "Open",
+    ]);
   });
 
   describe("Sessions: seats", () => {

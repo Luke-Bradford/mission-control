@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { type DriverStop, driverStopKey, type Run, type RunDigest } from "@mc/core";
+import { type DriverStop, driverStopKey, type Run, type RunDigest, zoneFormatter } from "@mc/core";
 import type { AdoptedLoop } from "../config.ts";
 import type { Store } from "../store.ts";
 import {
@@ -64,23 +64,17 @@ export function parseDriverLog(lines: string[]): DriverEvent[] {
   return out;
 }
 
-const formatters = new Map<string, Intl.DateTimeFormat>();
 /** Offset (ms, local minus UTC) of `tz` at the instant `ms`. */
 function zoneOffset(ms: number, tz: string): number {
-  let f = formatters.get(tz);
-  if (!f) {
-    f = new Intl.DateTimeFormat("en-GB", {
-      timeZone: tz,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-    formatters.set(tz, f);
-  }
+  const f = zoneFormatter(tz, {
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
   const p: Record<string, number> = {};
   for (const part of f.formatToParts(new Date(ms))) p[part.type] = Number(part.value);
   const asUtc = Date.UTC(

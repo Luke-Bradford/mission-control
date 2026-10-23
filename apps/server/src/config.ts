@@ -136,7 +136,45 @@ export interface CrewConfig {
   sessions: CrewSessionConfig[];
 }
 
+export const TeamsSelection = z
+  .array(
+    z
+      .strictObject({
+        kind: z.enum(["chat", "channel"]),
+        id: z.string().min(1).max(200),
+        teamId: z.string().min(1).max(200).optional(),
+        name: z.string().min(1).max(200),
+        repoId: z.string().min(1).max(100),
+        lane: z.enum(["work", "personal"]).default("work"),
+      })
+      .refine((s) => s.kind !== "channel" || s.teamId !== undefined, "channel needs teamId"),
+  )
+  .max(50);
+
+export const TeamsConfig = z.strictObject({
+  token_command: z.array(z.string().min(1).max(2000)).min(1).max(32).optional(),
+  selected: TeamsSelection.default([]),
+  aliases: z.array(z.string().min(1).max(100)).max(50).default([]),
+  refs: z.array(z.string().min(1).max(200)).max(200).default([]),
+  areas: z
+    .array(
+      z.strictObject({
+        repoId: z.string().min(1).max(100),
+        words: z.array(z.string().min(1).max(100)).min(1).max(50),
+        keywords: z
+          .array(z.string().min(1).max(100))
+          .min(1)
+          .max(50)
+          .default(["bug", "broken", "urgent"]),
+      }),
+    )
+    .max(50)
+    .default([]),
+});
+export type TeamsConfig = z.infer<typeof TeamsConfig>;
+
 export interface CcConfig {
+  sources?: { teams?: TeamsConfig };
   operator: { id: string; timezone: string };
   accounts: { id: AccountId; vendor: "claude" | "codex"; alertAt: number; stopAt: number }[];
   repos: {
@@ -370,12 +408,17 @@ const roleSchema = z.strictObject({
 // The file's snake_case shape; transformed to the camelCase CcConfig in one place.
 const fileSchema = z
   .strictObject({
-    operator: z.strictObject({
-      id: nonEmpty.default(DEFAULT_OPERATOR_ID),
-      timezone: nonEmpty,
-      /** Legacy (sign-in was removed): still accepted so existing configs load; never used. */
-      password_hash: z.string().optional(),
-    }),
+    sources: z.strictObject({ teams: TeamsConfig.optional() }).optional(),
+    operator: z.preprocess(
+      (v) =>
+        typeof v === "object" && v !== null && !Array.isArray(v)
+          ? Object.fromEntries(Object.entries(v).filter(([key]) => key !== "password_hash"))
+          : v,
+      z.strictObject({
+        id: nonEmpty.default(DEFAULT_OPERATOR_ID),
+        timezone: nonEmpty,
+      }),
+    ),
     accounts: z.array(
       z.strictObject({
         id: nonEmpty,
@@ -467,6 +510,7 @@ const fileSchema = z
   })
   .transform(
     (f): CcConfig => ({
+      ...(f.sources === undefined ? {} : { sources: f.sources }),
       operator: {
         id: f.operator.id,
         timezone: f.operator.timezone,

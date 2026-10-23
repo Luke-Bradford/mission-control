@@ -46,7 +46,7 @@ export interface Run {
   prs: { repo: string; number: number }[];
   /** The first sentences of the run's latest result text, DONE skipped (see workSummary), else null. */
   summary: string | null;
-  /** The first loop's state (Plan 7a); absent or null on a run no loop drives. */
+  /** The first loop's state; absent or null on a run no loop drives. */
   loop?: RunLoop | null;
   /** The template profile the run started with, as it was then; absent on a run without one. */
   profile?: RunProfile | null;
@@ -597,6 +597,8 @@ export interface MachineSample {
   diskTotalBytes: number | null;
   /** The `claude` and `codex` processes on this machine (editor sessions included). */
   agents: { count: number; rssBytes: number; cpuPct: number } | null;
+  /** The test-lock holder's command and every process under it; null when the lock is free. Optional: older stored samples lack it. */
+  testRun?: { count: number; rssBytes: number; cpuPct: number } | null;
 }
 
 /** `/api/machine`: the latest sample, with the crew's seat capacity for the Machine panel's agents row. */
@@ -647,7 +649,7 @@ export interface HealthRow {
 }
 
 /**
- * Where a crew row's latest run is in its loop, as the HUD shows it (Plan 7a Task 8). The server
+ * Where a crew row's latest run is in its loop, as the HUD shows it. The server
  * writes `text` (`working` → `Working on {ref}`; `ci` → `CI on {sha7}`; `review` →
  * `In review · PR #{n}`; `parked` → `Blocked: {reason}`); the web shows it as given.
  */
@@ -740,6 +742,11 @@ export interface CrewRow {
   asideRuns?: CrewAsideRun[];
   /** A writer seat's queued tickets, without the one it holds; [] for other rows. */
   queue?: CrewQueueItem[];
+  /**
+   * Crew seat parked: CAPCOM messages since its latest seat update; 0 otherwise. A patch while
+   * parked (e.g. a new reason) resets this window, so earlier queued messages are not counted.
+   */
+  queuedMessages?: number;
   /** The latest run. */
   run: {
     id: string;
@@ -804,7 +811,17 @@ export interface PersonSource {
 }
 
 export interface PersonMessage {
+  disposition?: "needs-you" | "digest";
+  triagedVersion?: string;
   source: PersonSource;
+  teams?: {
+    kind: "chat" | "channel";
+    id: string;
+    teamId?: string;
+    name: string;
+    messageId: string;
+    threadId?: string;
+  };
   author: string | null;
   at: number;
   text: string;

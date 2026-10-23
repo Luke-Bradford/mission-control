@@ -48,7 +48,7 @@ export const decision = (
 });
 
 describe("dockRows", () => {
-  it("op lines: a wake is one hub line, a plain op is you, a msg is flight, the rest are dropped", () => {
+  it("op lines: a wake is a complete hub entry, a plain op is you, a msg is flight, the rest are dropped", () => {
     const rows = dockRows(
       stream([
         ev("0:0", "op", `${MC_LINE_PREFIX} Wake: 2 questions\n{"a":1}`, 10),
@@ -65,7 +65,7 @@ describe("dockRows", () => {
       ["you", "1:0"],
       ["flight", "2:0"],
     ]);
-    expect(rows[0]).toMatchObject({ text: "Wake: 2 questions" });
+    expect(rows[0]).toMatchObject({ text: 'Wake: 2 questions\n{"a":1}' });
   });
 
   it("decisions interleave by time; one from before the run's first event is dropped", () => {
@@ -83,10 +83,10 @@ describe("dockRows", () => {
     expect(rows[0]?.id).toBe("d:5");
   });
 
-  it("a long hub line is cut at 160 characters with …", () => {
+  it("a long hub line is kept in full", () => {
     const [row] = dockRows(stream([ev("a", "op", `${MC_LINE_PREFIX} ${"x".repeat(300)}`, 1)]), []);
-    expect(row?.kind === "hub" && row.text).toBe(`${"x".repeat(159)}…`);
-    expect(row?.kind === "hub" && row.text.length).toBe(160);
+    expect(row?.kind === "hub" && row.text).toBe("x".repeat(300));
+    expect(row?.kind === "hub" && row.text.length).toBe(300);
   });
 });
 

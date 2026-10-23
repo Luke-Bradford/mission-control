@@ -3553,6 +3553,32 @@ button.nrow.thread.tagged {
 #discuss.person-item .panel {
   overflow: visible;
 }
+.access-preferences {
+  display: grid;
+  gap: 8px;
+}
+.access-preferences input[type="time"] {
+  max-width: 100%;
+}
+.notif {
+  overflow-wrap: anywhere;
+}
+.watch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-block: 10px;
+}
+.watch-row .min0,
+.incoming-row {
+  overflow-wrap: anywhere;
+}
+.incoming-row {
+  padding-block: 10px;
+}
+.lamp.info {
+  background: var(--accent);
+}
 .rename-editor {
   display: flex;
   flex-wrap: wrap;
@@ -3573,4 +3599,78 @@ button.nrow.thread.tagged {
 .rename-editor [role="alert"] {
   overflow-wrap: anywhere;
   max-width: 100%;
+}
+
+.draft-row {
+  overflow-wrap: anywhere;
+}
+.draft-row.acked {
+  opacity: 0.6;
+}
+.draft-row textarea {
+  width: 100%;
+  min-width: 0;
+}
+.draft-row .chipref {
+  white-space: normal;
+}
+.draft-row .pre {
+  white-space: pre-wrap;
+}
+
+.teams-sources {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.teams-selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 8px;
+}
+.teams-selection label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+.teams-selection input,
+.teams-selection select {
+  width: 100%;
+  min-width: 0;
+}
+
+.expandable {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.expandable-content {
+  line-height: 1.5;
+  min-width: 0;
+  overflow: hidden;
+}
+.expandable-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.expandable.open .expandable-content {
+  max-height: min(50vh, 24rem);
+  overflow: auto;
+}
+.expandable .expandable-text {
+  white-space: pre-wrap;
+}
+.expandable .sm {
+  margin-top: 4px;
+}
+#cHandled .nrow > div {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.dmsg:has(.expandable) {
+  grid-template-columns: minmax(0, 1fr);
 }

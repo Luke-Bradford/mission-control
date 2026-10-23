@@ -330,7 +330,9 @@ export async function collectNotifications(
     const modified = store.getSetting(NOTIFICATIONS_MODIFIED_SETTING);
     // Last-Modified tracks new activity, not reads: while a thread is unread here, a 304 could hide
     // that it was read on GitHub, so the conditional header goes only when nothing is unread.
-    const anyUnread = store.notifications().some((n) => n.unread);
+    const anyUnread = store
+      .notifications()
+      .some((n) => n.unread && n.message?.source.kind !== "teams");
     const first = await rest(
       NOTIFICATIONS_URL,
       modified === null || anyUnread ? undefined : { "If-Modified-Since": modified },
@@ -434,7 +436,7 @@ export async function collectNotifications(
       });
     }
 
-    const changed = store.upsertNotifications(rows, !truncated, now);
+    const changed = store.upsertNotifications(rows, !truncated, now, "github");
     store.pruneNotifications(now - NOTIFICATIONS_KEEP_MS);
     const lastModified = first.headers.get("last-modified");
     if (!truncated && lastModified !== null) {

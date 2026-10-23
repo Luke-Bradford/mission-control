@@ -78,9 +78,16 @@ const bodyText = (c: HTMLElement) => c.querySelector("#dsBrief .md")?.textConten
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.textContent?.match(/line \d+/g)?.length ?? 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(BODY_LINES);
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -92,7 +99,7 @@ describe("Item panel: the question's own text", () => {
     const body = container.querySelector("#dsBrief .md") as HTMLElement;
     expect(body.querySelector("strong")?.textContent).toBe("now");
     expect(body.querySelector("code")?.textContent).toBe("--force");
-    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });
 
   it("says Loading… while the body is on its way", async () => {
@@ -111,25 +118,31 @@ describe("Item panel: the question's own text", () => {
     expect(screen.getByText("Choose a cache eviction policy")).toBeTruthy();
   });
 
-  it("cuts a body over the limit and shows the rest on Show all, then Show less", async () => {
+  it("cuts a body over the limit and shows the rest on Show more, then Show less", async () => {
     const { container } = open(ticketView(lines(BODY_LINES + 20)));
-    await screen.findByRole("button", { name: "Show all" });
+    await screen.findByRole("button", { name: "Show more" });
     expect(bodyText(container)).toContain(`line ${BODY_LINES}`);
-    expect(bodyText(container)).not.toContain(`line ${BODY_LINES + 1}`);
-    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
+    expect(container.querySelector("#dsBrief .expandable.open")).toBeNull();
+    const content = container.querySelector("#dsBrief .expandable-content") as HTMLElement;
+    expect(content.classList.contains("expandable-text")).toBe(true);
+    expect(content.style.webkitLineClamp).toBe(String(BODY_LINES));
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    expect(content.style.webkitLineClamp).toBe("unset");
     expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
     expect(screen.getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe(
       "true",
     );
     fireEvent.click(screen.getByRole("button", { name: "Show less" }));
-    expect(bodyText(container)).not.toContain(`line ${BODY_LINES + 1}`);
+    expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
+    expect(container.querySelector("#dsBrief .expandable.open")).toBeNull();
   });
 
   it("does not cut a body of exactly the limit", async () => {
     const { container } = open(ticketView(lines(BODY_LINES)));
     await screen.findByText(new RegExp(`line ${BODY_LINES}`));
     expect(bodyText(container)).toContain(`line ${BODY_LINES}`);
-    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });
 
   it("links to GitHub to continue a truncated body", async () => {
@@ -143,7 +156,7 @@ describe("Item panel: the question's own text", () => {
     await screen.findByText("Which policy?");
     expect(asked(fetch, TICKET)).toBe(0);
     expect(screen.queryByText("issue")).toBeNull();
-    const toggle = screen.getByRole("button", { name: "Show all, the issue's text" });
+    const toggle = screen.getByRole("button", { name: "Show more, the issue's text" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(toggle);
     await screen.findByText("issue");
@@ -152,9 +165,18 @@ describe("Item panel: the question's own text", () => {
     expect(screen.queryByText("issue")).toBeNull();
   });
 
+  it("shows the whole folded body after opening without a second disclosure", async () => {
+    const { container } = open(ticketView(lines(BODY_LINES + 20)), { question: QUESTION });
+    fireEvent.click(await screen.findByRole("button", { name: "Show more, the issue's text" }));
+    const body = await screen.findByText(new RegExp(`line ${BODY_LINES + 20}`));
+    expect(body.textContent).toContain(`line ${BODY_LINES + 20}`);
+    expect(container.querySelector("#dsBrief .expandable")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
   it("makes one request across three toggles", async () => {
     const { fetch } = open(ticketView("the **issue** text"), { question: QUESTION });
-    const toggle = await screen.findByRole("button", { name: /^Show all/ });
+    const toggle = await screen.findByRole("button", { name: /^Show more/ });
     fireEvent.click(toggle);
     await screen.findByText("issue");
     fireEvent.click(toggle);
@@ -163,25 +185,26 @@ describe("Item panel: the question's own text", () => {
     expect(asked(fetch, TICKET)).toBe(1);
   });
 
-  it("does not carry Show all from one item to the next (no structured question)", async () => {
+  it("does not carry Show more from one item to the next (no structured question)", async () => {
     const { container } = open(ticketView(lines(60)));
-    fireEvent.click(await screen.findByRole("button", { name: "Show all" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
     expect(bodyText(container)).toContain("line 60");
     act(() => openItem("esc:shop-app#4002"));
     await screen.findByText("Second");
-    await screen.findByRole("button", { name: "Show all" });
-    expect(bodyText(container)).not.toContain(`line ${BODY_LINES + 1}`);
+    await screen.findByRole("button", { name: "Show more" });
+    expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
+    expect(container.querySelector("#dsBrief .expandable.open")).toBeNull();
   });
 
   it("does not carry an open body from one structured item to the next", async () => {
     const { container, fetch } = open(ticketView("the **issue** text"), { question: QUESTION });
-    fireEvent.click(await screen.findByRole("button", { name: /^Show all/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Show more/ }));
     await screen.findByText("issue");
     act(() => openItem("esc:shop-app#4002"));
     await screen.findByText("Second");
     expect(bodyText(container)).not.toContain("line 1");
     expect(asked(fetch, TICKET_B)).toBe(0);
-    expect(screen.getByRole("button", { name: /^Show all/ }).getAttribute("aria-expanded")).toBe(
+    expect(screen.getByRole("button", { name: /^Show more/ }).getAttribute("aria-expanded")).toBe(
       "false",
     );
   });
@@ -256,8 +279,8 @@ describe("Item panel layout (hud.css)", () => {
     const { container } = open(ticketView("x"));
     await screen.findByText("x");
     const body = container.querySelector("#dsBrief .md") as HTMLElement;
-    expect(body.parentElement?.classList.contains("qtext")).toBe(true);
-    expect(body.parentElement?.parentElement?.classList.contains("brief")).toBe(true);
+    expect(body.closest(".qtext")).toBeTruthy();
+    expect(body.closest(".qtext")?.parentElement?.classList.contains("brief")).toBe(true);
     expect(rule(String.raw`\.brief`)).toContain("minmax(0, 1fr)");
     expect(rule(String.raw`\.qtext`)).toContain("min-width: 0");
     expect(rule(String.raw`\.md`)).toContain("min-width: 0");

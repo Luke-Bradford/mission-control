@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   type CrewLoop,
   FLIGHT_BRIEF_SECTIONS,
@@ -11,9 +12,9 @@ import { hub } from "../src/data.ts";
 import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
-import { postedText } from "../src/flight/Drafts.tsx";
+import { Drafts, postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
-import { incomingCards, incomingThreads, NO_INCOMING } from "../src/flight/Incoming.tsx";
+import { NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
 import { rel } from "../src/fmt.ts";
@@ -26,7 +27,13 @@ import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch as fetchStub } from "./fetchStub.ts";
 
 const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
-  fetchStub({ "/api/drafts": [], ...routes });
+  fetchStub({
+    "/api/drafts": [],
+    "/api/drafts/history": [],
+    "/api/flight/incoming": { entries: [] },
+    "/api/flight/brief": { session: null, sections: [] },
+    ...routes,
+  });
 
 import {
   boardItem,
@@ -773,7 +780,7 @@ describe("FLIGHT page", () => {
     await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
     const text = container.querySelector("#timeline")?.textContent ?? "";
     expect(text).toContain("claude-main 5h window resets");
-    expect(text).toContain("Board and escalations poll (every 60 s)");
+    expect(text).toContain("Board and notifications poll (every 60 s)");
     expect(text).toContain("Usage read (every 30 min)");
     const later = container.querySelector(".tllater") as HTMLElement;
     expect(later.textContent).toBe("Later: Sun 19:00 codex 5h window resets");
@@ -1093,8 +1100,85 @@ describe("FLIGHT's brief", () => {
     expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING);
   });
 
-  it("Incoming lists a GitHub thread as Asked of you, merged newest first with the board", async () => {
+  it("Incoming renders Teams matches as Asked of you", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [],
+      "/api/boards/site-builder": [],
+      "/api/flight/brief": briefView(),
+      "/api/config": CONFIG,
+      "/api/flight/incoming": {
+        entries: [
+          {
+            id: "teams-fictional",
+            source: "Teams",
+            arrivalId: "fictional",
+            version: "v1",
+            repoId: "shop-app",
+            sourceRef: {
+              kind: "teams",
+              url: "https://teams.microsoft.com/l/message/fictional",
+            },
+            arrivedAt: NOW,
+            at: NOW,
+            outcome: "Asked of you",
+            text: "Finch: Review requested",
+            detail: "Teams message",
+          },
+        ],
+      },
+      "/api/notifications": {
+        open: [
+          thread({
+            number: null,
+            message: {
+              source: { kind: "teams", messageId: "fictional", revision: "v1" },
+              author: "Finch",
+              at: NOW,
+              text: "Review requested",
+              url: "https://teams.microsoft.com/l/message/fictional",
+            },
+          }),
+        ],
+        handledToday: [],
+      },
+    });
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("incoming-row");
+    expect(rows[0]?.textContent).toContain("Teams");
+    expect(rows[0]?.textContent).toContain("Asked of you");
+    expect(rows[0]?.textContent).not.toContain("GitHub");
+    expect(screen.getByRole("link", { name: "Finch: Review requested" }).getAttribute("href")).toBe(
+      "https://teams.microsoft.com/l/message/fictional",
+    );
+  });
+
+  it("Incoming lists recorded GitHub and Board arrivals newest first", async () => {
     const old = thread({ key: "person:303:1", id: "303", updatedAt: NOW - 30 * HOUR });
+    const entries = [
+      {
+        id: "person",
+        source: "GitHub",
+        arrivalId: "101",
+        version: "1",
+        arrivedAt: NOW - HOUR,
+        at: NOW,
+        outcome: "Asked of you",
+        text: "alice mentioned you: Fix the stop race",
+        detail: `#${N}`,
+      },
+      {
+        id: "board",
+        source: "Board",
+        arrivalId: "shop-app#10",
+        version: "1",
+        arrivedAt: NOW - 2 * HOUR,
+        at: NOW,
+        outcome: "Queued",
+        text: "#10",
+        detail: "Waiting for a seat",
+      },
+    ];
     stubFetch({
       "/api/repos": REPOS,
       "/api/boards/shop-app": [
@@ -1104,6 +1188,7 @@ describe("FLIGHT's brief", () => {
       "/api/flight/brief": briefView(),
       "/api/config": CONFIG,
       "/api/notifications": { open: [thread(), old], handledToday: [] },
+      "/api/flight/incoming": { entries },
     });
     render(<Flight />);
     const rows = await screen.findAllByTestId("incoming-row");
@@ -1114,7 +1199,7 @@ describe("FLIGHT's brief", () => {
     expect(first).toContain(`#${N}`);
     expect(first).toContain("alice mentioned you: Fix the stop race");
     expect(rows[1]?.textContent).toContain("#10");
-    expect(incomingThreads([thread(), old], NOW).map((t) => t.id)).toEqual(["101"]);
+    expect(rows[1]?.textContent).toContain("Queued");
   });
 
   it("Asked of you says nobody is waiting with no items", async () => {
@@ -1125,7 +1210,7 @@ describe("FLIGHT's brief", () => {
     );
   });
 
-  it("Incoming lists cards new in Backlog or Refinement; Watch list is FLIGHT's risks; Drafts are empty", async () => {
+  it("Incoming keeps recorded outcomes; Watch list is structured and risks stay in the brief", async () => {
     const cards = [
       boardItem({ issueNumber: 12, status: "Backlog", createdAt: NOW - 30 * HOUR }),
       boardItem({ issueNumber: 11, status: "Refinement", createdAt: NOW - 2 * HOUR }),
@@ -1136,7 +1221,45 @@ describe("FLIGHT's brief", () => {
       "/api/repos": REPOS,
       "/api/boards/shop-app": cards,
       "/api/boards/site-builder": [],
-      "/api/flight/brief": briefView({ risks: { text: "The cache may thrash." } }),
+      "/api/flight/incoming": {
+        entries: [
+          {
+            id: "10",
+            source: "Board",
+            arrivalId: "shop-app#10",
+            version: "1",
+            arrivedAt: NOW - HOUR,
+            at: NOW,
+            outcome: "Queued",
+            text: "#10",
+            detail: "Waiting for a seat",
+          },
+          {
+            id: "11",
+            source: "Board",
+            arrivalId: "shop-app#11",
+            version: "1",
+            arrivedAt: NOW - 2 * HOUR,
+            at: NOW,
+            outcome: "No action",
+            text: "#11",
+            detail: "Refinement needs more context",
+          },
+        ],
+      },
+      "/api/flight/brief": {
+        ...briefView({ risks: { text: "The cache may thrash." } }),
+        watch: [
+          {
+            id: "cache",
+            state: "info",
+            title: "Cache performance",
+            detail: "Observe the next run",
+            catchUp: { kind: "new", line: "First check" },
+            next: "Read timings",
+          },
+        ],
+      },
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
@@ -1145,10 +1268,12 @@ describe("FLIGHT's brief", () => {
     expect(rows[0]?.textContent).toContain("#10");
     expect(rows[1]?.textContent).toContain("#11");
     expect(rows[1]?.textContent).toContain("Refinement");
-    expect(incomingCards(cards, NOW).map((c) => c.issueNumber)).toEqual([10, 11]);
+    expect(rows[0]?.textContent).toContain("Queued");
+    expect(rows[1]?.textContent).toContain("No action");
     await waitFor(() =>
-      expect(container.querySelector("#watchP")?.textContent).toContain("The cache may thrash."),
+      expect(container.querySelector("#watchP")?.textContent).toContain("Cache performance"),
     );
+    expect(container.querySelector("#briefP")?.textContent).toContain("The cache may thrash.");
     expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send.");
   });
 
@@ -1171,6 +1296,252 @@ describe("FLIGHT's brief", () => {
 });
 
 describe("Draft replies", () => {
+  it("wraps long destinations and preserves multiline draft text on narrow screens", () => {
+    const css = readFileSync(new globalThis.URL("../src/hud.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.draft-row \.chipref\s*\{[^}]*white-space: normal/);
+    expect(css).toMatch(/\.draft-row \.pre\s*\{[^}]*white-space: pre-wrap/);
+    expect(css).toMatch(/\.draft-row\s*\{[^}]*overflow-wrap: anywhere/);
+    expect(css).toMatch(/\.row\s*\{[^}]*flex-wrap: wrap/);
+  });
+
+  it("shows loading until both resources arrive, then the empty state", async () => {
+    let resolveHistory!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        path === "/api/drafts/history"
+          ? new Promise<Response>((resolve) => {
+              resolveHistory = resolve;
+            })
+          : new Response("[]"),
+      ),
+    );
+    render(<Drafts />);
+    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.queryByText("No drafts to send.")).toBeNull();
+    await act(async () => resolveHistory(new Response("[]")));
+    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
+  });
+
+  it.each(["/api/drafts", "/api/drafts/history"])(
+    "shows failed %s responses while retaining available rows",
+    async (path) => {
+      let failed = false;
+      stubFetch({
+        "/api/drafts": () =>
+          failed && path === "/api/drafts"
+            ? { status: 503, body: { error: "Drafts unavailable" } }
+            : {
+                status: 200,
+                body: [
+                  {
+                    id: 12,
+                    target: "garden#12",
+                    kind: "issue",
+                    text: "Retained reply",
+                    state: "pending",
+                    createdAt: NOW,
+                  },
+                ],
+              },
+        "/api/drafts/history": () =>
+          failed && path === "/api/drafts/history"
+            ? { status: 503, body: { error: "Drafts unavailable" } }
+            : { status: 200, body: [] },
+      });
+      render(<Drafts />);
+      expect(await screen.findByText("Retained reply")).toBeTruthy();
+      failed = true;
+      act(() => hub.refetchTopic("flight"));
+      expect((await screen.findByRole("alert")).textContent).toBe("Drafts unavailable");
+      expect(screen.getByText("Retained reply")).toBeTruthy();
+    },
+  );
+
+  it("renders recipient, context and faded history without active controls", async () => {
+    stubFetch({
+      "/api/drafts": [
+        {
+          id: 8,
+          target: "garden#8",
+          kind: "issue",
+          text: "Pending reply",
+          state: "pending",
+          createdAt: NOW,
+          to: "Garden reviewer",
+          via: "GitHub",
+          where: "garden#8",
+          context: "Asked about the seed cache",
+        },
+      ],
+      "/api/drafts/history": [
+        {
+          id: 9,
+          target: "garden#9",
+          kind: "pr",
+          text: "Sent reply",
+          state: "posted",
+          createdAt: NOW,
+        },
+        {
+          id: 10,
+          target: "garden#10",
+          kind: "issue",
+          text: "Dropped reply",
+          state: "discarded",
+          createdAt: NOW,
+        },
+      ],
+    });
+    const { container } = render(<Flight />);
+    expect(await screen.findByText("To Garden reviewer")).toBeTruthy();
+    expect(screen.getByText("GitHub · garden#8")).toBeTruthy();
+    expect(screen.getByText("Asked about the seed cache")).toBeTruthy();
+    expect(await screen.findByText("Posted")).toBeTruthy();
+    expect(screen.getByText("Discarded")).toBeTruthy();
+    expect(screen.getByText("PR garden#9")).toBeTruthy();
+    for (const row of container.querySelectorAll(".draft-row.acked")) {
+      expect(row.querySelector("button, textarea")).toBeNull();
+    }
+    expect(container.querySelectorAll(".draft-row.acked")).toHaveLength(2);
+    expect(container.querySelector(".sitstats")?.textContent).toContain("1 drafts to send");
+  });
+
+  it.each([false, true])(
+    "Teams copies only and retains Copied after refresh (blocked: %s)",
+    async (blocked) => {
+      const writeText = vi.fn().mockImplementation(async () => {
+        if (blocked) throw new Error("blocked");
+      });
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      let recorded = false;
+      const fn = stubFetch({
+        "POST /api/drafts/11/copied": () => {
+          recorded = true;
+          return { status: 200, body: { ok: true } };
+        },
+        "/api/drafts": () => ({
+          status: 200,
+          body: recorded
+            ? []
+            : [
+                {
+                  id: 11,
+                  target: "garden#11",
+                  kind: "issue",
+                  text: "Teams reply",
+                  state: "pending",
+                  createdAt: NOW,
+                  to: "Garden team",
+                  via: "Teams",
+                  where: "Seed channel",
+                },
+              ],
+        }),
+        "/api/drafts/history": () => ({
+          status: 200,
+          body: recorded
+            ? [
+                {
+                  id: 11,
+                  target: "garden#11",
+                  kind: "issue",
+                  text: "Teams reply",
+                  state: "copied",
+                  createdAt: NOW,
+                  via: "Teams",
+                },
+              ]
+            : [],
+        }),
+      });
+      render(
+        <>
+          <Flight />
+          <Toast />
+        </>,
+      );
+      const button = await screen.findByRole("button", { name: "Copy for Teams" });
+      button.focus();
+      expect(document.activeElement).toBe(button);
+      expect(screen.queryByRole("button", { name: "Post on GitHub" })).toBeNull();
+      fireEvent.click(button);
+      expect(
+        await screen.findByText(
+          blocked
+            ? "Copy was blocked here; select the text and copy it."
+            : "Copied. Paste it into Teams.",
+        ),
+      ).toBeTruthy();
+      expect(writeText).toHaveBeenCalledWith("Teams reply");
+      if (!blocked) {
+        expect(await screen.findByText("Copied", { selector: ".pill" })).toBeTruthy();
+        act(() => hub.refetchTopic("flight"));
+        await waitFor(() =>
+          expect(fn.mock.calls.filter(([p]) => p === "/api/drafts").length).toBeGreaterThan(1),
+        );
+        expect(screen.queryByRole("button", { name: "Copy for Teams" })).toBeNull();
+      }
+      expect(
+        fn.mock.calls.filter(([, init]) => init?.method === "POST").map(([path]) => path),
+      ).toEqual(blocked ? [] : ["/api/drafts/11/copied"]);
+    },
+  );
+
+  it.each([false, true])(
+    "records Teams copies and refreshes history and Situation (failure: %s)",
+    async (failed) => {
+      const draft = {
+        id: 21,
+        target: "garden#21",
+        kind: "issue",
+        text: "Copy me",
+        state: "pending",
+        createdAt: NOW,
+        via: "Teams",
+      };
+      let copied = false;
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      const fn = stubFetch({
+        "/api/drafts": () => ({ status: 200, body: copied ? [] : [draft] }),
+        "/api/drafts/history": () => ({
+          status: 200,
+          body: copied
+            ? [{ ...draft, state: "copied", text: "History copy", completedAt: NOW }]
+            : [],
+        }),
+        "POST /api/drafts/21/copied": () => {
+          expect(writeText).toHaveBeenCalledWith("Copy me");
+          copied = !failed;
+          return {
+            status: failed ? 500 : 200,
+            body: failed ? { error: "record failed" } : { ok: true },
+          };
+        },
+      });
+      const { container } = render(<Flight />);
+      fireEvent.click(await screen.findByRole("button", { name: "Copy for Teams" }));
+      if (failed) {
+        expect(await screen.findByRole("alert")).toHaveProperty(
+          "textContent",
+          expect.stringContaining("Copy worked but couldn't be recorded"),
+        );
+        expect(screen.getByRole("button", { name: "Copy for Teams" })).toBeTruthy();
+      } else {
+        expect(await screen.findByText("History copy")).toBeTruthy();
+        expect(container.querySelector(".draft-row.acked")?.textContent).toContain("Copied");
+        await waitFor(() =>
+          expect(container.querySelector(".sitstats")?.textContent).toContain("0 drafts to send"),
+        );
+        expect(screen.queryByRole("button", { name: "Copy for Teams" })).toBeNull();
+      }
+      expect(
+        fn.mock.calls.filter(([, init]) => init?.method === "POST").map(([path]) => path),
+      ).toEqual(["/api/drafts/21/copied"]);
+    },
+  );
+
   it("shows the panel and count, and posts edited text only after Post", async () => {
     let drafts = [
       {
@@ -1198,14 +1569,16 @@ describe("Draft replies", () => {
     );
     expect(await screen.findByText("Prepared reply")).toBeTruthy();
     expect(container.querySelector(".sitstats")?.textContent).toContain("1 drafts to send");
-    expect(screen.getByText("shop-app#12")).toBeTruthy();
+    expect(screen.getByText("To shop-app#12")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Draft for shop-app#12" }), {
       target: { value: "Approved reply" },
     });
     expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Post on GitHub" }));
-    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
+    expect(await screen.findByText("Posted", { selector: ".pill" })).toBeTruthy();
+    expect(screen.getByText("Approved reply")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Post on GitHub" })).toBeNull();
     expect(screen.getByText(postedText("shop-app#12"))).toBeTruthy();
     const post = fn.mock.calls.find(([p]) => p === "/api/drafts/1/post");
     expect(JSON.parse(post?.[1]?.body as string)).toEqual({ text: "Approved reply" });
@@ -1235,6 +1608,8 @@ describe("Draft replies", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Post on GitHub" }));
     expect((await screen.findByRole("alert")).textContent).toBe("mentions are refused");
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
+    expect(await screen.findByText("Discarded", { selector: ".pill" })).toBeTruthy();
+    expect(screen.getByText("PR reply")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
   });
 });

@@ -315,6 +315,7 @@ describe("RESOURCES", () => {
 
   it("names the HUD's resources and the topics that refresh them", () => {
     expect(RESOURCES.crew).toEqual({ path: "/api/crew", topic: "agents" });
+    expect(RESOURCES.flightIncoming).toEqual({ path: "/api/flight/incoming", topic: "flight" });
     expect(RESOURCES.attention).toEqual({ path: "/api/attention", topic: "attention" });
     expect(RESOURCES.machine).toEqual({ path: "/api/machine", topic: "machine" });
     expect(RESOURCES.away).toEqual({ path: "/api/settings/away", topic: "settings" });
@@ -333,5 +334,233 @@ describe("RESOURCES", () => {
     });
     expect(ACTIONS.ack).toBe("/api/attention/ack");
     expect(ACTIONS.away).toBe("/api/settings/away");
+  });
+});
+
+describe("browser notification resources", () => {
+  it("refetches events on both settings and attention invalidations", async () => {
+    const fetch = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const off = hub.subscribe(RESOURCES.notificationEvents.path, "attention", () => {});
+    await settle();
+    fetch.mockClear();
+    hub.refetchTopic("settings");
+    await settle();
+    hub.refetchTopic("attention");
+    await settle();
+    expect(fetch.mock.calls.map((c) => (c as unknown[])[0])).toEqual([
+      "/api/notifications/events",
+      "/api/notifications/events",
+    ]);
+    off();
+  });
+});
+
+it("merges activity deltas and replaces timestamp ties without duplicating rows", async () => {
+  hub.clear();
+  const at = Date.now();
+  const row = (time: number, text: string) => ({ at: time, kind: "state", who: "seat", text });
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify([row(at, "one"), row(at - 1, "old")])))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify([row(at + 1, "new"), row(at, "one"), row(at, "tie")])),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify([row(at + 1, "new")])));
+  vi.stubGlobal("fetch", fetchMock);
+  const off = hub.subscribe(RESOURCES.activity.path, "agents", () => {});
+  try {
+    await settle();
+    hub.refetchTopic("agents");
+    await settle();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/activity?since=${at - 1}`);
+    expect(hub.snapshot(RESOURCES.activity.path, "agents").data).toEqual([
+      row(at + 1, "new"),
+      row(at, "one"),
+      row(at, "tie"),
+      row(at - 1, "old"),
+    ]);
+    hub.refetchTopic("agents");
+    await settle();
+    expect(hub.snapshot(RESOURCES.activity.path, "agents").data).toHaveLength(4);
+  } finally {
+    off();
+    hub.clear();
+  }
+});
+
+it("requests a delta even when the first activity load is empty", async () => {
+  hub.clear();
+  const fetchMock = vi.fn(async () => new Response("[]"));
+  vi.stubGlobal("fetch", fetchMock);
+  const off = hub.subscribe(RESOURCES.activity.path, "agents", () => {});
+  try {
+    await settle();
+    hub.refetchTopic("agents");
+    await settle();
+    expect(fetchMock.mock.calls.map((c) => (c as unknown[])[0])).toEqual([
+      "/api/activity",
+      "/api/activity?since=0",
+    ]);
+  } finally {
+    off();
+    hub.clear();
+  }
+});
+
+describe("activity reconciliation", () => {
+  let off: (() => void) | undefined;
+  beforeEach(() => {
+    hub.clear();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+  });
+  afterEach(() => {
+    off?.();
+    hub.clear();
+    vi.useRealTimers();
+  });
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+  const path = RESOURCES.activity.path;
+  const snapshot = () => hub.snapshot(path, "agents").data;
+  const row = (at: number, text: string) => ({ at, kind: "state", who: "seat", text });
+  const load = async (initial: unknown[], fresh: unknown[]) => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(initial)))
+      .mockImplementation(async () => new Response(JSON.stringify(fresh)));
+    vi.stubGlobal("fetch", fetch);
+    off = hub.subscribe(path, "agents", () => {});
+    await flush();
+    return fetch;
+  };
+
+  it("updates a run-start row's live status, PRs and summary on the next full load", async () => {
+    const initial = {
+      ...row(Date.now() - 100, "started"),
+      status: "running",
+      prs: [],
+      summary: null,
+    };
+    const fresh = { ...initial, status: "done", prs: [42], summary: "finished" };
+    const fetch = await load([row(Date.now(), "newest"), initial], [fresh]);
+    vi.setSystemTime(Date.now() + 60_000);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(fetch.mock.calls[1]?.[0]).toBe(path);
+    expect(snapshot()).toEqual([fresh]);
+  });
+
+  it("replaces a collector row that moved to a newer status time without duplicating it", async () => {
+    const initial = row(Date.now() - 100, "collector failing");
+    const fresh = row(Date.now() + 1, "collector failing again");
+    await load([row(Date.now(), "newest"), initial], [fresh]);
+    vi.setSystemTime(Date.now() + 60_000);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(snapshot()).toEqual([fresh]);
+  });
+
+  it("includes late rows with older timestamps after a full load", async () => {
+    const newest = row(Date.now(), "newest");
+    const late = row(Date.now() - 100, "late escalation");
+    const fetch = await load([newest], [newest, late]);
+    vi.setSystemTime(Date.now() + 60_000);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(fetch.mock.calls[1]?.[0]).toBe(path);
+    expect(snapshot()).toEqual([newest, late]);
+  });
+
+  it("reconnect always requests a full load within the delta window", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    FakeEventSource.instances = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const stop = startStream();
+    try {
+      const es = FakeEventSource.instances[0];
+      es?.emit("open");
+      es?.emit("open");
+      await flush();
+      expect(fetch.mock.calls[1]?.[0]).toBe(path);
+      expect(snapshot()).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("arms one full-load timer after deltas and fires once at the window boundary", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    await vi.advanceTimersByTimeAsync(10_000);
+    hub.refetchTopic("agents");
+    await flush();
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(49_999);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch.mock.calls[3]?.[0]).toBe(path);
+    expect(snapshot()).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("drops a timer's queued full load when the last subscriber leaves during a delta", async () => {
+    const cached = row(Date.now(), "cached");
+    const fetch = await load([cached], [cached]);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+
+    let release: (response: Response) => void = () => {};
+    fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    hub.refetchTopic("agents");
+    expect(fetch.mock.calls[2]?.[0]).toBe(`/api/activity?since=${Date.now() - 1}`);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(3);
+
+    off?.();
+    release(new Response("[]"));
+    await flush();
+    expect(hub.snapshot(path, "agents").loading).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("clears a pending timer when refetchAll does a full load", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+    hub.refetchAll();
+    await flush();
+    expect(fetch.mock.calls[2]?.[0]).toBe(path);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("clears the timer only when the last subscriber leaves", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    const secondOff = hub.subscribe(path, "agents", () => {});
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+    secondOff();
+    expect(vi.getTimerCount()).toBe(1);
+    off?.();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

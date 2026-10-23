@@ -4,6 +4,9 @@
  * useSyncExternalStore.
  */
 import {
+  ACTIVITY_LIMIT,
+  ACTIVITY_WINDOW_MS,
+  type ActivityRow,
   type CrewRow,
   GUARD_WINDOW_DAYS,
   type PullRequestView,
@@ -31,10 +34,14 @@ export interface ResourceRef {
 export const RUNS_LIMIT = 50;
 /** How often a running seat's context is asked of its CLI (each fetch is a live control request). */
 export const SEAT_CONTEXT_REFRESH_MS = 30_000;
+// Full loads reconcile mutable activity rows and arrivals older than the delta cursor.
+const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
+  teams: { path: "/api/sources/teams", topic: "attention" },
+  teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
   crew: { path: "/api/crew", topic: "agents" },
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
@@ -49,10 +56,15 @@ export const RESOURCES = {
     topic: "attention",
   }),
   attention: { path: "/api/attention", topic: "attention" },
+  notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
+  notificationEvents: { path: "/api/notifications/events", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
   drafts: { path: "/api/drafts", topic: "flight" },
+  draftHistory: { path: "/api/drafts/history", topic: "flight" },
+  flightSchedule: { path: "/api/flight/schedule", topic: "flight" },
+  flightIncoming: { path: "/api/flight/incoming", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
@@ -139,10 +151,13 @@ export const RESOURCES = {
 
 /** POST endpoints. */
 export const ACTIONS = {
+  notificationPreferences: RESOURCES.notificationPreferences.path,
+  notificationTest: "/api/notifications/test",
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
   addAccount: "/api/accounts",
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
+  copyDraft: (id: string) => `/api/drafts/${enc(id)}/copied`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
@@ -187,6 +202,9 @@ interface Entry {
   listeners: Set<() => void>;
   inflight: boolean;
   again: boolean;
+  fullAgain?: boolean;
+  activityFullAt?: number;
+  activityTimer?: ReturnType<typeof setTimeout>;
 }
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
@@ -220,13 +238,18 @@ class Hub {
     if (e.listeners.size === 1) void this.fetch(e);
     return () => {
       e.listeners.delete(fn);
+      if (e.listeners.size === 0) {
+        clearTimeout(e.activityTimer);
+        e.activityTimer = undefined;
+      }
     };
   }
 
   /** One request per path at a time; a change during a fetch queues exactly one more. */
-  private async fetch(e: Entry): Promise<void> {
+  private async fetch(e: Entry, full = false): Promise<void> {
     if (e.inflight) {
       e.again = true;
+      e.fullAgain ||= full;
       return;
     }
     const gen = this.generation;
@@ -234,7 +257,42 @@ class Hub {
     this.set(e, { ...e.snap, loading: true });
     let next: Resource<unknown>;
     try {
-      next = { data: await apiGet<unknown>(e.path), error: null, loading: false };
+      const activity = e.path === RESOURCES.activity.path;
+      const startedAt = Date.now();
+      const delta =
+        activity &&
+        !full &&
+        e.activityFullAt !== undefined &&
+        startedAt - e.activityFullAt < ACTIVITY_FULL_LOAD_MS;
+      const previous = delta ? (e.snap.data as ActivityRow[] | undefined) : undefined;
+      if (activity && !delta) {
+        clearTimeout(e.activityTimer);
+        e.activityTimer = undefined;
+      }
+      // Re-read the newest millisecond as well: several rows can share a timestamp.
+      const since = previous === undefined ? undefined : (previous[0]?.at ?? 1);
+      const path = since === undefined ? e.path : `${e.path}?since=${Math.max(0, since - 1)}`;
+      let data = await apiGet<unknown>(path);
+      if (previous && since !== undefined) {
+        data = [...(data as ActivityRow[]), ...previous.filter((r) => r.at < since)]
+          .filter((r) => r.at >= Date.now() - ACTIVITY_WINDOW_MS)
+          .sort((a, b) => b.at - a.at)
+          .slice(0, ACTIVITY_LIMIT);
+      }
+      if (gen !== this.generation) return;
+      if (activity) {
+        if (!delta) e.activityFullAt = startedAt;
+        else if (e.listeners.size > 0 && e.activityTimer === undefined) {
+          e.activityTimer = setTimeout(
+            () => {
+              e.activityTimer = undefined;
+              if (e.listeners.size > 0) void this.fetch(e, true);
+            },
+            Math.max(0, (e.activityFullAt ?? startedAt) + ACTIVITY_FULL_LOAD_MS - Date.now()),
+          );
+        }
+      }
+      next = { data, error: null, loading: false };
     } catch (err) {
       // Keep the last good data on screen; show the error beside it.
       const error = err instanceof Error ? err : new Error(String(err));
@@ -245,7 +303,9 @@ class Hub {
     this.set(e, next);
     if (e.again) {
       e.again = false;
-      void this.fetch(e);
+      const fullAgain = e.fullAgain;
+      e.fullAgain = false;
+      if (e.listeners.size > 0) void this.fetch(e, fullAgain);
     }
   }
 
@@ -257,12 +317,22 @@ class Hub {
   /** Refetch only what is on screen and belongs to the changed topic. */
   refetchTopic(topic: Topic): void {
     for (const e of this.entries.values()) {
-      if (e.topic === topic && e.listeners.size > 0) void this.fetch(e);
+      // The server filters watch rows using both the lock and crew state. Refetch
+      // the brief when either changes, including rows omitted from its last response.
+      const briefChanged =
+        e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
+      const notificationSettingsChanged =
+        topic === "settings" && e.path === RESOURCES.notificationEvents.path;
+      if (
+        (e.topic === topic || briefChanged || notificationSettingsChanged) &&
+        e.listeners.size > 0
+      )
+        void this.fetch(e);
     }
   }
 
   refetchAll(): void {
-    for (const e of this.entries.values()) if (e.listeners.size > 0) void this.fetch(e);
+    for (const e of this.entries.values()) if (e.listeners.size > 0) void this.fetch(e, true);
   }
 
   /**
@@ -275,6 +345,10 @@ class Hub {
     for (const e of this.entries.values()) {
       e.inflight = false;
       e.again = false;
+      e.fullAgain = false;
+      e.activityFullAt = undefined;
+      clearTimeout(e.activityTimer);
+      e.activityTimer = undefined;
       this.set(e, IDLE);
     }
     this.refetchAll();

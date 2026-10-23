@@ -1,7 +1,9 @@
+import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   ACK_BATCH_MAX,
+  ACTIVITY_LIMIT,
   type AgentStream,
   type AttentionItem,
   type AwaySettings,
@@ -61,7 +63,8 @@ import {
   type Telemetry,
   type TelemetryRange,
   type TestLockHistory,
-  type TestLockState,
+  type TestLockView,
+  type Topic,
   TYPE_LABELS,
   UPDATE_UNAVAILABLE,
   type UsageSample,
@@ -85,6 +88,7 @@ import {
   sourceReadUrl,
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
+import { teamsStatus } from "./collectors/teams.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
 import {
@@ -95,6 +99,7 @@ import {
   crewSeatGrants,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
+  TeamsSelection,
 } from "./config.ts";
 import {
   accountDuplicateReason,
@@ -107,6 +112,7 @@ import {
   RepoLocation,
   SeatsBody,
   setSessionSeats,
+  setTeamsSelection,
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
@@ -118,7 +124,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
-import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
+import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -144,8 +150,7 @@ import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/
 import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "./runview.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
-import { median, telemetry } from "./telemetry.ts";
-
+import { lockView, median, telemetry, usualLockMs } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -255,7 +260,7 @@ export interface AppDeps {
   tokens?: RunTokens;
   /** The `/mcp` calls in flight, which a restart waits for; default: not counted. */
   mcpCalls?: McpCalls;
-  /** The mc tools `/mcp` serves; default: none (the tools arrive with their tasks). */
+  /** The mc tools `/mcp` serves; default: none. */
   mcpTools?: () => McTool[];
   /** A seat's mode, which decides the mc tools it is offered; default: read-only. */
   seatMode?: (seatId: string) => CrewMode;
@@ -484,6 +489,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   const app = Fastify({
     bodyLimit: 16 * 1024,
+    disableRequestLogging: true,
     logger: deps.logger
       ? {
           level: "info",
@@ -491,6 +497,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...(typeof deps.logger === "object" ? { stream: deps.logger.stream } : {}),
         }
       : false,
+  });
+
+  const requestErrors = new WeakMap<object, Error>();
+  app.addHook("onError", async (req, _reply, error) => {
+    requestErrors.set(req, error);
+  });
+
+  // Routes that translate exceptions into response objects must retain the caught
+  // error before Fastify serializes the public (sometimes deliberately generic) text.
+  const captureError = (reply: FastifyReply, error: unknown) => {
+    requestErrors.set(reply.request, error instanceof Error ? error : new Error(String(error)));
+  };
+
+  app.addHook("onResponse", async (req, reply) => {
+    if (reply.statusCode >= 400 || reply.elapsedTime > 1000) {
+      const fields = { res: reply, responseTime: reply.elapsedTime };
+      if (reply.statusCode >= 500) {
+        req.log.error(
+          { ...fields, err: requestErrors.get(req) ?? new Error(`HTTP ${reply.statusCode}`) },
+          "request completed",
+        );
+      } else {
+        req.log.warn(fields, "request completed");
+      }
+    }
   });
 
   // DNS-rebinding defence: a page on another name that resolves to 127.0.0.1 sends its own Host.
@@ -544,6 +575,55 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  // These aggregates repeat expensive store/filesystem reads. Topics invalidate immediately;
+  // the short TTL also refreshes elapsed times and files changed outside the collectors.
+  const responseCache = new Map<string, { payload: string; at: number; stamp: string }>();
+  const responseStamp = () => {
+    let profiles = "";
+    if (deps.profilesPath !== undefined) {
+      try {
+        const file = statSync(deps.profilesPath);
+        profiles = `${file.mtimeMs}:${file.ctimeMs}:${file.size}`;
+      } catch {
+        /* A missing profiles file uses the built-ins. */
+      }
+    }
+    return JSON.stringify([
+      store.readVersion(),
+      config,
+      profiles,
+      deps.lock?.state(),
+      deps.hubLogin?.(),
+    ]);
+  };
+  let responseRevision = 0;
+  const revisions = new WeakMap<object, { revision: number; stamp: string }>();
+  const cachedPaths = new Set(["/api/telemetry", "/api/attention", "/api/config"]);
+  app.addHook("preHandler", async (req, reply) => {
+    if (req.method !== "GET" || !cachedPaths.has(req.url.split("?")[0] ?? "")) return;
+    const stamp = responseStamp();
+    revisions.set(req, { revision: responseRevision, stamp });
+    const cached = responseCache.get(req.url);
+    if (cached && cached.stamp === stamp && now() - cached.at < 10_000)
+      return reply.type("application/json").send(cached.payload);
+  });
+  app.addHook("onSend", async (req, reply, payload) => {
+    const started = revisions.get(req);
+    if (
+      !started ||
+      started.revision !== responseRevision ||
+      reply.statusCode !== 200 ||
+      typeof payload !== "string"
+    )
+      return;
+    // Telemetry may fill only part of its commit cache this call; keep reading next time.
+    if (started.stamp !== responseStamp()) return;
+    const cached = responseCache.get(req.url);
+    if (cached && cached.stamp === started.stamp && now() - cached.at < 10_000) return;
+    if (responseCache.size >= 64) responseCache.clear();
+    responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
+  });
+
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () =>
     notifications.reconcile(
@@ -572,6 +652,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     notificationTimer.unref();
   };
   const unsubscribeNotifications = bus.subscribe((topic) => {
+    if (topic !== "machine") {
+      responseRevision++;
+      responseCache.clear();
+    }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
   });
@@ -675,7 +759,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot; web wiring is a separate ticket)
+      // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot)
       api.get<{ Params: { id: string } }>("/comms/:id", async (req, reply) => {
         if (!agentById(req.params.id)) return reply.code(404).send({ error: "unknown agent" });
         return {
@@ -683,7 +767,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
 
-      // Reader: apps/web/src/comms/Conversation.tsx (opening a thread; web wiring is a separate ticket)
+      // Reader: apps/web/src/comms/Conversation.tsx (opening a thread)
       api.post<{ Params: { id: string } }>("/comms/:id/read", async (req, reply) => {
         const id = req.params.id;
         if (!agentById(id)) return reply.code(404).send({ error: "unknown agent" });
@@ -791,16 +875,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           try {
             return await worktreeFiles(worktree, exec);
           } catch (e) {
-            // Only the command, exit code and signal: git's message and any path stay out of the log.
+            captureError(reply, e);
             const git = e instanceof GitFailed ? e : null;
-            reply.log.warn(
-              {
-                command: git?.command ?? null,
-                exitCode: git?.exitCode ?? null,
-                signal: git?.signal ?? null,
-              },
-              `file list failed for ${req.params.id}`,
-            );
             // The filter check's fixed note survives a total failure, unless git never ran at all
             // because the checkout's git dir is not the clone's.
             return reply
@@ -845,9 +921,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           try {
             diff = await worktreeDiff(worktree, path.data, exec);
           } catch (e) {
-            // GitFailed's message is git's own, the worktree path already taken out
-            const git = e instanceof GitFailed ? e.message : "not git";
-            reply.log.warn({ git }, `file diff failed for ${req.params.id}`);
+            captureError(reply, e);
             return reply.code(502).send({ error: "git failed" });
           }
           if (diff === null) return reply.code(404).send({ error: "unknown file" });
@@ -931,7 +1005,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               // `finish` means the answer was handed to the kernel, not that the hook received it.
               // On a real socket this release only catches an async gap between the send and the
               // end (the hook hung up after the grant, before the answer went out). A peer that dies
-              // after `finish` is not seen here: Task 6's `releaseRun` covers it.
+              // after `finish` is not seen here: `releaseRun` covers it.
               let delivered = false;
               res.once("finish", () => {
                 delivered = true;
@@ -956,7 +1030,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      api.get("/test-lock", async (): Promise<TestLockState> => lock?.state() ?? NO_LOCK);
+      // Reader: apps/web/src/data.ts#RESOURCES (testLock; the Machine panel's Test lock box reads label and usualMs in the Overview web follow-up)
+      api.get(
+        "/test-lock",
+        async (): Promise<TestLockView> => lockView(config, store, lock?.state() ?? NO_LOCK, now()),
+      );
 
       // Reader: apps/web/src/telemetry/CapacityGroup.tsx (the Test lock table), Kpis.tsx (Lock wait) and components/LockLines.tsx (usually about)
       api.get("/test-lock/history", async (): Promise<TestLockHistory> => {
@@ -965,24 +1043,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const today = runs.filter(
           (r) => r.startedAt >= startOfLocalDay(at, config.operator.timezone),
         );
-        const lengths = new Map<string, number[]>();
-        for (const r of runs) {
-          if (r.outcome !== "done" || r.endedAt === null) continue;
-          const list = lengths.get(r.command) ?? [];
-          list.push(r.endedAt - r.startedAt);
-          lengths.set(r.command, list);
-        }
         return {
           runs,
           today: {
             runs: today.length,
             waitMs: today.reduce((sum, r) => sum + r.startedAt - r.queuedAt, 0),
           },
-          usualMs: Object.fromEntries(
-            [...lengths]
-              .filter(([, list]) => list.length >= 3)
-              .map(([command, list]) => [command, median(list) as number]),
-          ),
+          usualMs: usualLockMs(runs),
         };
       });
 
@@ -1011,17 +1078,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: apps/web/src/setup/Accounts.tsx (account status; UI integration follows)
+      // Reader: apps/web/src/setup/Accounts.tsx (account status)
       api.get("/accounts/status", async () =>
         Promise.all(config.accounts.map((account) => accountStatus(account))),
       );
-      // Reader: apps/web/src/setup/Accounts.tsx (Check; UI integration follows)
+      // Reader: apps/web/src/setup/Accounts.tsx (Check)
       api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
         const account = config.accounts.find((a) => a.id === req.params.id);
         if (!account) return reply.code(404).send({ error: "account not found" });
         return accountStatus(account, true);
       });
-      // Reader: apps/web/src/setup/Accounts.tsx (Add account; UI integration follows)
+      // Reader: apps/web/src/setup/Accounts.tsx (Add account)
       api.post("/accounts", async (req, reply) => {
         if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         const body = NewAccountBody.safeParse(req.body);
@@ -1035,6 +1102,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           bus.emit("config");
           return { account: added };
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof ConfigWriteError) {
             return reply
               .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
@@ -1061,7 +1129,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
 
-      // Reader: docs/runbook.md#what-it-observes (by hand until the HUD's refresh button reads it)
+      // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
         return reply.code(202).send({ ok: true });
@@ -1074,6 +1142,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           return await repoPreview(await githubGql(), body.data, config, store);
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof PreviewError) return reply.code(e.status).send({ error: e.message });
           return reply
             .code(502)
@@ -1099,6 +1168,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           result = await addRepo(configPath, repo, now());
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof ConfigWriteError && (e.kind === "duplicate" || e.kind === "current")) {
             return reply.code(409).send({ error: e.message });
           }
@@ -1161,6 +1231,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const ticket = await fetchTicket(repo, n, await githubGql(), config.repos);
             return ticket ?? reply.code(404).send({ error: "unknown issue" });
           } catch (e) {
+            captureError(reply, e);
             return reply
               .code(502)
               .send({ error: `GitHub failed: ${e instanceof Error ? e.message : String(e)}` });
@@ -1198,6 +1269,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           );
           return { ...status, missingLabels: await missingLabels(gql, repo.github, TYPE_LABELS) };
         } catch (e) {
+          captureError(reply, e);
           return setupFailed(reply, e);
         }
       });
@@ -1212,12 +1284,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const fields = await ensureFields(gql, repo.github.split("/")[0] ?? "", repo.project);
             // Refresh now: the fields exist even if a label below fails.
             if (fields.created.length > 0) refreshBoards();
-            // area labels: plan 7a Task 3
             const labelsCreated = await ensureLabels(gql, repo.github, TYPE_LABELS);
             return { ...fields, labelsCreated };
           });
           return result;
         } catch (e) {
+          captureError(reply, e);
           return setupFailed(reply, e);
         }
       });
@@ -1236,7 +1308,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
 
-      api.get("/activity", async () => activity(config, store, now()));
+      // Reader: apps/web/src/data.ts
+      api.get<{ Querystring: { since?: string; limit?: string } }>(
+        "/activity",
+        async (req, reply) => {
+          const { since, limit } = req.query;
+          const integer = (value: unknown) =>
+            typeof value === "string" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
+          if (
+            (since !== undefined && !integer(since)) ||
+            (limit !== undefined && (!integer(limit) || Number(limit) < 1))
+          )
+            return reply.code(400).send({
+              error: "since must be a non-negative timestamp; limit must be a positive integer",
+            });
+          return activity(config, store, now(), {
+            ...(since === undefined ? {} : { since: Number(since) }),
+            ...(limit === undefined ? {} : { limit: Math.min(Number(limit), ACTIVITY_LIMIT) }),
+          });
+        },
+      );
 
       api.get("/config", async () =>
         configView(
@@ -1248,7 +1339,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Re-reads the config.yaml the server started with now (no request names a path); a file that
       // does not load changes nothing.
-      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup › Sessions, #22, reads it)
+      // Reader: docs/runbook.md#reloading-the-config
       api.post("/config/reload", async (_req, reply) => {
         if (deps.crewReloader === undefined) {
           return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
@@ -1258,7 +1349,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return result;
       });
 
-      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup's seat editor reads it)
+      // Reader: docs/runbook.md#reloading-the-config
       // Replaces one session's seats in the config.yaml the server started with (no request names a
       // path), then reloads so the change applies live. A POST so the CSRF hook covers it.
       api.post<{ Params: { sessionId: string } }>(
@@ -1280,6 +1371,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               now(),
             );
           } catch (e) {
+            captureError(reply, e);
             if (e instanceof ConfigWriteError) {
               const status = { missing: 404, conflict: 409, invalid: 400, current: 409 }[
                 e.kind as string
@@ -1298,7 +1390,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup › Sessions, #22, reads it)
+      // Reader: docs/runbook.md#reloading-the-config
       api.get("/crew/changes", async (): Promise<CrewChanges> => {
         return (
           deps.crewReloader?.status() ?? {
@@ -1430,6 +1522,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (paused) await writeFile(path, "", { flag: "wx" });
           else await unlink(path);
         } catch (e) {
+          captureError(reply, e);
           const benign = paused ? errCode(e) === "EEXIST" : errCode(e) === "ENOENT";
           if (!benign) {
             reply.log.warn({ code: errCode(e) }, `pause state update failed for ${loop.id}`);
@@ -1462,6 +1555,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return true;
       };
       const crewFail = (e: unknown, reply: FastifyReply) => {
+        captureError(reply, e);
         if (e instanceof CheckoutError) {
           // the detail (a path, git's own text) goes to the log, never into the response
           if (e.detail !== null) reply.log.warn({ detail: e.detail }, "crew checkout refused");
@@ -1558,21 +1652,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
-      // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT ticket 4)
+      // Reader: apps/web/src/shell/Dock.tsx#Dock
       api.get("/flight", async () => flightView(config, store, Date.now()));
-      // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief, web follow-up of #225)
+      // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
         flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
       );
-      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes, web follow-up)
+      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes)
       api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
+      // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline)
+      api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
+
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
       api.get("/drafts", async () => store.drafts());
-      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history; web part follows in #415)
+      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history)
       api.get("/drafts/history", async () => store.draftHistory());
       const postingDrafts = new Set<number>();
       const postingItems = new Set<string>();
@@ -1661,7 +1758,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 return reply
                   .code(409)
                   .send({ error: "Source changed; refresh the item before posting." });
-            } catch {
+            } catch (e) {
+              captureError(reply, e);
               return reply
                 .code(502)
                 .send({ error: "Could not verify the source. Nothing was posted." });
@@ -1721,6 +1819,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/flight/Drafts.tsx
+      api.post<{ Params: { id: string } }>("/drafts/:id/copied", async (req, reply) => {
+        const id = Number(req.params.id);
+        const draft = store.draft(id);
+        if (!draft) return reply.code(404).send({ error: "No draft." });
+        if (draft.via !== "Teams" || draft.state !== "pending")
+          return reply.code(409).send({ error: "Only pending Teams drafts can be copied." });
+        store.finishDraft(id, "copied");
+        bus.emit("flight");
+        return { ok: true };
+      });
+      // Reader: apps/web/src/flight/Drafts.tsx
       api.post<{ Params: { id: string } }>("/drafts/:id/discard", async (req, reply) => {
         const id = Number(req.params.id);
         if (postingDrafts.has(id)) return reply.code(409).send({ error: "Draft is being posted." });
@@ -1732,7 +1841,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // The operator ends a run set aside in review, without waking it.
-      // Reader: apps/web/src/agent/LoopSteps.tsx (the End action on a set-aside run; the web part follows)
+      // Reader: apps/web/src/agent/LoopSteps.tsx (the End action on a set-aside run)
       api.post<{ Params: { id: string } }>("/runs/:id/end", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null || !supervisor) return reply.code(404).send({ error: "unknown run" });
@@ -1751,7 +1860,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
       // review or review-ruling park waives that head's findings, as the message does. The answer
       // waits for the engine's pass, so "ok" means the park was lifted.
-      // Reader: docs/runbook.md#resume-a-parked-run (by hand; a HUD Resume action is a follow-up web ticket)
+      // Reader: docs/runbook.md#resume-a-parked-run
       api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null) return reply.code(404).send({ error: "unknown run" });
@@ -1770,7 +1879,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
       // A looped run's state and its Activity rows, on demand.
-      // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view; it reads this once Plan 7a Task 8 lands)
+      // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view)
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null) return reply.code(404).send({ error: "unknown run" });
@@ -1861,6 +1970,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           return await updater.check();
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof UpdateError) {
             return reply.code(e.status).send({ error: e.message, checkedAt: e.checkedAt ?? null });
           }
@@ -1884,6 +1994,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const out = await updater.update();
             return "restarting" in out ? reply.code(202).send(out) : out;
           } catch (e) {
+            captureError(reply, e);
             if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
             reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
             return reply.code(500).send({ error: UPDATE_FAILED });
@@ -1985,7 +2096,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store.markDiscussionSent(thread.id, messageId);
           bus.emit("attention");
           return store.discussion(item.key, thread.id);
-        } catch {
+        } catch (e) {
+          captureError(reply, e);
           return reply.code(503).send({ error: "Could not send to FLIGHT. Retry this message." });
         } finally {
           discussionSends.delete(sendKey);
@@ -2007,7 +2119,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { acked: keys.length };
       });
 
-      // Reader: apps/web/src/comms/NeedsList.tsx (the Needs-you Dismiss button; the web side is its own ticket)
+      // Reader: apps/web/src/comms/NeedsList.tsx (the Needs-you Dismiss button)
       api.post<{ Params: { key: string } }>("/attention/:key/dismiss", async (req, reply) => {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -2020,10 +2132,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { dismissed: key };
       });
 
-      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      // Reader: apps/web/src/data.ts (notification settings)
       api.get("/notification-preferences", async () => notifications.preferences());
 
-      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      // Reader: apps/web/src/data.ts (notification settings)
       api.post("/notification-preferences", async (req, reply) => {
         const body = NotificationPreferencesBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -2031,25 +2143,52 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return notifications.preferences();
       });
 
-      // Reader: apps/web/src/notifications.ts (local notification feed; web wiring is a separate ticket)
+      // Reader: apps/web/src/notifications.ts (local notification feed)
       api.get("/notifications/events", async () => {
         return notifications.events();
       });
 
-      // Reader: apps/web/src/notifications.ts (Send a test notification; web wiring is a separate ticket)
+      // Reader: apps/web/src/notifications.ts (Send a test notification)
       api.post("/notifications/test", async (req, reply) => {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         return notifications.test();
       });
 
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)
+      // Reader: apps/web/src/data.ts (Sources status)
+      api.get("/sources/teams", async () => teamsStatus(config, store));
+
+      // Reader: apps/web/src/data.ts (Sources selection)
+      api.post("/sources/teams/selection", async (req, reply) => {
+        const body = z.strictObject({ selected: TeamsSelection }).safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: "Invalid Teams selection" });
+        if (!deps.configPath || deps.seatWrites === false)
+          return reply.code(409).send({ error: "Config writes unavailable" });
+        if (
+          body.data.selected.some(
+            (s) => s.lane !== "work" || !config.repos.some((r) => r.id === s.repoId),
+          )
+        )
+          return reply
+            .code(400)
+            .send({ error: "Teams sources must belong to a configured work repo" });
+        try {
+          const next = await setTeamsSelection(deps.configPath, body.data.selected, now());
+          config.sources = next.sources;
+          bus.emit("attention");
+          return teamsStatus(config, store);
+        } catch {
+          return reply.code(409).send({ error: "Teams selection could not be saved" });
+        }
+      });
+
+      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards)
       api.get(
         "/notifications",
         async (): Promise<NotificationsView> => notificationsView(config, store, now()),
       );
 
-      // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled; the web side is its own ticket)
+      // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled)
       api.post<{ Params: { key: string } }>("/attention/:key/handled", async (req, reply) => {
         const body = z
           .strictObject({
@@ -2107,6 +2246,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return body.data;
       });
 
+      // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
       api.get("/stream", (_req, reply) => {
         reply.hijack();
         const res = reply.raw;
@@ -2117,11 +2257,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           "x-accel-buffering": "no",
         });
         res.write(": connected\n\n");
-        const unsubscribe = bus.subscribe((topic) => {
+        let machineTimer: ReturnType<typeof setTimeout> | undefined;
+        const send = (topic: Topic) =>
           res.write(`event: changed\ndata: ${JSON.stringify({ topic })}\n\n`);
+        const unsubscribe = bus.subscribe((topic) => {
+          if (topic !== "machine") {
+            send(topic);
+            return;
+          }
+          if (machineTimer !== undefined) return;
+          machineTimer = setTimeout(() => {
+            machineTimer = undefined;
+            send("machine");
+          }, 10_000);
         });
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
+          clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
           streams.delete(end);

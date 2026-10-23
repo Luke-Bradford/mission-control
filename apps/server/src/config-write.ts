@@ -460,3 +460,37 @@ export function addAccount(path: string, account: z.infer<typeof NewAccountBody>
   queue = run.catch(() => undefined);
   return run;
 }
+
+/** Changes only selected Teams sources; the token command is never accepted over HTTP. */
+export function setTeamsSelection(
+  path: string,
+  selected: NonNullable<NonNullable<CcConfig["sources"]>["teams"]>["selected"],
+  now: number,
+): Promise<CcConfig> {
+  const run = queue.then(async () => {
+    const { bytes, text, current } = await readCurrent(path);
+    const doc = parseDocument(text);
+    doc.setIn(["sources", "teams", "selected"], doc.createNode(selected));
+    const newText = doc.toString({ lineWidth: 0 });
+    let next: CcConfig;
+    try {
+      next = parseConfig(newText, "the new config.yaml");
+    } catch {
+      throw new ConfigWriteError("write", "the new config.yaml would not load");
+    }
+    if (
+      !current.sources?.teams ||
+      !isDeepStrictEqual(next, {
+        ...current,
+        sources: { ...current.sources, teams: { ...current.sources.teams, selected } },
+      })
+    )
+      throw new ConfigWriteError("write", "Configure Teams locally before selecting sources");
+    const backup = await backUp(path, bytes, now);
+    await replace(path, newText);
+    await pruneBackups(path, basename(backup)).catch(() => undefined);
+    return next;
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}

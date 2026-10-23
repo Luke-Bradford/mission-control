@@ -14,7 +14,7 @@
  *               a preview started with MC_CREW=1, ignored (and logged) anywhere else
  *   MC_DEBUG   `1`: debug lines on stderr (each backfill tick's run count and duration)
  */
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,7 @@ async function main(): Promise<void> {
   const cliHold = new CliHold();
   const scheduler = createScheduler({
     config,
+    teamsEnabled: !isPreview(port, process.env),
     store,
     bus,
     cliHold,
@@ -388,6 +389,14 @@ async function main(): Promise<void> {
     }
   }
   await app.listen({ host: HOST, port });
+  // newsyslog sends SIGTERM to this pid; launchd reopens the rotated log on restart.
+  if (!preview) {
+    const pidPath = join(dirname(dbPath), "server.pid");
+    writeFileSync(pidPath, String(process.pid), { mode: 0o600 });
+    process.once("exit", () => {
+      unlinkSync(pidPath);
+    });
+  }
   scheduler.start();
   supervisor.start();
   // After the supervisor has taken the crew lock (it does so before returning), so the engine's

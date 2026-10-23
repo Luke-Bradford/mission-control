@@ -16,6 +16,10 @@ export interface MachineDeps {
   vmStat: () => Promise<string>;
   statfs: (p: string) => Promise<{ bavail: number; blocks: number; bsize: number }>;
   ps: () => Promise<string>;
+  /** `ps -axww -o pid=,ppid=,rss=,%cpu=,args=`: the whole process table, for the test run's tree. */
+  psTree: () => Promise<string>;
+  /** The test-lock holder's command; null when the lock is free. */
+  testCommand: string | null;
   prevCpus: CpuInfo[] | null;
   prev: MachineSample | null;
   now: number;
@@ -30,9 +34,10 @@ export interface MachineResult {
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** The real dependencies: no shell, 2 s timeout on each command. */
-export function realMachineDeps(): Omit<MachineDeps, "prevCpus" | "prev" | "now"> {
-  const run = async (cmd: string, args: string[]) =>
-    (await execFileP(cmd, args, { timeout: COMMAND_TIMEOUT_MS, encoding: "utf8" })).stdout;
+export function realMachineDeps(): Omit<MachineDeps, "prevCpus" | "prev" | "now" | "testCommand"> {
+  const run = async (cmd: string, args: string[], maxBuffer?: number) =>
+    (await execFileP(cmd, args, { timeout: COMMAND_TIMEOUT_MS, encoding: "utf8", maxBuffer }))
+      .stdout;
   return {
     cpus,
     totalmem,
@@ -43,6 +48,8 @@ export function realMachineDeps(): Omit<MachineDeps, "prevCpus" | "prev" | "now"
       return { bavail: Number(s.bavail), blocks: Number(s.blocks), bsize: Number(s.bsize) };
     },
     ps: () => run("ps", ["-axo", "pid=,rss=,%cpu=,comm="]),
+    // full command lines can pass the default 1 MB buffer on a busy machine
+    psTree: () => run("ps", ["-axww", "-o", "pid=,ppid=,rss=,%cpu=,args="], 8 * 1024 * 1024),
   };
 }
 
@@ -100,6 +107,66 @@ export function parsePs(text: string): { count: number; rssBytes: number; cpuPct
   return { count, rssBytes: rssKib * 1024, cpuPct: Math.round(cpuPct * 10) / 10 };
 }
 
+export interface PsProc {
+  pid: number;
+  ppid: number;
+  rssKib: number;
+  cpuPct: number;
+  args: string;
+}
+
+/** The rows of `ps -axww -o pid=,ppid=,rss=,%cpu=,args=`; `args` keeps its spaces. */
+export function parsePsTree(text: string): PsProc[] {
+  const procs: PsProc[] = [];
+  for (const line of text.split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s+(.+?)\s*$/.exec(line);
+    if (!m) continue;
+    procs.push({
+      pid: Number(m[1]),
+      ppid: Number(m[2]),
+      rssKib: Number(m[3]),
+      cpuPct: Number(m[4]),
+      args: m[5] as string,
+    });
+  }
+  return procs;
+}
+
+const squash = (s: string): string => s.replace(/\s+/g, " ");
+
+/**
+ * The processes running `command` (args include it followed by whitespace or their end, agents
+ * excluded) and everything under them. RSS is KiB in, bytes out.
+ */
+export function testRunUse(
+  procs: PsProc[],
+  command: string,
+): { count: number; rssBytes: number; cpuPct: number } {
+  const wanted = squash(command);
+  const inTree = new Map<number, PsProc>();
+  const queue = procs.filter((p) => {
+    const args = squash(p.args);
+    const first = args.split(" ")[0] as string;
+    return (
+      ` ${args} `.replace(/["'/]/g, " ").includes(` ${wanted} `) &&
+      !AGENT_COMMANDS.has(first.slice(first.lastIndexOf("/") + 1))
+    );
+  });
+  while (queue.length > 0) {
+    const p = queue.shift() as PsProc;
+    if (inTree.has(p.pid)) continue;
+    inTree.set(p.pid, p);
+    for (const child of procs) if (child.ppid === p.pid) queue.push(child);
+  }
+  let rssKib = 0;
+  let cpuPct = 0;
+  for (const p of inTree.values()) {
+    rssKib += p.rssKib;
+    cpuPct += p.cpuPct;
+  }
+  return { count: inTree.size, rssBytes: rssKib * 1024, cpuPct: Math.round(cpuPct * 10) / 10 };
+}
+
 /**
  * One machine reading. A part that fails keeps its value from `prev` (null if none) and adds a line
  * to `errors`; the first sample has no CPU delta, so its `cpuPct` is null.
@@ -146,6 +213,16 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
     errors.push(`ps: ${msg(e)}`);
   }
 
+  let testRun: MachineSample["testRun"] = null;
+  if (deps.testCommand !== null) {
+    try {
+      testRun = testRunUse(parsePsTree(await deps.psTree()), deps.testCommand);
+    } catch (e) {
+      errors.push(`ps tree: ${msg(e)}`);
+      testRun = deps.prev?.testRun ?? null;
+    }
+  }
+
   return {
     sample: {
       at: deps.now,
@@ -156,6 +233,7 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
       diskFreeBytes,
       diskTotalBytes,
       agents,
+      testRun,
     },
     cpus: cur,
     errors,

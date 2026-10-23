@@ -27,6 +27,7 @@ import {
   type FlightBriefSection,
   type FlightBriefView,
   type FlightPark,
+  type FlightScheduleView,
   type FlightSeatState,
   type FlightState,
   type FlightView,
@@ -51,6 +52,17 @@ import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { cut, seatFree } from "./tools.ts";
+
+interface TeamsDigestState {
+  teamsDigest?: {
+    title: string;
+    matches: {
+      text: string;
+      url: string;
+      arrival: { source: "Teams"; arrivalId: string; version: string; arrivedAt: number };
+    }[];
+  };
+}
 
 /** The Needs-you items that wait on the operator (the owner is the operator's), briefed or not. */
 export function operatorItems(
@@ -171,6 +183,26 @@ export function flightBriefSections(store: Store, sessionId: string | null): Fli
   });
 }
 
+/** Pending actual plans, including overdue work; a due time never proves completion. */
+export function flightScheduleView(
+  config: CcConfig,
+  store: Store,
+  now: number,
+): FlightScheduleView {
+  const session = flightSeat(config)?.session.id ?? null;
+  const entries = (session === null ? [] : store.flightPlans(session))
+    .filter((p) => p.status === "pending")
+    .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id))
+    .map((p) => ({
+      ...p,
+      title: p.label,
+      at: p.dueAt,
+      minutesFromNow: Math.ceil((p.dueAt - now) / 60_000),
+      overdue: p.dueAt < now,
+    }));
+  return { session, entries };
+}
+
 export function flightBriefView(
   config: CcConfig,
   store: Store,
@@ -217,7 +249,13 @@ export function flightBriefView(
       lock.waiting.length > 0
     );
   });
-  return { session, sections: flightBriefSections(store, session), watch, drafts };
+  return {
+    session,
+    sections: flightBriefSections(store, session),
+    watch,
+    drafts,
+    planned: flightScheduleView(config, store, now).entries,
+  };
 }
 
 /** Source records supply identity and text; a notification alone never implies an action. */
@@ -245,6 +283,23 @@ export function flightArrivalSource(
     operation.version !== (source?.revision ?? String(n.updatedAt))
   )
     return null;
+  // Keep Teams triage with the source revision, independent of the capped outcome log.
+  if (
+    operation.source === "Teams" &&
+    n.message?.disposition === "digest" &&
+    operation.outcome !== "Queued"
+  ) {
+    store.upsertNotifications(
+      [
+        {
+          ...n,
+          message: { ...n.message, triagedVersion: operation.version },
+        },
+      ],
+      false,
+      n.firstSeenAt,
+    );
+  }
   return { text: n.title, arrivedAt: n.updatedAt };
 }
 
@@ -289,7 +344,7 @@ export function flightState(i: {
   busy: readonly SeatBusy[];
   now: number;
   hubLogin?: string | null;
-}): FlightState & { discussions: ItemDiscussion[] } {
+}): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
   const discussions = store.pendingDiscussions();
   const tz = config.operator.timezone;
@@ -527,6 +582,51 @@ export function flightState(i: {
     ];
   });
 
+  const outcomes = store.flightIncoming();
+  const digestMatches = store.notifications().flatMap((n) => {
+    const message = n.message;
+    if (
+      n.repoId !== session.repoId ||
+      message?.source.kind !== "teams" ||
+      message.disposition !== "digest" ||
+      message.triagedVersion === message.source.revision ||
+      !n.unread ||
+      (n.handledThrough !== null && n.updatedAt <= n.handledThrough)
+    )
+      return [];
+    // Backfill matches triaged before the durable marker was introduced.
+    if (
+      outcomes.some(
+        (o) =>
+          o.source === "Teams" && o.arrivalId === n.id && o.version === message.source.revision,
+      )
+    ) {
+      store.upsertNotifications(
+        [
+          {
+            ...n,
+            message: { ...message, triagedVersion: message.source.revision },
+          },
+        ],
+        false,
+        n.firstSeenAt,
+      );
+      return [];
+    }
+    return [
+      {
+        text: cut(message.text, FLIGHT_ABOUT_MAX),
+        url: message.url,
+        arrival: {
+          source: "Teams" as const,
+          arrivalId: n.id,
+          version: message.source.revision,
+          arrivedAt: n.updatedAt,
+        },
+      },
+    ];
+  });
+
   const briefed = store.briefs();
   const flightId = flightSeat(config)?.seat.id ?? null;
   const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
@@ -541,9 +641,19 @@ export function flightState(i: {
       ageMin: Math.floor((now - x.at) / 60_000),
     }));
 
+  const planned = flightScheduleView(config, store, now).entries;
   return {
+    ...(planned.length > 0 ? { planned } : {}),
     discussions,
     time: clockHm(now, tz),
+    ...(digestMatches.length > 0
+      ? {
+          teamsDigest: {
+            title: `Teams: ${digestMatches.length} matches to triage`,
+            matches: digestMatches,
+          },
+        }
+      : {}),
     repo: session.repoId,
     lane: config.crew?.lane ?? null,
     hubLogin: i.hubLogin ?? null,
@@ -573,7 +683,9 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 };
 
 /** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
-export function wakeFacts(s: FlightState & { discussions?: ItemDiscussion[] }): string {
+export function wakeFacts(
+  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+): string {
   const startable = s.tickets.filter((t) => t.ready);
   const free =
     startable.length > 0
@@ -581,6 +693,10 @@ export function wakeFacts(s: FlightState & { discussions?: ItemDiscussion[] }): 
       : [];
   return JSON.stringify({
     discussions: s.discussions?.map((t) => [t.id, t.messages.map((m) => m.id)]),
+    planned: (s.planned ?? [])
+      .filter((p) => p.minutesFromNow <= 0)
+      .map((p) => [p.id, p.dueAt, p.kind, p.target, p.label]),
+    teams: s.teamsDigest?.matches.map((m) => [m.arrival.arrivalId, m.arrival.version]) ?? [],
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: free.length > 0 ? startable.map((t) => t.ref) : [],
@@ -618,9 +734,13 @@ const flightParkKind = (kind: string): boolean =>
   kind === RULING_PARK || (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
-export function pending(s: FlightState & { discussions?: ItemDiscussion[] }): boolean {
+export function pending(
+  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+): boolean {
   return (
+    (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
     (s.discussions?.length ?? 0) > 0 ||
+    (s.teamsDigest?.matches.length ?? 0) > 0 ||
     s.questions.length > 0 ||
     s.items.length > 0 ||
     releasable(s).length > 0 ||

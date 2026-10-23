@@ -19,6 +19,7 @@ import { interruptSeat, seatError } from "../agent/seat.ts";
 import { apiPost } from "../api.ts";
 import { isOperatorItem, itemOwner, ownerLabel } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
+import { Expandable } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -51,7 +52,17 @@ export function needText(i: AttentionItem, now: number): string {
 /** The server words a PR item `PR #n · You: …`; the number becomes a link to the PR's repo. */
 const PR_TEXT = /^PR #(\d+)( · .*)$/s;
 
-function NeedText({ item, now, lock }: { item: AttentionItem; now: number; lock?: TestLockState }) {
+function NeedText({
+  item,
+  now,
+  lock,
+  full = false,
+}: {
+  item: AttentionItem;
+  now: number;
+  lock?: TestLockState;
+  full?: boolean;
+}) {
   const board = useResource<BoardItem[]>(
     item.kind === "pr" && item.repoId !== null ? RESOURCES.boards(item.repoId) : null,
   ).data;
@@ -72,7 +83,7 @@ function NeedText({ item, now, lock }: { item: AttentionItem; now: number; lock?
         <RepoRef repoId={ticket.repoId} number={Number(pr[1])} kind="pr" url={item.url} bare />
         {cutText(
           ` · ${ticket.title}: waiting ${dur(Math.max(0, now - item.at))} for you to ${pr[2]}`,
-          NEED_TEXT_MAX - `${item.ticket} · PR #${pr[1]}`.length,
+          full ? Infinity : NEED_TEXT_MAX - `${item.ticket} · PR #${pr[1]}`.length,
         )}
       </span>
     );
@@ -82,14 +93,17 @@ function NeedText({ item, now, lock }: { item: AttentionItem; now: number; lock?
   if (!m || item.repoId === null) {
     return (
       <span>
-        <MarkdownInline text={text} max={NEED_TEXT_MAX} />
+        <MarkdownInline text={text} max={full ? undefined : NEED_TEXT_MAX} />
       </span>
     );
   }
   return (
     <span>
       <RepoRef repoId={item.repoId} number={Number(m[1])} kind="pr" url={item.url} />
-      <MarkdownInline text={m[2] ?? ""} max={NEED_TEXT_MAX - `PR #${m[1]}`.length} />
+      <MarkdownInline
+        text={m[2] ?? ""}
+        max={full ? undefined : NEED_TEXT_MAX - `PR #${m[1]}`.length}
+      />
     </span>
   );
 }
@@ -338,7 +352,9 @@ export function NeedsList({
               <div>
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
                 <span className="xs muted">{ownerLabel(itemOwner(i))}</span>{" "}
-                <NeedText item={i} now={now} lock={lock} />
+                <Expandable lines={2}>
+                  <NeedText item={i} now={now} lock={lock} full />
+                </Expandable>
               </div>
             </div>
           ))}

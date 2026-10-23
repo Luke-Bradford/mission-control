@@ -74,6 +74,7 @@ import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
+import * as views from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 const HOUR = 3600e3;
@@ -456,15 +457,19 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/drafts/history"],
   ["POST", "/api/drafts/guido-1/post"],
   ["POST", "/api/drafts/guido-1/discard"],
+  ["POST", "/api/drafts/guido-1/copied"],
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/flight/incoming"],
+  ["GET", "/api/flight/schedule"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["GET", "/api/accounts/status"],
+  ["GET", "/api/sources/teams"],
+  ["POST", "/api/sources/teams/selection", { selected: [] }],
   ["POST", "/api/accounts/claude-main/check"],
   ["POST", "/api/accounts", { name: "another", provider: "claude" }],
   ["POST", "/api/config/reload"],
@@ -968,6 +973,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(202);
         continue;
       }
+      if (url === "/api/sources/teams/selection") {
+        // the fixture has no config path: a valid selection can't be written
+        expect(r.statusCode, `${method} ${url}`).toBe(409);
+        continue;
+      }
       if (url === "/api/accounts" && method === "POST") {
         expect(r.statusCode).toBe(409);
         expect(r.json().error).toContain("one account per provider");
@@ -1296,43 +1306,29 @@ describe("agent files", () => {
     await a.close();
   });
 
-  it("a 502 is logged at warn with git's command and exit code, nothing a path could reveal", async () => {
+  it.each([false, true])("logs original files errors, diff=%s", async (diff) => {
     mkdirSync(join(dir, "wt-ta"));
-    const a = await withFiles(async () => {
-      throw new GitFailed(`fatal: not a git repository: ${dir}`, {
-        command: "diff",
-        exitCode: 128,
-      });
+    const error = new Error("original files failure");
+    const fail = async () => {
+      throw error;
+    };
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      changedFiles: fail,
+      fileDiff: fail,
+      logger: { stream: { write: (s: string) => void logs.push(s) } },
     });
-    await a.inject({ method: "GET", url: "/api/agents/shop-app-ta/files" });
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(warn).toMatchObject({ command: "diff", exitCode: 128 });
-    expect(logs.join("")).not.toContain(dir);
-    expect(logs.join("")).not.toContain("not a git repository");
-    await a.close();
-  });
-
-  it("a timed-out git is logged with its signal", async () => {
-    mkdirSync(join(dir, "wt-ta"));
-    const a = await withFiles(async () => {
-      throw new GitFailed("timed out", { command: "diff", exitCode: null, signal: "SIGTERM" });
+    logs.length = 0;
+    const response = await a.inject({
+      method: "GET",
+      url: `/api/agents/shop-app-ta/files${diff ? "/diff?path=a.ts" : ""}`,
     });
-    await a.inject({ method: "GET", url: "/api/agents/shop-app-ta/files" });
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(warn).toMatchObject({ command: "diff", exitCode: null, signal: "SIGTERM" });
-    await a.close();
-  });
-
-  it("an error that is not GitFailed is logged without a command or code", async () => {
-    mkdirSync(join(dir, "wt-ta"));
-    const a = await withFiles(async () => {
-      throw new Error(`boom at ${dir}`);
-    });
-    const r = await a.inject({ method: "GET", url: "/api/agents/shop-app-ta/files" });
-    expect(r.statusCode).toBe(502);
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(warn).toMatchObject({ command: null, exitCode: null });
-    expect(logs.join("")).not.toContain(dir);
+    expect(response.statusCode).toBe(502);
+    const completed = logs.map((s) => JSON.parse(s)).filter((s) => s.msg === "request completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0].err).toMatchObject({ message: error.message, stack: error.stack });
     await a.close();
   });
 
@@ -1403,7 +1399,7 @@ describe("agent file diff", () => {
     await a.close();
   });
 
-  it("git failing is 502 with fixed text; git's message is logged at warn without the worktree", async () => {
+  it("git failing is 502 with fixed text and its original error is logged", async () => {
     mkdirSync(join(dir, "wt-ta"));
     const a = await withDiff(async () => {
       throw new GitFailed("fatal: bad revision 'origin/HEAD...HEAD'");
@@ -1411,8 +1407,11 @@ describe("agent file diff", () => {
     const r = await a.inject({ method: "GET", url: url("a.ts") });
     expect(r.statusCode).toBe(502);
     expect(r.json()).toEqual({ error: "git failed" });
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(JSON.stringify(warn)).toContain("fatal: bad revision");
+    const completed = logs.map((l) => JSON.parse(l)).find((l) => l.msg === "request completed");
+    expect(completed.err).toMatchObject({
+      message: "fatal: bad revision 'origin/HEAD...HEAD'",
+      stack: expect.stringContaining("GitFailed"),
+    });
     expect(logs.join("")).not.toContain(join(dir, "wt-ta"));
     await a.close();
   });
@@ -2575,6 +2574,36 @@ describe("boards, escalations, health", () => {
 });
 
 describe("activity", () => {
+  it("takes an exclusive since timestamp and an optional limit", async () => {
+    store.upsertRun(run({ startedAt: NOW - 3000, endedAt: NOW - 1000, status: "ok" }));
+    const delta = (await get(`/api/activity?since=${NOW - 3000}`)).json() as ActivityEvent[];
+    expect(delta.map((r) => r.at)).toEqual([NOW - 1000]);
+    expect((await get("/api/activity?limit=1")).json()).toHaveLength(1);
+    expect((await get(`/api/activity?since=${NOW}`)).json()).toEqual([]);
+    for (const query of ["since=no", "since=-1", "since=1.5", "limit=0", "limit=no"]) {
+      expect((await get(`/api/activity?${query}`)).statusCode).toBe(400);
+    }
+  });
+
+  it("reuses slow responses until a topic changes or ten seconds pass", async () => {
+    for (const path of ["/api/telemetry", "/api/attention", "/api/config"]) {
+      const spy =
+        path === "/api/config" ? vi.spyOn(views, "configView") : vi.spyOn(store, "runsOverlapping");
+      await get(path);
+      spy.mockClear();
+      await get(path);
+      expect(spy, path).not.toHaveBeenCalled();
+      bus.emit("agents");
+      await get(path);
+      expect(spy, path).toHaveBeenCalled();
+      spy.mockClear();
+      clock += 10_000;
+      await get(path);
+      expect(spy, path).toHaveBeenCalled();
+      spy.mockRestore();
+    }
+  });
+
   it("lists run starts/ends, new escalations and failing collectors from the last 24h, newest first", async () => {
     store.upsertRun(
       run({
@@ -3223,6 +3252,33 @@ describe("SSE stream", () => {
     expect(bus.size).toBe(0);
   });
 
+  it("batches machine pushes to one event per ten seconds and cancels on close", async () => {
+    const s = await open();
+    await s.until(": connected");
+    const write = vi.spyOn(s.res.raw.res, "write");
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < 30; i++) bus.emit("machine");
+      expect(
+        write.mock.calls.filter(([chunk]) => String(chunk).includes('"machine"')),
+      ).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(
+        write.mock.calls.filter(([chunk]) => String(chunk).includes('"machine"')),
+      ).toHaveLength(1);
+      bus.emit("machine");
+      bus.emit("boards");
+      expect(write.mock.calls.some(([chunk]) => String(chunk).includes('"boards"'))).toBe(true);
+      s.res.raw.res.emit("close");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(
+        write.mock.calls.filter(([chunk]) => String(chunk).includes('"machine"')),
+      ).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("app.close() ends open streams", async () => {
     const s = await open();
     await s.until(": connected");
@@ -3520,6 +3576,70 @@ describe("crew routes", () => {
       expect(r.statusCode).toBe(400);
       expect(r.json()).toEqual({ error: "issue: an issue number is required" });
       expect(supervisorCalls).toEqual([]);
+    });
+  });
+
+  it("returns an empty schedule without FLIGHT", async () => {
+    const res = await get("/api/flight/schedule");
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ session: null, entries: [] });
+  });
+
+  it("serves only actual pending plans ordered by due time, including later and overdue work", async () => {
+    config.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    const session = config.crew?.sessions[0]?.id ?? "";
+    const at = clock;
+    store.setFlightPlans(
+      session,
+      {
+        upsert: [
+          {
+            id: "later",
+            dueAt: at + 300 * 60_000,
+            kind: "brief",
+            target: "crew",
+            label: "Standup brief ready",
+            status: "pending",
+          },
+          {
+            id: "overdue",
+            dueAt: at - 60_000,
+            kind: "report",
+            target: "missing-seat",
+            label: "Example report",
+            status: "pending",
+          },
+          {
+            id: "done",
+            dueAt: at,
+            kind: "report",
+            target: "crew",
+            label: "Read report",
+            status: "completed",
+            detail: "Read the report",
+          },
+        ],
+      },
+      at,
+    );
+    const body = (await get("/api/flight/schedule")).json();
+    expect(body.session).toBe(session);
+    expect(body.entries.map((e: { id: string }) => e.id)).toEqual(["overdue", "later"]);
+    expect(body.entries[0]).toMatchObject({
+      label: "Example report",
+      overdue: true,
+      minutesFromNow: -1,
+    });
+    expect(body.entries[1]).toMatchObject({
+      label: "Standup brief ready",
+      overdue: false,
+      minutesFromNow: 300,
     });
   });
 
@@ -4559,3 +4679,108 @@ it("bounds uncached telemetry reads, filters first and persists immutable counts
     read.mockRestore();
   }
 });
+
+it("does not log successful GET requests", async () => {
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/crew", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(200);
+  expect(logs).toEqual([]);
+});
+
+it("logs one response line for a 500", async () => {
+  vi.spyOn(store, "getSetting").mockImplementation(() => {
+    throw new Error("test failure");
+  });
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/settings/away", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(500);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0])).toMatchObject({ res: { statusCode: 500 } });
+  expect(JSON.parse(logs[0]).err).toMatchObject({
+    message: "test failure",
+    stack: expect.stringContaining("Error: test failure"),
+  });
+});
+
+it("logs a 4xx response once", async () => {
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/missing", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(404);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0])).toMatchObject({ res: { statusCode: 404 } });
+});
+
+it("logs a successful request taking over one second", async () => {
+  vi.spyOn(store, "getSetting").mockImplementationOnce(() => {
+    const until = performance.now() + 1010;
+    while (performance.now() < until) {
+      /* a slow store read */
+    }
+    return null;
+  });
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/settings/away", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(200);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0]).responseTime).toBeGreaterThan(1000);
+});
+
+it("logs the error message and stack of an explicit 5xx response", async () => {
+  updaterCheckError = new UpdateError(502, "Could not reach origin.");
+  logs.length = 0;
+  const response = await post("/api/version/check");
+  expect(response.statusCode).toBe(502);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0]).err).toMatchObject({
+    message: "Could not reach origin.",
+    stack: expect.stringContaining("Could not reach origin."),
+  });
+});
+
+it("keeps claim keys and the review round for a retained run past seven days", async () => {
+  const retained = run({
+    id: "retained-loop",
+    endedAt: NOW - 8 * 86_400_000,
+    loop: { ...NEW_LOOP },
+  });
+  store.upsertRun(retained);
+  const key = `fix:${retained.id}:0:1`;
+  store.claimLine(key, {
+    runId: retained.id,
+    seatId: "flight-1",
+    origin: "engine",
+    text: "fix",
+    at: 1,
+  });
+  await store.pruneHistory(NOW);
+  expect(store.claimedKeys(retained.id)).toEqual({ [key]: 1 });
+  expect((await get(`/api/runs/${retained.id}/loop`)).json().round).toBe(2);
+});
+
+it.each([false, true])(
+  "logs the original caught exception with generic response: %s",
+  async (generic) => {
+    const error = generic
+      ? new Error("original private failure")
+      : new UpdateError(502, "Could not reach origin.");
+    error.stack = "Error: original failure\n    at originalThrowSite (updater.ts:123:4)";
+    updaterCheckError = error;
+    logs.length = 0;
+    const response = await post("/api/version/check");
+    expect(response.statusCode).toBe(generic ? 500 : 502);
+    expect(response.json().error).toBe(generic ? CHECK_FAILED : error.message);
+    const completed = logs
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.msg === "request completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0].err).toMatchObject({ message: error.message, stack: error.stack });
+  },
+);

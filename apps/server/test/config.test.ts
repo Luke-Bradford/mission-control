@@ -101,6 +101,13 @@ describe("loadConfig", () => {
     expect(c.operator).toEqual({ id: "operator", timezone: "UTC" });
   });
 
+  it("discards the legacy password_hash without parsing its value", () => {
+    const legacy = tmpConfig((y) =>
+      y.replace("  id: operator\n", "  id: operator\n  password_hash: { obsolete: true }\n"),
+    );
+    expect(loadConfig(legacy).operator).toEqual({ id: "operator", timezone: "UTC" });
+  });
+
   it("reads updates.hub: off by default, auto when set, nothing else", () => {
     expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
     const auto = tmpConfig((y) => `${y}\nupdates:\n  hub: auto\n`);

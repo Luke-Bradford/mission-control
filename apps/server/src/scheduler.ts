@@ -62,6 +62,7 @@ import { nextBackoff, RateLimits } from "./collectors/rate-limit.ts";
 import { defaultIsAlive, type LiveSession, readSessions } from "./collectors/sessions.ts";
 import { collectStudioLoop, newStudioState } from "./collectors/studio-loop.ts";
 import { collectTaLoop, newTaState } from "./collectors/ta-loop.ts";
+import { collectTeams } from "./collectors/teams.ts";
 import { sampleClaude } from "./collectors/usage-claude.ts";
 import { sampleCodex } from "./collectors/usage-codex.ts";
 import { WINDOWS } from "./collectors/usage-common.ts";
@@ -73,12 +74,14 @@ import {
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
+import { followPrs } from "./github-board.ts";
 import { attentionItems, crew, NO_LOCK } from "./hud.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
+  | "teams"
   | "ta"
   | "studio"
   | "sessions"
@@ -95,6 +98,7 @@ export type Job =
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
 export const JOBS: readonly Job[] = [
   "sessions",
+  "teams",
   "ta",
   "studio",
   "github",
@@ -185,6 +189,8 @@ export interface Collectors {
   github: typeof collectGithub;
   /** Re-reads only the PRs the engine waits on, between board reads. */
   githubPrs: typeof collectWaitedPrs;
+  /** Moves each ticket's card to follow its PRs, after a board read. */
+  followPrs: typeof followPrs;
   /** The REST client for the operator's notifications (read-only, api.github.com only). */
   makeRest: (token: string) => Rest;
   notifications: typeof collectNotifications;
@@ -203,11 +209,13 @@ export interface Collectors {
     prevCpus: CpuInfo[] | null,
     prev: MachineSample | null,
     now: number,
+    testCommand: string | null,
   ) => Promise<MachineResult>;
 }
 
 export interface SchedulerDeps {
   config: CcConfig;
+  teamsEnabled?: boolean;
   store: Store;
   bus: ChangeBus;
   now?: () => number;
@@ -267,6 +275,7 @@ export function realCollectors(config: CcConfig): Collectors {
     makeGql: (token, rates) => makeGql(token, fetch, rates),
     github: collectGithub,
     githubPrs: collectWaitedPrs,
+    followPrs,
     makeRest: (token) => makeRest(token),
     notifications: collectNotifications,
     prSweep: sweepPullRequests,
@@ -291,7 +300,8 @@ export function realCollectors(config: CcConfig): Collectors {
         { appServer: () => appServer(), latestRollout: () => latestRollout(), onError },
         now,
       ),
-    machine: (prevCpus, prev, now) => sampleMachine({ ...realMachineDeps(), prevCpus, prev, now }),
+    machine: (prevCpus, prev, now, testCommand) =>
+      sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand }),
   };
 }
 
@@ -597,6 +607,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             const r = await c.github(repo, store, client, now(), now);
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
+            // Whoever opened a ticket's PR, its card follows (the engine moves only its runs').
+            changed.boards ||= await c.followPrs({ gql: client, store, config, now }, repo.id);
           });
           const error = store.status().find((s) => s.collector === collector)?.error;
           if (error?.includes(MISSING_SCOPE_PREFIX)) {
@@ -717,6 +729,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       emit("limits", "health");
     },
     maintenance: async () => {
+      await store.pruneHistory(now());
       store.pruneDigests(now() - DIGEST_RETENTION_MS);
       store.pruneAgentEvents(now() - AGENT_EVENT_RETENTION_MS);
     },
@@ -735,6 +748,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         }
       }
       if (boards) emit("boards");
+    },
+    teams: async () => {
+      if (deps.teamsEnabled === false) return;
+      if ((await collectTeams(config, store, now())).changed) {
+        emit("attention");
+        emit("flight");
+      }
     },
     flow: async () => {
       if (config.repos.length === 0) return;
@@ -789,7 +809,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       }),
     machine: async () => {
       const at = now();
-      const r = await c.machine(machineCpus, latestMachine, at);
+      const r = await c.machine(
+        machineCpus,
+        latestMachine,
+        at,
+        deps.lockState?.().holder?.command ?? null,
+      );
       machineCpus = r.cpus;
       latestMachine = r.sample;
       emit("machine");
@@ -825,6 +850,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   };
 
   const intervals: Record<Job, number> = {
+    teams: 60_000,
     ta: LOOP_INTERVAL_MS,
     studio: LOOP_INTERVAL_MS,
     sessions: LOOP_INTERVAL_MS,
