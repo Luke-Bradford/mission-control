@@ -2713,6 +2713,23 @@ describe("read_ci_log", () => {
     );
   });
 
+  it("skips a failed non-Actions check for a later failed Actions job", async () => {
+    const ext = {
+      __typename: "StatusContext",
+      context: "ci/ext",
+      state: "FAILURE",
+      targetUrl: "https://ci.example/1",
+    };
+    ghImpl = async (a) =>
+      a[0] === "pr" ? rollup(ext, checkRun("test", "FAILURE", 22)) : ok("boom");
+    expect((await call("read_ci_log", { pr: 9 })).text).toBe(
+      ciLogText("test", "22", ["ci/ext"], "boom"),
+    );
+    expect(ghCalls[1]).toContain("--job=22");
+    ghImpl = async () => rollup(ext);
+    expect(await call("read_ci_log", { pr: 9 })).toEqual(refused(ciNotActionsText("ci/ext")));
+  });
+
   it("says when nothing failed or the log is empty", async () => {
     ghImpl = async () => rollup(checkRun("lint", "SUCCESS"));
     expect(await call("read_ci_log", { pr: 9 })).toEqual(refused(ciNoFailedText(9)));
