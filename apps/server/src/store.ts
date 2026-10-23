@@ -33,6 +33,7 @@ import {
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
+  type ReplyDraft,
   type RepoId,
   type ReviewFinding,
   type ReviewRequest,
@@ -55,6 +56,10 @@ import {
 } from "@mc/core";
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
+  created_at INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending'
+);
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, repo_id TEXT NOT NULL, seq INTEGER NOT NULL,
   started_at INTEGER NOT NULL, ended_at INTEGER, status TEXT NOT NULL, session_id TEXT,
@@ -2817,6 +2822,30 @@ export class Store {
 
   ackCrewError(id: number): void {
     this.db.prepare("UPDATE crew_errors SET acked = 1 WHERE id = ?").run(id);
+  }
+
+  addDraft(target: string, kind: ReplyDraft["kind"], text: string, at: number): number {
+    return Number(
+      this.db
+        .prepare("INSERT INTO drafts (target, kind, text, created_at) VALUES (?, ?, ?, ?)")
+        .run(target, kind, text, at).lastInsertRowid,
+    );
+  }
+
+  drafts(): ReplyDraft[] {
+    return this.db
+      .prepare(
+        "SELECT id, target, kind, text, created_at AS createdAt, state FROM drafts WHERE state = 'pending' ORDER BY created_at, id",
+      )
+      .all() as unknown as ReplyDraft[];
+  }
+
+  finishDraft(id: number, state: "posted" | "discarded", text?: string): void {
+    if (state === "discarded") this.db.prepare("DELETE FROM drafts WHERE id = ?").run(id);
+    else
+      this.db
+        .prepare("UPDATE drafts SET state = ?, text = COALESCE(?, text) WHERE id = ?")
+        .run(state, text ?? null, id);
   }
 
   /** Records one of FLIGHT's decisions; returns its id. */

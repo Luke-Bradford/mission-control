@@ -1,4 +1,4 @@
-import { readdir, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   ACK_BATCH_MAX,
@@ -15,6 +15,7 @@ import {
   type CrewMode,
   type CrewSessionFolders,
   DEFAULT_AWAY,
+  DRAFT_BAD_TARGET,
   type FileDiff,
   fixesSent,
   fullAt5h,
@@ -37,6 +38,7 @@ import {
   LOOPBACK_HOST,
   lockBusyText,
   type MachineSample,
+  MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
   NEW_LOOP,
@@ -102,15 +104,17 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import type { TestLock } from "./guard/lock.ts";
 import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
 import { loopTries } from "./loophistory.ts";
+import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
+import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
 import { profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
-import type { Store } from "./store.ts";
+import { crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { median, telemetry } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
@@ -167,6 +171,8 @@ export const LOG_REDACT = {
 
 export interface AppDeps {
   config: CcConfig;
+  gh?: GhRunner;
+  knownSecrets?: McToolsDeps["knownSecrets"];
   store: Store;
   bus: ChangeBus;
   /** The latest machine sample (for `/api/machine`); default: none yet. */
@@ -1235,6 +1241,73 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
+      // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
+      api.get("/drafts", async () => store.drafts());
+      const postingDrafts = new Set<number>();
+      // Reader: apps/web/src/flight/Drafts.tsx (operator approval only)
+      api.post<{ Params: { id: string } }>("/drafts/:id/post", async (req, reply) => {
+        const id = Number(req.params.id);
+        const draft = store.drafts().find((d) => d.id === id);
+        if (!draft) return reply.code(404).send({ error: "No pending draft." });
+        if (postingDrafts.has(id)) return reply.code(409).send({ error: "Draft is being posted." });
+        const parsed = z
+          .strictObject({ text: z.string().trim().min(1).max(MC_TEXT_MAX).optional() })
+          .safeParse(req.body);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid draft text." });
+        const match = /^([^#]+)#([1-9][0-9]*)$/.exec(draft.target);
+        const repo = config.repos.find((r) => r.id === match?.[1]);
+        const n = Number(match?.[2]);
+        if (
+          !repo ||
+          !Number.isSafeInteger(n) ||
+          n > 2 ** 31 - 1 ||
+          (draft.kind !== "issue" && draft.kind !== "pr")
+        ) {
+          return reply.code(400).send({ error: DRAFT_BAD_TARGET });
+        }
+        const body = parsed.data.text ?? draft.text;
+        postingDrafts.add(id);
+        const file = crewPrBodyPath(store.path);
+        try {
+          const known = await readKnown(
+            { knownSecrets: deps.knownSecrets ?? (async () => [await githubToken()]) },
+            "post_draft",
+          );
+          const problem = prTextProblem(body, {
+            repo: repo.github,
+            issue: n,
+            known,
+            label: "draft",
+            unclosed: true,
+            allowOwnRepoRefs: true,
+          });
+          if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
+          await writeFile(file, body, { mode: 0o600, flag: "wx" });
+          const result = await (deps.gh ?? createGh())(
+            [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
+            { cwd: crewDir(store.path) },
+          );
+          if (result.code !== 0)
+            return reply.code(502).send({ error: "GitHub refused the comment." });
+          store.finishDraft(id, "posted", body);
+          bus.emit("flight");
+          return { ok: true };
+        } finally {
+          postingDrafts.delete(id);
+          await rm(file, { force: true });
+        }
+      });
+      // Reader: apps/web/src/flight/Drafts.tsx
+      api.post<{ Params: { id: string } }>("/drafts/:id/discard", async (req, reply) => {
+        const id = Number(req.params.id);
+        if (postingDrafts.has(id)) return reply.code(409).send({ error: "Draft is being posted." });
+        if (!store.drafts().some((d) => d.id === id))
+          return reply.code(404).send({ error: "No pending draft." });
+        store.finishDraft(id, "discarded");
+        bus.emit("flight");
+        return { ok: true };
+      });
+
       // The operator ends a run set aside in review, without waking it.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the End action on a set-aside run; the web part follows)
       api.post<{ Params: { id: string } }>("/runs/:id/end", async (req, reply) => {

@@ -48,7 +48,10 @@ import {
   createLabelsText,
   createTextText,
   DEFAULT_PROFILES,
+  DRAFT_BAD_TARGET,
+  DRAFT_REPLY_DESCRIPTION,
   dependsOn,
+  draftedReplyText,
   duplicateLabelText,
   duplicateTitleText,
   END_UNREADABLE_TEXT,
@@ -1895,6 +1898,40 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: updateBrief,
+    },
+    {
+      name: MC_TOOL_NAMES.draftReply,
+      description: DRAFT_REPLY_DESCRIPTION,
+      inputSchema: objectSchema(
+        {
+          target: { type: "string" },
+          kind: { type: "string", enum: ["issue", "pr"] },
+          text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+        },
+        ["target", "kind", "text"],
+      ),
+      modes: [],
+      grantable: ["read-only"],
+      call: async (ctx, args) => {
+        const c = flightCall(
+          deps,
+          ctx,
+          z.strictObject({
+            target: z.string().max(200),
+            kind: z.enum(["issue", "pr"]),
+            text: text(MC_TEXT_MAX),
+          }),
+          args,
+        );
+        if (!c.ok) return c.result;
+        const { target, kind, text: body } = c.args;
+        const match = /^([^#]+)#([1-9][0-9]*)$/.exec(target);
+        if (!match || Number(match[2]) > MAX_ISSUE || !config.repos.some((r) => r.id === match[1]))
+          return fail(DRAFT_BAD_TARGET);
+        const id = store.addDraft(target, kind, body, now());
+        bus.emit("flight");
+        return { text: draftedReplyText(id) };
+      },
     },
   ];
 }
