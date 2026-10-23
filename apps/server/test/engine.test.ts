@@ -252,6 +252,8 @@ interface Harness {
   excerptTexts: string[];
   /** The shas whose failed runs were re-run, and what rerunFailed answers. */
   reruns: string[];
+  /** Runs inside rerunFailed (a poll landing mid-call). */
+  duringRerun: (() => void) | null;
   rerunRuns: { id: number; name: string }[] | null;
   busy: boolean;
   facts: SeatFacts | null;
@@ -318,6 +320,7 @@ function harness(): Harness {
     openCalls: 0,
     excerptTexts: [],
     reruns: [],
+    duringRerun: null,
     rerunRuns: [{ id: 77, name: "CI" }],
     busy: false,
     facts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
@@ -376,6 +379,7 @@ function harness(): Harness {
         },
         async rerunFailed(_repo, sha) {
           x.reruns.push(sha);
+          x.duringRerun?.();
           return x.rerunRuns;
         },
         async hardRuleTouches() {
@@ -697,6 +701,20 @@ describe("CI and review", () => {
     expect(h.excerpts).toEqual([]);
     expect(loopOf()).toMatchObject({ phase: "ci", ciFails: 0, rerun: { sha: SHA } });
     expect(loopTexts()).toContain("CI failed on aaaaaaa; re-ran CI");
+  });
+
+  it("a poll that lands while gh re-runs still shows the old failure and is waited out", async () => {
+    await inCi();
+    h.duringRerun = () => {
+      clock += 500;
+      setPr({ ci: "failing" });
+      clock += 500;
+    };
+    setPr({ ci: "failing" });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent).toEqual([]);
+    expect(loopOf().ciFails).toBe(0);
   });
 
   it("a pass on the re-run is recorded as a flake, owned by the controller, and the run goes on", async () => {

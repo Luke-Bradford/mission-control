@@ -444,6 +444,25 @@ describe("state step", () => {
       });
     });
 
+    it("a flake note is never cleared by the loop, at done or after a later sha is re-run", () => {
+      const key = `flake:r1:${SHA}`;
+      const done = reconcile(
+        snap(
+          { openNotes: [key], pr: pr({ ci: "passing" }) },
+          {
+            phase: "done",
+            cardFor: "done:0",
+            rerun: { sha: SHA, at: NOW - 1000, runs: [], flaked: true },
+          },
+        ),
+      );
+      expect(done.actions).not.toContainEqual({ kind: "clear-note", key });
+      const later = reconcile(
+        inCi({ openNotes: [key], pr: pr({ ci: "failing" }) }, { rerun: reran(SHA2) }),
+      );
+      expect(later.actions).not.toContainEqual({ kind: "clear-note", key });
+    });
+
     it("a pass with no failure before is no flake", () => {
       const r = reconcile(inCi({ pr: pr({ ci: "passing" }) }));
       expect(r.loop.rerun ?? null).toBeNull();

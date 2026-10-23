@@ -993,6 +993,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     ) {
       continue;
     }
+    // a flake record stays for the controller to dismiss
+    if (isFlakeNoteKey(key)) continue;
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {
