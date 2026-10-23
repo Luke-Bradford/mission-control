@@ -27,6 +27,7 @@ import {
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
   guardDenyOutput,
+  HOOK_RETRY_ENV,
   NEW_LOOP,
   NOT_ASIDE,
   notOnBoardText,
@@ -2585,6 +2586,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       encoding: "utf8",
       timeout: 20_000,
       killSignal: "SIGKILL",
+      env: { ...process.env, [HOOK_RETRY_ENV]: "0" },
     });
     expect(r.status).toBe(2);
     expect(r.stdout).toBe(guardDenyOutput(GUARD_UNREACHABLE_TEXT));
