@@ -2,6 +2,7 @@ import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -624,6 +625,19 @@ describe("add a repo (POST /api/repos)", () => {
     expect(r.json()).toEqual({ error: "config writes are not available on this server" });
     unchanged();
     await a.close();
+  });
+
+  it("500 when the write fails; logs the reason", async () => {
+    chmodSync(dir, 0o500);
+    try {
+      const r = await postBody("/api/repos", NEW_REPO);
+      expect(r.statusCode).toBe(500);
+      expect(r.json()).toEqual({ error: "could not write config.yaml" });
+      expect(logs.join("")).toContain("config write failed");
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+    unchanged();
   });
 
   it("409 when the current file does not load; says so, never the contents", async () => {
