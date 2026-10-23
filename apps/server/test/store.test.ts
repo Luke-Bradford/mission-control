@@ -8,6 +8,7 @@ import type {
   FlightDecision,
   GuardHit,
   MachineSample,
+  Profile,
   ReviewFinding,
   ReviewRequest,
   Run,
@@ -15,7 +16,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
-import { NEW_LOOP } from "@mc/core";
+import { COMMS_TEXT_MAX, DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -1135,6 +1136,27 @@ describe("Store", () => {
   });
 });
 
+describe("FLIGHT's brief", () => {
+  it("keeps the FLIGHT brief across a reopen", () => {
+    const path = join(dir, "brief.sqlite");
+    const first = new Store(path);
+    const r = {
+      sessionId: "s1",
+      section: "lessons" as const,
+      text: "Read the log.",
+      updatedAt: 1,
+      updatedBy: "flight-1",
+    };
+    first.setFlightBriefSection(r);
+    first.setFlightBriefSection({ ...r, text: "Read the log first.", updatedAt: 2 });
+    first.close();
+    const again = new Store(path);
+    expect(again.flightBrief("s1")).toEqual([{ ...r, text: "Read the log first.", updatedAt: 2 }]);
+    expect(again.flightBrief("s2")).toEqual([]);
+    again.close();
+  });
+});
+
 describe("seat sessions", () => {
   const seat = (over: Partial<SeatSessionRow> = {}): SeatSessionRow => ({
     seatId: "guido",
@@ -1479,6 +1501,32 @@ describe("reviews", () => {
     expect(store.run("plain")?.reviewId).toBeNull();
   });
 
+  it("upsertRun stores a new row's profile and hash and never rewrites them", () => {
+    const profile = { ...DEFAULT_PROFILES[0], tries: 3 } as Profile;
+    const chosen = { profile, route: { by: "size", size: "M" } as const, hash: "h1" };
+    store.upsertRun(run({ id: "p1", profile: chosen }));
+    store.upsertRun(run({ id: "p1", summary: "later", profile: { ...chosen, hash: "h2" } }));
+    store.upsertRun(run({ id: "p1", summary: "again" }));
+    const got = store.run("p1");
+    expect(got?.profile).toEqual(chosen);
+    expect(got?.summary).toBe("again");
+    store.upsertRun(run({ id: "p2" }));
+    expect(store.run("p2")).not.toHaveProperty("profile");
+  });
+
+  it("keeps one override per ticket, the latest winning", () => {
+    expect(store.profileOverride("r", 7)).toBeNull();
+    store.setProfileOverride("r", 7, { profile: "feature", reason: "a", by: "planner" }, 10);
+    store.setProfileOverride("r", 7, { profile: "bugfix", reason: "b", by: "FLIGHT" }, 20);
+    store.setProfileOverride("r", 8, { profile: "research", reason: "c", by: "FLIGHT" }, 30);
+    expect(store.profileOverride("r", 7)).toEqual({
+      profile: "bugfix",
+      reason: "b",
+      by: "FLIGHT",
+    });
+    expect(store.profileOverride("r", 8)?.profile).toBe("research");
+  });
+
   it("evidenceNotes lists a run's notes in order", () => {
     store.addEvidence("r1", "one", 1);
     store.addEvidence("r1", "two", 2);
@@ -1624,5 +1672,47 @@ describe("flight decisions", () => {
     expect(count({ ref: "mc#6" })).toBe(1);
     expect(count({ targetRunId: "r1" })).toBe(1);
     expect(count({ kinds: [] })).toBe(0);
+  });
+});
+
+describe("comms", () => {
+  const row = (text: string, at = 100) => ({
+    at,
+    from: "CAPCOM",
+    to: "guido-1",
+    ticket: null,
+    text,
+  });
+
+  it("keeps a text of COMMS_TEXT_MAX characters whole", () => {
+    const text = "x".repeat(COMMS_TEXT_MAX);
+    store.addComms(row(text));
+    expect(store.comms(0)[0]?.text).toBe(text);
+  });
+
+  it("cuts a longer text to that length, ending with an ellipsis", () => {
+    store.addComms(row("y".repeat(COMMS_TEXT_MAX + 50)));
+    const text = store.comms(0)[0]?.text ?? "";
+    expect(Array.from(text)).toHaveLength(COMMS_TEXT_MAX);
+    expect(text.endsWith("…")).toBe(true);
+  });
+
+  it("makes whitespace runs one space and trims", () => {
+    store.addComms(row("  a \n\n b\t\tc  "));
+    expect(store.comms(0)[0]?.text).toBe("a b c");
+  });
+
+  it("returns the rows at or after since, oldest first", () => {
+    store.addComms({ ...row("late"), at: 300, ticket: "mc#1" });
+    store.addComms(row("early", 100));
+    expect(store.comms(100).map((c) => c.text)).toEqual(["early", "late"]);
+    expect(store.comms(101).map((c) => c.text)).toEqual(["late"]);
+    expect(store.comms(300)[0]).toEqual({
+      at: 300,
+      from: "CAPCOM",
+      to: "guido-1",
+      ticket: "mc#1",
+      text: "late",
+    });
   });
 });

@@ -14,6 +14,7 @@ import {
   ASKED_OPERATOR,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  COMMS_CAPCOM,
   clashText,
   closesIssue,
   commitMarkersText,
@@ -23,6 +24,7 @@ import {
   committedText,
   commitUnresolvedText,
   crewAuthorName,
+  DEFAULT_PROFILES,
   doneWhenCount,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
@@ -96,15 +98,22 @@ import {
   outsideAreaText,
   PLAN_HEADING,
   PNPM_STORE_DIR_NAME,
+  PROFILE_NAME,
+  PROFILE_PAIR_TEXT,
+  PROFILE_REASON_MAX,
+  type Profile,
+  type ProfileOverride,
   PUSH_SCAN_MAX_BUFFER,
   pathInArea,
   planByLine,
   planFewTestsText,
   planMissingPathsText,
+  planNoProfilesText,
   planPaths,
   planTestCount,
   planTextText,
   planTooLongText,
+  planUnknownProfileText,
   planWrittenText,
   prAlreadyOpenText,
   prClosesLine,
@@ -142,8 +151,9 @@ import { z } from "zod";
 import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import type { ProfilesError } from "../profiles.ts";
 import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
-import { crewGit } from "../runtime/git.ts";
+import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
 import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
@@ -175,6 +185,8 @@ export interface McToolsDeps {
   onEvidence?: (seatId: string, runId: string) => void;
   /** Called after `report_findings` records a review (the supervisor tells its listeners). */
   onFindings?: (seatId: string, runId: string) => void;
+  /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
+  profiles?: () => readonly Profile[] | ProfilesError;
   /** Called after `report_plan` writes a plan (the supervisor ends the run). */
   onPlanned?: (seatId: string, runId: string) => void;
 }
@@ -215,7 +227,15 @@ const CommitArgs = z.strictObject({
 });
 const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
 const EvidenceArgs = z.strictObject({ note: text(MC_EVIDENCE_MAX) });
-const PlanArgs = z.strictObject({ plan: text(MC_PLAN_MAX) });
+const PlanArgs = z
+  .strictObject({
+    plan: text(MC_PLAN_MAX),
+    profile: z.string().regex(PROFILE_NAME).optional(),
+    profile_reason: text(PROFILE_REASON_MAX).optional(),
+  })
+  .refine((a) => (a.profile === undefined) === (a.profile_reason === undefined), {
+    message: PROFILE_PAIR_TEXT,
+  });
 /** A line that is the plan heading: the ticket already has a plan. */
 const PLAN_HEADING_LINE = /^## Plan[ \t]*$/m;
 const FindingArgs = z.strictObject({
@@ -296,13 +316,6 @@ const PATHSPEC_CHUNK = 200;
 
 /** Index modes the commit tool refuses: a symlink, a gitlink (nested repository). */
 const SPECIAL_MODES = new Set(["120000", "160000"]);
-
-/** Node's error for a child whose output passed maxBuffer (it is `killed` too: check this first). */
-const MAX_BUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-const overflowed = (e: unknown): boolean =>
-  (e as { code?: unknown } | null)?.code === MAX_BUFFER_CODE;
-/** The error execFile gives a child it killed at its timeout. */
-const timedOut = (e: unknown): boolean => (e as { killed?: unknown } | null)?.killed === true;
 
 /**
  * Anything but printable ASCII (0x20–0x7e): APFS folds some non-ASCII names (`ſ`, Kelvin `K`,
@@ -1507,14 +1520,24 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function askOperator(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = AskArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    if (liveRun(ctx) === null) return { text: MC_RUN_ENDED, isError: true };
+    const live = liveRun(ctx);
+    if (live === null) return { text: MC_RUN_ENDED, isError: true };
+    const at = now();
     store.addQuestion({
       agentId: ctx.seatId,
       runId: ctx.runId,
       text: parsed.data.question,
-      at: now(),
+      at,
+    });
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      to: COMMS_CAPCOM,
+      ticket: live.run.ticket ?? null,
+      text: parsed.data.question,
     });
     bus.emit("attention");
+    bus.emit("agents");
     return { text: ASKED_OPERATOR };
   }
 
@@ -1653,6 +1676,25 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const repo = repoOf(deps, run);
     if (issue === null || repo === "") return ENDED;
     const call = seatCallSign(ctx.seatId);
+    const override: ProfileOverride | undefined =
+      parsed.data.profile !== undefined && parsed.data.profile_reason !== undefined
+        ? { profile: parsed.data.profile, reason: parsed.data.profile_reason, by: "planner" }
+        : undefined;
+    if (override !== undefined) {
+      const profiles = deps.profiles?.() ?? DEFAULT_PROFILES;
+      if (profiles instanceof Error) {
+        return { text: planNoProfilesText(profiles.message), isError: true };
+      }
+      if (!profiles.some((p) => p.name === override.profile)) {
+        return {
+          text: planUnknownProfileText(
+            override.profile,
+            profiles.map((p) => p.name),
+          ),
+          isError: true,
+        };
+      }
+    }
     const known = await readKnown(deps, "report_plan");
 
     const problem = prTextProblem(plan, { repo, issue, known, label: "plan", unclosed: true });
@@ -1740,7 +1782,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: MC_PLAN_WRITTEN };
     });
     if (written.isError === true) return written;
-    store.addLoopEvent(`${run.id}:plan`, run.id, planWrittenText(run.ticket ?? run.id), now());
+    const at = now();
+    if (override !== undefined) store.setProfileOverride(run.repoId, issue, override, at);
+    const planned = planWrittenText(run.ticket ?? run.id);
+    store.addLoopEvent(`${run.id}:plan`, run.id, planned, at);
+    const watcher = place.session.seats.find((s) => !s.retiring && seatDef(s).loop === "watch");
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      to: watcher?.id ?? COMMS_CAPCOM,
+      ticket: run.ticket ?? null,
+      text: planned,
+    });
     bus.emit("agents");
     deps.onPlanned?.(ctx.seatId, ctx.runId);
     return written;
@@ -1912,6 +1965,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             maxLength: MC_PLAN_MAX,
             description:
               "The plan alone, with no heading of your own: Mission Control adds ## Plan.",
+          },
+          profile: {
+            type: "string",
+            pattern: PROFILE_NAME.source,
+            description:
+              "Another template profile for the developer to run, if the one picked does not fit. Give profile_reason with it.",
+          },
+          profile_reason: {
+            type: "string",
+            minLength: 1,
+            maxLength: PROFILE_REASON_MAX,
+            description: "Why that template fits better; recorded with the choice.",
           },
         },
         required: ["plan"],

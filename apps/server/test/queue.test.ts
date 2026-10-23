@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  DEFAULT_PROFILES,
   fillLoopText,
   freezeRules,
   NEW_LOOP,
+  type PullRequestView,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
   type RepoRules,
@@ -30,6 +32,7 @@ import {
   takeNext,
 } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
+import { ProfilesError } from "../src/profiles.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -163,6 +166,7 @@ const refill = (
     const body = bodyOf(n);
     return body === null ? null : ticketWith(n, body);
   },
+  profiles?: QueueDeps["profiles"],
 ) =>
   refillQueues({
     config,
@@ -170,9 +174,16 @@ const refill = (
     rules: rulesOf,
     login: ME,
     fetchTicket,
+    ...(profiles === undefined ? {} : { profiles }),
     now: () => NOW,
     onNotes: () => void noteCalls++,
   });
+const refillWith = (profiles: NonNullable<QueueDeps["profiles"]>) =>
+  refill(
+    async () => rules,
+    async (_repo, n) => ticketWith(n, bodyOf(n) ?? ""),
+    profiles,
+  );
 const takeDeps = (): TakeDeps => ({
   config,
   store,
@@ -241,6 +252,17 @@ const run = (over: Partial<Run>): Run => ({
   ...over,
 });
 
+/** Two runs of the seat set aside in review: it is at the default cap. */
+const setAsideRuns = (agentId: string) => {
+  const loop = {
+    ...NEW_LOOP,
+    phase: "review" as const,
+    aside: { worktree: "/w/x", wake: false },
+  };
+  store.upsertRun(run({ id: "r-a", agentId, ticket: `${REPO}#8`, loop }));
+  store.upsertRun(run({ id: "r-b", agentId, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }));
+};
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-queue-"));
   store = new Store(join(dir, "mc.sqlite"));
@@ -289,6 +311,25 @@ describe("refillQueues", () => {
             : "## Done when\n- x\n";
     await refill();
     expect(issues(SERVER)).toEqual([1, 4]);
+  });
+
+  it("deals a Size M chore with no plan (its profile needs none) but not an unlabelled one", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { size: "M", labels: ["area:server", "chore"] }),
+      card(2, { size: "M" }),
+    ]);
+    bodyOf = () => "## Done when\n- x\n";
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+  });
+
+  it("deals nothing while the profiles file cannot be read, or the ticket's stored override is unknown", async () => {
+    store.replaceBoard(REPO, [card(1), card(2)]);
+    store.setProfileOverride(REPO, 2, { profile: "zzz", reason: "r", by: "FLIGHT" }, NOW);
+    await refillWith(() => new ProfilesError("boom"));
+    expect(issues(SERVER)).toEqual([]);
+    await refillWith(() => DEFAULT_PROFILES);
+    expect(issues(SERVER)).toEqual([1]);
   });
 
   it("reads a card's body once while the card is unchanged, and again once it changes", async () => {
@@ -365,6 +406,12 @@ describe("refillQueues", () => {
     ]);
     await refill();
     expect(issues(SERVER)).toEqual([6]);
+  });
+
+  it("deals no closed card left in Ready", async () => {
+    store.replaceBoard(REPO, [card(1, { closed: true, status: "Ready", state: "planned" })]);
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
   });
 
   it("queues no card with two area labels, and raises one question, cleared when it is relabelled", async () => {
@@ -526,6 +573,15 @@ describe("refillQueues", () => {
       expect(issues(SERVER)).toEqual([2]);
     });
 
+    it("deals a seat below its cap before one at it", async () => {
+      seatRow("idle");
+      setAsideRuns(SERVER);
+      store.replaceBoard(REPO, [card(1), card(2)]);
+      await refill();
+      expect(issues("guido-2")).toEqual([1]);
+      expect(issues(SERVER)).toEqual([2]);
+    });
+
     it("never deals one card to two seats, and leaves a taken card with its taker", async () => {
       store.replaceBoard(REPO, [card(1), card(2), card(3), card(4)]);
       await refill();
@@ -560,6 +616,17 @@ describe("refillQueues", () => {
       // guido-1 gets busy; guido-2 frees up
       store.upsertRun(run({ id: "r9", agentId: SERVER, ticket: `${REPO}#9` }));
       seatRow("running", "r9");
+      expect(issues(SERVER)).toEqual([1]);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([]);
+    });
+
+    it("takes the highest-Priority card dealt to a seat at its cap", async () => {
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      seatRow("idle");
+      setAsideRuns(SERVER);
       expect(issues(SERVER)).toEqual([1]);
       await take("guido-2");
       expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
@@ -844,6 +911,89 @@ describe("takeNext", () => {
     expect(seatMayTake(store, SERVER)).toBe(false);
     store.setRunLoop("r-aside", loop(null));
     expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
+  it("rework first: CI failing on a set-aside run in ci holds the seat before any engine pass", async () => {
+    const SHA = "a".repeat(40);
+    store.upsertRun(
+      run({
+        id: "r-ci",
+        agentId: SERVER,
+        ticket: `${REPO}#9`,
+        loop: {
+          ...NEW_LOOP,
+          phase: "ci",
+          prNumber: 12,
+          aside: { worktree: "/w/x", wake: false },
+          rerun: { sha: SHA, at: NOW - 1, runs: [] },
+        },
+      }),
+    );
+    store.setRunPush({ runId: "r-ci", sha: SHA, at: NOW });
+    seatRow("idle");
+    await queued(card(1));
+    const pr = (over: Partial<PullRequestView>): PullRequestView => ({
+      repoId: REPO,
+      number: 12,
+      title: "t",
+      url: "u",
+      branch: "b",
+      ticket: null,
+      state: "open",
+      isDraft: true,
+      review: null,
+      ci: "pending",
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: SHA,
+      mergeable: "MERGEABLE",
+      ...over,
+    });
+    store.upsertPullRequests(REPO, [pr({})], NOW);
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    store.upsertPullRequests(REPO, [pr({ ci: "failing" })], NOW);
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER)[0]?.takenAt).toBeNull();
+    store.upsertPullRequests(REPO, [pr({ ci: "failing", headSha: "b".repeat(40) })], NOW);
+    expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
+  it("the cap: a seat with two runs set aside takes no third", async () => {
+    seatRow("idle");
+    await queued(card(1));
+    const loop = {
+      ...NEW_LOOP,
+      phase: "review" as const,
+      aside: { worktree: "/w/x", wake: false },
+    };
+    store.upsertRun(run({ id: "r-a", agentId: SERVER, ticket: `${REPO}#8`, loop }));
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    store.upsertRun(
+      run({ id: "r-b", agentId: SERVER, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }),
+    );
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    await take();
+    expect(started).toEqual([]);
+    expect(seatMayTake(store, SERVER, 3)).toBe(true);
+    // the other seat's run does not count
+    store.upsertRun(
+      run({ id: "r-b", agentId: WEB, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }),
+    );
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    // nor does a finished one
+    store.upsertRun(
+      run({ id: "r-b", agentId: SERVER, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }),
+    );
+    store.setRunLoop("r-b", { ...loop, phase: "done" });
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    // the configured cap is read
+    store.setRunLoop("r-b", loop);
+    if (config.crew !== undefined) config.crew.maxOpenRunsPerSeat = 3;
+    await take();
+    expect(started).toHaveLength(1);
   });
 
   it.each(["stopped", "error", "starting", "running", "parked"] as const)(
