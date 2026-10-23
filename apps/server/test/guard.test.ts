@@ -853,8 +853,11 @@ describe("hookMain", () => {
         value = v;
       });
       for (let t = 0; t <= ms && !done; t += 1000) {
-        // the token file is read for real, so wait for the hook's next sleep (or its answer)
-        for (let i = 0; i < 500 && !done && vi.getTimerCount() < 2; i++) {
+        // The token file is read for real, so wait for the hook's next sleep (or its answer).
+        // Bound it in real time: a spin count runs out on a loaded runner, losing a retry.
+        const giveUpAt = performance.now() + 2000;
+        while (!done && vi.getTimerCount() < 2) {
+          if (performance.now() > giveUpAt) throw new Error("the hook did not sleep within 2 s");
           await new Promise((r) => setImmediate(r));
         }
         await vi.advanceTimersByTimeAsync(1000);
