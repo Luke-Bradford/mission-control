@@ -19,7 +19,7 @@ const popOut = (id: string): void => {
 };
 
 /** Interrupt and End the run for a crew seat with a live session. */
-function SeatControls({ row }: { row: CrewRow }) {
+export function SeatControls({ row }: { row: CrewRow }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const turn = seatTurn(row);
