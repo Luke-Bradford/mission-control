@@ -8,7 +8,7 @@ import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { closeTopOverlay } from "../src/shell/overlays.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
-import { stubFetch } from "./fetchStub.ts";
+import { settled, stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, crewRow, HOUR, item, NOW, REPOS } from "./fixtures.ts";
 
 const DAY = 86_400_000;
@@ -44,7 +44,7 @@ interface Data {
   prs?: PullRequestView[];
   crew?: ReturnType<typeof crewRow>[];
   attention?: ReturnType<typeof item>[];
-  profiles?: RepoProfile[];
+  profiles?: RepoProfile[] | (() => { status: number; body: unknown });
 }
 
 function stub(d: Data = {}) {
@@ -58,6 +58,18 @@ function stub(d: Data = {}) {
     "/api/crew": { rows: d.crew ?? [], firstRunToday: null },
     "/api/attention": d.attention ?? [],
     ...(d.profiles ? { "/api/repos/profiles": d.profiles } : {}),
+    "/api/boards/site-builder/items/2": {
+      number: 2,
+      title: "Ticket 2",
+      url: `${GH.replace("shop-app", "site-builder")}/issues/2`,
+      state: "open",
+      body: "the body",
+      bodyTruncated: false,
+      labels: [],
+      milestone: null,
+      subIssues: [],
+      pullRequests: [],
+    },
     "/api/boards/shop-app/items/3349": {
       number: 3349,
       title: "Ticket 3349",
@@ -868,6 +880,42 @@ describe("ticket route, lane and session", () => {
     expect(localStorage.getItem("mc-lane")).toBeNull();
   });
 
+  it("a session with a stored other lane shows only its own cards and the note, and keeps mc-lane", async () => {
+    localStorage.setItem("mc-lane", "site-builder");
+    stub({
+      shopApp: [todo(1, { title: "Mine" })],
+      engine: [todo(2, { repoId: "site-builder", title: "Theirs" })],
+    });
+    act(() => setSession("shop-app"));
+    const { container } = await open();
+    await screen.findByText("Mine");
+    expect(card(container, "site-builder#2")).toBeNull();
+    expect(screen.queryByText("Theirs")).toBeNull();
+    expect(screen.queryByRole("button", { name: "site-builder" })).toBeNull();
+    expect(
+      screen.getByText("Showing s/shop-app. Choose All sessions to see site-builder."),
+    ).toBeTruthy();
+    expect(localStorage.getItem("mc-lane")).toBe("site-builder");
+  });
+
+  it("a session with a ticket deep link to another repo shows that ticket, its own cards and the note", async () => {
+    stub({
+      shopApp: [todo(1, { title: "Mine" })],
+      engine: [todo(2, { repoId: "site-builder" })],
+    });
+    act(() => setSession("shop-app"));
+    const { container } = await open({ repoId: "site-builder", ticket: 2 });
+    const pane = await screen.findByRole("complementary", { name: "ticket" });
+    expect(await within(pane).findByRole("heading", { name: "Ticket 2" })).toBeTruthy();
+    expect(within(pane).getByRole("link", { name: "site-builder #2" })).toBeTruthy();
+    expect(card(container, "shop-app#1")).toBeTruthy();
+    expect(card(container, "site-builder#2")).toBeNull();
+    expect(
+      screen.getByText("Showing s/shop-app. Choose All sessions to see site-builder."),
+    ).toBeTruthy();
+    expect(localStorage.getItem("mc-lane")).toBeNull();
+  });
+
   it("a session with a stored lane for a repo no longer configured shows no note", async () => {
     localStorage.setItem("mc-lane", "gone-repo");
     stub({ shopApp: [todo(1, { title: "Mine" })] });
@@ -1013,6 +1061,27 @@ describe("render cost", () => {
       cardRenderProbe.onRender = null;
     }
   });
+
+  it("a Done card's age rolls over at midnight: today, then 1d ago", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(Date.UTC(2026, 9, 17, 22, 59, 55));
+    stub({
+      shopApp: [
+        todo(7, { status: "Done", state: "done", updatedAt: Date.UTC(2026, 9, 17, 22, 0) }),
+      ],
+    });
+    const { container } = await open();
+    await waitFor(() =>
+      expect(within(card(container, "shop-app#7") as HTMLElement).getByText("today")).toBeTruthy(),
+    );
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    const c = card(container, "shop-app#7") as HTMLElement;
+    expect(within(c).getByText("1d ago")).toBeTruthy();
+    expect(within(c).queryByText("today")).toBeNull();
+  });
 });
 
 const PROFILES: RepoProfile[] = [
@@ -1107,6 +1176,76 @@ describe("repos together or apart", () => {
     const link = shopApp?.querySelector<HTMLAnchorElement>("a");
     expect(link?.textContent).toBe("How its statuses map");
     expect(link?.getAttribute("href")).toBe("/setup/repos");
+  });
+
+  const apartKanbans = async () => {
+    localStorage.setItem("mc-board-layout", "apart");
+    const view = await open();
+    await waitFor(() => expect(view.container.querySelectorAll(".repokanban").length).toBe(2));
+    return Array.from(view.container.querySelectorAll<HTMLElement>(".repokanban"));
+  };
+  const headsOf = (el?: HTMLElement) =>
+    Array.from(el?.querySelectorAll(".kh") ?? []).map((h) => h.textContent);
+
+  it("Apart: a repo's kanban always has Backlog and Done", async () => {
+    seed();
+    const [shopApp] = await apartKanbans();
+    await waitFor(() =>
+      expect(headsOf(shopApp)).toEqual(["Backlog 0", "Ready 1", "In progress 0", "Done 0"]),
+    );
+  });
+
+  it("Apart: a column a card sits in is drawn though the profile lacks it", async () => {
+    stub({
+      shopApp: [todo(1), todo(5, { blockedBy: [{ ref: "shop-app#9", closed: false }] })],
+      engine: [todo(2, { repoId: "site-builder" })],
+      profiles: PROFILES,
+    });
+    const [shopApp] = await apartKanbans();
+    await waitFor(() =>
+      expect(headsOf(shopApp)).toEqual([
+        "Backlog 0",
+        "Blocked 1",
+        "Ready 1",
+        "In progress 0",
+        "Done 0",
+      ]),
+    );
+    const head = card(shopApp as HTMLElement, "shop-app#5")
+      ?.closest(".kcol")
+      ?.querySelector(".kh");
+    expect(head?.textContent).toBe("Blocked 1");
+  });
+
+  it("Apart before profiles load: every column, headed by the repo id alone", async () => {
+    const fetch = stub({
+      shopApp: [todo(1)],
+      engine: [todo(2, { repoId: "site-builder" })],
+      profiles: () => ({ status: 503, body: { error: "unavailable" } }),
+    });
+    localStorage.setItem("mc-board-layout", "apart");
+    const view = await open();
+    await settled(fetch, "/api/repos/profiles");
+    await waitFor(() => expect(view.container.querySelectorAll(".repokanban").length).toBe(2));
+    const kanbans = Array.from(view.container.querySelectorAll<HTMLElement>(".repokanban"));
+    expect(kanbans.map((k) => k.querySelector("h3")?.textContent)).toEqual([
+      "shop-app",
+      "site-builder",
+    ]);
+    for (const k of kanbans) expect(k.querySelectorAll(".kh").length).toBe(8);
+  });
+
+  it("an unknown stored layout reads as Together", async () => {
+    localStorage.setItem("mc-board-layout", "sideways");
+    seed();
+    const view = await open();
+    await waitFor(() => expect(repoSeg()).toBeTruthy());
+    const group = within(repoSeg() as HTMLElement);
+    expect(group.getByRole("button", { name: "Together" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(group.getByRole("button", { name: "Apart" }).getAttribute("aria-pressed")).toBe("false");
+    expect(view.container.querySelectorAll(".repokanban").length).toBe(0);
   });
 
   it("Together: marks a column a repo lacks with not in {ids}", async () => {

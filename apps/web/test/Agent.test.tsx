@@ -1399,6 +1399,29 @@ describe("Agent page: runs", () => {
     expect($(s, "code")?.textContent).toBe("refresh()");
   });
 
+  it("a closed run PR shows a Closed pill; an open one shows none", async () => {
+    const pull = (number: number, state: "closed" | "open") => ({
+      repoId: "shop-app",
+      number,
+      title: null,
+      url: `https://github.com/octo-org/shop-app/pull/${number}`,
+      state,
+      ticket: "shop-app#3227",
+    });
+    stub({
+      runs: [rv({ ticket: "shop-app#3227", prs: [pull(3240, "closed"), pull(3241, "open")] })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const cell = $(container, "#loopP .runrow:not(.head) .rticket") as HTMLElement;
+    const closed = within(cell).getByRole("link", { name: "shop-app PR #3240" }).closest(".rpr");
+    const pill = closed?.querySelector(".pill");
+    expect(pill?.textContent).toBe("Closed");
+    expect(pill?.className).toBe("pill plain");
+    const open = within(cell).getByRole("link", { name: "shop-app PR #3241" }).closest(".rpr");
+    expect(open?.querySelector(".pill")).toBeNull();
+  });
+
   it("a row shows its ticket, PR chips and the summary, with the full text in its title", async () => {
     const summary = "Cached quotes for the ranking job and moved the refresh to a background tick";
     stub({

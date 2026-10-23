@@ -1271,6 +1271,28 @@ describe("Activity panel", () => {
     ).toBeTruthy();
   });
 
+  it("a move into Error reads red; a move out of Error does not", async () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null };
+    const list: ActivityEvent[] = [
+      {
+        ...base,
+        at: NOW - 2 * MIN,
+        who: "shop-app-ta",
+        kind: "state",
+        text: "Running → Error: exit 1",
+      },
+      { ...base, at: NOW - MIN, who: "shop-app-ta", kind: "state", text: "Error → Idle" },
+    ];
+    stub({ rows, activity: list });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await waitFor(() => expect(act_.querySelectorAll(".arow").length).toBe(2));
+    const glyph = (text: string) =>
+      within(act_).getByText(text).closest(".arow")?.querySelector(".g")?.className;
+    expect(glyph("Running → Error: exit 1")).toContain("crit-t");
+    expect(glyph("Error → Idle")).not.toContain("crit-t");
+  });
+
   it("a failed board move reads red; a successful one does not", async () => {
     const base = { ref: null, url: null, status: null, prs: [], summary: null, kind: "board" };
     const list = [
