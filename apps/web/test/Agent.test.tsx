@@ -463,6 +463,42 @@ describe("Agent page: need banner", () => {
     expect(new Set(sent.flat()).size).toBe(51);
   });
 
+  it("Ack leaves a set-aside run's unacked note alone: the banner does not show it", async () => {
+    const ready = {
+      ...item({ key: "note:ready:old", ticket: "shop-app#3000", escalationId: null }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    const fetch = stub({
+      items: [
+        item({
+          key: "stall:shop-app-ta:r-12",
+          kind: "stalled",
+          at: NOW - 12 * MIN,
+          tool: "Bash",
+          ticket: null,
+          escalationId: null,
+        }),
+        ready,
+      ],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const banner = $(container, "#needBanner .banner") as HTMLElement;
+    expect(banner.textContent).toContain("Stalled 12:00 in Bash");
+    expect(banner.textContent).not.toContain("Ready to merge");
+    fireEvent.click(within(banner).getByRole("button", { name: "Ack" }));
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/attention/ack",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const body = JSON.parse(
+      (fetch.mock.calls.find(([u]) => u === "/api/attention/ack")?.[1]?.body as string) ?? "{}",
+    );
+    expect(body.keys).toEqual(["stall:shop-app-ta:r-12"]);
+  });
+
   it("has no banner without needs, and no Ack when everything is acknowledged", async () => {
     stub({ items: [item({ acked: true })] });
     const { container, unmount } = render(<Agent id="shop-app-ta" />);
