@@ -2735,6 +2735,29 @@ describe("config", () => {
     await b.close();
   });
 
+  it("does not retry a failed GitHub login read until the back-off has passed", async () => {
+    let calls = 0;
+    let t = 1_000_000;
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      now: () => t,
+      githubGql: async () => {
+        calls++;
+        throw new Error("gh: GitHub unreachable");
+      },
+    });
+    const get = () => a.inject({ method: "GET", url: "/api/config" });
+    expect((await get()).json().githubLogin).toBeNull();
+    expect((await get()).json().githubLogin).toBeNull();
+    expect(calls).toBe(1);
+    t += 5 * 60_000 + 1;
+    await get();
+    expect(calls).toBe(2);
+    await a.close();
+  });
+
   it("carries the template profiles: built-in without a file, the error when it cannot load", async () => {
     const profilesPath = join(dir, "profiles.yaml");
     const a = buildApp({ config, store, bus, profilesPath });
