@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   call,
   collectGithub,
+  collectWaitedPrs,
   describeGqlErrors,
   EMPTY_BOARD_GRACE_MS,
   fetchCardNow,
@@ -1643,5 +1644,38 @@ describe("change reporting", () => {
       boards: false,
       escalations: false,
     });
+  });
+});
+
+describe("collectWaitedPrs", () => {
+  it("reads only the given numbers and keeps the other rows", async () => {
+    const mergedAt = "2026-10-17T11:00:00Z";
+    await collectGithub(repo, store, stub({ prPages: [prPage([pull(1)])] }).gql, NOW);
+    const calls: Call[] = [];
+    const gql: Gql = async (q, v) => {
+      calls.push({ q, v });
+      return {
+        repository: { pullRequest: pull(v.number as number, { state: "MERGED", mergedAt }) },
+      };
+    };
+    const r = await collectWaitedPrs(repo, store, gql, [7, 8], () => NOW);
+    expect(r).toEqual({ boards: true, escalations: false });
+    expect(calls.map((c) => c.v.number)).toEqual([7, 8]);
+    for (const c of calls) expect(c.q).toContain("query PullRequest(");
+    const rows = store.pullRequests("shop-app");
+    expect(rows.map((p) => p.number).sort((a, b) => a - b)).toEqual([1, 7, 8]);
+    expect(rows.find((p) => p.number === 7)?.state).toBe("merged");
+  });
+
+  it("a failure keeps the rows and says prs:", async () => {
+    await collectGithub(repo, store, stub({ prPages: [prPage([pull(1)])] }).gql, NOW);
+    const gql: Gql = async () => {
+      throw new Error("boom");
+    };
+    const r = await collectWaitedPrs(repo, store, gql, [7], () => NOW);
+    expect(r).toEqual({ boards: false, escalations: false });
+    expect(store.pullRequests("shop-app").map((p) => p.number)).toEqual([1]);
+    expect(statusOf()).toMatchObject({ ok: false });
+    expect(statusOf()?.error?.startsWith("prs: ")).toBe(true);
   });
 });
