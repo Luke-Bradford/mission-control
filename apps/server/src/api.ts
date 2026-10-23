@@ -7,6 +7,7 @@ import {
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
+  type CliAccountStatus,
   COMMS_CAPCOM,
   type ContextUsage,
   CREW_DISABLED,
@@ -71,6 +72,7 @@ import {
 } from "@mc/core";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { readAccountStatus } from "./accounts.ts";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
@@ -98,9 +100,12 @@ import {
   flightPowersOf,
 } from "./config.ts";
 import {
+  accountDuplicateReason,
+  addAccount,
   addRepo,
   ConfigWriteError,
   duplicateReason,
+  NewAccountBody,
   NewRepoBody,
   RepoLocation,
   SeatsBody,
@@ -108,7 +113,14 @@ import {
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
-import { changedFiles, fileDiff, type GitExec, GitFailed, NO_WORKTREE_NOTE } from "./files.ts";
+import {
+  changedFiles,
+  committedLines,
+  fileDiff,
+  type GitExec,
+  GitFailed,
+  NO_WORKTREE_NOTE,
+} from "./files.ts";
 import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -120,6 +132,7 @@ import {
   NO_LOCK,
   NOTE_KEY,
 } from "./hud.ts";
+import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -130,13 +143,17 @@ import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
+import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "./runview.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { median, telemetry } from "./telemetry.ts";
+
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
+
+export const TELEMETRY_COMMIT_READ_LIMIT = 32;
+const TELEMETRY_COMMIT_CONCURRENCY = 4;
 
 /** The only Host names (and Origin hosts) the server answers: loopback, any port. */
 /** GitHub issue numbers are 32-bit; anything larger cannot exist. */
@@ -299,7 +316,17 @@ const MessageBody = z.strictObject({
 const NoBody = z.strictObject({});
 
 // Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
-const EndBody = z.strictObject({ hold: z.boolean().optional() });
+const EndBody = z.strictObject({
+  hold: z.boolean().optional(),
+  watch: z
+    .strictObject({
+      id: z.string().min(1).max(100),
+      runId: z.string().min(1).max(200),
+      toolUseId: z.string().min(1).max(200),
+      since: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
 
 /**
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
@@ -399,9 +426,31 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
   return Number(raw);
 }
 
+export const ACCOUNT_STATUS_CACHE_MS = 60_000;
+
+const NOTIFICATION_RECONCILE_MS = 1000;
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const accountReads = new Map<string, Promise<CliAccountStatus>>();
+  const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
+    const key = `${account.vendor}:${account.id}`;
+    const pending = accountReads.get(key);
+    if (pending) return pending;
+    const cached = accountStatuses.get(key);
+    if (!refresh && cached && now() < cached.expiresAt) return Promise.resolve(cached.status);
+    const read = readAccountStatus(account, now())
+      .then((status) => {
+        accountStatuses.set(key, { status, expiresAt: now() + ACCOUNT_STATUS_CACHE_MS });
+        return status;
+      })
+      .finally(() => accountReads.delete(key));
+    accountReads.set(key, read);
+    return read;
+  };
+
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
   const githubGql = deps.githubGql ?? (async () => makeGql(await githubToken()));
   // The login the hub acts as: kept once read; null when it cannot be, and not tried again for
@@ -497,8 +546,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  const notifications = new LocalNotifications(store, config, bus, now);
+  const reconcileNotifications = () =>
+    notifications.reconcile(
+      attentionItems(
+        config,
+        store,
+        now(),
+        deps.lock?.state() ?? NO_LOCK,
+        undefined,
+        deps.hubLogin?.() ?? null,
+      ),
+    );
+  let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconcilingNotifications = false;
+  const scheduleNotifications = () => {
+    if (notificationTimer !== undefined || reconcilingNotifications) return;
+    notificationTimer = setTimeout(() => {
+      notificationTimer = undefined;
+      reconcilingNotifications = true;
+      try {
+        reconcileNotifications();
+      } finally {
+        reconcilingNotifications = false;
+      }
+    }, NOTIFICATION_RECONCILE_MS);
+    notificationTimer.unref();
+  };
+  const unsubscribeNotifications = bus.subscribe((topic) => {
+    if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
+      scheduleNotifications();
+  });
+  app.addHook("onReady", async () => {
+    scheduleNotifications();
+  });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
+    unsubscribeNotifications();
+    clearTimeout(notificationTimer);
     for (const end of [...streams]) end();
   });
 
@@ -931,6 +1016,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
+      // Reader: apps/web/src/setup/Accounts.tsx (account status; UI integration follows)
+      api.get("/accounts/status", async () =>
+        Promise.all(config.accounts.map((account) => accountStatus(account))),
+      );
+      // Reader: apps/web/src/setup/Accounts.tsx (Check; UI integration follows)
+      api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        return accountStatus(account, true);
+      });
+      // Reader: apps/web/src/setup/Accounts.tsx (Add account; UI integration follows)
+      api.post("/accounts", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = NewAccountBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const duplicate = accountDuplicateReason(config.accounts, body.data);
+        if (duplicate) return reply.code(409).send({ error: duplicate });
+        try {
+          const result = await addAccount(deps.configPath, body.data, now());
+          const added = result.config.accounts.find((a) => a.id === body.data.name);
+          if (added) config.accounts.push(added);
+          bus.emit("config");
+          return { account: added };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
+              .send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
       api.get("/limits", async () => limitRows(config, store, now()));
       // Reader: apps/web/src/data.ts#RESOURCES (the Limits view's GitHub row)
       api.get("/limits/github", async () => githubRate(store));
@@ -1198,37 +1316,107 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
       });
 
-      api.get<{ Querystring: { range?: unknown; agent?: unknown; account?: unknown } }>(
-        "/telemetry",
-        async (req, reply): Promise<Telemetry | FastifyReply> => {
-          const range = req.query.range ?? DEFAULT_TELEMETRY_RANGE;
-          if (typeof range !== "string" || !Object.hasOwn(TELEMETRY_RANGES, range)) {
-            return reply
-              .code(400)
-              .send({ error: `range must be one of ${Object.keys(TELEMETRY_RANGES).join(", ")}` });
-          }
-          // Each scope is optional; an empty value means all, anything else must be configured.
-          const { agent, account } = req.query;
-          if (
-            agent !== undefined &&
-            agent !== "" &&
-            (typeof agent !== "string" || !agentIds(config).includes(agent))
-          ) {
-            return reply.code(400).send({ error: "agent must be a configured agent id" });
-          }
-          if (
-            account !== undefined &&
-            account !== "" &&
-            (typeof account !== "string" || !config.accounts.some((a) => a.id === account))
-          ) {
-            return reply.code(400).send({ error: "account must be a configured account id" });
-          }
-          return telemetry(config, store, range as TelemetryRange, now(), {
-            agent: agent === undefined || agent === "" ? null : (agent as string),
-            account: account === undefined || account === "" ? null : (account as string),
+      // Reader: apps/web/src/pages/Telemetry.tsx
+      api.get<{
+        Querystring: { range?: unknown; agent?: unknown; account?: unknown; ticket?: unknown };
+      }>("/telemetry", async (req, reply): Promise<Telemetry | FastifyReply> => {
+        const range = req.query.range ?? DEFAULT_TELEMETRY_RANGE;
+        if (typeof range !== "string" || !Object.hasOwn(TELEMETRY_RANGES, range)) {
+          return reply
+            .code(400)
+            .send({ error: `range must be one of ${Object.keys(TELEMETRY_RANGES).join(", ")}` });
+        }
+        // Each scope is optional; an empty value means all, anything else must be configured.
+        const { agent, account, ticket } = req.query;
+        if (
+          ticket !== undefined &&
+          ticket !== "" &&
+          (typeof ticket !== "string" ||
+            !config.repos.some(
+              (r) =>
+                ticket.startsWith(`${r.id}#`) &&
+                /^[1-9]\d*$/.test(ticket.slice(r.id.length + 1)) &&
+                Number.isSafeInteger(Number(ticket.slice(r.id.length + 1))),
+            ))
+        ) {
+          return reply.code(400).send({
+            error: "ticket must be a configured repo id and positive issue number (repo#issue)",
           });
-        },
-      );
+        }
+        if (
+          agent !== undefined &&
+          agent !== "" &&
+          (typeof agent !== "string" || !agentIds(config).includes(agent))
+        ) {
+          return reply.code(400).send({ error: "agent must be a configured agent id" });
+        }
+        if (
+          account !== undefined &&
+          account !== "" &&
+          (typeof account !== "string" || !config.accounts.some((a) => a.id === account))
+        ) {
+          return reply.code(400).send({ error: "account must be a configured account id" });
+        }
+        const at = now();
+        const scope = {
+          ticket: ticket === undefined || ticket === "" ? null : (ticket as string),
+          agent: agent === undefined || agent === "" ? null : (agent as string),
+          account: account === undefined || account === "" ? null : (account as string),
+        };
+        const counts = new Map<string, { additions: number | null; deletions: number | null }>();
+        const scopedCommits: { key: string; sha: string }[] = [];
+        const pending = new Map<string, { key: string; worktree: string }>();
+        const agents = configuredAgents(config);
+        for (const c of store.telemetryCommits(
+          at - TELEMETRY_RANGES[range as TelemetryRange] * 60_000,
+          at,
+        )) {
+          const key = `${c.repoId}#${c.sha}`;
+          if (counts.has(key)) continue;
+          const run = store.run(c.runId);
+          if (!run) continue;
+          const agent = agents.find((a) => a.id === run.agentId);
+          if (
+            !agent ||
+            (scope.agent !== null && scope.agent !== agent.id) ||
+            (scope.account !== null && scope.account !== agent.accountId) ||
+            (scope.ticket !== null && runTicket(run, runPrs(config, store, run)) !== scope.ticket)
+          )
+            continue;
+          scopedCommits.push({ key, sha: c.sha });
+          const cached = store.commitLines(c.sha);
+          if (cached) {
+            counts.set(key, cached);
+            continue;
+          }
+          const worktree =
+            agent?.kind === "crew"
+              ? config.crew?.sessions.find((s) => s.id === agent.sessionId)?.checkout
+              : agent?.loop.worktree;
+          if (worktree && pending.size < TELEMETRY_COMMIT_READ_LIMIT && !pending.has(c.sha))
+            pending.set(c.sha, { key, worktree });
+        }
+        const jobs = [...pending];
+        let next = 0;
+        await Promise.all(
+          Array.from({ length: TELEMETRY_COMMIT_CONCURRENCY }, async () => {
+            while (next < jobs.length) {
+              const job = jobs[next++];
+              if (!job) break;
+              const [sha, { key, worktree }] = job;
+              const lines = await committedLines(worktree, sha);
+              store.setCommitLines(sha, lines);
+              counts.set(key, lines);
+            }
+          }),
+        );
+        // A sha can occur in more than one repository.
+        for (const { key, sha } of scopedCommits) {
+          const lines = store.commitLines(sha);
+          if (lines) counts.set(key, lines);
+        }
+        return telemetry(config, store, range as TelemetryRange, at, scope, counts);
+      });
 
       const setPaused = async (id: string, paused: boolean, reply: FastifyReply) => {
         const loop = loopById(id);
@@ -1342,6 +1530,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
       seatAction("/seats/:id/end", EndBody, async (sup, id, b) => {
+        if (b.watch) {
+          const action = flightBriefView(
+            config,
+            store,
+            deps.lock?.state() ?? NO_LOCK,
+            now(),
+          ).watch?.find((entry) => entry.id === b.watch?.id)?.action;
+          if (
+            action?.kind !== "lock-hold" ||
+            action.runId !== b.watch.runId ||
+            action.toolUseId !== b.watch.toolUseId ||
+            action.since !== b.watch.since ||
+            store.seatSession(id)?.runId !== action.runId
+          )
+            throw new SupervisorError(
+              409,
+              "Watch target changed; refresh before stopping the run.",
+            );
+        }
         await sup.endRun(id, { hold: b.hold });
         return { ok: true };
       });
@@ -1359,13 +1566,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT ticket 4)
       api.get("/flight", async () => flightView(config, store, Date.now()));
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief, web follow-up of #225)
-      api.get("/flight/brief", async () => flightBriefView(config, store));
+      api.get("/flight/brief", async () =>
+        flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
+      );
+      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes, web follow-up)
+      api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
       api.get("/drafts", async () => store.drafts());
+      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history; web part follows in #415)
+      api.get("/drafts/history", async () => store.draftHistory());
       const postingDrafts = new Set<number>();
       const postingItems = new Set<string>();
       const postDraft = async (id: number, input: unknown, reply: FastifyReply) => {
@@ -1386,6 +1599,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           !repo ||
           !Number.isSafeInteger(n) ||
           n > 2 ** 31 - 1 ||
+          draft.via !== "GitHub" ||
           (draft.kind !== "issue" && draft.kind !== "pr")
         ) {
           return reply.code(400).send({ error: DRAFT_BAD_TARGET });
@@ -1537,6 +1751,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } catch (e) {
           return crewFail(e, reply);
         }
+      });
+      // The operator resumes a parked, looped run, for one whose seat no longer holds it (set aside at
+      // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
+      // review or review-ruling park waives that head's findings, as the message does. The answer
+      // waits for the engine's pass, so "ok" means the park was lifted.
+      // Reader: docs/runbook.md#resume-a-parked-run (by hand; a HUD Resume action is a follow-up web ticket)
+      api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+        if (!crewGate(run.agentId, reply)) return reply;
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (deps.engine?.status().on !== true) {
+          return reply.code(409).send({ error: "the loop engine is off" });
+        }
+        if (!(await deps.engine.onOperatorMessage(run.id))) {
+          return reply.code(409).send({
+            error: "nothing to resume: the run is not parked, or its park is not lifted this way",
+          });
+        }
+        return { ok: true };
       });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view; it reads this once Plan 7a Task 8 lands)
@@ -1787,6 +2023,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         bus.emit("attention");
         return { dismissed: key };
+      });
+
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.get("/notification-preferences", async () => notifications.preferences());
+
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.post("/notification-preferences", async (req, reply) => {
+        const body = NotificationPreferencesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        notifications.setPreferences(body.data);
+        return notifications.preferences();
+      });
+
+      // Reader: apps/web/src/notifications.ts (local notification feed; web wiring is a separate ticket)
+      api.get("/notifications/events", async () => {
+        return notifications.events();
+      });
+
+      // Reader: apps/web/src/notifications.ts (Send a test notification; web wiring is a separate ticket)
+      api.post("/notifications/test", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        return notifications.test();
       });
 
       // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)

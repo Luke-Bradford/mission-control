@@ -675,6 +675,20 @@ own issue:
 
 The commit tool refuses such a message before it commits, so the seat can reword it.
 
+### Resume a parked run
+
+A run can stay parked after its seat has moved on. This happens when it was set aside at CI or review, and then parked on a ruling or a review. A message to the seat doesn't reach it, because the seat no longer holds the run. Resume it directly:
+
+```sh
+curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: application/json' -d '{}'
+```
+
+This lifts the park, as your message to a live seat would:
+- **A ruling or review-failed park:** the run goes to review.
+- **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
+
+The route answers 409 when the engine is off, or when nothing was lifted.
+
 ## What it observes
 
 | Collector | Source | Cadence |

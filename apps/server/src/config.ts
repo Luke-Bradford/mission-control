@@ -66,7 +66,20 @@ export interface AdoptedLoop {
   logsDir?: string;
 }
 
+/** Editable display metadata stays separate from the seat's stable identity. */
+export interface ConfigSeatInput extends SeatInput {
+  displayCallSign?: string;
+}
+
+export const displayCallSign = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine((s) => s.trim().length > 0, "must not be blank")
+  .refine((s) => !/\p{Cc}/u.test(s), "must not contain control characters");
+
 export interface CrewSeatConfig {
+  displayCallSign?: string;
   id: AgentId;
   role: CrewRole;
   /** The seat's resolved role. Loaded: always set; a hand-built config may omit it (`seatDef`). */
@@ -437,6 +450,7 @@ const fileSchema = z
             seats: z.array(
               z.strictObject({
                 id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
+                display_call_sign: displayCallSign.optional(),
                 role: z.string(),
                 account_id: nonEmpty,
                 model: modelName.optional(),
@@ -519,6 +533,9 @@ const fileSchema = z
                 checkout: expandHome(x.checkout),
                 seats: x.seats.map((seat) => ({
                   id: seat.id,
+                  ...(seat.display_call_sign === undefined
+                    ? {}
+                    : { displayCallSign: seat.display_call_sign }),
                   role: seat.role,
                   accountId: seat.account_id,
                   // the role's model when the seat names none; `checkCrew` fills it in
@@ -687,10 +704,11 @@ export function writerAreaConflict(seats: readonly CrewSeatConfig[]): [string, s
   return null;
 }
 
-/** A seat as config.yaml says it (`effort` and `mode` only when set). */
-export function seatInput(seat: CrewSeatConfig): SeatInput {
+/** A seat as config.yaml says it (optional keys only when set). */
+export function seatInput(seat: CrewSeatConfig): ConfigSeatInput {
   return {
     id: seat.id,
+    ...(seat.displayCallSign === undefined ? {} : { displayCallSign: seat.displayCallSign }),
     role: seat.role,
     accountId: seat.accountId,
     model: seat.model,
@@ -797,6 +815,7 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
   const checkouts: string[] = [];
 
   const seatIds = new Set<string>(cfg.loops.map((l) => l.id));
+  const callSigns = new Set(cfg.loops.map((l) => l.id.toLowerCase()));
   let watchSeat: string | null = null;
   const sessionIds = new Set<string>();
   let seatCount = 0;
@@ -843,6 +862,11 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
         );
       }
       seatIds.add(seat.id);
+      const call = (seat.displayCallSign ?? seat.id).trim().toLowerCase();
+      if (callSigns.has(call)) {
+        throw new ConfigError(`${sp}.displayCallSign`, "call signs must be unique");
+      }
+      callSigns.add(call);
       if (!accountIds.has(seat.accountId)) {
         throw new ConfigError(`${sp}.accountId`, `unknown account "${seat.accountId}"`);
       }

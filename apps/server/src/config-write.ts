@@ -1,5 +1,5 @@
 /**
- * The server's one write to its own config: appending a repo to config.yaml (#26 A8). The path is
+ * Atomic edits to the server's own config.yaml: repos, session seats and accounts. The path is
  * the one the server started with; no request names a path, and a symbolic link there is refused.
  * Every write re-reads the file, keeps its comments and key order (the YAML Document API, never
  * string concatenation; other spacing and quoting may be normalised), re-validates the whole result
@@ -8,21 +8,16 @@
 import { type FileHandle, lstat, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import {
-  CONFIG_SEAT_MODES,
-  CREW_EFFORTS,
-  compactUtc,
-  type NewRepo,
-  ROLE_NAME,
-  type SeatInput,
-} from "@mc/core";
+import { CONFIG_SEAT_MODES, CREW_EFFORTS, compactUtc, type NewRepo, ROLE_NAME } from "@mc/core";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
 import {
   areaGlob,
   type CcConfig,
   ConfigError,
+  type ConfigSeatInput,
   defaultSeatCommands,
+  displayCallSign,
   MODEL_NAME,
   parseConfig,
   SEAT_ID,
@@ -70,20 +65,21 @@ export const noSessionText = (id: string): string => `no crew session s/${id} in
 
 export const SeatInputBody = z.strictObject({
   id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
+  displayCallSign: displayCallSign.optional(),
   role: z.string().regex(ROLE_NAME, "must be a role name"),
   accountId: z.string().min(1).max(64),
   model: z.string().max(100).regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/"),
   effort: z.enum(CREW_EFFORTS).optional(),
   mode: z.enum(CONFIG_SEAT_MODES).optional(),
   area: z.array(areaGlob).max(20),
-}) satisfies z.ZodType<SeatInput>;
+}) satisfies z.ZodType<ConfigSeatInput>;
 
 /** `POST /api/crew/sessions/:sessionId/seats`. */
 export const SeatsBody = z.strictObject({
   /** The seats as the page last saw them in config.yaml (`CrewChanges.sessions`). */
   base: z.array(SeatInputBody).max(32),
   seats: z
-    .array(SeatInputBody)
+    .array(SeatInputBody.extend({ displayCallSign: displayCallSign.nullable().optional() }))
     .max(32)
     .refine((l) => new Set(l.map((s) => s.id)).size === l.length, "seat ids must be unique"),
 });
@@ -170,8 +166,8 @@ async function readCurrent(
 export function setSessionSeats(
   path: string,
   sessionId: string,
-  base: SeatInput[],
-  seats: SeatInput[],
+  base: ConfigSeatInput[],
+  seats: z.infer<typeof SeatsBody>["seats"],
   now: number,
 ): Promise<{ config: CcConfig; backup: string }> {
   const run = queue.then(() => setSeats(path, sessionId, base, seats, now));
@@ -182,10 +178,12 @@ export function setSessionSeats(
 async function setSeats(
   path: string,
   sessionId: string,
-  base: SeatInput[],
-  seats: SeatInput[],
+  base: ConfigSeatInput[],
+  seats: z.infer<typeof SeatsBody>["seats"],
   now: number,
 ): Promise<{ config: CcConfig; backup: string }> {
+  const parsed = SeatsBody.safeParse({ base, seats });
+  if (!parsed.success) throw new ConfigWriteError("invalid", "invalid session seats");
   const { bytes, text, current } = await readCurrent(path);
   const i = current.crew?.sessions.findIndex((s) => s.id === sessionId) ?? -1;
   const session = current.crew?.sessions[i];
@@ -194,12 +192,18 @@ async function setSeats(
     throw new ConfigWriteError("conflict", SEATS_CHANGED);
   }
 
+  // Setup's seat editor omits display metadata. Preserve it unless explicitly cleared.
+  const nextSeats: ConfigSeatInput[] = seats.map(({ displayCallSign: name, ...seat }) => {
+    const stored = session.seats.find((s) => s.id === seat.id)?.displayCallSign;
+    const displayCallSign = name === undefined ? stored : name;
+    return displayCallSign == null ? seat : { ...seat, displayCallSign };
+  });
   const doc = parseDocument(text);
   const seq = doc.getIn(["crew", "sessions", i, "seats"], true);
   if (!isSeq(seq) || doc.errors.length > 0) {
     throw new ConfigWriteError("current", `config.yaml has no seats list for s/${sessionId}`);
   }
-  const nodes = seats.map((seat) => {
+  const nodes = nextSeats.map((seat) => {
     const existing = seq.items.find((item) => isMap(item) && item.get("id") === seat.id);
     let node: YAMLMap;
     if (isMap(existing)) node = existing;
@@ -207,6 +211,8 @@ async function setSeats(
       node = doc.createNode({ id: seat.id }, { aliasDuplicateObjects: false });
       node.flow = true;
     }
+    if (seat.displayCallSign === undefined) node.delete("display_call_sign");
+    else node.set("display_call_sign", seat.displayCallSign);
     node.set("role", seat.role);
     node.set("account_id", seat.accountId);
     node.set("model", seat.model);
@@ -242,7 +248,7 @@ async function setSeats(
   });
   if (
     !isDeepStrictEqual(bare(next), bare(current)) ||
-    !isDeepStrictEqual(next.crew?.sessions[i]?.seats.map(seatInput), seats)
+    !isDeepStrictEqual(next.crew?.sessions[i]?.seats.map(seatInput), nextSeats)
   ) {
     throw new ConfigWriteError(
       "write",
@@ -395,4 +401,62 @@ async function pruneBackups(path: string, keep: string): Promise<void> {
   for (const old of ours.slice(CONFIG_BACKUPS_KEEP - 1)) {
     await rm(join(dir, old.name), { force: true });
   }
+}
+
+export const NewAccountBody = z.strictObject({
+  name: z.string().regex(REPO_ID, "must be 1–40 letters, digits, . _ or -, starting alphanumeric"),
+  provider: z.enum(["claude", "codex"]),
+});
+
+export function accountDuplicateReason(
+  accounts: CcConfig["accounts"],
+  account: z.infer<typeof NewAccountBody>,
+): string | null {
+  if (accounts.some((a) => a.id.toLowerCase() === account.name.toLowerCase())) {
+    return "an account with that name is already configured";
+  }
+  if (accounts.some((a) => a.vendor === account.provider)) {
+    return "only one account per provider is supported until independent bindings are available";
+  }
+  return null;
+}
+
+/** Adds configuration only: no login, credentials, folders or seat operations. */
+export function addAccount(path: string, account: z.infer<typeof NewAccountBody>, now: number) {
+  const run = queue.then(async () => {
+    const parsed = NewAccountBody.safeParse(account);
+    if (!parsed.success) throw new ConfigWriteError("invalid", "invalid account provider or name");
+    const { bytes, text, current } = await readCurrent(path);
+    const duplicate = accountDuplicateReason(current.accounts, account);
+    if (duplicate) throw new ConfigWriteError("duplicate", duplicate);
+    const doc = parseDocument(text);
+    const accounts = doc.get("accounts", true);
+    if (!isSeq(accounts) || doc.errors.length > 0) {
+      throw new ConfigWriteError("current", "config.yaml has no accounts list");
+    }
+    accounts.add(
+      doc.createNode({ id: account.name, vendor: account.provider, alert_at: 80, stop_at: 100 }),
+    );
+    accounts.flow = false;
+    const newText = doc.toString({ lineWidth: 0 });
+    let next: CcConfig;
+    try {
+      next = parseConfig(newText, "the new config.yaml");
+    } catch {
+      throw new ConfigWriteError("invalid", "the new account config would not load");
+    }
+    const added = { id: account.name, vendor: account.provider, alertAt: 80, stopAt: 100 };
+    if (!isDeepStrictEqual(next, { ...current, accounts: [...current.accounts, added] })) {
+      throw new ConfigWriteError(
+        "write",
+        "the new config.yaml would change more than the added account",
+      );
+    }
+    const backup = await backUp(path, bytes, now);
+    await replace(path, newText);
+    await pruneBackups(path, basename(backup)).catch(() => undefined);
+    return { config: next, backup };
+  });
+  queue = run.catch(() => undefined);
+  return run;
 }

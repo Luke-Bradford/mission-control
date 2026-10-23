@@ -399,6 +399,9 @@ export interface RunDigest {
   tasks?: LiveTask[];
   /** Timestamped message usage, retained for attempt attribution (not run totals). */
   attemptUsage?: { id: string; at: number | null; tokens: number }[];
+  /** Committed lines; missing or null means unmeasured, including binary counts. */
+  additions?: number | null;
+  deletions?: number | null;
   toolCalls: number;
   turns: number;
   /** Newest timestamp on any frame, subagents included. */
@@ -419,7 +422,16 @@ export interface RunDigest {
    */
   lastText?: string | null;
   /** Every frame's tool calls by name; `durationsMs` keeps the last 50. */
-  tools: Record<string, { calls: number; failed: number; durationsMs: number[] }>;
+  tools: Record<
+    string,
+    {
+      calls: number;
+      failed: number;
+      durationsMs: number[];
+      /** Maximum timed call, retained independently of the bounded duration samples. */
+      slowest?: { detail: string | null; durationMs: number } | null;
+    }
+  >;
   subagents: SubagentInfo[];
   /** `[minute start (epoch ms), input + output tokens]` for the hour up to lastEventAt. */
   minuteTokens: [number, number][];
@@ -965,4 +977,49 @@ export interface VersionInfo {
   canUpdate: boolean;
   /** Why Update is refused; null when it may run. */
   reason: string | null;
+}
+
+/** Provider CLI status in the same machine binding used by usage collection. */
+export interface CliAccountStatus {
+  accountId: AccountId;
+  provider: "claude" | "codex";
+  binding: "machine";
+  identity: string | null;
+  plan: string | null;
+  status: "logged-in" | "not-logged-in" | "unknown";
+  checkedAt: number;
+  /** Fixed safe failure text, never CLI output. */
+  detail: string | null;
+}
+
+export type NotificationCategory =
+  | "people"
+  | "decisions"
+  | "stalls"
+  | "prs"
+  | "capcom"
+  | "awayDigest"
+  | "quota"
+  | "agentMessages";
+
+/** Notify me about, on every signed-in device (catalogue §2.7.6). */
+export interface NotificationPreferences {
+  enabled?: boolean;
+  categories: Record<NotificationCategory, boolean>;
+  quietHours: {
+    start: string;
+    end: string;
+    timezone: string;
+    stallsBypass: boolean;
+  };
+  softChime: boolean;
+}
+
+export interface NotificationEvent {
+  test?: boolean;
+  softChime?: boolean;
+  id: string;
+  category: NotificationCategory;
+  at: number;
+  text: string;
 }

@@ -37,9 +37,12 @@ export interface CrewPlan {
   drop: string[];
 }
 
-/** Deep equality of two seats, ignoring `retiring` (a changed `def` counts). */
+/** Deep equality of two seats, ignoring display metadata and `retiring` (a changed `def` counts). */
 const same = (a: CrewSeatConfig, b: CrewSeatConfig): boolean =>
-  isDeepStrictEqual({ ...a, retiring: undefined }, { ...b, retiring: undefined });
+  isDeepStrictEqual(
+    { ...a, retiring: undefined, displayCallSign: undefined },
+    { ...b, retiring: undefined, displayCallSign: undefined },
+  );
 
 const withoutRetiring = (seat: CrewSeatConfig): CrewSeatConfig => {
   if (!seat.retiring) return seat;
@@ -80,7 +83,16 @@ export function planCrew(
 
     // 1. held
     for (const seat of t.seats) {
-      const was = old.get(seat.id);
+      const previous = old.get(seat.id);
+      let was = previous;
+      if (previous && previous.displayCallSign !== seat.displayCallSign) {
+        const { displayCallSign: _displayCallSign, ...rest } = previous;
+        was = {
+          ...rest,
+          ...(seat.displayCallSign === undefined ? {} : { displayCallSign: seat.displayCallSign }),
+        };
+        plan.applied.push(`seat ${seat.id} renamed`);
+      }
       if (was === undefined) {
         adds.push(seat);
       } else if (same(was, seat)) {

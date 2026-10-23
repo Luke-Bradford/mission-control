@@ -62,11 +62,9 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const prRes = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
   const crew = useResource<Crew>(RESOURCES.crew).data?.rows;
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  // The GitHub login the hub acts as (#395 adds it to the config view). `operator.id` is the hub's own
+  // The GitHub login the hub acts as.`operator.id` is the hub's own
   // operator id, not a GitHub login, so All mine waits for this and is not offered until it is known.
-  const config = useResource<ConfigView>(RESOURCES.config).data as
-    | (ConfigView & { githubLogin?: string | null })
-    | undefined;
+  const config = useResource<ConfigView>(RESOURCES.config).data;
   const githubLogin = config?.githubLogin ?? null;
   const tz = useTz();
   const now = useNow();

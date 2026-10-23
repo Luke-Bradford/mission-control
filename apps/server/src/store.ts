@@ -15,10 +15,15 @@ import {
   COMMS_CAPCOM,
   COMMS_TEXT_MAX,
   type Escalation,
+  FLIGHT_INCOMING_LIMIT,
+  FLIGHT_WATCH_LIMIT,
+  type FlightArrivalDisposition,
   type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
+  type FlightWatchEntry,
+  type FlightWatchOperation,
   type FlowIssue,
   type FlowPr,
   GUARD_HITS_LIMIT,
@@ -177,6 +182,22 @@ CREATE TABLE IF NOT EXISTS attention_notes (
   key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
   text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER
 );
+-- Preserve every note episode, including the history available on upgrade.
+CREATE TABLE IF NOT EXISTS attention_episodes (
+  key TEXT NOT NULL, kind TEXT NOT NULL, seat_id TEXT, at INTEGER NOT NULL,
+  cleared_at INTEGER
+);
+CREATE TRIGGER IF NOT EXISTS attention_episode_open AFTER INSERT ON attention_notes BEGIN
+  INSERT INTO attention_episodes VALUES (NEW.key, NEW.kind, NEW.seat_id, NEW.at, NEW.cleared_at);
+END;
+CREATE TRIGGER IF NOT EXISTS attention_episode_reopen AFTER UPDATE ON attention_notes
+WHEN OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS NULL BEGIN
+  INSERT INTO attention_episodes VALUES (NEW.key, NEW.kind, NEW.seat_id, NEW.at, NULL);
+END;
+CREATE TRIGGER IF NOT EXISTS attention_episode_close AFTER UPDATE ON attention_notes
+WHEN OLD.cleared_at IS NULL AND NEW.cleared_at IS NOT NULL BEGIN
+  UPDATE attention_episodes SET cleared_at = NEW.cleared_at WHERE key = OLD.key AND cleared_at IS NULL;
+END;
 -- One row per crew seat (phase 2a); run_id is null when no run is active.
 CREATE TABLE IF NOT EXISTS seat_sessions (
   seat_id TEXT PRIMARY KEY, run_id TEXT, cli_session_id TEXT, state TEXT NOT NULL, reason TEXT,
@@ -193,6 +214,10 @@ CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
   branch TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, UNIQUE (run_id, sha)
 );
+CREATE TABLE IF NOT EXISTS commit_lines (
+  sha TEXT PRIMARY KEY, additions INTEGER, deletions INTEGER
+);
+CREATE INDEX IF NOT EXISTS run_commits_first ON run_commits(repo_id, sha, at, id);
 CREATE INDEX IF NOT EXISTS run_commits_branch ON run_commits(repo_id, branch);
 -- The sha a run last pushed to its branch, or found origin already at (phase 2b): draft_pr needs
 -- it to be the branch's tip.
@@ -262,6 +287,14 @@ CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
   updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
+);
+CREATE TABLE IF NOT EXISTS flight_watch (
+  session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
+  PRIMARY KEY (session_id, id)
+);
+CREATE TABLE IF NOT EXISTS flight_incoming (
+  id TEXT PRIMARY KEY, source TEXT NOT NULL, arrival_id TEXT NOT NULL, version TEXT NOT NULL,
+  at INTEGER NOT NULL, entry TEXT NOT NULL, UNIQUE (source, arrival_id, version)
 );
 -- The operator's GitHub notification threads (read-only copy); handled_* closes a thread here.
 CREATE TABLE IF NOT EXISTS notifications (
@@ -712,7 +745,14 @@ export class Store {
     // Wait up to the timeout for another writer's lock instead of failing at once.
     this.db = new DatabaseSync(path, { timeout: busyTimeoutMs });
     this.db.exec("PRAGMA journal_mode = WAL");
+    const hasEpisodes = this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE name = 'attention_episodes'")
+      .get();
     this.db.exec(SCHEMA);
+    if (!hasEpisodes)
+      this.db.exec(
+        "INSERT OR IGNORE INTO attention_episodes SELECT key, kind, seat_id, at, cleared_at FROM attention_notes",
+      );
     this.migrate();
   }
 
@@ -751,9 +791,19 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    // Discard the old later-state fallback starts; the next flow collection reads Ready history.
+    if (this.getSetting("flow-ready-start-v1") === null) {
+      this.transaction(() => {
+        if (this.getSetting("flow-ready-start-v1") !== null) return;
+        this.db.exec("DELETE FROM flow_issues");
+        this.setSetting("flow-ready-start-v1", "1");
+      }, true);
+    }
     this.addColumn("notifications", "source_content", "TEXT");
     this.addColumn("briefs", "structured", "TEXT");
     this.addColumn("drafts", "source", "TEXT");
+    this.addColumn("drafts", "metadata", "TEXT");
+    this.addColumn("drafts", "completed_at", "INTEGER");
     // An ok row last succeeded when it was recorded; a failing row's last success is unknown.
     this.whenColumnMissing("collector_status", "last_ok_at", () => {
       this.db.exec("ALTER TABLE collector_status ADD COLUMN last_ok_at INTEGER");
@@ -1985,6 +2035,17 @@ export class Store {
     return rows.map(toReview);
   }
 
+  /** The latest review of a PR that has reported, else null. */
+  latestReportedReview(repoId: string, prNumber: number): ReviewRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? AND state = 'reported'
+         ORDER BY ended_at DESC, id DESC LIMIT 1`,
+      )
+      .get(repoId, prNumber) as Row | undefined;
+    return row ? toReview(row) : null;
+  }
+
   /** The review the run (a review run) performs, else null. */
   reviewOfRun(reviewRunId: string): ReviewRow | null {
     const row = this.db.prepare("SELECT * FROM reviews WHERE run_id = ?").get(reviewRunId) as
@@ -2464,6 +2525,26 @@ export class Store {
     }));
   }
 
+  /** Historical waits, including cleared notes; only the named seat's evidence counts. */
+  telemetryNoteIntervals(
+    seatId: string,
+    since: number,
+    now: number,
+    kinds: string[],
+  ): [number, number][] {
+    const rows = this.db
+      .prepare(
+        "SELECT at, cleared_at, kind FROM attention_episodes WHERE seat_id = ? AND at < ? AND (cleared_at IS NULL OR cleared_at > ?) ORDER BY at",
+      )
+      .all(seatId, now, since) as Row[];
+    return rows
+      .filter((r) => kinds.includes(r.kind as string))
+      .map((r) => [
+        Math.max(since, r.at as number),
+        Math.min(now, (r.cleared_at as number | null) ?? now),
+      ]);
+  }
+
   openNoteKeys(runId: string): string[] {
     const rows = this.db
       .prepare(
@@ -2730,6 +2811,45 @@ export class Store {
       .run(c.runId, c.repoId, c.branch, c.sha, c.at);
   }
 
+  commitLines(sha: string): { additions: number | null; deletions: number | null } | null {
+    return (
+      (this.db.prepare("SELECT additions, deletions FROM commit_lines WHERE sha = ?").get(sha) as
+        | { additions: number | null; deletions: number | null }
+        | undefined) ?? null
+    );
+  }
+
+  setCommitLines(
+    sha: string,
+    counts: { additions: number | null; deletions: number | null },
+  ): void {
+    this.db
+      .prepare("INSERT OR IGNORE INTO commit_lines VALUES (?, ?, ?)")
+      .run(sha, counts.additions, counts.deletions);
+  }
+
+  /** First record of each repo/commit in the window; a later retry never recounts it. */
+  telemetryCommits(
+    since: number,
+    now: number,
+  ): { runId: string; repoId: string; sha: string; at: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.run_id, c.repo_id, c.sha, c.at FROM run_commits c
+         WHERE c.at >= ? AND c.at <= ? AND c.id = (
+           SELECT first.id FROM run_commits first
+           WHERE first.repo_id = c.repo_id AND first.sha = c.sha ORDER BY first.at, first.id LIMIT 1
+         ) ORDER BY c.at, c.id`,
+      )
+      .all(since, now) as Row[];
+    return rows.map((r) => ({
+      runId: r.run_id as string,
+      repoId: r.repo_id as string,
+      sha: r.sha as string,
+      at: r.at as number,
+    }));
+  }
+
   /** The commits the commit tool made for a run, in the order it made them. */
   runCommits(runId: string): string[] {
     const rows = this.db
@@ -2914,11 +3034,19 @@ export class Store {
     this.db.prepare("UPDATE crew_errors SET acked = 1 WHERE id = ?").run(id);
   }
 
-  addDraft(target: string, kind: ReplyDraft["kind"], text: string, at: number): number {
+  addDraft(
+    target: string,
+    kind: ReplyDraft["kind"],
+    text: string,
+    at: number,
+    metadata?: Pick<ReplyDraft, "to" | "via" | "where" | "context">,
+  ): number {
     return Number(
       this.db
-        .prepare("INSERT INTO drafts (target, kind, text, created_at) VALUES (?, ?, ?, ?)")
-        .run(target, kind, text, at).lastInsertRowid,
+        .prepare(
+          "INSERT INTO drafts (target, kind, text, created_at, metadata) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(target, kind, text, at, metadata ? JSON.stringify(metadata) : null).lastInsertRowid,
     );
   }
 
@@ -2928,8 +3056,9 @@ export class Store {
     text: string,
     at: number,
     source: { itemKey: string; replyId: string; source: PersonSource },
+    metadata?: Pick<ReplyDraft, "to" | "via" | "where" | "context">,
   ): number {
-    const id = this.addDraft(target, kind, text, at);
+    const id = this.addDraft(target, kind, text, at, metadata);
     this.db.prepare("UPDATE drafts SET source = ? WHERE id = ?").run(JSON.stringify(source), id);
     return id;
   }
@@ -2943,20 +3072,150 @@ export class Store {
     return row?.source ? { ...JSON.parse(row.source as string), state: row.state as string } : null;
   }
 
-  drafts(): ReplyDraft[] {
-    return this.db
-      .prepare(
-        "SELECT id, target, kind, text, created_at AS createdAt, state FROM drafts WHERE state = 'pending' ORDER BY created_at, id",
-      )
-      .all() as unknown as ReplyDraft[];
+  drafts(includeDone = false): ReplyDraft[] {
+    return this.readDrafts(includeDone ? "all" : "pending");
   }
 
-  finishDraft(id: number, state: "posted" | "discarded", text?: string): void {
-    if (state === "discarded") this.db.prepare("DELETE FROM drafts WHERE id = ?").run(id);
-    else
+  draftHistory(): ReplyDraft[] {
+    return this.readDrafts("history");
+  }
+
+  private readDrafts(selection: "pending" | "all" | "history"): ReplyDraft[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, target, kind, text, created_at AS createdAt, state, metadata, completed_at AS completedAt
+       FROM drafts ${
+         selection === "history"
+           ? "WHERE state != 'pending' ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 100"
+           : selection === "all"
+             ? `WHERE state = 'pending' OR id IN (
+               SELECT id FROM drafts WHERE state != 'pending'
+               ORDER BY created_at DESC, id DESC LIMIT 100
+             ) ORDER BY created_at DESC, id DESC`
+             : "WHERE state = 'pending' ORDER BY created_at, id"
+       }`,
+      )
+      .all() as Row[];
+    return rows.map(({ metadata, completedAt, ...r }) => ({
+      ...r,
+      to: r.target,
+      via: "GitHub",
+      where: r.target,
+      ...(metadata ? JSON.parse(metadata as string) : {}),
+      ...(completedAt === null ? {} : { completedAt }),
+    })) as ReplyDraft[];
+  }
+
+  finishDraft(
+    id: number,
+    state: "posted" | "copied" | "discarded",
+    text?: string,
+    at = Date.now(),
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE drafts SET state = ?, text = COALESCE(?, text), completed_at = ? WHERE id = ? AND state = 'pending'",
+      )
+      .run(state, text ?? null, at, id);
+  }
+
+  setFlightWatch(session: string, operation: FlightWatchOperation, at: number): void {
+    this.transaction(() => {
+      for (const id of operation.remove ?? [])
+        this.db
+          .prepare("DELETE FROM flight_watch WHERE session_id = ? AND id = ?")
+          .run(session, id);
+      for (const entry of operation.upsert ?? [])
+        this.db
+          .prepare("INSERT OR REPLACE INTO flight_watch (session_id, id, entry) VALUES (?, ?, ?)")
+          .run(session, entry.id, JSON.stringify({ ...entry, updatedAt: at }));
+      if (this.flightWatch(session).length > FLIGHT_WATCH_LIMIT)
+        throw new Error("Too many watch entries.");
+    });
+  }
+
+  flightWatch(session: string): FlightWatchEntry[] {
+    return (
       this.db
-        .prepare("UPDATE drafts SET state = ?, text = COALESCE(?, text) WHERE id = ?")
-        .run(state, text ?? null, id);
+        .prepare("SELECT entry FROM flight_watch WHERE session_id = ? ORDER BY id")
+        .all(session) as Row[]
+    ).map((r) => JSON.parse(r.entry as string) as FlightWatchEntry);
+  }
+
+  recordFlightArrival(entry: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">): void {
+    const id = JSON.stringify([entry.source, entry.arrivalId, entry.version]);
+    const notification = entry.source === "Board" ? null : this.notification(entry.arrivalId);
+    const board =
+      entry.source === "Board"
+        ? this.board(entry.arrivalId.split("#")[0] ?? "").find(
+            (c) => `${c.repoId}#${c.issueNumber}` === entry.arrivalId,
+          )
+        : undefined;
+    const repoId = notification?.repoId || board?.repoId || null;
+    const kind =
+      entry.source === "Teams"
+        ? "teams"
+        : notification?.subjectType === "PullRequest"
+          ? "github-pr"
+          : "github-issue";
+    const url = notification?.message?.url ?? notification?.url ?? board?.url;
+    let sourceRef: FlightArrivalDisposition["sourceRef"] = null;
+    if (url) {
+      try {
+        const parsed = new URL(url);
+        if (
+          parsed.origin ===
+            (kind === "teams" ? "https://teams.microsoft.com" : "https://github.com") &&
+          !parsed.username &&
+          !parsed.password
+        )
+          sourceRef = { kind, url };
+      } catch {
+        /* Invalid source URLs are never offered as links. */
+      }
+    }
+    this.transaction(() => {
+      const previous = this.db.prepare("SELECT entry FROM flight_incoming WHERE id = ?").get(id) as
+        | Row
+        | undefined;
+      const saved = previous
+        ? (JSON.parse(previous.entry as string) as FlightArrivalDisposition)
+        : null;
+      if (saved?.outcome === entry.outcome && saved.detail === entry.detail) return;
+      this.db
+        .prepare(
+          "INSERT OR REPLACE INTO flight_incoming (id, source, arrival_id, version, at, entry) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          id,
+          entry.source,
+          entry.arrivalId,
+          entry.version,
+          entry.at,
+          JSON.stringify({
+            ...entry,
+            id,
+            repoId: saved ? (saved.repoId ?? null) : repoId,
+            sourceRef: saved ? (saved.sourceRef ?? null) : sourceRef,
+          }),
+        );
+      this.db
+        .prepare(
+          "DELETE FROM flight_incoming WHERE id NOT IN (SELECT id FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?)",
+        )
+        .run(FLIGHT_INCOMING_LIMIT);
+    });
+  }
+
+  flightIncoming(): FlightArrivalDisposition[] {
+    return (
+      this.db
+        .prepare("SELECT entry FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?")
+        .all(FLIGHT_INCOMING_LIMIT) as Row[]
+    ).map((r) => {
+      const entry = JSON.parse(r.entry as string) as FlightArrivalDisposition;
+      return { ...entry, repoId: entry.repoId ?? null, sourceRef: entry.sourceRef ?? null };
+    });
   }
 
   /** Records one of FLIGHT's decisions; returns its id. */
@@ -3195,6 +3454,12 @@ export class Store {
                     r.text,
                     at,
                     { itemKey: key, replyId: r.id, source },
+                    {
+                      ...(n.author === null ? {} : { to: n.author }),
+                      via: "GitHub",
+                      where: `${n.repoId}#${n.number}`,
+                      context: n.title,
+                    },
                   ),
                 }
               : {}),

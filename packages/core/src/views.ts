@@ -3,6 +3,8 @@ import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from ".
 import type {
   AccountId,
   AgentId,
+  CliAccountStatus,
+  NotificationPreferences,
   RepoId,
   RunDigest,
   RunPr,
@@ -122,7 +124,17 @@ export interface ConfigView {
    * when the read fails; optional only until the web fixtures carry it.
    */
   githubLogin?: string | null;
-  accounts: { id: AccountId; vendor: "claude" | "codex"; alertAt: number; stopAt: number }[];
+  accounts: {
+    id: AccountId;
+    vendor: "claude" | "codex";
+    alertAt: number;
+    stopAt: number;
+    binding?: "machine";
+    canCheck?: boolean;
+    signInHint?: string;
+    status?: CliAccountStatus;
+  }[];
+  notificationPreferences?: NotificationPreferences;
   repos: {
     id: RepoId;
     github: string;
@@ -161,6 +173,8 @@ export interface ConfigView {
       id: string;
       repoId: RepoId;
       checkout: string;
+      branch?: string | null;
+      managedCheckout?: boolean;
       seats: {
         id: AgentId;
         focus?: string | null;
@@ -322,8 +336,17 @@ export interface Telemetry {
   tokensPerMinute: AgentSeries[];
   /** The last LIVE_MINUTES minutes, oldest first, from the digests' minute buckets. */
   liveMinutes: AgentSeries[];
-  /** % of today so far; the three sum to 100. */
-  utilisation: { agentId: AgentId; working: number; waiting: number; idle: number }[];
+  /** % of today so far. The four measured shares plus unknown sum to 100. */
+  utilisation: {
+    agentId: AgentId;
+    working: number;
+    waiting: number;
+    /** Blocked, parked or stalled. */
+    blocked?: number;
+    /** History without recorded state evidence; never assumed working or idle. */
+    unknown?: number;
+    idle: number;
+  }[];
   /** The latest run's per-turn usage. */
   turnUsage: { agentId: AgentId; turns: RunDigest["turnUsage"] }[];
   toolLatency: {
@@ -331,6 +354,7 @@ export interface Telemetry {
     calls: number;
     p50Ms: number | null;
     p95Ms: number | null;
+    slowest?: { detail: string | null; agentId: AgentId; durationMs: number } | null;
     failed: number;
   }[];
   subagents: (SubagentInfo & { agentId: AgentId })[];
@@ -345,6 +369,8 @@ export interface Telemetry {
     output: number;
     cacheRead: number;
     cacheHitPct: number | null;
+    additions?: number | null;
+    deletions?: number | null;
     turns: number;
     toolCalls: number;
     costUsd: number | null;

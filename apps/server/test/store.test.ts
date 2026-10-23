@@ -337,6 +337,24 @@ describe("Store", () => {
     expect(s.usage("acc", "5h", 0)).toHaveLength(2);
   });
 
+  it("invalidates legacy cycle starts once, preserving PR flow and recollected rows", () => {
+    const path = join(dir, "flow.sqlite");
+    const old = new Store(path);
+    old.deleteSetting("flow-ready-start-v1");
+    const issue = { repoId: "r", number: 1, size: null, startAt: 10, doneAt: 20 };
+    const pr = { repoId: "r", number: 2, mergedAt: 20, firstPushCi: null };
+    old.replaceFlow("r", [issue], [pr]);
+    old.close();
+    const migrated = new Store(path);
+    expect(migrated.flowIssues(0)).toEqual([]);
+    expect(migrated.flowPrs(0)).toEqual([pr]);
+    migrated.replaceFlow("r", [issue], [pr]);
+    migrated.close();
+    const reopened = new Store(path);
+    expect(reopened.flowIssues(0)).toEqual([issue]);
+    reopened.close();
+  });
+
   it("runs the usage dedupe on the first open only, gated on PRAGMA user_version", () => {
     const path = join(dir, "once.sqlite");
     const userVersion = (db: DatabaseSync) =>
@@ -1992,4 +2010,49 @@ it("retains complete and legacy briefs across restart without inventing checked 
   expect(store.briefs().get(legacy.key)).toEqual(legacyBrief);
   expect(store.briefs().get(complete.key)).toEqual(completeBrief);
   expect(store.briefs().get(legacy.key)?.checked).toBeUndefined();
+});
+
+it("deduplicates a large history with an indexed first-commit lookup", () => {
+  for (let i = 0; i < 500; i++) {
+    for (const [runId, at] of [
+      ["first", i],
+      ["retry", i + 1000],
+    ] as const)
+      store.addRunCommit({ runId, repoId: "repo", branch: "b", sha: String(i), at });
+  }
+  expect(store.telemetryCommits(0, 2000)).toHaveLength(500);
+  expect(store.telemetryCommits(0, 2000).every((c) => c.runId === "first")).toBe(true);
+  expect(store.telemetryCommits(1000, 2000)).toEqual([]);
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    const plan = db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT id FROM run_commits WHERE repo_id = ? AND sha = ? ORDER BY at, id LIMIT 1",
+      )
+      .all("repo", "1");
+    expect(plan.map((r) => r.detail).join(" ")).toContain("USING COVERING INDEX run_commits_first");
+  } finally {
+    db.close();
+  }
+});
+
+it("retains each reopened attention episode and closes notes by run", () => {
+  const note = {
+    key: "review",
+    kind: "review" as const,
+    runId: "r",
+    seatId: "seat",
+    repoId: "repo",
+    text: "review",
+    at: 10,
+  };
+  store.raiseNote(note);
+  store.raiseNote({ ...note, at: 15 });
+  store.clearNote(note.key, 20);
+  store.raiseNote({ ...note, at: 30 });
+  store.clearNotesFor("r", 40);
+  expect(store.telemetryNoteIntervals("seat", 0, 50, ["review"])).toEqual([
+    [10, 20],
+    [30, 40],
+  ]);
 });

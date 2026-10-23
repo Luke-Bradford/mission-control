@@ -66,6 +66,7 @@ import {
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -452,15 +453,20 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
+  ["GET", "/api/drafts/history"],
   ["POST", "/api/drafts/guido-1/post"],
   ["POST", "/api/drafts/guido-1/discard"],
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/flight/brief"],
+  ["GET", "/api/flight/incoming"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
+  ["GET", "/api/accounts/status"],
+  ["POST", "/api/accounts/claude-main/check"],
+  ["POST", "/api/accounts", { name: "another", provider: "claude" }],
   ["POST", "/api/config/reload"],
   ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
@@ -481,6 +487,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/interrupt"],
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
+  ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/example/discussion"],
@@ -489,6 +496,27 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
   ["GET", "/api/notifications"],
   ["POST", "/api/attention/person:101:1/handled", {}],
+  ["GET", "/api/notification-preferences"],
+  [
+    "POST",
+    "/api/notification-preferences",
+    {
+      categories: {
+        people: true,
+        decisions: true,
+        stalls: true,
+        prs: true,
+        capcom: true,
+        awayDigest: true,
+        quota: false,
+        agentMessages: false,
+      },
+      quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
+      softChime: true,
+    },
+  ],
+  ["GET", "/api/notifications/events"],
+  ["POST", "/api/notifications/test", {}],
   ["GET", "/api/settings/away"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
@@ -921,7 +949,7 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
-      if (url.startsWith("/api/drafts/")) {
+      if (url.startsWith("/api/drafts/") && method === "POST") {
         // the fixture has no such draft: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -938,6 +966,11 @@ describe("local access", () => {
       if (url === "/api/github/refresh") {
         // accepted, not done: the read happens later
         expect(r.statusCode, `${method} ${url}`).toBe(202);
+        continue;
+      }
+      if (url === "/api/accounts" && method === "POST") {
+        expect(r.statusCode).toBe(409);
+        expect(r.json().error).toContain("one account per provider");
         continue;
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
@@ -1068,6 +1101,7 @@ describe("local access", () => {
             ?.replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
+            .replace("/claude-main/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
@@ -2669,6 +2703,52 @@ describe("activity", () => {
 });
 
 describe("telemetry", () => {
+  it("intersects repo-qualified tickets, agent, account and range and clears scope", async () => {
+    for (const [id, ticket, input] of [
+      ["a", "shop-app#7", 10],
+      ["b", "shop-app#8", 20],
+      ["c", "site-builder#7", 40],
+    ] as const) {
+      store.upsertRun(
+        run({
+          id,
+          ticket,
+          tokens: { input, output: 0, cacheRead: 0, cacheCreate: 0 },
+          startedAt: NOW - HOUR,
+          endedAt: NOW - HOUR / 2,
+        }),
+      );
+    }
+    const read = async (q: string) => (await get(`/api/telemetry?${q}`)).json<Telemetry>();
+    expect((await read("ticket=shop-app%237")).totals[0]?.input).toBe(10);
+    expect((await read("ticket=site-builder%237")).totals[0]?.input).toBe(40);
+    expect(
+      (await read("ticket=shop-app%237&agent=shop-app-ta&account=claude-main")).tokensByTicket,
+    ).toEqual([{ ticket: "shop-app#7", tokens: 10, costUsd: null }]);
+    expect((await read("ticket=shop-app%237&account=codex-main")).totals).toEqual([]);
+    expect((await read("ticket=&agent=&account=")).totals[0]?.input).toBe(70);
+    store.upsertRun(
+      run({
+        id: "older",
+        ticket: "shop-app#7",
+        startedAt: NOW - 8 * HOUR,
+        endedAt: NOW - 7 * HOUR,
+        tokens: { input: 100, output: 0, cacheRead: 0, cacheCreate: 0 },
+      }),
+    );
+    expect((await read("range=6h&ticket=shop-app%237")).totals[0]?.input).toBe(10);
+    expect((await read("range=24h&ticket=shop-app%237")).totals[0]?.input).toBe(110);
+    for (const q of [
+      "ticket=7",
+      "ticket=unknown%237",
+      "ticket=shop-app%230",
+      "ticket=shop-app%231.5",
+      "ticket=a&ticket=b",
+    ]) {
+      expect((await get(`/api/telemetry?${q}`)).statusCode, q).toBe(400);
+    }
+  });
+
   it("defaults to 6h, accepts each range and refuses an unknown one with 400", async () => {
     store.upsertRun(
       run({
@@ -2719,8 +2799,24 @@ describe("config", () => {
       operator: { id: "operator", timezone: "Europe/London" },
       githubLogin: "octo-op",
       accounts: [
-        { id: "claude-main", vendor: "claude", alertAt: 85, stopAt: 95 },
-        { id: "codex-main", vendor: "codex", alertAt: 70, stopAt: 80 },
+        {
+          id: "claude-main",
+          vendor: "claude",
+          alertAt: 85,
+          stopAt: 95,
+          binding: "machine",
+          canCheck: true,
+          signInHint: "Sign in with the Claude CLI on this machine.",
+        },
+        {
+          id: "codex-main",
+          vendor: "codex",
+          alertAt: 70,
+          stopAt: 80,
+          binding: "machine",
+          canCheck: true,
+          signInHint: "Sign in with the Codex CLI on this machine.",
+        },
       ],
       repos: [
         {
@@ -2980,6 +3076,26 @@ describe("set a session's seats (POST /api/crew/sessions/:sessionId/seats)", () 
     await a.close();
   });
 
+  it("saves a display call sign through the guarded seat editor", async () => {
+    const { a, reload } = reloading();
+    const base = seats();
+    const renamed = base.map((s) =>
+      s.id === "guido-1" ? { ...s, displayCallSign: "Orbit One" } : s,
+    );
+    expect((await send(a, { base, seats: renamed })).statusCode).toBe(200);
+    expect(seats()).toEqual(renamed);
+    expect(reload).toHaveBeenCalledTimes(1);
+    const saved = readFileSync(configPath, "utf8");
+    expect((await send(a, { base, seats: base })).statusCode).toBe(409);
+    for (const displayCallSign of ["", "  ", "x".repeat(65), "INCO-1"]) {
+      const invalid = renamed.map((s) => (s.id === "guido-1" ? { ...s, displayCallSign } : s));
+      expect((await send(a, { base: renamed, seats: invalid })).statusCode).toBe(400);
+      expect(readFileSync(configPath, "utf8")).toBe(saved);
+    }
+    expect(reload).toHaveBeenCalledTimes(1);
+    await a.close();
+  });
+
   it("writes, then reloads once", async () => {
     const { a, reload } = reloading();
     const base = seats();
@@ -3094,7 +3210,7 @@ describe("SSE stream", () => {
     expect(s.res.headers["content-type"]).toContain("text/event-stream");
     expect(s.res.headers["cache-control"]).toContain("no-cache");
     await s.until(": connected");
-    expect(bus.size).toBe(1);
+    expect(bus.size).toBe(2); // notification transitions and the SSE client
     bus.emit("boards");
     await s.until('event: changed\ndata: {"topic":"boards"}\n\n');
     bus.emit("limits");
@@ -3102,6 +3218,8 @@ describe("SSE stream", () => {
     await s.until(": heartbeat");
     // stands in for Node's `close` on a client disconnect
     s.res.raw.res.emit("close");
+    expect(bus.size).toBe(1); // the notification subscriber lives until app.close()
+    await app.close();
     expect(bus.size).toBe(0);
   });
 
@@ -3260,6 +3378,93 @@ describe("crew routes", () => {
       expect(r.statusCode, `${action} ${JSON.stringify(body).slice(0, 40)}`).toBe(400);
       expect(r.json<{ error: string }>().error).toEqual(expect.any(String));
     }
+    expect(supervisorCalls).toEqual([]);
+  });
+
+  it("ends only the exact blocked run named by a watch action", async () => {
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("Missing crew fixture");
+    session.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    const since = NOW - 20 * 60_000;
+    const lock = new TestLock({ now: () => since });
+    const key = { runId: "preview-run", toolUseId: "preview-suite" };
+    await lock.acquire(key, "guido-1", "pnpm test", 60_000, new AbortController().signal);
+    const waiting = lock.acquire(
+      { runId: "waiting-preview", toolUseId: "waiting-suite" },
+      "inco-1",
+      "pnpm test",
+      60_000,
+      new AbortController().signal,
+    );
+    store.upsertRun(run({ id: key.runId, agentId: "guido-1", startedAt: since }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: key.runId,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: since,
+    });
+    store.addLockHold({ ...key, seatId: "guido-1", command: "pnpm test", since });
+    store.setFlightWatch(
+      session.id,
+      {
+        upsert: [
+          {
+            id: "stop-preview",
+            state: "warn",
+            title: "Preview suite is blocking",
+            detail: "A suite is waiting",
+            catchUp: { kind: "old", line: "Holder is silent" },
+            next: "Stop the run",
+            action: { kind: "lock-hold", ...key, since },
+          },
+        ],
+      },
+      NOW,
+    );
+    const preview = buildApp({
+      config,
+      store,
+      bus,
+      lock,
+      supervisor: stubSupervisor(),
+      now: () => NOW,
+    });
+    try {
+      const stop = (expectedSince: number) =>
+        preview.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/end",
+          payload: { watch: { id: "stop-preview", ...key, since: expectedSince } },
+        });
+      expect((await stop(since + 1)).statusCode).toBe(409);
+      expect(supervisorCalls).toEqual([]);
+      expect((await stop(since)).statusCode).toBe(200);
+      expect(supervisorCalls).toEqual([["end", "guido-1", { hold: undefined }]]);
+      lock.releaseRun(key.runId);
+      expect((await stop(since)).statusCode).toBe(409);
+      expect(supervisorCalls).toHaveLength(1);
+    } finally {
+      lock.releaseRun(key.runId);
+      lock.releaseRun("waiting-preview");
+      await waiting;
+      await preview.close();
+    }
+  });
+
+  it("refuses a stale watch stop target before ending any run", async () => {
+    const response = await post5("end", {
+      watch: { id: "stop-preview", runId: "preview-run", toolUseId: "preview-suite", since: NOW },
+    });
+    expect(response.statusCode).toBe(409);
     expect(supervisorCalls).toEqual([]);
   });
 
@@ -4065,6 +4270,72 @@ describe("the first loop's engine", () => {
     await none.a.close();
   });
 
+  it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const { a, told } = engineApp(null);
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(told).toEqual(["aside"]);
+    expect(r.statusCode).toBe(409);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
+        .statusCode,
+    ).toBe(404);
+    await a.close();
+  });
+
+  it.each([
+    ["a body", { x: 1 }, true, "aside", 400],
+    ["no engine", {}, false, "aside", 409],
+    ["an unlooped run", {}, true, "plain-run", 404],
+  ] as const)("refuses %s", async (_what, payload, withEngine, id, code) => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    store.upsertRun(run({ id: "plain-run", agentId: "guido-1" }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      ...(withEngine
+        ? {
+            engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+          }
+        : {}),
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: `/api/runs/${id}/resume`,
+      headers: json,
+      payload,
+    });
+    expect(r.statusCode).toBe(code);
+    await a.close();
+  });
+
+  it("answers ok when the engine lifts the park", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ok: true });
+    await a.close();
+  });
+
   it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {
     store.upsertRun(run({ id: "plain", agentId: "guido-1", ticket: "shop-app#9" }));
     const { a } = engineApp("plain");
@@ -4230,4 +4501,61 @@ describe("test lock history", () => {
     expect(h.today).toEqual({ runs: 4, waitMs: 4000 });
     expect(h.usualMs).toEqual({ test: 200 });
   });
+});
+
+// Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
+vi.mock("../src/accounts.ts", () => ({
+  readAccountStatus: async (account: { id: string; vendor: string }, now: number) => ({
+    accountId: account.id,
+    provider: account.vendor,
+    binding: "machine",
+    identity: null,
+    plan: null,
+    status: "unknown",
+    checkedAt: now,
+    detail: null,
+  }),
+}));
+
+it("bounds uncached telemetry reads, filters first and persists immutable counts", async () => {
+  store.upsertRun(
+    run({
+      id: "many",
+      ticket: "shop-app#7",
+      tokens: { input: 1, output: 0, cacheRead: 0, cacheCreate: 0 },
+    }),
+  );
+  for (let i = 0; i < 50; i++)
+    store.addRunCommit({
+      runId: "many",
+      repoId: "shop-app",
+      branch: "b",
+      sha: i.toString(16).padStart(40, "0"),
+      at: NOW - 1000 + i,
+    });
+  let active = 0;
+  let peak = 0;
+  const read = vi.spyOn(files, "committedLines").mockImplementation(async () => {
+    peak = Math.max(peak, ++active);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    active--;
+    return { additions: 2, deletions: 1 };
+  });
+  try {
+    await get("/api/telemetry?ticket=shop-app%238");
+    expect(read).toHaveBeenCalledTimes(0);
+    const first = (await get("/api/telemetry")).json<Telemetry>();
+    expect(read).toHaveBeenCalledTimes(32);
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(peak).toBeGreaterThan(1);
+    expect(first.totals[0]?.additions).toBeNull();
+    const second = (await get("/api/telemetry")).json<Telemetry>();
+    expect(read).toHaveBeenCalledTimes(50);
+    expect(new Set(read.mock.calls.map((c) => c[1])).size).toBe(50);
+    expect(second.totals[0]?.additions).toBe(100);
+    await get("/api/telemetry");
+    expect(read).toHaveBeenCalledTimes(50);
+  } finally {
+    read.mockRestore();
+  }
 });

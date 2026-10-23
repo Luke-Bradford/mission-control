@@ -308,11 +308,11 @@ export function runWait(
   if (lock.waiting.some((w) => w.runId === run.id)) return "lock";
   if (loop.phase === "parked") return "operator";
   if (asideWakeDue(store, run)) return "seat";
+  if (loop.mainMerge) return "main";
   if (loop.phase === "ci") return "ci";
   if (loop.phase !== "review") return null;
   const keys = store.openNoteKeys(run.id);
   if (keys.some((k) => OPERATOR_NOTE_PREFIXES.some((p) => k.startsWith(p)))) return "operator";
-  if (keys.some((k) => k.startsWith("behind:"))) return "main";
   const push = store.runPush(run.id);
   if (reviewerOf(config, run.agentId) !== null && push !== null) {
     const cur = currentReview(store.reviewsOfRun(run.id), loop.epoch, push.sha);
@@ -427,6 +427,9 @@ export function crew(
           : view.stateSince;
       return {
         id: agent.id,
+        ...(agent.kind === "crew" && agent.seat.displayCallSign !== undefined
+          ? { displayCallSign: agent.seat.displayCallSign }
+          : {}),
         repoId: agent.repoId,
         index,
         hudState: state,

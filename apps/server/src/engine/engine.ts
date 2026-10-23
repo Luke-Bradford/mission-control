@@ -87,7 +87,9 @@ import { wakeDueAsideRun } from "./aside.ts";
 import {
   CI_LOG_UNREADABLE,
   EMPTY_LOG,
+  MERGE_CONFLICTING,
   MERGE_HEAD_MOVED,
+  MERGE_WAITS_ON_MAIN,
   NO_FAILED_RUN,
   type Publisher,
   type UpdateBranchResult,
@@ -878,6 +880,19 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!r.ok) {
           // main may have moved: the gate's facts are read afresh
           cur.gate = null;
+          if (r.text === MERGE_CONFLICTING) {
+            // Stop this pass and refresh GitHub so the conflict routes to update-branch. Any other
+            // refusal (a branch policy, a required review) is counted and parks as before.
+            store.addLoopEvent(
+              `${run.id}:merge-conflict:${a.sha}`,
+              run.id,
+              MERGE_WAITS_ON_MAIN,
+              at,
+            );
+            out.parked = true;
+            deps.pollGithub?.();
+            return;
+          }
           return refused(r, "merge");
         }
         stepDone("merge", a.sha, mergedText(cur.prNumber));

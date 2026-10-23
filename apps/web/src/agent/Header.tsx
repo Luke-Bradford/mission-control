@@ -1,5 +1,5 @@
 import type { CrewChanges, CrewRow, LimitRow } from "@mc/core";
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { PauseButton } from "../components/PauseButton.tsx";
@@ -80,6 +80,112 @@ export function SeatControls({
   );
 }
 
+function RenameSeat({ row }: { row: CrewRow }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const changes = useResource<CrewChanges>(editing ? RESOURCES.crewChanges : null);
+  const base = changes.data?.sessions.find((s) => s.id === row.sessionId)?.seats;
+  const inConfig = base?.some((s) => s.id === row.id);
+  const close = () => {
+    setEditing(false);
+    button.current?.focus();
+  };
+  const save = async () => {
+    if (busy || !base || !inConfig || row.sessionId === null) return;
+    if (name.length > 64 || !name.trim() || /\p{Cc}/u.test(name)) {
+      setError("Use 1–64 characters, with no control characters or blank call sign.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost(ACTIONS.crewSeats(row.sessionId), {
+        base,
+        seats: base.map((s) => (s.id === row.id ? { ...s, displayCallSign: name } : s)),
+      });
+      close();
+    } catch (e) {
+      setError(seatError(e));
+    } finally {
+      hub.refetch(RESOURCES.crewChanges.path);
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.crew.path);
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="sm ghost"
+        disabled={busy}
+        aria-expanded={editing}
+        onClick={() => {
+          if (editing) return;
+          setName(callSign(row));
+          setError(null);
+          setEditing(true);
+          toast(
+            `Rename ${callSign(row)}: call signs default to the role's console plus a number. Any name works.`,
+          );
+        }}
+      >
+        Rename
+      </button>
+      {editing && (
+        <form
+          className="rename-editor"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!busy) close();
+            }
+          }}
+        >
+          <label>
+            Call sign
+            <input
+              // biome-ignore lint/a11y/noAutofocus: focus the editor opened by the Rename button
+              autoFocus
+              value={name}
+              disabled={busy}
+              aria-invalid={!!error}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError(null);
+              }}
+            />
+          </label>
+          <button type="submit" className="sm" disabled={busy || !inConfig}>
+            Save call sign
+          </button>
+          <button type="button" className="sm ghost" disabled={busy} onClick={close}>
+            Cancel
+          </button>
+          {changes.loading && !changes.data && <span className="s muted">Loading call sign…</span>}
+          {!changes.loading && !changes.error && !inConfig && (
+            <span className="s muted">Not in config.yaml</span>
+          )}
+          {(error || changes.error) && (
+            <span className="crit-t s" role="alert">
+              {error ?? changes.error?.message}
+            </span>
+          )}
+        </form>
+      )}
+    </>
+  );
+}
+
 /** Removal uses config.yaml's seat list, including changes that have not applied yet. */
 function SeatSettings({ row }: { row: CrewRow }) {
   const removable = row.hudState === "idle" || row.hudState === "stopped";
@@ -136,17 +242,7 @@ function SeatSettings({ row }: { row: CrewRow }) {
       {removable && changes.data && !inConfig && (
         <span className="s muted">Not in config.yaml</span>
       )}
-      <button
-        type="button"
-        className="sm ghost"
-        onClick={() =>
-          toast(
-            `Rename ${callSign(row)}: call signs are fixed. In Setup › Sessions, remove this seat and use Add agent to choose a new call sign.`,
-          )
-        }
-      >
-        Rename
-      </button>
+      <RenameSeat row={row} />
     </>
   );
 }

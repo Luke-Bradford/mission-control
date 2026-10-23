@@ -891,7 +891,7 @@ describe("Agent page: header and tiles", () => {
     stub({
       rows: [
         crewRow({
-          digest: digest({ speed: { tokensPerSec: 64.4, turnMs: 160_000 } }),
+          digest: digest({ speed: { tokensPerSec: 64.4, turnMs: 160_000, firstTokenMs: 1200 } }),
           contextWindow: 200_000,
         }),
       ],
@@ -900,7 +900,7 @@ describe("Agent page: header and tiles", () => {
     await loaded();
     const speed = tileOf(first.container, "Speed");
     expect($(speed, ".v")?.textContent).toBe("64tokens/s");
-    expect($(speed, ".d")?.textContent).toBe("turn 2m 40s");
+    expect($(speed, ".d")?.textContent).toBe("first token 1.2s · turn 2m 40s");
     expect(speed.textContent).not.toContain("phase 2");
     first.unmount();
     hub.clear();
@@ -909,7 +909,7 @@ describe("Agent page: header and tiles", () => {
     const second = render(<Agent id="shop-app-ta" />);
     await loaded();
     expect($(tileOf(second.container, "Speed"), ".v")?.textContent).toBe("—tokens/s");
-    expect($(tileOf(second.container, "Speed"), ".d")?.textContent).toBe("—");
+    expect($(tileOf(second.container, "Speed"), ".d")?.textContent).toBe("first token — · turn —");
   });
 
   it("Work sums +add −del from the Files list and shows commits and ⊘denials from row.work", async () => {
@@ -1961,6 +1961,7 @@ describe("Agent page: loop steps", () => {
       endedAt: NOW - 10 * MIN,
       outcome,
       reason: null,
+      tokens: 0,
       ...over,
     });
     const viewOf = (
@@ -2144,7 +2145,7 @@ describe("Agent page: loop steps", () => {
       expect(first.style.left).toBe("25%");
       expect(first.style.width).toBe("22.5%");
       expect(first.className).toBe("tl-fail");
-      expect(first.title).toBe("CI try 1 · fail: CI failed on abc1234 · 9 min");
+      expect(first.title).toBe("CI try 1 · fail: CI failed on abc1234 · 0 tokens · 9 min");
       expect(panel.textContent).toContain("(40 min)");
       expect(panel.textContent).toContain("Round 1 of 3");
     });
@@ -2454,30 +2455,13 @@ describe("Agent page: side tabs", () => {
     return $(container, "#sideP") as HTMLElement;
   };
 
-  it("Plan shows the ticket's ## Plan, and says when there is none or no ticket", async () => {
-    const body = "## Outcome\nOutcome words\n## Plan\n1. cache the quotes\n## Notes\nNotes words";
+  it("Plan never substitutes ticket Markdown for the live list", async () => {
     const side = await sideOf(crewRow({ digest: digest() }), {
-      [TICKET_ROUTE]: ticketOf(body, { bodyTruncated: true }),
+      [TICKET_ROUTE]: ticketOf("## Plan\n1. cache the quotes"),
     });
-    expect(await within(side).findByText("cache the quotes")).toBeTruthy();
-    const text = $(side, "#sideBody")?.textContent ?? "";
-    expect(text).not.toContain("Outcome words");
-    expect(text).not.toContain("Notes words");
-    expect(text).toContain("From the ## Plan section of shop-app#3349.");
-    expect(within(side).getByText("Continue on GitHub ↗")).toBeTruthy();
-    cleanup();
-    const bare = await sideOf(crewRow({ digest: digest() }), {
-      [TICKET_ROUTE]: ticketOf("## Outcome\nx"),
-    });
-    expect(await within(bare).findByText("shop-app#3349 has no ## Plan yet.")).toBeTruthy();
-    cleanup();
-    const none = await sideOf(crewRow({ digest: digest(), ticket: null }));
-    expect($(none, "#sideBody")?.textContent).toBe("No ticket on this run.");
-  });
-
-  it("Plan says why a ticket did not load", async () => {
-    const side = await sideOf(crewRow({ digest: digest() }));
-    expect(await within(side).findByText(/^Could not load the ticket: /)).toBeTruthy();
+    expect(await within(side).findByText("No task list yet.")).toBeTruthy();
+    expect(side.textContent).not.toContain("cache the quotes");
+    expect(within(side).getByRole("button", { name: "Plan 0/0" })).toBeTruthy();
   });
 
   it("Queue shows what the seat holds and what comes next", async () => {
@@ -2615,10 +2599,7 @@ describe("Agent page: side tabs", () => {
     const side = $(container, "#sideP") as HTMLElement;
     fireEvent.click(await within(side).findByRole("button", { name: "Files 2" }));
     const rows = [...side.querySelectorAll<HTMLElement>(".f")];
-    expect(rows.map((r) => r.textContent)).toEqual([
-      "src/a.ts+10 −2uncommitted",
-      "img/logo.png—committed",
-    ]);
+    expect(rows.map((r) => r.textContent)).toEqual(["src/a.ts+10 −2uncommitted", "img/logo.png——"]);
     expect(side.textContent).toContain("no origin/HEAD: showing uncommitted changes only");
   });
 
@@ -2846,7 +2827,7 @@ describe("Agent page: header and tile mockup", () => {
     expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
   });
 
-  it("Rename explains fixed call signs and how to add a new name", async () => {
+  it("Rename explains editable call signs", async () => {
     stub({ rows: [seat()], extra: SEAT_ROUTES() });
     render(
       <>
@@ -2857,9 +2838,178 @@ describe("Agent page: header and tile mockup", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
     expect(
       await screen.findByText(
-        "Rename GUIDO-1: call signs are fixed. In Setup › Sessions, remove this seat and use Add agent to choose a new call sign.",
+        "Rename GUIDO-1: call signs default to the role's console plus a number. Any name works.",
       ),
     ).toBeTruthy();
+  });
+
+  it("renames a running seat throughout the HUD while retaining its selection and run", async () => {
+    const row = seat({ hudState: "running" });
+    const rows = [row];
+    const f = stub({
+      rows,
+      extra: SEAT_ROUTES({
+        ...removalRoutes,
+        "POST /api/crew/sessions/s1/seats": (init: RequestInit) => {
+          const body = JSON.parse(init.body as string);
+          expect(body).toEqual({
+            base: changes.sessions[0]?.seats,
+            seats: changes.sessions[0]?.seats.map((s) =>
+              s.id === row.id ? { ...s, displayCallSign: "ORBIT" } : s,
+            ),
+          });
+          rows[0] = { ...row, displayCallSign: "ORBIT" };
+          return { status: 200, body: { changes } };
+        },
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const input = await screen.findByRole("textbox", { name: "Call sign" });
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "ORBIT" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Call sign" })).toBeNull());
+    await waitFor(() =>
+      expect(document.querySelector("#ahead .big")?.textContent).toContain("ORBIT"),
+    );
+    const picker = within(screen.getByRole("group", { name: "Pick an agent" })).getByRole(
+      "button",
+      { name: /ORBIT/ },
+    );
+    expect(picker.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(picker);
+    expect(window.location.pathname).toBe("/agent/guido-1");
+    expect(rows[0]?.run).toBe(row.run);
+    const posts = f.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts.map(([path]) => path)).toEqual(["/api/crew/sessions/s1/seats"]);
+    for (const path of ["/api/config", "/api/crew", "/api/crew/changes"]) {
+      expect(f.mock.calls.filter(([p]) => p === path).length).toBeGreaterThan(1);
+    }
+  });
+
+  it("cancels with Escape and rejects blank and overlong names in place", async () => {
+    const f = stub({ rows: [seat()], extra: SEAT_ROUTES(removalRoutes) });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    let input = await screen.findByRole("textbox", { name: "Call sign" });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Call sign" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    input = await screen.findByRole("textbox", { name: "Call sign" });
+    for (const value of ["   ", "x".repeat(65)]) {
+      fireEvent.change(input, { target: { value } });
+      fireEvent.submit(input.closest("form") as HTMLFormElement);
+      expect((await screen.findByRole("alert")).textContent).toContain("1–64");
+    }
+    expect(f.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it.each([null, { ...changes, sessions: [] }])(
+    "disables saving for an empty config response (%j)",
+    async (body) => {
+      stub({ rows: [seat()], extra: SEAT_ROUTES({ ...removalRoutes, "/api/crew/changes": body }) });
+      render(<Agent id="guido-1" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+      await screen.findByText("Not in config.yaml");
+      expect(
+        (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    },
+  );
+
+  it("shows loading until the saved seat list arrives", async () => {
+    const f = stub({ rows: [seat()], extra: SEAT_ROUTES(removalRoutes) });
+    const original = f.getMockImplementation();
+    let finish: (value: Response) => void = () => {};
+    f.mockImplementation(async (path, init) => {
+      if (path === "/api/crew/changes")
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return (original as NonNullable<typeof original>)(path, init);
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    await screen.findByText("Loading call sign…");
+    expect(
+      (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await act(async () => finish(new Response(JSON.stringify(changes))));
+    expect(
+      (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("shows a failed config read in place and keeps saving disabled", async () => {
+    stub({
+      rows: [seat()],
+      extra: SEAT_ROUTES({
+        ...removalRoutes,
+        "/api/crew/changes": () => ({ status: 503, body: { error: "Config unavailable" } }),
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Config unavailable");
+    expect(
+      (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("disables the editor while saving and handles an empty save response", async () => {
+    const f = stub({ rows: [seat()], extra: SEAT_ROUTES(removalRoutes) });
+    let finish: (value: Response) => void = () => {};
+    const original = f.getMockImplementation();
+    f.mockImplementation(async (path, init) => {
+      if (init?.method === "POST")
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return (original as NonNullable<typeof original>)(path, init);
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const input = await screen.findByRole("textbox", { name: "Call sign" });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    expect((input as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await act(async () => finish(new Response(null, { status: 200 })));
+    expect((await screen.findByRole("alert")).textContent).toBeTruthy();
+    expect((input as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it("keeps a rejected rename editable and shows the server validation error", async () => {
+    stub({
+      rows: [seat()],
+      extra: SEAT_ROUTES({
+        ...removalRoutes,
+        "POST /api/crew/sessions/s1/seats": () => ({
+          status: 400,
+          body: { error: "call signs must be unique" },
+        }),
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const input = await screen.findByRole("textbox", { name: "Call sign" });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.change(input, { target: { value: "ORBIT" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    expect((await screen.findByRole("alert")).textContent).toContain("call signs must be unique");
+    expect((input as HTMLInputElement).value).toBe("ORBIT");
   });
 
   it("Now shows the template, step, attempt and elapsed time of the latest matching try", async () => {

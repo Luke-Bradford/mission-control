@@ -5,6 +5,7 @@ import { useNow, useTz } from "../clock.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { useSeatName } from "../seatName.ts";
 import { answersToday, overturnText } from "./conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 
@@ -24,15 +25,19 @@ function DecidedRow({
   index: number;
   tz: string | null;
 }) {
+  const nameOf = useSeatName();
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // AgentTag resolves this raw call-sign identifier against the current crew.
   const call = d.seatId ? seatCallSign(d.seatId) : null;
   const overturn = async () => {
     setBusy(true);
     setErr(null);
     try {
-      await apiPost(ACTIONS.seatMessage(seatId), { text: overturnText(d, call) });
+      await apiPost(ACTIONS.seatMessage(seatId), {
+        text: overturnText(d, d.seatId ? nameOf(d.seatId) : null),
+      });
       setDone(true);
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));

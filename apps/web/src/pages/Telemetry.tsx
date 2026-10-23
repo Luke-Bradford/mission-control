@@ -1,10 +1,11 @@
 import {
   type ConfigView,
+  type Crew,
   TELEMETRY_RANGES,
   type Telemetry as TelemetryData,
   type TelemetryRange,
 } from "@mc/core";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { Seg } from "../hud/Seg.tsx";
 import { useSelectedAgent } from "../shell/selection.ts";
@@ -23,17 +24,35 @@ const DEFAULT_RANGE: TelemetryRange = "6h";
 
 /**
  * Telemetry (catalogue 2.6): running numbers, then history, from `GET /api/telemetry?range=`.
- * The Agent and Account selects scope every per-agent panel and, on the server, the KPIs, tool
- * latency, subagents and totals; flow of work, quota and machine stay crew-wide. **Decision:** no Ticket select — tickets per run are sparse while the loops'
- * branches rarely reach the transcript. While a new range loads the last one stays, dimmed.
+ * Agent, Account and Ticket scope the server's usage figures. Per-agent series, flow of work,
+ * quota and machine retain their own scope. While a request loads the last response stays, dimmed.
  */
 export function Telemetry() {
   const [range, setRange] = useState<TelemetryRange>(DEFAULT_RANGE);
   const [agent, setAgent] = useState("");
   const [account, setAccount] = useState("");
+  const [ticket, setTicket] = useState("");
+  const ticketSel = useId();
   const agentSel = useId();
   const accountSel = useId();
-  const res = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account));
+  const res = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account, ticket));
+  const available = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account)).data;
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const tickets = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...(crew?.rows.flatMap((r) => (r.ticket ? [r.ticket] : [])) ?? []),
+          ...(available?.tokensByTicket.map((r) => r.ticket) ?? []),
+        ]),
+      ].sort(),
+    [crew, available],
+  );
+  useEffect(() => {
+    if (ticket && available && !tickets.includes(ticket)) {
+      setTicket("");
+    }
+  }, [ticket, available, tickets]);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const [selected] = useSelectedAgent();
 
@@ -62,6 +81,7 @@ export function Telemetry() {
     all,
     agents,
     account,
+    ticket,
     wait: res.error && !t ? "Telemetry did not load." : "Loading…",
   };
   const turnAgent = agents.find((a) => a.id === selected)?.id ?? agents[0]?.id ?? null;
@@ -90,6 +110,17 @@ export function Telemetry() {
           {(config?.accounts ?? []).map((a) => (
             <option key={a.id} value={a.id}>
               {a.id}
+            </option>
+          ))}
+        </select>
+        <label className="s fg2" htmlFor={ticketSel}>
+          Ticket
+        </label>
+        <select id={ticketSel} value={ticket} onChange={(e) => setTicket(e.target.value)}>
+          <option value="">All</option>
+          {(tickets.length ? tickets : ticket ? [ticket] : []).map((id) => (
+            <option key={id} value={id}>
+              {id}
             </option>
           ))}
         </select>
