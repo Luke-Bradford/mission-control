@@ -1,5 +1,4 @@
 import type { BoardItem, RepoView } from "@mc/core";
-import { SESSION_ALL } from "../shell/session.ts";
 
 /** A saved view: which tickets, and the GitHub query and project that show the same set. */
 export type Lane = {
@@ -16,14 +15,10 @@ export const ALL_LANE = "*";
 export const MINE_LANE = "@mine";
 
 /**
- * GitHub ORs repeated `repo:` qualifiers, so one query covers every repo. Under a session only
- * that repo's lane is offered (an unknown session id offers them all; the page hides the cards).
+ * GitHub ORs repeated `repo:` qualifiers, so one query covers every repo.
+ * Lanes are independent of the session filter, which follows a card's assigned agent.
  */
-export function lanesFor(
-  repos: RepoView[],
-  session: string = SESSION_ALL,
-  operatorId: string | null = null,
-): Lane[] {
+export function lanesFor(repos: RepoView[], githubLogin: string | null = null): Lane[] {
   const all: Lane = {
     id: ALL_LANE,
     name: "All repos",
@@ -44,16 +39,14 @@ export function lanesFor(
       match: (i) => i.repoId === r.id,
     }),
   );
-  const own = session === SESSION_ALL ? undefined : repoLanes.find((l) => l.id === session);
-  if (own) return [own];
-  if (operatorId === null) return [all, ...repoLanes];
-  const query = `${all.query} assignee:${operatorId}`;
+  if (githubLogin === null) return [all, ...repoLanes];
+  const query = `${all.query} assignee:${githubLogin}`;
   const mine: Lane = {
     id: MINE_LANE,
     name: "All mine",
     query,
     url: `https://github.com/issues?q=${encodeURIComponent(query)}`,
-    match: (i) => (i.assignees ?? []).some((a) => a.toLowerCase() === operatorId.toLowerCase()),
+    match: (i) => (i.assignees ?? []).some((a) => a.toLowerCase() === githubLogin.toLowerCase()),
   };
   return [all, mine, ...repoLanes];
 }
@@ -61,7 +54,7 @@ export function lanesFor(
 /**
  * The route's repo wins over the stored lane, except on a ticket route (`/board/:repo/:n`), where
  * the repo only names the ticket and the stored lane picks the lane. An unknown id falls back to
- * All repos. A single offered lane (a session) is every lane's answer.
+ * All repos.
  */
 export function resolveLane(
   lanes: Lane[],

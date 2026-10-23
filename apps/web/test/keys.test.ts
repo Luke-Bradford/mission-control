@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installKeys, setPageKey } from "../src/shell/keys.ts";
 import { pushOverlay } from "../src/shell/overlays.ts";
 import { nextAgent } from "../src/shell/selection.ts";
-import { crewRow, item } from "./fixtures.ts";
+import { crewRow, item, seatRow } from "./fixtures.ts";
 
 const press = (key: string, target: Element = document.body) => fireEvent.keyDown(target, { key });
 
@@ -133,6 +133,41 @@ describe("installKeys", () => {
 });
 
 describe("nextAgent", () => {
+  const mixedRows = [
+    seatRow({ id: "alpha-seat", sessionId: "alpha", index: 0 }),
+    seatRow({ id: "beta-seat", sessionId: "beta", index: 1 }),
+    crewRow({ id: "shop-loop", sessionId: null, repoId: "shop-app", index: 2 }),
+    seatRow({ id: "gamma-seat", sessionId: "gamma", repoId: "site-builder", index: 3 }),
+    crewRow({ id: "other-loop", sessionId: null, repoId: "site-builder", index: 4 }),
+  ];
+
+  it("cycles through seats and loops across repos for all sessions", () => {
+    for (const [index, row] of mixedRows.entries()) {
+      expect(nextAgent(mixedRows, [], "all", row.id, 1, "all")).toBe(
+        mixedRows[(index + 1) % mixedRows.length]?.id,
+      );
+      expect(nextAgent(mixedRows, [], "all", row.id, -1, "all")).toBe(
+        mixedRows[(index + mixedRows.length - 1) % mixedRows.length]?.id,
+      );
+    }
+  });
+
+  it.each(["alpha", "beta"])("includes repo loops for %s with App's repo argument", (session) => {
+    const seat = `${session}-seat`;
+    expect(nextAgent(mixedRows, [], session, seat, 1, "shop-app")).toBe("shop-loop");
+    expect(nextAgent(mixedRows, [], session, "shop-loop", 1, "shop-app")).toBe(seat);
+    expect(nextAgent(mixedRows, [], session, seat, -1, "shop-app")).toBe("shop-loop");
+  });
+
+  it("excludes loops from another repo with App's repo argument", () => {
+    expect(nextAgent(mixedRows, [], "gamma", "gamma-seat", 1, "site-builder")).toBe("other-loop");
+    expect(nextAgent(mixedRows, [], "gamma", "other-loop", 1, "site-builder")).toBe("gamma-seat");
+  });
+
+  it("selects nothing for a removed session with no resolved repo", () => {
+    expect(nextAgent(mixedRows, [], "shop-app", null, 1, null)).toBeNull();
+  });
+
   const rows = [
     crewRow({ id: "a", index: 0, repoId: "shop-app", hudState: "running" }),
     crewRow({ id: "b", index: 1, repoId: "site-builder", hudState: "running" }),

@@ -24,7 +24,12 @@ export function NeedsBanner() {
   const all = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const items = all && operatorItems(all);
   const away = useResource<AwaySettings>(RESOURCES.away).data;
-  const lamp = items ? needsLamp(items, true) : null;
+  const lamp = items
+    ? needsLamp(
+        items,
+        items.some((i) => !i.acked),
+      )
+    : null;
   // Acknowledged items still count (catalogue §1.3: until the thing is acted on): say how many are not.
   const notAcked = items?.filter((i) => !i.acked).length ?? 0;
   return (
