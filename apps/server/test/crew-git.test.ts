@@ -143,8 +143,18 @@ describe("crewGit", () => {
   });
 
   it("adds the caller's env (an author name), never over the variables that keep it safe", async () => {
+    // An email and an empty HOME, so `git var` never depends on the runner's user or hostname.
+    const home = join(dir, "empty-home");
+    mkdirSync(home);
     const ident = await crewGit(wt, ["var", "GIT_AUTHOR_IDENT"], common(), {
-      env: { GIT_AUTHOR_NAME: "GUIDO-1 (Mission Control)" },
+      env: {
+        GIT_AUTHOR_NAME: "GUIDO-1 (Mission Control)",
+        GIT_AUTHOR_EMAIL: "guido@example.invalid",
+        GIT_COMMITTER_NAME: "GUIDO-1 (Mission Control)",
+        GIT_COMMITTER_EMAIL: "guido@example.invalid",
+        HOME: home,
+        XDG_CONFIG_HOME: home,
+      },
     });
     expect(ident).toMatch(/^GUIDO-1 \(Mission Control\) </);
     const real = git(clone, "rev-parse", "HEAD").trim();

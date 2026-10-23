@@ -1178,6 +1178,42 @@ describe("merge steps", () => {
       expect(gitCalls).toContainEqual(["merge-base", "--is-ancestor", OTHER, MAIN]);
     });
 
+    it("fetches main when the clone lacks the merge commit, then deletes", async () => {
+      let fetched = false;
+      gitAnswers = {
+        "rev-parse": (args) => {
+          if (args.includes(`${MAIN}^{commit}`) && !fetched) throw exit1;
+          return `${OTHER}\n`;
+        },
+        "ls-remote": lsRemote(),
+        fetch: () => {
+          fetched = true;
+          return "";
+        },
+        "merge-base": "",
+        branch: "",
+      };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toEqual({ ok: true });
+      expect(pushed("fetch")).toBe(true);
+      expect(gitCalls).toContainEqual(["branch", "-D", BRANCH]);
+    });
+
+    it("refuses transiently when the fetch fails", async () => {
+      gitAnswers = {
+        "rev-parse": (args) => {
+          if (args.includes(`${MAIN}^{commit}`)) throw exit1;
+          return `${OTHER}\n`;
+        },
+        "ls-remote": lsRemote(),
+        fetch: new Error("network"),
+      };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toMatchObject({
+        ok: false,
+        transient: true,
+      });
+      expect(pushed("branch")).toBe(false);
+    });
+
     it("keeps a branch with commits that were not merged", async () => {
       gitAnswers = {
         "rev-parse": `${OTHER}\n`,

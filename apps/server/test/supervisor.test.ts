@@ -18,29 +18,46 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  type BoardItem,
   CREW_DISABLED,
+  claimedText,
   clockHm,
+  DEFAULT_REPO_RULES,
+  freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
   guardDenyOutput,
   NEW_LOOP,
   NOT_ASIDE,
+  notOnBoardText,
+  otherLaneText,
   PNPM_STORE_ENV,
   READONLY_BUILTINS,
   READONLY_TOOLS,
   REVIEW_NOT_WANTED,
+  type RepoRules,
   type Run,
   type RunLoop,
+  researchText,
   retiringText,
   reworkFirstText,
+  START_NO_RULES,
+  startMissingNeedsText,
+  startNeedsPlanText,
   type TicketView,
+  ticketHasRunText,
   ticketInReviewText,
+  twoAreasText,
+  waitsOnText,
+  wrongAreaText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import { CliHold } from "../src/cli-update.ts";
 import { type CcConfig, type CrewSeatConfig, isInside } from "../src/config.ts";
+import { refillQueues, seatMayTake, type TakeDeps, takeNext } from "../src/engine/queue.ts";
+import { RepoRulesError } from "../src/engine/rules.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
@@ -153,6 +170,33 @@ const TICKET: TicketView = {
   subIssues: [],
   pullRequests: [],
 };
+/** No area labels, and nothing the card must have: only the checks a test sets up apply. */
+const START_RULES: RepoRules = freezeRules({ ...DEFAULT_REPO_RULES, needs: [] });
+const boardCard = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
+  repoId: "mc",
+  issueNumber: n,
+  title: `Ticket ${n}`,
+  status: "Ready",
+  state: "planned",
+  labels: [],
+  assignees: [],
+  priority: null,
+  updatedAt: 0,
+  url: "u",
+  stage: null,
+  owner: null,
+  parent: null,
+  subIssues: null,
+  blockedBy: [],
+  milestone: null,
+  size: "S",
+  closed: false,
+  prioritySource: null,
+  createdAt: 0,
+  itemId: `I${n}`,
+  projectId: "P1",
+  ...over,
+});
 const BRANCH = "feature/42-fix-the-stop-race";
 const TZ = "Europe/London";
 
@@ -215,6 +259,8 @@ function make(
     repo?: Partial<CcConfig["repos"][number]>;
     cliHold?: CliHold;
     cliVersion?: SupervisorDeps["cliVersion"];
+    rules?: SupervisorDeps["rules"];
+    login?: string | null;
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
@@ -237,6 +283,8 @@ function make(
     store,
     bus,
     dbPath,
+    rules: over.rules ?? (async () => START_RULES),
+    login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,
     commandArgs:
       over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
@@ -307,6 +355,10 @@ beforeEach(() => {
   dbPath = join(dir, "db", "mc.sqlite");
   mkdirSync(join(dir, "db"));
   store = new Store(dbPath);
+  store.replaceBoard(
+    "mc",
+    [7, 42, 43, 44].map((n) => boardCard(n)),
+  );
   bus = new ChangeBus();
 });
 
@@ -381,6 +433,207 @@ describe("the CLI update hold", () => {
     hold.release();
     await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
     expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId });
+  });
+});
+
+describe("startRun eligibility", () => {
+  const AREAS = {
+    "area:server": ["apps/server/**"],
+    "area:web": ["apps/web/**"],
+    "area:docs": ["docs/**"],
+  };
+  const withRules =
+    (over: Partial<RepoRules> = {}) =>
+    async () =>
+      freezeRules({ ...DEFAULT_REPO_RULES, needs: [], areas: AREAS, ...over });
+  const ticketWith =
+    (over: Partial<TicketView>): FetchTicket =>
+    async () => ({
+      ...TICKET,
+      labels: ["area:server"],
+      ...over,
+    });
+  /** What the worktrees folder holds besides the crew lock. */
+  const worktrees = () =>
+    existsSync(root) ? readdirSync(root).filter((f) => f !== CREW_LOCK_FILE) : [];
+  const onBoard = (...cards: BoardItem[]) =>
+    store.replaceBoard("mc", [...[7, 43, 44].map((n) => boardCard(n)), ...cards]);
+
+  /** startRun on mc#42 as GUIDO-1 is refused with this status and text, before any worktree or claim. */
+  async function refused(
+    status: number,
+    text: string,
+    over: Parameters<typeof make>[0] = {},
+  ): Promise<void> {
+    const claim = vi.fn(async () => {});
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), ...over, claim });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect([e.status, e.message]).toEqual([status, text]);
+    expect(store.seatSession("guido-1")).toBeNull();
+    expect(worktrees()).toEqual([]);
+    expect(claim).not.toHaveBeenCalled();
+  }
+
+  it("1: refuses another lane", async () => {
+    const { sup, cfg } = make({
+      rules: withRules(),
+      fetchTicket: ticketWith({ labels: ["area:server", "lane:home"] }),
+    });
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.lane = "work";
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect([e.status, e.message]).toEqual([422, otherLaneText("mc#42", ["lane:home"], "work")]);
+    expect(store.seatSession("guido-1")).toBeNull();
+    expect(worktrees()).toEqual([]);
+  });
+
+  it("2: refuses two areas", async () => {
+    await refused(422, twoAreasText("mc#42", ["area:server", "area:web"]), {
+      fetchTicket: ticketWith({ labels: ["area:server", "area:web"] }),
+    });
+  });
+
+  it("3: refuses no area label", async () => {
+    await refused(422, "Not started: mc#42 has no area label.", {
+      fetchTicket: ticketWith({ labels: [] }),
+    });
+  });
+
+  it("4: refuses an area that is not the seat's", async () => {
+    await refused(422, wrongAreaText("GUIDO-1", "mc#42", ["area:docs"]), {
+      fetchTicket: ticketWith({ labels: ["area:docs"] }),
+    });
+  });
+
+  it("5: refuses a ticket another seat has taken", async () => {
+    store.replaceQueue("fao-1", [{ repoId: "mc", issue: 42 }]);
+    store.takeQueued("fao-1", 1);
+    await refused(422, ticketHasRunText("mc#42"));
+  });
+
+  it("5: refuses a ticket with an active run", async () => {
+    store.upsertRun({
+      id: "fao-1:1",
+      agentId: "fao-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      ticketTitle: "x",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    await refused(422, ticketHasRunText("mc#42"));
+  });
+
+  it("6: refuses a card assigned to another login", async () => {
+    onBoard(boardCard(42, { assignees: ["other"] }));
+    await refused(422, claimedText("mc#42", ["other"]));
+  });
+
+  it("7: refuses an open blocker and an open Depends on issue", async () => {
+    onBoard(boardCard(42, { blockedBy: [{ ref: "mc#3", closed: false }] }));
+    await refused(422, waitsOnText("mc#42", ["mc#3"]));
+    onBoard(boardCard(42), boardCard(45, { closed: true }));
+    await refused(422, waitsOnText("mc#42", ["mc#43", "mc#99"]), {
+      fetchTicket: ticketWith({ body: "Depends on #43, #45 and #99\n" }),
+    });
+  });
+
+  it("8: refuses a research ticket", async () => {
+    await refused(422, researchText("mc#42"), {
+      fetchTicket: ticketWith({ labels: ["area:server", "research"] }),
+    });
+  });
+
+  it("9: refuses a ticket missing Done when or Size", async () => {
+    onBoard(boardCard(42, { size: null }));
+    await refused(422, startMissingNeedsText("mc#42", ["done_when", "size"]), {
+      rules: withRules({ needs: ["done_when", "size"] }),
+    });
+  });
+
+  it("10: refuses Size M with no plan", async () => {
+    onBoard(boardCard(42, { size: "M" }));
+    await refused(422, startNeedsPlanText("mc#42", "M"));
+  });
+
+  it("refuses a card that is not on the board", async () => {
+    store.replaceBoard("mc", [boardCard(7)]);
+    await refused(422, notOnBoardText("mc#42"));
+  });
+
+  it("refuses when the rules cannot be read", async () => {
+    await refused(502, START_NO_RULES, { rules: async () => new RepoRulesError("no clone") });
+  });
+
+  it("starts an eligible ticket", async () => {
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    expect(store.seatSession("guido-1")).not.toBeNull();
+  });
+});
+
+describe("two hubs, one card", () => {
+  const AREAS = { "area:server": ["apps/server/**"] };
+  const labels = ["area:server", "lane:home"];
+  const rules = async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [], areas: AREAS });
+
+  async function hub(lane: "home" | "work") {
+    store.replaceBoard("mc", [boardCard(42, { labels })]);
+    const made = make({
+      autonomy: "merge",
+      rules,
+      fetchTicket: async () => ({ ...TICKET, labels }),
+    });
+    if (made.cfg.crew === undefined) throw new Error("no crew");
+    made.cfg.crew.lane = lane;
+    made.sup.start();
+    await refillQueues({
+      config: made.cfg,
+      store,
+      rules,
+      login: "me",
+      now: () => Date.now(),
+    });
+    return made;
+  }
+  const takeDeps = (made: Awaited<ReturnType<typeof hub>>): TakeDeps => ({
+    config: made.cfg,
+    store,
+    supervisor: made.sup,
+    login: "me",
+    readCard: async (_repoId, issue) =>
+      store.board("mc").find((c) => c.issueNumber === issue) ?? null,
+    enabled: true,
+    now: () => Date.now(),
+    transientTakes: new Map(),
+  });
+
+  it("the work hub neither queues nor starts a lane:home card", async () => {
+    const made = await hub("work");
+    expect(store.queue("guido-1")).toEqual([]);
+    const e = await refusal(made.sup.startRun("guido-1", 42));
+    expect([e.status, e.message]).toEqual([422, otherLaneText("mc#42", ["lane:home"], "work")]);
+    expect(store.activeTickets().has("mc#42")).toBe(false);
+  });
+
+  it("the home hub queues and starts it", async () => {
+    const made = await hub("home");
+    expect(store.queue("guido-1").map((q) => q.issue)).toEqual([42]);
+    await takeNext(takeDeps(made), "guido-1");
+    expect(store.activeTickets().has("mc#42")).toBe(true);
   });
 });
 
@@ -1293,9 +1546,44 @@ describe("questions and strays", () => {
     store.addQuestion({ agentId: "guido-1", runId: "guido-1:old", text: "one?", at: 1 });
     store.addStrays([stray("docs/a.md")]);
     await sup.endRun("guido-1");
-    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
     expect(store.openQuestions()).toEqual([]);
     expect(store.strays()).toEqual([]);
+  });
+
+  it("endRun with hold on a run with no process stops the seat, out of rotation", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "guido-1:old",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "guido-1:old",
+      cliSessionId: "s",
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: 1,
+    });
+    await sup.endRun("guido-1", { hold: true });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(seatMayTake(store, "guido-1")).toBe(false);
   });
 
   it("endRun on a run with no process folds its transcript, so a stale DONE. summary is replaced", async () => {
@@ -1366,13 +1654,14 @@ describe("questions and strays", () => {
 });
 
 describe("endRun", () => {
-  it("ends the run ok, stops the seat and keeps the worktree", async () => {
+  it("ends the run ok, leaves the seat idle for its next ticket and keeps the worktree", async () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRun("guido-1");
-    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+    expect(seatMayTake(store, "guido-1")).toBe(true);
     expect(store.run(runId)).toMatchObject({ status: "ok" });
     expect(store.run(runId)?.endedAt).not.toBeNull();
     expect(existsSync(join(root, "guido-1-42", "README.md"))).toBe(true);
@@ -1382,6 +1671,17 @@ describe("endRun", () => {
     expect(next.runId).not.toBe(runId);
     expect(store.run(next.runId)?.seq).toBe(2);
     expect(store.run(runId)?.status).toBe("ok");
+  });
+
+  it("with hold, stops the seat and keeps it out of rotation", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.endRun("guido-1", { hold: true });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(seatMayTake(store, "guido-1")).toBe(false);
+    expect(store.run(runId)).toMatchObject({ status: "ok" });
   });
 
   it("interrupts a turn in flight, then closes", async () => {
@@ -1394,7 +1694,7 @@ describe("endRun", () => {
     await sup.endRun("guido-1");
     expect(recorded().some((l) => l.request?.subtype === "interrupt")).toBe(true);
     expect(store.run(runId)?.status).toBe("ok");
-    expect(seatState("guido-1")).toBe("stopped");
+    expect(seatState("guido-1")).toBe("idle");
   });
 });
 
@@ -1596,6 +1896,15 @@ describe("startWatch", () => {
       "mcp__mc__end_run",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
+  });
+
+  it("ending the watch seat's run stops it, so the watch does not restart it", async () => {
+    const { sup } = flightMake();
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await sup.endRun("flight-1");
+    expect(seatState("flight-1")).toBe("stopped");
   });
 
   it("appends first after a blank line", async () => {
@@ -2436,7 +2745,7 @@ describe("supervisor events (Plan 7a)", () => {
         { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
       ]);
       expect(atEvent).toMatchObject({ status: "ok", endedBy: "operator" });
-      expect(seatState("guido-1")).toBe("stopped");
+      expect(seatState("guido-1")).toBe("idle");
     });
 
     it("is exit after a crash", async () => {
@@ -2827,7 +3136,7 @@ describe("supervisor events (Plan 7a)", () => {
       expect(sup.seatFacts("guido-1")).toBeNull();
       expect(snaps).toHaveLength(1);
       expect(store.run(runId)?.endedBy).toBe("operator");
-      expect(seatState("guido-1")).toBe("stopped");
+      expect(seatState("guido-1")).toBe("idle");
     });
 
     it("an ended run whose worktree check fails does not overwrite the seat", async () => {
@@ -2906,7 +3215,7 @@ describe("supervisor events (Plan 7a)", () => {
         { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
       ]);
       expect(store.run(runId)?.endedBy).toBe("operator");
-      expect(seatState("guido-1")).toBe("stopped");
+      expect(seatState("guido-1")).toBe("idle");
       expect(existsSync(join(root, "guido-1-42"))).toBe(true);
     });
   });
@@ -3213,7 +3522,7 @@ describe("a run set aside in review", () => {
     const { sup, runId } = await aside(false);
     const other = await sup.startRun("guido-1", 43, { loop: NEW_LOOP });
     await until(() => expect(seatState("guido-1")).toBe("idle"));
-    await sup.endRun("guido-1");
+    await sup.endRun("guido-1", { hold: true });
     expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
     expect(other.runId).not.toBe(runId);
     await sup.wakeRun(runId);
