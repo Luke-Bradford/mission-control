@@ -228,7 +228,19 @@ describe("Needs you", () => {
     expect(link.getAttribute("href")).toBe(item().url);
   });
 
-  it("a stall names a different test-lock holder", async () => {
+  it("a stall queued for the lock names the seat holding it", async () => {
+    stubFetch({
+      "/api/attention": [ITEMS[1]],
+      "/api/test-lock": {
+        holder: { seatId: "studio", runId: "r-12", command: "pnpm test", since: NOW - MIN },
+        waiting: [{ runId: "r-13", seatId: "shop-app-ta", since: NOW - MIN }],
+      },
+    });
+    render(<Comms item={null} />);
+    await within(needs()).findByText("2:15 in Bash · waiting on the test lock (studio)");
+  });
+
+  it("a stall that isn't queued for the lock says nothing about it", async () => {
     stubFetch({
       "/api/attention": [ITEMS[1]],
       "/api/test-lock": {
@@ -237,7 +249,7 @@ describe("Needs you", () => {
       },
     });
     render(<Comms item={null} />);
-    await within(needs()).findByText("2:15 in Bash · waiting on the test lock (studio)");
+    await within(needs()).findByText("2:15 in Bash");
   });
 
   it("a PR names its ticket, title and wait time", async () => {
