@@ -1,6 +1,6 @@
-import type { BoardItem, Telemetry } from "@mc/core";
+import type { BoardItem, ConfigView, Telemetry } from "@mc/core";
 import { ticketRef } from "../board/cards.ts";
-import { RESOURCES, useResources } from "../data.ts";
+import { RESOURCES, useResource, useResources } from "../data.ts";
 import { cost, kTokens } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { HBar } from "../hud/charts/HBar.tsx";
@@ -11,7 +11,9 @@ import { DASH, indexOf, NOT_TRACKED, type Scope } from "./common.ts";
 /** Cost (catalogue 2.6.6): tokens by ticket, totals and loop steps. */
 export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const tickets = t?.tokensByTicket ?? [];
-  const repoIds = [...new Set(tickets.flatMap((r) => parseTicket(r.ticket)?.repoId ?? []))];
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const ticketRepos = new Set(tickets.flatMap((r) => parseTicket(r.ticket)?.repoId ?? []));
+  const repoIds = (config?.repos ?? []).filter((r) => ticketRepos.has(r.id)).map((r) => r.id);
   const boards = useResources<BoardItem[]>(repoIds.map(RESOURCES.boards));
   const titles = new Map(boards.flatMap((b) => (b.data ?? []).map((i) => [ticketRef(i), i.title])));
   const steps = t?.tokensByStep;
@@ -38,7 +40,9 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
                 label={
                   <>
                     <TicketRef ticket={r.ticket} />
-                    {titles.has(r.ticket) && <> {titles.get(r.ticket)}</>}
+                    {titles.has(r.ticket) && (
+                      <span className="ticket-bar-title">{titles.get(r.ticket)}</span>
+                    )}
                   </>
                 }
                 pct={(r.tokens / most) * 100}

@@ -771,10 +771,38 @@ describe("Capacity and cost", () => {
     await within(panel("tTicketBars")).findByText(items[11]?.title as string);
     const rows = panel("tTicketBars").querySelectorAll(".hrow");
     expect(rows).toHaveLength(12);
-    items.forEach((item, i) => {
-      expect(rows[i]?.textContent).toContain(item.title);
+    await waitFor(() => {
+      items.forEach((item, i) => {
+        const title = rows[i]?.querySelector(".ticket-bar-title");
+        expect(title?.textContent).toBe(item.title);
+        expect(title?.previousElementSibling?.className).toBe("rref");
+        expect(title?.parentElement?.className).toBe("ellip");
+      });
     });
     expect(panel("tTicketBars").querySelector("img")).toBeNull();
+  });
+
+  it("fetches ticket titles only for configured repos, leaving unknown tickets visible", async () => {
+    const item = boardItem({ repoId: "shop-app", issueNumber: 1, title: "Configured ticket" });
+    const fetch = stubFetch({
+      [RESOURCES.config.path]: { ...CFG, repos: CFG.repos.filter((r) => r.id === "shop-app") },
+      [RESOURCES.telemetry("6h").path]: tel({
+        tokensByTicket: [
+          { ticket: "shop-app#1", tokens: 1000, costUsd: null },
+          { ticket: "site-builder#2", tokens: 500, costUsd: null },
+          { ticket: "unknown#3", tokens: 100, costUsd: null },
+        ],
+      }),
+      [RESOURCES.boards("shop-app").path]: [item],
+    });
+    render(<Telemetry />);
+    await within(panel("tTicketBars")).findByText(item.title);
+    expect(panel("tTicketBars").querySelectorAll(".hrow")).toHaveLength(3);
+    within(panel("tTicketBars")).getByText("site-builder");
+    within(panel("tTicketBars")).getByText("unknown");
+    expect(
+      fetch.mock.calls.map(([url]) => url).filter((url) => url.startsWith("/api/boards/")),
+    ).toEqual([RESOURCES.boards("shop-app").path]);
   });
 
   it("shows the live holder and queue without history, with a ticking elapsed time", async () => {

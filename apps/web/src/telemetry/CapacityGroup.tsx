@@ -176,6 +176,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
                       <span className="chipref">{r.command}</span>
                     </td>
                     <td className="num">
+                      {/* The live row's Waited is "—" because /api/test-lock gives no queued time. */}
                       {history?.runs.some(
                         (stored) => stored.runId === r.runId && stored.startedAt === r.startedAt,
                       )
