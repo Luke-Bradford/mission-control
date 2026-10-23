@@ -380,7 +380,7 @@ it("merges activity deltas and replaces timestamp ties without duplicating rows"
       row(at, "tie"),
       row(at - 1, "old"),
     ]);
-    hub.refetchAll();
+    hub.refetchTopic("agents");
     await settle();
     expect(hub.snapshot(RESOURCES.activity.path, "agents").data).toHaveLength(4);
   } finally {
@@ -406,4 +406,132 @@ it("requests a delta even when the first activity load is empty", async () => {
     off();
     hub.clear();
   }
+});
+
+describe("activity reconciliation", () => {
+  let off: (() => void) | undefined;
+  beforeEach(() => {
+    hub.clear();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+  });
+  afterEach(() => {
+    off?.();
+    hub.clear();
+    vi.useRealTimers();
+  });
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+  const path = RESOURCES.activity.path;
+  const snapshot = () => hub.snapshot(path, "agents").data;
+  const row = (at: number, text: string) => ({ at, kind: "state", who: "seat", text });
+  const load = async (initial: unknown[], fresh: unknown[]) => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(initial)))
+      .mockImplementation(async () => new Response(JSON.stringify(fresh)));
+    vi.stubGlobal("fetch", fetch);
+    off = hub.subscribe(path, "agents", () => {});
+    await flush();
+    return fetch;
+  };
+
+  it("updates a run-start row's live status, PRs and summary on the next full load", async () => {
+    const initial = {
+      ...row(Date.now() - 100, "started"),
+      status: "running",
+      prs: [],
+      summary: null,
+    };
+    const fresh = { ...initial, status: "done", prs: [42], summary: "finished" };
+    const fetch = await load([row(Date.now(), "newest"), initial], [fresh]);
+    vi.setSystemTime(Date.now() + 60_000);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(fetch.mock.calls[1]?.[0]).toBe(path);
+    expect(snapshot()).toEqual([fresh]);
+  });
+
+  it("replaces a collector row that moved to a newer status time without duplicating it", async () => {
+    const initial = row(Date.now() - 100, "collector failing");
+    const fresh = row(Date.now() + 1, "collector failing again");
+    await load([row(Date.now(), "newest"), initial], [fresh]);
+    vi.setSystemTime(Date.now() + 60_000);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(snapshot()).toEqual([fresh]);
+  });
+
+  it("includes late rows with older timestamps after a full load", async () => {
+    const newest = row(Date.now(), "newest");
+    const late = row(Date.now() - 100, "late escalation");
+    const fetch = await load([newest], [newest, late]);
+    vi.setSystemTime(Date.now() + 60_000);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(fetch.mock.calls[1]?.[0]).toBe(path);
+    expect(snapshot()).toEqual([newest, late]);
+  });
+
+  it("reconnect always requests a full load within the delta window", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    FakeEventSource.instances = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const stop = startStream();
+    try {
+      const es = FakeEventSource.instances[0];
+      es?.emit("open");
+      es?.emit("open");
+      await flush();
+      expect(fetch.mock.calls[1]?.[0]).toBe(path);
+      expect(snapshot()).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("arms one full-load timer after deltas and fires once at the window boundary", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    await vi.advanceTimersByTimeAsync(10_000);
+    hub.refetchTopic("agents");
+    await flush();
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(49_999);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch.mock.calls[3]?.[0]).toBe(path);
+    expect(snapshot()).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("clears a pending timer when refetchAll does a full load", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+    hub.refetchAll();
+    await flush();
+    expect(fetch.mock.calls[2]?.[0]).toBe(path);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("clears the timer only when the last subscriber leaves", async () => {
+    const fetch = await load([row(Date.now(), "cached")], []);
+    const secondOff = hub.subscribe(path, "agents", () => {});
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+    secondOff();
+    expect(vi.getTimerCount()).toBe(1);
+    off?.();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
 });

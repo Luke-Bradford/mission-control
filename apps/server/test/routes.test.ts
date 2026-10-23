@@ -151,6 +151,8 @@ describe("the route table", () => {
     const routes = await registeredRoutes();
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
+    expect(routes).toContain("GET /api/activity");
+    expect(routes).toContain("GET /api/stream");
     expect(routes).toContain("GET /api/drafts/history");
     expect(routes).toContain("POST /api/drafts/:id/copied");
     expect(routes).toContain("GET /api/sources/teams");
@@ -185,6 +187,13 @@ describe("the route table", () => {
   it("POST /api/github/refresh has a Reader comment that names a real reader", () => {
     const text = readerComments().get("POST /api/github/refresh");
     expect(text).toBeDefined();
+    expect(readerProblem(text as string)).toBeNull();
+  });
+
+  it("GET /api/stream names its EventSource reader", () => {
+    const text = readerComments().get("GET /api/stream");
+    expect(text).toBeDefined();
+    expect(text).toContain("apps/web/src/data.ts#startStream");
     expect(readerProblem(text as string)).toBeNull();
   });
 

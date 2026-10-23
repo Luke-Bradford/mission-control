@@ -2246,6 +2246,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return body.data;
       });
 
+      // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
       api.get("/stream", (_req, reply) => {
         reply.hijack();
         const res = reply.raw;
