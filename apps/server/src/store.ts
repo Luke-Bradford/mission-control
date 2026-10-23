@@ -873,6 +873,19 @@ export class Store {
       ["profile_hash", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS loop_events_run ON loop_events(run_id);
+      CREATE INDEX IF NOT EXISTS reviews_run ON reviews(run_id);
+      CREATE INDEX IF NOT EXISTS reviews_repo_pr ON reviews(repo_id, pr_number, state);
+      CREATE INDEX IF NOT EXISTS board_moves_run ON board_moves(run_id);
+      CREATE INDEX IF NOT EXISTS flight_decisions_target_kind ON flight_decisions(target_run_id, kind);
+      CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
+      CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
+      CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
+      CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
+      CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
+      CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
+    `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
@@ -1381,6 +1394,21 @@ export class Store {
       )
       .all() as Row[];
     return new Map(rows.map((r) => [r.agent_id as AgentId, r.to_state as HudState]));
+  }
+
+  /** The maintenance sweep keeps short-lived detail; run and review history stays. */
+  pruneHistory(now: number): void {
+    const day = 24 * 60 * 60_000;
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM seat_lines WHERE at < ?").run(now - 7 * day);
+      this.db.prepare("DELETE FROM loop_events WHERE at < ?").run(now - 30 * day);
+      this.db.prepare("DELETE FROM run_evidence WHERE at < ?").run(now - 30 * day);
+      this.db
+        .prepare(
+          "DELETE FROM review_findings WHERE review_id IN (SELECT id FROM reviews WHERE created_at < ?)",
+        )
+        .run(now - 30 * day);
+    });
   }
 
   /** Deletes the state changes recorded before `olderThan`. */

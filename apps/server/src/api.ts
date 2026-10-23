@@ -484,6 +484,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   const app = Fastify({
     bodyLimit: 16 * 1024,
+    disableRequestLogging: true,
     logger: deps.logger
       ? {
           level: "info",
@@ -491,6 +492,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...(typeof deps.logger === "object" ? { stream: deps.logger.stream } : {}),
         }
       : false,
+  });
+
+  app.addHook("onResponse", async (req, reply) => {
+    if (reply.statusCode >= 400 || reply.elapsedTime > 1000) {
+      req.log.warn({ res: reply, responseTime: reply.elapsedTime }, "request completed");
+    }
   });
 
   // DNS-rebinding defence: a page on another name that resolves to 127.0.0.1 sends its own Host.

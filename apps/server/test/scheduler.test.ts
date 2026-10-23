@@ -1912,3 +1912,10 @@ describe("scheduler scope log", () => {
     );
   });
 });
+
+it("maintenance prunes hub history on the existing sweep", async () => {
+  const prune = vi.spyOn(store, "pruneHistory");
+  const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+  await s.tick("maintenance");
+  expect(prune).toHaveBeenCalledWith(NOW);
+});

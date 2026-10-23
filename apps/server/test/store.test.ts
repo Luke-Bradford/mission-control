@@ -2056,3 +2056,84 @@ it("retains each reopened attention episode and closes notes by run", () => {
     [30, 40],
   ]);
 });
+
+describe("hub retention", () => {
+  it("prunes past each window, keeping boundary and newer rows and review history", () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    const now = 40 * 86_400_000;
+    const week = now - 7 * 86_400_000;
+    const month = now - 30 * 86_400_000;
+    store.upsertRun(run());
+    for (const [i, offset] of [-1, 0, 1].entries()) {
+      db.prepare("INSERT INTO seat_lines VALUES (?, 'r1', 'seat', 'sys', 'text', ?)").run(
+        String(i),
+        week + offset,
+      );
+      db.prepare("INSERT INTO loop_events VALUES (?, 'r1', 'text', ?)").run(
+        String(i),
+        month + offset,
+      );
+      db.prepare("INSERT INTO run_evidence (run_id, note, at) VALUES ('r1', 'note', ?)").run(
+        month + offset,
+      );
+      db.prepare(`INSERT INTO reviews
+        (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt, round, state, created_at)
+        VALUES (?, 'r1', 'repo', 'seat', 1, ?, 1, 1, 1, 'reported', ?)`).run(
+        i + 1,
+        String(i),
+        month + offset,
+      );
+      db.prepare(`INSERT INTO review_findings
+        (review_id, author_run_id, pos, severity, file, line, summary, scenario, fix, state)
+        VALUES (?, 'r1', 0, 'minor', 'file.ts', 1, 'summary', 'scenario', 'fix', 'open')`).run(
+        i + 1,
+      );
+    }
+    db.exec(`INSERT INTO flight_decisions (at, kind, about, decision, basis)
+      VALUES (0, 'end', 'run', 'ended', 'done')`);
+    try {
+      store.pruneHistory(now);
+      for (const table of ["seat_lines", "loop_events", "run_evidence", "review_findings"]) {
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 2 });
+      }
+      expect(db.prepare("SELECT key FROM seat_lines ORDER BY key").all()).toEqual([
+        { key: "1" },
+        { key: "2" },
+      ]);
+      expect(db.prepare("SELECT review_id FROM review_findings ORDER BY review_id").all()).toEqual([
+        { review_id: 2 },
+        { review_id: 3 },
+      ]);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM reviews").get()).toEqual({ n: 3 });
+      expect(store.run("r1")).not.toBeNull();
+      expect(db.prepare("SELECT COUNT(*) AS n FROM flight_decisions").get()).toEqual({ n: 1 });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+it.each([
+  "SELECT * FROM loop_events WHERE run_id = 'r1'",
+  "SELECT * FROM reviews WHERE run_id = 'r1'",
+  "SELECT * FROM reviews WHERE repo_id = 'repo' AND pr_number = 1 AND state = 'reported'",
+  "SELECT * FROM board_moves WHERE run_id = 'r1'",
+  "SELECT * FROM flight_decisions WHERE target_run_id = 'r1' AND kind = 'end'",
+  "SELECT * FROM runs WHERE review_id = 1",
+  "SELECT * FROM runs WHERE repo_id = 'repo' AND branch = 'branch'",
+  "SELECT * FROM runs WHERE repo_id = 'repo' AND ticket = 'ticket'",
+  "SELECT * FROM runs WHERE ended_at IS NULL",
+  "SELECT * FROM runs WHERE folded = 0",
+  "SELECT * FROM seat_questions WHERE answered_at IS NULL",
+])("uses an index: %s", (query) => {
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${query}`).all();
+    expect(plan.map((row) => row.detail).join("\n")).toMatch(/USING (?:COVERING )?INDEX/);
+    if (query.includes("pr_number")) {
+      expect(plan.map((row) => row.detail).join("\n")).toContain("reviews_repo_pr");
+    }
+  } finally {
+    db.close();
+  }
+});

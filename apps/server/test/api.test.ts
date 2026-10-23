@@ -4629,3 +4629,52 @@ it("bounds uncached telemetry reads, filters first and persists immutable counts
     read.mockRestore();
   }
 });
+
+it("does not log successful GET requests", async () => {
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/crew", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(200);
+  expect(logs).toEqual([]);
+});
+
+it("logs one response line for a 500", async () => {
+  vi.spyOn(store, "getSetting").mockImplementation(() => {
+    throw new Error("test failure");
+  });
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/settings/away", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(500);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0])).toMatchObject({ res: { statusCode: 500 } });
+});
+
+it("logs a 4xx response once", async () => {
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/missing", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(404);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0])).toMatchObject({ res: { statusCode: 404 } });
+});
+
+it("logs a successful request taking over one second", async () => {
+  vi.spyOn(store, "getSetting").mockImplementationOnce(() => {
+    const until = performance.now() + 1010;
+    while (performance.now() < until) {
+      /* a slow store read */
+    }
+    return null;
+  });
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/settings/away", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(200);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0]).responseTime).toBeGreaterThan(1000);
+});

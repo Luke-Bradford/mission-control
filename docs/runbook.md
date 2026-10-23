@@ -213,6 +213,34 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.serve
 # stop: launchctl bootout gui/$(id -u)/com.missioncontrol.server
 ```
 
+### Log rotation and retention
+
+Routine requests produce no request log lines. Responses with status 4xx or 5xx and requests
+taking over one second produce a summary. Other hub warnings remain logged.
+
+For a launchd hub, add this entry to `/etc/newsyslog.d/mission-control.conf`, replacing
+`<home>` with the home directory and `<user>:<group>` with the hub's account and group.
+Use absolute paths (newsyslog does not expand `~`). If `MC_DB` is set, the pid file is
+`server.pid` beside that database instead.
+
+```text
+# logfilename                                  owner:group     mode count size when flags pid_file                                                signal
+<home>/Library/Logs/mission-control/server.log  <user>:<group>  600  7     *    @T00 B     <home>/.local/share/mission-control/server.pid           15
+```
+
+The system's newsyslog job rotates daily at midnight and keeps seven daily archives. The
+`B` flag avoids inserting plain text into the JSON log. Signal 15 requests the hub's existing
+graceful shutdown; launchd's `KeepAlive` starts it again and reopens the new log. Rotation
+therefore includes a hub restart and the crew's normal shutdown and resume. This entry requires
+the launchd job; do not install it for a manually started hub. Check the expanded entry with
+`sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
+
+The existing hourly maintenance sweep deletes seat lines older than seven days, loop events
+and run evidence older than 30 days, and findings whose review was created more than 30 days
+ago. Rows exactly at the cutoff stay. Runs, reviews and flight decisions remain available to
+Activity and Telemetry. Deletion makes SQLite pages reusable; it does not shrink the database
+file on disk.
+
 ## First crew
 
 Mission Control runs its own Claude agents ("seats") only in a clone of its own, never in your
