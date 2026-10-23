@@ -3353,7 +3353,9 @@ describe("the mc tools and the guard (phase 2b)", () => {
     expect(lock.state().holder?.runId).toBe(runId);
     expect(seatState("guido-1")).toBe("running");
     lock.release({ runId, toolUseId: "toolu_p" });
-    expect(lock.state().holder).toBeNull();
+    // the lock is free once toolu_g's hold is gone too: the transcript line is written by the keeper
+    // before the hub has read it, so that release may be a moment behind
+    await until(() => expect(lock.state().holder).toBeNull());
     // a hold no tool_result ends (an interrupt, a refusal) is freed at the turn's end
     await lock.acquire({ runId, toolUseId: "toolu_q" }, "guido-1", "pnpm -s test", 1000, live());
     await cue(sup);
