@@ -8,6 +8,20 @@ export const TEAMS_COLLECTOR = "teams";
 const GRAPH = "https://graph.microsoft.com/v1.0/";
 const STATE = "teams.poll";
 const MAX_PAGES = 5;
+// Bound expanded data even without a continuation link; disclose possible loss in status.
+const MAX_EXPANDED_REPLIES = 1_000;
+const REPLY_LIMIT_NOTE = "Teams expanded replies reached 1,000; results may be incomplete";
+
+function sameEndpoint(candidate: string, expected: string): boolean {
+  const parsed = new URL(candidate);
+  const target = new URL(expected);
+  return (
+    parsed.origin === "https://graph.microsoft.com" &&
+    !parsed.username &&
+    !parsed.password &&
+    decodeURIComponent(parsed.pathname) === decodeURIComponent(target.pathname)
+  );
+}
 const PERMISSION = "not permitted with this login; needs Chat.Read, ChannelMessage.Read.All";
 
 type Selection = TeamsConfig["selected"][number];
@@ -153,10 +167,16 @@ export async function collectTeams(
         if (
           parsed.origin !== "https://graph.microsoft.com" ||
           !(
-            parsed.pathname === new URL(base).pathname ||
+            sameEndpoint(url, base) ||
             (source.kind === "channel" &&
-              parsed.pathname.startsWith(`${new URL(base).pathname}/`) &&
-              /^\/[^/]+\/replies$/.test(parsed.pathname.slice(new URL(base).pathname.length)))
+              decodeURIComponent(parsed.pathname).startsWith(
+                `${decodeURIComponent(new URL(base).pathname)}/`,
+              ) &&
+              /^\/[^/]+\/replies$/.test(
+                decodeURIComponent(parsed.pathname).slice(
+                  decodeURIComponent(new URL(base).pathname).length,
+                ),
+              ))
           ) ||
           parsed.username ||
           parsed.password
@@ -203,9 +223,23 @@ export async function collectTeams(
         if (!isObj(body) || !Array.isArray(body.value)) throw new Error("Teams invalid response");
         const messages = body.value.slice(0, 50).flatMap((raw) => {
           if (source.kind !== "channel" || !isObj(raw)) return [raw];
-          if (typeof raw["replies@odata.nextLink"] === "string")
+          if (typeof raw["replies@odata.nextLink"] === "string") {
+            if (
+              typeof raw.id !== "string" ||
+              !sameEndpoint(
+                raw["replies@odata.nextLink"],
+                `${base}/${encodeURIComponent(raw.id)}/replies`,
+              )
+            )
+              throw new Error("Teams refused pagination URL");
             pending.push(raw["replies@odata.nextLink"]);
-          return [raw, ...(Array.isArray(raw.replies) ? raw.replies.slice(0, 200) : [])];
+          }
+          if (Array.isArray(raw.replies) && raw.replies.length >= MAX_EXPANDED_REPLIES)
+            note = REPLY_LIMIT_NOTE;
+          return [
+            raw,
+            ...(Array.isArray(raw.replies) ? raw.replies.slice(0, MAX_EXPANDED_REPLIES) : []),
+          ];
         });
         for (const raw of messages) {
           if (
@@ -295,9 +329,13 @@ export async function collectTeams(
               now,
             ) || changed;
         }
-        if (typeof body["@odata.nextLink"] === "string") pending.push(body["@odata.nextLink"]);
+        if (typeof body["@odata.nextLink"] === "string") {
+          if (!sameEndpoint(body["@odata.nextLink"], url))
+            throw new Error("Teams refused pagination URL");
+          pending.push(body["@odata.nextLink"]);
+        }
         if (pending.length > 0 && page === MAX_PAGES - 1)
-          note = "Teams pagination limit reached; continues next poll";
+          note = `${note ? `${note}; ` : ""}Teams pagination limit reached; continues next poll`;
       }
       store.setSetting(cursorKey, pending.length > 0 ? JSON.stringify(pending) : "");
       store.setSetting(`${key}:pending`, pending.length > 0 ? watermark : "");

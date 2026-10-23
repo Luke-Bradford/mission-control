@@ -315,3 +315,53 @@ it("feeds existing person attention without creating drafts or publishing arriva
   expect(store.flightIncoming()).toEqual([]);
   store.close();
 });
+
+it("continues chat pagination with literal and encoded Graph ids", async () => {
+  for (const id of ["19:example@thread.v2", "19%3Aexample%40thread.v2"]) {
+    const { config, store } = setup();
+    config.sources.teams.selected.splice(1);
+    config.sources.teams.selected[0].id = "19:example@thread.v2";
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response([], {
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/chats/${id}/messages?$skiptoken=next`,
+        }),
+      )
+      .mockResolvedValueOnce(response([message("next", "Operator")]));
+    await collectTeams(config, store, 1_000, { fetch: read, token: async () => "secret" });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(store.notifications()).toHaveLength(1);
+    store.close();
+  }
+});
+
+it("retains expanded replies through the named cap and reports possible truncation", async () => {
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(0, 1);
+  const replies = Array.from({ length: 1_000 }, (_, i) =>
+    message(`reply-${i}`, i === 999 ? "Operator" : "unrelated"),
+  );
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async () => response([message("root", "unrelated", { replies })]),
+  });
+  expect(store.notifications()).toHaveLength(1);
+  expect(teamsStatus(config, store).note).toContain("1,000");
+  expect(teamsStatus(config, store).note).toContain("may be incomplete");
+  store.close();
+});
+
+it("refuses a channel message continuation that changes to a reply endpoint", async () => {
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(0, 1);
+  const read = vi.fn(async () =>
+    response([], {
+      "@odata.nextLink":
+        "https://graph.microsoft.com/v1.0/teams/team-a/channels/channel-a/messages/other/replies",
+    }),
+  );
+  await collectTeams(config, store, 1_000, { fetch: read, token: async () => "secret" });
+  expect(read).toHaveBeenCalledTimes(1);
+  store.close();
+});
