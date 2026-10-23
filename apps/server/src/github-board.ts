@@ -72,7 +72,7 @@ const BEFORE_REVIEW: readonly HudColumn[] = [
  * Moves each ticket's card to follow its PRs, whoever opened them (a crew run, the controller,
  * Codex, the work lane): an open PR puts an earlier card In review, a merged one puts it Done, and
  * PRs all closed unmerged send an In review card back to Ready. A card whose run is live is the
- * engine's. Each move is a `board_moves` row under the run id `pr:<repo>#<number>`. True when a
+ * engine's. Each PR moves a card to a column once; a later move by hand is left alone. Each move is a `board_moves` row under the run id `pr:<repo>#<number>`. True when a
  * card moved.
  */
 export async function followPrs(deps: MoveDeps, repoId: RepoId): Promise<boolean> {
@@ -105,8 +105,13 @@ export async function followPrs(deps: MoveDeps, repoId: RepoId): Promise<boolean
       target = "Ready";
     }
     if (!target || !by) continue;
+    const runId = `pr:${repoId}#${by.number}`;
+    if (
+      store.boardMovesOfRun(runId).some((m) => m.issue === item.issueNumber && m.column === target)
+    )
+      continue;
     const r = await moveCard(deps, {
-      runId: `pr:${repoId}#${by.number}`,
+      runId,
       repoId,
       issue: item.issueNumber,
       column: target,

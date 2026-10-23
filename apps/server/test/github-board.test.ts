@@ -441,6 +441,12 @@ describe("followPrs", () => {
     expect(b.state.card).toBe("O_done");
   });
 
+  it("moves a card to a column once per PR; a later move by hand is left alone", async () => {
+    await follow("In Review", "O_review", [pr({ state: "merged", mergedAt: 5 })]);
+    const again = await follow("Todo", "O_todo", [pr({ state: "merged", mergedAt: 5 })]);
+    expect(again.mutations()).toHaveLength(0);
+  });
+
   it("moves an In review card back to Ready when the PR closed unmerged", async () => {
     const b = await follow("In Review", "O_review", [pr({ state: "closed" })]);
     expect(b.state.card).toBe("O_todo");
