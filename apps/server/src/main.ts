@@ -48,7 +48,7 @@ import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
-import { createScheduler } from "./scheduler.ts";
+import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
 import { Store } from "./store.ts";
 import { createAutoUpdate, createUpdater, crewRefusal, headSha, UPDATE_LOG } from "./update.ts";
@@ -143,6 +143,11 @@ async function main(): Promise<void> {
     hubPort: port,
     hubRoot: hubRoot ?? "",
   });
+  // a seat that frees up is about to take new work: read the boards first
+  refreshOnSeatFree(
+    (fn) => supervisor.on(fn),
+    () => scheduler.refreshBoards(),
+  );
 
   // Lines from before the server exists (and the mc tools' own) go to the server log once it does.
   const early: string[] = [];
@@ -192,7 +197,7 @@ async function main(): Promise<void> {
     move: async (m: Move) => {
       const moved = await moveCard({ gql: makeGql(await githubToken()), store, config }, m);
       // a card that moved shows on the boards now, not at the next poll
-      if (moved.ok && moved.changed) void scheduler.tick("github");
+      if (moved.ok && moved.changed) scheduler.refreshBoards();
       return moved;
     },
   };
@@ -203,7 +208,7 @@ async function main(): Promise<void> {
     supervisor,
     publisher: createPublisher(mcDeps),
     board: engineBoard,
-    pollGithub: () => void scheduler.tick("github"),
+    pollGithub: () => scheduler.refreshBoards(),
     rules: engineRules,
     refillQueues: () =>
       refillQueues({
@@ -329,7 +334,7 @@ async function main(): Promise<void> {
     webRoot: WEB_ROOT,
     profilesPath,
     // A setup that created fields, or an added repo, refreshes the boards now, not at the next poll.
-    refreshBoards: () => void scheduler.tick("github"),
+    refreshBoards: () => scheduler.refreshBoards(),
     machine: () => scheduler.machine(),
     hubLogin: () => hubLogin,
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
