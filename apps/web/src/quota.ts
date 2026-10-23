@@ -1,6 +1,6 @@
 /** Quota windows as the Overview and (later) Setup show them. */
 import { type LimitRow, MIN_PACE_5H_MINUTES } from "@mc/core";
-import { hhmm, wkdTime } from "./fmt.ts";
+import { dayMonth, hhmm, isoDay, wkdTime } from "./fmt.ts";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -31,6 +31,13 @@ export function timeToFull(row: LimitRow, now: number): string {
 /** A window's reset: a clock time for the 5-hour window, weekday and time for the 7-day one. */
 export const resetLabel = (row: LimitRow, tz: string): string =>
   row.window === "5h" ? hhmm(row.resetAt, tz) : wkdTime(row.resetAt, tz);
+
+/** When a window resets: the clock time if that is later today, else weekday, date and time. */
+export function resetWhen(row: LimitRow, now: number, tz: string): string {
+  return isoDay(row.resetAt, tz) === isoDay(now, tz)
+    ? hhmm(row.resetAt, tz)
+    : wkdTime(row.resetAt, tz).replace(" ", ` ${dayMonth(row.resetAt, tz)} `);
+}
 
 /** Windows at their limit (red) and windows that will fill before they reset (amber). */
 export function quotaWarnings(

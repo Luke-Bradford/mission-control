@@ -4,7 +4,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
 import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { quotaWarnings, resetLabel, timeToFull } from "../quota.ts";
+import { quotaWarnings, resetLabel, resetWhen, timeToFull } from "../quota.ts";
 
 const DASH = "—";
 
@@ -34,10 +34,17 @@ export function QuotaPanel() {
     const row = rows.find((r) => r.accountId === account && r.window === window);
     return row ? (
       <span title={title(row, now, tz)}>
-        <Meter label={window} pct={row.used} />
+        <Meter
+          label={window}
+          pct={row.used}
+          detail={` used · resets ${tz ? resetWhen(row, now, tz) : DASH}`}
+        />
       </span>
     ) : (
-      <span className="xs muted">no {window} window</span>
+      <span className="meter">
+        <span className="track" />
+        <span className="num xs muted">{window}: none on this plan</span>
+      </span>
     );
   };
   const warnings = tz ? quotaWarnings(rows, now, tz) : [];
@@ -65,8 +72,7 @@ export function QuotaPanel() {
         <p className="note xs quotanote">
           Claude quota comes from the usage endpoint and from rate-limit events in the loops'
           transcripts; Codex from its app-server, or its latest session log when that is
-          unavailable. Read every {config?.poll.usageMinutes ?? DASH} min. Hover a bar for its reset
-          time.
+          unavailable. Read every {config?.poll.usageMinutes ?? DASH} min.
         </p>
       </div>
     </Panel>

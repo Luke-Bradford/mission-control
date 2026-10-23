@@ -1,13 +1,12 @@
 import { AskedOfYou } from "../flight/AskedOfYou.tsx";
 import { BriefPanel, WatchList } from "../flight/Brief.tsx";
 import { Decided } from "../flight/Decided.tsx";
+import { Drafts } from "../flight/Drafts.tsx";
 import { Incoming } from "../flight/Incoming.tsx";
 import { Situation } from "../flight/Situation.tsx";
 import { WorkInFlight } from "../flight/WorkInFlight.tsx";
 import { WorkingLog } from "../flight/WorkingLog.tsx";
 import { Panel } from "../hud/Panel.tsx";
-
-export const DRAFTS_NOT_TRACKED = "Drafts are not tracked yet.";
 
 /** FLIGHT (catalogue §2.2): the head agent's picture of the work, and its living brief. */
 export function Flight() {
@@ -41,7 +40,7 @@ export function Flight() {
             title="Drafts for you to send"
             sub="Mission Control never messages people itself"
           >
-            <p className="pb note">{DRAFTS_NOT_TRACKED}</p>
+            <Drafts />
           </Panel>
           <Panel id="decidedP" title="Decided without you" sub="today · overturn any">
             <Decided />
