@@ -1,11 +1,18 @@
-import { type AttentionItem, type CrewRow, FLIGHT_NOT_RUNNING } from "@mc/core";
+import {
+  type ActivityRow,
+  type AttentionItem,
+  type CommsEvent,
+  type CrewRow,
+  FLIGHT_NOT_RUNNING,
+} from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { crewOrder, doingLine, needsLamp, seatStatus } from "../crew.ts";
-import { useReviewPrs } from "../data.ts";
+import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { agentComms, commsLine } from "./messages.tsx";
 
 export const FLIGHT_THREAD = "flight";
 
@@ -24,6 +31,7 @@ export function Threads({
 }) {
   const now = useSecond();
   const tz = useTz();
+  const activity = useResource<ActivityRow[]>(RESOURCES.activity).data;
   return (
     <Panel id="cThreadsP" title="Threads" sub="FLIGHT and each agent" phase="P2">
       <div className="scroll" id="chanList">
@@ -48,6 +56,7 @@ export function Threads({
             items={items}
             selected={selected === r.id}
             onSelect={onSelect}
+            last={agentComms(activity ?? [], r.id).at(-1) ?? null}
             now={now}
             tz={tz}
           />
@@ -62,6 +71,7 @@ function Thread({
   items,
   selected,
   onSelect,
+  last,
   now,
   tz,
 }: {
@@ -69,6 +79,8 @@ function Thread({
   items: AttentionItem[];
   selected: boolean;
   onSelect: (id: string) => void;
+  /** The seat's latest message, shown in place of its doing line. */
+  last: CommsEvent | null;
   now: number;
   tz: string | null;
 }) {
@@ -79,6 +91,7 @@ function Thread({
   );
   // text only: the row is a button, and a link inside one is invalid
   const doing = doingLine(r, now, tz, useReviewPrs(r));
+  const line = last ? commsLine(last, r.id) : doing;
   return (
     <button
       type="button"
@@ -90,8 +103,8 @@ function Thread({
       <div className="tbody">
         <AgentTag id={r.id} index={r.index} sm />
         <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
-        <span className="s fg2 doing" title={doing}>
-          {doing}
+        <span className="s fg2 doing" title={line}>
+          {line}
         </span>
       </div>
     </button>
