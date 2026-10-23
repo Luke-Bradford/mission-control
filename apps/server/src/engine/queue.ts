@@ -86,6 +86,12 @@ export interface TakeDeps {
 
 const refOf = (repoId: RepoId, issue: number) => `${repoId}#${issue}`;
 
+/** Ticket bodies read for the queue, by card; a body is current while the card's `updatedAt` is. */
+const bodyCache = new Map<string, { updatedAt: number; body: string }>();
+
+/** Empties the body cache (for tests). */
+export const clearBodyCache = (): void => bodyCache.clear();
+
 /** Priorities in the order they are picked; a card with none, or any other, comes after. */
 const priorityRank = (p: string | null): number => {
   const i = p === null ? -1 : (PRIORITIES as readonly string[]).indexOf(p);
@@ -215,6 +221,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       if (q.takenAt !== null) takenRefs.add(refOf(q.repoId, q.issue));
     }
   }
+  const readyRefs = new Set<string>();
   for (const [repoId, rules] of rulesOf) {
     const group = seats.filter((s) => s.session.repoId === repoId);
     const order = [
@@ -226,6 +233,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
     const cards: { issue: number; label: string }[] = [];
     for (const card of readyCards(store, repoId)) {
       const ref = refOf(repoId, card.issueNumber);
+      readyRefs.add(ref);
       if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) continue;
       // the one start check every start applies
       const startable = (body: string | null): boolean =>
@@ -248,13 +256,19 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       // the board alone first: only a card that passes it has its body read
       if (!startable(null)) continue;
       // fails closed: a body that cannot be read, or a ticket GitHub no longer has, is not dealt
+      // a body is read again only when the card has changed since (updatedAt includes the issue's)
+      const hit = bodyCache.get(ref);
       let body: string;
-      try {
-        const ticket = repo === undefined ? null : await deps.fetchTicket(repo, card.issueNumber);
-        if (ticket === null) continue;
-        body = ticket.body;
-      } catch {
-        continue;
+      if (hit !== undefined && hit.updatedAt === card.updatedAt) body = hit.body;
+      else {
+        try {
+          const ticket = repo === undefined ? null : await deps.fetchTicket(repo, card.issueNumber);
+          if (ticket === null) continue;
+          body = ticket.body;
+        } catch {
+          continue;
+        }
+        bodyCache.set(ref, { updatedAt: card.updatedAt, body });
       }
       if (!startable(body)) continue;
       const labels = areaLabelsOf(rules, card);
@@ -274,6 +288,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       })),
     );
   }
+  for (const ref of bodyCache.keys()) if (!readyRefs.has(ref)) bodyCache.delete(ref);
 }
 
 /**

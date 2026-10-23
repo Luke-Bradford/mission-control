@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
+  clearBodyCache,
   dealQueues,
   type QueueDeps,
   refillQueues,
@@ -235,6 +236,7 @@ beforeEach(() => {
   logs = [];
   transientTakes = new Map();
   readFails = false;
+  clearBodyCache();
   bodyOf = () => "## Done when\n- x\n## Plan\n- y\n";
   myLogin = ME;
   fresh = (issue) => {
@@ -267,6 +269,31 @@ describe("refillQueues", () => {
             : "## Done when\n- x\n";
     await refill();
     expect(issues(SERVER)).toEqual([1, 4]);
+  });
+
+  it("reads a card's body once while the card is unchanged, and again once it changes", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    let reads = 0;
+    const counting: QueueDeps["fetchTicket"] = async (_repo, n) => {
+      reads++;
+      return ticketWith(n, "## Done when\n- x\n## Plan\n- y\n");
+    };
+    await refill(undefined, counting);
+    await refill(undefined, counting);
+    expect(reads).toBe(1);
+    store.replaceBoard(REPO, [card(1, { updatedAt: NOW + 1000 })]);
+    await refill(undefined, counting);
+    expect(reads).toBe(2);
+  });
+
+  it("does not cache a failed read", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    await refill(undefined, async () => {
+      throw new Error("GitHub is down");
+    });
+    expect(issues(SERVER)).toEqual([]);
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
   });
 
   it("deals nothing when the body read fails", async () => {
