@@ -9,6 +9,9 @@
  * command line holds only paths; the token is read from its 0600 file and sent only to 127.0.0.1.
  * Nothing the hub says is relayed as text: the output is rebuilt here.
  *
+ * A refused or reset connection (the hub restarting) is retried every second for `HOOK_RETRY_MS`
+ * from the first try; after that it is the same deny. An HTTP answer is never retried.
+ *
  * A Post that fails (hub down, a bad answer) is not retried: the call's hold then lasts until the
  * supervisor's `releaseRun` (the turn's end, an interrupt or the process's exit; Task 6).
  */
@@ -23,6 +26,8 @@ import {
   type GuardHookEvent,
   guardDenyOutput,
   HOOK_DEADLINE_MS,
+  HOOK_RETRY_EVERY_MS,
+  HOOK_RETRY_MS,
   LOOPBACK_HOST,
 } from "@mc/core";
 
@@ -47,6 +52,11 @@ const TOKEN = /^[0-9a-f]{64}$/;
 export const FAILED: HookResult = { out: guardDenyOutput(GUARD_UNREACHABLE_TEXT), exit: 2 };
 
 class Unusable extends Error {}
+
+/** A refused or reset connection (a socket hang-up is ECONNRESET): the hub is not answering yet. */
+const CONNECTION_ERRORS: readonly unknown[] = ["ECONNREFUSED", "ECONNRESET"];
+const isConnectionError = (err: unknown): boolean =>
+  isObject(err) && CONNECTION_ERRORS.includes(err.code);
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -123,11 +133,25 @@ async function decide(stdin: string, argv: readonly string[], post: HookPost): P
     // large fails closed, and its hold waits for `releaseRun`.
     return event === "PreToolUse" ? { out: guardDenyOutput(GUARD_TOO_LONG_TEXT), exit: 0 } : FAILED;
   }
-  const token = (await readFile(tokenFile, "utf8")).trim();
-  if (!TOKEN.test(token)) return FAILED;
-  const res = await post(url, token, body);
-  const out = verdict(res.status, res.body);
-  return out === null ? FAILED : { out, exit: 0 };
+  const started = Date.now();
+  for (;;) {
+    // read again each try: a restarted hub may have written a new token
+    const token = (await readFile(tokenFile, "utf8")).trim();
+    if (!TOKEN.test(token)) return FAILED;
+    let res: { status: number; body: string };
+    try {
+      res = await post(url, token, body);
+    } catch (err) {
+      // only a hub that is not there is waited for; any other failure is a deny at once
+      if (!isConnectionError(err) || Date.now() - started + HOOK_RETRY_EVERY_MS > HOOK_RETRY_MS) {
+        return FAILED;
+      }
+      await new Promise((resolve) => setTimeout(resolve, HOOK_RETRY_EVERY_MS));
+      continue;
+    }
+    const out = verdict(res.status, res.body);
+    return out === null ? FAILED : { out, exit: 0 };
+  }
 }
 
 /**

@@ -7,7 +7,8 @@
  *   '<crew.node>' --experimental-strip-types '<hub root>/apps/server/src/guard/hook-cli.ts' \
  *     '<token file>' 'http://127.0.0.1:<port>/api/guard/check' || exit 2
  *
- * It reads all of stdin, asks `hookMain`, prints its answer and exits with its code. Any failure of
+ * It reads all of stdin, asks `hookMain`, prints its answer and exits with its code. `postHttp`
+ * rejects with node's own error (`code` ECONNREFUSED or ECONNRESET), which `hookMain` retries. Any failure of
  * its own once loaded, and its hard deadline, print the "unreachable" deny and exit 2. A failure to
  * load the module (node missing, an import that fails) exits 1 (127 for a missing node) before any
  * of this runs: the `|| exit 2` wrapper turns that into exit 2, which blocks the tool.
