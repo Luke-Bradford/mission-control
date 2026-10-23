@@ -218,6 +218,7 @@ describe("at phone width", () => {
       prs: [],
       crew: [],
       attention: [],
+      unackedAttention: [],
       now: NOW,
       tz: "UTC",
       todayStart: 0,
@@ -602,6 +603,7 @@ describe("cards", () => {
         prs={[]}
         crew={[]}
         attention={[]}
+        unackedAttention={[]}
         now={NOW}
         tz={null}
         todayStart={null}
@@ -877,7 +879,7 @@ describe("filters", () => {
     expect(screen.queryByText("New done")).toBeNull();
   });
 
-  it("the session filter hides every card of another repo, Done included", async () => {
+  it("the session filter hides another session's assigned cards and keeps Done and unassigned cards", async () => {
     stub({
       shopApp: board,
       engine: [todo(7, { repoId: "site-builder", title: "Engine plain" })],
@@ -887,13 +889,70 @@ describe("filters", () => {
     await screen.findByText("Ticket 3349");
     act(() => setSession("site-builder"));
     expect(screen.queryByText("Ticket 3349")).toBeNull();
-    expect(screen.queryByText("New done")).toBeNull();
-    expect(screen.queryByText("Plain")).toBeNull();
+    expect(screen.getByText("New done")).toBeTruthy();
+    expect(screen.getByText("Plain")).toBeTruthy();
     expect(screen.getByText("Engine plain")).toBeTruthy();
   });
 });
 
 describe("lanes", () => {
+  it("omits All mine without a GitHub login even when the hub operator is configured", async () => {
+    localStorage.setItem("mc-lane", "@mine");
+    stub({ config: { ...CONFIG, githubLogin: null } as ConfigView, shopApp: [todo(1)] });
+    await open();
+    await screen.findByText("Ticket 1");
+    expect(screen.queryByRole("button", { name: "All mine" })).toBeNull();
+    expect(screen.getByRole("button", { name: "All repos" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("keeps All mine across crew sessions, including its unassigned and Done cards", async () => {
+    stub({
+      config: { ...CONFIG, githubLogin: "pilot" } as ConfigView, // githubLogin: #395
+      shopApp: [1, 2].map((n) => todo(n, { assignees: ["pilot"] })),
+      engine: [
+        todo(3, { repoId: "site-builder", assignees: ["PILOT"] }),
+        todo(4, {
+          repoId: "site-builder",
+          assignees: ["pilot"],
+          status: "Done",
+          state: "done",
+          closed: true,
+          updatedAt: NOW - 1000,
+        }),
+        todo(5, { repoId: "site-builder", assignees: ["someone-else"] }),
+      ],
+      crew: [
+        crewRow({ id: "alpha-agent", sessionId: "alpha", ticket: "shop-app#1" }),
+        crewRow({ id: "beta-agent", sessionId: "beta", ticket: "shop-app#2" }),
+        crewRow({
+          id: "gamma-agent",
+          sessionId: "gamma",
+          repoId: "site-builder",
+          ticket: "site-builder#4",
+        }),
+      ],
+    });
+    await open();
+    await screen.findByText("Ticket 5");
+    fireEvent.click(screen.getByRole("button", { name: "All mine" }));
+    for (const [session, visible, hidden] of [
+      ["alpha", 1, 2],
+      ["beta", 2, 1],
+    ] as const) {
+      act(() => setSession(session));
+      expect(screen.getByRole("button", { name: "All mine" }).getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      expect(screen.getByText(`Ticket ${visible}`)).toBeTruthy();
+      expect(screen.queryByText(`Ticket ${hidden}`)).toBeNull();
+      expect(screen.getByText("Ticket 3")).toBeTruthy();
+      expect(screen.getByText("Ticket 4")).toBeTruthy();
+      expect(screen.queryByText("Ticket 5")).toBeNull();
+    }
+  });
+
   it("All mine uses the hub's GitHub login across repos, links its query and is remembered", async () => {
     stub({
       config: { ...CONFIG, githubLogin: "pilot" } as ConfigView, // githubLogin: #395
@@ -1019,7 +1078,7 @@ describe("ticket route, lane and session", () => {
     );
   });
 
-  it("a session shows no other repo's card in any lane and offers no All repos lane", async () => {
+  it("a session keeps unassigned cards in All repos and offers each repo lane", async () => {
     stub({
       shopApp: [todo(1, { title: "Mine" })],
       engine: [todo(2, { repoId: "site-builder", title: "Theirs" })],
@@ -1027,26 +1086,25 @@ describe("ticket route, lane and session", () => {
     act(() => setSession("shop-app"));
     await open();
     await screen.findByText("Mine");
-    expect(screen.queryByText("Theirs")).toBeNull();
-    expect(screen.queryByRole("button", { name: "All repos" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "site-builder" })).toBeNull();
+    expect(screen.getByText("Theirs")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "All repos" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "site-builder" })).toBeTruthy();
   });
 
-  it("a session with a route naming another repo shows its lane and the note", async () => {
+  it("a session preserves a route naming another repo's lane", async () => {
     stub({
       shopApp: [todo(1, { title: "Mine" })],
       engine: [todo(2, { repoId: "site-builder", title: "Theirs" })],
     });
     act(() => setSession("shop-app"));
     const { container } = await open({ repoId: "site-builder" });
-    await screen.findByText("Mine");
-    expect(screen.queryByText("Theirs")).toBeNull();
-    const note = container.querySelector(".s.muted") as HTMLElement;
-    expect(note.textContent).toBe("Showing s/shop-app. Choose All sessions to see site-builder.");
-    expect(localStorage.getItem("mc-lane")).toBeNull();
+    await screen.findByText("Theirs");
+    expect(screen.queryByText("Mine")).toBeNull();
+    expect(container.textContent).not.toContain("Showing s/");
+    expect(localStorage.getItem("mc-lane")).toBe("site-builder");
   });
 
-  it("a session with a stored other lane shows only its own cards and the note, and keeps mc-lane", async () => {
+  it("a session preserves the stored lane and its unassigned cards", async () => {
     localStorage.setItem("mc-lane", "site-builder");
     stub({
       shopApp: [todo(1, { title: "Mine" })],
@@ -1054,17 +1112,17 @@ describe("ticket route, lane and session", () => {
     });
     act(() => setSession("shop-app"));
     const { container } = await open();
-    await screen.findByText("Mine");
-    expect(card(container, "site-builder#2")).toBeNull();
-    expect(screen.queryByText("Theirs")).toBeNull();
-    expect(screen.queryByRole("button", { name: "site-builder" })).toBeNull();
-    expect(
-      screen.getByText("Showing s/shop-app. Choose All sessions to see site-builder."),
-    ).toBeTruthy();
+    await screen.findByText("Theirs");
+    expect(card(container, "site-builder#2")).toBeTruthy();
+    expect(screen.queryByText("Mine")).toBeNull();
+    expect(screen.getByRole("button", { name: "site-builder" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(container.textContent).not.toContain("Showing s/");
     expect(localStorage.getItem("mc-lane")).toBe("site-builder");
   });
 
-  it("a session with a ticket deep link to another repo shows that ticket, its own cards and the note", async () => {
+  it("a session with a ticket deep link keeps the ticket and unassigned cards in view", async () => {
     stub({
       shopApp: [todo(1, { title: "Mine" })],
       engine: [todo(2, { repoId: "site-builder" })],
@@ -1075,10 +1133,8 @@ describe("ticket route, lane and session", () => {
     expect(await within(pane).findByRole("heading", { name: "Ticket 2" })).toBeTruthy();
     expect(within(pane).getByRole("link", { name: "site-builder #2" })).toBeTruthy();
     expect(card(container, "shop-app#1")).toBeTruthy();
-    expect(card(container, "site-builder#2")).toBeNull();
-    expect(
-      screen.getByText("Showing s/shop-app. Choose All sessions to see site-builder."),
-    ).toBeTruthy();
+    expect(card(container, "site-builder#2")).toBeTruthy();
+    expect(container.textContent).not.toContain("Showing s/");
     expect(localStorage.getItem("mc-lane")).toBeNull();
   });
 
@@ -1425,13 +1481,13 @@ describe("repos together or apart", () => {
     expect(refinement?.querySelector(".knot")?.textContent).toBe("not in shop-app");
   });
 
-  it("ignores the layout under a session (one repo)", async () => {
+  it("keeps the All repos layout under a session", async () => {
     seed();
     localStorage.setItem("mc-board-layout", "apart");
     act(() => setSession("shop-app"));
     const view = await open();
-    expect(repoSeg()).toBeNull();
-    expect(view.container.querySelectorAll(".repokanban").length).toBe(0);
+    expect(repoSeg()).not.toBeNull();
+    expect(view.container.querySelectorAll(".repokanban").length).toBe(2);
     expect(view.container.querySelector(".kcol .knot")).toBeNull();
   });
 

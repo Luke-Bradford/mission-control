@@ -6,7 +6,7 @@ import { FLIGHT_THREAD, Threads } from "../comms/Threads.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
-import { inSession, setSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 /** Where `.cgrid` stacks to one column (hud.css). */
@@ -18,8 +18,8 @@ export const ITEM_GONE = "That item is no longer waiting.";
 export function Comms({ item }: { item: string | null }) {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const [session] = useSession();
-  const [selected, setSelected] = useState(FLIGHT_THREAD);
+  const { inView: matchesSession } = useSessionScope();
+  const [selected, setSelected] = useState({ id: FLIGHT_THREAD, fromNeeds: false });
 
   // A link to one item opens its panel once the list is known; a key that has gone opens nothing.
   const handled = useRef<string | null>(null);
@@ -37,18 +37,17 @@ export function Comms({ item }: { item: string | null }) {
   }, [item, items]);
 
   // Below 1000 px the conversation stacks under the list: bring it into view.
-  const select = (id: string) => {
-    const target = crew?.rows.find((r) => r.id === id);
-    if (target && !inSession(session, target.repoId)) setSession(target.repoId);
-    setSelected(id);
+  const select = (id: string, fromNeeds = false) => {
+    setSelected({ id, fromNeeds });
     if (window.matchMedia?.(STACKED_QUERY).matches) {
       document.getElementById("chatP")?.scrollIntoView?.({ block: "start" });
     }
   };
 
   const rows = crew?.rows ?? [];
-  const inView = rows.filter((r) => inSession(session, r.repoId));
-  const row = inView.find((r) => r.id === selected) ?? null;
+  const inView = rows.filter((r) => matchesSession(r));
+  // Needs you spans sessions: an explicit Read can open a thread outside the filtered list.
+  const row = (selected.fromNeeds ? rows : inView).find((r) => r.id === selected.id) ?? null;
 
   return (
     <section id="page-comms">
@@ -58,7 +57,7 @@ export function Comms({ item }: { item: string | null }) {
             items={items}
             rows={rows}
             onAskFlight={() => select(FLIGHT_THREAD)}
-            onRead={select}
+            onRead={(id) => select(id, true)}
           />
           <Threads
             rows={inView}

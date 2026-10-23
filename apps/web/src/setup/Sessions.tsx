@@ -24,7 +24,7 @@ import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { addAgentParam, agentPath, navigate, withoutAddAgentParam } from "../router.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { inSession, useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 const DASH = "—";
@@ -563,7 +563,7 @@ export function Sessions({ config }: { config: ConfigView }) {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const folders = useResource<CrewSessionFolders[]>(RESOURCES.crewSessions).data;
   const changes = useResource<CrewChanges>(RESOURCES.crewChanges).data;
-  const [session] = useSession();
+  const { session, inRepo } = useSessionScope(config);
   // Read once on mount: Overview's Add agent arrives from another page, so Setup mounts fresh.
   const [requestedSessionId] = useState(() => addAgentParam(window.location.search));
   const [form, setForm] = useState<FormState | null>(() => {
@@ -583,9 +583,8 @@ export function Sessions({ config }: { config: ConfigView }) {
   // Where a refusal shows: a session's panel, or (null) the page, for a reload.
   const [failure, setFailure] = useState<{ sessionId: string | null; text: string } | null>(null);
   const crewSessions =
-    config.crew?.sessions.filter(
-      (s) => inSession(session, s.repoId) || s.id === requestedSessionId,
-    ) ?? [];
+    config.crew?.sessions.filter((s) => inSession(session, s.id) || s.id === requestedSessionId) ??
+    [];
 
   const refetch = () => {
     hub.refetch(RESOURCES.crewChanges.path);
@@ -648,7 +647,7 @@ export function Sessions({ config }: { config: ConfigView }) {
         </button>
       </div>
       {config.repos
-        .filter((r) => inSession(session, r.id))
+        .filter((r) => inRepo(r.id))
         .filter((r) => config.loops.some((l) => l.repoId === r.id))
         .map((r) => {
           const first = config.loops.find((l) => l.repoId === r.id);

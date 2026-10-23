@@ -11,7 +11,7 @@ import { useSecond, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 /**
@@ -25,11 +25,11 @@ export function Agent({ id }: { id: string | null }) {
   const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
   const tz = useTz();
   const now = useSecond();
-  const [session] = useSession();
+  const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
 
   const all = crew.data ? [...crew.data.rows].sort((a, b) => a.index - b.index) : null;
-  const inView = all?.filter((r) => inSession(session, r.repoId)) ?? [];
+  const inView = all?.filter((r) => matchesSession(r)) ?? [];
   const crewSeats = inView.filter((r) => r.kind === "crew");
   const row =
     all === null

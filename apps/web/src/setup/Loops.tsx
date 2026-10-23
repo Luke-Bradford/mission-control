@@ -3,7 +3,7 @@ import { useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 function NewTemplate() {
@@ -58,12 +58,9 @@ function stepExtra(p: ConfigProfile, step: ConfigProfile["steps"][number]): stri
 /** The Templates panel and the picked profile's track (catalogue 2.7.2), read-only. */
 function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]> }) {
   const [picked, setPicked] = useState<string | null>(null);
-  const [session] = useSession();
+  const { inView } = useSessionScope();
   const { data: crew } = useResource<Crew>(RESOURCES.crew);
-  // The header selects repo IDs; also accept crew session IDs to show their seats.
-  const seats = crew?.rows.filter(
-    (r) => r.kind === "crew" && (inSession(session, r.repoId) || r.sessionId === session),
-  );
+  const seats = crew?.rows.filter((r) => r.kind === "crew" && inView(r));
   const { list, error, source } = profiles;
   const p = list.find((x) => x.name === picked) ?? list[0];
   return (
@@ -146,8 +143,8 @@ const TEMPLATES_NOTE =
 
 /** Setup › Loops (catalogue 2.7.2), read-only: the observed loops, and the template profiles. */
 export function Loops({ config }: { config: ConfigView }) {
-  const [session] = useSession();
-  const loops = config.loops.filter((l) => inSession(session, l.repoId));
+  const { inRepo } = useSessionScope(config);
+  const loops = config.loops.filter((l) => inRepo(l.repoId));
   return (
     <>
       <Panel title="Observed loops" sub="read from config.yaml">
