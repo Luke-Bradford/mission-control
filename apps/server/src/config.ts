@@ -276,7 +276,7 @@ export const ticketState = z.enum([
   "blocked",
   "done",
 ]) satisfies z.ZodType<TicketState>;
-const DEFAULT_MAX_SEATS = 8;
+export const DEFAULT_MAX_SEATS = 8;
 export const DEFAULT_RUN_TOKEN_BUDGET = 400_000;
 export const DEFAULT_MAX_OPEN_RUNS_PER_SEAT = 2;
 export const SEAT_ID = /^[a-z][a-z0-9-]{0,30}$/;
