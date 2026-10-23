@@ -177,6 +177,22 @@ CREATE TABLE IF NOT EXISTS attention_notes (
   key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
   text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER
 );
+-- Preserve every note episode, including the history available on upgrade.
+CREATE TABLE IF NOT EXISTS attention_episodes (
+  key TEXT NOT NULL, kind TEXT NOT NULL, seat_id TEXT, at INTEGER NOT NULL,
+  cleared_at INTEGER
+);
+CREATE TRIGGER IF NOT EXISTS attention_episode_open AFTER INSERT ON attention_notes BEGIN
+  INSERT INTO attention_episodes VALUES (NEW.key, NEW.kind, NEW.seat_id, NEW.at, NEW.cleared_at);
+END;
+CREATE TRIGGER IF NOT EXISTS attention_episode_reopen AFTER UPDATE ON attention_notes
+WHEN OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS NULL BEGIN
+  INSERT INTO attention_episodes VALUES (NEW.key, NEW.kind, NEW.seat_id, NEW.at, NULL);
+END;
+CREATE TRIGGER IF NOT EXISTS attention_episode_close AFTER UPDATE ON attention_notes
+WHEN OLD.cleared_at IS NULL AND NEW.cleared_at IS NOT NULL BEGIN
+  UPDATE attention_episodes SET cleared_at = NEW.cleared_at WHERE key = OLD.key AND cleared_at IS NULL;
+END;
 -- One row per crew seat (phase 2a); run_id is null when no run is active.
 CREATE TABLE IF NOT EXISTS seat_sessions (
   seat_id TEXT PRIMARY KEY, run_id TEXT, cli_session_id TEXT, state TEXT NOT NULL, reason TEXT,
@@ -193,6 +209,10 @@ CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
   branch TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, UNIQUE (run_id, sha)
 );
+CREATE TABLE IF NOT EXISTS commit_lines (
+  sha TEXT PRIMARY KEY, additions INTEGER, deletions INTEGER
+);
+CREATE INDEX IF NOT EXISTS run_commits_first ON run_commits(repo_id, sha, at, id);
 CREATE INDEX IF NOT EXISTS run_commits_branch ON run_commits(repo_id, branch);
 -- The sha a run last pushed to its branch, or found origin already at (phase 2b): draft_pr needs
 -- it to be the branch's tip.
@@ -712,7 +732,14 @@ export class Store {
     // Wait up to the timeout for another writer's lock instead of failing at once.
     this.db = new DatabaseSync(path, { timeout: busyTimeoutMs });
     this.db.exec("PRAGMA journal_mode = WAL");
+    const hasEpisodes = this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE name = 'attention_episodes'")
+      .get();
     this.db.exec(SCHEMA);
+    if (!hasEpisodes)
+      this.db.exec(
+        "INSERT OR IGNORE INTO attention_episodes SELECT key, kind, seat_id, at, cleared_at FROM attention_notes",
+      );
     this.migrate();
   }
 
@@ -2483,6 +2510,26 @@ export class Store {
     }));
   }
 
+  /** Historical waits, including cleared notes; only the named seat's evidence counts. */
+  telemetryNoteIntervals(
+    seatId: string,
+    since: number,
+    now: number,
+    kinds: string[],
+  ): [number, number][] {
+    const rows = this.db
+      .prepare(
+        "SELECT at, cleared_at, kind FROM attention_episodes WHERE seat_id = ? AND at < ? AND (cleared_at IS NULL OR cleared_at > ?) ORDER BY at",
+      )
+      .all(seatId, now, since) as Row[];
+    return rows
+      .filter((r) => kinds.includes(r.kind as string))
+      .map((r) => [
+        Math.max(since, r.at as number),
+        Math.min(now, (r.cleared_at as number | null) ?? now),
+      ]);
+  }
+
   openNoteKeys(runId: string): string[] {
     const rows = this.db
       .prepare(
@@ -2747,6 +2794,45 @@ export class Store {
          ON CONFLICT(run_id, sha) DO NOTHING`,
       )
       .run(c.runId, c.repoId, c.branch, c.sha, c.at);
+  }
+
+  commitLines(sha: string): { additions: number | null; deletions: number | null } | null {
+    return (
+      (this.db.prepare("SELECT additions, deletions FROM commit_lines WHERE sha = ?").get(sha) as
+        | { additions: number | null; deletions: number | null }
+        | undefined) ?? null
+    );
+  }
+
+  setCommitLines(
+    sha: string,
+    counts: { additions: number | null; deletions: number | null },
+  ): void {
+    this.db
+      .prepare("INSERT OR IGNORE INTO commit_lines VALUES (?, ?, ?)")
+      .run(sha, counts.additions, counts.deletions);
+  }
+
+  /** First record of each repo/commit in the window; a later retry never recounts it. */
+  telemetryCommits(
+    since: number,
+    now: number,
+  ): { runId: string; repoId: string; sha: string; at: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.run_id, c.repo_id, c.sha, c.at FROM run_commits c
+         WHERE c.at >= ? AND c.at <= ? AND c.id = (
+           SELECT first.id FROM run_commits first
+           WHERE first.repo_id = c.repo_id AND first.sha = c.sha ORDER BY first.at, first.id LIMIT 1
+         ) ORDER BY c.at, c.id`,
+      )
+      .all(since, now) as Row[];
+    return rows.map((r) => ({
+      runId: r.run_id as string,
+      repoId: r.repo_id as string,
+      sha: r.sha as string,
+      at: r.at as number,
+    }));
   }
 
   /** The commits the commit tool made for a run, in the order it made them. */

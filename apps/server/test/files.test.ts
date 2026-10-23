@@ -6,6 +6,7 @@ import { DIFF_MAX_CHARS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   changedFiles,
+  committedLines,
   FILES_MAX,
   FILTERS_NOTE,
   fileDiff,
@@ -559,6 +560,30 @@ describe("realGitExec on a scratch repo", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("counts a merge against its first parent rather than treating it as an empty commit", async () => {
+    git("checkout", "-q", "-b", "feature");
+    writeFileSync(join(dir, "feature.txt"), "feature\n");
+    git("add", "feature.txt");
+    git("commit", "-q", "-m", "feature");
+    git("checkout", "-q", "main");
+    git("merge", "-q", "--no-ff", "-m", "merge", "feature");
+    expect(await committedLines(dir, git("rev-parse", "HEAD").trim())).toEqual({
+      additions: 1,
+      deletions: 0,
+    });
+  });
+
+  it("counts root and ordinary commits independently of dirty worktree changes", async () => {
+    const root = git("rev-parse", "HEAD").trim();
+    expect(await committedLines(dir, root)).toEqual({ additions: 2, deletions: 0 });
+    writeFileSync(join(dir, "a.txt"), "two\n");
+    git("add", "a.txt");
+    git("commit", "-q", "-m", "change");
+    const sha = git("rev-parse", "HEAD").trim();
+    writeFileSync(join(dir, "a.txt"), "dirty\nworktree\nchanges\n");
+    expect(await committedLines(dir, sha)).toEqual({ additions: 1, deletions: 1 });
+  });
+
   it("reads uncommitted and untracked files with the note when there is no origin/HEAD", async () => {
     writeFileSync(join(dir, "a.txt"), "one\ntwo\n");
     writeFileSync(join(dir, "new file.txt"), "x\n");
@@ -904,5 +929,30 @@ describe("realGitExec on a scratch repo", () => {
     execFileSync("git", ["-C", dir, "diff", "origin/HEAD...HEAD", "--", "c.txt"]);
     expect(existsSync(marker)).toBe(true);
     rmSync(marker, { force: true });
+  });
+});
+
+describe("committed line counts", () => {
+  it("reads immutable commit trees, preserving binary and missing counts as unknown", async () => {
+    const calls: string[][] = [];
+    const exec: GitExec = async (args) => {
+      calls.push(args);
+      if (args.includes("version")) return "git";
+      return "3\t2\tfile.ts\0";
+    };
+    expect(await committedLines(WT, SHA, exec)).toEqual({ additions: 3, deletions: 2 });
+    expect(calls.at(-1)).toContain(SHA);
+    expect(calls.at(-1)).toContain("--root");
+    expect(calls.at(-1)).toContain("--no-ext-diff");
+    expect(await committedLines(WT, SHA, async () => "-\t-\timage.bin\0")).toEqual({
+      additions: null,
+      deletions: null,
+    });
+    expect(
+      await committedLines(WT, SHA, async () => {
+        throw new Error("missing");
+      }),
+    ).toEqual({ additions: null, deletions: null });
+    expect(await committedLines(WT, "--bad", exec)).toEqual({ additions: null, deletions: null });
   });
 });

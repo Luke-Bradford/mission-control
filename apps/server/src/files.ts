@@ -252,6 +252,47 @@ export async function changedFiles(
   return (await listChanged(worktree, exec)).list;
 }
 
+/** Counts committed trees only; binary files or unavailable objects leave the counts unknown. */
+export async function committedLines(
+  worktree: string,
+  sha: string,
+  exec: GitExec = realGitExec,
+): Promise<{ additions: number | null; deletions: number | null }> {
+  const unknown = { additions: null, deletions: null };
+  if (!/^[a-f0-9]{40,64}$/.test(sha)) return unknown;
+  try {
+    const base = await readOnlyBase(worktree, exec);
+    const out = await exec([
+      ...base,
+      "diff-tree",
+      "--diff-merges=first-parent",
+      "--root",
+      "--no-commit-id",
+      "-r",
+      "--numstat",
+      "-z",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--ignore-submodules=all",
+      "--no-renames",
+      sha,
+      "--",
+    ]);
+    const rows = parseNumstat(out, "committed");
+    if (out !== "" && rows.length === 0) return unknown;
+    return {
+      additions: rows.some((r) => r.add === null)
+        ? null
+        : rows.reduce((n, r) => n + (r.add ?? 0), 0),
+      deletions: rows.some((r) => r.del === null)
+        ? null
+        : rows.reduce((n, r) => n + (r.del ?? 0), 0),
+    };
+  } catch {
+    return unknown;
+  }
+}
+
 /** HEAD's sha, or null when git cannot name it. */
 const headSha = (base: string[], exec: GitExec): Promise<string | null> =>
   exec([...base, "rev-parse", "--verify", "HEAD"]).then(

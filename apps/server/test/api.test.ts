@@ -66,6 +66,7 @@ import {
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
@@ -2675,6 +2676,52 @@ describe("activity", () => {
 });
 
 describe("telemetry", () => {
+  it("intersects repo-qualified tickets, agent, account and range and clears scope", async () => {
+    for (const [id, ticket, input] of [
+      ["a", "shop-app#7", 10],
+      ["b", "shop-app#8", 20],
+      ["c", "site-builder#7", 40],
+    ] as const) {
+      store.upsertRun(
+        run({
+          id,
+          ticket,
+          tokens: { input, output: 0, cacheRead: 0, cacheCreate: 0 },
+          startedAt: NOW - HOUR,
+          endedAt: NOW - HOUR / 2,
+        }),
+      );
+    }
+    const read = async (q: string) => (await get(`/api/telemetry?${q}`)).json<Telemetry>();
+    expect((await read("ticket=shop-app%237")).totals[0]?.input).toBe(10);
+    expect((await read("ticket=site-builder%237")).totals[0]?.input).toBe(40);
+    expect(
+      (await read("ticket=shop-app%237&agent=shop-app-ta&account=claude-main")).tokensByTicket,
+    ).toEqual([{ ticket: "shop-app#7", tokens: 10, costUsd: null }]);
+    expect((await read("ticket=shop-app%237&account=codex-main")).totals).toEqual([]);
+    expect((await read("ticket=&agent=&account=")).totals[0]?.input).toBe(70);
+    store.upsertRun(
+      run({
+        id: "older",
+        ticket: "shop-app#7",
+        startedAt: NOW - 8 * HOUR,
+        endedAt: NOW - 7 * HOUR,
+        tokens: { input: 100, output: 0, cacheRead: 0, cacheCreate: 0 },
+      }),
+    );
+    expect((await read("range=6h&ticket=shop-app%237")).totals[0]?.input).toBe(10);
+    expect((await read("range=24h&ticket=shop-app%237")).totals[0]?.input).toBe(110);
+    for (const q of [
+      "ticket=7",
+      "ticket=unknown%237",
+      "ticket=shop-app%230",
+      "ticket=shop-app%231.5",
+      "ticket=a&ticket=b",
+    ]) {
+      expect((await get(`/api/telemetry?${q}`)).statusCode, q).toBe(400);
+    }
+  });
+
   it("defaults to 6h, accepts each range and refuses an unknown one with 400", async () => {
     store.upsertRun(
       run({
@@ -4267,3 +4314,46 @@ vi.mock("../src/accounts.ts", () => ({
     detail: null,
   }),
 }));
+
+it("bounds uncached telemetry reads, filters first and persists immutable counts", async () => {
+  store.upsertRun(
+    run({
+      id: "many",
+      ticket: "shop-app#7",
+      tokens: { input: 1, output: 0, cacheRead: 0, cacheCreate: 0 },
+    }),
+  );
+  for (let i = 0; i < 50; i++)
+    store.addRunCommit({
+      runId: "many",
+      repoId: "shop-app",
+      branch: "b",
+      sha: i.toString(16).padStart(40, "0"),
+      at: NOW - 1000 + i,
+    });
+  let active = 0;
+  let peak = 0;
+  const read = vi.spyOn(files, "committedLines").mockImplementation(async () => {
+    peak = Math.max(peak, ++active);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    active--;
+    return { additions: 2, deletions: 1 };
+  });
+  try {
+    await get("/api/telemetry?ticket=shop-app%238");
+    expect(read).toHaveBeenCalledTimes(0);
+    const first = (await get("/api/telemetry")).json<Telemetry>();
+    expect(read).toHaveBeenCalledTimes(32);
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(peak).toBeGreaterThan(1);
+    expect(first.totals[0]?.additions).toBeNull();
+    const second = (await get("/api/telemetry")).json<Telemetry>();
+    expect(read).toHaveBeenCalledTimes(50);
+    expect(new Set(read.mock.calls.map((c) => c[1])).size).toBe(50);
+    expect(second.totals[0]?.additions).toBe(100);
+    await get("/api/telemetry");
+    expect(read).toHaveBeenCalledTimes(50);
+  } finally {
+    read.mockRestore();
+  }
+});
