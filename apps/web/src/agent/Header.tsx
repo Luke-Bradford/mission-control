@@ -4,7 +4,7 @@ import { useTz } from "../clock.ts";
 import { PauseButton } from "../components/PauseButton.tsx";
 import { callSign, modelLine, seatAreaText, seatStatus, seatTurn } from "../crew.ts";
 import { useReviewPrs } from "../data.ts";
-import { agentColor } from "../hud/AgentTag.tsx";
+import { agentColor, useRoleLabel } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { agentPath } from "../router.ts";
@@ -76,12 +76,18 @@ export function Header({ row, limits, now }: { row: CrewRow; limits: LimitRow[];
   const tz = useTz();
   const repoPrs = useReviewPrs(row);
   const popout = useIsPopout();
+  const role = useRoleLabel(row.id);
   return (
     <section className="panel ahead" id="ahead" aria-label={`${row.id} details`}>
       <div className="idrow">
-        <span className="big" style={{ "--c": agentColor(row.index) } as CSSProperties}>
+        <span
+          className="big"
+          style={{ "--c": agentColor(row.index) } as CSSProperties}
+          title={role.title}
+        >
           <i aria-hidden="true" />
           {callSign(row)}
+          {role.suffix !== null && <span className="rt">{` · ${role.suffix}`}</span>}
         </span>
         <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
         <span className="chips">
