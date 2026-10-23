@@ -15,6 +15,7 @@ import {
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
+  type CrewQueueItem,
   type CrewRow,
   crewHudState,
   currentReview,
@@ -44,6 +45,8 @@ import {
   prYouAction,
   questionText,
   REVIEW_ROUNDS,
+  type ReviewRow,
+  type ReviewState,
   type Run,
   type RunDigest,
   type SeatSessionRow,
@@ -213,7 +216,12 @@ export function agentViews(config: CcConfig, store: Store, now: number = Date.no
  * The open PR on the run's branch in the seat's repo (the newest, if several), as the row's review
  * state; null without a branch or an open PR.
  */
-function reviewOf(store: Store, repoId: string, branch: string | null): CrewRow["review"] {
+function reviewOf(
+  store: Store,
+  repoId: string,
+  branch: string | null,
+  inFlight: ReviewRow[],
+): CrewRow["review"] {
   if (branch === null) return null;
   const open = store
     .pullRequests(repoId)
@@ -225,7 +233,17 @@ function reviewOf(store: Store, repoId: string, branch: string | null): CrewRow[
     : open.review === "changes" || open.review === "approved"
       ? open.review
       : "open";
-  return { prNumber: open.number, state };
+  const reviewing = inFlight.findLast((r) => r.repoId === repoId && r.prNumber === open.number);
+  return { prNumber: open.number, state, reviewing: reviewing?.seatId ?? null };
+}
+
+/** A writer seat's queued tickets in order, without the one it holds; [] for any other row. */
+function queueOf(store: Store, agent: ConfiguredAgent): CrewQueueItem[] {
+  if (agent.kind !== "crew" || modeOfSeat(agent.seat) !== "writer") return [];
+  return store
+    .queue(agent.id)
+    .filter((q) => q.takenAt === null)
+    .map((q, i) => ({ ref: `${q.repoId}#${q.issue}`, issue: q.issue, pos: i + 1 }));
 }
 
 /** A scratch seat's live review: its latest run is active and performs a review. */
@@ -234,6 +252,9 @@ function reviewingOf(store: Store, latest: Run | null): CrewRow["reviewing"] {
   const rv = store.review(latest.reviewId);
   return rv === null ? null : { prNumber: rv.prNumber, sha: rv.sha, ref: latest.ticket };
 }
+
+/** A review in one of these states is on the review seat now. */
+const REVIEWING: readonly ReviewState[] = ["queued", "starting", "running"];
 
 /** Open note keys that say the operator is next on a run in review. */
 const OPERATOR_NOTE_PREFIXES = ["ready:", "review:", "headmoved:"];
@@ -324,6 +345,7 @@ export function crew(
         }
       : null;
   const asideAll = store.asideRuns();
+  const reviewsInFlight = store.reviewsIn(REVIEWING);
   const rows = loopViews(config, store, now, lock).map(
     ({ agent, runs, latest, view, seatRow }, index): CrewRow => {
       const digests: Map<string, RunDigest> = store.digests(runs.map((r) => r.id));
@@ -385,7 +407,9 @@ export function crew(
             ? { version: cliVersionOnce(), effort: agent.seat.effort ?? null }
             : { version: null, effort: null },
         review:
-          agent.kind === "crew" ? reviewOf(store, agent.repoId, latest?.branch ?? null) : null,
+          agent.kind === "crew"
+            ? reviewOf(store, agent.repoId, latest?.branch ?? null, reviewsInFlight)
+            : null,
         reviewing: reviewingOf(store, latest),
         paused: view.paused,
         note: view.note,
@@ -413,6 +437,7 @@ export function crew(
                     : [];
                 })
             : [],
+        queue: queueOf(store, agent),
         run: latest
           ? {
               id: latest.id,
@@ -557,7 +582,13 @@ export function attentionItems(
   );
   for (const ticket of store.activeTickets()) working.add(ticket);
   for (const repo of config.repos) {
-    const onBoard = new Set(store.board(repo.id).map((b) => `${repo.id}#${b.issueNumber}`));
+    // a ticket the board has seen closed clears its PR's item
+    const onBoard = new Set(
+      store
+        .board(repo.id)
+        .filter((b) => !b.closed)
+        .map((b) => `${repo.id}#${b.issueNumber}`),
+    );
     for (const pr of store.pullRequests(repo.id)) {
       if (pr.ticket === null || !onBoard.has(pr.ticket)) continue;
       const action = prYouAction(pr, working.has(pr.ticket), now);

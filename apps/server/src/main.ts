@@ -322,6 +322,7 @@ async function main(): Promise<void> {
     bus,
     logger: true,
     webRoot: WEB_ROOT,
+    profilesPath,
     // A setup that created fields, or an added repo, refreshes the boards now, not at the next poll.
     refreshBoards: () => void scheduler.tick("github"),
     machine: () => scheduler.machine(),

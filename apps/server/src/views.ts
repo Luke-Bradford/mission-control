@@ -356,7 +356,7 @@ export function metrics(config: CcConfig, store: Store, now: number): Metrics {
 }
 
 /** The loaded config, field by field: only the fields the Settings page shows are copied. */
-export function configView(config: CcConfig): ConfigView {
+export function configView(config: CcConfig, profiles?: ConfigView["profiles"]): ConfigView {
   return {
     operator: { id: config.operator.id, timezone: config.operator.timezone },
     accounts: config.accounts.map((a) => ({
@@ -415,5 +415,6 @@ export function configView(config: CcConfig): ConfigView {
           })),
         }
       : null,
+    ...(profiles === undefined ? {} : { profiles }),
   };
 }

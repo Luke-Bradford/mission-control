@@ -1,16 +1,22 @@
-import { type CrewRow, type PullRequestView, startOfLocalDay } from "@mc/core";
+import { type CrewRow, type PrCheck, type PullRequestView, startOfLocalDay } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   cardAgent,
   cardColumn,
   cardPr,
+  cardQueue,
+  cardReviewer,
+  cardStep,
   cardYouWait,
+  checksText,
   daysAgo,
   doneOutcome,
   needsMe,
   priorityRank,
+  type QueueRow,
   sortCards,
   statusOutOfDateTitle,
+  ticketRef,
   waitingText,
 } from "../src/board/cards.ts";
 import { boardItem, crewRow, HOUR, item, NOW } from "./fixtures.ts";
@@ -209,5 +215,72 @@ describe("statusOutOfDateTitle", () => {
     expect(statusOutOfDateTitle({ closed: true, status: "" })).toBe(
       "GitHub says Closed; the board's Status says none",
     );
+  });
+});
+
+const L = { phase: "working", text: "Working", prNumber: null, parked: null } as const;
+
+describe("cardStep", () => {
+  it("a looped run shows its template, step and try", () => {
+    const tries = { n: 2, max: 3 };
+    expect(
+      cardStep(crewRow({ loop: { ...L, profile: "feature", step: "implement", tries } })),
+    ).toBe("feature › implement · try 2 of 3");
+    expect(
+      cardStep(crewRow({ loop: { ...L, profile: "feature", step: "implement", tries: null } })),
+    ).toBe("feature › implement");
+    expect(cardStep(crewRow({ loop: { ...L, phase: "ci" } }))).toBe("build › CI");
+    expect(cardStep(crewRow())).toBe(`run #${RUN.seq} · no template step`);
+  });
+});
+
+describe("cardQueue", () => {
+  const q = (n: number, pos: number) => ({ ref: `shop-app#${n}`, issue: n, pos });
+  const guido: QueueRow = {
+    ...crewRow({ id: "GUIDO-1", index: 2, kind: "crew" }),
+    queue: [q(5, 1), q(7, 2)],
+  };
+  it("a queued Ready card names its seat and place", () => {
+    const seven = boardItem({ issueNumber: 7, status: "Todo", state: "planned" });
+    expect(cardQueue(seven, [crewRow(), guido])).toEqual({ id: "GUIDO-1", index: 2, pos: 2 });
+    expect(cardQueue({ ...seven, status: "In Progress" }, [crewRow(), guido])).toBeNull();
+    expect(cardQueue({ ...seven, issueNumber: 9 }, [crewRow(), guido])).toBeNull();
+    expect(cardQueue(seven, [crewRow()])).toBeNull();
+  });
+});
+
+describe("cardReviewer", () => {
+  const retro = (reviewing: CrewRow["reviewing"]) =>
+    crewRow({ id: "RETRO-1", index: 3, kind: "crew", reviewing });
+  it("names the seat reviewing the card's PR or ticket", () => {
+    const seat = retro({ prNumber: 40, sha: "c".repeat(40), ref: null });
+    expect(cardReviewer(boardItem(), pr({ number: 40 }), [seat])).toEqual({
+      id: "RETRO-1",
+      index: 3,
+    });
+    expect(cardReviewer(boardItem(), pr({ number: 41 }), [seat])).toBeNull();
+    const byRef = retro({ prNumber: 99, sha: "c".repeat(40), ref: ticketRef(boardItem()) });
+    expect(cardReviewer(boardItem(), null, [byRef])).toEqual({ id: "RETRO-1", index: 3 });
+    expect(cardReviewer(boardItem(), pr(), [retro(null)])).toBeNull();
+  });
+});
+
+describe("checksText", () => {
+  const c = (name: string, state: PrCheck["state"]): PrCheck => ({
+    name,
+    kind: "check",
+    state,
+    conclusion: state,
+    attempt: null,
+    url: null,
+  });
+  it("names the checks, without mc/review, worst state per name", () => {
+    expect(
+      checksText([c("check", "passing"), c("e2e", "failing"), c("mc/review", "failing")]),
+    ).toBe("check passing · e2e failing");
+    expect(checksText([c("check", "passing"), c("check", "failing")])).toBe("check failing");
+    expect(checksText(undefined)).toBeNull();
+    expect(checksText([])).toBeNull();
+    expect(checksText([c("mc/review", "passing")])).toBeNull();
   });
 });

@@ -6,7 +6,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
+  BUILTIN_PROFILES_SOURCE,
   type ChosenProfile,
+  type ConfigView,
   DEFAULT_PROFILES,
   overrideProfile,
   PROFILE_NAME,
@@ -108,6 +110,28 @@ export function loadProfiles(path: string): readonly Profile[] | ProfilesError {
     if (!seen.has(name)) return new ProfilesError(`profiles: no profile named "${name}" (${why})`);
   }
   return ps;
+}
+
+/**
+ * The profiles as `/api/config` shows them, read now. A file that cannot be loaded gives its error
+ * and no profiles; the hub still answers.
+ */
+export function profilesView(path: string): NonNullable<ConfigView["profiles"]> {
+  const ps = loadProfiles(path);
+  if (ps instanceof ProfilesError) return { source: path, error: ps.message, list: [] };
+  return {
+    source: ps === DEFAULT_PROFILES ? BUILTIN_PROFILES_SOURCE : path,
+    error: null,
+    list: ps.map((p) => ({
+      name: p.name,
+      labels: [...p.labels],
+      steps: p.steps.map((s) => ({ name: s.name, phase: s.phase })),
+      planRequired: p.planRequired,
+      reviewer: { role: p.reviewer.role, depth: p.reviewer.depth },
+      tries: p.tries,
+      rounds: p.rounds,
+    })),
+  };
 }
 
 /** sha256 hex of the profile as JSON, keys in `Profile` order. */

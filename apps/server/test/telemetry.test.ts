@@ -11,6 +11,7 @@ import type {
   RunDigest,
   SubagentInfo,
 } from "@mc/core";
+import { NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
@@ -357,7 +358,14 @@ describe("flow of work", () => {
         fp(6, null),
       ],
     );
-    expect(tel().quality).toEqual({ ciGreenFirstPushPct: 75, prs: 4 });
+    expect(tel().quality).toEqual({
+      ciGreenFirstPushPct: 75,
+      prs: 4,
+      reviewRoundsPerPr: null,
+      firstPassReviewPct: null,
+      reviewedPrs: 0,
+      commitsPerRun: null,
+    });
   });
 });
 
@@ -717,7 +725,14 @@ describe("empty store", () => {
       })),
       excluded: 0,
     });
-    expect(t.quality).toEqual({ ciGreenFirstPushPct: null, prs: 0 });
+    expect(t.quality).toEqual({
+      ciGreenFirstPushPct: null,
+      prs: 0,
+      reviewRoundsPerPr: null,
+      firstPassReviewPct: null,
+      reviewedPrs: 0,
+      commitsPerRun: null,
+    });
     // Per-agent series are one per configured agent, all zero / idle.
     expect(t.tokensPerMinute.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
     expect(t.liveMinutes.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
@@ -914,6 +929,126 @@ describe("crew seats", () => {
       accountId: "claude-main",
       input: 600,
       output: 400,
+    });
+  });
+
+  /** A reported review of `prNumber` at `round`, with `blocking` Important findings. */
+  const reported = (authorRunId: string, prNumber: number, round: number, blocking: number) => {
+    const id = store.requestReview({
+      authorRunId,
+      repoId: "shop-app",
+      seatId: "RETRO-1",
+      prNumber,
+      sha: "c".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round,
+      at: NOW - HOUR,
+    }) as number;
+    store.setReviewState(id, ["queued"], "running", { at: NOW - HOUR, runId: `rv-${id}` });
+    store.recordFindings(id, `rv-${id}`, {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "s",
+      findings: Array.from({ length: blocking }, () => ({
+        severity: "Important" as const,
+        file: "a.ts",
+        line: 1,
+        summary: "x",
+        scenario: "y",
+        fix: "z",
+      })),
+      at: NOW - HOUR,
+    });
+  };
+
+  it("quality: review rounds and first-pass rate per merged PR, commits per run", () => {
+    store.replacePullRequests(
+      "shop-app",
+      [pr(7, NOW - DAY), pr(8, NOW - 2 * DAY), pr(9, NOW - 20 * DAY), pr(10, null)],
+      0,
+    );
+    reported("a7", 7, 1, 1);
+    reported("b7", 7, 2, 0);
+    reported("a8", 8, 1, 0);
+    reported("a9", 9, 1, 1);
+    reported("a10", 10, 1, 0);
+    const c = (id: string, over: Partial<Run> = {}) =>
+      store.upsertRun(
+        run({
+          id,
+          agentId: "GUIDO-1",
+          startedAt: NOW - 3 * HOUR,
+          endedAt: NOW - 2 * HOUR,
+          loop: NEW_LOOP,
+          ...over,
+        }),
+      );
+    c("c1");
+    c("c2");
+    c("c3", { endedAt: null });
+    c("c4", { reviewId: 1 });
+    c("c5", { loop: null });
+    c("c6", { startedAt: NOW - 20 * DAY, endedAt: NOW - 20 * DAY + HOUR });
+    const commit = (runId: string, sha: string) =>
+      store.addRunCommit({ runId, repoId: "shop-app", branch: "b", sha, at: NOW - 2 * HOUR });
+    for (const sha of ["1", "2", "3"]) commit("c1", sha.repeat(40));
+    commit("c2", "4".repeat(40));
+    expect(tel().quality).toMatchObject({
+      reviewRoundsPerPr: 1.5,
+      firstPassReviewPct: 50,
+      reviewedPrs: 2,
+      commitsPerRun: 2,
+    });
+  });
+
+  it("quality's review and commit figures are null with no data", () => {
+    expect(tel().quality).toMatchObject({
+      reviewRoundsPerPr: null,
+      firstPassReviewPct: null,
+      reviewedPrs: 0,
+      commitsPerRun: null,
+    });
+  });
+
+  describe("a seat's waiting share", () => {
+    const NOON = at("2026-10-17T15:00:00Z");
+    // local midnight 2026-10-16T23:00Z: 16h elapsed at NOON
+    const seatShare = () => tel("6h", NOON).utilisation.find((u) => u.agentId === "GUIDO-1");
+    const ran = () =>
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          startedAt: at("2026-10-17T07:00:00Z"),
+          endedAt: at("2026-10-17T11:00:00Z"),
+        }),
+      );
+    const ask = (agentId: string, when: string) =>
+      store.addQuestion({ agentId, runId: "c1", text: "q?", at: at(when) });
+
+    it("is its own questions' open time, not also working; another seat's question does not count", () => {
+      ran();
+      ask("GUIDO-1", "2026-10-17T08:00:00Z");
+      store.answerQuestions("GUIDO-1", at("2026-10-17T10:00:00Z"));
+      ask("FLIGHT", "2026-10-17T12:00:00Z");
+      expect(seatShare()).toEqual({ agentId: "GUIDO-1", working: 12.5, waiting: 12.5, idle: 75 });
+    });
+
+    it("an open title escalation on the seat's repo leaves its waiting at 0; the loop's share is unchanged", () => {
+      ran();
+      store.replaceEscalations("shop-app", [escalation({ openedAt: at("2026-10-17T07:00:00Z") })]);
+      expect(seatShare()).toEqual({ agentId: "GUIDO-1", working: 25, waiting: 0, idle: 75 });
+      expect(tel("6h", NOON).utilisation.find((u) => u.agentId === "shop-app-ta")).toEqual({
+        agentId: "shop-app-ta",
+        working: 0,
+        waiting: 50,
+        idle: 50,
+      });
+    });
+
+    it("an unanswered question waits until now", () => {
+      ask("GUIDO-1", "2026-10-17T13:00:00Z");
+      expect(seatShare()).toMatchObject({ working: 0, waiting: 12.5 });
     });
   });
 
