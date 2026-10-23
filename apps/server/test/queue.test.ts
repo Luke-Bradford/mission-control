@@ -3,12 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  fillLoopText,
   freezeRules,
   NEW_LOOP,
   QUEUE_DEPTH,
   type RepoRules,
   type Run,
   type SeatState,
+  startMissingNeedsText,
+  startNeedsPlanText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
@@ -17,6 +20,7 @@ import {
   dealQueues,
   refillQueues,
   seatMayTake,
+  TAKE_FAILED_TEXT,
   type TakeDeps,
   takeNext,
 } from "../src/engine/queue.ts";
@@ -296,6 +300,50 @@ describe("refillQueues", () => {
 
   it("skips a research ticket", async () => {
     store.replaceBoard(REPO, [card(1, { labels: ["area:server", "research"] }), card(2)]);
+    await refill();
+    expect(issues(SERVER)).toEqual([2]);
+  });
+
+  it("starts only the hub's lane when it has one, and any card when it has none", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { labels: ["area:server", "lane:home"] }),
+      card(2, { labels: ["area:server", "lane:work"] }),
+      card(3),
+    ]);
+    if (config.crew === undefined) throw new Error("no crew");
+    config.crew.lane = "work";
+    await refill();
+    expect(issues(SERVER)).toEqual([2]);
+    config.crew.laneDefault = true;
+    await refill();
+    expect(issues(SERVER)).toEqual([2, 3]);
+    delete config.crew.lane;
+    await refill();
+    expect(issues(SERVER)).toEqual([1, 2, 3]);
+  });
+
+  it("queues no card whose area no writer seat holds", async () => {
+    const seats = config.crew?.sessions[0]?.seats ?? [];
+    seats.splice(
+      seats.findIndex((s) => s.id === WEB),
+      1,
+    );
+    store.replaceBoard(REPO, [card(1, { labels: ["area:web"] }), card(2)]);
+    await refill();
+    expect(issues(SERVER)).toEqual([2]);
+    expect(issues(WEB)).toEqual([]);
+  });
+
+  it("leaves out a card with an open blocker", async () => {
+    store.replaceBoard(REPO, [
+      card(1, {
+        blockedBy: [
+          { ref: `${REPO}#8`, closed: false },
+          { ref: `${REPO}#9`, closed: true },
+        ],
+      }),
+      card(2),
+    ]);
     await refill();
     expect(issues(SERVER)).toEqual([2]);
   });
@@ -749,6 +797,26 @@ describe("takeNext", () => {
         "question:take-failed:mc#1",
         "question:take-failed:mc#2",
       ]);
+    });
+
+    it("treats the supervisor's start-check refusal (422) as the card's own", async () => {
+      for (const text of [
+        startMissingNeedsText("mc#1", ["done_when"]),
+        startNeedsPlanText("mc#1", "M"),
+      ]) {
+        await queued(card(1));
+        startFails = () => new SupervisorError(422, text);
+        await take();
+        expect(issues(SERVER)).toEqual([]);
+        const note = store.notes().find((x) => x.key === "question:take-failed:mc#1");
+        expect(note?.text).toBe(
+          fillLoopText(TAKE_FAILED_TEXT, { call: "GUIDO-1", ref: "mc#1", reason: text }),
+        );
+        expect(store.notes().filter((x) => x.key.startsWith("question:take-failed:"))).toHaveLength(
+          1,
+        );
+        store.clearNote("question:take-failed:mc#1", NOW);
+      }
     });
 
     it("retries what is the machine's: a busy seat, GitHub, the fetch, the install, anything else", async () => {
