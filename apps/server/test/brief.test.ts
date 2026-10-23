@@ -273,6 +273,14 @@ describe("role briefs", () => {
     }
   });
 
+  it("RETRO reads the diff first and mutation-checks only to prove a finding", () => {
+    const text = readFileSync(join(ROLES_DIR, "RETRO.md"), "utf8");
+    expect(text).toContain(
+      "- Read the diff, not the whole codebase. From the second round, start with `.mc-review/since-last-review.diff`",
+    );
+    expect(text).not.toContain("mutation-check a fix");
+  });
+
   it("RETRO has no tools for commits, pushes or PRs", () => {
     expect(mayNot("RETRO")).toBe(
       "Do not commit, push, run git writes, open PRs or comment on GitHub, and do not run the full suite. You have no tools for these, no network access and no gh. A doubt you cannot settle is a finding, not a question.",
