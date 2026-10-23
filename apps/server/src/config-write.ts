@@ -79,7 +79,7 @@ export const SeatsBody = z.strictObject({
   /** The seats as the page last saw them in config.yaml (`CrewChanges.sessions`). */
   base: z.array(SeatInputBody).max(32),
   seats: z
-    .array(SeatInputBody)
+    .array(SeatInputBody.extend({ displayCallSign: displayCallSign.nullable().optional() }))
     .max(32)
     .refine((l) => new Set(l.map((s) => s.id)).size === l.length, "seat ids must be unique"),
 });
@@ -167,7 +167,7 @@ export function setSessionSeats(
   path: string,
   sessionId: string,
   base: ConfigSeatInput[],
-  seats: ConfigSeatInput[],
+  seats: z.infer<typeof SeatsBody>["seats"],
   now: number,
 ): Promise<{ config: CcConfig; backup: string }> {
   const run = queue.then(() => setSeats(path, sessionId, base, seats, now));
@@ -179,7 +179,7 @@ async function setSeats(
   path: string,
   sessionId: string,
   base: ConfigSeatInput[],
-  seats: ConfigSeatInput[],
+  seats: z.infer<typeof SeatsBody>["seats"],
   now: number,
 ): Promise<{ config: CcConfig; backup: string }> {
   const parsed = SeatsBody.safeParse({ base, seats });
@@ -192,12 +192,18 @@ async function setSeats(
     throw new ConfigWriteError("conflict", SEATS_CHANGED);
   }
 
+  // Setup's seat editor omits display metadata. Preserve it unless explicitly cleared.
+  const nextSeats: ConfigSeatInput[] = seats.map(({ displayCallSign: name, ...seat }) => {
+    const stored = session.seats.find((s) => s.id === seat.id)?.displayCallSign;
+    const displayCallSign = name === undefined ? stored : name;
+    return displayCallSign == null ? seat : { ...seat, displayCallSign };
+  });
   const doc = parseDocument(text);
   const seq = doc.getIn(["crew", "sessions", i, "seats"], true);
   if (!isSeq(seq) || doc.errors.length > 0) {
     throw new ConfigWriteError("current", `config.yaml has no seats list for s/${sessionId}`);
   }
-  const nodes = seats.map((seat) => {
+  const nodes = nextSeats.map((seat) => {
     const existing = seq.items.find((item) => isMap(item) && item.get("id") === seat.id);
     let node: YAMLMap;
     if (isMap(existing)) node = existing;
@@ -242,7 +248,7 @@ async function setSeats(
   });
   if (
     !isDeepStrictEqual(bare(next), bare(current)) ||
-    !isDeepStrictEqual(next.crew?.sessions[i]?.seats.map(seatInput), seats)
+    !isDeepStrictEqual(next.crew?.sessions[i]?.seats.map(seatInput), nextSeats)
   ) {
     throw new ConfigWriteError(
       "write",
