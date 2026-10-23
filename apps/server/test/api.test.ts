@@ -3173,8 +3173,36 @@ describe("crew routes", () => {
         model: "opus",
         state: null,
         live: false,
+        turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("counts the wakes of FLIGHT's current run as its turn", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "rf", agentId: "flight-1", startedAt: NOW - 3600e3 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "rf",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const claim = (key: string, runId: string) =>
+        store.claimLine(key, { runId, seatId: "flight-1", origin: "engine", text: "w", at: NOW });
+      for (const k of [1, 2, 3]) claim(`flight:wake:rf:${k}`, "rf");
+      claim("flight:wake:other:1", "other");
+      claim("flight:note:rf:1", "rf");
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.seat?.turns).toEqual({ n: 4, max: 41 });
     });
   });
 
