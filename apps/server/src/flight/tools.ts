@@ -1537,7 +1537,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const drafted = store
         .briefs()
         .get(key)
-        ?.person?.replies?.some((r) => r.draftId !== undefined);
+        ?.person?.replies?.some(
+          (r) => structured.person?.source.kind === "teams" || r.draftId !== undefined,
+        );
       if (n)
         store.recordFlightArrival({
           source: structured.person.source.kind === "teams" ? "Teams" : "GitHub",
