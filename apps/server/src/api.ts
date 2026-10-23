@@ -771,7 +771,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/test-lock", async (): Promise<TestLockState> => lock?.state() ?? NO_LOCK);
 
-      // Reader: apps/web/src/telemetry/CapacityGroup.tsx (the Test lock table; the web part follows)
+      // Reader: apps/web/src/telemetry/CapacityGroup.tsx (the Test lock table), Kpis.tsx (Lock wait) and components/LockLines.tsx (usually about)
       api.get("/test-lock/history", async (): Promise<TestLockHistory> => {
         const at = now();
         const runs = store.lockRuns(at - TELEMETRY_RANGES["7d"] * 60_000);
