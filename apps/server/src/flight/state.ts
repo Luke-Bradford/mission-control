@@ -7,6 +7,8 @@ import {
   type AttentionItem,
   clockHm,
   FLIGHT_ABOUT_MAX,
+  FLIGHT_BRIEF_SECTIONS,
+  FLIGHT_BRIEF_TITLES,
   FLIGHT_HOUR_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_MESSAGES_PER_HOUR,
@@ -17,6 +19,8 @@ import {
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
+  type FlightBriefSection,
+  type FlightBriefView,
   type FlightSeatState,
   type FlightState,
   type FlightView,
@@ -117,6 +121,28 @@ export function flightView(config: CcConfig, store: Store, now: number): FlightV
   };
 }
 
+/** All nine sections of a session's brief, in order; one never written (or no session) is empty. */
+export function flightBriefSections(store: Store, sessionId: string | null): FlightBriefSection[] {
+  const rows = new Map(
+    (sessionId === null ? [] : store.flightBrief(sessionId)).map((r) => [r.section, r]),
+  );
+  return FLIGHT_BRIEF_SECTIONS.map((section) => {
+    const r = rows.get(section);
+    return {
+      section,
+      title: FLIGHT_BRIEF_TITLES[section],
+      text: r?.text ?? "",
+      updatedAt: r?.updatedAt ?? null,
+      updatedBy: r?.updatedBy ?? null,
+    };
+  });
+}
+
+export function flightBriefView(config: CcConfig, store: Store): FlightBriefView {
+  const session = flightSeat(config)?.session.id ?? null;
+  return { session, sections: flightBriefSections(store, session) };
+}
+
 const priorityRank = (p: string | null): number => {
   const i = (PRIORITIES as readonly (string | null)[]).indexOf(p);
   return i === -1 ? PRIORITIES.length : i;
@@ -177,11 +203,22 @@ export function flightState(i: {
         store.countFlightDecisions({ kinds: ["answer", "message", "unpark"], since }),
     ),
   };
-  const recent = store.flightDecisions(0, FLIGHT_RECENT_LISTED).map((d) => ({
-    time: clockHm(d.at, tz),
-    kind: d.kind,
-    about: d.about,
-    decision: d.decision,
+  // brief edits stay out of `recent`: the brief itself is in the state, and edits would crowd it
+  const recent = store
+    .flightDecisions(0, FLIGHT_RECENT_LISTED * 4)
+    .filter((d) => d.kind !== "brief")
+    .slice(0, FLIGHT_RECENT_LISTED)
+    .map((d) => ({
+      time: clockHm(d.at, tz),
+      kind: d.kind,
+      about: d.about,
+      decision: d.decision,
+    }));
+  const brief = flightBriefSections(store, found?.session.id ?? null).map((b) => ({
+    section: b.section,
+    title: b.title,
+    text: b.text,
+    ageMin: b.updatedAt === null ? null : Math.floor((now - b.updatedAt) / 60_000),
   }));
   if (found === null) {
     return {
@@ -198,6 +235,7 @@ export function flightState(i: {
       holds: [],
       recent,
       limits,
+      brief,
     };
   }
   const { session } = found;
@@ -401,6 +439,7 @@ export function flightState(i: {
     holds,
     recent,
     limits,
+    brief,
   };
 }
 
