@@ -91,7 +91,7 @@ const termPattern = (term: string) => {
 
 const contains = (text: string, term: string) => termPattern(term).test(text);
 
-function matches(text: string, mentions: unknown, config: TeamsConfig, source: Selection): boolean {
+function mentionsOperator(text: string, mentions: unknown, config: TeamsConfig): boolean {
   if (config.aliases.some((alias) => contains(text, alias))) return true;
   if (
     Array.isArray(mentions) &&
@@ -106,6 +106,10 @@ function matches(text: string, mentions: unknown, config: TeamsConfig, source: S
     })
   )
     return true;
+  return false;
+}
+
+function matches(text: string, config: TeamsConfig, source: Selection): boolean {
   if (config.refs.some((ref) => contains(text, ref))) return true;
   return config.areas.some(
     (area) =>
@@ -147,6 +151,8 @@ export async function collectTeams(
       const base = path(source);
       const key = `teams.watermark:${source.kind}:${source.id}${source.teamId ? `:${source.teamId}` : ""}`;
       let watermark = store.getSetting(`${key}:pending`) || store.getSetting(key) || "";
+      const threadsKey = `${key}:participated`;
+      const participated = new Set<string>(JSON.parse(store.getSetting(threadsKey) ?? "[]"));
       const committed = store.getSetting(key) ?? "";
       const cursorKey = key.replace("watermark", "cursor");
       const first = new URL(
@@ -238,9 +244,32 @@ export async function collectTeams(
             note = REPLY_LIMIT_NOTE;
           return [
             raw,
-            ...(Array.isArray(raw.replies) ? raw.replies.slice(0, MAX_EXPANDED_REPLIES) : []),
+            ...(Array.isArray(raw.replies)
+              ? raw.replies
+                  .slice(0, MAX_EXPANDED_REPLIES)
+                  .map((reply) =>
+                    isObj(reply) ? { ...reply, replyToId: reply.replyToId ?? raw.id } : reply,
+                  )
+              : []),
           ];
         });
+        const operatorAuthored = (raw: Record<string, unknown>): boolean => {
+          const user = isObj(raw.from) && isObj(raw.from.user) ? raw.from.user : null;
+          return (
+            user !== null &&
+            teams.aliases.some((alias) =>
+              [user.id, user.displayName].some(
+                (v) => typeof v === "string" && v.toLowerCase() === alias.toLowerCase(),
+              ),
+            )
+          );
+        };
+        for (const raw of messages) {
+          if (!isObj(raw) || raw.deletedDateTime || !operatorAuthored(raw)) continue;
+          const thread = raw.replyToId ?? raw.id;
+          if (typeof thread === "string") participated.add(thread);
+        }
+        store.setSetting(threadsKey, JSON.stringify([...participated]));
         for (const raw of messages) {
           if (
             !isObj(raw) ||
@@ -261,7 +290,12 @@ export async function collectTeams(
               : raw.createdDateTime;
           if (typeof modified !== "string" || !Number.isFinite(Date.parse(modified))) continue;
           if (modified > watermark) watermark = modified;
-          if (!matches(text, raw.mentions, teams, source)) continue;
+          if (operatorAuthored(raw)) continue;
+          const needsYou =
+            mentionsOperator(text, raw.mentions, teams) ||
+            (typeof raw.replyToId === "string" && participated.has(raw.replyToId));
+          if (!needsYou && !matches(text, teams, source)) continue;
+          const disposition = needsYou ? "needs-you" : "digest";
           let web: URL;
           try {
             web = new URL(String(raw.webUrl));
@@ -281,7 +315,7 @@ export async function collectTeams(
           // Numeric local ids keep existing person keys usable; metadata retains the Graph ids.
           const id = BigInt(`0x${messageId.slice(0, 16)}`).toString();
           const revision = createHash("sha256")
-            .update(JSON.stringify([modified, text, raw.mentions, raw.from, web.href]))
+            .update(JSON.stringify([modified, text, raw.mentions, raw.from, web.href, disposition]))
             .digest("hex");
           const previous = store.notification(id);
           if (previous?.message?.source.revision === revision) continue;
@@ -299,13 +333,14 @@ export async function collectTeams(
                   subjectType: "Teams",
                   title: source.name,
                   number: null,
-                  reason: "mentioned you",
+                  reason: needsYou ? "mentioned you" : "Teams match",
                   url: web.href,
                   author,
                   snippet: text.slice(0, 280),
                   updatedAt: at,
                   lastReadAt: null,
                   message: {
+                    disposition,
                     source: {
                       kind: "teams",
                       messageId,

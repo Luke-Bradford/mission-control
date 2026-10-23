@@ -803,6 +803,7 @@ export interface PersonSource {
 }
 
 export interface PersonMessage {
+  disposition?: "needs-you" | "digest";
   source: PersonSource;
   teams?: {
     kind: "chat" | "channel";

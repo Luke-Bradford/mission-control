@@ -365,3 +365,94 @@ it("refuses a channel message continuation that changes to a reply endpoint", as
   expect(read).toHaveBeenCalledTimes(1);
   store.close();
 });
+
+it("splits asks from digest signals and preserves legacy person items", async () => {
+  const { attentionItems } = await import("../src/hud.ts");
+  const { flightState, pending, wakeFacts, flightArrivalSource } = await import(
+    "../src/flight/state.ts"
+  );
+  const { wakeLine } = await import("@mc/core");
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(0, 1);
+  config.crew = {
+    worktrees: "/tmp/teams-test",
+    maxSeats: 1,
+    sessions: [
+      {
+        id: "work",
+        repoId: "work",
+        checkout: "/tmp/teams-test",
+        seats: [{ id: "flight-1", role: "FLIGHT", accountId: "test", model: "opus", area: [] }],
+      },
+    ],
+  };
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async () =>
+      response([
+        message("mention", "please check", {
+          mentions: [{ mentioned: { user: { id: "Operator" } } }],
+        }),
+        message("root", "ordinary thread", {
+          replies: [
+            message("reply", "can you check this?", { replyToId: "root" }),
+            message("own", "I will check", {
+              replyToId: "root",
+              from: { user: { id: "Operator" } },
+            }),
+          ],
+        }),
+        message("signal", "urgent catalog bug"),
+      ]),
+  });
+  await collectTeams(config, store, 1_500, {
+    token: async () => "secret",
+    fetch: async () => response([message("later-reply", "any update?", { replyToId: "root" })]),
+  });
+  const rows = store.notifications();
+  const byId = (id: string) => {
+    const row = rows.find((n) => n.message?.teams?.messageId === id);
+    if (!row?.message) throw new Error(`Missing message ${id}`);
+    return { ...row, message: row.message };
+  };
+  expect(byId("mention").message).toMatchObject({ disposition: "needs-you" });
+  expect(byId("reply").message).toMatchObject({ disposition: "needs-you" });
+  expect(byId("later-reply").message).toMatchObject({ disposition: "needs-you" });
+  expect(byId("signal").message).toMatchObject({ disposition: "digest" });
+  expect(attentionItems(config, store, 1_000).filter((x) => x.kind === "person")).toHaveLength(3);
+  const readState = () => flightState({ config, store, busy: [], now: 2_000 });
+  const state = readState();
+  expect(state.teamsDigest).toMatchObject({
+    title: "Teams: 1 matches to triage",
+    matches: [
+      { url: byId("signal").url, arrival: { source: "Teams", arrivalId: byId("signal").id } },
+    ],
+  });
+  expect(wakeLine(state)).toContain(byId("signal").message.url);
+  expect(wakeFacts(state)).toContain(byId("signal").message.source.revision);
+  expect(pending({ ...state, items: [] })).toBe(true);
+  const arrival = state.teamsDigest?.matches[0]?.arrival;
+  if (!arrival) throw new Error("Missing digest arrival");
+  const operation = { ...arrival, outcome: "No action" as const, detail: "Checked" };
+  expect(flightArrivalSource(config, store, operation)).not.toBeNull();
+  store.recordFlightArrival({ ...operation, text: "Checked", arrivedAt: 1_000, at: 2_000 });
+  expect(readState().teamsDigest).toBeUndefined();
+  expect(pending({ ...readState(), items: [] })).toBe(false);
+  await collectTeams(config, store, 2_500, {
+    token: async () => "secret",
+    fetch: async () =>
+      response([
+        message("signal", "urgent catalog bug: updated", {
+          lastModifiedDateTime: "2026-10-23T10:01:00Z",
+        }),
+      ]),
+  });
+  expect(readState().teamsDigest?.matches[0]?.arrival.version).not.toBe(arrival.version);
+  expect(pending({ ...readState(), items: [] })).toBe(true);
+  const legacy = store.notification(byId("signal").id);
+  if (!legacy?.message) throw new Error("Missing legacy message");
+  delete legacy.message.disposition;
+  store.upsertNotifications([{ ...legacy, updatedAt: legacy.updatedAt + 1 }], false, 3_000);
+  expect(attentionItems(config, store, 3_000).filter((x) => x.kind === "person")).toHaveLength(4);
+  store.close();
+});
