@@ -1219,6 +1219,7 @@ main > section {
 }
 #wifP .row:hover {
   background: var(--surface-2);
+  border-radius: 4px;
 }
 #wifP .agent-link::after {
   content: "";
