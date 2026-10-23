@@ -556,6 +556,30 @@ describe("FLIGHT page", () => {
     expect(list.textContent).toContain("run #12");
   });
 
+  it("Situation counts people waiting on you and excludes In review cards with a you action", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/config": CONFIG,
+      "/api/crew": { rows: [], firstRunToday: null },
+      "/api/notifications": { open: [thread()], handledToday: [] },
+      "/api/boards/shop-app": [
+        boardItem({ issueNumber: 12, status: "In review", state: "review" }),
+        boardItem({ issueNumber: 13, status: "In review", state: "review" }),
+        boardItem({ issueNumber: 14, status: "Ready for QA", state: "review" }),
+      ],
+      "/api/boards/site-builder": [],
+      "/api/repos/shop-app/prs?linked=1": [
+        prView({ ticket: "shop-app#12", isDraft: true, updatedAt: NOW - 2 * HOUR }),
+      ],
+      "/api/repos/site-builder/prs?linked=1": [],
+    });
+    const { container } = render(<Flight />);
+    const strip = container.querySelector(".sitstats") as HTMLElement;
+    await waitFor(() => expect(strip.textContent).toContain("1 person waiting on you"));
+    expect(within(strip).getByText(/person waiting on you/).className).toContain("warn");
+    await waitFor(() => expect(strip.textContent).toContain("2 waiting on other people"));
+  });
+
   it("the stats strip comes from the board and the attention list", async () => {
     stub();
     const { container } = render(<Flight />);
