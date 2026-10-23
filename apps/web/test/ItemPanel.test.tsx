@@ -342,6 +342,29 @@ describe("ItemPanel, acting on an item", () => {
     expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
   });
 
+  const STOPPED = { "/api/flight": { seat: { ...FLIGHT_SEAT, live: false }, decisions: [] } };
+
+  it("with FLIGHT stopped, a seat's item still replies and Ask FLIGHT is disabled", async () => {
+    const fn = acting([SEAT_Q], STOPPED);
+    fireEvent.click(await enabled("5174"));
+    await waitFor(() =>
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "Use port 5174." }]),
+    );
+    const ask = within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
+    expect(ask.disabled).toBe(true);
+    expect(ask.title).toBe(FLIGHT_NOT_RUNNING);
+  });
+
+  it("with FLIGHT stopped, an answer for FLIGHT cannot be sent", async () => {
+    acting([{ ...SEAT_Q, agentId: "flight-1" }], STOPPED);
+    const opt = (await within(panel()).findByRole("button", { name: "5174" })) as HTMLButtonElement;
+    await waitFor(() => expect(opt.title).toBe(FLIGHT_NOT_RUNNING));
+    expect(opt.disabled).toBe(true);
+    expect(
+      (within(panel()).getByRole("button", { name: "Reply" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it("Dismiss posts the dismiss route, refreshes the list and closes the panel", async () => {
     const fn = acting([BLOCKED], { [DISMISS]: { dismissed: BLOCKED.key } });
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
