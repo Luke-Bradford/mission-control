@@ -43,6 +43,7 @@ import {
   retiringText,
   reworkFirstText,
   START_NO_RULES,
+  seatBusyText,
   startMissingNeedsText,
   startNeedsPlanText,
   type TicketView,
@@ -3727,6 +3728,16 @@ describe("a run set aside in review", () => {
     const e = await refusal(sup.endAsideRun(runId));
     expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
     expect(store.run(runId)?.endedAt).toBeNull();
+    expect(existsSync(wt())).toBe(true);
+  });
+
+  it("endAsideRun says the seat is busy while another run is starting on it", async () => {
+    const { sup, runId } = await aside(false);
+    const starter = sup.startRun("guido-1", 43, { loop: NEW_LOOP });
+    const e = await refusal(sup.endAsideRun(runId));
+    expect([e.status, e.message]).toEqual([409, seatBusyText("GUIDO-1")]);
+    await starter;
+    expect(store.run(runId)).toMatchObject({ endedAt: null });
     expect(existsSync(wt())).toBe(true);
   });
 
