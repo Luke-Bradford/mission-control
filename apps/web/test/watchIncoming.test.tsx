@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { FlightWatchEntry } from "@mc/core";
+import type { FlightArrivalDisposition, FlightWatchEntry } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
@@ -29,6 +29,8 @@ it("shows recorded outcomes, newest first, without deriving them from Ready or a
     id: String(i),
     source: "Board",
     arrivalId: "demo#7",
+    repoId: "demo",
+    sourceRef: { kind: "github-issue", url: "https://github.com/example/demo/issues/7" },
     version: "1",
     arrivedAt: i,
     at: i,
@@ -209,6 +211,15 @@ it("preserves source destinations and refuses unsafe URLs", async () => {
     id: String(i),
     source,
     arrivalId: String(i),
+    repoId: "demo",
+    sourceRef: {
+      kind: source === "Teams" ? "teams" : "github-pr",
+      url: [
+        "https://github.com/example/demo/pull/7",
+        "https://teams.microsoft.com/l/message/demo",
+        "javascript:alert(1)",
+      ][i],
+    },
     version: "1",
     arrivedAt: i,
     at: i,
@@ -280,6 +291,8 @@ it("rejects a GitHub URL for a Teams arrival", async () => {
           at: 1,
           outcome: "No action",
           text: "Teams source",
+          repoId: "demo",
+          sourceRef: { kind: "teams", url: "https://github.com/example/demo/issues/7" },
           detail: "Recorded reason",
         },
       ],
@@ -331,3 +344,89 @@ it.each(["guard", "agents"] as const)(
     expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   },
 );
+
+const storedArrival: FlightArrivalDisposition = {
+  id: "stored",
+  source: "GitHub",
+  arrivalId: "expired-thread",
+  version: "1",
+  repoId: "demo",
+  sourceRef: null,
+  arrivedAt: 1,
+  at: 1,
+  outcome: "No action",
+  text: "Stored arrival",
+  detail: "Recorded reason",
+};
+
+it("keeps arrivals in their stored repo after handled notifications expire", async () => {
+  stubFetch({
+    "/api/flight/incoming": {
+      entries: [
+        storedArrival,
+        { ...storedArrival, id: "other", repoId: "other", text: "Other repo" },
+      ],
+    },
+    "/api/config": {
+      operator: { timezone: "UTC" },
+      crew: { sessions: [{ id: "session", repoId: "demo" }] },
+    },
+    "/api/notifications": { open: [], handledToday: [] },
+  });
+  setSession("session");
+  render(<Incoming />);
+  await screen.findByText("Stored arrival");
+  expect(screen.queryByText("Other repo")).toBeNull();
+  expect(screen.getAllByTestId("incoming-row")).toHaveLength(1);
+});
+
+it.each([
+  ["github-pr", "https://github.com/example/demo/pull/7"],
+  ["github-issue", "https://github.com/example/demo/issues/7"],
+  ["teams", "https://teams.microsoft.com/l/message/demo"],
+] as const)("links a stored %s destination without notifications", async (kind, url) => {
+  stubFetch({
+    "/api/flight/incoming": {
+      entries: [
+        {
+          ...storedArrival,
+          source: kind === "teams" ? "Teams" : "GitHub",
+          sourceRef: { kind, url },
+        },
+      ],
+    },
+    "/api/notifications": { open: [], handledToday: [] },
+  });
+  render(<Incoming />);
+  expect((await screen.findByRole("link", { name: "Stored arrival" })).getAttribute("href")).toBe(
+    url,
+  );
+});
+
+it("keeps legacy arrivals plain even when a notification has a URL or a Board id names an issue", async () => {
+  stubFetch({
+    "/api/flight/incoming": {
+      entries: [
+        storedArrival,
+        {
+          ...storedArrival,
+          id: "board",
+          source: "Board",
+          arrivalId: "demo#7",
+          text: "Legacy Board",
+        },
+      ],
+    },
+    "/api/repos": [{ id: "demo", github: "example/demo" }],
+    "/api/notifications": {
+      open: [
+        { id: "expired-thread", repoId: "demo", url: "https://github.com/example/demo/pull/7" },
+      ],
+      handledToday: [],
+    },
+  });
+  render(<Incoming />);
+  await screen.findByText("Stored arrival");
+  expect(screen.queryByRole("link", { name: "Stored arrival" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Legacy Board" })).toBeNull();
+});

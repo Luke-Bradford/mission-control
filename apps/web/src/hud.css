@@ -3549,6 +3549,7 @@ button.nrow.thread.tagged {
 /* Person items retain their own scrolling brief and reply choices. */
 #discuss.person-item .panel {
   overflow: visible;
+}
 .watch-row {
   display: flex;
   align-items: baseline;

@@ -1,21 +1,17 @@
-import type { FlightIncomingView, RepoView } from "@mc/core";
+import type { FlightIncomingView } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
-import { githubHref, githubItemHref } from "../links.ts";
-import type { NotificationsView } from "../notifications.ts";
+import { githubHref } from "../links.ts";
 import { useSessionScope } from "../shell/session.ts";
 
 const DASH = "—";
-const NO_REPOS: RepoView[] = [];
 export const NO_INCOMING = "Nothing has arrived yet.";
 
 /** Recorded arrival outcomes, independent of the card's current column. */
 export function Incoming() {
   const { data, error } = useResource<FlightIncomingView>(RESOURCES.flightIncoming);
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
-  const notes = useResource<NotificationsView>(RESOURCES.notifications).data;
   const { inRepo, session } = useSessionScope();
   const now = useSecond();
   const tz = useTz();
@@ -28,23 +24,10 @@ export function Incoming() {
   if (!data) return <p className="pb note">{DASH}</p>;
   const rows = data.entries
     .map((entry) => {
-      const match = entry.source === "Board" ? /^(.*)#(\d+)$/.exec(entry.arrivalId) : null;
-      const thread = [...(notes?.open ?? []), ...(notes?.handledToday ?? [])].find(
-        (t) => t.id === entry.arrivalId,
-      );
-      const repoId = match?.[1] ?? thread?.repoId;
-      const repo = repos.find((r) => r.id === repoId);
-      const number = match?.[2];
-      const url =
-        thread && "url" in thread
-          ? thread.url
-          : repo && number
-            ? githubItemHref(repo.github, "issue", Number(number))
-            : undefined;
-      // Handled notifications have no source URL or issue/PR kind. Only Board
-      // identities are known to name issues; never guess a notification destination.
-      let href = entry.source !== "Teams" && url ? githubHref(url) : null;
-      if (entry.source === "Teams" && url) {
+      const { repoId, sourceRef } = entry;
+      const url = sourceRef?.url;
+      let href = sourceRef && sourceRef.kind !== "teams" ? githubHref(sourceRef.url) : null;
+      if (sourceRef?.kind === "teams" && url) {
         try {
           const source = new URL(url);
           if (
