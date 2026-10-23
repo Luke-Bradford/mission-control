@@ -618,6 +618,27 @@ describe("stable ids and reconciliation", () => {
     });
   });
 
+  it("shows another process's in-flight run from status.md when the loop restarts within a minute", async () => {
+    writeFileSync(
+      log(),
+      [
+        "2026-10-22T10:00:00Z === ta_loop start (worktree=/w, max=0, cooldown=120s, pid=1111) ===",
+        "2026-10-22T10:00:01Z --- iteration 1 start",
+        "2026-10-22T10:00:20Z --- iteration 1 FAILED rc=1 result_ok=0 (failures in a row: 3)",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(stateDir, "status.md"),
+      "# TA loop status\n\n- iteration: **1** — IN FLIGHT\n- started: 2026-10-22T10:00:36Z\n- pid: 2222\n",
+    );
+    await collectTaLoop(loop, store, NOW, newTaState(), alive);
+    const rows = byId();
+    expect([...rows.keys()].sort()).toEqual(["shop-app-ta:1111.1", "shop-app-ta:2222.1"]);
+    expect(rows.get("shop-app-ta:1111.1")).toMatchObject({ status: "failed" });
+    expect(rows.get("shop-app-ta:2222.1")).toMatchObject({ status: "running" });
+  });
+
   it("starts an end-only run when its transcript started", async () => {
     const name = "iteration-20261022T100036Z-2222.1.log";
     rmSync(join(stateDir, "status.md"));
