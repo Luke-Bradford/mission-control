@@ -460,6 +460,35 @@ describe("FLIGHT's items to brief", () => {
   });
 });
 
+describe("FLIGHT's brief in the digest", () => {
+  const setGoals = (at: number) =>
+    store.setFlightBriefSection({
+      sessionId: "s1",
+      section: "goals",
+      text: "Ship the brief.",
+      updatedAt: at,
+      updatedBy: "flight-1",
+    });
+
+  it("starts FLIGHT with the whole brief", async () => {
+    setGoals(T0);
+    await watch.check();
+    const state = JSON.parse(startCalls[0]?.first?.split("\n")[2] ?? "") as FlightState;
+    expect(state.brief).toHaveLength(9);
+    expect(state.brief[0]?.text).toBe("Ship the brief.");
+  });
+
+  it("a brief edit alone does not wake FLIGHT", async () => {
+    liveCrew();
+    await watch.check();
+    const sent = sendCalls.length;
+    setGoals(T0);
+    nowMs = T0 + MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(sent);
+  });
+});
+
 describe("the FLIGHT watcher", () => {
   it("starts FLIGHT with the digest", async () => {
     await watch.check();
@@ -895,6 +924,7 @@ describe("wakeSummary", () => {
     holds: [],
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
+    brief: [],
     ...over,
   });
 

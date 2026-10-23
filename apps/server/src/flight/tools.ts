@@ -12,6 +12,7 @@ import {
   answerMessageText,
   areaLabelsOf,
   askerRunEndedText,
+  BRIEF_CLEARED_DECISION,
   BRIEF_INPUT_MAX,
   BRIEF_ITEM_DESCRIPTION,
   BRIEF_KEY_MAX,
@@ -19,7 +20,11 @@ import {
   BRIEF_OPTIONS_MAX,
   BRIEF_OPTIONS_MIN,
   BRIEFED_TEXT,
+  briefAboutText,
+  briefClearedText,
   briefNoItemText,
+  briefSavedText,
+  briefTooLongText,
   COMMENTED_DECISION,
   CREATE_NO_REPO,
   capText,
@@ -43,6 +48,11 @@ import {
   endFailedText,
   FLIGHT_ABOUT_MAX,
   FLIGHT_BASIS_MAX,
+  FLIGHT_BRIEF_EDITS_PER_HOUR,
+  FLIGHT_BRIEF_INPUT_MAX,
+  FLIGHT_BRIEF_SECTION_MAX,
+  FLIGHT_BRIEF_SECTIONS,
+  FLIGHT_BRIEF_TITLES,
   FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_COMMENTS_PER_HOUR,
   FLIGHT_DECISION_MAX,
@@ -141,6 +151,7 @@ import {
   startMissingNeedsText,
   type TicketView,
   ticketReadText,
+  UPDATE_BRIEF_DESCRIPTION,
   unclosedMarkdown,
   unknownLabelText,
   unparkCapText,
@@ -227,6 +238,11 @@ const BriefItemArgs = z.strictObject({
     .min(BRIEF_OPTIONS_MIN)
     .max(BRIEF_OPTIONS_MAX)
     .optional(),
+  basis: basisArg,
+});
+const UpdateBriefArgs = z.strictObject({
+  section: z.enum(FLIGHT_BRIEF_SECTIONS),
+  text: z.string().max(FLIGHT_BRIEF_INPUT_MAX),
   basis: basisArg,
 });
 const AnswerArgs = z
@@ -1033,6 +1049,34 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: BRIEFED_TEXT };
   }
 
+  async function updateBrief(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, UpdateBriefArgs, args);
+    if (!c.ok) return c.result;
+    const { section, text: body, basis } = c.args;
+    const session = flightSeat(config)?.session.id;
+    if (session === undefined) return fail(MC_FLIGHT_ONLY);
+    const title = FLIGHT_BRIEF_TITLES[section];
+    if (body.length > FLIGHT_BRIEF_SECTION_MAX) return fail(briefTooLongText(title, body.length));
+    const at = now();
+    const n = lastHour(["brief"], at);
+    if (n >= FLIGHT_BRIEF_EDITS_PER_HOUR) return fail(capText("updated your brief", n));
+    store.setFlightBriefSection({
+      sessionId: session,
+      section,
+      text: body,
+      updatedAt: at,
+      updatedBy: ctx.seatId,
+    });
+    record(at, {
+      kind: "brief",
+      about: briefAboutText(title),
+      decision: body === "" ? BRIEF_CLEARED_DECISION : body,
+      basis,
+    });
+    bus.emit("flight");
+    return { text: body === "" ? briefClearedText(title) : briefSavedText(title, body.length) };
+  }
+
   return [
     {
       name: MC_TOOL_NAMES.logDecision,
@@ -1117,7 +1161,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.flightState,
       description:
-        "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and limits.",
+        "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and limits; and your brief.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       modes: [],
       grantable: ["read-only"],
@@ -1205,6 +1249,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: briefItem,
+    },
+    {
+      name: MC_TOOL_NAMES.updateBrief,
+      description: UPDATE_BRIEF_DESCRIPTION,
+      inputSchema: objectSchema(
+        {
+          section: { type: "string", enum: FLIGHT_BRIEF_SECTIONS },
+          text: { type: "string", maxLength: FLIGHT_BRIEF_SECTION_MAX },
+          basis: BASIS_SCHEMA,
+        },
+        ["section", "text", "basis"],
+      ),
+      modes: [],
+      grantable: ["read-only"],
+      call: updateBrief,
     },
   ];
 }

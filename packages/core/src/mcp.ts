@@ -25,6 +25,7 @@ export const MC_TOOL_NAMES = {
   createTicket: "create_ticket",
   commentTicket: "comment_ticket",
   briefItem: "brief_item",
+  updateBrief: "update_brief",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -49,6 +50,7 @@ export const MC_TOOLS = {
   createTicket: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.createTicket}`,
   commentTicket: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.commentTicket}`,
   briefItem: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.briefItem}`,
+  updateBrief: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.updateBrief}`,
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */

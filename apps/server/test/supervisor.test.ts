@@ -2019,6 +2019,7 @@ describe("startWatch", () => {
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",
       "mcp__mc__brief_item",
+      "mcp__mc__update_brief",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
