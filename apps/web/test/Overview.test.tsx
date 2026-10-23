@@ -239,6 +239,7 @@ describe("Agents panel", () => {
     release();
     await within(flight).findByText(FLIGHT_NOT_RUNNING);
     unmount();
+    hub.clear();
 
     stub({ rows: [crewRow()], config: () => ({ status: 503, body: { error: "loading" } }) });
     const failed = render(<Overview />);
