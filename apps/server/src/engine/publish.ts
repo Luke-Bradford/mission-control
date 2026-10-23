@@ -110,10 +110,22 @@ export type GateResult =
  * changes, so nothing was merged).
  */
 export type UpdateBranchResult =
-  | { ok: true; kind: "merged"; sha: string }
+  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean }
   | { ok: true; kind: "conflict"; files: string[] }
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
+
+/**
+ * A PR diff without its index lines and hunk numbers, which a merge of main changes and the
+ * change does not.
+ */
+export function prDiffKey(diff: string): string {
+  return diff
+    .split("\n")
+    .filter((l) => !l.startsWith("index "))
+    .map((l) => (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(l) ? "@@" : l))
+    .join("\n");
+}
 
 export interface Publisher {
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
@@ -682,7 +694,30 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             sha,
             at: (deps.now ?? Date.now)(),
           });
-          return { ok: true, kind: "merged", sha };
+          // the PR's own change, before and after: the same when the merge only brought main in
+          let prSame = false;
+          try {
+            const b1 = (await g(["merge-base", mainSha, before])).trim();
+            const diffOf = (base: string, tip: string): Promise<string> =>
+              g([
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                "--full-index",
+                "--binary",
+                base,
+                tip,
+                "--",
+              ]);
+            prSame =
+              SHA.test(b1) &&
+              prDiffKey(await diffOf(b1, before)) === prDiffKey(await diffOf(mainSha, sha));
+          } catch {
+            prSame = false;
+          }
+          return { ok: true, kind: "merged", sha, parent: before, prSame };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);
