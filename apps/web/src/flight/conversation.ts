@@ -1,4 +1,5 @@
-import type { AgentStream } from "@mc/core";
+import type { AgentStream, AttentionItem } from "@mc/core";
+import { isOperatorItem } from "../attention.ts";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
@@ -18,6 +19,7 @@ export const FLIGHT_KIND_LABEL: Readonly<Record<string, string>> = {
   message: "Messaged",
   unpark: "Un-parked",
   note: "Noted",
+  brief: "Brief",
 };
 
 /** The label for a decision kind; a kind the web does not know yet shows as written. */
@@ -36,7 +38,25 @@ function hubLine(text: string): string {
   return line.length > HUB_LINE_MAX ? `${line.slice(0, HUB_LINE_MAX - 1)}…` : line;
 }
 
-/** The Chat tab's rows: only what the operator and FLIGHT said to each other. */
+/**
+ * The operator's items that FLIGHT has put to them: ones it briefed, and ones it passed on
+ * (`ask:{questionId}` of a `pass` decision), oldest first. Acked items stay.
+ */
+export function waitingAsks(
+  items: readonly AttentionItem[],
+  decisions: readonly FlightDecision[],
+): AttentionItem[] {
+  const passed = new Set(
+    decisions.flatMap((d) =>
+      d.kind === "pass" && d.questionId !== null ? [`ask:${d.questionId}`] : [],
+    ),
+  );
+  return items
+    .filter((i) => isOperatorItem(i) && (i.brief !== undefined || passed.has(i.key)))
+    .sort((a, b) => a.at - b.at);
+}
+
+/** The dock's rows: only what the operator and FLIGHT said to each other. */
 export const chatRows = (rows: readonly DockRow[]): DockRow[] =>
   rows.filter((r) => r.kind === "you" || r.kind === "flight");
 

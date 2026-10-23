@@ -1,9 +1,10 @@
-import { type AttentionItem, type BoardItem, FLIGHT_NOT_RUNNING, type RepoView } from "@mc/core";
+import type { AttentionItem, BoardItem, RepoView } from "@mc/core";
 import { cardColumn } from "../board/cards.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
+import { SituationText } from "./Brief.tsx";
 import { Timeline } from "./Timeline.tsx";
 
 const NO_REPOS: RepoView[] = [];
@@ -12,8 +13,8 @@ const count = (items: AttentionItem[], kinds: AttentionItem["kind"][]): number =
   items.filter((i) => kinds.includes(i.kind)).length;
 
 /**
- * FLIGHT › Situation (catalogue 2.2.1): FLIGHT's paragraph waits for FLIGHT; the stats strip and
- * the timeline are computed from today's data.
+ * FLIGHT › Situation (catalogue 2.2.1): FLIGHT's paragraph comes from its brief; the stats strip
+ * and the timeline are computed from today's data.
  */
 export function Situation() {
   const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
@@ -40,7 +41,7 @@ export function Situation() {
       phase="P2"
     >
       <div className="pb">
-        <p className="sittext note">{FLIGHT_NOT_RUNNING}</p>
+        <SituationText />
         <div className="sitstats">
           <span>
             <b className="num">{inColumn("In progress")}</b> tickets in progress
