@@ -2493,8 +2493,14 @@ td.wrap {
   flex-wrap: wrap;
   gap: 6px;
 }
+.tiles.wrap {
+  min-width: 0;
+  max-width: 100%;
+}
 .tiles .tile {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2504,6 +2510,7 @@ td.wrap {
 }
 .tiles .tile-vis {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }

@@ -279,6 +279,9 @@ describe("Setup tabs", () => {
     expect(within(seen).getByText("apps/")).toBeTruthy();
     expect(within(seen).getByText("guido-1")).toBeTruthy();
     expect(within(seen).getByText("guido-2")).toBeTruthy();
+    // the tiles wrap inside the panel, and so does a tile with many owners
+    expect(apps.closest("ul")?.classList.contains("wrap")).toBe(true);
+    expect(seen.classList.contains("wrap")).toBe(true);
     const docsSeen = seenIn(await tileOf("docs/: free"));
     expect(within(docsSeen).getByText(FOLDER_FREE)).toBeTruthy();
     expect(within(docsSeen).getByText("docs/")).toBeTruthy();
