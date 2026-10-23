@@ -305,6 +305,7 @@ beforeEach(async () => {
         },
       };
     }
+    if (query.includes("viewer")) return { viewer: { login: "octo-op" } };
     if (query.includes("mutation")) {
       const input = vars.input as { name: string; singleSelectOptions: { name: string }[] };
       if (input.name === gqlFailField) throw new Error("github: HTTP 500");
@@ -430,6 +431,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
   ["GET", "/api/agents/shop-app-ta/stream"],
+  ["GET", "/api/comms/guido-1"],
+  ["POST", "/api/comms/guido-1/read", { messageIds: [] }],
   ["GET", "/api/agents/shop-app-ta/files"],
   ["GET", "/api/agents/shop-app-ta/files/diff?path=a.ts"],
   ["GET", "/api/agents/guido-1/stream"],
@@ -1039,6 +1042,7 @@ describe("local access", () => {
             .split("?")[0]
             ?.replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
+            .replace(/\/guido-1$/, "/:id")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
@@ -2681,6 +2685,7 @@ describe("config", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({
       operator: { id: "operator", timezone: "Europe/London" },
+      githubLogin: "octo-op",
       accounts: [
         { id: "claude-main", vendor: "claude", alertAt: 85, stopAt: 95 },
         { id: "codex-main", vendor: "codex", alertAt: 70, stopAt: 80 },
@@ -2729,6 +2734,61 @@ describe("config", () => {
       crew: null,
     } satisfies ConfigView);
     expect(r.body.toLowerCase()).not.toContain("password");
+  });
+
+  it("reads the GitHub login once, and answers null when it cannot be read", async () => {
+    let reads = 0;
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      githubGql: async () => async () => {
+        reads++;
+        return { viewer: { login: "octo-op" } };
+      },
+    });
+    for (let i = 0; i < 3; i++) {
+      const r = await a.inject({ method: "GET", url: "/api/config" });
+      expect(r.json().githubLogin).toBe("octo-op");
+    }
+    expect(reads).toBe(1);
+    await a.close();
+
+    const b = buildApp({
+      config,
+      store,
+      bus,
+      githubGql: async () => {
+        throw new Error("gh: could not read a GitHub token (run `gh auth login`)");
+      },
+    });
+    const r = await b.inject({ method: "GET", url: "/api/config" });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().githubLogin).toBeNull();
+    await b.close();
+  });
+
+  it("does not retry a failed GitHub login read until the back-off has passed", async () => {
+    let calls = 0;
+    let t = 1_000_000;
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      now: () => t,
+      githubGql: async () => {
+        calls++;
+        throw new Error("gh: GitHub unreachable");
+      },
+    });
+    const get = () => a.inject({ method: "GET", url: "/api/config" });
+    expect((await get()).json().githubLogin).toBeNull();
+    expect((await get()).json().githubLogin).toBeNull();
+    expect(calls).toBe(1);
+    t += 5 * 60_000 + 1;
+    await get();
+    expect(calls).toBe(2);
+    await a.close();
   });
 
   it("carries the template profiles: built-in without a file, the error when it cannot load", async () => {

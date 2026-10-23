@@ -1,4 +1,5 @@
 import { type GuardHitsView, seatCallSign, type Telemetry, type TestLockHistory } from "@mc/core";
+import { useEffect, useRef, useState } from "react";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { RESOURCES, useResource } from "../data.ts";
@@ -29,6 +30,47 @@ interface Tile {
   href?: string;
   /** The figure is not stored: the value reads "not tracked yet", small and muted. */
   nt?: boolean;
+}
+
+function Kpi({ tile: k }: { tile: Tile }) {
+  const previous = useRef(k.value);
+  const [changed, setChanged] = useState(false);
+  useEffect(() => {
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    setChanged(
+      !!k.live &&
+        !k.nt &&
+        k.value !== DASH &&
+        previous.current !== DASH &&
+        previous.current !== NOT_TRACKED &&
+        previous.current !== k.value &&
+        !motion?.matches,
+    );
+    previous.current = k.value;
+    const stop = () => setChanged(false);
+    motion?.addEventListener?.("change", stop);
+    return () => motion?.removeEventListener?.("change", stop);
+  }, [k.value, k.live, k.nt]);
+  return (
+    <div className={k.live ? "kpi live" : "kpi"}>
+      <span className="lbl">{k.label}</span>
+      <span
+        key={k.value}
+        className={`v${k.nt ? " nt" : ""}${changed ? " kpi-change" : ""}`}
+        title={k.title}
+        onAnimationEnd={() => setChanged(false)}
+      >
+        {k.href === undefined ? (
+          k.value
+        ) : (
+          <a href={k.href} onClick={(e) => followLink(e, k.href as string)}>
+            {k.value}
+          </a>
+        )}
+      </span>
+      <span className="d">{k.detail}</span>
+    </div>
+  );
 }
 
 /** Today's KPI row (catalogue 2.6.2). */
@@ -88,6 +130,7 @@ export function Kpis({ t }: { t: Telemetry | undefined }) {
       key: "commits",
       label: "Commits",
       detail: "today",
+      live: true,
       ...commits,
     },
     {
@@ -137,19 +180,7 @@ export function Kpis({ t }: { t: Telemetry | undefined }) {
   return (
     <div className="kpis">
       {tiles.map((k) => (
-        <div key={k.key} className={k.live ? "kpi live" : "kpi"}>
-          <span className="lbl">{k.label}</span>
-          <span className={k.nt ? "v nt" : "v"} title={k.title}>
-            {k.href === undefined ? (
-              k.value
-            ) : (
-              <a href={k.href} onClick={(e) => followLink(e, k.href as string)}>
-                {k.value}
-              </a>
-            )}
-          </span>
-          <span className="d">{k.detail}</span>
-        </div>
+        <Kpi key={k.key} tile={k} />
       ))}
     </div>
   );

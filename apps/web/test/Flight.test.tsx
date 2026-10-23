@@ -1046,6 +1046,26 @@ describe("FLIGHT's brief", () => {
     expect(screen.getByTestId("item").textContent).toBe(KEY);
   });
 
+  it("Asked of you highlights mentions and keeps the message inert", async () => {
+    const snippet =
+      '@CAPCOM @OctoCat <img src=x onerror="alert(1)"> @octocat-other @operator @someone @capcom';
+    stubFetch({
+      "/api/attention": [personItem],
+      "/api/notifications": { open: [thread({ snippet })], handledToday: [] },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const card = await screen.findByTestId("person-card");
+    const quote = card.querySelector("blockquote") as HTMLElement;
+    expect(quote.textContent).toBe(snippet);
+    expect([...quote.querySelectorAll(".mention")].map((el) => el.textContent)).toEqual([
+      "@CAPCOM",
+      "@OctoCat",
+      "@capcom",
+    ]);
+    expect(quote.querySelector("img")).toBeNull();
+  });
+
   it("the Handled today footer lists each handled thread with its how", async () => {
     const h = {
       id: "9",

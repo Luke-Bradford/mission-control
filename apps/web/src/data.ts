@@ -28,7 +28,7 @@ export interface ResourceRef {
   topic: Topic | null;
 }
 
-const RUNS_LIMIT = 50;
+export const RUNS_LIMIT = 50;
 /** How often a running seat's context is asked of its CLI (each fetch is a live control request). */
 export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 const enc = encodeURIComponent;
@@ -58,6 +58,10 @@ export const RESOURCES = {
       `/api/telemetry?range=${enc(range)}` +
       (agent === "" ? "" : `&agent=${enc(agent)}`) +
       (account === "" ? "" : `&account=${enc(account)}`),
+    topic: "agents",
+  }),
+  comms: (agentId: string): ResourceRef => ({
+    path: `/api/comms/${enc(agentId)}`,
     topic: "agents",
   }),
   stream: (agentId: string): ResourceRef => ({
@@ -129,6 +133,7 @@ export const RESOURCES = {
 
 /** POST endpoints. */
 export const ACTIONS = {
+  commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,

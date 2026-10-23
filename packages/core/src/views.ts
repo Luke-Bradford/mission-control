@@ -117,6 +117,11 @@ export interface Metrics {
 /** `/api/config`: the loaded config, read-only, never including the password hash. */
 export interface ConfigView {
   operator: { id: string; timezone: string };
+  /**
+   * The GitHub login the hub acts as (the authenticated `gh` user). The server always sets it, null
+   * when the read fails; optional only until the web fixtures carry it.
+   */
+  githubLogin?: string | null;
   accounts: { id: AccountId; vendor: "claude" | "codex"; alertAt: number; stopAt: number }[];
   repos: {
     id: RepoId;
