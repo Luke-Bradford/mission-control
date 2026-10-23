@@ -18,6 +18,7 @@ export const SMALL_SIZES: readonly string[] = ["XS", "S"];
 /** The model a full-depth review runs on. */
 export const REVIEW_FULL_MODEL = "opus";
 export const PROFILE_REASON_MAX = 300;
+export const FIX_STEP = "fix";
 
 export interface Profile {
   name: string;
@@ -94,7 +95,7 @@ export const DEFAULT_PROFILES: readonly Profile[] = [
     labels: ["bug"],
     steps: [
       { name: "reproduce", phase: null },
-      { name: "fix", phase: "working" },
+      { name: FIX_STEP, phase: "working" },
       { name: "verify", phase: "ci" },
       { name: "review", phase: "review" },
       { name: "draft PR", phase: null },
