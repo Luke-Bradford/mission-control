@@ -75,6 +75,9 @@ loops:
 poll:
   usage_minutes: 30
   github_seconds: 60
+  # Minutes between periodic reads of the GitHub boards (5–60, default 15). The boards are also
+  # read when work is picked up, right after the hub changes GitHub, and on the HUD's Refresh.
+  board_minutes: 15
 
 # Optional: Mission Control's own crew. Each session is a repo cloned for the crew (never your
 # working checkout) and the seats that work in it. GUIDO and INCO write inside their `area`
