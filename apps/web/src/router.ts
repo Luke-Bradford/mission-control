@@ -70,6 +70,9 @@ export const ticketPath = (repoId: string, issueNumber: number): string =>
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
 export const setupPath = (tab: SetupTab): string => `/setup/${tab}`;
+export const ADD_AGENT_PARAM = "add";
+export const addAgentPath = (sessionId: string): string =>
+  `${setupPath("sessions")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
 
 /** A popped-out window (`?popout=1`, the Agent header's Pop out): the page alone, no chrome. */
 export const isPopout = (search: string): boolean =>

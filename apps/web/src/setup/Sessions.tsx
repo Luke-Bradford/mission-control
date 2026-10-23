@@ -20,7 +20,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { agentPath, navigate } from "../router.ts";
+import { ADD_AGENT_PARAM, agentPath, navigate } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
@@ -66,6 +66,29 @@ interface FormState {
   effort: CrewEffort | "";
   area: string;
   scratch: boolean;
+}
+
+const rolesOf = (config: ConfigView): RoleView[] =>
+  [...(config.crew?.roles ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+
+function seatForm(
+  config: ConfigView,
+  sessionId: string,
+  editing: SeatInput | null = null,
+): FormState | null {
+  const first = rolesOf(config)[0];
+  if (editing === null && !first) return null;
+  return {
+    sessionId,
+    editId: editing?.id ?? null,
+    role: editing?.role ?? first?.name ?? "",
+    id: null,
+    accountId: editing?.accountId ?? config.accounts.find((a) => a.vendor === "claude")?.id ?? "",
+    model: editing?.model ?? first?.model ?? "",
+    effort: editing?.effort ?? "",
+    area: editing?.area.join(", ") ?? "",
+    scratch: editing?.mode === "scratch",
+  };
 }
 
 /** A save in flight: the whole seat list as it was loaded, the new one, and the toast on success. */
@@ -298,11 +321,10 @@ function CrewSession({
 }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const repo = config.repos.find((r) => r.id === session.repoId);
-  const roles = [...(config.crew?.roles ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  const roles = rolesOf(config);
   const base = changes?.sessions.find((s) => s.id === session.id)?.seats ?? [];
   const mine = form?.sessionId === session.id ? form : null;
   const pickable = mine !== null && roles.find((r) => r.name === mine.role)?.mode === "writer";
-  const accounts = config.accounts.filter((a) => a.vendor === "claude");
   const tableSeats: TableSeat[] = [
     ...base.map((input) => ({ ...input, input })),
     ...session.seats.filter((s) => s.retiring).map((s) => ({ ...s, input: null })),
@@ -321,20 +343,8 @@ function CrewSession({
   };
 
   function open(editing: SeatInput | null) {
-    const first = roles[0];
-    if (editing === null && !first) return;
     setRemoving(null);
-    setForm({
-      sessionId: session.id,
-      editId: editing?.id ?? null,
-      role: editing?.role ?? first?.name ?? "",
-      id: null,
-      accountId: editing?.accountId ?? accounts[0]?.id ?? "",
-      model: editing?.model ?? first?.model ?? "",
-      effort: editing?.effort ?? "",
-      area: editing?.area.join(", ") ?? "",
-      scratch: editing?.mode === "scratch",
-    });
+    setForm(seatForm(config, session.id, editing));
   }
 
   function toggleTile(name: string) {
@@ -491,7 +501,7 @@ function CrewSession({
             </table>
           </div>
         )}
-        {mine && (
+        {mine && changes && (
           <SeatForm
             session={session}
             config={config}
@@ -535,11 +545,17 @@ export function Sessions({ config }: { config: ConfigView }) {
   const folders = useResource<CrewSessionFolders[]>(RESOURCES.crewSessions).data;
   const changes = useResource<CrewChanges>(RESOURCES.crewChanges).data;
   const [session] = useSession();
-  const [form, setForm] = useState<FormState | null>(null);
+  const [form, setForm] = useState<FormState | null>(() => {
+    const id = new URLSearchParams(window.location.search).get(ADD_AGENT_PARAM);
+    const target = config.crew?.sessions.find((s) => s.id === id);
+    return target ? seatForm(config, target.id) : null;
+  });
   const [busy, setBusy] = useState(false);
   // Where a refusal shows: a session's panel, or (null) the page, for a reload.
   const [failure, setFailure] = useState<{ sessionId: string | null; text: string } | null>(null);
-  const crewSessions = config.crew?.sessions.filter((s) => inSession(session, s.repoId)) ?? [];
+  const crewSessions =
+    config.crew?.sessions.filter((s) => inSession(session, s.repoId) || s.id === form?.sessionId) ??
+    [];
 
   const refetch = () => {
     hub.refetch(RESOURCES.crewChanges.path);

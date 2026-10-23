@@ -26,6 +26,7 @@ import { setSession } from "../src/shell/session.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
 import {
   CONFIG,
+  CREW_CONFIG,
   crewRow,
   GITHUB_RATE,
   GITHUB_RATE_LINE,
@@ -122,6 +123,32 @@ describe("Overview panels", () => {
 });
 
 describe("Agents panel", () => {
+  it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
+    const crew = CREW_CONFIG.crew;
+    const first = crew?.sessions[0];
+    if (!crew || !first) throw new Error("no crew session");
+    const f = stub({
+      config: {
+        ...CREW_CONFIG,
+        crew: { ...crew, sessions: [first, { ...first, id: "s2" }] },
+      },
+    });
+    const { container } = render(<Overview />);
+    await settled(f, "/api/config");
+    const header = container.querySelector<HTMLElement>("#agentsP .ph") as HTMLElement;
+    fireEvent.click(within(header).getByRole("button", { name: "Add agent" }));
+    expect(window.location.pathname + window.location.search).toBe("/setup/sessions?add=s1");
+  });
+
+  it("disables Add agent when there is no crew session", async () => {
+    const f = stub();
+    render(<Overview />);
+    await settled(f, "/api/config");
+    expect((screen.getByRole("button", { name: "Add agent" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
   it("says Crew is off with the note when the server has crew off", async () => {
     stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
     const { container } = render(<Overview />);
@@ -264,7 +291,7 @@ describe("Agents panel", () => {
     expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
-  it("subtitle counts the working agents and says FLIGHT is not counted; no Add agent", async () => {
+  it("subtitle counts the working agents and says FLIGHT is not counted", async () => {
     stub({
       rows: [
         crewRow({ id: "a" }),
@@ -274,7 +301,6 @@ describe("Agents panel", () => {
     });
     render(<Overview />);
     await screen.findByText("2 working · 3 agents · FLIGHT not counted");
-    expect(screen.queryByText("Add agent")).toBeNull();
   });
 
   const loopOf = (phase: CrewLoop["phase"], text: string, prNumber: number | null = null) => ({
