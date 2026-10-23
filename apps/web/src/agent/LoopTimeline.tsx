@@ -44,7 +44,9 @@ export function LoopTimeline({
     <>
       {LOOP_PATH.map((step) => (
         <div className="tlrow" key={step}>
-          <span className="ellip">{LOOP_PHASE_LABEL[step]}</span>
+          <span className="ellip" title={LOOP_PHASE_LABEL[step]}>
+            {LOOP_PHASE_LABEL[step]}
+          </span>
           <span className="tlbars">
             {stepTries(view.tries, step).map((t) => {
               const { left, width } = barPlace(t, start, end, total);

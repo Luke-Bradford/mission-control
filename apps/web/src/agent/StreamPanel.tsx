@@ -177,7 +177,9 @@ function LiveCall({ row, now, tz }: { row: CrewRow; now: number; tz: string | nu
     <div id="liveCall">
       <div className={stalled ? "livecall stuck" : "livecall"}>
         <span aria-hidden="true">▶</span>
-        <span className="t">{live ? live.name : "no tool running"}</span>
+        <span className="t" title={live ? live.name : "no tool running"}>
+          {live ? live.name : "no tool running"}
+        </span>
         {live && <span className="num">{mss(now - live.since)}</span>}
         <span className="xs">
           {stalled

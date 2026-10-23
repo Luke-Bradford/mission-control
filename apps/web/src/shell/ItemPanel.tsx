@@ -14,6 +14,7 @@ import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answe
 import { BriefOptions, ItemBrief, PersonChoices, PersonStory } from "../comms/ItemBrief.tsx";
 import { ItemDiscussion } from "../comms/ItemDiscussion.tsx";
 import { MentionText } from "../comms/messages.tsx";
+import { Expandable, Toggle } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
@@ -38,7 +39,7 @@ import { toast } from "./Toast.tsx";
 /** An escalation opened less than this long ago is New, an older one a Follow-up. */
 const NEW_MS = 24 * 3_600_000;
 
-/** An issue body longer than this many lines is cut until "Show all". */
+/** The initial rendered height of the issue body, in lines. */
 export const BODY_LINES = 40;
 
 /**
@@ -537,38 +538,18 @@ function EscalationBrief({
   );
 }
 
-/** Show all / Show less; `of` names what it shows, for a screen reader. */
-function Toggle({ on, of, onClick }: { on: boolean; of?: string; onClick: () => void }) {
-  const text = on ? "Show less" : "Show all";
-  return (
-    <button
-      type="button"
-      className="sm"
-      aria-expanded={on}
-      aria-label={of ? `${text}, ${of}` : undefined}
-      onClick={onClick}
-    >
-      {text}
-    </button>
-  );
-}
-
 /**
  * The question's own text: the escalation's issue body, from the ticket resource. With no
- * structured question it shows at once (cut past BODY_LINES); with one it stays folded until asked
+ * structured question it shows at once (clamped to BODY_LINES); with one it stays folded until asked
  * for, and is not fetched before. Once asked for it stays subscribed, so hiding and showing it
  * again makes no new request. The caller keys it on the escalation, so no state carries over.
  */
 function IssueBody({ esc, folded = false }: { esc: Escalation; folded?: boolean }) {
   const [open, setOpen] = useState(!folded);
   const [asked, setAsked] = useState(!folded);
-  const [all, setAll] = useState(false);
   const res = useResource<TicketView>(asked ? RESOURCES.ticket(esc.repoId, esc.issueNumber) : null);
   const t = res.data;
   const body = t?.body.trim() ?? "";
-  const lines = body.split("\n");
-  const long = lines.length > BODY_LINES;
-  const cut = !folded && !all && long;
   return (
     <>
       {folded && (
@@ -588,14 +569,15 @@ function IssueBody({ esc, folded = false }: { esc: Escalation; folded?: boolean 
       {open && body !== "" && (
         <>
           <div className="s qtext">
-            <Markdown text={cut ? lines.slice(0, BODY_LINES).join("\n") : body} />
+            <Expandable lines={BODY_LINES}>
+              <Markdown text={body} />
+            </Expandable>
           </div>
           {t?.bodyTruncated && (
             <p className="s">
               <ExternalLink url={t.url}>Continue on GitHub ↗</ExternalLink>
             </p>
           )}
-          {!folded && long && <Toggle on={all} onClick={() => setAll(!all)} />}
         </>
       )}
     </>

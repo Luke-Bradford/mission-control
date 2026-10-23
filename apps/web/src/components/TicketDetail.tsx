@@ -75,7 +75,9 @@ function PullRequestRef({ repoId, number, url }: { repoId: string; number: numbe
   const name = from.split("/")[1] as string;
   return (
     <span className="rref">
-      <span className="rchip">{name}</span>{" "}
+      <span className="rchip" title={name}>
+        {name}
+      </span>{" "}
       <ExternalLink url={url} label={`${name} PR #${number}`}>
         {`PR #${number}`}
       </ExternalLink>
