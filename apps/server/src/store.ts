@@ -16,12 +16,15 @@ import {
   COMMS_TEXT_MAX,
   type Escalation,
   FLIGHT_INCOMING_LIMIT,
+  FLIGHT_PLAN_LIMIT,
   FLIGHT_WATCH_LIMIT,
   type FlightArrivalDisposition,
   type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
+  type FlightPlanInput,
+  type FlightPlanOperation,
   type FlightWatchEntry,
   type FlightWatchOperation,
   type FlowIssue,
@@ -289,6 +292,10 @@ CREATE TABLE IF NOT EXISTS flight_brief (
   updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
 );
 CREATE TABLE IF NOT EXISTS flight_watch (
+  session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
+  PRIMARY KEY (session_id, id)
+);
+CREATE TABLE IF NOT EXISTS flight_plans (
   session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
   PRIMARY KEY (session_id, id)
 );
@@ -1793,9 +1800,14 @@ export class Store {
    * Merges the unread threads `rows` into the table: a new row is first seen `now`; an existing one
    * is unread again, keeping `first_seen_at` and its handled fields. `complete` (`rows` is the whole
    * unread list): every other unread row is read on GitHub, and closes as `read` if it was open.
-   * True when any row changed.
+   * With a source, completeness applies only to that source. True when any row changed.
    */
-  upsertNotifications(rows: NotificationRead[], complete: boolean, now: number): boolean {
+  upsertNotifications(
+    rows: NotificationRead[],
+    complete: boolean,
+    now: number,
+    source?: "github" | "teams",
+  ): boolean {
     let changed = false;
     this.transaction(() => {
       const before = this.notificationsJson();
@@ -1838,7 +1850,13 @@ export class Store {
         const unread = this.db.prepare("SELECT id FROM notifications WHERE unread = 1").all() as {
           id: string;
         }[];
-        for (const { id } of unread) if (!seen.has(id)) close.run(now, id);
+        for (const { id } of unread)
+          if (
+            !seen.has(id) &&
+            (source === undefined ||
+              (this.notification(id)?.message?.source.kind ?? "github") === source)
+          )
+            close.run(now, id);
       }
       changed = this.notificationsJson() !== before;
     });
@@ -3125,18 +3143,87 @@ export class Store {
       .run(state, text ?? null, at, id);
   }
 
+  setFlightPlans(session: string, operation: FlightPlanOperation, at: number): void {
+    const write = this.prepareFlightPlans(session, operation, at);
+    this.transaction(write);
+  }
+
+  private prepareFlightPlans(
+    session: string,
+    operation: FlightPlanOperation,
+    at: number,
+  ): () => void {
+    const plans = new Map(this.flightPlans(session).map((p) => [p.id, p]));
+    for (const entry of operation.upsert ?? []) {
+      if (entry.status === "completed" && !entry.detail?.trim())
+        throw new Error("Completion needs an observed outcome.");
+      plans.set(entry.id, { ...entry, createdAt: plans.get(entry.id)?.createdAt ?? at });
+    }
+    if ([...plans.values()].filter((p) => p.status === "pending").length > FLIGHT_PLAN_LIMIT)
+      throw new Error("Too many planned entries.");
+    const finished = [...plans.values()]
+      .filter((p) => p.status !== "pending")
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    for (const entry of finished.slice(0, Math.max(0, plans.size - FLIGHT_PLAN_LIMIT)))
+      plans.delete(entry.id);
+    return () => {
+      this.db.prepare("DELETE FROM flight_plans WHERE session_id = ?").run(session);
+      for (const entry of plans.values())
+        this.db
+          .prepare("INSERT INTO flight_plans (session_id, id, entry) VALUES (?, ?, ?)")
+          .run(session, entry.id, JSON.stringify(entry));
+    };
+  }
+
+  flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
+    return (
+      this.db
+        .prepare("SELECT entry FROM flight_plans WHERE session_id = ? ORDER BY id")
+        .all(session) as Row[]
+    ).map((r) => JSON.parse(r.entry as string) as FlightPlanInput & { createdAt: number });
+  }
+
   setFlightWatch(session: string, operation: FlightWatchOperation, at: number): void {
+    const write = this.prepareFlightWatch(session, operation, at);
+    this.transaction(write);
+  }
+
+  private prepareFlightWatch(
+    session: string,
+    operation: FlightWatchOperation,
+    at: number,
+  ): () => void {
+    const watch = new Map(this.flightWatch(session).map((entry) => [entry.id, entry]));
+    for (const id of operation.remove ?? []) watch.delete(id);
+    for (const entry of operation.upsert ?? []) watch.set(entry.id, { ...entry, updatedAt: at });
+    if (watch.size > FLIGHT_WATCH_LIMIT) throw new Error("Too many watch entries.");
+    return () => {
+      this.db.prepare("DELETE FROM flight_watch WHERE session_id = ?").run(session);
+      for (const entry of watch.values())
+        this.db
+          .prepare("INSERT INTO flight_watch (session_id, id, entry) VALUES (?, ?, ?)")
+          .run(session, entry.id, JSON.stringify(entry));
+    };
+  }
+
+  /** Validate the whole update before writing any part of it. */
+  updateFlightBrief(
+    section: FlightBriefRow,
+    planned?: FlightPlanOperation,
+    watch?: FlightWatchOperation,
+    arrival?: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">,
+  ): void {
+    const plansWrite = planned
+      ? this.prepareFlightPlans(section.sessionId, planned, section.updatedAt)
+      : undefined;
+    const watchWrite = watch
+      ? this.prepareFlightWatch(section.sessionId, watch, section.updatedAt)
+      : undefined;
     this.transaction(() => {
-      for (const id of operation.remove ?? [])
-        this.db
-          .prepare("DELETE FROM flight_watch WHERE session_id = ? AND id = ?")
-          .run(session, id);
-      for (const entry of operation.upsert ?? [])
-        this.db
-          .prepare("INSERT OR REPLACE INTO flight_watch (session_id, id, entry) VALUES (?, ?, ?)")
-          .run(session, entry.id, JSON.stringify({ ...entry, updatedAt: at }));
-      if (this.flightWatch(session).length > FLIGHT_WATCH_LIMIT)
-        throw new Error("Too many watch entries.");
+      plansWrite?.();
+      watchWrite?.();
+      if (arrival) this.writeFlightArrival(arrival);
+      this.setFlightBriefSection(section);
     });
   }
 
@@ -3149,6 +3236,12 @@ export class Store {
   }
 
   recordFlightArrival(entry: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">): void {
+    this.transaction(() => this.writeFlightArrival(entry));
+  }
+
+  private writeFlightArrival(
+    entry: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">,
+  ): void {
     const id = JSON.stringify([entry.source, entry.arrivalId, entry.version]);
     const notification = entry.source === "Board" ? null : this.notification(entry.arrivalId);
     const board =
@@ -3180,37 +3273,35 @@ export class Store {
         /* Invalid source URLs are never offered as links. */
       }
     }
-    this.transaction(() => {
-      const previous = this.db.prepare("SELECT entry FROM flight_incoming WHERE id = ?").get(id) as
-        | Row
-        | undefined;
-      const saved = previous
-        ? (JSON.parse(previous.entry as string) as FlightArrivalDisposition)
-        : null;
-      if (saved?.outcome === entry.outcome && saved.detail === entry.detail) return;
-      this.db
-        .prepare(
-          "INSERT OR REPLACE INTO flight_incoming (id, source, arrival_id, version, at, entry) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .run(
+    const previous = this.db.prepare("SELECT entry FROM flight_incoming WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    const saved = previous
+      ? (JSON.parse(previous.entry as string) as FlightArrivalDisposition)
+      : null;
+    if (saved?.outcome === entry.outcome && saved.detail === entry.detail) return;
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO flight_incoming (id, source, arrival_id, version, at, entry) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        id,
+        entry.source,
+        entry.arrivalId,
+        entry.version,
+        entry.at,
+        JSON.stringify({
+          ...entry,
           id,
-          entry.source,
-          entry.arrivalId,
-          entry.version,
-          entry.at,
-          JSON.stringify({
-            ...entry,
-            id,
-            repoId: saved ? (saved.repoId ?? null) : repoId,
-            sourceRef: saved ? (saved.sourceRef ?? null) : sourceRef,
-          }),
-        );
-      this.db
-        .prepare(
-          "DELETE FROM flight_incoming WHERE id NOT IN (SELECT id FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?)",
-        )
-        .run(FLIGHT_INCOMING_LIMIT);
-    });
+          repoId: saved ? (saved.repoId ?? null) : repoId,
+          sourceRef: saved ? (saved.sourceRef ?? null) : sourceRef,
+        }),
+      );
+    this.db
+      .prepare(
+        "DELETE FROM flight_incoming WHERE id NOT IN (SELECT id FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?)",
+      )
+      .run(FLIGHT_INCOMING_LIMIT);
   }
 
   flightIncoming(): FlightArrivalDisposition[] {

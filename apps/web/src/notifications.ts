@@ -49,8 +49,16 @@ export const CATCH_UP_LABEL: Record<CatchUpKind, string> = {
 };
 
 export const whoOf = (t: { author: string | null }): string => t.author ?? SOMEONE;
-export const whereOf = (t: { repoId: string; number: number | null }): string =>
-  `GitHub · ${t.number === null ? t.repoId : `${t.repoId}#${t.number}`}`;
+export const sourceOf = (t: { message?: PersonMessage }): string =>
+  t.message?.source.kind === "teams" ? "Teams" : "GitHub";
+export const whereOf = (t: {
+  repoId: string;
+  number: number | null;
+  message?: PersonMessage;
+}): string =>
+  t.message?.source.kind === "teams"
+    ? `Teams · ${t.message.teams?.name ?? "message"}`
+    : `GitHub · ${t.number === null ? t.repoId : `${t.repoId}#${t.number}`}`;
 export const handledLine = (h: HandledThreadView[]): string =>
   `Handled today: ${h.map((x) => `${whoOf(x)} (${x.how})`).join(" · ")}`;
 

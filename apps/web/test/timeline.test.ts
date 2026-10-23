@@ -24,7 +24,7 @@ describe("upcoming", () => {
       poll,
     });
     expect(ev.map((e) => e.label)).toEqual([
-      "Board and escalations poll (every 60 s)",
+      "Board and notifications poll (every 60 s)",
       "Usage read (every 30 min)",
       "claude-main 5h window resets",
       "codex-main 7d window resets",
@@ -74,7 +74,7 @@ describe("upcoming", () => {
       repoIds,
       poll,
     });
-    expect(ev).toEqual([{ at: NOW, label: "Board and escalations poll (every 60 s)" }]);
+    expect(ev).toEqual([{ at: NOW, label: "Board and notifications poll (every 60 s)" }]);
   });
 
   it("formats intervals: 60 s stays seconds, 120 s and over is minutes", () => {

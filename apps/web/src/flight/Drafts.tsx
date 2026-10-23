@@ -9,6 +9,9 @@ export const NO_DRAFTS = "No drafts to send.";
 export const postedText = (where: string): string =>
   `Posted on ${where} as you. Clicking Post was your approval.`;
 
+export const draftRowId = (id: number, target: string): string =>
+  `draft-${id}-${encodeURIComponent(target)}`;
+
 function DraftRow({ draft, finish }: { draft: ReplyDraft; finish: (draft: ReplyDraft) => void }) {
   const [text, setText] = useState(draft.text);
   const [editing, setEditing] = useState(false);
@@ -58,7 +61,11 @@ function DraftRow({ draft, finish }: { draft: ReplyDraft; finish: (draft: ReplyD
     }
   };
   return (
-    <div className={`pb draft-row${done ? " acked" : ""}`}>
+    <div
+      className={`pb draft-row${done ? " acked" : ""}`}
+      id={draftRowId(draft.id, draft.target)}
+      tabIndex={-1}
+    >
       <div className="row">
         <b>To {draft.to ?? draft.target}</b>
         <span className="chipref">

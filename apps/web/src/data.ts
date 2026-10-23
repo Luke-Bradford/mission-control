@@ -35,6 +35,8 @@ const enc = encodeURIComponent;
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
+  teams: { path: "/api/sources/teams", topic: "attention" },
+  teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
   crew: { path: "/api/crew", topic: "agents" },
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
@@ -54,6 +56,8 @@ export const RESOURCES = {
   flight: { path: "/api/flight", topic: "agents" },
   drafts: { path: "/api/drafts", topic: "flight" },
   draftHistory: { path: "/api/drafts/history", topic: "flight" },
+  flightSchedule: { path: "/api/flight/schedule", topic: "flight" },
+  flightIncoming: { path: "/api/flight/incoming", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
@@ -259,7 +263,11 @@ class Hub {
   /** Refetch only what is on screen and belongs to the changed topic. */
   refetchTopic(topic: Topic): void {
     for (const e of this.entries.values()) {
-      if (e.topic === topic && e.listeners.size > 0) void this.fetch(e);
+      // The server filters watch rows using both the lock and crew state. Refetch
+      // the brief when either changes, including rows omitted from its last response.
+      const briefChanged =
+        e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
+      if ((e.topic === topic || briefChanged) && e.listeners.size > 0) void this.fetch(e);
     }
   }
 

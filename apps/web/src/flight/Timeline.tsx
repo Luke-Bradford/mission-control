@@ -1,4 +1,4 @@
-import type { ConfigView, HealthRow, LimitRow } from "@mc/core";
+import type { ConfigView, FlightScheduleView, HealthRow, LimitRow } from "@mc/core";
 import type { CSSProperties } from "react";
 import { useSecond, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -22,10 +22,18 @@ export function Timeline() {
   const limits = useResource<LimitRow[]>(RESOURCES.limits).data;
   const health = useResource<HealthRow[]>(RESOURCES.health).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
+  const schedule = useResource<FlightScheduleView>(RESOURCES.flightSchedule);
   const poll = config?.poll;
   if (!tz || !limits || !health || !poll) return <p className="pb note">—</p>;
   const { onLine, later } = splitTimeline(
-    upcoming({ now, limits, repoIds: config?.repos.map((r) => r.id) ?? [], health, poll }),
+    upcoming({
+      now,
+      limits,
+      repoIds: config?.repos.map((r) => r.id) ?? [],
+      health,
+      poll,
+      planned: schedule.data?.entries,
+    }),
     now,
   );
   return <Line onLine={onLine} later={later} now={now} tz={tz} />;
@@ -44,7 +52,7 @@ function NextLine({
     <div className={`tlnext ${className} s fg2`}>
       <b>Next:</b>{" "}
       {events.map((e, i) => (
-        <span key={`${e.at}|${e.label}`}>
+        <span key={e.id ?? e.label}>
           {i > 0 && " · "}
           <b>{hhmm(e.at, tz)}</b> {e.label}
         </span>
@@ -89,7 +97,7 @@ function Line({
           const side = sides[i] === "none" ? "dn bare" : sides[i];
           return (
             <div
-              key={`${e.at}|${e.label}`}
+              key={e.id ?? e.label}
               className={`tlev ${side}${frac > RIGHT_FROM ? " r" : ""}`}
               style={style}
               title={text(e)}
@@ -120,7 +128,7 @@ function Line({
         <div className="tllater s fg2">
           <b>Later:</b>{" "}
           {later.map((e, i) => (
-            <span key={`${e.at}|${e.label}`}>
+            <span key={e.id ?? e.label}>
               {i > 0 && " · "}
               <b>{wkdTime(e.at, tz)}</b> {e.label}
             </span>

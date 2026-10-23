@@ -14,7 +14,7 @@ import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.t
 import { overturnText } from "../src/flight/conversation.ts";
 import { Drafts, postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
-import { incomingCards, incomingThreads, NO_INCOMING } from "../src/flight/Incoming.tsx";
+import { NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
 import { rel } from "../src/fmt.ts";
@@ -27,7 +27,13 @@ import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch as fetchStub } from "./fetchStub.ts";
 
 const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
-  fetchStub({ "/api/drafts": [], "/api/drafts/history": [], ...routes });
+  fetchStub({
+    "/api/drafts": [],
+    "/api/drafts/history": [],
+    "/api/flight/incoming": { entries: [] },
+    "/api/flight/brief": { session: null, sections: [] },
+    ...routes,
+  });
 
 import {
   boardItem,
@@ -774,7 +780,7 @@ describe("FLIGHT page", () => {
     await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
     const text = container.querySelector("#timeline")?.textContent ?? "";
     expect(text).toContain("claude-main 5h window resets");
-    expect(text).toContain("Board and escalations poll (every 60 s)");
+    expect(text).toContain("Board and notifications poll (every 60 s)");
     expect(text).toContain("Usage read (every 30 min)");
     const later = container.querySelector(".tllater") as HTMLElement;
     expect(later.textContent).toBe("Later: Sun 19:00 codex 5h window resets");
@@ -1094,8 +1100,85 @@ describe("FLIGHT's brief", () => {
     expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING);
   });
 
-  it("Incoming lists a GitHub thread as Asked of you, merged newest first with the board", async () => {
+  it("Incoming renders Teams matches as Asked of you", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [],
+      "/api/boards/site-builder": [],
+      "/api/flight/brief": briefView(),
+      "/api/config": CONFIG,
+      "/api/flight/incoming": {
+        entries: [
+          {
+            id: "teams-fictional",
+            source: "Teams",
+            arrivalId: "fictional",
+            version: "v1",
+            repoId: "shop-app",
+            sourceRef: {
+              kind: "teams",
+              url: "https://teams.microsoft.com/l/message/fictional",
+            },
+            arrivedAt: NOW,
+            at: NOW,
+            outcome: "Asked of you",
+            text: "Finch: Review requested",
+            detail: "Teams message",
+          },
+        ],
+      },
+      "/api/notifications": {
+        open: [
+          thread({
+            number: null,
+            message: {
+              source: { kind: "teams", messageId: "fictional", revision: "v1" },
+              author: "Finch",
+              at: NOW,
+              text: "Review requested",
+              url: "https://teams.microsoft.com/l/message/fictional",
+            },
+          }),
+        ],
+        handledToday: [],
+      },
+    });
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("incoming-row");
+    expect(rows[0]?.textContent).toContain("Teams");
+    expect(rows[0]?.textContent).toContain("Asked of you");
+    expect(rows[0]?.textContent).not.toContain("GitHub");
+    expect(screen.getByRole("link", { name: "Finch: Review requested" }).getAttribute("href")).toBe(
+      "https://teams.microsoft.com/l/message/fictional",
+    );
+  });
+
+  it("Incoming lists recorded GitHub and Board arrivals newest first", async () => {
     const old = thread({ key: "person:303:1", id: "303", updatedAt: NOW - 30 * HOUR });
+    const entries = [
+      {
+        id: "person",
+        source: "GitHub",
+        arrivalId: "101",
+        version: "1",
+        arrivedAt: NOW - HOUR,
+        at: NOW,
+        outcome: "Asked of you",
+        text: "alice mentioned you: Fix the stop race",
+        detail: `#${N}`,
+      },
+      {
+        id: "board",
+        source: "Board",
+        arrivalId: "shop-app#10",
+        version: "1",
+        arrivedAt: NOW - 2 * HOUR,
+        at: NOW,
+        outcome: "Queued",
+        text: "#10",
+        detail: "Waiting for a seat",
+      },
+    ];
     stubFetch({
       "/api/repos": REPOS,
       "/api/boards/shop-app": [
@@ -1105,6 +1188,7 @@ describe("FLIGHT's brief", () => {
       "/api/flight/brief": briefView(),
       "/api/config": CONFIG,
       "/api/notifications": { open: [thread(), old], handledToday: [] },
+      "/api/flight/incoming": { entries },
     });
     render(<Flight />);
     const rows = await screen.findAllByTestId("incoming-row");
@@ -1115,7 +1199,7 @@ describe("FLIGHT's brief", () => {
     expect(first).toContain(`#${N}`);
     expect(first).toContain("alice mentioned you: Fix the stop race");
     expect(rows[1]?.textContent).toContain("#10");
-    expect(incomingThreads([thread(), old], NOW).map((t) => t.id)).toEqual(["101"]);
+    expect(rows[1]?.textContent).toContain("Queued");
   });
 
   it("Asked of you says nobody is waiting with no items", async () => {
@@ -1126,7 +1210,7 @@ describe("FLIGHT's brief", () => {
     );
   });
 
-  it("Incoming lists cards new in Backlog or Refinement; Watch list is FLIGHT's risks; Drafts are empty", async () => {
+  it("Incoming keeps recorded outcomes; Watch list is structured and risks stay in the brief", async () => {
     const cards = [
       boardItem({ issueNumber: 12, status: "Backlog", createdAt: NOW - 30 * HOUR }),
       boardItem({ issueNumber: 11, status: "Refinement", createdAt: NOW - 2 * HOUR }),
@@ -1137,7 +1221,45 @@ describe("FLIGHT's brief", () => {
       "/api/repos": REPOS,
       "/api/boards/shop-app": cards,
       "/api/boards/site-builder": [],
-      "/api/flight/brief": briefView({ risks: { text: "The cache may thrash." } }),
+      "/api/flight/incoming": {
+        entries: [
+          {
+            id: "10",
+            source: "Board",
+            arrivalId: "shop-app#10",
+            version: "1",
+            arrivedAt: NOW - HOUR,
+            at: NOW,
+            outcome: "Queued",
+            text: "#10",
+            detail: "Waiting for a seat",
+          },
+          {
+            id: "11",
+            source: "Board",
+            arrivalId: "shop-app#11",
+            version: "1",
+            arrivedAt: NOW - 2 * HOUR,
+            at: NOW,
+            outcome: "No action",
+            text: "#11",
+            detail: "Refinement needs more context",
+          },
+        ],
+      },
+      "/api/flight/brief": {
+        ...briefView({ risks: { text: "The cache may thrash." } }),
+        watch: [
+          {
+            id: "cache",
+            state: "info",
+            title: "Cache performance",
+            detail: "Observe the next run",
+            catchUp: { kind: "new", line: "First check" },
+            next: "Read timings",
+          },
+        ],
+      },
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
@@ -1146,10 +1268,12 @@ describe("FLIGHT's brief", () => {
     expect(rows[0]?.textContent).toContain("#10");
     expect(rows[1]?.textContent).toContain("#11");
     expect(rows[1]?.textContent).toContain("Refinement");
-    expect(incomingCards(cards, NOW).map((c) => c.issueNumber)).toEqual([10, 11]);
+    expect(rows[0]?.textContent).toContain("Queued");
+    expect(rows[1]?.textContent).toContain("No action");
     await waitFor(() =>
-      expect(container.querySelector("#watchP")?.textContent).toContain("The cache may thrash."),
+      expect(container.querySelector("#watchP")?.textContent).toContain("Cache performance"),
     );
+    expect(container.querySelector("#briefP")?.textContent).toContain("The cache may thrash.");
     expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send.");
   });
 
