@@ -804,6 +804,13 @@ export interface PersonSource {
 
 export interface PersonMessage {
   source: PersonSource;
+  teams?: {
+    kind: "chat" | "channel";
+    id: string;
+    teamId?: string;
+    name: string;
+    messageId: string;
+  };
   author: string | null;
   at: number;
   text: string;

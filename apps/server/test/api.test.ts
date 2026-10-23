@@ -464,6 +464,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["GET", "/api/accounts/status"],
+  ["GET", "/api/sources/teams"],
+  ["POST", "/api/sources/teams/selection", { selected: [] }],
   ["POST", "/api/accounts/claude-main/check"],
   ["POST", "/api/accounts", { name: "another", provider: "claude" }],
   ["POST", "/api/config/reload"],
@@ -963,6 +965,11 @@ describe("local access", () => {
       if (url === "/api/github/refresh") {
         // accepted, not done: the read happens later
         expect(r.statusCode, `${method} ${url}`).toBe(202);
+        continue;
+      }
+      if (url === "/api/sources/teams/selection") {
+        // the fixture has no config path: a valid selection can't be written
+        expect(r.statusCode, `${method} ${url}`).toBe(409);
         continue;
       }
       if (url === "/api/accounts" && method === "POST") {
