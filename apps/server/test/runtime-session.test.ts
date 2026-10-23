@@ -1,12 +1,4 @@
-import {
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-  writeSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,15 +7,26 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type CrewSession, startSession } from "../src/runtime/session.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
+const KEEPER = fileURLToPath(new URL("../src/runtime/keeper-cli.ts", import.meta.url));
 const SID = "11111111-2222-4333-8444-555555555555";
 
 let dir: string;
 let transcript: string;
+let keeperDirs = 0;
 const sessions: CrewSession[] = [];
+
+/** What `startSession` needs besides the CLI: a keeper under node, in a folder of its own. */
+const keeperInput = () => ({
+  node: process.execPath,
+  entry: KEEPER,
+  dir: join(dir, `k${++keeperDirs}`),
+  spawn: `spawn-${keeperDirs}`,
+});
 
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-session-")));
   transcript = join(dir, "seat.jsonl");
+  keeperDirs = 0;
 });
 afterEach(async () => {
   // Never leave a fake running: close politely, and the short grace below ends a HANG one.
@@ -46,6 +49,7 @@ function start(
     cwd: dir,
     transcriptPath: transcript,
     stopGraceMs: 300,
+    ...keeperInput(),
     ...input,
   });
   sessions.push(s);
@@ -335,6 +339,7 @@ describe("startSession against the fake CLI", () => {
         args: [FAKE],
         cwd: dir,
         transcriptPath: join(dir, "missing", "seat.jsonl"),
+        ...keeperInput(),
       }),
     ).toThrow(/ENOENT/);
   });
@@ -345,10 +350,12 @@ describe("startSession against the fake CLI", () => {
       args: [],
       cwd: dir,
       transcriptPath: transcript,
+      ...keeperInput(),
     });
     sessions.push(s);
     const events: SessionEvent[] = [];
     s.on((e) => events.push(e));
+    await s.ready; // the keeper says whether the CLI started
     expect(s.alive).toBe(false);
     expect(await s.close()).toBeNull();
     expect(events.map((e) => e.kind)).toEqual(["stderr", "exit"]);
@@ -403,6 +410,7 @@ describe("startSession against the fake CLI", () => {
         cwd: dir,
         transcriptPath: transcript,
         stopGraceMs: 300,
+        ...keeperInput(),
         ...extra,
       });
       sessions.push(s);
@@ -489,49 +497,6 @@ describe("startSession against the fake CLI", () => {
       expect(stderrs(events)).toEqual([
         { kind: "stderr", text: "aaaaaaTAIL" },
         { kind: "stderr", text: "b".repeat(10) },
-      ]);
-    });
-
-    it("record writes the whole line when the writer writes short", async () => {
-      const chunks: Buffer[] = [];
-      const { done } = raw(`console.log("hello world")`, {
-        write: (fd, data) => {
-          const part = data.subarray(0, 3);
-          chunks.push(Buffer.from(part));
-          return writeSync(fd, part);
-        },
-      });
-      await done;
-      expect(chunks.length).toBeGreaterThan(1);
-      expect(Buffer.concat(chunks).toString()).toBe("hello world\n");
-      expect(lines()).toEqual(["hello world"]);
-    });
-
-    it("a writer that writes no bytes is reported once, and the run still exits", async () => {
-      // Without the guard record() would spin on 0 forever; the throw turns that into a failure.
-      let calls = 0;
-      const { events, done } = raw(`console.log("a"); console.log("b")`, {
-        write: () => {
-          if (++calls > 1000) throw new Error("spun");
-          return 0;
-        },
-      });
-      await done;
-      expect(stderrs(events)).toEqual([
-        { kind: "stderr", text: "transcript write failed: no bytes written" },
-      ]);
-      expect(events.at(-1)?.kind).toBe("exit");
-    });
-
-    it("reports a failing writer once", async () => {
-      const { events, done } = raw(`console.log("a"); setTimeout(() => console.log("b"), 50)`, {
-        write: () => {
-          throw new Error("disk full");
-        },
-      });
-      await done;
-      expect(stderrs(events)).toEqual([
-        { kind: "stderr", text: "transcript write failed: disk full" },
       ]);
     });
   });

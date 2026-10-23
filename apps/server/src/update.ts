@@ -54,7 +54,6 @@ export const CREW_STATE_UNREADABLE = "could not read the crew's state";
 /** An update that failed outside any named step. */
 export const UPDATE_FAILED = "update failed; see update.log";
 /** `call` is the seat's call sign (`seatCallSign`). */
-export const midTurn = (call: string) => `${call} is mid-turn`;
 export const seatStarting = (call: string) => `${call} is starting`;
 
 /** What a check answers (502) when origin cannot be fetched; `checkedAt` is the last good fetch. */
@@ -211,7 +210,7 @@ export interface UpdaterDeps {
   logPath: string;
   /** Port ≠ DEFAULT_PORT, or `MC_NO_LOOP_WRITES=1`. */
   preview: boolean;
-  /** Why the crew blocks an update (a seat mid-turn or starting), or null; never throws. */
+  /** Why the crew blocks an update (a seat starting), or null; never throws. */
   crewRefusal: () => string | null;
   /** The hub's shutdown: stops the crew, the scheduler and the server, then exits 0. */
   exit: () => void;
@@ -231,12 +230,13 @@ export interface Updater {
 }
 
 /**
- * `{CALL} is mid-turn` for the first crew seat (config order) that is mid-turn, or `{CALL} is
- * starting` for one that is starting; null when none is. What the supervisor holds in memory
- * (`busy()`: a start still in its checkout or install, a line written but not yet a turn) counts
- * first; the seat rows are read only on a server that holds the crew lock, since another
- * server's seats are not this one's to wait for. Never throws, so `/api/version` never fails on
- * the crew: a row read that fails refuses with CREW_STATE_UNREADABLE.
+ * `{CALL} is starting` for the first crew seat (config order) that is starting; null when none is.
+ * A seat mid-turn does not refuse: its CLI runs under a keeper and keeps working through the
+ * restart, and the new hub attaches to it. A start that is still in its checkout or install has no
+ * keeper yet, so it does. What the supervisor holds in memory (`busy()`) counts first; the seat
+ * rows are read only on a server that holds the crew lock, since another server's seats are not
+ * this one's to wait for. Never throws, so `/api/version` never fails on the crew: a row read that
+ * fails refuses with CREW_STATE_UNREADABLE.
  */
 export function crewRefusal(
   config: CcConfig,
@@ -249,7 +249,6 @@ export function crewRefusal(
     for (const a of configuredAgents(config)) {
       if (a.kind !== "crew") continue;
       const state = busy.get(a.id) ?? (enabled ? seat(a.id)?.state : undefined);
-      if (state === "running") return midTurn(seatCallSign(a.id));
       if (state === "starting") return seatStarting(seatCallSign(a.id));
     }
     return null;
@@ -262,7 +261,7 @@ export interface AutoUpdateDeps {
   /** `updates.hub` is `auto`. */
   enabled: boolean;
   updater: Pick<Updater, "check" | "update" | "restart">;
-  /** Why the hub may not restart now (a seat mid-turn or starting, the test lock held), or null. */
+  /** Why the hub may not restart now (a seat starting, the test lock held), or null. */
   blocked: () => string | null;
   /** HEAD of the checkout once Update has pulled. */
   headSha: () => Promise<string | null>;

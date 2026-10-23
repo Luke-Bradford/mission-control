@@ -5,12 +5,15 @@
 export const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 /**
- * The SIGINT/SIGTERM handler: stops the crew supervisor (its processes end; their runs stay active
- * for the next start to resume), then the scheduler, then closes the server, then exits 0. A stop
- * or close that hangs is cut off after SHUTDOWN_TIMEOUT_MS with a warning, so launchd never waits
- * on it. A second signal while shutting down is ignored.
+ * The SIGINT/SIGTERM handler: lets the `/mcp` calls in flight finish (`drain`), lets go of the crew
+ * supervisor's seats (they keep running under their keepers; their runs stay active for the next
+ * start to attach to), then stops the scheduler, closes the server, and exits 0. A drain, stop or
+ * close that hangs is cut off after SHUTDOWN_TIMEOUT_MS with a warning, so launchd never waits on
+ * it. A second signal while shutting down is ignored.
  */
 export function onSignal(i: {
+  /** Resolves once no `/mcp` call is in flight. */
+  drain: () => Promise<void>;
   stopCrew: () => Promise<void>;
   stop: () => Promise<void>;
   close: () => Promise<void>;
@@ -26,6 +29,7 @@ export function onSignal(i: {
       i.log.warn(`${signal}: still stopping after ${SHUTDOWN_TIMEOUT_MS} ms; exiting`);
       i.exit(0);
     }, SHUTDOWN_TIMEOUT_MS).unref();
+    await i.drain();
     await i.stopCrew();
     await i.stop();
     await i.close();

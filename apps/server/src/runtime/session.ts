@@ -1,13 +1,16 @@
 /**
  * The driver for one crew process: a long-lived `claude -p` speaking stream-json both ways (spike
- * docs/spikes/2026-10-20-runtime-stream-json.md). It writes user lines and control requests to
- * stdin, tees every stdout line to the seat's transcript, and reports typed events. A crew process
- * may misbehave (die mid-line, never answer, print junk): nothing here throws from an event
- * handler or leaves a promise pending once the process is gone.
+ * docs/spikes/2026-10-20-runtime-stream-json.md). The CLI is owned by a keeper (`keeper.ts`), a
+ * detached process that outlives the hub; this driver speaks to the keeper's socket, writes user
+ * lines and control requests through it, and reports typed events from the stdout lines the keeper
+ * numbers and replays. A crew process may misbehave (die mid-line, never answer, print junk):
+ * nothing here throws from an event handler or leaves a promise pending once the process is gone.
  */
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, openSync, writeSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { connect, type Socket } from "node:net";
+import { join } from "node:path";
 import {
   CONTROL_TIMEOUT_MS,
   type ControlSubtype,
@@ -18,25 +21,56 @@ import {
 import { cleanText } from "../clean.ts";
 import { CLAUDE_COMMAND } from "../cli-version.ts";
 import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
+import {
+  CLI_PID_FILE,
+  endKeeper,
+  KEEPER_LOG_FILE,
+  KEEPER_PID_FILE,
+  KEEPER_PROTOCOL_VERSION,
+  KEEPER_SOCKET,
+  KEEPER_SOCKET_PATH_MAX,
+  KEEPER_SPEC_FILE,
+  type KeeperExit,
+  type KeeperHello,
+  type KeeperSpec,
+  pidAlive,
+  readKeeperExit,
+  readPidFile,
+} from "./keeper.ts";
 
 export type { SessionEvent };
+
+/** How long `startSession` waits for the keeper it spawned to listen. */
+export const KEEPER_CONNECT_MS = 10_000;
+/** How long a connected keeper may take to send its hello. */
+export const KEEPER_HELLO_MS = 5000;
+/** How long `attachSession` tries to connect to a keeper whose pid is alive. */
+const ATTACH_CONNECT_MS = 2000;
+/** How long `attachSession` waits for the pids of a keeper that has exited to go. */
+const EXITED_WAIT_MS = 5000;
+const CONNECT_RETRY_MS = 25;
 
 export interface SessionInput {
   /** Default `"claude"`; tests pass `process.execPath` with the fake CLI as the first argument. */
   command?: string;
   args: string[];
   cwd: string;
-  /** Every stdout line is appended here (mode 0600 when created). */
+  /** Every stdout line is appended here by the keeper (mode 0600 when created). */
   transcriptPath: string;
   env?: NodeJS.ProcessEnv;
+  /** The node that runs the keeper, and the keeper's entry file. */
+  node: string;
+  entry: string;
+  /** The run's keeper folder: made here (mode 0700), emptied first. */
+  dir: string;
+  /** This keeper's id: the hub's cursor is only good for the keeper it was taken from. */
+  spawn: string;
   /** Defaults CONTROL_TIMEOUT_MS and STOP_GRACE_MS; tests shorten them. */
   controlTimeoutMs?: number;
   stopGraceMs?: number;
   /** Default the module caps on a partial line; tests shrink them. */
   stdoutLineMax?: number;
   stderrLineMax?: number;
-  /** Defaults `writeSync`; tests inject one that writes short. Returns the bytes written. */
-  write?: (fd: number, data: Uint8Array) => number;
 }
 
 export interface CrewSession {
@@ -49,20 +83,24 @@ export interface CrewSession {
    * code (null when a signal ended it).
    */
   close(): Promise<number | null>;
+  /**
+   * Lets go of the keeper without ending the process: the socket is closed, pending controls are
+   * rejected `session ended` and no event is emitted. The process keeps running.
+   */
+  detach(): void;
   on(listener: (e: SessionEvent) => void): () => void;
   readonly pid: number | undefined;
   readonly alive: boolean;
+  /** Resolves once the keeper answered (or the session ended without it): `alive` is then the truth. */
+  readonly ready: Promise<void>;
+  /** The keeper line this driver has read up to: the next one wanted. */
+  readonly lines: number;
 }
 
 type Json = Record<string, unknown>;
 const isObj = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
-
-/**
- * After the process exits, how long its pipes may stay open (a grandchild holding them) before
- * they are destroyed, so the exit is always reported.
- */
-const EXIT_DRAIN_MS = 1000;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * The longest partial stdout line kept, in characters (not bytes); a longer one is dropped, never
@@ -71,7 +109,6 @@ const EXIT_DRAIN_MS = 1000;
 const STDOUT_LINE_MAX = 64 * 1024 * 1024;
 /** The longest partial stderr line kept, in characters (not bytes); only its last ones are. */
 const STDERR_LINE_MAX = 64 * 1024;
-const DROPPED_TEXT = "a CLI output line over 64 MiB was dropped";
 
 interface Pending {
   resolve: (v: unknown) => void;
@@ -79,16 +116,90 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-export function startSession(i: SessionInput): CrewSession {
-  const controlTimeoutMs = i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS;
-  const stopGraceMs = i.stopGraceMs ?? STOP_GRACE_MS;
-  const stdoutLineMax = i.stdoutLineMax ?? STDOUT_LINE_MAX;
-  const stderrLineMax = i.stderrLineMax ?? STDERR_LINE_MAX;
-  const write = i.write ?? ((f: number, d: Uint8Array) => writeSync(f, d));
+/** Splits a socket's data into lines; lines that come while no handler is set wait for the next one. */
+function lineReader(sock: Socket) {
+  let buf = "";
+  let handler: ((line: string) => void) | null = null;
+  const queued: string[] = [];
+  sock.setEncoding("utf8");
+  sock.on("data", (chunk: string) => {
+    buf += chunk;
+    for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (handler) handler(line);
+      else queued.push(line);
+    }
+  });
+  return {
+    set(h: ((line: string) => void) | null) {
+      handler = h;
+      while (h && queued.length > 0 && handler === h) h(queued.shift() as string);
+    },
+  };
+}
+type LineReader = ReturnType<typeof lineReader>;
+
+/** The first line of `reader` as a hello's version: null when it is not a hello (or not JSON). */
+function parseHello(line: string): KeeperHello | { version: number | null } {
+  try {
+    const v: unknown = JSON.parse(line);
+    if (isObj(v) && v.t === "hello") {
+      const version = typeof v.version === "number" ? v.version : null;
+      if (version === KEEPER_PROTOCOL_VERSION) {
+        const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
+        return {
+          t: "hello",
+          version,
+          spawn: typeof v.spawn === "string" ? v.spawn : "",
+          pid: n(v.pid),
+          cliPid: typeof v.cliPid === "number" ? v.cliPid : null,
+          lines: n(v.lines),
+          awaiting: v.awaiting === true,
+        };
+      }
+      return { version };
+    }
+  } catch {
+    // not JSON
+  }
+  return { version: null };
+}
+const isHello = (h: KeeperHello | { version: number | null }): h is KeeperHello => "t" in h;
+
+/** The session's state and events, over a keeper socket that `link` brings (or never does). */
+function createDriver(i: {
+  dir: string;
+  controlTimeoutMs: number;
+  stopGraceMs: number;
+  /** Emit `attached` once the replay is in. */
+  announce: boolean;
+}) {
   const listeners = new Set<(e: SessionEvent) => void>();
   const pending = new Map<string, Pending>();
+  let sock: Socket | null = null;
+  let hello: KeeperHello | null = null;
+  /** Messages for the keeper written before the socket is linked. */
+  const outbox: Json[] = [];
+  let alive = true;
+  let finished = false;
+  let detached = false;
+  let stdinEnded = false;
+  let inTurn = false;
+  let announced = false;
+  /** The next keeper line wanted. */
+  let next = 0;
+  let resolveExit: (code: number | null) => void = () => {};
+  const exited = new Promise<number | null>((r) => {
+    resolveExit = r;
+  });
+  let resolveReady: () => void = () => {};
+  const ready = new Promise<void>((r) => {
+    resolveReady = r;
+  });
 
   const emit = (e: SessionEvent) => {
+    if (detached) return;
     for (const fn of [...listeners]) {
       try {
         fn(e);
@@ -98,154 +209,33 @@ export function startSession(i: SessionInput): CrewSession {
     }
   };
 
-  // Written synchronously, so a line is in the file before its event is emitted (a listener may
-  // fold the transcript on a result). Opening it throws before anything is spawned.
-  const fd = openSync(i.transcriptPath, "a", 0o600);
-  let transcriptFailed = false;
-  const record = (line: string) => {
-    try {
-      const bytes = Buffer.from(`${line}\n`);
-      for (let done = 0; done < bytes.length; ) {
-        const n = write(fd, bytes.subarray(done));
-        if (n <= 0) throw new Error("no bytes written");
-        done += n;
-      }
-    } catch (e) {
-      if (transcriptFailed) return;
-      transcriptFailed = true;
-      const text = `transcript write failed: ${e instanceof Error ? e.message : String(e)}`;
-      emit({ kind: "stderr", text: cleanText(text, STDERR_TEXT_MAX) });
-    }
+  const transmit = (obj: Json) => {
+    if (sock === null) outbox.push(obj);
+    else if (!sock.destroyed) sock.write(`${JSON.stringify(obj)}\n`);
   };
 
-  let child: ChildProcessWithoutNullStreams;
-  try {
-    child = spawn(i.command ?? CLAUDE_COMMAND, i.args, {
-      cwd: i.cwd,
-      env: i.env ?? process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-  } catch (e) {
-    // Invalid arguments throw here; a missing command or cwd arrives as an 'error' event instead.
-    closeSync(fd);
-    throw e;
-  }
-  let alive = child.pid !== undefined;
-  /** stdin has been ended by close(): nothing more may be written. */
-  let stdinEnded = false;
-  let finished = false;
-  let inTurn = false;
-  let exitInfo: { code: number | null; signal: string | null } | null = null;
-  /** The partial line after the last newline, per stream. */
-  let outBuf = "";
-  let errBuf = "";
-  /** Discarding an over-long stdout line up to its next newline. */
-  let dropping = false;
-  let stopTimer: NodeJS.Timeout | undefined;
-  let drainTimer: NodeJS.Timeout | undefined;
-  let resolveExit: (code: number | null) => void = () => {};
-  const exited = new Promise<number | null>((r) => {
-    resolveExit = r;
-  });
-
-  // EPIPE after the child died (or any write failure) lands here; the exit path reports it.
-  child.stdin.on("error", () => {});
-
-  child.on("error", (e) => {
-    // Without a pid the spawn itself failed ('close' follows); otherwise a kill() failed.
-    if (child.pid !== undefined) return;
-    alive = false;
-    emit({
-      kind: "stderr",
-      text: cleanText(`could not start the CLI: ${e.message}`, STDERR_TEXT_MAX),
-    });
-  });
-
-  child.on("exit", (code, signal) => {
-    alive = false;
-    exitInfo = { code, signal };
-    drainTimer = setTimeout(() => {
-      child.stdout.destroy();
-      child.stderr.destroy();
-    }, EXIT_DRAIN_MS);
-    drainTimer.unref();
-  });
-
-  child.on("close", (code, signal) => {
-    finished = true;
-    alive = false;
-    clearTimeout(stopTimer);
-    clearTimeout(drainTimer);
-    // A line cut off by the exit is kept, but never parsed: it may be any prefix of an event.
-    if (outBuf !== "") record(outBuf);
-    outBuf = "";
-    if (errBuf !== "") stderrLine(errBuf);
-    errBuf = "";
+  const rejectPending = () => {
     for (const [id, p] of pending) {
       clearTimeout(p.timer);
       pending.delete(id);
       p.reject(new Error("session ended"));
     }
-    const info =
-      child.pid === undefined
-        ? { code: null, signal: null }
-        : (exitInfo ?? { code, signal: signal ?? null });
-    try {
-      closeSync(fd);
-    } catch {
-      // nothing is left to write
-    }
+  };
+
+  const stderrText = (text: string) => {
+    const t = cleanText(text, STDERR_TEXT_MAX).trim();
+    if (t !== "") emit({ kind: "stderr", text: t });
+  };
+
+  /** Reports the exit, once. A line cut off by the exit was kept by the keeper but never sent. */
+  function end(info: { code: number | null; signal: string | null }): void {
+    if (finished) return;
+    finished = true;
+    alive = false;
+    rejectPending();
+    resolveReady();
     emit({ kind: "exit", code: info.code, signal: info.signal });
     resolveExit(info.code);
-  });
-
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    let rest = chunk;
-    while (rest !== "") {
-      const nl = rest.indexOf("\n");
-      if (dropping) {
-        if (nl < 0) return;
-        dropping = false;
-        rest = rest.slice(nl + 1);
-        continue;
-      }
-      if (nl < 0) {
-        outBuf += rest;
-        if (outBuf.length > stdoutLineMax) {
-          outBuf = "";
-          dropping = true;
-          emit({ kind: "stderr", text: DROPPED_TEXT });
-        }
-        return;
-      }
-      const line = outBuf + rest.slice(0, nl);
-      outBuf = "";
-      rest = rest.slice(nl + 1);
-      if (line.length > stdoutLineMax) {
-        emit({ kind: "stderr", text: DROPPED_TEXT });
-        continue;
-      }
-      record(line);
-      stdoutLine(line);
-    }
-  });
-
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => {
-    errBuf += chunk;
-    let nl = errBuf.indexOf("\n");
-    while (nl >= 0) {
-      stderrLine(errBuf.slice(0, nl).slice(-stderrLineMax));
-      errBuf = errBuf.slice(nl + 1);
-      nl = errBuf.indexOf("\n");
-    }
-    if (errBuf.length > stderrLineMax) errBuf = errBuf.slice(-stderrLineMax);
-  });
-
-  function stderrLine(line: string): void {
-    const text = cleanText(line, STDERR_TEXT_MAX).trim();
-    if (text !== "") emit({ kind: "stderr", text });
   }
 
   function stdoutLine(line: string): void {
@@ -307,15 +297,74 @@ export function startSession(i: SessionInput): CrewSession {
     }
   }
 
-  const writable = () => alive && !stdinEnded && !finished;
-  const writeLine = (obj: Json) => {
-    child.stdin.write(`${JSON.stringify(obj)}\n`);
+  const announceIfCaughtUp = () => {
+    if (!i.announce || announced || hello === null || next < hello.lines) return;
+    announced = true;
+    emit({ kind: "attached", awaiting: hello.awaiting });
   };
 
-  return {
+  function onLine(text: string): void {
+    if (finished || detached) return;
+    let m: unknown;
+    try {
+      m = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (!isObj(m)) return;
+    if (m.t === "out" && typeof m.n === "number" && typeof m.line === "string") {
+      if (m.n < next) return; // a line already read
+      next = m.n + 1;
+      stdoutLine(m.line);
+      announceIfCaughtUp();
+    } else if (m.t === "err" && typeof m.text === "string") {
+      stderrText(m.text);
+    } else if (m.t === "exit") {
+      end({
+        code: typeof m.code === "number" ? m.code : null,
+        signal: typeof m.signal === "string" ? m.signal : null,
+      });
+    }
+  }
+
+  /** The keeper went without saying `exit`: end it by its pids, and report the exit it left. */
+  async function lost(): Promise<void> {
+    if (finished || detached) return;
+    stderrText("the keeper ended unexpectedly");
+    await endKeeper(i.dir, i.stopGraceMs);
+    if (finished || detached) return;
+    const e = readKeeperExit(i.dir);
+    end({ code: e?.code ?? null, signal: e?.signal ?? null });
+  }
+
+  /** The keeper's hello is in: say ours, send what waited, and read the rest. */
+  function link(s: Socket, reader: LineReader, h: KeeperHello, from: number): void {
+    sock = s;
+    hello = h;
+    next = Math.min(Math.max(from, 0), h.lines);
+    s.on("error", () => {});
+    s.on("close", () => {
+      if (!finished && !detached) void lost();
+    });
+    transmit({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: next });
+    for (const m of outbox.splice(0)) transmit(m);
+    reader.set(onLine);
+    resolveReady();
+    // Later than the caller's own turn, so the caller's listeners hear it (a replay's lines come
+    // from the socket, never before then).
+    setImmediate(announceIfCaughtUp);
+  }
+
+  const writable = () => alive && !stdinEnded && !finished;
+
+  const session: CrewSession = {
     send(text) {
       if (!writable()) throw new Error("session ended");
-      writeLine({ type: "user", message: { role: "user", content: text } });
+      transmit({
+        t: "in",
+        line: JSON.stringify({ type: "user", message: { role: "user", content: text } }),
+        user: true,
+      });
       // The activity that follows a user line starts a turn, even mid-turn.
       inTurn = false;
     },
@@ -326,26 +375,36 @@ export function startSession(i: SessionInput): CrewSession {
         const timer = setTimeout(() => {
           pending.delete(id);
           reject(new Error("control timeout"));
-        }, controlTimeoutMs);
+        }, i.controlTimeoutMs);
         pending.set(id, { resolve, reject, timer });
-        writeLine({ type: "control_request", request_id: id, request: { subtype } });
+        transmit({
+          t: "in",
+          line: JSON.stringify({
+            type: "control_request",
+            request_id: id,
+            request: { subtype },
+          }),
+          user: false,
+        });
       });
     },
     close() {
       if (!stdinEnded && !finished) {
         stdinEnded = true;
-        child.stdin.end();
-        if (alive) {
-          stopTimer = setTimeout(() => {
-            if (!alive) return;
-            child.kill("SIGTERM");
-            stopTimer = setTimeout(() => {
-              if (alive) child.kill("SIGKILL");
-            }, stopGraceMs);
-          }, stopGraceMs);
-        }
+        transmit({ t: "close", graceMs: i.stopGraceMs });
       }
       return exited;
+    },
+    detach() {
+      if (detached) return;
+      rejectPending();
+      detached = true;
+      alive = false;
+      listeners.clear();
+      sock?.destroy();
+      // nobody is left waiting on a keeper this driver no longer follows
+      resolveReady();
+      resolveExit(null);
     },
     on(listener) {
       listeners.add(listener);
@@ -354,10 +413,223 @@ export function startSession(i: SessionInput): CrewSession {
       };
     },
     get pid() {
-      return child.pid;
+      return hello?.cliPid ?? undefined;
     },
     get alive() {
       return alive;
     },
+    ready,
+    get lines() {
+      return next;
+    },
   };
+
+  return {
+    session,
+    link,
+    /** The keeper never came up: report what it left (or that it left nothing), then the exit. */
+    failed(e: KeeperExit | null, why: string | null): void {
+      if (finished || detached) return;
+      const said = e?.lastStderr ?? why;
+      if (said !== null) stderrText(said);
+      end({ code: e?.code ?? null, signal: e?.signal ?? null });
+    },
+    isDone: () => finished || detached,
+  };
+}
+
+/**
+ * Starts a keeper for a new run (its folder emptied and made, its spec written), and drives it. The
+ * keeper runs `claude` with `i.args`, `i.env` and `i.cwd`. Throws before anything is spawned when the
+ * transcript cannot be opened or the folder's socket path is too long. The session is usable at once:
+ * lines and controls sent before the keeper answers wait for it. A keeper that cannot start the CLI
+ * (or never answers) ends the session with its stderr line and an exit.
+ */
+export function startSession(i: SessionInput): CrewSession {
+  const socketPath = join(i.dir, KEEPER_SOCKET);
+  if (socketPath.length > KEEPER_SOCKET_PATH_MAX) {
+    throw new Error(`the keeper's socket path is too long (${socketPath.length} characters)`);
+  }
+  // A transcript that cannot be opened throws here, before anything is spawned.
+  closeSync(openSync(i.transcriptPath, "a", 0o600));
+  const stopGraceMs = i.stopGraceMs ?? STOP_GRACE_MS;
+  rmSync(i.dir, { recursive: true, force: true });
+  mkdirSync(i.dir, { mode: 0o700 });
+  const spec: KeeperSpec = {
+    runId: i.spawn,
+    spawn: i.spawn,
+    command: i.command ?? CLAUDE_COMMAND,
+    args: i.args,
+    cwd: i.cwd,
+    env: Object.fromEntries(
+      Object.entries(i.env ?? process.env).filter(
+        (e): e is [string, string] => typeof e[1] === "string",
+      ),
+    ),
+    transcriptPath: i.transcriptPath,
+    stdoutLineMax: i.stdoutLineMax ?? STDOUT_LINE_MAX,
+    stderrLineMax: i.stderrLineMax ?? STDERR_LINE_MAX,
+    stopGraceMs,
+  };
+  writeFileSync(join(i.dir, KEEPER_SPEC_FILE), JSON.stringify(spec), { mode: 0o600 });
+  const driver = createDriver({
+    dir: i.dir,
+    controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
+    stopGraceMs,
+    announce: false,
+  });
+  const log = openSync(join(i.dir, KEEPER_LOG_FILE), "a", 0o600);
+  let keeper: ChildProcess;
+  try {
+    keeper = spawn(i.node, ["--experimental-strip-types", i.entry, i.dir], {
+      cwd: i.dir,
+      detached: true,
+      stdio: ["ignore", log, log],
+      // the keeper needs none of the hub's environment; the CLI's is in the spec
+      env: { PATH: process.env.PATH ?? "" },
+    });
+  } finally {
+    closeSync(log);
+  }
+  keeper.unref();
+  let keeperGone = false;
+  let spawnError: string | null = null;
+  keeper.on("error", (e) => {
+    spawnError = `could not start the CLI: ${e.message}`;
+    keeperGone = true;
+  });
+  keeper.on("exit", () => {
+    keeperGone = true;
+  });
+
+  const t0 = Date.now();
+  const attempt = () => {
+    if (driver.isDone()) return;
+    if (keeperGone) {
+      // the keeper left without listening: its exit file says why (a CLI that would not start)
+      const e = readKeeperExit(i.dir);
+      driver.failed(e, e === null ? (spawnError ?? "the keeper ended unexpectedly") : null);
+      return;
+    }
+    if (Date.now() - t0 > KEEPER_CONNECT_MS) {
+      void endKeeper(i.dir, stopGraceMs).then(() =>
+        driver.failed(null, "could not start the CLI: the keeper did not answer"),
+      );
+      return;
+    }
+    const sock = connect(socketPath);
+    sock.once("error", () => {
+      sock.destroy();
+      setTimeout(attempt, CONNECT_RETRY_MS);
+    });
+    sock.once("connect", () => {
+      sock.removeAllListeners("error");
+      sock.on("error", () => {});
+      const reader = lineReader(sock);
+      const timer = setTimeout(() => {
+        sock.destroy();
+        void endKeeper(i.dir, stopGraceMs).then(() =>
+          driver.failed(null, "could not start the CLI: the keeper did not answer"),
+        );
+      }, KEEPER_HELLO_MS);
+      reader.set((line) => {
+        clearTimeout(timer);
+        reader.set(null);
+        const h = parseHello(line);
+        if (isHello(h)) {
+          driver.link(sock, reader, h, 0);
+        } else {
+          sock.destroy();
+          void endKeeper(i.dir, stopGraceMs).then(() =>
+            driver.failed(null, "could not start the CLI: the keeper spoke another version"),
+          );
+        }
+      });
+    });
+  };
+  attempt();
+  return driver.session;
+}
+
+/** What `attachSession` found. */
+export type Attached =
+  | { kind: "attached"; session: CrewSession; hello: KeeperHello }
+  /** The CLI exited while no hub was attached. */
+  | { kind: "exited"; exit: KeeperExit }
+  /** No keeper to attach to (null), or one that speaks another version (its number). */
+  | { kind: "gone"; version: number | null };
+
+/**
+ * Attaches to the keeper of a run folder that an earlier hub started. `from` says which keeper line
+ * to replay from, given the keeper's hello. Never throws.
+ */
+export async function attachSession(i: {
+  dir: string;
+  from: (h: KeeperHello) => number;
+  controlTimeoutMs?: number;
+  stopGraceMs?: number;
+}): Promise<Attached> {
+  try {
+    const exitedResult = async (): Promise<Attached | null> => {
+      const exit = readKeeperExit(i.dir);
+      if (exit === null) return null;
+      const live = () =>
+        [KEEPER_PID_FILE, CLI_PID_FILE].some((n) => {
+          const pid = readPidFile(i.dir, n);
+          return pid !== null && pidAlive(pid);
+        });
+      for (const t0 = Date.now(); live() && Date.now() - t0 < EXITED_WAIT_MS; ) await sleep(50);
+      return { kind: "exited", exit };
+    };
+    const done = await exitedResult();
+    if (done !== null) return done;
+    const keeperPid = readPidFile(i.dir, KEEPER_PID_FILE);
+    if (keeperPid === null || !pidAlive(keeperPid)) return { kind: "gone", version: null };
+
+    const socketPath = join(i.dir, KEEPER_SOCKET);
+    let sock: Socket | null = null;
+    for (const t0 = Date.now(); sock === null && Date.now() - t0 < ATTACH_CONNECT_MS; ) {
+      sock = await new Promise<Socket | null>((resolve) => {
+        const s = connect(socketPath);
+        s.once("connect", () => resolve(s));
+        s.once("error", () => {
+          s.destroy();
+          setTimeout(() => resolve(null), CONNECT_RETRY_MS);
+        });
+      });
+    }
+    if (sock === null) {
+      // the keeper may have finished between the checks
+      return (await exitedResult()) ?? { kind: "gone", version: null };
+    }
+    const s = sock;
+    s.on("error", () => {});
+    const reader = lineReader(s);
+    const first = await new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => {
+        reader.set(null);
+        resolve(null);
+      }, KEEPER_HELLO_MS);
+      reader.set((line) => {
+        clearTimeout(timer);
+        reader.set(null);
+        resolve(line);
+      });
+    });
+    const h = first === null ? { version: null } : parseHello(first);
+    if (!isHello(h)) {
+      s.destroy();
+      return { kind: "gone", version: h.version };
+    }
+    const driver = createDriver({
+      dir: i.dir,
+      controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
+      stopGraceMs: i.stopGraceMs ?? STOP_GRACE_MS,
+      announce: true,
+    });
+    driver.link(s, reader, h, i.from(h));
+    return { kind: "attached", session: driver.session, hello: h };
+  } catch {
+    return { kind: "gone", version: null };
+  }
 }

@@ -18,10 +18,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import {
   type BriefInput,
+  CLAUDE_MD_HEADING,
   CLAUDE_MD_MAX,
+  MC_RESTART_TEXT,
   type ReviewBriefInput,
   readRepoClaudeMd,
   reviewBrief,
+  rolePrompt,
   ticketBrief,
   watchBrief,
 } from "../src/runtime/brief.ts";
@@ -284,6 +287,26 @@ describe("role briefs", () => {
   it("RETRO has no tools for commits, pushes or PRs", () => {
     expect(mayNot("RETRO")).toBe(
       "Do not commit, push, run git writes, open PRs or comment on GitHub, and do not run the full suite. You have no tools for these, no network access and no gh. A doubt you cannot settle is a finding, not a question.",
+    );
+  });
+});
+
+describe("rolePrompt", () => {
+  it("every role prompt carries the restart line", () => {
+    for (const role of ["FAO", "FLIGHT", "GUIDO", "INCO", "RETRO"]) {
+      const brief = readFileSync(join(ROLES_DIR, `${role}.md`), "utf8");
+      const alone = rolePrompt(brief, null);
+      expect(alone).toBe(`${brief.trimEnd()}\n\n${MC_RESTART_TEXT}\n`);
+      const withRepo = rolePrompt(brief, "Repo rule: keep tests green.\n");
+      expect(withRepo).toBe(
+        `${brief.trimEnd()}\n\n${MC_RESTART_TEXT}\n\n${CLAUDE_MD_HEADING}\n\nRepo rule: keep tests green.\n`,
+      );
+    }
+  });
+
+  it("tells the seat what ECONNREFUSED means and what to do about it", () => {
+    expect(MC_RESTART_TEXT).toBe(
+      "If an mc tool fails with ECONNREFUSED, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.",
     );
   });
 });

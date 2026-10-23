@@ -5,7 +5,8 @@
 // `{"argv", "cwd", "env"}` on start and then every stdin line, as received, to that file. With
 // `--boot-delay <ms>` blocks startup that long before it reads stdin (a slow boot with no signal
 // handler yet, so a SIGTERM during it ends the process by signal). With
-// `--fail-resume` it exits 1 at once when started with `--resume` (an unknown session, say).
+// `--fail-resume` it exits 1 at once when started with `--resume` (an unknown session, say). With
+// `--record-exit` it also records `{"exited":<pid>}` when it exits, and SIGTERM becomes exit 143.
 //
 // Nothing is printed until the first user line. Each user line starts a turn: `system/init`, a
 // `rate_limit_event` (allowed), an assistant reply `echo: <text>` and a `result`. A user line that
@@ -44,6 +45,12 @@ const record = (line) => {
 const bootDelay = Number(flag("--boot-delay") ?? 0);
 if (bootDelay > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, bootDelay);
 record(JSON.stringify({ argv, cwd: process.cwd(), env: process.env }));
+// `--record-exit`: a SIGTERM ends it with exit 143 (not by the signal), and every exit leaves
+// `{"exited":<pid>}` in the record, so a test can order it against the starts around it.
+if (argv.includes("--record-exit")) {
+  process.on("SIGTERM", () => process.exit(143));
+  process.on("exit", () => record(JSON.stringify({ exited: process.pid })));
+}
 if (argv.includes("--fail-resume") && argv.includes("--resume")) {
   process.stderr.write("No conversation found with session ID\n");
   process.exit(1);

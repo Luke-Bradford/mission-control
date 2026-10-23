@@ -209,6 +209,10 @@ CREATE TABLE IF NOT EXISTS test_lock_holds (
   run_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, seat_id TEXT NOT NULL, command TEXT NOT NULL,
   since INTEGER NOT NULL, PRIMARY KEY (run_id, tool_use_id)
 );
+-- The last keeper line the hub acted on, per run: the next hub replays from here.
+CREATE TABLE IF NOT EXISTS keeper_cursors (
+  run_id TEXT PRIMARY KEY, spawn TEXT NOT NULL, line INTEGER NOT NULL, rate_limited_until INTEGER
+);
 -- FLIGHT's briefs on Needs-you items (the newest row per key shows); options is JSON.
 CREATE TABLE IF NOT EXISTS briefs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, context TEXT NOT NULL,
@@ -349,6 +353,23 @@ export const CREW_PR_BODY_FILE =
 /** A new, unique path for a draft PR's body file; the tool removes it once gh has read it. */
 export function crewPrBodyPath(dbPath: string): string {
   return join(crewDir(dbPath), `pr-${randomUUID()}.md`);
+}
+
+/** A crew run's keeper folder: `{dir of the DB}/crew/k-<12 hex of sha256(runId)>`, short for its socket path. */
+export function crewKeeperDir(dbPath: string, runId: string): string {
+  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
+  return join(crewDir(dbPath), `k-${hex}`);
+}
+
+/** A keeper folder's name in `{DB dir}/crew/`. */
+export const CREW_KEEPER_DIR = /^k-[0-9a-f]{12}$/;
+
+/** What the hub has acted on of a run's keeper: the lines of keeper `spawn` below `line`. */
+export interface KeeperCursor {
+  runId: string;
+  spawn: string;
+  line: number;
+  rateLimitedUntil: number | null;
 }
 
 export const BUSY_TIMEOUT_MS = 5000;
@@ -2221,6 +2242,32 @@ export class Store {
   /** Every held call of the run. */
   deleteLockHolds(runId: string): void {
     this.db.prepare("DELETE FROM test_lock_holds WHERE run_id = ?").run(runId);
+  }
+
+  setKeeperCursor(c: KeeperCursor): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO keeper_cursors (run_id, spawn, line, rate_limited_until)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(c.runId, c.spawn, c.line, c.rateLimitedUntil);
+  }
+
+  keeperCursor(runId: string): KeeperCursor | null {
+    const r = this.db.prepare("SELECT * FROM keeper_cursors WHERE run_id = ?").get(runId) as
+      | Row
+      | undefined;
+    if (r === undefined) return null;
+    return {
+      runId,
+      spawn: r.spawn as string,
+      line: r.line as number,
+      rateLimitedUntil: r.rate_limited_until as number | null,
+    };
+  }
+
+  deleteKeeperCursor(runId: string): void {
+    this.db.prepare("DELETE FROM keeper_cursors WHERE run_id = ?").run(runId);
   }
 
   lockHolds(): LockHoldRow[] {

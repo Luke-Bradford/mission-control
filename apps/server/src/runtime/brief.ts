@@ -277,8 +277,20 @@ export async function readRepoClaudeMd(checkout: string, baseSha: string): Promi
   return body === null ? null : body.subarray(0, CLAUDE_MD_MAX).toString("utf8");
 }
 
-/** The prompt file's text: the role brief, then the repo's CLAUDE.md under its own heading. */
+/**
+ * What every seat is told about a hub restart: the CLI does not retry a failed mc call, and the
+ * spike (docs/spikes/2026-10-22-seat-survives-hub-restart.md) measured that its next call reaches
+ * the new hub.
+ */
+export const MC_RESTART_TEXT =
+  "If an mc tool fails with ECONNREFUSED, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
+
+/**
+ * The prompt file's text: the role brief, the restart line, then the repo's CLAUDE.md under its own
+ * heading.
+ */
 export function rolePrompt(roleBrief: string, claudeMd: string | null): string {
-  if (claudeMd === null || claudeMd.trim() === "") return roleBrief;
-  return `${roleBrief.trimEnd()}\n\n${CLAUDE_MD_HEADING}\n\n${claudeMd}`;
+  const head = `${roleBrief.trimEnd()}\n\n${MC_RESTART_TEXT}\n`;
+  if (claudeMd === null || claudeMd.trim() === "") return head;
+  return `${head}\n${CLAUDE_MD_HEADING}\n\n${claudeMd}`;
 }

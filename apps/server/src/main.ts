@@ -42,6 +42,7 @@ import { createFlightWatch } from "./flight/watch.ts";
 import { type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
+import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
@@ -84,6 +85,8 @@ async function main(): Promise<void> {
   // per-run bearer tokens for /mcp and the guard: the supervisor issues one at each spawn and
   // revokes it at the process's exit
   const tokens = new RunTokens();
+  // the /mcp calls in flight: a restart lets them finish before it lets go of the crew
+  const mcpCalls = new McpCalls();
   // one full suite at a time across every seat; the supervisor frees a run's hold when its call
   // ends, its turn ends or its process exits
   const lock = new TestLock({ onChange: lockChanged(bus), holds: store, log: (line) => log(line) });
@@ -336,12 +339,14 @@ async function main(): Promise<void> {
     updater,
     // the guard and /mcp: tokens, the test lock, and each seat judged by its configured role
     ...crewGuardDeps(config, tokens, lock),
+    mcpCalls,
     mcpTools: () => [...mcTools, ...flightTools],
   });
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
 
   const shutdown = onSignal({
+    drain: () => mcpCalls.idle(),
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
       crewReloader.stop();

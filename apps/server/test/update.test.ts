@@ -187,7 +187,7 @@ describe("version", () => {
   it("keeps every refusal ahead of up to date", async () => {
     // origin has nothing new and HEAD is the start SHA: each of these would read as up to date
     expect((await updater({ preview: true }).u.version()).reason).toBe(PREVIEW_SERVER);
-    for (const reason of ["GUIDO-1 is mid-turn", "GUIDO-1 is starting", CREW_STATE_UNREADABLE]) {
+    for (const reason of ["GUIDO-1 is starting", CREW_STATE_UNREADABLE]) {
       expect((await updater({ crewRefusal: () => reason }).u.version()).reason).toBe(reason);
     }
     writeFileSync(join(hub, "new.txt"), "x\n");
@@ -234,9 +234,41 @@ describe("version", () => {
     expect(calls.map((c) => c.cmd)).not.toContain("git fetch origin main");
   });
 
-  it("refuses while a crew seat is mid-turn", async () => {
-    const { u } = updater({ crewRefusal: () => "GUIDO-1 is mid-turn" });
-    expect(await u.version()).toMatchObject({ canUpdate: false, reason: "GUIDO-1 is mid-turn" });
+  it("a running seat no longer blocks Update; a starting one does", async () => {
+    const config = {
+      loops: [],
+      crew: { sessions: [{ id: "s", repoId: "r", seats: [{ id: "guido-1" }] }] },
+    } as unknown as CcConfig;
+    const seat = (state: SeatSessionRow["state"]): SeatSessionRow => ({
+      seatId: "guido-1",
+      runId: "r",
+      cliSessionId: null,
+      state,
+      reason: null,
+      worktree: null,
+      updatedAt: 0,
+    });
+    const crew = (state: SeatSessionRow["state"], busy: SeatBusy[] = []) =>
+      updater({
+        startSha: head(),
+        crewRefusal: () =>
+          crewRefusal(
+            config,
+            { status: () => ({ enabled: true, note: null }), busy: () => busy },
+            () => seat(state),
+          ),
+      });
+    upstreamCommit("b.txt");
+    const ready = { behind: 1, canUpdate: true, reason: null };
+    // mid-turn, by its row and by the supervisor's memory of a line it just wrote
+    expect(await crew("running").u.version()).toMatchObject(ready);
+    expect(await crew("idle", [{ seatId: "guido-1", state: "running" }]).u.version()).toMatchObject(
+      ready,
+    );
+    expect(await crew("starting").u.version()).toMatchObject({
+      canUpdate: false,
+      reason: "GUIDO-1 is starting",
+    });
   });
 
   it("fetches at most once per VERSION_CHECK_MS", async () => {
@@ -450,7 +482,6 @@ describe("update", () => {
       [{ preview: true }, PREVIEW_SERVER, () => {}],
       [{}, "not on main", () => git(hub, "checkout", "-q", "-b", "other")],
       [{}, "the checkout has uncommitted changes", () => writeFileSync(join(hub, "x"), "")],
-      [{ crewRefusal: () => "GUIDO-1 is mid-turn" }, "GUIDO-1 is mid-turn", () => {}],
       [{ crewRefusal: () => "GUIDO-1 is starting" }, "GUIDO-1 is starting", () => {}],
     ];
     upstreamCommit("b.txt");
@@ -719,36 +750,33 @@ describe("crewRefusal", () => {
     busy: () => busy,
   });
 
-  it("names the first running seat by its call sign: mid-turn", () => {
+  it("names the first starting seat by its call sign, and not a running one", () => {
     const states: Record<string, SeatSessionRow | null> = {
       "guido-1": row("idle"),
-      "guido-2": null,
+      "guido-2": row("starting"),
       "eva-1": row("running"),
     };
-    expect(crewRefusal(config, sup(true), (id) => states[id] ?? null)).toBe("EVA-1 is mid-turn");
-  });
-
-  it("a seat that is starting blocks too", () => {
-    const states: Record<string, SeatSessionRow | null> = { "guido-2": row("starting") };
     expect(crewRefusal(config, sup(true), (id) => states[id] ?? null)).toBe("GUIDO-2 is starting");
+    states["guido-2"] = null;
+    expect(crewRefusal(config, sup(true), (id) => states[id] ?? null)).toBeNull();
   });
 
-  it("is null when no seat is running or starting, or there is no crew", () => {
-    for (const st of ["idle", "parked", "stopped", "error"] as const) {
+  it("is null when no seat is starting, or there is no crew", () => {
+    for (const st of ["idle", "running", "parked", "stopped", "error"] as const) {
       expect(crewRefusal(config, sup(true), () => row(st))).toBeNull();
     }
     const none = { loops: [] } as unknown as CcConfig;
-    expect(crewRefusal(none, sup(true), () => row("running"))).toBeNull();
+    expect(crewRefusal(none, sup(true), () => row("starting"))).toBeNull();
   });
 
-  it("names a seat the supervisor holds in memory: a start before its row, a line not yet a turn", () => {
+  it("names a start the supervisor holds in memory, before its row; a line not yet a turn is no refusal", () => {
     const idle = () => row("idle");
     expect(crewRefusal(config, sup(true, [{ seatId: "guido-2", state: "starting" }]), idle)).toBe(
       "GUIDO-2 is starting",
     );
-    expect(crewRefusal(config, sup(true, [{ seatId: "eva-1", state: "running" }]), idle)).toBe(
-      "EVA-1 is mid-turn",
-    );
+    expect(
+      crewRefusal(config, sup(true, [{ seatId: "eva-1", state: "running" }]), idle),
+    ).toBeNull();
   });
 
   it("reads no seat row on a server that does not hold the crew lock", () => {
