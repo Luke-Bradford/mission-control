@@ -1251,6 +1251,35 @@ describe("The operator's message", () => {
     expect(loopOf()).toMatchObject({ phase: "ci", pushStartedAt: clock, unparkedAt: clock });
   });
 
+  it("a parked run whose push landed but whose PR never opened goes to ci and tries the PR again", async () => {
+    report();
+    store.setRunPush({ runId: RUN, sha: SHA, at: clock });
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "gh pr create failed", ended: false },
+      reportedEvidenceId: 1,
+      pushFor: SHA,
+    });
+    h.sent.length = 0;
+    clock += 40 * MIN;
+    await h.engine.onOperatorMessage(RUN);
+    expect(h.openCalls).toBe(1);
+    expect(h.sent).toEqual([]);
+    expect(loopOf()).toMatchObject({ phase: "ci", prNumber: 12, pushFor: SHA, unparkedAt: clock });
+  });
+
+  it("a parked run whose newest commit is not pushed goes back to working", async () => {
+    report();
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "gone quiet", ended: false },
+      reportedEvidenceId: 1,
+    });
+    await h.engine.onOperatorMessage(RUN);
+    expect(h.openCalls).toBe(0);
+    expect(loopOf().phase).toBe("working");
+  });
+
   it("a ruling park resumes into review, a budget park raises the ceiling", async () => {
     setLoop({ phase: "parked", parked: { kind: "ruling", reason: "ruled", ended: false } });
     await h.engine.onOperatorMessage(RUN);
