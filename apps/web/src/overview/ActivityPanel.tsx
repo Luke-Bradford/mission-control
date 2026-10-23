@@ -1,12 +1,13 @@
 import {
   type ActivityEvent,
+  type ActivityRow,
   type ConfigView,
   type Crew,
-  ENGINE_NOT_RUNNING,
   HUD_STATE_LABEL,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { useTz } from "../clock.ts";
+import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
@@ -30,7 +31,7 @@ const SUB: Record<Filter, string> = {
 };
 const SHOWN = 120;
 
-const GLYPH: Record<ActivityEvent["kind"], string> = {
+const GLYPH: Record<ActivityRow["kind"], string> = {
   "run-start": "→",
   "run-end": "◆",
   escalation: "◆",
@@ -41,8 +42,9 @@ const GLYPH: Record<ActivityEvent["kind"], string> = {
   board: "▤",
   loop: "↻",
   push: "⇡",
+  comms: "›",
 };
-const KIND_CLASS: Record<ActivityEvent["kind"], string> = {
+const KIND_CLASS: Record<ActivityRow["kind"], string> = {
   "run-start": "k-step",
   "run-end": "k-state",
   escalation: "k-state",
@@ -53,6 +55,7 @@ const KIND_CLASS: Record<ActivityEvent["kind"], string> = {
   board: "k-step",
   loop: "k-step",
   push: "k-step",
+  comms: "k-comms",
 };
 /** A state change into one of these is red (the text reads `{From} → {To}`). */
 const RED_ARROWS = (["error", "stalled"] as const).map((s) => `→ ${HUD_STATE_LABEL[s]}`);
@@ -140,13 +143,13 @@ function ActivityText({
 
 /** What happened across the crew (catalogue 2.1.3), oldest first, from runs, escalations and sources. */
 export function ActivityPanel() {
-  const events = useResource<ActivityEvent[]>(RESOURCES.activity);
+  const events = useResource<ActivityRow[]>(RESOURCES.activity);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const tz = useTz();
   const [session] = useSession();
   const [filter, setFilter] = useState<Filter>("steps");
-  const [frozen, setFrozen] = useState<ActivityEvent[] | null>(null);
+  const [frozen, setFrozen] = useState<ActivityRow[] | null>(null);
   const list = useRef<HTMLDivElement>(null);
 
   const agents = new Map(crew?.rows.map((r) => [r.id, r]));
@@ -159,8 +162,13 @@ export function ActivityPanel() {
     agents.get(who)?.repoId ?? [who, ...who.split(":")].find((p) => repoIds.has(p)) ?? null;
 
   const source = frozen ?? events.data ?? [];
-  const rows = (filter === "comms" ? [] : source)
+  const rows = source
+    .filter((e) => (filter === "all" ? true : filter === "comms" ? isComms(e) : !isComms(e)))
     .filter((e) => {
+      if (isComms(e)) {
+        const ends = [e.who, e.to].flatMap((id) => agents.get(id) ?? []);
+        return ends.length === 0 || ends.some((a) => inSession(session, a.repoId));
+      }
       const repo = repoOf(e.who);
       return repo === null || inSession(session, repo);
     })
@@ -169,7 +177,7 @@ export function ActivityPanel() {
   // Events have no id: key by content, and number repeats so twins never share a key.
   const seen = new Map<string, number>();
   const keyed = rows.map((e) => {
-    const base = `${e.at}:${e.who}:${e.kind}:${e.text}`;
+    const base = `${e.at}:${e.who}:${e.kind}:${isComms(e) ? `${e.to}:` : ""}${e.text}`;
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
     return { e, key: `${base}#${n}` };
@@ -201,6 +209,25 @@ export function ActivityPanel() {
     >
       <div className="scroll" id="actList" ref={list}>
         {keyed.map(({ e, key }) => {
+          if (isComms(e)) {
+            return (
+              <div key={key} className="arow k-comms">
+                <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
+                <span className="g">{GLYPH.comms}</span>
+                <span className="txt">
+                  <CommsEnd id={e.who} /> <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
+                  <MentionText text={e.text} />
+                </span>
+                {e.ref ? (
+                  <span className="arefs">
+                    <TicketRef ticket={e.ref} url={null} />
+                  </span>
+                ) : (
+                  <span />
+                )}
+              </div>
+            );
+          }
           const agent = agents.get(e.who);
           const failed = e.kind === "run-end" && e.status === "failed";
           const intoRed = e.kind === "state" && RED_ARROWS.some((a) => e.text.includes(a));
@@ -239,8 +266,7 @@ export function ActivityPanel() {
             </div>
           );
         })}
-        {filter === "comms" && <div className="pb muted">{ENGINE_NOT_RUNNING}</div>}
-        {filter !== "comms" && rows.length === 0 && !events.error && events.data && (
+        {rows.length === 0 && !events.error && events.data && (
           <div className="pb muted">No events yet.</div>
         )}
         {events.error && !events.data && <div className="pb crit-t">Could not load activity.</div>}

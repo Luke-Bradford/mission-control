@@ -2047,6 +2047,47 @@ pre.diff .h {
 }
 
 /* comms */
+.mention {
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.msg {
+  display: grid;
+  gap: 3px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  max-width: 900px;
+}
+.msg.tagged {
+  background: var(--warn-soft);
+}
+.msg.mine .from b {
+  color: var(--accent);
+}
+.msg .from {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.msg .body {
+  overflow-wrap: anywhere;
+}
+.msg.sys .body {
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+.msg.peer {
+  padding-left: 32px;
+}
+.msg.peer .body {
+  color: var(--fg-2);
+}
 .cgrid {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);

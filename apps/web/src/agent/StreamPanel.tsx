@@ -1,4 +1,5 @@
 import {
+  type ActivityRow,
   type AgentStream,
   BACKGROUND_STALL_MS,
   type ConfigView,
@@ -10,6 +11,7 @@ import {
   type StreamKind,
 } from "@mc/core";
 import { type FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { agentComms, commsKeys, commsLine, MentionText } from "../comms/messages.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { callSign, seatTurn } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -39,10 +41,15 @@ const FILTERS: readonly { value: Filter; label: string }[] = [
   { value: "guard", label: "Guard" },
 ];
 
+/** A message to or from the seat (`/api/activity`), shown in the transcript's time order. */
+type A2aRow = { kind: "a2a"; at: number; text: string; key: string };
+type StreamRow = StreamEvent | A2aRow;
+type RowKind = StreamKind | "a2a";
+
 /** Which kinds each filter shows; Guard has none until the engine's guard exists. */
-const SHOWS: Record<Filter, readonly StreamKind[] | null> = {
+const SHOWS: Record<Filter, readonly RowKind[] | null> = {
   all: null,
-  talk: ["op", "msg", "sys"],
+  talk: ["op", "msg", "a2a", "sys"],
   think: ["think"],
   tool: ["tool"],
   guard: [],
@@ -52,7 +59,8 @@ const SHOWS: Record<Filter, readonly StreamKind[] | null> = {
  * Who each kind is. **Decision:** the loop's prompt reads `prompt`, not the mockup's `you`: it is
  * the loop's message, not the operator's.
  */
-const WHO: Record<StreamKind, string> = {
+const WHO: Record<RowKind, string> = {
+  a2a: "agents",
   op: "prompt",
   think: "thinking",
   tool: "tool",
@@ -61,7 +69,8 @@ const WHO: Record<StreamKind, string> = {
 };
 
 /** The row class (the mockup's: `op` is styled as `you`). */
-const CLS: Record<StreamKind, string> = {
+const CLS: Record<RowKind, string> = {
+  a2a: "a2a",
   op: "you",
   think: "think",
   tool: "tool",
@@ -91,13 +100,32 @@ function ToolText({ tool, rel }: { tool: NonNullable<StreamEvent["tool"]>; rel: 
 /** Kinds whose text is the agent's (or the loop's prompt) own Markdown. */
 const MARKDOWN: readonly StreamKind[] = ["op", "msg"];
 
-function EventRow({ ev, tz, rel }: { ev: StreamEvent; tz: string | null; rel: Relativise }) {
+/**
+ * The transcript with the seat's messages in: each goes before the first event with a later `at`;
+ * an event without an `at` keeps its place, a tie goes after the event, leftovers go last.
+ */
+function mergeA2a(events: StreamEvent[], a2a: A2aRow[]): StreamRow[] {
+  const out: StreamRow[] = [];
+  let next = 0;
+  for (const ev of events) {
+    while (ev.at !== null && next < a2a.length && (a2a[next] as A2aRow).at < ev.at) {
+      out.push(a2a[next++] as A2aRow);
+    }
+    out.push(ev);
+  }
+  out.push(...a2a.slice(next));
+  return out;
+}
+
+function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Relativise }) {
   return (
     <div className={`ev ${CLS[ev.kind]}`}>
       <span className="at num">{ev.at !== null && tz ? hhmm(ev.at, tz) : DASH}</span>
       <span className="who">{WHO[ev.kind]}</span>
       <div className="txt">
-        {ev.kind === "tool" && ev.tool ? (
+        {ev.kind === "a2a" ? (
+          <MentionText text={ev.text} />
+        ) : ev.kind === "tool" && ev.tool ? (
           <ToolText tool={ev.tool} rel={rel} />
         ) : MARKDOWN.includes(ev.kind) ? (
           <Markdown text={ev.text} />
@@ -224,10 +252,20 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const rel = useMemo(() => relativiser(config, row.id), [config, row.id]);
   const box = useRef<HTMLDivElement>(null);
+  const activity = useResource<ActivityRow[]>(RESOURCES.activity).data;
+  const a2a = useMemo<A2aRow[]>(() => {
+    const list = row.run ? agentComms(activity ?? [], row.id, row.run.startedAt) : [];
+    const keys = commsKeys(list);
+    return list.map((c, i) => ({
+      kind: "a2a",
+      at: c.at,
+      text: commsLine(c, row.id),
+      key: keys[i] as string,
+    }));
+  }, [activity, row.id, row.run]);
   const shows = SHOWS[filter];
-  const events = (stream.data?.events ?? []).filter(
-    (e) => shows === null || shows.includes(e.kind),
-  );
+  const all = mergeA2a(stream.data?.events ?? [], a2a);
+  const events = all.filter((e) => shows === null || shows.includes(e.kind));
   const count = events.length;
 
   // Follow the newest event only when the list's content changed and the reader was already at
@@ -249,7 +287,7 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
   else if (stream.error && !stream.data)
     empty = `Could not load the activity: ${stream.error.message}`;
   else if (!stream.data) empty = "Loading…";
-  else if (stream.data.events.length === 0) empty = stream.data.reason ?? "No activity yet.";
+  else if (all.length === 0) empty = stream.data.reason ?? "No activity yet.";
   else if (count === 0) empty = "Nothing of this kind in this run.";
 
   return (
@@ -267,7 +305,12 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
           <p className="pb s muted">{empty}</p>
         ) : (
           events.map((ev) => (
-            <EventRow key={`${stream.data?.runId}:${ev.id}`} ev={ev} tz={tz} rel={rel} />
+            <EventRow
+              key={ev.kind === "a2a" ? ev.key : `${stream.data?.runId}:${ev.id}`}
+              ev={ev}
+              tz={tz}
+              rel={rel}
+            />
           ))
         )}
       </div>
