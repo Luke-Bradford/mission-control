@@ -212,6 +212,22 @@ describe("RunTokens", () => {
     tokens.revoke("run-1");
     expect(tokens.resolve(token)).toBeNull();
   });
+
+  it("adopts an earlier hub's token for a run, and nothing that is not 64 hex characters", () => {
+    const t = "a".repeat(64);
+    expect(tokens.adopt("seat-1", "run-9", t)).toBe(true);
+    expect(tokens.resolve(t)).toEqual({
+      seatId: "seat-1",
+      runId: "run-9",
+      tokenHash: createHash("sha256").update(t).digest("hex"),
+    });
+    for (const bad of ["", "A".repeat(64), "a".repeat(63), `${"a".repeat(64)}\n`]) {
+      expect(tokens.adopt("seat-1", "run-8", bad)).toBe(false);
+      expect(tokens.resolve(bad)).toBeNull();
+    }
+    tokens.revoke("run-9");
+    expect(tokens.resolve(t)).toBeNull();
+  });
 });
 
 describe("handshake", () => {

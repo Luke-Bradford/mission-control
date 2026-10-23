@@ -70,6 +70,65 @@ describe("TestLock", () => {
     lock = new TestLock({ now: () => clock });
   });
 
+  describe("stored holds", () => {
+    let dir: string;
+    let store: Store;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), "mc-lock-"));
+      store = new Store(join(dir, "mc.sqlite"));
+      lock = new TestLock({ now: () => clock, holds: store });
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("stores each held call and deletes it when released", async () => {
+      await lock.acquire({ runId: "A", toolUseId: "a1" }, "guido-1", "pnpm -s test", 1000, live());
+      await lock.acquire({ runId: "A", toolUseId: "a2" }, "guido-1", "pnpm -s test", 1000, live());
+      expect(store.lockHolds()).toEqual([
+        { runId: "A", toolUseId: "a1", seatId: "guido-1", command: "pnpm -s test", since: 1000 },
+        { runId: "A", toolUseId: "a2", seatId: "guido-1", command: "pnpm -s test", since: 1000 },
+      ]);
+      lock.release({ runId: "A", toolUseId: "a1" });
+      expect(store.lockHolds()).toHaveLength(1);
+      const b = lock.acquire(
+        { runId: "B", toolUseId: "b1" },
+        "guido-2",
+        "pnpm -s test",
+        1000,
+        live(),
+      );
+      lock.releaseRun("A");
+      expect(await b).toBe(true);
+      expect(store.lockHolds().map((r) => `${r.runId}/${r.toolUseId}`)).toEqual(["B/b1"]);
+      lock.release({ runId: "B", toolUseId: "b1" });
+      expect(store.lockHolds()).toEqual([]);
+    });
+
+    it("restores stored holds: the earliest run holds, and others' rows go", async () => {
+      const row = (runId: string, toolUseId: string, since: number) => ({
+        runId,
+        toolUseId,
+        seatId: `s-${runId}`,
+        command: "pnpm -s test",
+        since,
+      });
+      store.addLockHold(row("A", "a1", 5));
+      store.addLockHold(row("A", "a2", 6));
+      store.addLockHold(row("C", "c1", 9));
+      lock.restore(store.lockHolds());
+      expect(lock.state().holder).toEqual({
+        runId: "A",
+        seatId: "s-A",
+        command: "pnpm -s test",
+        since: 5,
+      });
+      expect(store.lockHolds().map((r) => r.runId)).toEqual(["A", "A"]);
+      lock.release({ runId: "A", toolUseId: "a1" });
+      expect(lock.state().holder).not.toBeNull();
+      lock.release({ runId: "A", toolUseId: "a2" });
+      expect(lock.state().holder).toBeNull();
+    });
+  });
+
   it("grants a free lock and reports the holder", async () => {
     expect(lock.state()).toEqual({ holder: null, waiting: [] });
     expect(
