@@ -35,6 +35,7 @@ export const FLIGHT_DECISION_KINDS = [
   "rerun",
   "ruling",
   "sync",
+  "brief",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -86,6 +87,59 @@ export const briefNoItemText = (key: string): string =>
   `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
 export const BRIEF_ITEM_DESCRIPTION = `Brief one of the operator's Needs-you items (its key from your digest's items): two or three sentences of context (what it is, why it waits, since when), your recommendation, and two to four options when it is a choice. A new brief on a key replaces the old one. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
+
+/** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
+export const FLIGHT_BRIEF_SECTIONS = [
+  "goals",
+  "in_progress",
+  "coming_up",
+  "recently_done",
+  "project",
+  "crew",
+  "risks",
+  "operator",
+  "lessons",
+] as const;
+export type FlightBriefSectionKey = (typeof FLIGHT_BRIEF_SECTIONS)[number];
+export const FLIGHT_BRIEF_TITLES: Readonly<Record<FlightBriefSectionKey, string>> = {
+  goals: "Goals and priorities",
+  in_progress: "In progress",
+  coming_up: "Coming up",
+  recently_done: "Recently done",
+  project: "The project",
+  crew: "The crew",
+  risks: "Risks and watch items",
+  operator: "The operator",
+  lessons: "Lessons",
+};
+export const FLIGHT_BRIEF_SECTION_MAX = 4000;
+/** Over the section cap, so an over-long text gets briefTooLongText, not a bare argument error. */
+export const FLIGHT_BRIEF_INPUT_MAX = 20_000;
+export const FLIGHT_BRIEF_EDITS_PER_HOUR = 30;
+export interface FlightBriefSection {
+  section: FlightBriefSectionKey;
+  title: string;
+  text: string;
+  updatedAt: number | null;
+  updatedBy: string | null;
+}
+/** `GET /api/flight/brief`: the brief of FLIGHT's session (null when there is no watch seat). */
+export interface FlightBriefView {
+  session: string | null;
+  sections: FlightBriefSection[];
+}
+export const briefTooLongText = (title: string, n: number): string =>
+  `Not saved: the ${title} section would be ${n} characters; the most is ${FLIGHT_BRIEF_SECTION_MAX}. Shorten it: keep what is still true, drop what is done or wrong.`;
+export const briefSavedText = (title: string, n: number): string =>
+  `Saved the ${title} section of your brief (${n} of ${FLIGHT_BRIEF_SECTION_MAX} characters). Recorded in Decided without you.`;
+export const briefClearedText = (title: string): string =>
+  `Cleared the ${title} section of your brief. Recorded in Decided without you.`;
+export const briefAboutText = (title: string): string => `Brief: ${title}`;
+export const BRIEF_CLEARED_DECISION = "Cleared";
+/** A saved section in the decision log: its size, not its text (the brief itself holds that). */
+export const briefSavedDecision = (chars: number): string => `Saved (${chars} characters)`;
+export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, which comes back in every wake (brief in mc flight_state). Sections: ${FLIGHT_BRIEF_SECTIONS.join(", ")}. text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
+
 export const READ_OTHER_REPO =
   "Not read: you read only your session's repo, or the issue of an open loop escalation in another configured repo.";
 export const FLIGHT_NOTED = "Noted in Decided without you.";
@@ -505,6 +559,8 @@ export interface FlightState {
   }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
+  /** Your brief, all nine sections in order; `text` is "" for a section never written. */
+  brief: { section: FlightBriefSectionKey; title: string; text: string; ageMin: number | null }[];
 }
 
 export const FLIGHT_TICKETS_LISTED = 30;
