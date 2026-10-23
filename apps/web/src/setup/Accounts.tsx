@@ -19,6 +19,10 @@ const AUTO_APPROVE = [
   "Switching accounts",
 ];
 
+function newestReading(local?: CliAccountStatus, listed?: CliAccountStatus) {
+  return local && (!listed || local.checkedAt >= listed.checkedAt) ? local : listed;
+}
+
 /** Setup › Accounts (catalogue 2.7.3): machine CLI readings and config only. */
 export function Accounts({ config }: { config: ConfigView }) {
   const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
@@ -26,7 +30,13 @@ export function Accounts({ config }: { config: ConfigView }) {
   const [checks, setChecks] = useState<
     Record<
       string,
-      { reading?: CliAccountStatus; busy?: boolean; error?: string; unknown?: boolean }
+      {
+        reading?: CliAccountStatus;
+        busy?: boolean;
+        error?: string;
+        unknown?: boolean;
+        clearedListError?: Error | null;
+      }
     >
   >({});
   const [adding, setAdding] = useState(false);
@@ -35,7 +45,10 @@ export function Accounts({ config }: { config: ConfigView }) {
   const [name, setName] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   async function check(id: string) {
-    const previous = checks[id]?.reading ?? statuses.data?.find((s) => s.accountId === id);
+    const previous = newestReading(
+      checks[id]?.reading,
+      statuses.data?.find((s) => s.accountId === id),
+    );
     setChecks((all) => ({ ...all, [id]: { ...all[id], busy: true } }));
     try {
       const next = await apiPost<CliAccountStatus>(ACTIONS.checkAccount(id));
@@ -49,6 +62,7 @@ export function Accounts({ config }: { config: ConfigView }) {
         [id]: {
           reading: next.status === "unknown" && previous ? previous : next,
           unknown: next.status === "unknown",
+          clearedListError: next.status !== "unknown" ? statuses.error : undefined,
           error: next.status === "unknown" ? (next.detail ?? "CLI status unavailable") : undefined,
         },
       }));
@@ -167,10 +181,16 @@ export function Accounts({ config }: { config: ConfigView }) {
             <tbody>
               {config.accounts.map((a) => {
                 const checkState = checks[a.id];
-                const reading =
-                  checkState?.reading ?? statuses.data?.find((s) => s.accountId === a.id);
-                const stale = !!checkState?.error || !!statuses.error;
-                const status = checkState?.unknown ? "unknown" : reading?.status;
+                const reading = newestReading(
+                  checkState?.reading,
+                  statuses.data?.find((s) => s.accountId === a.id),
+                );
+                const local = !!checkState && reading === checkState.reading;
+                const checkError = local ? checkState?.error : undefined;
+                const stale =
+                  !!checkError ||
+                  (!!statuses.error && (!local || statuses.error !== checkState?.clearedListError));
+                const status = local && checkState?.unknown ? "unknown" : reading?.status;
                 return (
                   <tr key={a.id}>
                     <td>{a.id}</td>
@@ -206,9 +226,9 @@ export function Accounts({ config }: { config: ConfigView }) {
                           ? `${stale ? "Stale · last checked" : "Checked"} ${new Date(reading.checkedAt).toISOString()}`
                           : "Not checked"}
                       </div>
-                      {(checkState?.error || reading?.detail) && (
+                      {(checkError || reading?.detail) && (
                         <p role="status" className="warn-t s">
-                          {checkState?.error ?? reading?.detail}
+                          {checkError ?? reading?.detail}
                         </p>
                       )}
                     </td>

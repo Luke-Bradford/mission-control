@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CliAccountStatus } from "@mc/core";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it } from "vitest";
+import { hub, RESOURCES } from "../src/data.ts";
 import { Accounts } from "../src/setup/Accounts.tsx";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -180,4 +181,66 @@ it("announces a successful Check with the catalogue wording", async () => {
       "claude-main: signed in (checked with the provider's own status command).",
     ),
   ).toBeTruthy();
+});
+
+it("uses the newest checkedAt across Check and refreshed status lists", async () => {
+  let listed = reading;
+  load([], {
+    "/api/accounts/status": () => ({ status: 200, body: [listed] }),
+    "POST /api/accounts/claude-main/check": {
+      ...reading,
+      plan: "max",
+      checkedAt: reading.checkedAt + 60000,
+    },
+  });
+  render(<Accounts config={CONFIG} />);
+  await screen.findByText("team");
+  fireEvent.click(screen.getAllByRole("button", { name: "Check" })[0] as HTMLButtonElement);
+  await screen.findByText("max");
+  await act(async () => hub.refetchTopic("config"));
+  expect(screen.getByText("max")).toBeTruthy();
+  listed = {
+    ...reading,
+    checkedAt: reading.checkedAt + 120000,
+    plan: "pro",
+    identity: "New operator",
+    status: "not-logged-in",
+  };
+  await act(async () => hub.refetchAll());
+  expect(await screen.findByText("pro")).toBeTruthy();
+  expect(screen.getByText("New operator")).toBeTruthy();
+  expect(screen.getByText("Not signed in")).toBeTruthy();
+});
+
+it("makes a successful Check current despite a list error, preserving other accounts' stale readings", async () => {
+  let fail = false;
+  load([], {
+    "/api/accounts/status": () =>
+      fail
+        ? { status: 503, body: { error: "List unavailable" } }
+        : {
+            status: 200,
+            body: [reading, { ...reading, accountId: "codex-main", provider: "codex" }],
+          },
+    "POST /api/accounts/claude-main/check": {
+      ...reading,
+      plan: "max",
+      checkedAt: reading.checkedAt + 60000,
+    },
+  });
+  render(<Accounts config={CONFIG} />);
+  await screen.findAllByText("team");
+  fail = true;
+  await act(async () => hub.refetch(RESOURCES.accountStatus.path));
+  await screen.findByText(/Could not load account status: List unavailable/);
+  fireEvent.click(screen.getAllByRole("button", { name: "Check" })[0] as HTMLButtonElement);
+  await screen.findByText("max");
+  const claude = screen.getByText("claude-main").closest("tr") as HTMLTableRowElement;
+  const codex = screen.getByText("codex-main").closest("tr") as HTMLTableRowElement;
+  expect(within(claude).queryByText(/Stale/)).toBeNull();
+  expect(
+    within(claude).getByText(`Checked ${new Date(reading.checkedAt + 60000).toISOString()}`),
+  ).toBeTruthy();
+  expect(within(codex).getByText(/Stale · last checked/)).toBeTruthy();
+  expect(screen.getByRole("alert").textContent).toContain("List unavailable");
 });
