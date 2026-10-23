@@ -5,6 +5,7 @@ import {
   type PullRequestView,
   startOfLocalDay,
 } from "@mc/core";
+import { loopStepLabel } from "../crew.ts";
 import {
   cardAgent,
   cardColumn,
@@ -78,7 +79,8 @@ export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: stri
   const step = (i: BoardItem): string => {
     const a = cardAgent(i, ctx.crew);
     if (!a?.run) return "";
-    return `run #${a.run.seq}${held.has(a.hudState) ? ", held up" : ""}`;
+    const label = a.loop ? loopStepLabel(a.loop) : `run #${a.run.seq}`;
+    return `${label}${held.has(a.hudState) ? ", held up" : ""}`;
   };
   const blocked = column(items, "Blocked");
   const waiting = sortCards(items.filter((i) => mine(i) && !blocked.includes(i)));
@@ -124,9 +126,10 @@ export function weekly(
       (i) => `${outcome(i, ctx)} ${agoWords(daysAgo(i.updatedAt, now, tz, today))}`,
     ),
     section("Ready for QA", column(items, "Ready for QA"), ctx),
-    section("In review", column(items, "In review"), ctx, (i) =>
-      needsMe(i, ctx.attention, ctx.crew) ? "waiting on me" : "PR open",
-    ),
+    section("In review", column(items, "In review"), ctx, (i) => {
+      const you = cardYouWait(i, ctx.prs, ctx.crew, now);
+      return you ? `waiting for me to ${you.action}` : "PR open";
+    }),
     section("In progress", column(items, "In progress"), ctx),
     section("Blocked", column(items, "Blocked"), ctx, blockedBy),
     section("Coming up next", column(items, "Ready"), ctx, (i) => i.priority ?? ""),

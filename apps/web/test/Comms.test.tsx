@@ -1096,7 +1096,7 @@ describe("Needs you: row actions", () => {
   const live = { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true };
   const LOCK = {
     holder: { runId: "r-1", seatId: "guido-1", command: "pnpm -s test", since: NOW - 12 * MIN },
-    waiting: [{ runId: "r-2", seatId: "guido-2", since: NOW - MIN }],
+    waiting: [{ runId: "r-2", seatId: "guido-2", command: "pnpm -s test", since: NOW - MIN }],
   };
   const stall = (agentId: string) =>
     item({
