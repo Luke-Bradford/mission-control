@@ -314,7 +314,13 @@ export function flightState(i: {
     const card = board.find((b) => `${b.repoId}#${b.issueNumber}` === h.ref);
     // The stored board lags the move to Backlog until the next poll, so a card is only past its
     // hold once the board has shown it in Backlog.
-    if (card === undefined || card.closed || (h.seen && hudColumnOf(card) !== "Backlog")) {
+    // a card a run has taken is past its hold, wherever the board shows it
+    if (
+      card === undefined ||
+      card.closed ||
+      active.has(h.ref) ||
+      (h.seen && hudColumnOf(card) !== "Backlog")
+    ) {
       store.releaseHold(h.ref, now);
       return [];
     }

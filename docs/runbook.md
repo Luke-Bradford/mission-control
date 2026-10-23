@@ -713,7 +713,7 @@ run may use; the engine parks a run that goes over.
 that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
 not have moved the card itself). The hold is a row in the `holds` table (ref, the PR, basis, time,
 `released_at`), counts as a move under the hourly cap, and shows in FLIGHT's digest as
-`holds: [{ ref, waitsOn, ageMin, prState }]`. When the PR merges or closes, the watch wakes FLIGHT
+`holds: [{ ref, waitsOn, ageMin, prState, told }]` (`told` once FLIGHT has been woken for the PR's merge or close). When the PR merges or closes, the watch wakes FLIGHT
 (`n hold(s) to release`); a closed-unmerged PR leaves the hold in place for FLIGHT to decide. FLIGHT
 promotes the card to Ready again through `promote` with the usual checks, and that move releases the hold.
 

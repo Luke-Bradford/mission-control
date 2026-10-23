@@ -28,6 +28,7 @@ import {
   type TicketView,
   ticketHasRunText,
   twoAreasText,
+  WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
   wrongAreaText,
 } from "@mc/core";
@@ -1908,10 +1909,14 @@ describe("promote", () => {
     });
 
     it("refuses waits_on on a move that is not to Backlog, and a hold from Backlog", async () => {
-      expect((await call("promote", P({ waits_on: 246 }))).isError).toBe(true);
       board(backlog());
+      expect(await call("promote", P({ waits_on: 246 }))).toEqual(refused(WAITS_ON_ONLY_BACKLOG));
+      expect(await call("promote", P({ to: "Refinement", waits_on: 246 }))).toEqual(
+        refused(WAITS_ON_ONLY_BACKLOG),
+      );
       expect((await call("promote", H())).isError).toBe(true);
       expect(moveCalls).toEqual([]);
+      expect(store.activeHolds()).toEqual([]);
     });
 
     it("keeps a new hold while the stored board still shows the card in Ready", async () => {
@@ -1921,6 +1926,16 @@ describe("promote", () => {
       board(backlog());
       await call("flight_state", {});
       board(backlog({ status: "Ready" }));
+      await call("flight_state", {});
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("releases a hold whose card a run has taken, though the board never showed it in Backlog", async () => {
+      await call("promote", H());
+      board(backlog({ status: "Ready" }));
+      await call("flight_state", {});
+      expect(store.activeHolds()).toHaveLength(1);
+      live("guido-1", "r-guido", { ticket: "mc#7" });
       await call("flight_state", {});
       expect(store.activeHolds()).toEqual([]);
     });
