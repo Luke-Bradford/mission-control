@@ -19,11 +19,13 @@ import type { LiveSession } from "../src/collectors/sessions.ts";
 import {
   collectStudioLoop,
   fireLogStartedAt,
+  NO_SESSION_ERROR,
   newStudioState,
   parseDriverLog,
 } from "../src/collectors/studio-loop.ts";
 import type { AdoptedLoop } from "../src/config.ts";
 import { Store } from "../src/store.ts";
+import { PRINT_NOT_RUNNING, PRINT_RUNNING } from "./fixtures/launchctl.ts";
 
 const FIX = join(import.meta.dirname, "fixtures/studio");
 const TZ = "Europe/London";
@@ -627,13 +629,13 @@ describe("collectStudioLoop", () => {
   describe("launchd job", () => {
     const NOTE = "studio-loop:studio-builder:note";
     const noteRow = () => store.status().find((c) => c.collector === NOTE);
-    const runner = (code: number) => {
+    const runner = (code: number, stdout = code === 0 ? PRINT_RUNNING : "") => {
       const calls: string[][] = [];
       return {
         calls,
         run: async (args: string[]) => {
           calls.push(args);
-          return { code };
+          return { code, stdout };
         },
       };
     };
@@ -708,6 +710,115 @@ describe("collectStudioLoop", () => {
         false,
       );
       expect(noteRow()).toMatchObject({ ok: true, error: "launchd job missing: x" });
+    });
+
+    const COLLECTOR = "studio-loop:studio-builder";
+    const collectorRow = () => store.status().find((c) => c.collector === COLLECTOR);
+    const F43_ID = "studio-builder:20261017-124500";
+    const EXIT = "[2026-10-17T11:49:00Z] fire 43 exited 0\n";
+    const appendLog = (text: string) => appendFileSync(join(logsDir, "driver.log"), text);
+    const NOT_RUNNING_ERROR = "loop process not running (launchd job x has no process)";
+
+    it("no process: the open fire is unknown even with a session in the worktree", async () => {
+      const l = runner(0, PRINT_NOT_RUNNING);
+      await collectStudioLoop(loop, store, TZ, NOW, newStudioState(), live(), l.run);
+      expect(byId().get(F43_ID)?.status).toBe("unknown");
+      expect(collectorRow()).toMatchObject({ ok: false, error: NOT_RUNNING_ERROR });
+    });
+
+    it("a process and no session: the open fire is running", async () => {
+      await collectStudioLoop(loop, store, TZ, NOW, newStudioState(), [], runner(0).run);
+      expect(byId().get(F43_ID)?.status).toBe("running");
+      expect(collectorRow()?.ok).toBe(true);
+    });
+
+    const noProcess = () =>
+      collectStudioLoop(
+        loop,
+        store,
+        TZ,
+        NOW,
+        newStudioState(),
+        live(),
+        runner(0, PRINT_NOT_RUNNING).run,
+      );
+
+    it("between fires with no process and no STOP: driver not running", async () => {
+      appendLog(EXIT);
+      await noProcess();
+      expect(collectorRow()).toMatchObject({
+        ok: false,
+        error: "studio driver not running (no STOP logged)",
+      });
+      expect(noteRow()?.error ?? "").toBe("");
+    });
+
+    it("between fires with no process after a STOP: no error, the stop note shows", async () => {
+      appendLog(`${EXIT}[2026-10-17T11:49:30Z] STOP: nothing to do\n`);
+      await noProcess();
+      expect(collectorRow()).toMatchObject({ ok: true, error: null });
+      expect(noteRow()).toMatchObject({ ok: true, error: "stopped: nothing to do" });
+    });
+
+    it("a signal STOP also counts as a stop", async () => {
+      appendLog(`${EXIT}[2026-10-17T11:49:30Z] STOP: operator signal open\n`);
+      await noProcess();
+      expect(collectorRow()?.ok).toBe(true);
+      expect(byId().get(F43_ID)?.status).toBe("blocked");
+    });
+
+    it("between fires with a process: no error", async () => {
+      appendLog(EXIT);
+      await collectStudioLoop(loop, store, TZ, NOW, newStudioState(), live(), runner(0).run);
+      expect(collectorRow()?.ok).toBe(true);
+    });
+
+    it("unknown job: the session check decides", async () => {
+      const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        await collectStudioLoop(loop, store, TZ, NOW, newStudioState(), [], runner(1).run);
+        expect(byId().get(F43_ID)?.status).toBe("unknown");
+        expect(collectorRow()).toMatchObject({ ok: false, error: NO_SESSION_ERROR });
+        await collectStudioLoop(loop, store, TZ, NOW, newStudioState(), live(), async () => {
+          throw new Error("spawn launchctl ENOENT");
+        });
+        expect(byId().get(F43_ID)?.status).toBe("running");
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    it("nothing from launchctl's stdout reaches status, runs, settings or logs", async () => {
+      const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        const go = async (stdout: string, code = 0) =>
+          collectStudioLoop(
+            loop,
+            store,
+            TZ,
+            NOW,
+            newStudioState(),
+            live(),
+            runner(code, stdout).run,
+          );
+        await go(PRINT_RUNNING);
+        await go(PRINT_NOT_RUNNING);
+        appendLog(EXIT);
+        await go(PRINT_NOT_RUNNING);
+        await go(PRINT_RUNNING, 1);
+        await go("\tstate = leak-me\n");
+        const db = new DatabaseSync(join(dir, "mc.sqlite"));
+        const settings = JSON.stringify(db.prepare("SELECT key, value FROM settings").all());
+        db.close();
+        const logged = write.mock.calls.map((c) => String(c[0])).join("");
+        expect(JSON.stringify(store.status())).not.toContain("leak-me");
+        expect(JSON.stringify(store.runs("studio-builder", 100))).not.toContain("leak-me");
+        expect(settings).not.toContain("leak-me");
+        expect(logged).not.toContain("leak-me");
+        expect(logged).toContain("launchctl print gave no known state");
+      } finally {
+        write.mockRestore();
+      }
     });
 
     it("error: no launchd note, the error is logged, the fire stays running", async () => {

@@ -43,6 +43,7 @@ import {
   crewMcpConfig,
   crewPnpmStoreDir,
   DEFAULT_CREW_NODE,
+  DEFAULT_PROFILES,
   eligibleToStart,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
@@ -57,6 +58,9 @@ import {
   notReviewSeatText,
   notWatchSeatText,
   PNPM_STORE_ENV,
+  type Profile,
+  type ProfileOverride,
+  REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
   type RepoRules,
@@ -96,6 +100,7 @@ import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
   ACTIVE_SEAT_STATES,
@@ -115,6 +120,7 @@ import {
   prepareDetachedCheckout,
   preparePlanCheckout,
   prepareScratch,
+  type RepoPeer,
   removeCheckout,
   writeReviewInputs,
 } from "./checkouts.ts";
@@ -193,6 +199,14 @@ export function seatDenyRead(
   return [...new Set(paths.map(realish))];
 }
 
+/** The folders whose git repository a crew clone must not share: the hub's checkout and each loop's worktree. */
+export function clonePeers(config: CcConfig, hubRoot: string): RepoPeer[] {
+  return [
+    { label: "the hub's checkout", dir: hubRoot },
+    ...config.loops.map((l) => ({ label: `loop ${l.id} worktree`, dir: l.worktree })),
+  ];
+}
+
 /**
  * Writes one of a run's private files atomically: a temp name created at 0600 (never an existing
  * file), then renamed into place, so a reader never sees it partly written or more open.
@@ -235,6 +249,8 @@ export interface SupervisorDeps {
   rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** The hub's own `gh` login; null when it could not be read, so any assigned card is another's. */
   login: () => string | null;
+  /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
+  profiles?: () => readonly Profile[] | ProfilesError;
   now?: () => number;
   /** Default `"claude"`; tests pass `process.execPath` and the fake CLI in `commandArgs`. */
   command?: string;
@@ -347,11 +363,14 @@ export interface Supervisor {
   start(): void;
   /** Ends every process (runs stay active for the reattach) and releases the lock. */
   stopAll(): Promise<void>;
-  /** `opts.loop`: the run row is created with this loop state. */
+  /**
+   * `opts.loop`: the run row is created with this loop state. `opts.override`: the template
+   * profile to use instead of the routed one; it is stored for the ticket before the run starts.
+   */
   startRun(
     seatId: string,
     issue: number,
-    opts?: { loop: RunLoop },
+    opts?: { loop?: RunLoop; override?: ProfileOverride },
   ): Promise<{ runId: string; branch: string }>;
   /**
    * Starts the watch seat (FLIGHT): no ticket and no branch, a detached worktree of the default
@@ -926,7 +945,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const args = crewCliArgs({
         commands: info.repo.commands,
         protectedFiles: info.repo.protectedFiles,
-        model: info.seat.model,
+        model: run.reviewId != null && run.model !== null ? run.model : info.seat.model,
         effort: info.seat.effort,
         mode: def.mode,
         mcTools: def.mcTools,
@@ -1194,7 +1213,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     emit({ kind: "idle", seatId: row.seatId, runId: run.id, resumed: true });
   }
 
-  async function startRun(seatId: string, issue: number, opts?: { loop: RunLoop }) {
+  async function startRun(
+    seatId: string,
+    issue: number,
+    opts?: { loop?: RunLoop; override?: ProfileOverride },
+  ) {
     const info = need(seatId);
     refuseWhileHeld();
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
@@ -1237,7 +1260,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (card === undefined) throw new SupervisorError(422, notOnBoardText(ref));
       const rules = await deps.rules(info.repo.id);
       if (rules instanceof RepoRulesError) throw new SupervisorError(502, START_NO_RULES);
+      const profiles = deps.profiles?.() ?? DEFAULT_PROFILES;
+      const chosen = chooseRunProfile(
+        profiles,
+        ticket.labels,
+        card.size,
+        opts?.override ?? store.profileOverride(info.repo.id, issue),
+      );
+      if ("refusal" in chosen) {
+        throw new SupervisorError(profiles instanceof Error ? 502 : 422, chosen.refusal);
+      }
       const refusal = eligibleToStart({
+        planRequired: chosen.profile.planRequired,
         repoId: info.repo.id,
         issue,
         card: {
@@ -1245,6 +1279,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           assignees: card.assignees ?? [],
           blockedBy: card.blockedBy,
           size: card.size,
+          status: card.status,
+          state: card.state,
+          closed: card.closed,
         },
         rules,
         seat: { call: call(info), area: info.seat.area, loop: def.loop },
@@ -1272,6 +1309,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           sessionId: info.session.id,
           seatId,
           issue,
+          peers: clonePeers(deps.config, deps.hubRoot),
         };
         const c = planner
           ? await preparePlanCheckout(where)
@@ -1321,8 +1359,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         transcriptPath: crewTranscriptPath(deps.dbPath, runId),
         prs: [],
         summary: null,
-        ...(opts ? { loop: opts.loop } : {}),
+        ...(opts?.loop ? { loop: opts.loop } : {}),
+        profile: { ...chosen, hash: profileHash(chosen.profile) },
       };
+      if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
       let l: Live;
       try {
@@ -1370,6 +1410,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? (info.repo.commands?.writer ?? [])
             : (info.repo.commands?.review ?? []),
         fullSuite: info.repo.fullSuite ?? [],
+        ...(run.profile ? { profile: run.profile } : {}),
+        ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       if (!session.alive) {
@@ -1404,6 +1446,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           worktreesRoot: crew?.worktrees ?? "",
           sessionId: info.session.id,
           name: watchCheckoutName(seatId),
+          peers: clonePeers(deps.config, deps.hubRoot),
         });
         return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
       });
@@ -1545,6 +1588,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           seatId,
           reviewId,
           sha: review.sha,
+          peers: clonePeers(deps.config, deps.hubRoot),
         });
         try {
           return {
@@ -1579,7 +1623,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         endedAt: null,
         status: "running",
         sessionId: cliSessionId,
-        model: info.seat.model,
+        model:
+          author.profile?.profile.reviewer.depth === "full" ? REVIEW_FULL_MODEL : info.seat.model,
         ...on,
         branch: null,
         ticket: author.ticket,

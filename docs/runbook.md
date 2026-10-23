@@ -95,6 +95,33 @@ The config is rejected at start-up if an id repeats within `accounts`, `repos` o
 two accounts share a vendor: the usage readers use this Mac's single Claude login (Keychain
 OAuth) and single Codex login, so a second account would report the first one's usage.
 
+## Template profiles
+
+A profile is one template (feature, bugfix, small-change, research, review) kept in your user config, not in the repo. Each sets the steps shown, a checklist that goes into the brief, whether a plan is required at Size M or larger, the reviewer role and depth, the CI checks to name, and the CI try and review round limits. With no `profiles.yaml` the five built-ins apply. A file replaces them whole (no merge), and must keep profiles named `small-change` and `feature`, the Size fallbacks.
+
+```yaml
+profiles:
+  - name: small-change          # lowercase, up to 32 letters, digits and -
+    labels: [chore, test, docs] # card labels that pick it; the first profile in file order wins
+    steps:                      # shown on the run; phase ties a step to working, ci or review
+      - { name: implement, phase: working }
+      - { name: verify, phase: ci }
+      - { name: review, phase: review }
+    checklist: |                # briefed as "Before you report, check:" (at most 4000 characters)
+      - Only the paths this ticket type allows changed
+    plan_required: false
+    reviewer: { role: RETRO, depth: light }   # full runs the review on opus
+    checks: []                  # CI checks named in the brief
+    tries: 2                    # CI failures before the run parks (1 to 10)
+    rounds: 2                   # blocking reviews before the run parks (1 to 10)
+```
+
+- **Routing.** The first profile with a label the ticket has wins. With none, Size XS or S takes `small-change`; anything else, or no Size, takes `feature`. FLIGHT (`start_seat`) and the planner (`report_plan`) may name another profile with `profile` and `profile_reason`; the choice is kept per ticket with its reason, and the profile keeps every check the routed one required.
+- **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
+- **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
+- **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.
+- **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
+
 ## Moving from Control Centre
 
 The project was renamed Mission Control on 2026-10-18. An install made under the old name moves
@@ -121,6 +148,7 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 |---|---|
 | Config | `~/.config/mission-control/config.yaml` (override with `MC_CONFIG`) |
 | Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every write the server makes to `config.yaml` (a repo added from Setup › Repos, or a session's seats replaced), the newest 10 kept, mode 0600 |
+| Template profiles | `profiles.yaml` beside `config.yaml` (optional; you create it, the hub never writes it); see [Template profiles](#template-profiles) |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
 | Update log | `update.log` beside the database: the last update's commands and output, mode 0600 |
@@ -707,7 +735,11 @@ defaulted. `pick_from: []` and an area with no globs are refused, and an area gl
 repo-relative with `**` only as a trailing `/**`. Nothing uses the rules yet (the build loop will,
 and a refused block stops new tickets for that repo). This repo's own block is at the end of its
 `CLAUDE.md`. `crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
-run may use; the engine parks a run that goes over.
+run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
+its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
+the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+`crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
+hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
 **FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
 that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
@@ -724,15 +756,23 @@ ever. Mission Control checks:
 
 - **TA:** the `status.md` IN FLIGHT iteration is `running` only while its `pid` (the
   `ta_loop.sh` process) is alive (`kill -0`).
-- **Studio:** the latest fire with no `exited` line is `running` only while a live Claude
-  session in `~/.claude/sessions/` has the loop's `worktree` as its cwd. The sessions collector's
-  15 s read is reused, and a fire younger than 60 s is given grace while its CLI registers.
+- **Studio:** liveness comes from the loop's launchd job, read with `launchctl print`. The latest
+  fire with no `exited` line is `running` while the job has a process (`state = running`). With
+  the job loaded but no process it is `unknown` and the collector reports
+  `loop process not running (launchd job <label> has no process)`, even with a Claude session
+  open in the worktree. Only when launchctl's answer cannot be read does the old check apply: a
+  live Claude session in `~/.claude/sessions/` with the loop's `worktree` as its cwd (the
+  sessions collector's 15 s read, with 60 s of grace for a young fire), else
+  `loop process not running (no live Claude session in its worktree)`. Between fires a job with no
+  process is normal after a `STOP:` line in `driver.log`; with no `STOP:` since the last fire the
+  collector reports `studio driver not running (no STOP logged)`. Only the `state` and `pid` lines
+  of the `launchctl print` output are read; the rest (which can hold the job's environment) is
+  discarded.
 
 Otherwise the run is shown as `unknown` and the loop's collector reports
-`loop process not running (pid N)` (TA) or
-`loop process not running (no live Claude session in its worktree)` (studio), so the card shows
-an error. If the session registry cannot be read, the studio check is skipped (the `sessions`
-row in health says why). A driver that dies *between* fires is not detected yet.
+`loop process not running (pid N)` (TA) or one of the studio errors above, so the card shows
+an error. If the session registry cannot be read, the session check is skipped (the `sessions`
+row in health says why).
 
 ### Staleness
 
