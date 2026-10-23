@@ -59,6 +59,7 @@ import {
   WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
   wrongAreaText,
+  wrongColumnText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
@@ -1113,6 +1114,14 @@ describe("start_seat", () => {
         refused(wrongAreaText("INCO-1", "mc#7", ["area:server"])),
       );
       expect(startCalls).toEqual([]);
+    });
+
+    // start_seat's column check names Done first, so a closed card never reaches the rule's text
+    it("0: a closed card, or one in Done", async () => {
+      board(sc(7, { labels: ["area:server"], closed: true }));
+      await nothingStarted(wrongColumnText("mc#7", "Done"));
+      board(sc(7, { labels: ["area:server"], status: "Done", state: "done" }));
+      await nothingStarted(wrongColumnText("mc#7", "Done"));
     });
 
     it("5: a ticket with a run", async () => {

@@ -408,6 +408,12 @@ describe("refillQueues", () => {
     expect(issues(SERVER)).toEqual([6]);
   });
 
+  it("deals no closed card left in Ready", async () => {
+    store.replaceBoard(REPO, [card(1, { closed: true, status: "Ready", state: "planned" })]);
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+  });
+
   it("queues no card with two area labels, and raises one question, cleared when it is relabelled", async () => {
     store.replaceBoard(REPO, [card(1, { labels: ["area:server", "area:web"] })]);
     await refill();

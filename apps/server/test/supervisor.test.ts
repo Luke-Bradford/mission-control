@@ -48,6 +48,7 @@ import {
   reworkFirstText,
   START_NO_RULES,
   seatBusyText,
+  startClosedText,
   startMissingNeedsText,
   startNeedsPlanText,
   type TicketView,
@@ -516,6 +517,16 @@ describe("startRun eligibility", () => {
     expect(worktrees()).toEqual([]);
     expect(claim).not.toHaveBeenCalled();
   }
+
+  it("0: refuses a closed card", async () => {
+    onBoard(boardCard(42, { closed: true }));
+    await refused(422, startClosedText("mc#42"));
+  });
+
+  it("0: refuses a card in Done", async () => {
+    onBoard(boardCard(42, { status: "Done", state: "done" }));
+    await refused(422, startClosedText("mc#42"));
+  });
 
   it("1: refuses another lane", async () => {
     const { sup, cfg } = make({
@@ -1477,6 +1488,20 @@ describe("startRun", () => {
     expect(existsSync(join(root, "mc-crew", "guido-1-9999"))).toBe(false);
   });
 
+  it("answers 502 when GitHub cannot be read, with no run and no worktree", async () => {
+    const { sup } = make({
+      fetchTicket: async () => {
+        throw new Error("rate limited");
+      },
+    });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(e.message).toBe("could not read o/mc#42 from GitHub");
+    expect(store.runs("guido-1", 1)).toEqual([]);
+    expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(false);
+  });
+
   it("queues two starts on one clone, so their fetches never race", async () => {
     const { sup } = make();
     sup.start();
@@ -2300,6 +2325,44 @@ describe("reattach after a restart", () => {
     expect(after).toContain("echo: carry on");
     await sup.endRun("guido-1");
     expect(store.run(runId)?.status).toBe("ok");
+  });
+
+  it("resumes the next run when resuming the first fails", async () => {
+    const first = make();
+    first.sup.start();
+    const a = await first.sup.startRun("guido-1", 42);
+    const b = await first.sup.startRun("retro", 43);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    expect(starts()).toHaveLength(2);
+    rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+    const { sup } = make();
+    sup.start();
+    await until(() => expect(store.seatSession("retro")?.reason).toBe(RESUMED));
+    expect(store.seatSession("guido-1")).toMatchObject({
+      state: "error",
+      reason: "could not resume: checkout missing",
+    });
+    expect(store.run(a.runId)?.status).toBe("failed");
+    expect(store.run(b.runId)).toMatchObject({ status: "running", endedAt: null });
+    await until(() => expect(starts()).toHaveLength(3));
+    expect(starts()[2].cwd).toBe(join(root, "mc-crew", "retro-43"));
+  });
+
+  it("resumes both of two active runs left by a stopped hub", async () => {
+    const first = make();
+    first.sup.start();
+    await first.sup.startRun("guido-1", 42);
+    await first.sup.startRun("retro", 43);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    const { sup } = make();
+    sup.start();
+    await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
+    await until(() => expect(store.seatSession("retro")?.reason).toBe(RESUMED));
+    await until(() => expect(starts()).toHaveLength(4));
   });
 
   it("marks a seat removed from config in error and its run failed", async () => {
@@ -3400,6 +3463,19 @@ describe("supervisor events (Plan 7a)", () => {
       // a later Stop has no run to end and emits nothing
       await refusal(sup.endRun("guido-1"));
       expect(snaps).toHaveLength(1);
+    });
+
+    it("stopAll stops a resume waiting in its checkout check: no CLI, the run stays active", async () => {
+      const runId = await leftActive();
+      const { sup } = make();
+      const release = holdResume();
+      sup.start();
+      await sup.stopAll();
+      release();
+      await settle();
+      expect(launches()).toBe(1); // the first supervisor's only
+      expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+      expect(store.activeSeatSessions().map((r) => r.seatId)).toContain("guido-1");
     });
 
     it("Stop's end stops the resume too", async () => {

@@ -308,6 +308,60 @@ describe("prepareCheckout", () => {
     expect(hasBranch(BRANCH)).toBe(false);
   });
 
+  it("removes the worktree and the local branch made from origin's when the install fails", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": "garbage: [\n" });
+    git(seed, "push", "-q", "origin", "main");
+    git(seed, "checkout", "-q", "-b", BRANCH);
+    commit(seed, { "work.txt": "w\n" });
+    git(seed, "push", "-q", "origin", BRANCH);
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("install");
+    expect(existsSync(wtPath())).toBe(false);
+    expect(worktrees()).toHaveLength(1);
+    expect(hasBranch(BRANCH)).toBe(false);
+  });
+
+  it("refuses a branch only origin has that changes pnpm-lock.yaml, and leaves no branch", async () => {
+    commit(seed, { "package.json": PKG });
+    git(seed, "push", "-q", "origin", "main");
+    git(seed, "checkout", "-q", "-b", BRANCH);
+    commit(seed, { "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", BRANCH);
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("protected");
+    expect(e.message).toBe(
+      `branch ${BRANCH} changes pnpm-lock.yaml; Mission Control won't install from it`,
+    );
+    expect(existsSync(wtPath())).toBe(false);
+    expect(worktrees()).toHaveLength(1);
+    expect(hasBranch(BRANCH)).toBe(false);
+  });
+
+  it("keeps a branch that moved after the start made it, when the install fails", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    git(clone, "pull", "-q", "--ff-only");
+    const moved = commit(clone, { "moved.txt": "m\n" });
+    git(clone, "reset", "-q", "--hard", "HEAD~1");
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "pnpm"),
+      `#!/bin/sh\ngit -C '${clone}' update-ref refs/heads/${BRANCH} ${moved}\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${bin}:${savedPath}`;
+    try {
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("install");
+    } finally {
+      process.env.PATH = savedPath;
+    }
+    expect(existsSync(wtPath())).toBe(false);
+    expect(git(clone, "rev-parse", `refs/heads/${BRANCH}`)).toBe(moved);
+  });
+
   it("installs with clone-or-copy, never hardlinks into the shared store", () => {
     expect(INSTALL_ARGS).toEqual([
       "install",
