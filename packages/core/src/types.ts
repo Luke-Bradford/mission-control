@@ -147,6 +147,8 @@ export interface LoopEvent {
 
 /** One try at a step of a looped run, oldest first. */
 export interface LoopTry {
+  /** Measured input + output tokens; null when usage was not recorded. */
+  tokens?: number | null;
   step: Exclude<LoopPhase, "parked">;
   /** Rework after a review's blocking findings; shown as "fix" on the review step. */
   fix: boolean;
@@ -381,12 +383,22 @@ export interface SubagentInfo {
   durationMs: number | null;
 }
 
+/** One item in the agent's own task list, replayed from its stream. */
+export interface LiveTask {
+  id: string;
+  text: string;
+  status: "done" | "in_progress" | "pending";
+}
+
 /**
  * Per-run facts folded from the transcript, stored apart from the run row. Usage-derived numbers
  * count each message id once. Top-level frames only: toolCalls, turns, contextTokens, liveTool,
  * turnUsage.
  */
 export interface RunDigest {
+  tasks?: LiveTask[];
+  /** Timestamped message usage, retained for attempt attribution (not run totals). */
+  attemptUsage?: { id: string; at: number | null; tokens: number }[];
   toolCalls: number;
   turns: number;
   /** Newest timestamp on any frame, subagents included. */
@@ -429,9 +441,10 @@ export interface RunDigest {
   /**
    * Reply speed over the top-level messages whose ask and last frame are both known: output tokens
    * per second, and the mean ask-to-last-frame time; null when there are none. Absent on a digest
-   * stored before it existed.
+   * stored before it existed. `firstTokenMs` is mean request-to-first-content latency,
+   * measured only when both timestamps exist.
    */
-  speed?: { tokensPerSec: number | null; turnMs: number | null };
+  speed?: { tokensPerSec: number | null; turnMs: number | null; firstTokenMs?: number | null };
 }
 
 export type StreamKind = "op" | "msg" | "think" | "tool" | "sys";
@@ -463,6 +476,7 @@ export interface CommsThreadMessage {
 
 /** `GET /api/agents/:id/stream`: the latest run's events, oldest first. */
 export interface AgentStream {
+  tasks?: LiveTask[];
   runId: string | null;
   events: StreamEvent[];
   /** The scan stopped at its byte cap before reaching `limit` events. */
@@ -484,6 +498,8 @@ export interface ChangedFiles {
     add: number | null;
     del: number | null;
     state: "committed" | "uncommitted" | "untracked";
+    /** Latest branch commit affecting this file; null for uncommitted/untracked files. */
+    commitSha?: string | null;
   }[];
   /** Why the list is partial (no `origin/HEAD`, a part git could not read, the cap), else null. */
   note: string | null;
@@ -665,6 +681,8 @@ export interface CrewAsideRun {
 
 /** One `/api/crew` row: a configured loop as the HUD shows it. */
 export interface CrewRow {
+  focus?: string | null;
+  displayCallSign?: string | null;
   id: AgentId;
   repoId: RepoId;
   /** Position in config order (the agent's colour). */

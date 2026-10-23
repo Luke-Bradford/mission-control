@@ -810,6 +810,17 @@ describe("Store", () => {
       ["b", null],
     ]);
   });
+  it("persists task identities, measured zero and first-content timing", () => {
+    const recorded = digest({
+      tasks: [{ id: "1", text: "Verify changes", status: "done" }],
+      attemptUsage: [{ id: "m", at: 1000, tokens: 0 }],
+      speed: { tokensPerSec: null, turnMs: 4000, firstTokenMs: 1000 },
+    });
+    store.setDigest("measured", recorded);
+    expect(store.digest("measured")).toEqual(recorded);
+    expect(store.digests(["measured"]).get("measured")).toEqual(recorded);
+  });
+
   it("round-trips run digests apart from the run rows", () => {
     store.upsertRun(run());
     store.upsertRun(run({ id: "r2" }));
