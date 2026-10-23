@@ -14,7 +14,7 @@ import { errorNote } from "../api.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { LOOP_PHASE_LABEL } from "../crew.ts";
-import { RESOURCES, type Resource, useResource, useResources } from "../data.ts";
+import { RESOURCES, type Resource, RUNS_LIMIT, useResource, useResources } from "../data.ts";
 import { dur, kTokens } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
@@ -122,10 +122,13 @@ function Queue({ row }: { row: CrewRow }) {
         })
       )}
       <p className="note xs">
-        Each ticket starts as a fresh run on its own branch. Earlier tickets' conversations aren't
-        carried over.
+        Each ticket starts as a fresh run on its own branch, with the ticket, the repo's docs and
+        this lane's notes. Earlier tickets' conversations aren't carried over.
       </p>
-      <div className="qsec">Done</div>
+      <div className="qsec">
+        Done
+        {runs.data?.length === RUNS_LIMIT && <span className="muted"> · latest {RUNS_LIMIT}</span>}
+      </div>
       {runs.error && !runs.data ? (
         <p className="s crit-t">Could not load finished tickets: {runs.error.message}</p>
       ) : !runs.data ? (
