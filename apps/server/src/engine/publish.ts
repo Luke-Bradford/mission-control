@@ -672,8 +672,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const rerun = await deps.gh(["run", "rerun", `--repo=${repo}`, String(r.id), "--failed"], {
           cwd: cwd(),
         });
-        // a run already re-run is in `done`, and the caller keeps it: a partial failure is a refusal
-        if (rerun.code !== 0) return ghFailed("run rerun", rerun.stderr);
+        // the runs already re-run are returned, so the caller records the re-run and never repeats
+        // it; a failure before any run was re-run is a refusal
+        if (rerun.code !== 0) {
+          return done.length > 0 ? { ok: true, runs: done } : ghFailed("run rerun", rerun.stderr);
+        }
         done.push({ id: r.id, attempt: r.attempt });
       }
       return { ok: true, runs: done };
@@ -689,7 +692,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (runs.some((r) => r.attempt <= r.was || r.status !== "completed")) {
         return { ok: true, outcome: "pending" };
       }
-      const failed = runs.some((r) => !NOT_FAILED_CONCLUSIONS.includes(r.conclusion));
+      // a failed run that was not re-run (its re-run was refused) means CI still fails
+      const failed =
+        runs.some((r) => !NOT_FAILED_CONCLUSIONS.includes(r.conclusion)) ||
+        listed.some(
+          (r) =>
+            !saved.some((s) => s.id === r.id) &&
+            (r.conclusion === "failure" || r.conclusion === "timed_out"),
+        );
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
 

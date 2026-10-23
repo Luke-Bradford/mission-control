@@ -543,6 +543,39 @@ describe("rerunRuling and rerunState", () => {
     ]);
   });
 
+  it("returns the runs already re-run when a later rerun fails, so the caller records them", async () => {
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "failure", attempt: 1 },
+        { databaseId: 13, conclusion: "failure", attempt: 1 },
+      ),
+      () => ({ code: 0, stdout: "" }),
+      () => ({ code: 1, stdout: "", stderr: "boom" }),
+    ];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toEqual({
+      ok: true,
+      runs: [{ id: 11, attempt: 1 }],
+    });
+    // a first rerun that fails is still a refusal
+    ghAnswers = [
+      runs({ databaseId: 11, conclusion: "failure", attempt: 1 }),
+      () => ({ code: 1, stdout: "", stderr: "boom" }),
+    ];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toMatchObject({ ok: false });
+  });
+
+  it("is failed when a failed run was not re-run, though the re-run runs passed", async () => {
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "success", attempt: 2, status: "completed" },
+        { databaseId: 13, conclusion: "failure", attempt: 1, status: "completed" },
+      ),
+    ];
+    expect(await createPublisher(deps()).rerunState("o/mc", SHA, [{ id: 11, attempt: 1 }])).toEqual(
+      { ok: true, outcome: "failed" },
+    );
+  });
+
   it("refuses when no run failed, and when gh cannot list", async () => {
     ghAnswers = [runs({ databaseId: 12, conclusion: "success", attempt: 1 })];
     expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toMatchObject({
