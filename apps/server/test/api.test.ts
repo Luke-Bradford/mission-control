@@ -489,6 +489,7 @@ const API_ROUTES: [string, string, object?][] = [
     { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "t1", tool_input: {} },
   ],
   ["GET", "/api/test-lock"],
+  ["GET", "/api/test-lock/history"],
   ["GET", "/api/guard/hits?days=7"],
 ];
 
@@ -4059,5 +4060,41 @@ describe("the first loop's engine", () => {
       review: null,
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
+  });
+});
+
+describe("test lock history", () => {
+  it("returns seven days newest first, local today waits and medians after three done holds", async () => {
+    const midnight = Date.parse("2026-10-16T23:00:00Z");
+    const add = (id: string, started: number, command: string, length: number, freed = false) => {
+      store.addLockHold({
+        runId: id,
+        seatId: "guido-1",
+        toolUseId: "call",
+        command,
+        since: started,
+        queuedAt: started - 1000,
+      });
+      if (freed) store.deleteLockHolds(id, started + length);
+      else store.deleteLockHold(id, "call", started + length);
+    };
+    add("old", NOW - 7.5 * 86400000, "test", 100);
+    add("yesterday", midnight - 1, "test", 100);
+    add("one", midnight, "test", 200);
+    add("two", midnight + 1, "test", 900);
+    add("free", midnight + 2, "test", 500, true);
+    add("rare", midnight + 3, "rare", 500);
+    const response = await get("/api/test-lock/history");
+    expect(response.statusCode).toBe(200);
+    const h = response.json();
+    expect(h.runs.map((r: { runId: string }) => r.runId)).toEqual([
+      "rare",
+      "free",
+      "two",
+      "one",
+      "yesterday",
+    ]);
+    expect(h.today).toEqual({ runs: 4, waitMs: 4000 });
+    expect(h.usualMs).toEqual({ test: 200 });
   });
 });
