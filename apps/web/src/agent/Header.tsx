@@ -18,8 +18,11 @@ const popOut = (id: string): void => {
   window.open(`${agentPath(id)}?popout=1`, `mc-agent-${id}`, "popup,width=1200,height=820");
 };
 
-/** Interrupt and End the run for a crew seat with a live session. */
-export function SeatControls({ row }: { row: CrewRow }) {
+/**
+ * Interrupt and End the run for a crew seat with a live session. `interrupt` false leaves Interrupt
+ * out, where the row's need line already carries one.
+ */
+export function SeatControls({ row, interrupt = true }: { row: CrewRow; interrupt?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const turn = seatTurn(row);
@@ -41,7 +44,7 @@ export function SeatControls({ row }: { row: CrewRow }) {
           {error}
         </span>
       )}
-      {turn === "running" && (
+      {interrupt && turn === "running" && (
         <button
           type="button"
           className={row.hudState === "stalled" ? "sm warn" : "sm"}

@@ -343,8 +343,11 @@ export function contextPct(row: CrewRow): number | null {
 
 export interface NeedPart {
   text: string;
-  /** The button the line carries: Answer or Open (both open the Item panel), or none. */
-  action: "answer" | "open" | null;
+  /**
+   * The button the line carries: Answer or Open (both open the Item panel), Interrupt or Stop the
+   * run (both stop the seat's turn), or none.
+   */
+  action: "answer" | "open" | "interrupt" | "stop" | null;
   key: string;
 }
 
@@ -352,16 +355,28 @@ const ASKS = ["decision", "approval", "question"] as const;
 
 /**
  * The need line under an agent row (catalogue 2.1.2, the parts that exist): its stall (age from
- * the item's `at`), a parked escalation, asks for an answer, and the loop's own error.
+ * the item's `at`; a crew seat's carries Interrupt, or Stop the run while it holds the test lock),
+ * a parked escalation, asks for an answer, and the loop's own error.
  */
-export function needLine(row: CrewRow, items: AttentionItem[], now: number): NeedPart[] {
+export function needLine(
+  row: CrewRow,
+  items: AttentionItem[],
+  now: number,
+  lock?: TestLockState,
+): NeedPart[] {
   const mine = seatItems(row, items);
   const parts: NeedPart[] = [];
   const stall = mine.find((i) => i.kind === "stalled");
   if (stall) {
+    const age = mss(now - stall.at);
+    const holding = lock?.holder?.seatId === row.id;
+    const waiting = new Set((lock?.waiting ?? []).map((w) => w.seatId)).size;
     parts.push({
-      text: `Stalled ${mss(now - stall.at)}${stall.tool ? ` in ${stall.tool}` : ""}`,
-      action: null,
+      text: holding
+        ? `Stalled ${age} and holding the test lock${waiting > 0 ? `; ${waiting} waiting` : ""}`
+        : `Stalled ${age}${stall.tool ? ` in ${stall.tool}` : ""}`,
+      // an observed loop is not ours to stop
+      action: row.kind !== "crew" ? null : holding ? "stop" : "interrupt",
       key: stall.key,
     });
   }

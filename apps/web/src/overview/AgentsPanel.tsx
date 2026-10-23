@@ -1,9 +1,9 @@
 import type { AttentionItem, ConfigView, Crew, LimitRow, TestLockState } from "@mc/core";
-import type { MouseEvent } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
+import { NeedButton } from "../components/NeedButton.tsx";
 import {
   callSign,
   contextPct,
@@ -14,6 +14,7 @@ import {
   isSeatFree,
   lockSince,
   modelLine,
+  type NeedPart,
   NO_LOOP,
   needLine,
   needsLamp,
@@ -39,7 +40,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Sparkline } from "../hud/Sparkline.tsx";
 import { agentPath, followLink, navigate } from "../router.ts";
-import { openItem, toggleDock } from "../shell/overlays.ts";
+import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { inSession, useSession } from "../shell/session.ts";
 import { LoopStep } from "./LoopStep.tsx";
@@ -128,6 +129,9 @@ function FlightRow({
   );
 }
 
+/** A need part whose button stops the seat's turn, so the row needs no second Interrupt. */
+const stopsTheTurn = (p: NeedPart): boolean => p.action === "interrupt" || p.action === "stop";
+
 function AgentRow({
   row,
   items,
@@ -151,7 +155,7 @@ function AgentRow({
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const roleTitle = seatRoleTitle(row.id, crew?.rows, config?.crew?.roles);
   const doing = doingLine(row, now, tz, repoPrs);
-  const parts = needLine(row, items, now);
+  const parts = needLine(row, items, now, lock);
   const lamp = needsLamp(mine, true);
   const running = row.hudState === "running";
   const go = () => navigate(agentPath(row.id));
@@ -164,10 +168,6 @@ function AgentRow({
     row.run?.costUsd == null ? null : cost(row.run.costUsd),
   ].filter((x) => x !== null);
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
-  const click = (fn: () => void) => (e: MouseEvent) => {
-    e.stopPropagation();
-    fn();
-  };
 
   const to = agentPath(row.id);
   return (
@@ -258,25 +258,14 @@ function AgentRow({
                 mine.some((m) => m.key === p.key && m.kind === "stalled") && (
                   <span className="xs muted"> observed loop</span>
                 )}
-              {p.action !== null && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    className={p.action === "answer" ? "sm primary" : "sm"}
-                    onClick={click(() => openItem(p.key))}
-                  >
-                    {p.action === "answer" ? "Answer" : "Open"}
-                  </button>
-                </>
-              )}
+              <NeedButton part={p} row={row} />
             </span>
           ))}
           {row.kind === "crew" && (
             // biome-ignore lint/a11y/useKeyWithClickEvents: the buttons inside are the keyboard route
             // biome-ignore lint/a11y/noStaticElementInteractions: a click on them must not open the Agent page
             <span className="needctl" onClick={(e) => e.stopPropagation()}>
-              <SeatControls row={row} />
+              <SeatControls row={row} interrupt={!parts.some(stopsTheTurn)} />
             </span>
           )}
         </div>
