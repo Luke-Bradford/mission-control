@@ -1,16 +1,18 @@
-import { ENGINE_NOT_RUNNING, type Telemetry } from "@mc/core";
+import type { Telemetry } from "@mc/core";
 import { cost, kTokens } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
-import { DASH, indexOf, type Scope } from "./common.ts";
+import { DASH, indexOf, NOT_TRACKED, type Scope } from "./common.ts";
 
 const TICKET_ROWS = 8;
 
-/** Cost (catalogue 2.6.6): tokens by ticket, totals; loop steps wait for the engine. */
+/** Cost (catalogue 2.6.6): tokens by ticket, totals and loop steps. */
 export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const tickets = (t?.tokensByTicket ?? []).slice(0, TICKET_ROWS);
+  const steps = t?.tokensByStep;
+  const mostStep = Math.max(1, ...(steps?.map((r) => r.tokens) ?? []));
   const most = Math.max(1, ...tickets.map((r) => r.tokens));
   const inView = new Set(scope.agents.map((a) => a.id));
   const totals = (t?.totals ?? []).filter(
@@ -40,7 +42,23 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
         )}
       </Panel>
       <Panel id="tStepBars" title="Tokens by loop step" sub="repeats cost more">
-        <p className="pb note">{ENGINE_NOT_RUNNING}</p>
+        {!t ? (
+          <p className="pb s muted">{scope.wait}</p>
+        ) : steps === undefined ? (
+          <p className="pb s muted">{NOT_TRACKED}</p>
+        ) : (
+          <div className="pb">
+            {steps.map((r) => (
+              <HBar
+                key={r.step}
+                label={r.step}
+                pct={(r.tokens / mostStep) * 100}
+                value={kTokens(r.tokens)}
+                extra={`${cost(r.costUsd)} · ${r.runs} runs`}
+              />
+            ))}
+          </div>
+        )}
       </Panel>
       {/* Decision: no Lines column; lines changed per run arrive with the engine's commits. */}
       <Panel id="tTotals" title="Totals" sub="selected range" className="wide">

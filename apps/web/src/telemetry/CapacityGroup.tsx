@@ -1,16 +1,55 @@
-import { ENGINE_NOT_RUNNING, TELEMETRY_RANGES, type Telemetry } from "@mc/core";
-import { useNow } from "../clock.ts";
-import { agentColor } from "../hud/AgentTag.tsx";
+import {
+  type CrewRow,
+  LOCK_OUTCOME_TEXT,
+  seatCallSign,
+  startOfLocalDay,
+  TELEMETRY_RANGES,
+  type Telemetry,
+  type TestLockHistory,
+  type TestLockRun,
+} from "@mc/core";
+import { useSecond, useTz } from "../clock.ts";
+import { useTestLock } from "../components/LockLines.tsx";
+import { RESOURCES, useResource } from "../data.ts";
+import { hhmm, mss } from "../fmt.ts";
+import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { minutesAgo, type Scope } from "./common.ts";
+import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
 
 const MINUTE_MS = 60_000;
 
 /** Capacity (catalogue 2.6.5): quota per account window, machine load; the test lock waits. */
 export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
-  const now = useNow();
+  const now = useSecond();
+  const tz = useTz();
+  const history = useResource<TestLockHistory>(RESOURCES.testLockHistory).data;
+  const lock = useTestLock();
+  const crew = useResource<{ rows: CrewRow[] }>(RESOURCES.crew).data;
+  const holds = [...(history?.runs ?? [])];
+  const h = lock?.holder;
+  if (h && !holds.some((r) => r.runId === h.runId && r.startedAt === h.since))
+    holds.unshift({
+      runId: h.runId,
+      seatId: h.seatId,
+      command: h.command,
+      queuedAt: h.since,
+      startedAt: h.since,
+      endedAt: null,
+      outcome: null,
+      ticket: null,
+    });
+  const today =
+    tz === null
+      ? []
+      : holds.filter((r) => r.endedAt === null || r.startedAt >= startOfLocalDay(now, tz));
+  const result = (r: TestLockRun) =>
+    r.outcome === null
+      ? crew?.rows.find((row) => row.id === r.seatId)?.hudState === "stalled"
+        ? "no output"
+        : "running"
+      : LOCK_OUTCOME_TEXT[r.outcome];
   const from = now - TELEMETRY_RANGES[scope.range] * MINUTE_MS;
   const chart = {
     from,
@@ -72,17 +111,32 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
           </div>
         )}
       </Panel>
-      {/* Decision: no test-lock shading; the lock arrives with the engine. */}
-      <Panel id="tMach" title="Machine load" sub="% of capacity">
+      <Panel
+        id="tMach"
+        title="Machine load"
+        sub="% of capacity · shaded while the test lock is held"
+      >
         {!t ? (
           <p className="pb s muted">{scope.wait}</p>
         ) : machine.length === 0 ? (
           <p className="pb s muted">No machine samples in the last {scope.range}.</p>
         ) : (
           <div className="pb">
-            <LineChart series={machineLines} label="Machine load" {...chart} />
+            <LineChart
+              series={machineLines}
+              label="Machine load"
+              bands={holds.map((r) => ({
+                from: r.startedAt,
+                to: r.endedAt ?? now,
+                label: `${seatCallSign(r.seatId)} suite`,
+              }))}
+              {...chart}
+            />
             <Legend
-              items={machineLines.map((l) => ({ key: l.id, name: l.name, color: l.color }))}
+              items={[
+                ...machineLines.map((l) => ({ key: l.id, name: l.name, color: l.color })),
+                { key: "lock", name: "test lock held", color: "var(--warn)" },
+              ]}
             />
           </div>
         )}
@@ -93,7 +147,41 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
         sub="full-suite runs, waits and stops today"
         className="wide"
       >
-        <p className="pb note">{ENGINE_NOT_RUNNING}</p>
+        {!history && !h ? (
+          <p className="pb s muted">{NOT_TRACKED}</p>
+        ) : tz === null ? (
+          <p className="pb s muted">{scope.wait}</p>
+        ) : today.length === 0 ? (
+          <p className="pb s muted">No full-suite runs today.</p>
+        ) : (
+          <div className="pb tw">
+            <table>
+              <thead>
+                <tr>
+                  {["Started", "Agent", "Run", "Waited", "Took", "Result"].map((label) => (
+                    <th key={label}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {today.map((r) => (
+                  <tr key={`${r.runId}:${r.startedAt}`}>
+                    <td className="num">{tz ? hhmm(r.startedAt, tz) : DASH}</td>
+                    <td>
+                      <AgentTag id={r.seatId} index={indexOf(scope, r.seatId)} sm bare />
+                    </td>
+                    <td>
+                      <span className="chipref">{r.command}</span>
+                    </td>
+                    <td className="num">{mss(r.startedAt - r.queuedAt)}</td>
+                    <td className="num">{mss((r.endedAt ?? now) - r.startedAt)}</td>
+                    <td className={r.outcome === "freed" ? "warn-t" : "ok-t"}>{result(r)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
     </div>
   );
