@@ -11,6 +11,7 @@ import {
   BOARD_DONE_MS,
   type BoardItem,
   BUILTIN_ROLES,
+  CHECK_EVENT,
   type ConfigView,
   type Metrics,
   type MetricsDay,
@@ -147,9 +148,19 @@ export function overview(
 }
 
 /**
+ * What a test-lock holder or waiter is called: "{repoId} full suite" when `command` is one of its
+ * seat's repo's full_suite entries, else the command itself.
+ */
+export function lockLabel(config: CcConfig, seatId: string, command: string): string {
+  const session = config.crew?.sessions.find((s) => s.seats.some((seat) => seat.id === seatId));
+  const repo = config.repos.find((r) => r.id === session?.repoId);
+  return repo?.fullSuite?.includes(command) ? `${repo.id} full suite` : command;
+}
+
+/**
  * The last 24h as events, newest first, at most ACTIVITY_LIMIT: run starts and ends of the
  * configured agents, escalations opened, collectors currently failing (at their latest status),
- * and board Status moves that finished.
+ * board Status moves that finished, CI checks, commits, test-lock turns and guard denials.
  */
 export function activity(config: CcConfig, store: Store, now: number): ActivityRow[] {
   const since = now - ACTIVITY_WINDOW_MS;
@@ -240,9 +251,44 @@ export function activity(config: CcConfig, store: Store, now: number): ActivityR
       ...plain,
       at: e.at,
       who: run?.agentId ?? e.runId,
-      kind: "loop",
+      kind: CHECK_EVENT.test(e.text) ? "check" : "loop",
       text: e.text,
       ref: run?.ticket ?? null,
+    });
+  }
+  for (const c of store.runCommitsSince(since)) {
+    if (!known.has(c.agentId)) continue;
+    events.push({
+      ...plain,
+      at: c.at,
+      who: c.agentId,
+      kind: "commit",
+      text: `Committed ${c.sha.slice(0, 7)}`,
+      ref: c.ticket,
+    });
+  }
+  for (const l of store.lockRuns(since)) {
+    if (!known.has(l.seatId)) continue;
+    const label = lockLabel(config, l.seatId, l.command);
+    const row = { ...plain, who: l.seatId, kind: "lock" as const, ref: l.ticket };
+    if (l.queuedAt < l.startedAt && l.queuedAt >= since) {
+      events.push({ ...row, at: l.queuedAt, text: `In line for the test lock: ${label}` });
+    }
+    events.push({ ...row, at: l.startedAt, text: `Took the test lock: ${label}` });
+    if (l.endedAt !== null && l.endedAt >= since) {
+      const text = l.outcome === "done" ? "Done with the test lock" : "Test lock freed";
+      events.push({ ...row, at: l.endedAt, text: `${text}: ${label}` });
+    }
+  }
+  for (const h of store.guardHits(since, ACTIVITY_LIMIT)) {
+    if (!known.has(h.agentId)) continue;
+    events.push({
+      ...plain,
+      at: h.at,
+      who: h.agentId,
+      kind: "guard",
+      text: `Denied: ${h.text}`,
+      ref: h.runId === null ? null : (store.run(h.runId)?.ticket ?? null),
     });
   }
   for (const e of store.hubEvents(since)) {

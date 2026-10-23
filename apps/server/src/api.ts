@@ -61,7 +61,7 @@ import {
   type Telemetry,
   type TelemetryRange,
   type TestLockHistory,
-  type TestLockState,
+  type TestLockView,
   TYPE_LABELS,
   UPDATE_UNAVAILABLE,
   type UsageSample,
@@ -119,7 +119,7 @@ import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/
 import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
-import { median, telemetry } from "./telemetry.ts";
+import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -856,7 +856,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      api.get("/test-lock", async (): Promise<TestLockState> => lock?.state() ?? NO_LOCK);
+      // Reader: apps/web/src/data.ts#RESOURCES (testLock; the Machine panel's Test lock box reads label and usualMs in the Overview web follow-up)
+      api.get(
+        "/test-lock",
+        async (): Promise<TestLockView> => lockView(config, store, lock?.state() ?? NO_LOCK, now()),
+      );
 
       // Reader: apps/web/src/telemetry/CapacityGroup.tsx (the Test lock table), Kpis.tsx (Lock wait) and components/LockLines.tsx (usually about)
       api.get("/test-lock/history", async (): Promise<TestLockHistory> => {
@@ -865,24 +869,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const today = runs.filter(
           (r) => r.startedAt >= startOfLocalDay(at, config.operator.timezone),
         );
-        const lengths = new Map<string, number[]>();
-        for (const r of runs) {
-          if (r.outcome !== "done" || r.endedAt === null) continue;
-          const list = lengths.get(r.command) ?? [];
-          list.push(r.endedAt - r.startedAt);
-          lengths.set(r.command, list);
-        }
         return {
           runs,
           today: {
             runs: today.length,
             waitMs: today.reduce((sum, r) => sum + r.startedAt - r.queuedAt, 0),
           },
-          usualMs: Object.fromEntries(
-            [...lengths]
-              .filter(([, list]) => list.length >= 3)
-              .map(([command, list]) => [command, median(list) as number]),
-          ),
+          usualMs: usualLockMs(runs),
         };
       });
 

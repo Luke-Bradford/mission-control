@@ -317,4 +317,41 @@ describe("crew seats in overview and activity", () => {
     const events = activity(crewConfig, store, NOW).filter((e) => e.who === "GUIDO-1");
     expect(events.map((e) => e.kind).sort()).toEqual(["run-end", "run-start"]);
   });
+
+  it("activity: checks, commits, the test lock and guard denials", () => {
+    store.upsertRun(run({ id: "c1", agentId: "GUIDO-1", ticket: "shop-app#7" }));
+    store.addLoopEvent("k", "c1", "CI passed on abc1234", NOW - 500);
+    store.addRunCommit({
+      runId: "c1",
+      repoId: "shop-app",
+      branch: "b",
+      sha: "a3f19c2deadbeef",
+      at: NOW - 400,
+    });
+    store.addLockHold({
+      runId: "c1",
+      seatId: "GUIDO-1",
+      toolUseId: "t",
+      command: "pnpm -s test",
+      since: NOW - 300,
+      queuedAt: NOW - 300,
+    });
+    store.addGuardHit({
+      agentId: "GUIDO-1",
+      runId: "c1",
+      rule: "git-write",
+      text: "git push: use the mc push tool",
+      at: NOW - 200,
+    });
+    const events = activity(crewConfig, store, NOW);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "check", text: "CI passed on abc1234", who: "GUIDO-1" }),
+        expect.objectContaining({ kind: "commit", text: "Committed a3f19c2", ref: "shop-app#7" }),
+        expect.objectContaining({ kind: "lock", text: "Took the test lock: pnpm -s test" }),
+        expect.objectContaining({ kind: "guard", text: "Denied: git push: use the mc push tool" }),
+      ]),
+    );
+    expect(events.some((e) => e.kind === "loop" && e.text.startsWith("CI passed"))).toBe(false);
+  });
 });

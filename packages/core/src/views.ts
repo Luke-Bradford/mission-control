@@ -63,7 +63,11 @@ export type ActivityKind =
   | "pr-merged"
   | "board"
   | "loop"
-  | "push";
+  | "push"
+  | "check"
+  | "commit"
+  | "lock"
+  | "guard";
 
 /** One `/api/activity` row, newest first. Derived from runs, escalations and collector health. */
 export interface ActivityEvent {
@@ -362,6 +366,21 @@ export interface TestLockRun {
   endedAt: number | null;
   outcome: "done" | "freed" | null;
   ticket: string | null;
+}
+
+export interface TestLockEntryView {
+  runId: string;
+  seatId: string;
+  command: string;
+  since: number;
+  /** "{repoId} full suite" when command is one of the seat's repo's full_suite entries, else the command. */
+  label: string;
+}
+
+/** `GET /api/test-lock`, with labels. */
+export interface TestLockView {
+  holder: (TestLockEntryView & { usualMs: number | null }) | null;
+  waiting: TestLockEntryView[];
 }
 
 export interface TestLockHistory {

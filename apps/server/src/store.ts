@@ -2216,6 +2216,14 @@ export class Store {
     }));
   }
 
+  /** How many hand-offs `from` sent `to` at or after `since`. */
+  commsCountTo(from: string, to: string, since: number): number {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?")
+      .get(from, to, since) as { n: number };
+    return r.n;
+  }
+
   /** Stable stored message IDs for one thread, in insertion order. */
   threadComms(id: string): (CommsRow & { id: string })[] {
     const rows = this.db
@@ -2724,6 +2732,23 @@ export class Store {
       .prepare("SELECT sha FROM run_commits WHERE run_id = ? ORDER BY id ASC")
       .all(runId) as { sha: string }[];
     return rows.map((r) => r.sha);
+  }
+
+  /** The commits the commit tool made at or after `since`, oldest first, with their run's agent and ticket. */
+  runCommitsSince(
+    since: number,
+  ): { runId: string; agentId: AgentId; sha: string; at: number; ticket: string | null }[] {
+    const rows = this.db
+      .prepare(`SELECT c.run_id, r.agent_id, c.sha, c.at, r.ticket FROM run_commits c
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? ORDER BY c.at, c.id`)
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      runId: r.run_id as string,
+      agentId: r.agent_id as AgentId,
+      sha: r.sha as string,
+      at: r.at as number,
+      ticket: r.ticket as string | null,
+    }));
   }
 
   /** The run's newest commit and when the commit tool made it, else null. */
