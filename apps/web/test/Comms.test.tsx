@@ -228,16 +228,16 @@ describe("Needs you", () => {
     expect(link.getAttribute("href")).toBe(item().url);
   });
 
-  it("a stall names the test-lock holder", async () => {
+  it("a stall names a different test-lock holder", async () => {
     stubFetch({
       "/api/attention": [ITEMS[1]],
       "/api/test-lock": {
-        holder: { seatId: "shop-app-ta", runId: "r-12", command: "pnpm test", since: NOW - MIN },
+        holder: { seatId: "studio", runId: "r-12", command: "pnpm test", since: NOW - MIN },
         waiting: [],
       },
     });
     render(<Comms item={null} />);
-    await within(needs()).findByText("2:15 in Bash · holds the test lock (shop-app-ta)");
+    await within(needs()).findByText("2:15 in Bash · waiting on the test lock (studio)");
   });
 
   it("a PR names its ticket, title and wait time", async () => {
@@ -734,6 +734,24 @@ describe("Threads and conversation", () => {
     await within(needs()).findByText("1 new on your direct line");
   });
 
+  it("a reply with the same timestamp becomes unread and stays seen after reading", async () => {
+    const messages = [comms({ text: "First reply" })];
+    stubMessages(messages);
+    const view = render(<Comms item={null} />);
+    fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));
+    await screen.findByText("nothing waiting");
+    const list = document.querySelector("#chanList") as HTMLElement;
+    fireEvent.click(within(list).getByRole("button", { name: /retro-1/ }));
+    messages.push(comms({ text: "Same-time reply" }));
+    act(() => hub.refetch(RESOURCES.activity.path));
+    await within(needs()).findByText("1 new on your direct line");
+    fireEvent.click(within(needs()).getByRole("button", { name: "Read" }));
+    await screen.findByText("nothing waiting");
+    view.unmount();
+    render(<Comms item={null} />);
+    expect(needs().querySelector(".nrow")).toBeNull();
+  });
+
   it("Read opens a thread from another session", async () => {
     setSession("site-builder");
     stubMessages([comms({ text: "Reply from another session" })]);
@@ -750,7 +768,7 @@ describe("Threads and conversation", () => {
     stubMessages(messages);
     render(<Comms item={null} />);
     fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));
-    messages.push(comms({ text: "Live reply", at: NOW + MIN }));
+    messages.push(comms({ text: "Live reply", at: NOW }));
     act(() => hub.refetch(RESOURCES.activity.path));
     await within(document.querySelector("#convo") as HTMLElement).findByText("Live reply");
     const list = document.querySelector("#chanList") as HTMLElement;

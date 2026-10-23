@@ -67,6 +67,7 @@ export function ItemPanel() {
   const savedPerson = person?.item.key === key ? person : null;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [justHandled, setJustHandled] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
   const now = useNow();
@@ -127,6 +128,7 @@ export function ItemPanel() {
   };
   const thread = currentThread ?? savedPerson?.thread;
   const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
+  const handledHow = handled?.how ?? justHandled[key];
   const flightTitle = live ? undefined : flightOffText(seat);
   const options = item?.brief?.options ?? [];
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
@@ -235,16 +237,23 @@ export function ItemPanel() {
         )}
         {item?.kind === "person" && !holding && (
           <div className="composer" id="dsPerson">
-            {handled ? (
+            {handledHow ? (
               <span>
-                Handled: <b>{handled.how}</b>
+                Handled: <b>{handledHow}</b>
               </span>
+            ) : !currentItem ? (
+              <span>No longer open</span>
             ) : (
               <button
                 type="button"
                 className="primary"
                 disabled={busy}
-                onClick={() => void act(() => markHandled(item.key))}
+                onClick={() =>
+                  void act(
+                    () => markHandled(item.key),
+                    () => setJustHandled((prev) => ({ ...prev, [item.key]: "marked handled" })),
+                  )
+                }
               >
                 Mark handled
               </button>

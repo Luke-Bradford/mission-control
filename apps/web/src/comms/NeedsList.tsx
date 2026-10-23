@@ -55,8 +55,10 @@ function NeedText({ item, now, lock }: { item: AttentionItem; now: number; lock?
   ).data;
   const ticket = board?.find((b) => `${b.repoId}#${b.issueNumber}` === item.ticket);
   let text = needText(item, now);
-  if (item.kind === "stalled" && holdsLock(item, lock)) {
-    text += ` · holds the test lock (${lock?.holder?.seatId})`;
+  if (item.kind === "stalled" && lock?.holder) {
+    text += holdsLock(item, lock)
+      ? ` · holds the test lock (${lock.holder.seatId})`
+      : ` · waiting on the test lock (${lock.holder.seatId})`;
   }
   const pr = /^PR #(\d+) · You: (.*)$/s.exec(item.text);
   if (item.kind === "pr" && ticket && pr) {

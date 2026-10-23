@@ -2,6 +2,7 @@ import type { AttentionItem, AutonomyQuestion } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
+import { hub, RESOURCES } from "../src/data.ts";
 import { FLIGHT_NO_SEAT, FLIGHT_STOPPED } from "../src/flight/flightTypes.ts";
 import type { PersonThreadView } from "../src/notifications.ts";
 import { navigate } from "../src/router.ts";
@@ -888,7 +889,9 @@ describe("ItemPanel, person variant", () => {
       ),
     );
     await screen.findByText("Handled:", { exact: false });
-    expect(document.querySelector("#dsPerson")?.textContent).toBe("Handled: read on GitHub");
+    await waitFor(() =>
+      expect(document.querySelector("#dsPerson")?.textContent).toBe("Handled: read on GitHub"),
+    );
     expect(document.querySelector("#discuss")).not.toBeNull();
     expect(screen.getByText("can you look?")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Mark handled" })).toBeNull();
@@ -900,9 +903,56 @@ describe("ItemPanel, person variant", () => {
     expect(screen.queryByText("Handled:", { exact: false })).toBeNull();
   });
 
+  it("keeps a successful Mark handled local until the server supplies how, keyed by item", async () => {
+    const other = thread({ key: "person:102", id: "102", snippet: "Another message" });
+    const notes = { open: [thread(), other], handledToday: [] as { id: string; how: string }[] };
+    const fn = stubFetch({
+      "/api/attention": [personItem, { ...personItem, key: other.key }],
+      "/api/notifications": notes,
+      "/api/config": CONFIG,
+      [`POST /api/attention/${encodeURIComponent(KEY)}/handled`]: {},
+    });
+    render(<ItemPanel />);
+    act(() => openItem(KEY));
+    await screen.findByText("The message");
+    fireEvent.click(screen.getByRole("button", { name: "Mark handled" }));
+    await waitFor(() =>
+      expect(document.querySelector("#dsPerson")?.textContent).toBe("Handled: marked handled"),
+    );
+    expect(screen.queryByRole("button", { name: "Mark handled" })).toBeNull();
+    act(() => openItem(other.key));
+    await screen.findByText("Another message");
+    expect(screen.getByRole("button", { name: "Mark handled" })).toBeTruthy();
+    act(() => openItem(KEY));
+    await screen.findByText("can you look?");
+    expect(screen.queryByRole("button", { name: "Mark handled" })).toBeNull();
+    notes.handledToday.push({ id: "101", how: "read on GitHub" });
+    act(() => hub.refetch(RESOURCES.notifications.path));
+    await waitFor(() =>
+      expect(document.querySelector("#dsPerson")?.textContent).toBe("Handled: read on GitHub"),
+    );
+    expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("shows No longer open when a person item disappears without being handled", async () => {
+    const items = [personItem];
+    stubFetch({
+      "/api/attention": items,
+      "/api/notifications": { open: [thread()], handledToday: [] },
+      "/api/config": CONFIG,
+    });
+    render(<ItemPanel />);
+    act(() => openItem(KEY));
+    await screen.findByText("The message");
+    items.length = 0;
+    act(() => hub.refetch(RESOURCES.attention.path));
+    await screen.findByText("No longer open");
+    expect(screen.queryByRole("button", { name: "Mark handled" })).toBeNull();
+  });
+
   it("highlights mentions in the message as inert text", async () => {
     const snippet =
-      '@CAPCOM @operator <img src=x onerror="alert(1)"> @operator-other @someone @CAPCOM';
+      '@CAPCOM @OctoCat <img src=x onerror="alert(1)"> @octocat-other @operator @someone @capcom';
     stubFetch({
       "/api/attention": [personItem],
       "/api/notifications": { open: [thread({ snippet })], handledToday: [] },
@@ -915,8 +965,8 @@ describe("ItemPanel, person variant", () => {
     expect(quote.textContent).toBe(snippet);
     expect([...quote.querySelectorAll(".mention")].map((el) => el.textContent)).toEqual([
       "@CAPCOM",
-      "@operator",
-      "@CAPCOM",
+      "@OctoCat",
+      "@capcom",
     ]);
     expect(quote.querySelector("img")).toBeNull();
   });

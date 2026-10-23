@@ -39,7 +39,7 @@ export function commsLine(c: CommsEvent, id: string): string {
 export function commsKeys(list: CommsEvent[]): string[] {
   const seen = new Map<string, number>();
   return list.map((c) => {
-    const base = `comms:${c.at}:${c.who}:${c.to}`;
+    const base = `comms:${JSON.stringify([c.at, c.who, c.to, c.text])}`;
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
     return `${base}#${n}`;
@@ -48,14 +48,17 @@ export function commsKeys(list: CommsEvent[]): string[] {
 
 /** Plain text with each mention picked out. */
 export function MentionText({ text }: { text: string }) {
-  const operator = useResource<ConfigView>(RESOURCES.config).data?.operator.id;
-  const parts = text.split(/(@[\w-]+)/);
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const login = (config as (ConfigView & { githubLogin?: string | null }) | undefined)?.githubLogin;
+  const parts = text.split(/((?<![\w.])@[\w-]+)/);
   return (
     <>
       {parts.map((part, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
         <Fragment key={i}>
-          {part === CAPCOM_TAG || (operator !== undefined && part === `@${operator}`) ? (
+          {i % 2 === 1 &&
+          (part.toLowerCase() === CAPCOM_TAG.toLowerCase() ||
+            (login && part.toLowerCase() === `@${login.toLowerCase()}`)) ? (
             <span className="mention">{part}</span>
           ) : (
             part

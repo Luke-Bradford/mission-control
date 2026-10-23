@@ -947,7 +947,7 @@ describe("FLIGHT's brief", () => {
 
   it("Asked of you highlights mentions and keeps the message inert", async () => {
     const snippet =
-      '@CAPCOM @operator <img src=x onerror="alert(1)"> @operator-other @someone @CAPCOM';
+      '@CAPCOM @OctoCat <img src=x onerror="alert(1)"> @octocat-other @operator @someone @capcom';
     stubFetch({
       "/api/attention": [personItem],
       "/api/notifications": { open: [thread({ snippet })], handledToday: [] },
@@ -959,8 +959,8 @@ describe("FLIGHT's brief", () => {
     expect(quote.textContent).toBe(snippet);
     expect([...quote.querySelectorAll(".mention")].map((el) => el.textContent)).toEqual([
       "@CAPCOM",
-      "@operator",
-      "@CAPCOM",
+      "@OctoCat",
+      "@capcom",
     ]);
     expect(quote.querySelector("img")).toBeNull();
   });
