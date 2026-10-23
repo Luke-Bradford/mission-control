@@ -52,11 +52,28 @@ export class McpCalls {
     return p;
   }
 
+  private stopped = false;
+
+  /** The drain has started: a new `tools/call` is refused. */
+  get draining(): boolean {
+    return this.stopped;
+  }
+
+  /** Refuses new calls from now on, and resolves once those in flight have finished. */
+  drain(): Promise<void> {
+    this.stopped = true;
+    return this.idle();
+  }
+
   /** Resolves once no call is in flight (calls that start meanwhile are waited for too). */
   async idle(): Promise<void> {
     while (this.calls.size > 0) await Promise.all([...this.calls]);
   }
 }
+
+/** What a seat is told when it calls a tool while the hub drains for a restart. */
+export const MCP_RESTARTING_TEXT =
+  "Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments.";
 
 export interface McpDeps {
   tokens: RunTokens;
@@ -201,6 +218,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           },
         };
       case "tools/call": {
+        if (deps.calls?.draining) {
+          return {
+            jsonrpc: "2.0",
+            id: id ?? null,
+            result: { content: [{ type: "text", text: MCP_RESTARTING_TEXT }], isError: true },
+          };
+        }
         const call = callTool(who, id, msg.params);
         return deps.calls === undefined ? call : deps.calls.track(call);
       }

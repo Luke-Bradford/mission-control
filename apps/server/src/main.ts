@@ -348,7 +348,7 @@ async function main(): Promise<void> {
   for (const line of early.splice(0)) log(line);
 
   const shutdown = onSignal({
-    drain: () => mcpCalls.idle(),
+    drain: () => mcpCalls.drain(),
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
       crewReloader.stop();
