@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import type { CliAccountStatus } from "@mc/core";
 import { isObj } from "./collectors/usage-common.ts";
+import { usageProviderEnv } from "./collectors/usage-sources.ts";
 
 type Account = { id: string; vendor: "claude" | "codex" };
 const MAX_BUFFER = 64 * 1024;
@@ -72,7 +73,7 @@ function cliStatus(provider: Account["vendor"], timeoutMs: number): Promise<unkn
     const child = execFile(
       provider,
       provider === "claude" ? ["auth", "status", "--json"] : ["app-server"],
-      { timeout: timeoutMs, maxBuffer: MAX_BUFFER },
+      { timeout: timeoutMs, maxBuffer: MAX_BUFFER, env: usageProviderEnv(provider) },
       (error, stdout) => {
         if (provider === "codex") {
           finish(new Error(error?.killed ? "timeout" : "unavailable"));
