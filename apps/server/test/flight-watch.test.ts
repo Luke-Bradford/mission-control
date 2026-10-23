@@ -27,6 +27,7 @@ import {
   flightStartCap,
   flightState,
   markPrsShown,
+  ownReply,
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
@@ -1064,5 +1065,14 @@ describe("wakeSummary", () => {
       expect(pending(unparked)).toBe(false);
       expect(wakeFacts(state({ aside: [aside] }))).not.toBe(wakeFacts(unparked));
     });
+  });
+});
+
+describe("ownReply", () => {
+  it("leaves FLIGHT's own direct-line reply out of its digest and keeps another seat's", () => {
+    expect(ownReply({ kind: "message", agentId: "flight-1" }, "flight-1")).toBe(true);
+    expect(ownReply({ kind: "message", agentId: "guido-1" }, "flight-1")).toBe(false);
+    expect(ownReply({ kind: "question", agentId: "flight-1" }, "flight-1")).toBe(false);
+    expect(ownReply({ kind: "message", agentId: "flight-1" }, null)).toBe(false);
   });
 });
