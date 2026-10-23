@@ -644,8 +644,13 @@ function stateStep(s: LoopSnapshot): Step {
         actions: [{ kind: "event", text: `CI failed on ${short}` }],
       };
     }
-    // a run the operator un-parked is judged from the un-park, not from a push made before it
-    const since = Math.max(pushed.at, loop.unparkedAt ?? 0);
+    // a run the operator un-parked is judged from the un-park, not from a push made before it;
+    // a re-run is also judged from when it was asked for
+    const since = Math.max(
+      pushed.at,
+      loop.unparkedAt ?? 0,
+      loop.rerun?.sha === pushed.sha ? loop.rerun.at : 0,
+    );
     if (pr.ci === "pending" && now - since > CI_PENDING_MAX_MS) {
       return park(
         loop,

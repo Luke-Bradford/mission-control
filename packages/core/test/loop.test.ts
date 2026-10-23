@@ -463,6 +463,18 @@ describe("state step", () => {
       expect(later.actions).not.toContainEqual({ kind: "clear-note", key });
     });
 
+    it("the CI-pending clock runs from the re-run, not the push", () => {
+      const old = { pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } };
+      const pending = pr({ ci: "pending" });
+      const r = reconcile(
+        inCi({ ...old, pr: pending }, { rerun: { sha: SHA, at: NOW - 60_000, runs: [] } }),
+      );
+      expect(r.loop.phase).toBe("ci");
+      expect(r.loop.parked).toBeNull();
+      const other = reconcile(inCi({ ...old, pr: pending }, { rerun: reran(SHA2) }));
+      expect(other.loop.parked?.kind).toBe("ci-pending");
+    });
+
     it("a pass with no failure before is no flake", () => {
       const r = reconcile(inCi({ pr: pr({ ci: "passing" }) }));
       expect(r.loop.rerun ?? null).toBeNull();
