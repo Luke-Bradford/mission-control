@@ -532,7 +532,8 @@ describe("update", () => {
       const tick = createAutoUpdate({
         enabled: true,
         updater: upd.u,
-        blocked: () => null,
+        blocked: () => MID_TURN,
+        locked: () => null,
         headSha: async () => head(),
         record,
       });
@@ -1101,6 +1102,7 @@ describe("auto update", () => {
       enabled: true,
       updater: upd.u,
       blocked: () => null,
+      locked: () => null,
       headSha: async () => head(),
       record,
       ...over,
@@ -1139,10 +1141,23 @@ describe("auto update", () => {
     expect(a.record).toHaveBeenCalledTimes(1);
   });
 
+  it("waits on a change outside apps/web/ and docs/ while a seat is mid-turn", async () => {
+    upstreamPath("apps/server/src/x.txt");
+    const busy = "GUIDO-1 is mid-turn";
+    const a = auto(
+      { blocked: () => busy, locked: () => null },
+      updater({ crewRefusal: () => busy }),
+    );
+    await expect(a.tick()).resolves.toBe("waiting");
+    expect(pulls(a.calls)).toHaveLength(0);
+    expect(a.record).not.toHaveBeenCalled();
+    expect(a.restart).not.toHaveBeenCalled();
+  });
+
   it("waits while the test lock is held", async () => {
     upstreamCommit("b.txt");
     let held = true;
-    const a = auto({ blocked: () => (held ? "the test lock is held" : null) });
+    const a = auto({ locked: () => (held ? "the test lock is held" : null) });
     await expect(a.tick()).resolves.toBe("waiting");
     expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
     held = false;
@@ -1152,10 +1167,9 @@ describe("auto update", () => {
   it("holds the restart while a turn that started during the build is in flight", async () => {
     upstreamCommit("b.txt");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    let calls = 0;
     let busy: string | null = null;
-    // free for the look before update(); a seat is mid-turn by the time the build is done
-    const a = auto({ blocked: () => (++calls <= 1 ? null : busy) });
+    // update() sees an idle crew; a seat is mid-turn by the time the build is done
+    const a = auto({ blocked: () => busy });
     busy = "GUIDO-1 is mid-turn";
     await expect(a.tick()).resolves.toBe("updated");
     expect(a.restart).not.toHaveBeenCalled();

@@ -273,6 +273,8 @@ export interface AutoUpdateDeps {
   updater: Pick<Updater, "check" | "update" | "restart">;
   /** Why the hub may not restart now (a seat mid-turn or starting, the test lock held), or null. */
   blocked: () => string | null;
+  /** The test lock is held (why), or null. */
+  locked: () => string | null;
   /** HEAD of the checkout once Update has pulled. */
   headSha: () => Promise<string | null>;
   /** Writes the Activity line. */
@@ -283,8 +285,8 @@ export type AutoUpdateResult = "off" | "current" | "waiting" | "updated";
 
 /**
  * `updates.hub: auto`: one check, run by the scheduler every VERSION_CHECK_MS. When origin/main is
- * ahead and nothing Update refuses on applies (the check answers canUpdate), and the test lock is
- * free, it runs the same `update()` the route does. The pull, install and build take minutes, so a
+ * ahead and nothing Update refuses on applies (the check answers canUpdate; a busy crew is no
+ * refusal for a web-only change), and the test lock is free, it runs the same `update()` the route does. The pull, install and build take minutes, so a
  * turn may have started meanwhile: the restart (and the `Updated to <sha> (auto)` line) waits, off
  * the tick, until `blocked()` is null, rechecked every VERSION_CHECK_FLOOR_MS. Anything that stops it (a refusal, the lock, an unreachable origin, a
  * failed step) is "waiting": the next check tries again. Never forces, never throws.
@@ -295,7 +297,7 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
     try {
       const v = await deps.updater.check();
       if (!v.canUpdate) return v.reason === UP_TO_DATE_MAIN ? "current" : "waiting";
-      if (deps.blocked() !== null) return "waiting";
+      if (deps.locked() !== null) return "waiting"; // update() itself refuses a busy crew unless the change is web-only
       const out = await deps.updater.update(); // re-checks every refusal itself
       if ("upToDate" in out) return "current";
       if ("swapped" in out) {
