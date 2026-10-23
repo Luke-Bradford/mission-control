@@ -484,6 +484,34 @@ describe("the conversation", () => {
     expect(container.querySelectorAll(".dmsg.flight")).toHaveLength(3);
   });
 
+  it("keeps the scroll position while reading up, and follows again near the bottom", async () => {
+    let events = STREAM.events;
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "/api/agents/flight-1/stream": () => ({ status: 200, body: { ...STREAM, events } }) },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
+    const log = screen.getByRole("log");
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
+    const reply = async (id: string, n: number) => {
+      events = [...events, { id, at: NOW - 100_000 + n, kind: "msg", text: `reply ${id}` }];
+      await act(async () => {
+        hub.refetch("/api/agents/flight-1/stream");
+      });
+      await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3 + n));
+    };
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+    await reply("4:0", 1);
+    expect(log.scrollTop).toBe(100);
+    log.scrollTop = 800;
+    fireEvent.scroll(log);
+    await reply("5:0", 2);
+    expect(log.scrollTop).toBe(1000);
+  });
+
   it("does not rebuild the conversation while the operator types", async () => {
     stubFlight({ seat: flightSeat(), decisions: [] });
     const spy = vi.spyOn(conversation, "dockRows");

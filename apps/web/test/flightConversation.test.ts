@@ -111,28 +111,32 @@ describe("kindLabel", () => {
 
 describe("withPending", () => {
   const you = (id: string, text: string): DockRow => ({ kind: "you", id, at: 1, text });
-  const sent = (text: string, seen: number): PendingMsg => ({ id: "p:0", text, at: 5, seen });
+  const sent = (text: string, seen: string[]): PendingMsg => ({ id: "p:0", text, at: 5, seen });
 
-  it("keeps a message open, as a pending you row, until the stream holds another copy", () => {
+  it("keeps a message open, as a pending you row, until the stream holds a new copy", () => {
     const rows = [you("a", "go")];
-    const first = withPending(rows, [sent("go", 1)]);
+    const first = withPending(rows, [sent("go", ["a"])]);
     expect(first.open).toHaveLength(1);
     expect(first.rows.at(-1)).toMatchObject({ kind: "you", id: "p:0", text: "go", pending: true });
-    const second = withPending([...rows, you("b", "go")], [sent("go", 1)]);
+    const second = withPending([...rows, you("b", "go")], [sent("go", ["a"])]);
     expect(second.open).toEqual([]);
     expect(second.rows).toHaveLength(2);
   });
 
+  it("settles on a new copy even when the older one has rolled out of the stream", () => {
+    expect(withPending([you("b", "go")], [sent("go", ["a"])]).open).toEqual([]);
+  });
+
   it("settles a long message on the hub's cut copy of it", () => {
     const cut = you("a", `${"x".repeat(1999)}…`);
-    expect(withPending([cut], [sent("x".repeat(2100), 0)]).open).toEqual([]);
-    expect(withPending([cut], [sent("y".repeat(2100), 0)]).open).toHaveLength(1);
+    expect(withPending([cut], [sent("x".repeat(2100), [])]).open).toEqual([]);
+    expect(withPending([cut], [sent("y".repeat(2100), [])]).open).toHaveLength(1);
   });
 
   it("drops a settled message and keeps one still waiting", () => {
     const { open, rows } = withPending(
       [you("a", "done")],
-      [sent("done", 0), { ...sent("later", 0), id: "p:1" }],
+      [sent("done", []), { ...sent("later", []), id: "p:1" }],
     );
     expect(open.map((p) => p.text)).toEqual(["later"]);
     expect(rows.map((r) => r.id)).toEqual(["a", "p:1"]);

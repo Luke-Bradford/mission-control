@@ -46,13 +46,14 @@ export const feedRows = (rows: readonly DockRow[]): DockRow[] =>
 
 /**
  * Messages sent but not yet in FLIGHT's stream, as `you` rows marked pending. One is settled once
- * the stream holds more of that text than when it was sent (`seen`).
+ * the stream holds a copy of that text that was not there when it was sent (`seen`: the ids of the
+ * copies that were; the stream is a window, so an older copy may roll out, and a count would miss it).
  */
 export interface PendingMsg {
   id: string;
   text: string;
   at: number;
-  seen: number;
+  seen: readonly string[];
 }
 
 /** The stream's copy of a sent message: the hub cuts long text to end in "…", so a cut copy matches too. */
@@ -64,7 +65,8 @@ export function withPending(
   pending: readonly PendingMsg[],
 ): { rows: DockRow[]; open: PendingMsg[] } {
   const open = pending.filter(
-    (p) => rows.filter((r) => r.kind === "you" && sameMessage(r.text, p.text)).length <= p.seen,
+    (p) =>
+      !rows.some((r) => r.kind === "you" && sameMessage(r.text, p.text) && !p.seen.includes(r.id)),
   );
   return {
     rows: [

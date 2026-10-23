@@ -216,7 +216,7 @@ export function Dock() {
   const send = async (body: string): Promise<boolean> => {
     if (!seat?.live) return false;
     const id = `p:${sent.current++}`;
-    const seen = all.filter((r) => r.kind === "you" && sameMessage(r.text, body)).length;
+    const seen = all.flatMap((r) => (r.kind === "you" && sameMessage(r.text, body) ? [r.id] : []));
     stick.current = true;
     setPending((p) => [...p, { id, text: body, at: Date.now(), seen }]);
     setBusy(true);
