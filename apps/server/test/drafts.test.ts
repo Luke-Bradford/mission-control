@@ -77,7 +77,8 @@ describe("operator draft approval", () => {
       expect(posted).toBe("Operator edited text");
       expect(existsSync(bodyFile)).toBe(false);
       expect(store.drafts()).toEqual([]);
-      expect((await app.inject("/api/drafts")).json()).toEqual([
+      expect((await app.inject("/api/drafts")).json()).toEqual([]);
+      expect((await app.inject("/api/drafts/history")).json()).toEqual([
         expect.objectContaining({
           id,
           state: "posted",
@@ -196,7 +197,8 @@ describe("operator draft approval", () => {
       (await app.inject({ method: "POST", url: `/api/drafts/${id}/discard`, payload: {} }))
         .statusCode,
     ).toBe(200);
-    expect((await app.inject("/api/drafts")).json()).toEqual([
+    expect((await app.inject("/api/drafts")).json()).toEqual([]);
+    expect((await app.inject("/api/drafts/history")).json()).toEqual([
       expect.objectContaining({ id, state: "discarded", completedAt: expect.any(Number) }),
     ]);
     expect(
@@ -315,4 +317,47 @@ it("never posts a Teams draft on GitHub", async () => {
   expect((await post(id)).statusCode).toBe(400);
   expect(gh).not.toHaveBeenCalled();
   expect(store.drafts()).toHaveLength(1);
+});
+
+it("serves only pending drafts alongside bounded history ordered by completion, newest first", async () => {
+  const pending = store.addDraft("mc#1", "issue", "Still waiting", 1000);
+  const finished = [];
+  for (let i = 0; i < 105; i++) {
+    const metadata = {
+      to: `Recipient ${i}`,
+      via: i % 3 === 0 ? ("Teams" as const) : ("GitHub" as const),
+      where: `Place ${i}`,
+      context: `Context ${i}`,
+    };
+    // Creation order deliberately differs from completion order.
+    const id = store.addDraft("mc#2", "pr", `Reply ${i}`, 200 - i, metadata);
+    const state = i % 3 === 0 ? "copied" : i % 3 === 1 ? "posted" : "discarded";
+    store.finishDraft(id, state, undefined, 300 + Math.floor(i / 2));
+    finished.push({
+      id,
+      target: "mc#2",
+      kind: "pr",
+      text: `Reply ${i}`,
+      createdAt: 200 - i,
+      state,
+      ...metadata,
+      completedAt: 300 + Math.floor(i / 2),
+    });
+  }
+  expect((await app.inject("/api/drafts")).json()).toEqual([
+    {
+      id: pending,
+      target: "mc#1",
+      kind: "issue",
+      text: "Still waiting",
+      createdAt: 1000,
+      state: "pending",
+      to: "mc#1",
+      via: "GitHub",
+      where: "mc#1",
+    },
+  ]);
+  const response = await app.inject("/api/drafts/history");
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual(finished.reverse().slice(0, 100));
 });

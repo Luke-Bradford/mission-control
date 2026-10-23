@@ -3073,16 +3073,26 @@ export class Store {
   }
 
   drafts(includeDone = false): ReplyDraft[] {
+    return this.readDrafts(includeDone ? "all" : "pending");
+  }
+
+  draftHistory(): ReplyDraft[] {
+    return this.readDrafts("history");
+  }
+
+  private readDrafts(selection: "pending" | "all" | "history"): ReplyDraft[] {
     const rows = this.db
       .prepare(
         `SELECT id, target, kind, text, created_at AS createdAt, state, metadata, completed_at AS completedAt
        FROM drafts ${
-         includeDone
-           ? `WHERE state = 'pending' OR id IN (
+         selection === "history"
+           ? "WHERE state != 'pending' ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 100"
+           : selection === "all"
+             ? `WHERE state = 'pending' OR id IN (
                SELECT id FROM drafts WHERE state != 'pending'
                ORDER BY created_at DESC, id DESC LIMIT 100
              ) ORDER BY created_at DESC, id DESC`
-           : "WHERE state = 'pending' ORDER BY created_at, id"
+             : "WHERE state = 'pending' ORDER BY created_at, id"
        }`,
       )
       .all() as Row[];

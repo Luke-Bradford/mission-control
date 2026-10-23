@@ -1570,7 +1570,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
-      api.get("/drafts", async () => store.drafts(true));
+      api.get("/drafts", async () => store.drafts());
+      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history; web part follows in #415)
+      api.get("/drafts/history", async () => store.draftHistory());
       const postingDrafts = new Set<number>();
       const postingItems = new Set<string>();
       const postDraft = async (id: number, input: unknown, reply: FastifyReply) => {
