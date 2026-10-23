@@ -569,9 +569,13 @@ function IssueBody({ esc, folded = false }: { esc: Escalation; folded?: boolean 
       {open && body !== "" && (
         <>
           <div className="s qtext">
-            <Expandable lines={BODY_LINES}>
+            {folded ? (
               <Markdown text={body} />
-            </Expandable>
+            ) : (
+              <Expandable lines={BODY_LINES}>
+                <Markdown text={body} />
+              </Expandable>
+            )}
           </div>
           {t?.bodyTruncated && (
             <p className="s">

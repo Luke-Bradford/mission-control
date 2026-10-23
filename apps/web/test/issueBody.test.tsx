@@ -124,7 +124,11 @@ describe("Item panel: the question's own text", () => {
     expect(bodyText(container)).toContain(`line ${BODY_LINES}`);
     expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
     expect(container.querySelector("#dsBrief .expandable.open")).toBeNull();
+    const content = container.querySelector("#dsBrief .expandable-content") as HTMLElement;
+    expect(content.classList.contains("expandable-text")).toBe(true);
+    expect(content.style.webkitLineClamp).toBe(String(BODY_LINES));
     fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    expect(content.style.webkitLineClamp).toBe("unset");
     expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
     expect(screen.getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe(
       "true",
@@ -159,6 +163,15 @@ describe("Item panel: the question's own text", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(toggle);
     expect(screen.queryByText("issue")).toBeNull();
+  });
+
+  it("shows the whole folded body after opening without a second disclosure", async () => {
+    const { container } = open(ticketView(lines(BODY_LINES + 20)), { question: QUESTION });
+    fireEvent.click(await screen.findByRole("button", { name: "Show more, the issue's text" }));
+    const body = await screen.findByText(new RegExp(`line ${BODY_LINES + 20}`));
+    expect(body.textContent).toContain(`line ${BODY_LINES + 20}`);
+    expect(container.querySelector("#dsBrief .expandable")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });
 
   it("makes one request across three toggles", async () => {

@@ -42,11 +42,16 @@ export function Expandable({ lines, children }: { lines: number; children: React
   const box = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Remeasure after refreshed children change the rendered height.
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
     const measure = () => {
-      if (!open) setOverflows(el.scrollHeight > el.clientHeight);
+      const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+      const clampedHeight = Number.isFinite(lineHeight) ? lines * lineHeight : el.clientHeight;
+      const overflowing = el.scrollHeight > clampedHeight;
+      setOverflows(overflowing);
+      if (!overflowing) setOpen(false);
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
@@ -60,7 +65,7 @@ export function Expandable({ lines, children }: { lines: number; children: React
       window.removeEventListener("resize", measure);
       details?.removeEventListener("toggle", measure);
     };
-  });
+  }, [children, lines]);
   return (
     <div className={`expandable${open ? " open" : ""}`}>
       <div

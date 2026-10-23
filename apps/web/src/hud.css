@@ -3647,6 +3647,7 @@ button.nrow.thread.tagged {
   white-space: normal;
 }
 .expandable-content {
+  line-height: 1.5;
   min-width: 0;
   overflow: hidden;
 }
