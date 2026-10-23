@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addAgentParam,
   agentPath,
   boardPath,
   isPopout,
@@ -67,6 +68,17 @@ describe("route()", () => {
       "access",
     ]);
     for (const tab of SETUP_TABS) expect(route(setupPath(tab))).toEqual({ page: "setup", tab });
+  });
+});
+
+describe("addAgentParam()", () => {
+  it.each([
+    ["?add=s1", "s1"],
+    ["?other=1&add=a%2Fb%20c", "a/b c"],
+    ["", null],
+    ["?other=1", null],
+  ])("%s → %s", (search, expected) => {
+    expect(addAgentParam(search)).toBe(expected);
   });
 });
 

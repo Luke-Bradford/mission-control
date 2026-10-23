@@ -12,7 +12,7 @@ import {
   type SeatInput,
   seatCallSign,
 } from "@mc/core";
-import { Fragment, useId, useState } from "react";
+import { Fragment, useEffect, useId, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { modelLine, seatAreaText } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
@@ -20,7 +20,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { ADD_AGENT_PARAM, agentPath, navigate } from "../router.ts";
+import { addAgentParam, agentPath, navigate, setupPath } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
@@ -545,17 +545,27 @@ export function Sessions({ config }: { config: ConfigView }) {
   const folders = useResource<CrewSessionFolders[]>(RESOURCES.crewSessions).data;
   const changes = useResource<CrewChanges>(RESOURCES.crewChanges).data;
   const [session] = useSession();
+  const [requestedSessionId] = useState(() => addAgentParam(window.location.search));
   const [form, setForm] = useState<FormState | null>(() => {
-    const id = new URLSearchParams(window.location.search).get(ADD_AGENT_PARAM);
-    const target = config.crew?.sessions.find((s) => s.id === id);
+    const target = config.crew?.sessions.find((s) => s.id === requestedSessionId);
     return target ? seatForm(config, target.id) : null;
   });
+  useEffect(() => {
+    if (
+      changes &&
+      form?.sessionId === requestedSessionId &&
+      addAgentParam(window.location.search) === requestedSessionId
+    ) {
+      navigate(setupPath("sessions"), { replace: true });
+    }
+  }, [changes, form?.sessionId, requestedSessionId]);
   const [busy, setBusy] = useState(false);
   // Where a refusal shows: a session's panel, or (null) the page, for a reload.
   const [failure, setFailure] = useState<{ sessionId: string | null; text: string } | null>(null);
   const crewSessions =
-    config.crew?.sessions.filter((s) => inSession(session, s.repoId) || s.id === form?.sessionId) ??
-    [];
+    config.crew?.sessions.filter(
+      (s) => inSession(session, s.repoId) || s.id === requestedSessionId,
+    ) ?? [];
 
   const refetch = () => {
     hub.refetch(RESOURCES.crewChanges.path);

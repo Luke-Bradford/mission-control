@@ -141,7 +141,8 @@ describe("Agents panel", () => {
   });
 
   it("disables Add agent when there is no crew session", async () => {
-    const f = stub();
+    expect(CONFIG.crew?.sessions ?? []).toEqual([]);
+    const f = stub({ config: CONFIG });
     render(<Overview />);
     await settled(f, "/api/config");
     expect((screen.getByRole("button", { name: "Add agent" }) as HTMLButtonElement).disabled).toBe(
