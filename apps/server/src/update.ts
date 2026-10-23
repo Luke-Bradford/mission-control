@@ -11,6 +11,10 @@
  * and installs, builds, swaps and restarts. On success the route answers 202 and then calls `restart()`, which hands over to
  * the hub's shutdown (crew first, then exit 0); launchd's KeepAlive starts it again.
  *
+ * When every path changed since the running code is under `apps/web/` or `docs/`, nothing a seat
+ * depends on changed: Update skips the crew refusals, swaps the page in and answers `{ swapped }`
+ * (200) without restarting; the running SHA becomes the new HEAD.
+ *
  * No command takes request input. git runs with hooks and fsmonitor off and none of the server's
  * `GIT_*` settings, like every other git call the server makes.
  */
@@ -45,6 +49,8 @@ export const WEB_OUTDIR_NEXT = "dist-next";
 const WEB_OUTDIR = "dist";
 const WEB_OUTDIR_PREV = "dist-prev";
 const MAIN = "main";
+/** A change only under these needs no hub restart: the server serves `apps/web/dist` from disk. */
+const WEB_ONLY_PREFIXES = ["apps/web/", "docs/"];
 export const UPDATE_MAX_BUFFER = 16 * 1024 * 1024;
 
 export const NOT_ON_MAIN = "not on main";
@@ -223,8 +229,11 @@ export interface Updater {
   version(): Promise<VersionInfo>;
   /** `version()` after a fetch now (shared with one in flight; none inside the floor). */
   check(): Promise<VersionInfo>;
-  /** Resolves `{ upToDate }` or `{ restarting }` (then call `restart()`); throws UpdateError. */
-  update(): Promise<{ upToDate: true } | { restarting: true }>;
+  /**
+   * Resolves `{ upToDate }`, `{ restarting }` (then call `restart()`) or `{ swapped }` (a change
+   * under apps/web/ and docs/ only: the new page is live, nothing restarts); throws UpdateError.
+   */
+  update(): Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
   /** Schedules the exit, UPDATE_EXIT_DELAY_MS on. Called once the 202 has been sent. */
   restart(): void;
 }
@@ -263,6 +272,8 @@ export interface AutoUpdateDeps {
   updater: Pick<Updater, "check" | "update" | "restart">;
   /** Why the hub may not restart now (a seat starting, the test lock held), or null. */
   blocked: () => string | null;
+  /** The test lock is held (why), or null. */
+  locked: () => string | null;
   /** HEAD of the checkout once Update has pulled. */
   headSha: () => Promise<string | null>;
   /** Writes the Activity line. */
@@ -273,8 +284,8 @@ export type AutoUpdateResult = "off" | "current" | "waiting" | "updated";
 
 /**
  * `updates.hub: auto`: one check, run by the scheduler every VERSION_CHECK_MS. When origin/main is
- * ahead and nothing Update refuses on applies (the check answers canUpdate), and the test lock is
- * free, it runs the same `update()` the route does. The pull, install and build take minutes, so a
+ * ahead and nothing Update refuses on applies (the check answers canUpdate; a busy crew is no
+ * refusal for a web-only change), and the test lock is free, it runs the same `update()` the route does. The pull, install and build take minutes, so a
  * turn may have started meanwhile: the restart (and the `Updated to <sha> (auto)` line) waits, off
  * the tick, until `blocked()` is null, rechecked every VERSION_CHECK_FLOOR_MS. Anything that stops it (a refusal, the lock, an unreachable origin, a
  * failed step) is "waiting": the next check tries again. Never forces, never throws.
@@ -285,9 +296,13 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
     try {
       const v = await deps.updater.check();
       if (!v.canUpdate) return v.reason === UP_TO_DATE_MAIN ? "current" : "waiting";
-      if (deps.blocked() !== null) return "waiting";
+      if (deps.locked() !== null) return "waiting"; // update() itself refuses a busy crew unless the change is web-only
       const out = await deps.updater.update(); // re-checks every refusal itself
       if ("upToDate" in out) return "current";
+      if ("swapped" in out) {
+        deps.record(`Updated to ${(await deps.headSha()) ?? "main"} (auto, web only)`);
+        return "updated";
+      }
       const text = `Updated to ${(await deps.headSha()) ?? "main"} (auto)`;
       const go = () => {
         if (deps.blocked() !== null) {
@@ -329,8 +344,12 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   const exec = deps.exec ?? realExec;
   const now = deps.now ?? Date.now;
   const web = (dir: string) => join(root, "apps", "web", dir);
-  /** What `behind` counts from: the code running, not a HEAD a failed update moved. */
-  const base = deps.startSha ?? "HEAD";
+  /**
+   * What `behind` counts from: the code running, not a HEAD a failed update moved. A web-only
+   * update does not restart the hub, so it moves this to the new head.
+   */
+  let running = deps.startSha;
+  const base = () => running ?? "HEAD";
 
   /** Set from the start of an update until it fails; after a success the hub is going down. */
   let updating = false;
@@ -390,7 +409,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
    * The first reason Update may not run, or null. Reads the checkout; never fetches. `update()`
    * passes `self` because it has already claimed `updating`.
    */
-  async function refusal(self = false): Promise<string | null> {
+  async function refusal(self = false, crew = true): Promise<string | null> {
     if (deps.preview) return PREVIEW_SERVER;
     if (updating && !self) return UPDATE_RUNNING;
     const branch = await gitOut(["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => null);
@@ -399,7 +418,18 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     // status never takes index.lock in the live checkout (where the operator may be running git).
     const status = await gitOut(["--no-optional-locks", "status", "--porcelain"]).catch(() => null);
     if (status !== "") return UNCOMMITTED_CHANGES;
-    return deps.crewRefusal();
+    return crew ? deps.crewRefusal() : null;
+  }
+
+  /** Whether every path changed from the running code to origin/main is web or docs; false if unreadable. */
+  async function webOnly(): Promise<boolean> {
+    try {
+      const out = await gitOut(["diff", "--name-only", base(), `origin/${MAIN}`]);
+      const paths = out.split("\n").filter((p) => p !== "");
+      return paths.length > 0 && paths.every((p) => WEB_ONLY_PREFIXES.some((x) => p.startsWith(x)));
+    } catch {
+      return false;
+    }
   }
 
   /** Commits on origin/main that `from` lacks; null when they cannot be counted. */
@@ -507,15 +537,15 @@ export function createUpdater(deps: UpdaterDeps): Updater {
    * on origin/main and HEAD still the SHA it started on (no pulled-but-unrestarted update).
    */
   async function info(): Promise<VersionInfo> {
-    const [sha, n, reason, head] = await Promise.all([
-      deps.startSha ?? gitOut(["rev-parse", "HEAD"]).catch(() => ""),
-      behind(base),
-      refusal(),
-      deps.startSha === null
-        ? Promise.resolve(null)
-        : gitOut(["rev-parse", "HEAD"]).catch(() => null),
+    const [sha, n, other, head] = await Promise.all([
+      running ?? gitOut(["rev-parse", "HEAD"]).catch(() => ""),
+      behind(base()),
+      refusal(false, false),
+      running === null ? Promise.resolve(null) : gitOut(["rev-parse", "HEAD"]).catch(() => null),
     ]);
-    const current = n === 0 && (deps.startSha === null || head === deps.startSha);
+    // a web-only change waits for no seat
+    const reason = other ?? ((await webOnly()) ? null : deps.crewRefusal());
+    const current = n === 0 && (running === null || head === running);
     const why = reason ?? (current ? UP_TO_DATE_MAIN : null);
     return { sha, behind: n, checkedAt, canUpdate: why === null, reason: why };
   }
@@ -540,7 +570,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
       if (updating) throw new UpdateError(409, UPDATE_RUNNING);
       updating = true;
       try {
-        const reason = await refusal(true);
+        const reason = await refusal(true, false); // the crew's turn comes once the change is known
         if (reason !== null) throw new UpdateError(409, reason);
         await startLog();
         if (fetching) await fetching; // a version() fetch in flight: never two at once
@@ -552,7 +582,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         }
         // from the code running, and from the checkout (a failed update may have pulled already)
         const [sinceStart, toPull, head] = await Promise.all([
-          behind(base),
+          behind(base()),
           behind("HEAD"),
           gitOut(["rev-parse", "HEAD"]).catch(() => null),
         ]);
@@ -560,11 +590,17 @@ export function createUpdater(deps: UpdaterDeps): Updater {
           await log(`failed: cannot count the commits on origin/${MAIN}\n`);
           throw new UpdateError(500, updateFailed("fetch"));
         }
-        const pulledNotRestarted = deps.startSha !== null && head !== deps.startSha;
+        const pulledNotRestarted = running !== null && head !== running;
         if (sinceStart === 0 && !pulledNotRestarted) {
           await log("up to date\n");
           updating = false;
           return { upToDate: true };
+        }
+        // a web-only change leaves the seats alone: no wait for them, no restart
+        const webChange = await webOnly();
+        if (!webChange) {
+          const busy = deps.crewRefusal();
+          if (busy !== null) throw new UpdateError(409, busy);
         }
         if (toPull > 0) {
           await step("pull", "git", [...SAFE_CONFIG, "pull", "--ff-only", "origin", MAIN], {
@@ -576,6 +612,14 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         await step("install", "pnpm", ["install", "--frozen-lockfile"], installEnv(root));
         await build();
         await swap();
+        if (webChange) {
+          await log("\ndone; web-only update; not restarting\n");
+          if (running !== null) {
+            running = (await gitOut(["rev-parse", "HEAD"]).catch(() => null)) ?? running;
+          }
+          updating = false;
+          return { swapped: true };
+        }
         await log("\ndone; restarting\n");
         return { restarting: true };
       } catch (e) {
