@@ -340,8 +340,8 @@ export const readyHardRuleText = (ref: string, pr: number, paths: readonly strin
   `${ref}: PR #${pr} passed every check but touches hard-rule files (${paths.join(", ")}); merge it yourself`;
 export const headMovedText = (ref: string, pr: number, head: string, pushed: string): string =>
   `${ref}: PR #${pr}'s head ${head.slice(0, 7)} is not the commit Mission Control pushed (${pushed.slice(0, 7)}); it is not reviewed, so check it before merging`;
-export const reviewParkText = (retro: string, sha: string): string =>
-  `${retro} found blocking issues in ${REVIEW_ROUNDS} reviews; the last on ${sha.slice(0, 7)}`;
+export const reviewParkText = (retro: string, sha: string, rounds = REVIEW_ROUNDS): string =>
+  `${retro} found blocking issues in ${rounds} reviews; the last on ${sha.slice(0, 7)}`;
 export const reviewFailedParkText = (
   retro: string,
   sha: string,

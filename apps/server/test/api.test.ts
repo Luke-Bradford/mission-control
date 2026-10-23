@@ -34,6 +34,7 @@ import {
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
+  type FlightBriefView,
   type FlightView,
   fullAt5h,
   type MachineSample,
@@ -440,6 +441,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/flight"],
+  ["GET", "/api/flight/brief"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
@@ -3065,6 +3067,39 @@ describe("crew routes", () => {
     });
   });
 
+  describe("GET /api/flight/brief", () => {
+    it("has no session and nine empty sections without a watch seat", async () => {
+      const body = (await get("/api/flight/brief")).json<FlightBriefView>();
+      expect(body.session).toBeNull();
+      expect(body.sections).toHaveLength(9);
+      expect(body.sections.every((s) => s.text === "" && s.updatedAt === null)).toBe(true);
+    });
+
+    it("lists FLIGHT's saved sections in order", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.setFlightBriefSection({
+        sessionId: config.crew?.sessions[0]?.id ?? "",
+        section: "crew",
+        text: "GUIDO builds.",
+        updatedAt: 5,
+        updatedBy: "flight-1",
+      });
+      const body = (await get("/api/flight/brief")).json<FlightBriefView>();
+      expect(body.session).toBe(config.crew?.sessions[0]?.id);
+      expect(body.sections[5]).toMatchObject({
+        section: "crew",
+        text: "GUIDO builds.",
+        updatedBy: "flight-1",
+      });
+    });
+  });
+
   describe("GET /api/flight", () => {
     it("has no seat without a watch seat", async () => {
       const r = await get("/api/flight");
@@ -3202,6 +3237,34 @@ describe("crew routes", () => {
     const r = await post5("end");
     expect(r.statusCode).toBe(500);
     expect(r.json()).toEqual({ error: "crew action failed" });
+    expect(r.body).not.toContain("secret");
+  });
+
+  it("logs an unexpected error's message at warn", async () => {
+    supervisorFail = new Error("spawn git EAGAIN");
+    const r = await post5("end");
+    expect(r.json()).toEqual({ error: "crew action failed" });
+    expect(logs.join("")).toContain("spawn git EAGAIN");
+  });
+
+  it("checks that the crew is enabled before the seat, and the seat before the body", async () => {
+    supervisorStatus = { enabled: false, note: null };
+    const disabled = await postBody("/api/seats/nobody/start", { issue: 5 });
+    expect(disabled.statusCode).toBe(409);
+    expect(disabled.json()).toEqual({ error: "crew is disabled on this server" });
+    supervisorStatus = { enabled: true, note: null };
+    const unknown = await postBody("/api/seats/nobody/start", { issue: "not a number" });
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.json()).toEqual({ error: "unknown seat" });
+    expect(supervisorCalls).toEqual([]);
+  });
+
+  it("GET context hides a supervisor failure behind fixed text", async () => {
+    supervisorFail = new Error("ENOENT /Users/someone/secret/path");
+    const r = await get("/api/seats/guido-1/context");
+    expect(r.statusCode).toBe(500);
+    expect(r.json()).toEqual({ error: "crew action failed" });
+    expect(r.body).not.toContain("secret");
   });
 
   it("GET context answers the usage, or null", async () => {
@@ -3505,6 +3568,32 @@ describe("seat ids in the agent routes", () => {
     expect((await get("/api/telemetry?agent=guido-1")).statusCode).toBe(200);
   });
 
+  it("GET /api/telemetry?agent=guido-1 returns only that seat's series", async () => {
+    for (const [id, agentId] of [
+      ["c1", "guido-1"],
+      ["c2", "shop-app-ta"],
+    ] as const) {
+      store.upsertRun(
+        run({
+          id,
+          agentId,
+          startedAt: NOW - 3 * HOUR,
+          endedAt: NOW - 2 * HOUR,
+          status: "ok",
+          tokens: { input: 600, output: 0, cacheRead: 0, cacheCreate: 0 },
+        }),
+      );
+    }
+    // the scope narrows today and totals; the per-agent series stay crew-wide (telemetry.ts)
+    const all = (await get("/api/telemetry")).json<Telemetry>();
+    expect(all.totals.map((t) => t.agentId).sort()).toEqual(["guido-1", "shop-app-ta"]);
+    const one = (await get("/api/telemetry?agent=guido-1")).json<Telemetry>();
+    expect(one.totals.map((t) => t.agentId)).toEqual(["guido-1"]);
+    expect(one.today.agents).toBe(1);
+    expect(one.today.tokens).toBeGreaterThan(0);
+    expect(one.today.tokens).toBeLessThan(all.today.tokens);
+  });
+
   it("refuses an unknown agent with the configured-id text", async () => {
     const r = await get("/api/telemetry?agent=nobody");
     expect(r.statusCode).toBe(400);
@@ -3587,6 +3676,32 @@ describe("the first loop's engine", () => {
     const none = engineApp(null);
     expect((await message(none.a)).statusCode).toBe(200);
     expect(none.told).toEqual([]);
+    await none.a.close();
+  });
+
+  it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {
+    store.upsertRun(run({ id: "plain", agentId: "guido-1", ticket: "shop-app#9" }));
+    const { a } = engineApp("plain");
+    expect((await message(a)).statusCode).toBe(200);
+    expect(store.comms(0)).toEqual([
+      {
+        at: expect.any(Number),
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: "shop-app#9",
+        text: "go on",
+      },
+    ]);
+    await a.close();
+  });
+
+  it("records a message to a seat with no run against no ticket, and a refused one not at all", async () => {
+    const none = engineApp(null);
+    expect((await message(none.a)).statusCode).toBe(200);
+    expect(store.comms(0).map((c) => c.ticket)).toEqual([null]);
+    supervisorFail = new SupervisorError(409, "GUIDO-1 has no live session");
+    expect((await message(none.a)).statusCode).toBe(409);
+    expect(store.comms(0)).toHaveLength(1);
     await none.a.close();
   });
 

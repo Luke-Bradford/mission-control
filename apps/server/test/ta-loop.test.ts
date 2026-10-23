@@ -22,6 +22,7 @@ import {
 } from "../src/collectors/ta-loop.ts";
 import type { AdoptedLoop } from "../src/config.ts";
 import { Store } from "../src/store.ts";
+import { PRINT_RUNNING } from "./fixtures/launchctl.ts";
 
 const FIX = join(import.meta.dirname, "fixtures");
 const NOW = Date.parse("2026-10-17T09:30:00Z");
@@ -406,13 +407,13 @@ describe("collectTaLoop", () => {
   describe("launchd job", () => {
     const NOTE = "ta-loop:shop-app-ta:note";
     const noteRow = () => store.status().find((c) => c.collector === NOTE);
-    const runner = (code: number) => {
+    const runner = (code: number, stdout = code === 0 ? PRINT_RUNNING : "") => {
       const calls: string[][] = [];
       return {
         calls,
         run: async (args: string[]) => {
           calls.push(args);
-          return { code };
+          return { code, stdout };
         },
       };
     };

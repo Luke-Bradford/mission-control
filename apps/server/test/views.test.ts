@@ -199,6 +199,27 @@ describe("activity: board moves", () => {
   });
 });
 
+describe("activity: comms", () => {
+  it("serves a hand-off inside the window as a comms row, and leaves out an older one", () => {
+    store.addComms({ at: NOW - 100, from: "CAPCOM", to: "guido-1", ticket: "mc#7", text: "go" });
+    store.addComms({ at: 1, from: "MC", to: "guido-1", ticket: null, text: "old" });
+    expect(activity(config, store, NOW).filter((e) => e.kind === "comms")).toEqual([
+      {
+        at: NOW - 100,
+        who: "CAPCOM",
+        to: "guido-1",
+        kind: "comms",
+        text: "go",
+        ref: "mc#7",
+        url: null,
+        status: null,
+        prs: [],
+        summary: null,
+      },
+    ]);
+  });
+});
+
 describe("configView crew roles", () => {
   const cfg = {
     operator: { id: "operator", timezone: "Europe/London" },

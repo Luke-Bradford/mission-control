@@ -7,6 +7,7 @@ import {
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
+  COMMS_CAPCOM,
   type ContextUsage,
   CREW_DISABLED,
   CREW_FILES_NOTE,
@@ -84,7 +85,7 @@ import {
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
 import { changedFiles, fileDiff, GitFailed } from "./files.ts";
-import { flightView } from "./flight/state.ts";
+import { flightBriefView, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
@@ -1042,7 +1043,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(422).send({ error: e.message });
         }
         if (e instanceof SupervisorError) return reply.code(e.status).send({ error: e.message });
-        reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "crew action failed");
+        reply.log.warn(
+          {
+            err: e instanceof Error ? e.name : typeof e,
+            message: e instanceof Error ? e.message : String(e),
+          },
+          "crew action failed",
+        );
         return reply.code(500).send({ error: CREW_ACTION_FAILED });
       };
       const seatAction = <B>(
@@ -1081,7 +1088,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
       seatAction("/seats/:id/message", MessageBody, async (sup, id, b) => {
         const runId = sup.seat(id)?.runId ?? null;
+        const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
         await sup.message(id, b.text, { interrupt: b.interrupt === true });
+        store.addComms({ at: now(), from: COMMS_CAPCOM, to: id, ticket, text: b.text });
         // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
         if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
         return { ok: true };
@@ -1107,6 +1116,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT ticket 4)
       api.get("/flight", async () => flightView(config, store, Date.now()));
+      // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief, web follow-up of #225)
+      api.get("/flight/brief", async () => flightBriefView(config, store));
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),

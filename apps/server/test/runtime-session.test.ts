@@ -298,10 +298,15 @@ describe("startSession against the fake CLI", () => {
   });
 
   it("writing to a process that just died does not crash", async () => {
-    const { s, until } = start();
+    const { s, events, until } = start();
     s.send("hi");
     await until(isResult);
     process.kill(s.pid as number, "SIGKILL");
+    // No await since the kill: the exit cannot have been seen, so this send is to a dead process.
+    const aliveAtSend = s.alive;
+    s.send("x".repeat(65536));
+    expect(aliveAtSend).toBe(true);
+    expect(events.some(isExit)).toBe(false);
     // Until the exit is seen the session still looks alive: the writes hit a closed pipe.
     for (let i = 0; i < 50 && s.alive; i++) {
       s.send("x".repeat(65536));

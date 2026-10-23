@@ -19,6 +19,7 @@ import {
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
+  DEFAULT_PROFILES,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -33,6 +34,7 @@ import {
   FINDINGS_NOT_A_REVIEW,
   FINDINGS_RECORDED,
   findingFileText,
+  MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
   MC_PLAN_ALREADY,
   MC_PLAN_BODY_UNCLOSED,
@@ -53,10 +55,14 @@ import {
   MC_TOOLS,
   NEW_LOOP,
   originMovedText,
+  PROFILE_PAIR_TEXT,
   planByLine,
   planFewTestsText,
   planMissingPathsText,
+  planNoProfilesText,
   planTooLongText,
+  planUnknownProfileText,
+  planWrittenText,
   prNamedRefText,
   prNotifyText,
   prSecretText,
@@ -76,6 +82,7 @@ import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools, type McToolsDeps, openDraftPr, pushRun } from "../src/mcp/tools.ts";
+import { ProfilesError } from "../src/profiles.ts";
 import { CREW_GIT_SLOW_MS } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
@@ -888,6 +895,14 @@ describe("ask_operator", () => {
     expect(emitted).toContain("attention");
   });
 
+  it("records the question as the seat to CAPCOM, about its run's ticket", async () => {
+    await ask({ question: "Lanes per customer?" });
+    expect(store.comms(0)).toEqual([
+      { at: NOW, from: "guido-1", to: "CAPCOM", ticket: "mc#42", text: "Lanes per customer?" },
+    ]);
+    expect(emitted).toContain("agents");
+  });
+
   it("closes a seat's open questions when it is answered, and only that seat's", async () => {
     await ask({ question: "one?" });
     liveSeat("retro", "retro:1");
@@ -905,6 +920,7 @@ describe("ask_operator", () => {
     );
     expect(other).toEqual({ text: "This run has ended.", isError: true });
     expect(store.openQuestions()).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
   });
 
   it("validates the question: 1 to 2000 characters, not blank", async () => {
@@ -3087,6 +3103,45 @@ describe("report_plan", () => {
     expect(bodyFiles()).toEqual([]);
   });
 
+  it("records the plan landing as the planner to CAPCOM when the session has no FLIGHT seat", async () => {
+    await plan();
+    expect(store.comms(0)).toEqual([
+      {
+        at: NOW,
+        from: "fao-1",
+        to: "CAPCOM",
+        ticket: "mc#7",
+        text: planWrittenText("mc#7"),
+      },
+    ]);
+  });
+
+  it("records it to the session's FLIGHT seat, skipping a retiring one", async () => {
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push(
+      { id: "fao-1", role: "FAO", accountId: "claude-main", model: "haiku", area: [] },
+      {
+        id: "flight-0",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "haiku",
+        area: [],
+        retiring: true,
+      },
+      { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "haiku", area: [] },
+    );
+    const withFlight = createMcTools(deps({ config: cfg, gh: createGh(join(ghDir, "gh")) }));
+    await tool("report_plan", withFlight).call(FAO_CTX, { plan: PLAN });
+    expect(store.comms(0).map((c) => [c.from, c.to, c.ticket])).toEqual([
+      ["fao-1", "flight-1", "mc#7"],
+    ]);
+  });
+
+  it("records nothing when the plan is refused", async () => {
+    await plan("ask @someone");
+    expect(store.comms(0)).toEqual([]);
+  });
+
   it("starts the body with the plan when the ticket body is blank", async () => {
     ghState(view("  \n"));
     await plan();
@@ -3285,6 +3340,69 @@ describe("report_plan", () => {
   it("says there is no room when the ticket alone is too long", async () => {
     ghState(view("b".repeat(TICKET_BODY_MAX)));
     expect(await plan()).toEqual(refused(MC_PLAN_NO_ROOM));
+  });
+
+  const planWith = (over: Record<string, unknown>) =>
+    tool("report_plan", pt).call(FAO_CTX, { plan: PLAN, ...over });
+
+  it("stores the planner's profile choice with its reason, after the plan is written", async () => {
+    expect(await planWith({ profile: "bugfix", profile_reason: "it is a bug" })).toEqual({
+      text: MC_PLAN_WRITTEN,
+    });
+    expect(store.profileOverride("mc", 7)).toEqual({
+      profile: "bugfix",
+      reason: "it is a bug",
+      by: "planner",
+    });
+  });
+
+  it("stores no choice when the plan is refused", async () => {
+    ghState(view("Do X.", "CLOSED"));
+    await planWith({ profile: "bugfix", profile_reason: "it is a bug" });
+    expect(store.profileOverride("mc", 7)).toBeNull();
+  });
+
+  it("refuses an unknown profile before gh is called", async () => {
+    const r = await planWith({ profile: "zzz", profile_reason: "r" });
+    expect(r).toEqual(
+      refused(
+        planUnknownProfileText(
+          "zzz",
+          DEFAULT_PROFILES.map((p) => p.name),
+        ),
+      ),
+    );
+    expect(ghCalls()).toEqual([]);
+    expect(store.profileOverride("mc", 7)).toBeNull();
+  });
+
+  it("refuses a profile when the profiles file cannot be read, before gh is called", async () => {
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "fao-1",
+      role: "FAO",
+      accountId: "claude-main",
+      model: "haiku",
+      area: [],
+    });
+    pt = createMcTools(
+      deps({
+        config: cfg,
+        gh: createGh(join(ghDir, "gh")),
+        profiles: () => new ProfilesError("boom"),
+      }),
+    );
+    expect(await planWith({ profile: "bugfix", profile_reason: "r" })).toEqual(
+      refused(planNoProfilesText("boom")),
+    );
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it("takes a profile and its reason together or not at all", async () => {
+    for (const over of [{ profile: "bugfix" }, { profile_reason: "r" }]) {
+      expect(await planWith(over)).toEqual(refused(`${MC_BAD_ARGS}${PROFILE_PAIR_TEXT}`));
+    }
+    expect(ghCalls()).toEqual([]);
   });
 
   it("refuses arguments it does not take", async () => {

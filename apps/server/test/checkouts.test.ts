@@ -265,6 +265,38 @@ describe("prepareCheckout", () => {
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
   });
 
+  it("installs when a base lockfile is over the 4 MiB default read", async () => {
+    commit(seed, {
+      "package.json": PKG,
+      "pnpm-lock.yaml": `${EMPTY_LOCK}${"# padding padding padding padding\n".repeat(160_000)}`,
+    });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout(input());
+    expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
+  });
+
+  it("says a git that times out reading a base file timed out", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const shim = join(dir, "shim");
+    mkdirSync(shim);
+    writeFileSync(
+      join(shim, "git"),
+      `#!/bin/sh\ncase " $* " in *" cat-file -e "*) ;; *" cat-file "*) exec sleep 30;; esac\nexec ${realGit} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${shim}:${savedPath}`;
+    try {
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toMatch(/^could not read \S+ from the crew clone \(timed out\)$/);
+    } finally {
+      process.env.PATH = savedPath;
+    }
+  }, 30_000);
+
   it("removes the worktree and the fresh branch when the install fails", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": "garbage: [\n" });
     git(seed, "push", "-q", "origin", "main");
@@ -274,6 +306,60 @@ describe("prepareCheckout", () => {
     expect(existsSync(wtPath())).toBe(false);
     expect(worktrees()).toHaveLength(1);
     expect(hasBranch(BRANCH)).toBe(false);
+  });
+
+  it("removes the worktree and the local branch made from origin's when the install fails", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": "garbage: [\n" });
+    git(seed, "push", "-q", "origin", "main");
+    git(seed, "checkout", "-q", "-b", BRANCH);
+    commit(seed, { "work.txt": "w\n" });
+    git(seed, "push", "-q", "origin", BRANCH);
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("install");
+    expect(existsSync(wtPath())).toBe(false);
+    expect(worktrees()).toHaveLength(1);
+    expect(hasBranch(BRANCH)).toBe(false);
+  });
+
+  it("refuses a branch only origin has that changes pnpm-lock.yaml, and leaves no branch", async () => {
+    commit(seed, { "package.json": PKG });
+    git(seed, "push", "-q", "origin", "main");
+    git(seed, "checkout", "-q", "-b", BRANCH);
+    commit(seed, { "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", BRANCH);
+    const e = await fail(prepareCheckout(input()));
+    expect(e.code).toBe("protected");
+    expect(e.message).toBe(
+      `branch ${BRANCH} changes pnpm-lock.yaml; Mission Control won't install from it`,
+    );
+    expect(existsSync(wtPath())).toBe(false);
+    expect(worktrees()).toHaveLength(1);
+    expect(hasBranch(BRANCH)).toBe(false);
+  });
+
+  it("keeps a branch that moved after the start made it, when the install fails", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    git(clone, "pull", "-q", "--ff-only");
+    const moved = commit(clone, { "moved.txt": "m\n" });
+    git(clone, "reset", "-q", "--hard", "HEAD~1");
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "pnpm"),
+      `#!/bin/sh\ngit -C '${clone}' update-ref refs/heads/${BRANCH} ${moved}\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${bin}:${savedPath}`;
+    try {
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("install");
+    } finally {
+      process.env.PATH = savedPath;
+    }
+    expect(existsSync(wtPath())).toBe(false);
+    expect(git(clone, "rev-parse", `refs/heads/${BRANCH}`)).toBe(moved);
   });
 
   it("installs with clone-or-copy, never hardlinks into the shared store", () => {
@@ -835,5 +921,64 @@ describe("existingCheckout", () => {
     git(dir, "init", "-q", other);
     writeFileSync(join(wtPath(), ".git"), `gitdir: ${join(other, ".git")}\n`);
     expect((await fail(existingCheckout(clone, wtPath(), BRANCH))).code).toBe("path");
+  });
+});
+
+describe("a crew clone that shares its git repository", () => {
+  const refs = () => git(clone, "for-each-ref");
+  /** A linked worktree of the clone, standing in for a loop's worktree. */
+  const loopWorktree = () => {
+    const loop = join(dir, "loop-wt");
+    git(clone, "worktree", "add", "-q", "--detach", loop);
+    return loop;
+  };
+
+  it("is refused before anything is fetched, pruned or added", async () => {
+    const loop = loopWorktree();
+    // origin dropped a branch the clone still tracks: a prune would remove it
+    git(seed, "push", "-q", "origin", "main:refs/heads/gone");
+    git(clone, "fetch", "-q", "origin");
+    git(origin, "branch", "-q", "-D", "gone");
+    const refsBefore = refs();
+    const treesBefore = worktrees();
+
+    const peers = [{ label: "loop shop worktree", dir: loop }];
+    const e = await fail(prepareCheckout({ ...input(), peers }));
+    expect(e.code).toBe("checkout");
+    expect(e.message).toBe("the crew clone shares its git repository with loop shop worktree");
+    expect(refs()).toBe(refsBefore);
+    expect(worktrees()).toEqual(treesBefore);
+  });
+
+  it("is refused for plan, review and detached checkouts too", async () => {
+    const peers = [{ label: "the hub's checkout", dir: loopWorktree() }];
+    const text = "the crew clone shares its git repository with the hub's checkout";
+    const base = { checkout: clone, worktreesRoot: root, sessionId: "a" };
+    const plan = await fail(preparePlanCheckout({ ...base, seatId: "guido", issue: 42, peers }));
+    expect(plan.message).toBe(text);
+    const scratch = await fail(
+      prepareScratch({
+        ...base,
+        seatId: "retro",
+        reviewId: 1,
+        sha: git(clone, "rev-parse", "HEAD"),
+        peers,
+      }),
+    );
+    expect(scratch.message).toBe(text);
+    const detached = await fail(
+      prepareDetachedCheckout({ ...base, name: "flight-1-watch", peers }),
+    );
+    expect(detached.message).toBe(text);
+  });
+
+  it("skips a peer git cannot read and one in another repository", async () => {
+    const other = join(dir, "other");
+    git(dir, "init", "-q", "-b", "main", other);
+    const peers = [
+      { label: "loop gone worktree", dir: join(dir, "missing") },
+      { label: "loop other worktree", dir: other },
+    ];
+    expect((await prepareCheckout({ ...input(), peers })).created).toBe(true);
   });
 });

@@ -229,9 +229,15 @@ describe("the allowlist in phase 2b", () => {
       flightState: "mcp__mc__flight_state",
       promote: "mcp__mc__promote",
       endRun: "mcp__mc__end_run",
+      acceptRuling: "mcp__mc__accept_ruling",
+      syncMain: "mcp__mc__sync_main",
       createTicket: "mcp__mc__create_ticket",
       commentTicket: "mcp__mc__comment_ticket",
       briefItem: "mcp__mc__brief_item",
+      readPr: "mcp__mc__read_pr",
+      readCiLog: "mcp__mc__read_ci_log",
+      listTickets: "mcp__mc__list_tickets",
+      updateBrief: "mcp__mc__update_brief",
     });
     expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit]);
   });
@@ -511,9 +517,15 @@ describe("crew constants", () => {
           "flight_state",
           "promote",
           "end_run",
+          "accept_ruling",
+          "sync_main",
           "create_ticket",
           "comment_ticket",
           "brief_item",
+          "read_pr",
+          "read_ci_log",
+          "list_tickets",
+          "update_brief",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -590,9 +602,15 @@ describe("mc tool grants", () => {
       "flight_state",
       "promote",
       "end_run",
+      "accept_ruling",
+      "sync_main",
       "create_ticket",
       "comment_ticket",
       "brief_item",
+      "read_pr",
+      "read_ci_log",
+      "list_tickets",
+      "update_brief",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");

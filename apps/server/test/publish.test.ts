@@ -338,7 +338,7 @@ describe("rerunFailed", () => {
     (...r: { databaseId: number; name: string; conclusion: string }[]) =>
     () => ({
       code: 0,
-      stdout: JSON.stringify(r),
+      stdout: JSON.stringify(r.map((x) => ({ status: "completed", ...x }))),
     });
 
   it("re-runs the failed jobs of each failed run, argv only", async () => {
@@ -353,6 +353,20 @@ describe("rerunFailed", () => {
     expect(out).toEqual([{ id: 11, name: "test" }]);
     expect(ghCalls[1]).toEqual(["run", "rerun", "--repo=o/mc", "11", "--failed"]);
     expect(ghCalls).toHaveLength(2);
+  });
+
+  it("answers running, and re-runs nothing, while a listed run has not completed", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "failure", status: "completed" },
+          { databaseId: 12, name: "lint", conclusion: "", status: "in_progress" },
+        ]),
+      }),
+    ];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toBe("running");
+    expect(ghCalls).toHaveLength(1);
   });
 
   it("answers null when gh refuses and nothing was re-run, or the sha is not a commit", async () => {
@@ -503,6 +517,152 @@ describe("ciExcerpt", () => {
     };
     await createPublisher(deps({ gh: spy })).ciExcerpt("o/mc", SHA);
     expect(seen).toEqual([undefined, 16 * 1024 * 1024]);
+  });
+});
+
+describe("rerunRuling and rerunState", () => {
+  type R = { databaseId: number; conclusion: string; attempt: number; status?: string };
+  const runs =
+    (...r: R[]) =>
+    () => ({ code: 0, stdout: JSON.stringify(r) });
+
+  it("re-runs only the failed runs, and returns each one's attempt from before", async () => {
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "failure", attempt: 1 },
+        { databaseId: 12, conclusion: "success", attempt: 1 },
+        { databaseId: 13, conclusion: "timed_out", attempt: 2 },
+      ),
+      () => ({ code: 0, stdout: "" }),
+      () => ({ code: 0, stdout: "" }),
+    ];
+    const r = await createPublisher(deps()).rerunRuling("o/mc", SHA);
+    expect(r).toEqual({
+      ok: true,
+      runs: [
+        { id: 11, attempt: 1 },
+        { id: 13, attempt: 2 },
+      ],
+    });
+    expect(ghCalls[0]).toEqual([
+      "run",
+      "list",
+      "--repo=o/mc",
+      `--commit=${SHA}`,
+      "--json=databaseId,conclusion,attempt",
+    ]);
+    expect(ghCalls.slice(1)).toEqual([
+      ["run", "rerun", "--repo=o/mc", "11", "--failed"],
+      ["run", "rerun", "--repo=o/mc", "13", "--failed"],
+    ]);
+  });
+
+  it("returns the runs already re-run when a later rerun fails, so the caller records them", async () => {
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "failure", attempt: 1 },
+        { databaseId: 13, conclusion: "failure", attempt: 1 },
+      ),
+      () => ({ code: 0, stdout: "" }),
+      () => ({ code: 1, stdout: "", stderr: "boom" }),
+    ];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toEqual({
+      ok: true,
+      runs: [{ id: 11, attempt: 1 }],
+    });
+    // a first rerun that fails is still a refusal
+    ghAnswers = [
+      runs({ databaseId: 11, conclusion: "failure", attempt: 1 }),
+      () => ({ code: 1, stdout: "", stderr: "boom" }),
+    ];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toMatchObject({ ok: false });
+  });
+
+  it("is failed when a failed run was not re-run, though the re-run runs passed", async () => {
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "success", attempt: 2, status: "completed" },
+        { databaseId: 13, conclusion: "failure", attempt: 1, status: "completed" },
+      ),
+    ];
+    expect(await createPublisher(deps()).rerunState("o/mc", SHA, [{ id: 11, attempt: 1 }])).toEqual(
+      { ok: true, outcome: "failed" },
+    );
+  });
+
+  it("refuses when no run failed, and when gh cannot list", async () => {
+    ghAnswers = [runs({ databaseId: 12, conclusion: "success", attempt: 1 })];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toMatchObject({
+      ok: false,
+      text: NO_FAILED_RUN,
+    });
+    ghAnswers = [() => ({ code: 1, stdout: "", stderr: "boom" })];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toMatchObject({
+      ok: false,
+      transient: true,
+    });
+    expect(ghCalls).toHaveLength(2);
+  });
+
+  it("reads a re-run as pending until its attempt is higher and it is completed", async () => {
+    const saved = [{ id: 11, attempt: 1 }];
+    const state = async (...r: R[]) => {
+      ghAnswers = [runs(...r)];
+      return createPublisher(deps()).rerunState("o/mc", SHA, saved);
+    };
+    expect(
+      await state({ databaseId: 11, conclusion: "failure", attempt: 1, status: "completed" }),
+    ).toEqual({
+      ok: true,
+      outcome: "pending",
+    });
+    expect(
+      await state({ databaseId: 11, conclusion: "", attempt: 2, status: "in_progress" }),
+    ).toEqual({
+      ok: true,
+      outcome: "pending",
+    });
+    expect(
+      await state({ databaseId: 11, conclusion: "success", attempt: 2, status: "completed" }),
+    ).toEqual({
+      ok: true,
+      outcome: "passed",
+    });
+    expect(
+      await state({ databaseId: 11, conclusion: "failure", attempt: 2, status: "completed" }),
+    ).toEqual({
+      ok: true,
+      outcome: "failed",
+    });
+    expect(ghCalls[0]).toEqual([
+      "run",
+      "list",
+      "--repo=o/mc",
+      `--commit=${SHA}`,
+      "--json=databaseId,status,conclusion,attempt",
+    ]);
+  });
+
+  it("is failed if any run failed, and a run that cannot be found is a transient refusal", async () => {
+    const saved = [
+      { id: 11, attempt: 1 },
+      { id: 13, attempt: 1 },
+    ];
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "skipped", attempt: 2, status: "completed" },
+        { databaseId: 13, conclusion: "cancelled", attempt: 2, status: "completed" },
+      ),
+    ];
+    expect(await createPublisher(deps()).rerunState("o/mc", SHA, saved)).toEqual({
+      ok: true,
+      outcome: "failed",
+    });
+    ghAnswers = [runs({ databaseId: 11, conclusion: "success", attempt: 2, status: "completed" })];
+    expect(await createPublisher(deps()).rerunState("o/mc", SHA, saved)).toMatchObject({
+      ok: false,
+      transient: true,
+    });
   });
 });
 
@@ -1169,6 +1329,62 @@ describe("merge steps", () => {
             stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
           },
         ),
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+    });
+
+    it("counts a branch deleted between the check and the push as success", async () => {
+      let asked = 0;
+      const rejected = Object.assign(new Error("Command failed: git push"), {
+        code: 1,
+        stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
+      });
+      gitAnswers = {
+        "ls-remote": () => lsRemote(MAIN, ++asked === 1 ? SHA : null),
+        push: rejected,
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toEqual({ ok: true });
+      expect(asked).toBe(2);
+    });
+
+    it("counts a push that fails because the branch has gone as success", async () => {
+      let asked = 0;
+      gitAnswers = {
+        "ls-remote": () => lsRemote(MAIN, ++asked === 1 ? SHA : null),
+        push: new Error("error: unable to delete: remote ref does not exist"),
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toEqual({ ok: true });
+    });
+
+    it("keeps the push's refusal when the re-check cannot read origin", async () => {
+      let asked = 0;
+      gitAnswers = {
+        "ls-remote": () => {
+          if (++asked === 1) return lsRemote(MAIN, SHA);
+          throw new Error("fatal: unable to access origin");
+        },
+        push: Object.assign(new Error("Command failed: git push"), {
+          code: 1,
+          stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
+        }),
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+      expect(asked).toBe(2);
+    });
+
+    it("still refuses finally when the branch is still there after a refused push", async () => {
+      gitAnswers = {
+        "ls-remote": lsRemote(MAIN, SHA),
+        push: Object.assign(new Error("Command failed: git push"), {
+          code: 1,
+          stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
+        }),
       };
       expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
         ok: false,

@@ -10,7 +10,10 @@ import {
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
+  type ChosenProfile,
+  COMMS_TEXT_MAX,
   type Escalation,
+  type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
@@ -25,6 +28,7 @@ import {
   inferTicket,
   type MachineSample,
   type MoveColumn,
+  type ProfileOverride,
   type PullRequestView,
   type RepoId,
   type ReviewFinding,
@@ -137,6 +141,12 @@ CREATE TABLE IF NOT EXISTS loop_events (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
+-- Hand-offs between agents (Activity › Messages): who told whom what, about which ticket.
+CREATE TABLE IF NOT EXISTS comms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
+  to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
 -- The Activity page's hub rows (an automatic update); the primary key keeps a line landing once.
 CREATE TABLE IF NOT EXISTS hub_events (
   at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (at, text)
@@ -205,15 +215,34 @@ CREATE TABLE IF NOT EXISTS briefs (
 );
 CREATE INDEX IF NOT EXISTS briefs_key ON briefs(key);
 CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
+-- The template profile FLIGHT or the planner chose for a ticket, with the reason; the latest wins.
+CREATE TABLE IF NOT EXISTS profile_overrides (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
+  by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
+);
 -- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
 CREATE TABLE IF NOT EXISTS holds (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
   basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
+-- FLIGHT's living brief: one row per crew session and section.
+CREATE TABLE IF NOT EXISTS flight_brief (
+  session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
+  updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
+);
 `;
 
 type Row = Record<string, SQLInputValue>;
+
+/** One section of FLIGHT's brief, as stored. */
+export interface FlightBriefRow {
+  sessionId: string;
+  section: FlightBriefSectionKey;
+  text: string;
+  updatedAt: number;
+  updatedBy: string;
+}
 
 /** A card FLIGHT holds in Backlog behind an open PR. */
 export interface Hold {
@@ -361,6 +390,15 @@ export interface BoardMove {
 }
 
 /** Who a seat line is from. */
+/** A hand-off between agents; `from` and `to` are seat ids, COMMS_CAPCOM or COMMS_MC. */
+export interface CommsRow {
+  at: number;
+  from: string;
+  to: string;
+  ticket: string | null;
+  text: string;
+}
+
 export type SeatLineOrigin = "operator" | "engine";
 
 /** A line sent to a seat; its key is what makes sending it once-only. */
@@ -456,6 +494,15 @@ const toRun = (r: Row): Run => ({
   ...(r.loop === null || r.loop === undefined
     ? {}
     : { loop: JSON.parse(r.loop as string) as RunLoop }),
+  // Absent, not null, on a run that started without a profile.
+  ...(r.profile === null || r.profile === undefined
+    ? {}
+    : {
+        profile: {
+          ...(JSON.parse(r.profile as string) as ChosenProfile),
+          hash: r.profile_hash as string,
+        },
+      }),
   ...(r.ended_by === null || r.ended_by === undefined
     ? {}
     : { endedBy: r.ended_by as NonNullable<Run["endedBy"]> }),
@@ -643,6 +690,10 @@ export class Store {
       ["review_id", "INTEGER"],
       // The `claude` CLI version the run started on; null on rows from before it was recorded.
       ["cli_version", "TEXT"],
+      // The template profile the run started with (JSON of profile and route) and its hash;
+      // `upsertRun` writes them on a new row only.
+      ["profile", "TEXT"],
+      ["profile_hash", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
@@ -750,8 +801,8 @@ export class Store {
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ticket_title, review_id, cli_version, profile, profile_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -784,7 +835,31 @@ export class Store {
         r.ticketTitle ?? null,
         r.reviewId ?? null,
         r.cliVersion ?? null,
+        r.profile ? JSON.stringify({ profile: r.profile.profile, route: r.profile.route }) : null,
+        r.profile?.hash ?? null,
       );
+  }
+
+  /** Records the template profile chosen for a ticket; a later choice replaces it. */
+  setProfileOverride(repoId: RepoId, issue: number, o: ProfileOverride, at: number): void {
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO profile_overrides (repo_id, issue, profile, reason, by, at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(repoId, issue, o.profile, o.reason, o.by, at);
+  }
+
+  profileOverride(repoId: RepoId, issue: number): ProfileOverride | null {
+    const r = this.db
+      .prepare("SELECT profile, reason, by FROM profile_overrides WHERE repo_id = ? AND issue = ?")
+      .get(repoId, issue) as Row | undefined;
+    return r
+      ? {
+          profile: r.profile as string,
+          reason: r.reason as string,
+          by: r.by as ProfileOverride["by"],
+        }
+      : null;
   }
 
   run(id: string): Run | null {
@@ -1883,6 +1958,32 @@ export class Store {
     }));
   }
 
+  /** Records a hand-off: whitespace runs made one space, trimmed, cut to COMMS_TEXT_MAX characters. */
+  addComms(row: CommsRow): void {
+    const chars = Array.from(row.text.replace(/\s+/g, " ").trim());
+    const text =
+      chars.length > COMMS_TEXT_MAX
+        ? `${chars.slice(0, COMMS_TEXT_MAX - 1).join("")}…`
+        : chars.join("");
+    this.db
+      .prepare("INSERT INTO comms (at, from_id, to_id, ticket, text) VALUES (?, ?, ?, ?, ?)")
+      .run(row.at, row.from, row.to, row.ticket, text);
+  }
+
+  /** The hand-offs at or after `since`, oldest first. */
+  comms(since: number): CommsRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM comms WHERE at >= ? ORDER BY at, id")
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      at: r.at as number,
+      from: r.from_id as string,
+      to: r.to_id as string,
+      ticket: r.ticket as string | null,
+      text: r.text as string,
+    }));
+  }
+
   /** Records a hub event (a line on the Activity page). */
   addHubEvent(text: string, at: number): void {
     this.db.prepare("INSERT OR IGNORE INTO hub_events (at, text) VALUES (?, ?)").run(at, text);
@@ -2414,6 +2515,32 @@ export class Store {
       about: r.about as string,
       decision: r.decision as string,
       basis: r.basis as string,
+    }));
+  }
+
+  /** Replaces one section of a session's brief. */
+  setFlightBriefSection(r: FlightBriefRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO flight_brief (session_id, section, text, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, section) DO UPDATE SET
+           text = excluded.text, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+      )
+      .run(r.sessionId, r.section, r.text, r.updatedAt, r.updatedBy);
+  }
+
+  /** The stored sections of a session's brief. */
+  flightBrief(sessionId: string): FlightBriefRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM flight_brief WHERE session_id = ? ORDER BY section")
+      .all(sessionId) as Row[];
+    return rows.map((r) => ({
+      sessionId: r.session_id as string,
+      section: r.section as FlightBriefSectionKey,
+      text: r.text as string,
+      updatedAt: r.updated_at as number,
+      updatedBy: r.updated_by as string,
     }));
   }
 
