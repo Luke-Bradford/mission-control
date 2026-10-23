@@ -3573,6 +3573,15 @@ describe("startReview", () => {
 
   /** A review of an author run whose profile has this review depth; the review run's model. */
   async function reviewModel(depth: "light" | "full"): Promise<string | null> {
+    const model = await reviewRunModel(depth);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    // the CLI is launched on the model the depth calls for, as the run row says
+    expect(argv[argv.indexOf("--model") + 1]).toBe(depth === "full" ? REVIEW_FULL_MODEL : "haiku");
+    return model;
+  }
+
+  async function reviewRunModel(depth: "light" | "full"): Promise<string | null> {
     const base = DEFAULT_PROFILES[0] as Profile;
     const r = reviewOfPush({
       profile: {

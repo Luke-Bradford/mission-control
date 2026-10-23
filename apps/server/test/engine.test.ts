@@ -1,11 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   asideEventText,
   type BoardItem,
   cleanupBranchNoteKey,
   closedIssueText,
+  DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   deletedLocalText,
   deletedRemoteText,
@@ -27,6 +29,7 @@ import {
   minorNotPostedText,
   NEW_LOOP,
   originMovedText,
+  type Profile,
   type PullRequestView,
   parkedEventText,
   prNamedRefText,
@@ -531,6 +534,24 @@ const report = (note = "Changed the thing", sha = SHA) => {
   store.addEvidence(RUN, note, clock);
   clock += 1000;
 };
+/** Gives RUN a profile snapshot; `upsertRun` never rewrites one, so this writes the row directly. */
+const giveProfile = (over: Partial<Profile>): void => {
+  const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+  const snapshot = {
+    profile: { ...feature, ...over },
+    route: { by: "size", size: "M" },
+  };
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    db.prepare("UPDATE runs SET profile = ?, profile_hash = ? WHERE id = ?").run(
+      JSON.stringify(snapshot),
+      "h",
+      RUN,
+    );
+  } finally {
+    db.close();
+  }
+};
 const setPr = (over: Partial<PullRequestView> = {}) =>
   store.upsertPullRequests(REPO, [prRow(over)], clock);
 const noteKeys = () => store.notes().map((n) => n.key);
@@ -1031,6 +1052,18 @@ describe("The operator's message", () => {
     });
     await h.engine.reconcileRun(RUN);
   }
+
+  it("the run's profile try limit parks CI on the first failure at tries 1", async () => {
+    giveProfile({ tries: 1 });
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "failing" });
+    await h.engine.reconcileRun(RUN);
+    expect(store.run(RUN)?.loop?.parked).toMatchObject({
+      kind: "ci",
+      reason: "CI failed 1 times; last on aaaaaaa",
+    });
+  });
 
   it("un-parks a parked run, and its next park has a new blocked key", async () => {
     await parkOnCi();
@@ -1895,6 +1928,13 @@ describe("the engine runs reviews", () => {
     expect(reviewerOf(config, "guido-1")?.id).toBe("retro-2");
     need(seats().find((s) => s.id === "retro-2")).retiring = true;
     expect(reviewerOf(config, "guido-1")).toBeNull();
+  });
+
+  it("requests the review from the seat with the run's profile reviewer role", async () => {
+    seats().push({ ...retroSeat(), id: "other-1", role: "AUDIT", def: seatDef(retroSeat()) });
+    giveProfile({ reviewer: { role: "AUDIT", depth: "light" } });
+    await toReview();
+    expect(reviewRows().map((r) => r.seatId)).toEqual(["other-1"]);
   });
 
   it("reviewerOf prefers the review seat with the profile's role, else the first", () => {
