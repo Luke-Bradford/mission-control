@@ -28,11 +28,25 @@ import {
 import { cutText, hhmm, mss, prLabel, wkdTime } from "./fmt.ts";
 
 /**
+ * The attention items a seat's row shows: the seat's own, about the run it is working now. Run
+ * items carry the ticket, not the run, so one about another ticket belongs to a run the seat has
+ * set aside (in review, ready to merge, parked) and shows under that ticket in Needs you instead.
+ * An escalation is the repo's, not a run's, and always stays.
+ */
+export function seatItems(row: CrewRow, items: AttentionItem[]): AttentionItem[] {
+  return items.filter(
+    (i) =>
+      i.agentId === row.id &&
+      (i.escalationId !== null || i.ticket === null || i.ticket === row.ticket),
+  );
+}
+
+/**
  * The order the Overview table and j/k share: agents with an attention item first, then by state
  * (broken and stalled first), then config order.
  */
 export function crewOrder(rows: CrewRow[], items: AttentionItem[]): CrewRow[] {
-  const needs = new Set(items.map((i) => i.agentId).filter((id) => id !== null));
+  const needs = new Set(rows.filter((r) => seatItems(r, items).length > 0).map((r) => r.id));
   return [...rows].sort(
     (a, b) =>
       Number(needs.has(b.id)) - Number(needs.has(a.id)) ||
@@ -339,7 +353,7 @@ const ASKS = ["decision", "approval", "question"] as const;
  * the item's `at`), a parked escalation, asks for an answer, and the loop's own error.
  */
 export function needLine(row: CrewRow, items: AttentionItem[], now: number): NeedPart[] {
-  const mine = items.filter((i) => i.agentId === row.id);
+  const mine = seatItems(row, items);
   const parts: NeedPart[] = [];
   const stall = mine.find((i) => i.kind === "stalled");
   if (stall) {
