@@ -491,6 +491,26 @@ describe("refillQueues", () => {
       expect(issues(SERVER)).toEqual([1]);
     });
 
+    it("takes the card queued on an idle seat that is at its account's quota stop", async () => {
+      config.accounts.push({ id: "claude-alt", vendor: "claude", alertAt: 80, stopAt: 95 });
+      const second = config.crew?.sessions[0]?.seats.find((s) => s.id === "guido-2");
+      if (second === undefined) throw new Error("no seat");
+      second.accountId = "claude-alt";
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: NOW - 1000,
+        pct: 95,
+        resetAt: NOW + DAY,
+        source: "test",
+      });
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      await take(SERVER);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
+    });
+
     it("leaves a card the busy seat holds taken", async () => {
       await busyServer(card(1, { priority: "P1" }), card(2, { priority: "P2" }));
       store.takeQueued(SERVER, NOW);

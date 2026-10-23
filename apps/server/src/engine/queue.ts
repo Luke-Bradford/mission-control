@@ -307,7 +307,7 @@ export const isTransientStart = (e: unknown): boolean =>
 
 /**
  * A seat about to take picks, in `readyCards` order, the first card of its own queue and the queues
- * of the seats that may not take now, among the cards its area labels cover. A card from another
+ * of the seats that may not take now (busy, or at their account's quota stop), among the cards its area labels cover. A card from another
  * seat's queue moves to the head of this seat's, so a busy seat's queue never holds back a higher
  * Priority. A card a seat holds taken stays with it.
  */
@@ -321,7 +321,13 @@ async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConf
   const holder = new Map<number, string>();
   for (const q of own) if (q.repoId === repoId) holder.set(q.issue, seat.id);
   for (const { session, seat: other } of writerSeats(config)) {
-    if (other.id === seat.id || session.repoId !== repoId || seatMayTake(store, other.id)) continue;
+    if (
+      other.id === seat.id ||
+      session.repoId !== repoId ||
+      (seatMayTake(store, other.id) && !atQuotaStop(deps, other.accountId))
+    ) {
+      continue;
+    }
     for (const q of store.queue(other.id)) {
       if (q.repoId === repoId && q.takenAt === null) holder.set(q.issue, other.id);
     }
