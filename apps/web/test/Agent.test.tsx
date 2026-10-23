@@ -419,13 +419,22 @@ describe("Agent page: picker and selection", () => {
   });
 });
 
+/** The default crew row's current ticket: items about it show on the seat's banner. */
+const THIS_RUN = "shop-app#3349";
+
 describe("Agent page: need banner", () => {
   it("says the agent needs you, with the need line and Ack, which acks its unacked keys", async () => {
     const fetch = stub({
       items: [
-        item(),
-        item({ key: "stall:shop-app-ta:r-12", kind: "stalled", at: NOW - 12 * MIN, tool: "Bash" }),
-        item({ key: "esc:shop-app#1", kind: "question", acked: true }),
+        item({ ticket: THIS_RUN }),
+        item({
+          key: "stall:shop-app-ta:r-12",
+          kind: "stalled",
+          at: NOW - 12 * MIN,
+          tool: "Bash",
+          ticket: null,
+        }),
+        item({ key: "esc:shop-app#1", kind: "question", acked: true, ticket: THIS_RUN }),
         item({ key: "esc:other", agentId: "studio-builder" }),
       ],
     });
@@ -449,7 +458,9 @@ describe("Agent page: need banner", () => {
   });
 
   it(`Ack sends more than ${ACK_BATCH_MAX} keys in batches the server accepts`, async () => {
-    const many = Array.from({ length: 51 }, (_, i) => item({ key: `esc:shop-app#${i + 1}` }));
+    const many = Array.from({ length: 51 }, (_, i) =>
+      item({ key: `esc:shop-app#${i + 1}`, ticket: THIS_RUN }),
+    );
     const fetch = stub({ items: many });
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
@@ -464,7 +475,7 @@ describe("Agent page: need banner", () => {
   });
 
   it("has no banner without needs, and no Ack when everything is acknowledged", async () => {
-    stub({ items: [item({ acked: true })] });
+    stub({ items: [item({ acked: true, ticket: THIS_RUN })] });
     const { container, unmount } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const banner = $(container, "#needBanner .banner") as HTMLElement;
@@ -2331,7 +2342,9 @@ describe("Agent page: agent text is formatted", () => {
   it("the Now tile's summary and the banner's Parked reason render Markdown on one line", async () => {
     stub({
       rows: [idle("Cached **quotes** via `refresh()`")],
-      items: [item({ key: "p:1", kind: "parked", text: "wait for **the operator**" })],
+      items: [
+        item({ key: "p:1", kind: "parked", text: "wait for **the operator**", ticket: null }),
+      ],
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await screen.findByText("the operator");
@@ -2347,7 +2360,7 @@ describe("Agent page: agent text is formatted", () => {
   it("keeps the Now tile and the banner to one line: a list marker is not a list", async () => {
     stub({
       rows: [idle("1. retry")],
-      items: [item({ key: "p:1", kind: "parked", text: "1. retry" })],
+      items: [item({ key: "p:1", kind: "parked", text: "1. retry", ticket: null })],
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await screen.findByText("Parked: 1. retry");
@@ -2361,7 +2374,7 @@ describe("Agent page: agent text is formatted", () => {
   it.each(["__init__.py", "a*b", "1.", "-"])("plain prose %j is unchanged", async (text) => {
     stub({
       rows: [idle(text)],
-      items: [item({ key: "p:1", kind: "parked", text })],
+      items: [item({ key: "p:1", kind: "parked", text, ticket: null })],
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await screen.findByText(`Parked: ${text}`);

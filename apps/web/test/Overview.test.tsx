@@ -677,7 +677,9 @@ describe("Agents panel", () => {
     vi.setSystemTime(NOW);
     stub({
       rows: [crewRow({ hudState: "stalled", lastOutputAt: NOW - 11 * MIN })],
-      items: [item({ key: "stall:1", kind: "stalled", at: NOW - 125_000, tool: "Bash" })],
+      items: [
+        item({ key: "stall:1", kind: "stalled", at: NOW - 125_000, tool: "Bash", ticket: null }),
+      ],
     });
     const { container } = render(<Overview />);
     const need = async () => (await screen.findByText(/^Stalled \d+:\d\d/)).textContent;
@@ -694,8 +696,8 @@ describe("Agents panel", () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
       items: [
-        item({ key: "p:1", kind: "parked", text: "Needs a rebase decision" }),
-        item({ key: "esc:shop-app#4001", kind: "decision" }),
+        item({ key: "p:1", kind: "parked", text: "Needs a rebase decision", ticket: null }),
+        item({ key: "esc:shop-app#4001", kind: "decision", ticket: "shop-app#3349" }),
       ],
     });
     const { container } = render(
@@ -711,10 +713,24 @@ describe("Agents panel", () => {
     expect(window.location.pathname).toBe("/"); // the row click did not also navigate
   });
 
-  it("a row is not a button around buttons: its call sign is the link to the Agent page", async () => {
+  it("a set-aside run's ready note shows in Needs you, not as a lamp or need line on the seat's row", async () => {
+    const ready = {
+      ...item({ key: "ready:old", kind: "decision", ticket: "shop-app#3000" }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    stub({ rows: [crewRow({ ticket: "shop-app#3349" })], items: [ready] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.classList.contains("needs")).toBe(false);
+    expect(row.querySelector(".need")).toBeNull();
+    expect(screen.queryByText("Ready to merge")).toBeNull();
+  });
+
+  it("a row is not a button around buttons:its call sign is the link to the Agent page", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "esc:shop-app#4001", kind: "decision" })],
+      items: [item({ key: "esc:shop-app#4001", kind: "decision", ticket: "shop-app#3349" })],
     });
     const { container } = render(<Overview />);
     await screen.findByRole("button", { name: "Answer" });
@@ -1398,7 +1414,9 @@ describe("Overview: agent text is formatted", () => {
   it("an Activity row and a Parked need part render Markdown", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "p:1", kind: "parked", text: "wait for **the operator**" })],
+      items: [
+        item({ key: "p:1", kind: "parked", text: "wait for **the operator**", ticket: null }),
+      ],
       activity: [ev("ran `pnpm test` on **main**")],
     });
     const { container } = render(<Overview />);
@@ -1415,7 +1433,7 @@ describe("Overview: agent text is formatted", () => {
   it.each(["__init__.py", "a*b", "1.", "-"])("plain prose %j is unchanged", async (text) => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "p:1", kind: "parked", text })],
+      items: [item({ key: "p:1", kind: "parked", text, ticket: null })],
       activity: [ev(text)],
     });
     const { container } = render(<Overview />);
@@ -1429,7 +1447,7 @@ describe("Overview: agent text is formatted", () => {
   it("keeps an Activity row and a need part to one line: a list marker is not a list", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "p:1", kind: "parked", text: "1. retry" })],
+      items: [item({ key: "p:1", kind: "parked", text: "1. retry", ticket: null })],
       activity: [ev("1. retry")],
     });
     const { container } = render(<Overview />);

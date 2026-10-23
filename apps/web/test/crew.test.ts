@@ -15,12 +15,13 @@ import {
   needsLamp,
   SEAT_STATUS_LABEL,
   seatAreaText,
+  seatItems,
   seatStatus,
   sparkValues,
   stopLine,
   tokensPerMinute,
 } from "../src/crew.ts";
-import { crewRow, HOUR, item, MIN, NOW, stoppedSeat } from "./fixtures.ts";
+import { crewRow, item as fixtureItem, HOUR, item, MIN, NOW, stoppedSeat } from "./fixtures.ts";
 
 const ids = (rows: CrewRow[]) => rows.map((r) => r.id);
 
@@ -36,7 +37,7 @@ describe("crewOrder", () => {
       crewRow({ id: "e", index: 4, hudState: "stopped" }),
       crewRow({ id: "f", index: 5, hudState: "stalled" }),
     ];
-    const items: AttentionItem[] = [item({ key: "esc:x", agentId: "d" })];
+    const items: AttentionItem[] = [item({ key: "esc:x", agentId: "d", ticket: null })];
     expect(ids(crewOrder(rows, items))).toEqual(["d", "c", "f", "b", "a", "e"]);
   });
 
@@ -361,6 +362,8 @@ describe("contextPct", () => {
 
 describe("needLine", () => {
   const row = crewRow({ id: "a" });
+  // Items here are about the row's current run unless a test says otherwise.
+  const item = (over: Partial<AttentionItem> = {}) => fixtureItem({ ticket: row.ticket, ...over });
   it("is empty without items", () => {
     expect(needLine(row, [], NOW)).toEqual([]);
     expect(needLine(row, [item({ agentId: "b", kind: "stalled" })], NOW)).toEqual([]);
@@ -413,6 +416,17 @@ describe("needLine", () => {
     });
     expect(needLine(row, [], NOW).some((p) => p.text === "Ready to merge")).toBe(false);
     expect(needLine(crewRow({ id: "b" }), [ready], NOW)).toEqual([]);
+  });
+
+  it("leaves out a set-aside run's items: another ticket's ready note is not the row's", () => {
+    const old = {
+      ...item({ key: "ready:old", agentId: "a", ticket: "shop-app#3000" }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    const seatLevel = item({ key: "stall:a", agentId: "a", kind: "stalled", ticket: null });
+    expect(needLine(row, [old], NOW)).toEqual([]);
+    expect(needLine(row, [old, seatLevel], NOW).map((p) => p.key)).toEqual(["stall:a"]);
+    expect(seatItems(row, [old, seatLevel])).toEqual([seatLevel]);
   });
 });
 
