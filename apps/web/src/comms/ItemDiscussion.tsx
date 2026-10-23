@@ -3,7 +3,14 @@ import { useState } from "react";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { askFlight } from "./answer.ts";
 
-export function ItemDiscussion(p: { itemKey: string; live: boolean; title?: string }) {
+type Receipt = { id: string; text: string; note?: string };
+
+export function ItemDiscussion(p: {
+  itemKey: string;
+  live: boolean;
+  title?: string;
+  receipt?: Receipt;
+}) {
   return <DiscussionBody key={p.itemKey} {...p} />;
 }
 
@@ -11,10 +18,12 @@ function DiscussionBody({
   itemKey,
   live,
   title,
+  receipt,
 }: {
   itemKey: string;
   live: boolean;
   title?: string;
+  receipt?: Receipt;
 }) {
   const current = useResource<Discussion>(RESOURCES.discussion(itemKey));
   const resource = current.data ? RESOURCES.discussion(itemKey, current.data.id) : null;
@@ -60,7 +69,7 @@ function DiscussionBody({
         aria-busy={history.loading || pending}
       >
         {!discussion && !loadError && <p className="note">Loading discussion…</p>}
-        {discussion?.messages.length === 0 && <p className="note">No messages yet.</p>}
+        {discussion?.messages.length === 0 && !receipt && <p className="note">No messages yet.</p>}
         {discussion?.messages
           .filter((m) => m.itemKey === itemKey && m.correlationId === discussion?.id)
           .map((m) => (
@@ -69,6 +78,17 @@ function DiscussionBody({
               <div className="txt">{m.text}</div>
             </div>
           ))}
+        {receipt &&
+          !discussion?.messages.some(
+            (m) =>
+              m.id === receipt.id && m.itemKey === itemKey && m.correlationId === discussion.id,
+          ) && (
+            <div className="dmsg you">
+              <span className="who">You</span>
+              <div className="txt">{receipt.text}</div>
+              {receipt.note && <p className="note">{receipt.note}</p>}
+            </div>
+          )}
         {loadError && (
           <p className="note err" role="alert">
             {loadError.message}

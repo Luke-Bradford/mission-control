@@ -28,7 +28,7 @@ describe("decision brief evidence", () => {
     expect(screen.getByText("So far")).toBeTruthy();
     expect(screen.getByText("Be aware")).toBeTruthy();
     expect(screen.getByText("Checked sources unavailable.")).toBeTruthy();
-    expect(screen.getByText("Use 5174.")).toBeTruthy();
+    expect(screen.getAllByText("Use 5174.")).toHaveLength(2);
   });
   it("marks the recommendation by identity and never executes a description", () => {
     const pick = vi.fn();
@@ -64,4 +64,30 @@ describe("approval brief", () => {
     expect(screen.queryByText("Why it came to you")).toBeNull();
     expect(screen.queryByText("What FLIGHT checked")).toBeNull();
   });
+});
+
+it("shows legacy reasoning in Why it came to you without an option identity", () => {
+  render(
+    <ItemBrief
+      brief={brief({ recommendedOptionId: undefined, recommendation: "Legacy reasoning" })}
+    />,
+  );
+  const heading = screen.getByText("Why it came to you");
+  expect(heading.nextElementSibling?.textContent).toBe("Legacy reasoning");
+  expect(screen.queryByText("Reason unavailable.")).toBeNull();
+});
+
+it("shows unavailable reasoning when the recommendation is empty", () => {
+  render(
+    <ItemBrief
+      brief={brief({
+        recommendedOptionId: "a",
+        options: [{ id: "a", label: "A", answer: "A" }],
+        recommendation: "",
+      })}
+    />,
+  );
+  expect(screen.getByText("Why it came to you").nextElementSibling?.textContent).toBe(
+    "Reason unavailable.",
+  );
 });

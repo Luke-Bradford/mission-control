@@ -72,7 +72,11 @@ export function ItemBrief({
       </div>
       <div className="bsec">{approval ? "If you approve" : "Why it came to you"}</div>
       <div className="s qtext">
-        {approval || recommended ? <Markdown text={brief.recommendation} /> : "Reason unavailable."}
+        {brief.recommendation.trim() ? (
+          <Markdown text={brief.recommendation} />
+        ) : (
+          "Reason unavailable."
+        )}
       </div>
       {!approval && (
         <>

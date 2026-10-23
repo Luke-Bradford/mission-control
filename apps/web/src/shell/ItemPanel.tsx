@@ -77,6 +77,9 @@ export function ItemPanel() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [justHandled, setJustHandled] = useState<Record<string, string>>({});
+  const [receipts, setReceipts] = useState<
+    Record<string, { id: string; text: string; note?: string }>
+  >({});
   const [chosen, setChosen] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
@@ -145,18 +148,44 @@ export function ItemPanel() {
       toast("Opens the draft so you can change it before approving.");
       return;
     }
+    const resource = RESOURCES.discussion(item.key);
+    const discussion = hub.snapshot(resource.path, resource.topic).data as Discussion | undefined;
+    const id = crypto.randomUUID();
+    const receiptText = `You chose: ${o.label}\n\n${o.answer}`;
+    const receipt = (note?: string) =>
+      setReceipts((prev) => ({ ...prev, [item.key]: { id, text: receiptText, note } }));
+    const refresh = () => {
+      hub.refetch(resource.path);
+      if (discussion) hub.refetch(RESOURCES.discussion(item.key, discussion.id).path);
+    };
     void act(
-      () => sendAnswer(target, seat, item, about, o.answer),
+      async () => {
+        if (target.to !== "flight") return sendAnswer(target, seat, item, about, o.answer);
+        if (!discussion)
+          return "The discussion couldn't be loaded. Refresh discussion and try again.";
+        try {
+          await askFlight(item.key, discussion.version, id, o.answer);
+          refresh();
+          return null;
+        } catch (e) {
+          return e instanceof Error ? e.message : "server unreachable";
+        }
+      },
       () => {
         setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-        const resource = RESOURCES.discussion(item.key);
-        const discussion = hub.snapshot(resource.path, resource.topic).data as
-          | Discussion
-          | undefined;
-        if (discussion && live) {
-          void askFlight(item.key, discussion.version, crypto.randomUUID(), `You chose: ${o.label}`)
-            .catch(() => toast("Answer sent. Could not add it to the item discussion."))
-            .finally(() => hub.refetch(RESOURCES.discussion(item.key, discussion.id).path));
+        if (target.to === "flight") {
+          receipt("FLIGHT hasn't replied yet.");
+        } else if (discussion && live) {
+          receipt("FLIGHT hasn't replied yet.");
+          void askFlight(item.key, discussion.version, id, `You chose: ${o.label}`)
+            .catch(() => receipt("Answer sent. FLIGHT hasn't replied yet."))
+            .finally(refresh);
+        } else {
+          receipt(
+            discussion
+              ? "FLIGHT hasn't replied yet."
+              : "Answer sent. The discussion couldn't be loaded.",
+          );
         }
       },
     );
@@ -352,7 +381,12 @@ export function ItemPanel() {
           </div>
         )}
         {item && item.kind !== "person" && !holding && (
-          <ItemDiscussion itemKey={item.key} live={live} title={flightTitle} />
+          <ItemDiscussion
+            itemKey={item.key}
+            live={live}
+            title={flightTitle}
+            receipt={receipts[item.key]}
+          />
         )}
         {(target?.to !== "github" || item?.kind === "person") && (
           <form className="composer" id="dsForm" onSubmit={submit}>

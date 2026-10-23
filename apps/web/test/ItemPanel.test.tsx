@@ -356,7 +356,7 @@ describe("ItemPanel, acting on an item", () => {
   it("renders FLIGHT's brief: context, recommendation and an option per choice", async () => {
     acting([SEAT_Q]);
     await within(panel()).findByText("The dev seat asks which port to preview on.");
-    expect(within(panel()).getByText("Use 5174.")).toBeTruthy();
+    expect(within(panel()).getAllByText("Use 5174.")).toHaveLength(2);
     expect(within(panel()).getByRole("button", { name: "5174" })).toBeTruthy();
     expect(within(panel()).getByRole("button", { name: "5180" })).toBeTruthy();
   });
@@ -370,18 +370,17 @@ describe("ItemPanel, acting on an item", () => {
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
-  it("an option on FLIGHT's own question posts to FLIGHT and opens the dock", async () => {
+  it("an option on FLIGHT's own question posts to its discussion and keeps the dock closed", async () => {
     act(() => toggleDock(false));
     const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }]);
     fireEvent.click(await enabled("5180"));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Re: ask:7 · Which port?\n\nUse port 5180." },
+      expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([
+        { version: "v1", messageId: expect.any(String), text: "Use port 5180." },
       ]),
     );
-    await waitFor(() =>
-      expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(false),
-    );
+    await waitFor(() => expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true));
+    expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
   it("an escalation's options are text beside Reply on GitHub, and nothing is posted", async () => {
@@ -1164,3 +1163,100 @@ it("retains the brief and choices while sending, and a late failure stays with i
   expect(screen.queryByText("First send failed")).toBeNull();
   expect(document.querySelector("#discuss")).toBeTruthy();
 });
+
+it("sends a FLIGHT choice through the item discussion without opening the dock", async () => {
+  const q = { ...SEAT_Q, agentId: "flight-1" };
+  const discussion = { id: "flight-choice", itemKey: q.key, version: "v1", messages: [] };
+  const fn = stubFetch({
+    "/api/attention": [q],
+    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+    [discussionPath(q.key)]: discussion,
+    [`${discussionPath(q.key)}?id=flight-choice`]: discussion,
+    [`POST ${discussionPath(q.key)}`]: discussion,
+    "POST /api/seats/flight-1/message": {},
+  });
+  render(
+    <>
+      <Dock />
+      <ItemPanel />
+    </>,
+  );
+  act(() => {
+    toggleDock(false);
+    openItem(q.key);
+  });
+  await screen.findByText("No messages yet.");
+  fireEvent.click(screen.getByRole("button", { name: "5174" }));
+  await waitFor(() =>
+    expect(fn).toHaveBeenCalledWith(
+      discussionPath(q.key),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining(q.brief?.options[0]?.answer ?? "missing"),
+      }),
+    ),
+  );
+  expect(
+    fn.mock.calls.some(
+      ([path, init]) => path === "/api/seats/flight-1/message" && init?.method === "POST",
+    ),
+  ).toBe(false);
+  expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true);
+  expect(
+    within(screen.getByRole("log", { name: "Item discussion" })).getByText(
+      q.brief?.options[0]?.answer ?? "missing",
+      { exact: false },
+    ),
+  ).toBeTruthy();
+});
+
+it.each(["offline", "load failed", "echo failed"])(
+  "keeps a successful seat answer in the discussion when %s",
+  async (mode) => {
+    const fn = stubFetch({
+      "/api/attention": [SEAT_Q],
+      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/flight": {
+        seat: mode === "offline" ? null : { id: "flight-1", live: true },
+        decisions: [],
+      },
+      "POST /api/seats/mc-dev-1/message": {},
+      ...(mode === "load failed"
+        ? {
+            [discussionPath(SEAT_Q.key)]: () => ({
+              status: 503,
+              body: { error: "Discussion unavailable" },
+            }),
+          }
+        : {}),
+      [`POST ${discussionPath(SEAT_Q.key)}`]: () => ({
+        status: 503,
+        body: { error: "FLIGHT unavailable" },
+      }),
+    });
+    render(<ItemPanel />);
+    act(() => openItem(SEAT_Q.key));
+    if (mode === "load failed") await screen.findByText("Discussion unavailable");
+    else await screen.findByText("No messages yet.");
+    fireEvent.click(screen.getByRole("button", { name: "5174" }));
+    await screen.findByText("You chose:");
+    const log = within(screen.getByRole("log", { name: "Item discussion" }));
+    await waitFor(() =>
+      expect(
+        log.getByText(SEAT_Q.brief?.options[0]?.answer ?? "missing", { exact: false }),
+      ).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(
+        log.getByText(
+          mode === "load failed" ? /discussion couldn't be loaded/i : /FLIGHT hasn't replied yet/i,
+        ),
+      ).toBeTruthy(),
+    );
+    expect(
+      fn.mock.calls.filter(
+        ([path, init]) => path === "/api/seats/mc-dev-1/message" && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
+  },
+);
