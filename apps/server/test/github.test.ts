@@ -1340,6 +1340,7 @@ describe("collectGithub pull requests", () => {
     expect(store.board("shop-app")).toHaveLength(1);
     expect(statusOf()).toMatchObject({ ok: false });
     expect(statusOf()?.error).toContain("prs: pr boom");
+    expect([...store.stalePullRequests("shop-app")]).toEqual([1]);
   });
 });
 

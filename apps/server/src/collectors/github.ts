@@ -1004,6 +1004,8 @@ export async function collectGithub(
       changes.boards = true;
     }
   } catch (e) {
+    // Keep the rows, but say they are the last good read.
+    store.markPullRequestsStale(repo.id);
     failures.push(`prs: ${errMsg(e)}`);
   }
   const collector = githubCollector(repo.id);
