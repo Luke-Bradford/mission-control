@@ -573,6 +573,46 @@ export function loopMarks(loop: CrewLoop, hudState: HudState, heldAt?: LoopPhase
   return LOOP_PATH.map((_, i) => (i < at ? "done" : i === at ? (held ? "held" : "cur") : "todo"));
 }
 
+/** A profile step on screen, or a build-loop phase standing as one. */
+export interface ShownStep {
+  name: string;
+  phase: Exclude<LoopPhase, "parked"> | null;
+}
+/** The profile step that a landed plan marks done. */
+export const PLAN_STEP = "plan";
+/** The profile step that an open PR marks done. */
+export const DRAFT_PR_STEP = "draft PR";
+
+/** The run's profile steps, else the build loop's path labelled by phase. */
+export function loopSteps(loop: CrewLoop): ShownStep[] {
+  return loop.steps?.length
+    ? loop.steps.map(({ name, phase }) => ({ name, phase }))
+    : LOOP_PATH.map((phase) => ({ name: LOOP_PHASE_LABEL[phase], phase }));
+}
+
+/** One mark per shown step, using phase progress and evidence for steps without a phase. */
+export function stepMarks(loop: CrewLoop, hudState: HudState, heldAt?: LoopPhase): StepMark[] {
+  const base = loopMarks(loop, hudState, heldAt);
+  const phaseMark = (phase: Exclude<LoopPhase, "parked">): StepMark | undefined =>
+    base[LOOP_PATH.indexOf(phase)];
+  const steps = loopSteps(loop);
+  return steps.map((step) => {
+    const mark = step.phase === null ? undefined : phaseMark(step.phase);
+    if (mark !== undefined) return mark;
+    if (step.name === PLAN_STEP) return loop.planned === true ? "done" : "todo";
+    if (step.name === DRAFT_PR_STEP) {
+      return loop.prNumber !== null ? "done" : "todo";
+    }
+    return "todo";
+  });
+}
+
+/** The step bar's tooltip: the shown step names joined by " → ". */
+export const loopPathTitle = (loop: CrewLoop): string =>
+  loopSteps(loop)
+    .map((s) => s.name)
+    .join(" → ");
+
 /** A row whose run is in a loop that has not finished: it belongs in Work in flight. */
 export const isLoopInFlight = (row: Pick<CrewRow, "loop" | "run">): boolean =>
   row.loop !== null && row.loop.phase !== "done" && row.run !== null && row.run.endedAt === null;

@@ -5,6 +5,7 @@ import {
   type CommsEvent,
   type CrewLoop,
   type CrewRow,
+  DEFAULT_PROFILES,
   GITHUB_SLOWED_PREFIX,
   type GithubRateState,
   type HealthRow,
@@ -26,6 +27,7 @@ import { setSession } from "../src/shell/session.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
 import {
   CONFIG,
+  CREW_CONFIG,
   crewRow,
   GITHUB_RATE,
   GITHUB_RATE_LINE,
@@ -122,6 +124,33 @@ describe("Overview panels", () => {
 });
 
 describe("Agents panel", () => {
+  it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
+    const crew = CREW_CONFIG.crew;
+    const first = crew?.sessions[0];
+    if (!crew || !first) throw new Error("no crew session");
+    const f = stub({
+      config: {
+        ...CREW_CONFIG,
+        crew: { ...crew, sessions: [first, { ...first, id: "s2" }] },
+      },
+    });
+    const { container } = render(<Overview />);
+    await settled(f, "/api/config");
+    const header = container.querySelector<HTMLElement>("#agentsP .ph") as HTMLElement;
+    fireEvent.click(within(header).getByRole("button", { name: "Add agent" }));
+    expect(window.location.pathname + window.location.search).toBe("/setup/sessions?add=s1");
+  });
+
+  it("disables Add agent when there is no crew session", async () => {
+    expect(CONFIG.crew?.sessions ?? []).toEqual([]);
+    const f = stub({ config: CONFIG });
+    render(<Overview />);
+    await settled(f, "/api/config");
+    expect((screen.getByRole("button", { name: "Add agent" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
   it("says Crew is off with the note when the server has crew off", async () => {
     stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
     const { container } = render(<Overview />);
@@ -178,6 +207,35 @@ describe("Agents panel", () => {
         },
       ],
     },
+  });
+
+  it("shows FLIGHT's turns and explains what it does under the doing line", async () => {
+    stub({
+      config: flightConfig([{ id: "flight-1" }]),
+      rows: [crewRow({ id: "flight-1", hudState: "error" })],
+      extra: {
+        "/api/flight": {
+          seat: {
+            id: "flight-1",
+            call: "FLIGHT-1",
+            model: "opus",
+            live: true,
+            state: "idle",
+            turns: { n: 4, max: 41 },
+          },
+          decisions: [],
+        },
+      },
+    });
+    const { container } = render(<Overview />);
+    const flight = container.querySelector(".trow.flight") as HTMLElement;
+    const loop = await within(flight).findByText("turn 4 of 41");
+    expect(flight.children[3]).toBe(loop);
+    const line = within(flight).getByText("coordinates the crew and brings you decisions");
+    expect(line.className).toBe("xs muted block");
+    expect(line.previousElementSibling).toBe(flight.querySelector(".doing"));
+    expect(within(flight).getByText("Head")).toBeTruthy();
+    expect(within(flight).getByText("Error", { selector: ".pill" })).toBeTruthy();
   });
 
   it("the FLIGHT row is the seat the server treats as FLIGHT: a retiring one lists as an agent", async () => {
@@ -264,7 +322,7 @@ describe("Agents panel", () => {
     expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
-  it("subtitle counts the working agents and says FLIGHT is not counted; no Add agent", async () => {
+  it("subtitle counts the working agents and says FLIGHT is not counted", async () => {
     stub({
       rows: [
         crewRow({ id: "a" }),
@@ -274,7 +332,6 @@ describe("Agents panel", () => {
     });
     render(<Overview />);
     await screen.findByText("2 working · 3 agents · FLIGHT not counted");
-    expect(screen.queryByText("Add agent")).toBeNull();
   });
 
   const loopOf = (phase: CrewLoop["phase"], text: string, prNumber: number | null = null) => ({
@@ -290,6 +347,24 @@ describe("Agents panel", () => {
     );
   const bar = (row: HTMLElement | undefined) =>
     [...(row?.querySelectorAll(".loopstep .stepbar i") ?? [])].map((i) => i.className);
+
+  it("the step bar follows the run's profile steps", async () => {
+    const loop: CrewLoop = {
+      ...loopOf("ci", "CI is running"),
+      profile: "feature",
+      step: "verify",
+      steps: DEFAULT_PROFILES.find((p) => p.name === "feature")?.steps,
+      planned: true,
+    };
+    stub({ rows: [crewRow({ loop })] });
+    const { container } = render(<Overview />);
+    await stepLabel("feature › verify");
+    const row = agentRows(container)[0];
+    expect(bar(row)).toEqual(["d", "", "d", "c", "", ""]);
+    expect(row?.querySelector(".stepbar")?.getAttribute("title")).toBe(
+      "plan → go/no-go → implement → verify → review → draft PR",
+    );
+  });
 
   it("the Loop step column shows the loop type, step and a step bar; a dash without a loop", async () => {
     const loop = loopOf("review", "In review · PR #9", 9);

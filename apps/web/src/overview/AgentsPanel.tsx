@@ -1,4 +1,11 @@
-import type { AttentionItem, ConfigView, Crew, LimitRow, TestLockState } from "@mc/core";
+import {
+  type AttentionItem,
+  type ConfigView,
+  type Crew,
+  flightTurnShort,
+  type LimitRow,
+  type TestLockState,
+} from "@mc/core";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -28,7 +35,7 @@ import {
   waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
-import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
+import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
 import { cost, kTokens } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
@@ -39,7 +46,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Sparkline } from "../hud/Sparkline.tsx";
-import { agentPath, followLink, navigate } from "../router.ts";
+import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { inSession, useSession } from "../shell/session.ts";
@@ -71,6 +78,8 @@ function FlightRow({
   now: number;
   tz: string | null;
 }) {
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const turns = flight?.seat?.turns ?? null;
   const go = () => toggleDock(true);
   const status = row ? seatStatus(row) : null;
   const five = row ? limits.find((l) => l.accountId === row.accountId && l.window === "5h") : null;
@@ -109,8 +118,9 @@ function FlightRow({
         ) : (
           <span className="ellip s">{FLIGHT_NO_SEAT}</span>
         )}
+        <span className="xs muted block">coordinates the crew and brings you decisions</span>
       </span>
-      <span className="xs fg2">{DASH}</span>
+      <span className="xs fg2">{turns ? flightTurnShort(turns.n, turns.max) : DASH}</span>
       <span className="tok">
         <span className="num s">{tokens === null ? DASH : kTokens(tokens)}</span>
         {tpm !== null && <span className="xs muted num">{kTokens(tpm)}/min</span>}
@@ -304,6 +314,7 @@ export function AgentsPanel() {
   const [selected] = useSelectedAgent();
   const configRes = useResource<ConfigView>(RESOURCES.config);
   const config = configRes.data;
+  const firstSession = config?.crew?.sessions[0];
   // The seat the server treats as FLIGHT has its own row above; any other lists as an agent.
   const flightId = flightSeatId(config);
   const flight = crew.data?.rows.find((r) => r.id === flightId) ?? null;
@@ -320,6 +331,16 @@ export function AgentsPanel() {
       id="agentsP"
       title="Agents"
       sub={rows ? `${working} working · ${rows.length} agents · FLIGHT not counted` : undefined}
+      actions={
+        <button
+          type="button"
+          className="sm"
+          disabled={!firstSession}
+          onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
+        >
+          Add agent
+        </button>
+      }
     >
       <div
         className={rows && !rows.some((r) => r.loop) ? "scroll noloop" : "scroll"}
