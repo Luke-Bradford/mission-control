@@ -115,7 +115,10 @@ export type UpdateBranchResult =
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
 
-/** A PR diff without its index lines and hunk numbers, which a merge of main changes and the change does not. */
+/**
+ * A PR diff without its index lines and hunk numbers, which a merge of main changes and the
+ * change does not.
+ */
 export function prDiffKey(diff: string): string {
   return diff
     .split("\n")
