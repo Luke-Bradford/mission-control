@@ -131,6 +131,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
     notifications: vi.fn(async () => ({ changed: true })),
     github: vi.fn(async () => ({ boards: true, escalations: true })),
     githubPrs: vi.fn(async () => ({ boards: false, escalations: false })),
+    followPrs: vi.fn(async () => false),
     prSweep: vi.fn(async () => ({ boards: true, escalations: false })),
     flow: vi.fn(async () => undefined),
     backfill: vi.fn(() => ({ folded: 0, left: 0, failed: 0 })),

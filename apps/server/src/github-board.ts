@@ -1,7 +1,10 @@
 import {
   type FlightMoveColumn,
+  type HudColumn,
+  hudColumnOf,
   type MoveColumn,
   optionForColumn,
+  type PullRequestView,
   type RepoId,
   STATUS_FIELD,
 } from "@mc/core";
@@ -55,6 +58,68 @@ export interface Move {
 }
 
 export type MoveResult = { ok: true; changed: boolean } | { ok: false; reason: string };
+
+/** The columns a card is earlier than In review in. */
+const BEFORE_REVIEW: readonly HudColumn[] = [
+  "Backlog",
+  "Refinement",
+  "Ready",
+  "In progress",
+  "Blocked",
+];
+
+/**
+ * Moves each ticket's card to follow its PRs, whoever opened them (a crew run, the controller,
+ * Codex, the work lane): an open PR puts an earlier card In review, a merged one puts it Done, and
+ * PRs all closed unmerged send an In review card back to Ready. A card whose run is live is the
+ * engine's. Each PR moves a card to a column once; a later move by hand is left alone. Each move is a `board_moves` row under the run id `pr:<repo>#<number>`. True when a
+ * card moved.
+ */
+export async function followPrs(deps: MoveDeps, repoId: RepoId): Promise<boolean> {
+  const { store, config } = deps;
+  const repo = config.repos.find((r) => r.id === repoId);
+  if (repo?.autonomy !== "merge") return false;
+  let moved = false;
+
+  const byTicket = new Map<number, PullRequestView[]>();
+  for (const pr of store.pullRequests(repoId)) {
+    const [r, n] = pr.ticket?.split("#") ?? [];
+    if (r !== repoId || !/^\d+$/.test(n ?? "")) continue;
+    const list = byTicket.get(Number(n)) ?? [];
+    list.push(pr);
+    byTicket.set(Number(n), list);
+  }
+  for (const item of store.board(repoId)) {
+    const prs = byTicket.get(item.issueNumber);
+    if (!prs || store.hasLiveRunOnTicket(repoId, `${repoId}#${item.issueNumber}`)) continue;
+    const column = hudColumnOf(item);
+    const open = prs.find((p) => p.state === "open");
+    const merged = prs.find((p) => p.state === "merged");
+    let target: MoveColumn | FlightMoveColumn | null = null;
+    const by = open ?? merged ?? prs[0];
+    if (open) {
+      if (BEFORE_REVIEW.includes(column)) target = "In review";
+    } else if (merged) {
+      if (column !== "Done") target = "Done";
+    } else if (column === "In review") {
+      target = "Ready";
+    }
+    if (!target || !by) continue;
+    const runId = `pr:${repoId}#${by.number}`;
+    if (
+      store.boardMovesOfRun(runId).some((m) => m.issue === item.issueNumber && m.column === target)
+    )
+      continue;
+    const r = await moveCard(deps, {
+      runId,
+      repoId,
+      issue: item.issueNumber,
+      column: target,
+    });
+    if (r.ok && r.changed) moved = true;
+  }
+  return moved;
+}
 
 /** The card of `issue` on project `projectId`: its item id and Status option id, or null off the project. */
 async function findCard(

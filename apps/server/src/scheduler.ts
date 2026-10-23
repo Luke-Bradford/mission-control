@@ -74,6 +74,7 @@ import {
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
+import { followPrs } from "./github-board.ts";
 import { attentionItems, crew, NO_LOCK } from "./hud.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
@@ -188,6 +189,8 @@ export interface Collectors {
   github: typeof collectGithub;
   /** Re-reads only the PRs the engine waits on, between board reads. */
   githubPrs: typeof collectWaitedPrs;
+  /** Moves each ticket's card to follow its PRs, after a board read. */
+  followPrs: typeof followPrs;
   /** The REST client for the operator's notifications (read-only, api.github.com only). */
   makeRest: (token: string) => Rest;
   notifications: typeof collectNotifications;
@@ -271,6 +274,7 @@ export function realCollectors(config: CcConfig): Collectors {
     makeGql: (token, rates) => makeGql(token, fetch, rates),
     github: collectGithub,
     githubPrs: collectWaitedPrs,
+    followPrs,
     makeRest: (token) => makeRest(token),
     notifications: collectNotifications,
     prSweep: sweepPullRequests,
@@ -601,6 +605,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             const r = await c.github(repo, store, client, now(), now);
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
+            // Whoever opened a ticket's PR, its card follows (the engine moves only its runs').
+            changed.boards ||= await c.followPrs({ gql: client, store, config, now }, repo.id);
           });
           const error = store.status().find((s) => s.collector === collector)?.error;
           if (error?.includes(MISSING_SCOPE_PREFIX)) {
