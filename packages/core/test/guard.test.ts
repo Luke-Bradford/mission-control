@@ -1872,3 +1872,102 @@ describe("program names compare case-insensitively (PR #143 I1b)", () => {
     expect(ruleOf(bash("PNPM -s test", { run_in_background: true }))).toBe("full-suite");
   });
 });
+
+describe("runners, option clusters, zsh function and always, brace suites, git listing", () => {
+  const pushDenied = {
+    kind: "deny",
+    rule: "git-write",
+    text: `${GUARD_RULES["git-write"]}: git push`,
+  };
+  it.each([
+    "env -iu HOME git push",
+    "env -vS 'git push'",
+    "env -uS git push",
+    "sudo -iu root git push",
+    "xargs -0n 1 git push",
+    "watch git push",
+    "watch 'git push'",
+    "caffeinate -i git push",
+    "script -q /dev/null git push",
+    "flock /tmp/l git push",
+    "flock /tmp/l -c 'git push'",
+    "parallel git push ::: a",
+    "pnpm exec git push",
+    "pnpm dlx git push",
+    "pnpm -s exec git push",
+    "pnpm --filter web exec git push",
+    "npx git push",
+    "doas git push",
+    "ionice -c 3 git push",
+    "taskset 1 git push",
+    "chronic git push",
+    "unbuffer git push",
+    "function f { git push; }; f",
+    "{ echo a } always { git push }",
+    "{ echo a; } always { git push; }",
+  ])("denies %s as git-write naming git push", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual(pushDenied);
+  });
+
+  it("splits a zsh always group", () => {
+    expect(splitCommands("{ echo a } always { git push }")).toEqual([
+      ["echo", "a"],
+      ["git", "push"],
+    ]);
+  });
+
+  it("locks a full suite spelled with a brace word", () => {
+    const ctx: GuardContext = { mode: "writer", repo: "dev", fullSuite: ["pnpm -s test"] };
+    const lock = { kind: "lock", command: "pnpm -s test" };
+    expect(guardDecision(bash("pnpm -s {test,}"), ctx)).toEqual(lock);
+    expect(guardDecision(bash("pnpm -s test{,}"), ctx)).toEqual(lock);
+    expect(ruleOf(bash("pnpm -s {test,}"), { ...ctx, mode: "read-only" })).toBe("full-suite");
+  });
+
+  it("a runner runs its command in the foreground", () => {
+    expect(guardDecision(bash("watch pnpm -s test"), writer)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+    });
+    expect(guardDecision(bash("watch tmux new -d 'pnpm -s test'"), writer)).toEqual({
+      kind: "deny",
+      rule: "full-suite",
+      text: BACKGROUND_SUITE_TEXT,
+    });
+  });
+
+  it.each([
+    "X={a,b} ls",
+    "git tag -l 'v*'",
+    "git tag --list",
+    "git branch --contains abc",
+    "git branch --merged main",
+    "git branch --points-at=HEAD",
+    "npx tsc --noEmit",
+    "pnpm exec tsc --noEmit",
+    "pnpm -s exec tsc --noEmit",
+    "watch ls",
+  ])("allows %s", (c) => {
+    expect(ruleOf(bash(c))).toBe("allow");
+  });
+
+  it.each([
+    "git tag v1",
+    "git tag -d v1",
+    "git tag -l -d v1",
+    "git tag -l --message=x v1",
+    "git branch -d x",
+    "git branch newname",
+    "git branch --contains abc -d x",
+  ])("still denies %s as git-write", (c) => {
+    expect(ruleOf(bash(c))).toBe("git-write");
+  });
+
+  it("still denies a brace-expanding head word", () => {
+    expect(guardDecision(bash("./scripts/{a,b}.sh"), writer)).toEqual({
+      kind: "deny",
+      rule: "git-write",
+      text: `${GUARD_RULES["git-write"]}: brace expansion`,
+    });
+  });
+});
