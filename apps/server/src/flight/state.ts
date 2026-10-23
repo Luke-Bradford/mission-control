@@ -22,6 +22,7 @@ import {
   type FlightView,
   hudColumnOf,
   inLane,
+  LANE_LABEL_PREFIX,
   OWNER_OPERATOR,
   PRIORITIES,
   READY_LABEL,
@@ -186,6 +187,8 @@ export function flightState(i: {
     return {
       time: clockHm(now, tz),
       repo: "",
+      lane: config.crew?.lane ?? null,
+      hubLogin: i.hubLogin ?? null,
       seats: [],
       aside: [],
       questions: [],
@@ -284,6 +287,8 @@ export function flightState(i: {
         labels: b.labels,
         ready: column === "Ready" || b.labels.includes(READY_LABEL),
         blockedBy: b.blockedBy.filter((x) => x.closed).map((x) => x.ref),
+        laneLabel: b.labels.find((l) => l.startsWith(LANE_LABEL_PREFIX)) ?? null,
+        assignees: b.assignees ?? [],
       };
     });
 
@@ -385,6 +390,8 @@ export function flightState(i: {
   return {
     time: clockHm(now, tz),
     repo: session.repoId,
+    lane: config.crew?.lane ?? null,
+    hubLogin: i.hubLogin ?? null,
     seats,
     aside,
     questions,
