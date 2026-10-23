@@ -45,6 +45,7 @@ import { createGh, ghCommand } from "./mcp/gh.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
+import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
@@ -85,7 +86,7 @@ async function main(): Promise<void> {
   const tokens = new RunTokens();
   // one full suite at a time across every seat; the supervisor frees a run's hold when its call
   // ends, its turn ends or its process exits
-  const lock = new TestLock({ onChange: lockChanged(bus) });
+  const lock = new TestLock({ onChange: lockChanged(bus), holds: store, log: (line) => log(line) });
   // set by the CLI update check while the CLI fails its smoke test: no run starts or resumes
   const cliHold = new CliHold();
   const scheduler = createScheduler({
@@ -116,6 +117,8 @@ async function main(): Promise<void> {
   };
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
   // crew config, and only where the guard hook can be found.
+  const crewEnabled =
+    crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null;
   // The template profiles sit beside config.yaml; read afresh for each start, never cached.
   const profilesPath = join(dirname(configPath), PROFILES_FILE);
   const profiles = () => loadProfiles(profilesPath);
@@ -130,7 +133,7 @@ async function main(): Promise<void> {
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
-    enabled: crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null,
+    enabled: crewEnabled,
     tokens,
     lock,
     cliHold,
@@ -353,6 +356,13 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
+  // before the first request: a seat that kept running meets its token and its hold again
+  if (crewEnabled) {
+    const r = restoreRuns({ store, dbPath, tokens, lock, log: (line) => log(line) });
+    if (r.tokens + r.holds > 0) {
+      log(`crew: restored ${r.tokens} token(s) and ${r.holds} test-lock hold(s)`);
+    }
+  }
   await app.listen({ host: HOST, port });
   scheduler.start();
   supervisor.start();

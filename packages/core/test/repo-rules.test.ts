@@ -11,6 +11,7 @@ import {
   type RepoRules,
   researchText,
   type StartCheck,
+  startClosedText,
   startMissingNeedsText,
   startNeedsPlanText,
   ticketHasRunText,
@@ -135,7 +136,15 @@ describe("eligibleToStart", () => {
   const base = (over: Partial<StartCheck> = {}): StartCheck => ({
     repoId: "mc",
     issue: 7,
-    card: { labels: ["area:server"], assignees: [], blockedBy: [], size: "S" },
+    card: {
+      labels: ["area:server"],
+      assignees: [],
+      blockedBy: [],
+      size: "S",
+      status: "Ready",
+      state: "planned",
+      closed: false,
+    },
     rules: {
       areas: { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] },
       needs: ["done_when", "size"],
@@ -155,6 +164,16 @@ describe("eligibleToStart", () => {
 
   it("gives null for an eligible card", () => {
     expect(eligibleToStart(base())).toBeNull();
+  });
+
+  it("0: refuses a closed card, or one in Done, before any other check", () => {
+    const text = startClosedText(ref);
+    expect(text).toBe("Not started: mc#7 is closed");
+    expect(eligibleToStart(base(card({ closed: true })))).toBe(text);
+    expect(eligibleToStart(base(card({ status: "Done" })))).toBe(text);
+    expect(eligibleToStart(base({ ...card({ closed: true }), hasRun: true, lane: "work" }))).toBe(
+      text,
+    );
   });
 
   it("1: refuses another lane, or none", () => {
