@@ -195,3 +195,50 @@ describe("nextAgent", () => {
     expect(nextAgent([], [], "all", null, 1)).toBeNull();
   });
 });
+
+it("/ goes to Agent and focuses its message box after navigation", async () => {
+  app.navigate.mockImplementation(() => {
+    const input = document.createElement("input");
+    input.id = "agentInput";
+    const panel = document.createElement("div");
+    panel.id = "streamP";
+    panel.append(input);
+    document.body.append(panel);
+  });
+  press("/");
+  await vi.waitFor(() => expect(document.activeElement?.id).toBe("agentInput"));
+});
+
+it("/ waits for the Agent composer rather than focusing the old Comms composer", async () => {
+  const old = document.createElement("input");
+  old.id = "agentInput";
+  document.body.append(old);
+  app.navigate.mockImplementation(() => {
+    queueMicrotask(() => {
+      old.remove();
+      const panel = document.createElement("div");
+      panel.id = "streamP";
+      const input = document.createElement("input");
+      input.id = "agentInput";
+      panel.append(input);
+      document.body.append(panel);
+    });
+  });
+  press("/");
+  await vi.waitFor(() => expect(document.activeElement?.closest("#streamP")).toBeTruthy());
+});
+
+it("/ stops waiting for the message box after 2 s", async () => {
+  vi.useFakeTimers();
+  press("/");
+  vi.advanceTimersByTime(2000);
+  const panel = document.createElement("div");
+  panel.id = "streamP";
+  const input = document.createElement("input");
+  input.id = "agentInput";
+  panel.append(input);
+  document.body.append(panel);
+  await Promise.resolve();
+  expect(document.activeElement).not.toBe(input);
+  vi.useRealTimers();
+});

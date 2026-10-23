@@ -1,4 +1,5 @@
 import {
+  type AttentionItem,
   type ConfigView,
   CREW_EFFORTS,
   type Crew,
@@ -14,8 +15,10 @@ import {
 } from "@mc/core";
 import { Fragment, useEffect, useId, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
+import { useTz } from "../clock.ts";
 import { modelLine, seatAreaText } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -27,7 +30,8 @@ import { toast } from "../shell/Toast.tsx";
 const DASH = "—";
 export const FOLDERS_UNREADABLE = "Could not read the checkout's folders.";
 export const FOLDER_FREE = "free";
-export const FOLDERS_NOTE = "Tiles show who owns each folder; areas can't overlap.";
+export const FOLDERS_NOTE =
+  "Tiles show who owns each folder; areas can't overlap. A stray change is outside every writer's area: it shows in Needs you, and FLIGHT can work out whose it is.";
 export const SESSIONS_NOTE =
   "A session is one repo and the agents working on it, as config.yaml lists them. Add, edit or remove an agent here: Mission Control writes config.yaml, keeps a backup beside it, and applies the change without a restart.";
 export const SAVE_NOTE =
@@ -319,6 +323,14 @@ function CrewSession({
   error: string | null;
   save: SaveSeats;
 }) {
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const tz = useTz();
+  // This session's stray files, from the item's own path (no parsing of its text).
+  const strays = (attention ?? []).flatMap((item) =>
+    item.kind === "stray" && item.sessionId === session.id && item.path
+      ? [{ ...item, path: item.path }]
+      : [],
+  );
   const [removing, setRemoving] = useState<string | null>(null);
   const repo = config.repos.find((r) => r.id === session.repoId);
   const roles = rolesOf(config);
@@ -383,6 +395,7 @@ function CrewSession({
         {folders && folders.folders.length > 0 && (
           <ul className="tiles wrap" aria-label={`Folders of s/${session.id}`}>
             {folders.folders.map((f) => {
+              const stray = strays.filter((s) => s.path.startsWith(`${f.name}/`));
               const inner = (
                 <>
                   <span className="tile-vis wrap" aria-hidden="true">
@@ -402,13 +415,19 @@ function CrewSession({
                     )}
                     <span className="s">{`${f.name}/`}</span>
                   </span>
+                  {stray.length > 0 && <span className="xs crit-t">Stray change</span>}
+                  {stray.map((s) => (
+                    <span className="xs warn-t" key={s.key}>
+                      {s.path} · {tz ? hhmm(s.at, tz) : DASH}
+                    </span>
+                  ))}
                   <span className="sr-only">
                     {`${f.name}/: ${f.owners.length > 0 ? f.owners.join(", ") : FOLDER_FREE}`}
                   </span>
                 </>
               );
               return (
-                <li key={f.name} className="tile">
+                <li key={f.name} className={`tile${stray.length > 0 ? " stray" : ""}`}>
                   {pickable ? (
                     <button
                       type="button"

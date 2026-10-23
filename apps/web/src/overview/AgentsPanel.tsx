@@ -164,7 +164,10 @@ function AgentRow({
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const roleTitle = seatRoleTitle(row.id, crew?.rows, config?.crew?.roles);
-  const doing = doingLine(row, now, tz, repoPrs);
+  const shownLoop = row.loop && (row.kind !== "crew" || isLoopInFlight(row));
+  const doingRow =
+    shownLoop && row.digest?.liveTool ? { ...row, digest: { ...row.digest, liveTool: null } } : row;
+  const doing = doingLine(doingRow, now, tz, repoPrs);
   const parts = needLine(row, items, now, lock);
   const lamp = needsLamp(
     mine,
@@ -232,13 +235,15 @@ function AgentRow({
           )}
         </span>
         <span className="ellip xs fg2 doing" title={doing}>
-          <DoingLine row={row} now={now} tz={tz} repoPrs={repoPrs} />
+          <DoingLine row={doingRow} now={now} tz={tz} repoPrs={repoPrs} />
         </span>
       </span>
       <span className="min0 loopstep">
         {row.loop && (row.kind !== "crew" || isLoopInFlight(row)) ? (
           <LoopStep
             loop={row.loop}
+            live={row.run?.status === "running" ? row.digest?.liveTool : null}
+            now={now}
             hudState={row.hudState}
             wait={waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)}
           />

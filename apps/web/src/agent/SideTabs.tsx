@@ -5,6 +5,7 @@ import {
   DIFF_MAX_CHARS,
   type FileDiff,
   READONLY_FILES_NOTE,
+  type RunView,
   SUBAGENT_PILL,
   type TicketView,
 } from "@mc/core";
@@ -58,6 +59,22 @@ function Plan({ row }: { row: CrewRow }) {
 
 /** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
 function Queue({ row }: { row: CrewRow }) {
+  const runs = useResource<RunView[]>(RESOURCES.runs(row.id));
+  // Tickets whose run finished its work, once each (a ticket can take several runs). A run the
+  // operator or FLIGHT stopped also ends "ok", as `endedBy: "operator"`: that is not finished.
+  const done = [
+    ...new Map(
+      (runs.data ?? [])
+        .filter(
+          (r) =>
+            r.status === "ok" &&
+            r.endedBy !== "operator" &&
+            r.endedAt !== null &&
+            r.ticket !== null,
+        )
+        .map((r) => [r.ticket, r]),
+    ).values(),
+  ];
   const queue = row.queue ?? [];
   const queued = queue.flatMap((q) => {
     const t = parseTicket(q.ref);
@@ -108,6 +125,23 @@ function Queue({ row }: { row: CrewRow }) {
         Each ticket starts as a fresh run on its own branch. Earlier tickets' conversations aren't
         carried over.
       </p>
+      <div className="qsec">Done</div>
+      {runs.error && !runs.data ? (
+        <p className="s crit-t">Could not load finished tickets: {runs.error.message}</p>
+      ) : !runs.data ? (
+        <p className="s muted">Loading…</p>
+      ) : done.length === 0 ? (
+        <p className="s muted">None yet.</p>
+      ) : (
+        done.map((r) => (
+          <div className="qi" key={r.id}>
+            <span className="ok-t">✓</span>
+            <span className="min0">
+              <TicketRef ticket={r.ticket as string} bare /> {r.ticketTitle}
+            </span>
+          </div>
+        ))
+      )}
     </>
   );
 }

@@ -1,4 +1,12 @@
-import type { BoardItem, PrCheck, PullRequestView, RepoProfile } from "@mc/core";
+import {
+  type BoardItem,
+  type ConfigView,
+  OWNER_CONTROLLER,
+  OWNER_FLIGHT,
+  type PrCheck,
+  type PullRequestView,
+  type RepoProfile,
+} from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cardRenderProbe } from "../src/board/Card.tsx";
@@ -46,6 +54,7 @@ const todo = (n: number, over: Partial<BoardItem> = {}) =>
   boardItem({ issueNumber: n, title: `Ticket ${n}`, status: "Todo", state: "planned", ...over });
 
 interface Data {
+  config?: ConfigView;
   shopApp?: BoardItem[];
   engine?: BoardItem[];
   prs?: PullRequestView[];
@@ -57,7 +66,7 @@ interface Data {
 function stub(d: Data = {}) {
   return stubFetch({
     "/api/repos": REPOS,
-    "/api/config": CONFIG,
+    "/api/config": d.config ?? CONFIG,
     "/api/boards/shop-app": d.shopApp ?? [],
     "/api/boards/site-builder": d.engine ?? [],
     "/api/repos/shop-app/prs?linked=1": d.prs ?? [],
@@ -468,6 +477,12 @@ describe("cards", () => {
     await screen.findByText("Ticket 3349");
     const c = card(container, "shop-app#3349") as HTMLElement;
     expect(within(c).getByText("Reviewing:")).toBeTruthy();
+    expect(within(c).getByText("Running")).toBeTruthy();
+    expect(c.className).toContain("pulse-ok");
+    const reviewer = within(c).getByRole("link", { name: "RETRO-1" });
+    expect(reviewer.getAttribute("href")).toBe("/agent/RETRO-1");
+    fireEvent.click(reviewer);
+    expect(window.location.pathname).toBe("/agent/RETRO-1");
     expect(within(c).getByText("RETRO-1")).toBeTruthy();
     expect(within(c).getByText("check passing")).toBeTruthy();
     expect(within(c).queryByText(NO_REVIEWER)).toBeNull();
@@ -775,6 +790,37 @@ describe("agent overlay and click", () => {
 });
 
 describe("filters", () => {
+  it("Has an agent includes a queued card with no running agent", async () => {
+    const queued: QueueRow = {
+      ...crewRow({ run: null, ticket: null }),
+      queue: [{ ref: "shop-app#1", issue: 1, pos: 1 }],
+    };
+    stub({ shopApp: [todo(1), todo(2)], crew: [queued] });
+    await open();
+    await screen.findByText("Ticket 1");
+    fireEvent.click(screen.getByRole("button", { name: "Has an agent" }));
+    expect(screen.getByText("Ticket 1")).toBeTruthy();
+    expect(screen.queryByText("Ticket 2")).toBeNull();
+  });
+
+  it("Needs me excludes FLIGHT, controller and an agent's need outside In progress", async () => {
+    stub({
+      shopApp: [todo(1), todo(2), todo(3, { status: "In review" }), todo(4)],
+      crew: [crewRow({ ticket: "shop-app#3" })],
+      attention: [
+        item({ key: "flight", ticket: "shop-app#1", agentId: null, owner: OWNER_FLIGHT }),
+        item({ key: "controller", ticket: "shop-app#2", agentId: null, owner: OWNER_CONTROLLER }),
+        item({ key: "agent", ticket: null }),
+        item({ key: "operator", ticket: "shop-app#4", agentId: null }),
+      ],
+    });
+    await open();
+    await screen.findByText("Ticket 4");
+    fireEvent.click(screen.getByRole("button", { name: "Needs me" }));
+    expect(screen.getByText("Ticket 4")).toBeTruthy();
+    for (const n of [1, 2, 3]) expect(screen.queryByText(`Ticket ${n}`)).toBeNull();
+  });
+
   const board = [
     todo(1, { status: "Done", state: "done", updatedAt: NOW - 10 * DAY, title: "Old done" }),
     todo(2, { status: "Done", state: "done", updatedAt: NOW - 2 * DAY, title: "New done" }),
@@ -850,6 +896,103 @@ describe("filters", () => {
 });
 
 describe("lanes", () => {
+  it("omits All mine without a GitHub login even when the hub operator is configured", async () => {
+    localStorage.setItem("mc-lane", "@mine");
+    stub({ shopApp: [todo(1)] });
+    await open();
+    await screen.findByText("Ticket 1");
+    expect(screen.queryByRole("button", { name: "All mine" })).toBeNull();
+    expect(screen.getByRole("button", { name: "All repos" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("keeps All mine across crew sessions, including its unassigned and Done cards", async () => {
+    stub({
+      config: { ...CONFIG, githubLogin: "pilot" } as ConfigView, // githubLogin: #395
+      shopApp: [1, 2].map((n) => todo(n, { assignees: ["pilot"] })),
+      engine: [
+        todo(3, { repoId: "site-builder", assignees: ["PILOT"] }),
+        todo(4, {
+          repoId: "site-builder",
+          assignees: ["pilot"],
+          status: "Done",
+          state: "done",
+          closed: true,
+          updatedAt: NOW - 1000,
+        }),
+        todo(5, { repoId: "site-builder", assignees: ["someone-else"] }),
+      ],
+      crew: [
+        crewRow({ id: "alpha-agent", sessionId: "alpha", ticket: "shop-app#1" }),
+        crewRow({ id: "beta-agent", sessionId: "beta", ticket: "shop-app#2" }),
+        crewRow({
+          id: "gamma-agent",
+          sessionId: "gamma",
+          repoId: "site-builder",
+          ticket: "site-builder#4",
+        }),
+      ],
+    });
+    await open();
+    await screen.findByText("Ticket 5");
+    fireEvent.click(screen.getByRole("button", { name: "All mine" }));
+    for (const [session, visible, hidden] of [
+      ["alpha", 1, 2],
+      ["beta", 2, 1],
+    ] as const) {
+      act(() => setSession(session));
+      expect(screen.getByRole("button", { name: "All mine" }).getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      expect(screen.getByText(`Ticket ${visible}`)).toBeTruthy();
+      expect(screen.queryByText(`Ticket ${hidden}`)).toBeNull();
+      expect(screen.getByText("Ticket 3")).toBeTruthy();
+      expect(screen.getByText("Ticket 4")).toBeTruthy();
+      expect(screen.queryByText("Ticket 5")).toBeNull();
+    }
+  });
+
+  it("All mine uses the hub's GitHub login across repos, links its query and is remembered", async () => {
+    stub({
+      config: { ...CONFIG, githubLogin: "pilot" } as ConfigView, // githubLogin: #395
+      shopApp: [
+        todo(1, { assignees: ["pilot"] }),
+        todo(2, { assignees: ["someone-else"] }),
+        todo(3, { assignees: [] }),
+        todo(4),
+      ],
+      engine: [todo(5, { repoId: "site-builder", assignees: ["other", "PILOT"] })],
+    });
+    const first = await open();
+    await screen.findByText("Ticket 5");
+    fireEvent.click(screen.getByRole("button", { name: "All mine" }));
+    expect(screen.getByText("Ticket 1")).toBeTruthy();
+    expect(screen.getByText("Ticket 5")).toBeTruthy();
+    for (const n of [2, 3, 4]) expect(screen.queryByText(`Ticket ${n}`)).toBeNull();
+    expect(
+      within(card(first.container, "site-builder#5") as HTMLElement).getByText("site-builder"),
+    ).toBeTruthy();
+    const url = new URL(
+      screen.getByRole("link", { name: "Open in GitHub ↗" }).getAttribute("href") ?? "",
+    );
+    expect(url.origin).toBe("https://github.com");
+    expect(url.searchParams.get("q")).toBe(
+      "repo:octo-org/shop-app repo:octo-org/site-builder is:issue assignee:pilot",
+    );
+    expect(window.location.pathname).toBe("/board");
+    first.unmount();
+    await open();
+    expect(screen.getByRole("button", { name: "All mine" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.queryByText("Ticket 2")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Standup brief" }));
+    const brief = screen.getByRole("dialog", { name: "Brief" }).querySelector("pre");
+    expect(brief?.textContent).toContain("(All mine)");
+    expect(brief?.textContent).not.toContain("Ticket 2");
+  });
+
   it("shows the query for the lane and copies it", async () => {
     stub({ shopApp: [todo(1)] });
     const writeText = vi.fn(async () => {});

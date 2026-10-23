@@ -108,7 +108,7 @@ export const Card = memo(function Card({
 }: CardProps) {
   cardRenderProbe.onRender?.(ticketRef(item));
   const col = cardColumn(item);
-  const worked = !mine && agent?.hudState === "running";
+  const worked = !mine && (agent?.hudState === "running" || reviewer?.hudState === "running");
   const blocker = col === "Done" ? null : firstBlocker(item);
   const to = agent ? agentPath(agent.id) : ticketPath(item.repoId, item.issueNumber);
   const go = () => navigate(to);
@@ -143,7 +143,14 @@ export const Card = memo(function Card({
       (reviewer ? (
         <span key="rev" className="row">
           <span className="xs">Reviewing:</span>
-          <AgentTag id={reviewer.id} index={reviewer.index} sm />
+          <a href={agentPath(reviewer.id)} onClick={(e) => followLink(e, agentPath(reviewer.id))}>
+            <AgentTag id={reviewer.id} index={reviewer.index} sm />
+          </a>
+          {reviewer.hudState && (
+            <Pill tone={HUD_STATE_TONE[reviewer.hudState]}>
+              {HUD_STATE_LABEL[reviewer.hudState]}
+            </Pill>
+          )}
         </span>
       ) : (
         col === "In review" && (

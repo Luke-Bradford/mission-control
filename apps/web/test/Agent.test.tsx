@@ -536,8 +536,8 @@ describe("Agent page: need banner", () => {
           "/api/test-lock": {
             holder: { runId: "r-12", seatId: "guido-1", command: "pnpm -s test", since: NOW - MIN },
             waiting: [
-              { runId: "r-2", seatId: "retro-1", since: NOW - MIN },
-              { runId: "r-3", seatId: "inco-1", since: NOW - MIN },
+              { runId: "r-2", seatId: "retro-1", command: "pnpm -s test", since: NOW - MIN },
+              { runId: "r-3", seatId: "inco-1", command: "pnpm -s test", since: NOW - MIN },
             ],
           },
         }),
@@ -1494,6 +1494,32 @@ describe("Agent page: activity stream", () => {
     );
     await act(async () => {});
     expect(top).toBe(790);
+  });
+
+  it("the live call bar names the waiting suite, command, timer and holder", async () => {
+    // the queued Bash call is still the live tool while its hook waits for the lock
+    const row = crewRow({
+      digest: digest({ liveTool: { name: "Bash", since: NOW - 125_000 } }),
+      hudState: "waiting",
+    });
+    stub({
+      rows: [row],
+      extra: {
+        "/api/test-lock": {
+          holder: { runId: "other", seatId: "guido-2", command: "pnpm test", since: NOW },
+          waiting: [
+            { runId: row.run?.id, seatId: row.id, command: "pnpm -s test", since: NOW - 125_000 },
+          ],
+        },
+      },
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    await waitFor(() =>
+      expect($(container, "#liveCall .livecall")?.textContent).toBe(
+        "⏸ Waiting for the test lock: shop-app full suite (pnpm -s test) 2:05 behind GUIDO-2",
+      ),
+    );
   });
 
   it("the live call bar shows the running tool and its elapsed time", async () => {
@@ -2472,12 +2498,54 @@ describe("Agent page: side tabs", () => {
     fireEvent.click(within(side).getByRole("button", { name: "Queue" }));
     expect(await within(side).findByText("Retry the fetch")).toBeTruthy();
     const heads = [...side.querySelectorAll(".qsec")].map((h) => h.textContent);
-    expect(heads).toEqual(["Now", "Next · from Ready, by priority"]);
+    expect(heads).toEqual(["Now", "Next · from Ready, by priority", "Done"]);
     const rows = [...side.querySelectorAll<HTMLElement>(".qi")].map((r) => r.textContent);
-    expect(rows).toEqual(["▸#3349 Quote cacheCI", "1#3 Retry the fetchP1", "2#8 Fix the typoP2"]);
+    expect(rows).toEqual([
+      "▸#3349 Quote cacheCI",
+      "1#3 Retry the fetchP1",
+      "2#8 Fix the typoP2",
+      "✓#3349 ",
+    ]);
     expect(side.textContent).toContain(
       "Each ticket starts as a fresh run on its own branch. Earlier tickets' conversations aren't carried over.",
     );
+  });
+
+  it("Queue Done lists finished tickets once, excluding unfinished, failed, stopped and unticketed runs", async () => {
+    const ok = { status: "ok" as const, endedAt: NOW };
+    const side = await sideOf(
+      seatRow(),
+      SEAT_ROUTES({
+        "/api/agents/guido-1/runs?limit=50": [
+          rv({ id: "done", ticket: "shop-app#42", ticketTitle: "Finished cache", ...ok }),
+          rv({ id: "again", ticket: "shop-app#42", ticketTitle: "Finished cache", ...ok }),
+          rv({ id: "active", ticket: "shop-app#43", ticketTitle: "Still working", endedAt: null }),
+          rv({
+            id: "failed",
+            ticket: "shop-app#44",
+            ticketTitle: "Fell over",
+            status: "failed",
+            endedAt: NOW,
+          }),
+          rv({ id: "scratch", ticket: null, ticketTitle: "Unticketed", ...ok }),
+          rv({
+            id: "stopped",
+            ticket: "shop-app#45",
+            ticketTitle: "Stopped by you",
+            ...ok,
+            endedBy: "operator",
+          }),
+        ],
+      }),
+    );
+    fireEvent.click(within(side).getByRole("button", { name: "Queue" }));
+    expect(await within(side).findByText("Finished cache")).toBeTruthy();
+    expect(side.textContent).toContain("✓#42 Finished cache");
+    expect(within(side).getAllByText("Finished cache")).toHaveLength(1);
+    expect(side.textContent).not.toContain("Still working");
+    expect(side.textContent).not.toContain("Fell over");
+    expect(side.textContent).not.toContain("Unticketed");
+    expect(side.textContent).not.toContain("Stopped by you");
   });
 
   it("Queue says when it is empty, nothing is held, or the row is no writer seat", async () => {
