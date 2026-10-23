@@ -154,7 +154,7 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
       prep.inFlight++;
       prep.maxInFlight = Math.max(prep.maxInFlight, prep.inFlight);
       try {
-        await new Promise((r) => setTimeout(r, 30));
+        await new Promise<void>((r) => setImmediate(r));
         if (prep.gate) await prep.gate;
         return await real.prepareCheckout(i);
       } finally {
@@ -534,7 +534,7 @@ describe("the CLI update hold", () => {
     hold.hold("held");
     const { sup, log } = make({ cliHold: hold });
     sup.start();
-    await new Promise((r) => setTimeout(r, 200));
+    await until(() => expect(log).toHaveBeenCalledWith("guido-1: resume held: held"));
     expect(sup.seatFacts("guido-1")).toBeNull();
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(log).toHaveBeenCalledWith("guido-1: resume held: held");
@@ -2436,8 +2436,7 @@ describe("reattach after a restart", () => {
       cliSessionId: row?.cliSessionId,
     });
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
-    await new Promise((r) => setTimeout(r, 200));
-    expect(starts()).toHaveLength(2);
+    await until(() => expect(starts()).toHaveLength(2));
     const argv = starts()[1].argv as string[];
     expect(argv[argv.indexOf("--resume") + 1]).toBe(row?.cliSessionId);
     expect(argv).not.toContain("--session-id");
@@ -2701,6 +2700,7 @@ describe("reattach after a restart", () => {
     const second = make().sup;
     second.start();
     expect(second.status().note).toBe(`crew lock held by pid ${process.ppid}`);
+    await until(() => expect(starts()).toHaveLength(2));
     await new Promise((r) => setTimeout(r, 200));
     expect(starts()).toHaveLength(2); // the first start, and the holder's one resume
     expect(store.run(runId)?.status).toBe("running");
