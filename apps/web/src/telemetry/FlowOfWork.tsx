@@ -1,5 +1,5 @@
-import { NO_REVIEWS, NO_SIZE, type Telemetry } from "@mc/core";
-import { dayLabel, narrowDay } from "../fmt.ts";
+import { NO_SIZE, seatCallSign, type Telemetry } from "@mc/core";
+import { dayLabel, dur, narrowDay } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -52,7 +52,23 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
           ? { value: DASH, title: noReviewed }
           : { value: show(value), title: reviewed };
   const rounds = reviewStat(t?.quality.reviewRoundsPerPr, (n) => n.toFixed(1));
-  const firstPass = reviewStat(t?.quality.firstPassReviewPct, (n) => `${Math.round(n)}%`);
+  const findings = reviewStat(t?.quality.retroFindingsPerPr, (n) => n.toFixed(1));
+  const sentBack = reviewStat(t?.quality.sentBackPrs, String);
+  if (t?.quality.sentBackPrs !== undefined && t.quality.firstPassReviewPct != null)
+    sentBack.title = `${Math.round(t.quality.firstPassReviewPct)}% passed the first review round`;
+  const humanWait = reviewStat(t?.quality.humanReviewWaitMs, dur);
+  // It measures the hub's "ready" and "review" notes, not merged PRs: its own titles.
+  if (t?.quality.humanReviewWaitMs !== undefined)
+    humanWait.title =
+      t.quality.humanReviewWaitMs === null
+        ? "No finished PR waited for your review in the last 14 days."
+        : "How long a finished PR waited for your review, median, last 14 days.";
+  const capcomStat = (value: number | null | undefined, show: (n: number) => string) => {
+    const stat = reviewStat(value, show);
+    if (t?.capcom && value !== undefined) stat.title = "today";
+    return stat;
+  };
+  const capcom = t?.capcom;
   const notTracked = { value: NOT_TRACKED, title: NOT_TRACKED_TITLE, nt: true };
 
   return (
@@ -113,9 +129,9 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
           <div className="stats">
             <Stat {...notTracked} label="verify passed first try" />
             <Stat {...rounds} label="review rounds per PR" />
-            <Stat {...firstPass} label="passed the first review round" />
-            <Stat {...notTracked} label="median wait for a human review" title={NO_REVIEWS} />
-            <Stat {...notTracked} label="PRs sent back by reviewers" title={NO_REVIEWS} />
+            <Stat {...findings} label="RETRO findings per PR" />
+            <Stat {...humanWait} label="median wait for a human review" />
+            <Stat {...sentBack} label="PRs sent back by reviewers" />
             <Stat
               value={ci === null ? DASH : `${Math.round(ci)}%`}
               label="CI green on first push"
@@ -133,11 +149,18 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
       <Panel id="tCapcom" title="You as CAPCOM" sub="how long work waits on you">
         <div className="pb">
           <div className="stats">
-            <Stat {...notTracked} label="decisions today" />
-            <Stat {...notTracked} label="median response" />
-            <Stat {...notTracked} label="slowest 10%" />
-            <Stat {...notTracked} label="runs you stopped or interrupted" />
+            <Stat {...capcomStat(capcom?.answered, String)} label="decisions today" />
+            <Stat {...capcomStat(capcom?.medianMs, dur)} label="median response" />
+            <Stat {...capcomStat(capcom?.p90Ms, dur)} label="slowest 10%" />
+            <Stat {...capcomStat(capcom?.stopped, String)} label="runs you stopped" />
           </div>
+          {capcom?.longest && (
+            <p className="note xs tnote">
+              Longest wait today: {seatCallSign(capcom.longest.agentId)}'s question,{" "}
+              {dur(capcom.longest.ms)}. Agent time spent waiting on you today:{" "}
+              {dur(capcom.agentWaitMs)}.
+            </p>
+          )}
         </div>
       </Panel>
     </div>

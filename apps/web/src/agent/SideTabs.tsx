@@ -59,15 +59,22 @@ function Plan({ row }: { row: CrewRow }) {
 
 /** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
 function Queue({ row }: { row: CrewRow }) {
-  const runs = useResource<RunView[]>(
-    row.kind === "crew" && row.mode === "writer" ? RESOURCES.runs(row.id) : null,
-  );
-  const done = (runs.data ?? [])
-    .filter(
-      (r): r is RunView & { ticket: string } =>
-        r.ticket !== null && r.status === "ok" && r.endedAt !== null,
-    )
-    .filter((r, i, all) => all.findIndex((other) => other.ticket === r.ticket) === i);
+  const runs = useResource<RunView[]>(RESOURCES.runs(row.id));
+  // Tickets whose run finished its work, once each (a ticket can take several runs). A run the
+  // operator or FLIGHT stopped also ends "ok", as `endedBy: "operator"`: that is not finished.
+  const done = [
+    ...new Map(
+      (runs.data ?? [])
+        .filter(
+          (r) =>
+            r.status === "ok" &&
+            r.endedBy !== "operator" &&
+            r.endedAt !== null &&
+            r.ticket !== null,
+        )
+        .map((r) => [r.ticket, r]),
+    ).values(),
+  ];
   const queue = row.queue ?? [];
   const queued = queue.flatMap((q) => {
     const t = parseTicket(q.ref);
@@ -122,21 +129,21 @@ function Queue({ row }: { row: CrewRow }) {
         Done
         {runs.data?.length === RUNS_LIMIT && <span className="muted"> · latest {RUNS_LIMIT}</span>}
       </div>
-      {done.map((r) => (
-        <div className="qi" key={r.ticket}>
-          <span className="ok-t">✓</span>
-          <span className="min0">
-            <TicketRef ticket={r.ticket} bare />
-            {r.ticketTitle && <> {r.ticketTitle}</>}
-          </span>
-        </div>
-      ))}
-      {!runs.data ? (
-        <p className="s muted">
-          {runs.error ? `Could not load the runs: ${runs.error.message}` : "Loading…"}
-        </p>
+      {runs.error && !runs.data ? (
+        <p className="s crit-t">Could not load finished tickets: {runs.error.message}</p>
+      ) : !runs.data ? (
+        <p className="s muted">Loading…</p>
+      ) : done.length === 0 ? (
+        <p className="s muted">None yet.</p>
       ) : (
-        done.length === 0 && <p className="s muted">None yet.</p>
+        done.map((r) => (
+          <div className="qi" key={r.id}>
+            <span className="ok-t">✓</span>
+            <span className="min0">
+              <TicketRef ticket={r.ticket as string} bare /> {r.ticketTitle}
+            </span>
+          </div>
+        ))
       )}
     </>
   );

@@ -40,8 +40,24 @@ function typing(t: EventTarget | null): t is HTMLElement {
   return t instanceof HTMLElement && (t.matches("input, select, textarea") || t.isContentEditable);
 }
 
+/** How long `/` waits for the Agent page's message box to mount before giving up. */
+const FOCUS_WAIT_MS = 2000;
+
 export function installKeys(app: KeyApp): () => void {
   let gAt: number | null = null;
+  let focus: MutationObserver | null = null;
+  let focusTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopFocus = () => {
+    focus?.disconnect();
+    focus = null;
+    clearTimeout(focusTimer);
+  };
+  const focusMessage = () => {
+    const input = document.querySelector<HTMLElement>("#streamP #agentInput");
+    if (!input) return;
+    input.focus();
+    stopFocus();
+  };
 
   const onKey = (e: KeyboardEvent) => {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -77,7 +93,12 @@ export function installKeys(app: KeyApp): () => void {
         return;
       case "/":
         e.preventDefault();
+        stopFocus();
+        focus = new MutationObserver(focusMessage);
+        focus.observe(document.body, { childList: true, subtree: true });
+        focusTimer = setTimeout(stopFocus, FOCUS_WAIT_MS);
         app.navigate(PAGE_PATHS.agent);
+        focusMessage();
         return;
       case "?":
         app.help();
@@ -92,5 +113,8 @@ export function installKeys(app: KeyApp): () => void {
   };
 
   document.addEventListener("keydown", onKey);
-  return () => document.removeEventListener("keydown", onKey);
+  return () => {
+    document.removeEventListener("keydown", onKey);
+    stopFocus();
+  };
 }

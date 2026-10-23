@@ -109,10 +109,10 @@ describe("App", () => {
     const keys = container.querySelector(".keys");
     expect(keys?.textContent).toContain("g then o f b a c t pages");
     expect(keys?.textContent).toContain("s Setup");
-    for (const hint of ["f FLIGHT", "jk next agent", "/ Agent page", "i interrupt", "? help"]) {
+    for (const hint of ["f FLIGHT", "jk next agent", "/ message agent", "i interrupt", "? help"]) {
       expect(keys?.textContent).toContain(hint);
     }
-    expect(keys?.textContent).not.toContain("message agent");
+    expect(keys?.textContent).not.toContain("Agent page");
     expect(keys?.textContent).not.toContain("Sample data");
   });
 

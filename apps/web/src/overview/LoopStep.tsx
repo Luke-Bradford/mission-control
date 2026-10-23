@@ -1,4 +1,4 @@
-import type { CrewLoop, HudState } from "@mc/core";
+import type { CrewLoop, HudState, RunDigest } from "@mc/core";
 import {
   loopPathTitle,
   loopStepLabel,
@@ -9,7 +9,7 @@ import {
   stepMarks,
   WAIT_WARN,
 } from "../crew.ts";
-import { mss } from "../fmt.ts";
+import { cutText, mss } from "../fmt.ts";
 
 const MARK_CLASS: Record<StepMark, string | undefined> = {
   done: "d",
@@ -27,11 +27,15 @@ export function LoopStep({
   hudState,
   wait,
   elapsed,
+  live,
+  now,
 }: {
   loop: CrewLoop;
   hudState: HudState;
   wait: string | null;
   elapsed?: number | null;
+  live?: RunDigest["liveTool"];
+  now?: number;
 }) {
   const marks = stepMarks(loop, hudState);
   const steps = loopSteps(loop);
@@ -54,6 +58,15 @@ export function LoopStep({
           <i key={`${i}:${steps[i]?.name}`} className={MARK_CLASS[m]} />
         ))}
       </span>
+      {wait === null && live && now !== undefined && (
+        <span
+          className="ellip xs fg2"
+          title={`${live.name}${live.detail ? ` ${live.detail}` : ""}`}
+        >
+          {cutText(`${live.name}${live.detail ? ` ${live.detail}` : ""}`, 46)} ·{" "}
+          {mss(now - live.since)}
+        </span>
+      )}
       {wait !== null && (
         <span className={`ellip xs loopwait ${warn ? "warn-t" : "fg2"}`} title={wait}>
           {wait}

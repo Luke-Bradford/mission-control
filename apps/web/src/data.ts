@@ -81,6 +81,7 @@ export const RESOURCES = {
   }),
   escalations: { path: "/api/escalations", topic: "escalations" },
   /** Who holds the full-suite lock and who waits; the server emits "guard" when that changes. */
+  testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
   limits: { path: "/api/limits", topic: "limits" },
