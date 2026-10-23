@@ -48,6 +48,7 @@ export const RESOURCES = {
   notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
+  drafts: { path: "/api/drafts", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
@@ -127,6 +128,8 @@ export const RESOURCES = {
 
 /** POST endpoints. */
 export const ACTIONS = {
+  postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
+  discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
