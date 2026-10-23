@@ -3027,6 +3027,25 @@ kbd {
   border-radius: var(--r-s);
   padding: 6px 8px;
 }
+.askcards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 8px;
+  padding: 8px 14px 12px;
+}
+.askcard {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--warn-mark);
+  border-radius: var(--r-s);
+  padding: 6px 8px;
+}
+.askcard blockquote,
+#dsBrief blockquote {
+  margin: 0;
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+}
 /* a tile whose figure is not stored */
 .kpi .v.nt,
 .stat2 b.nt {

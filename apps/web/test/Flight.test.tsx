@@ -11,9 +11,11 @@ import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
-import { incomingCards, NO_INCOMING } from "../src/flight/Incoming.tsx";
+import { incomingCards, incomingThreads, NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
+import { rel } from "../src/fmt.ts";
+import { type PersonThreadView, whereOf } from "../src/notifications.ts";
 import { DRAFTS_NOT_TRACKED, Flight } from "../src/pages/Flight.tsx";
 import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
@@ -33,6 +35,37 @@ import {
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
+
+const KEY = `person:101:${NOW - HOUR}`;
+const N = 12;
+const URL = `${"https://github.com"}/octo-org/shop-app/issues/${N}`;
+const thread = (over: Partial<PersonThreadView> = {}): PersonThreadView => ({
+  key: KEY,
+  id: "101",
+  repoId: "shop-app",
+  github: "octo-org/shop-app",
+  subjectType: "Issue",
+  number: N,
+  title: "Fix the stop race",
+  reason: "mention",
+  reasonText: "mentioned you",
+  author: "alice",
+  snippet: "can you look?",
+  url: URL,
+  updatedAt: NOW - HOUR,
+  firstSeenAt: NOW - HOUR,
+  catchUp: "new",
+  ...over,
+});
+const personItem = item({
+  key: KEY,
+  kind: "person",
+  agentId: null,
+  escalationId: null,
+  ticket: null,
+  url: URL,
+  text: "alice mentioned you: Fix the stop race",
+});
 
 const board = [
   boardItem({ issueNumber: 1, status: "In progress", state: "in progress" }),
@@ -825,6 +858,111 @@ describe("FLIGHT's brief", () => {
     expect(rows[1]?.textContent).not.toContain("FLIGHT's take:");
     fireEvent.click(within(rows[0] as HTMLElement).getByRole("button", { name: "Open" }));
     expect(screen.getByTestId("item").textContent).toBe("a");
+  });
+
+  it("Asked of you shows a person card for each open GitHub thread, with FLIGHT's take when briefed", async () => {
+    function Probe() {
+      return <span data-testid="item">{useItem() ?? "none"}</span>;
+    }
+    const t2 = thread({
+      key: "person:202:1",
+      id: "202",
+      author: null,
+      number: 7,
+      catchUp: "follow-up",
+    });
+    stubFetch({
+      "/api/attention": [
+        { ...personItem, brief: brief({ recommendation: "Reply that the fix is in review." }) },
+      ],
+      "/api/notifications": { open: [thread(), t2], handledToday: [] },
+      "/api/config": CONFIG,
+    });
+    render(
+      <>
+        <Probe />
+        <Flight />
+      </>,
+    );
+    const cards = await screen.findAllByTestId("person-card");
+    expect(cards).toHaveLength(2);
+    const first = cards[0]?.textContent ?? "";
+    for (const part of [
+      "alice",
+      whereOf(thread()),
+      rel(NOW - HOUR, NOW, "Europe/London"),
+      "New",
+      "mentioned you: Fix the stop race",
+      "can you look?",
+      "FLIGHT'S TAKE",
+      "Reply that the fix is in review.",
+    ])
+      expect(first).toContain(part);
+    expect(
+      within(cards[0] as HTMLElement)
+        .getByRole("link", { name: "Open in GitHub ↗" })
+        .getAttribute("href"),
+    ).toBe(URL);
+    const second = cards[1]?.textContent ?? "";
+    expect(second).toContain("Someone");
+    expect(second).toContain(whereOf(t2));
+    expect(second).toContain("Follow-up");
+    expect(second).not.toContain("FLIGHT'S TAKE");
+    expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
+    fireEvent.click(
+      within(cards[0] as HTMLElement).getByRole("button", { name: "Read the brief and reply" }),
+    );
+    expect(screen.getByTestId("item").textContent).toBe(KEY);
+  });
+
+  it("the Handled today footer lists each handled thread with its how", async () => {
+    const h = {
+      id: "9",
+      repoId: "shop-app",
+      number: 3,
+      title: "t",
+      author: "bob",
+      how: "marked handled",
+      at: NOW - MIN,
+      firstSeenAt: NOW - HOUR,
+    };
+    stubFetch({
+      "/api/attention": [],
+      "/api/config": CONFIG,
+      "/api/notifications": {
+        open: [],
+        handledToday: [h, { ...h, id: "8", author: null, how: "read on GitHub" }],
+      },
+    });
+    const { container } = render(<Flight />);
+    expect((await screen.findByTestId("handled-today")).textContent).toBe(
+      "Handled today: bob (marked handled) · Someone (read on GitHub)",
+    );
+    expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING);
+  });
+
+  it("Incoming lists a GitHub thread as Asked of you, merged newest first with the board", async () => {
+    const old = thread({ key: "person:303:1", id: "303", updatedAt: NOW - 30 * HOUR });
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [
+        boardItem({ issueNumber: 10, status: "Backlog", createdAt: NOW - 2 * HOUR }),
+      ],
+      "/api/boards/site-builder": [],
+      "/api/flight/brief": briefView(),
+      "/api/config": CONFIG,
+      "/api/notifications": { open: [thread(), old], handledToday: [] },
+    });
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("incoming-row");
+    expect(rows).toHaveLength(2);
+    const first = rows[0]?.textContent ?? "";
+    expect(first).toContain("GitHub");
+    expect(first).toContain("Asked of you");
+    expect(first).toContain(`#${N}`);
+    expect(first).toContain("alice mentioned you: Fix the stop race");
+    expect(rows[1]?.textContent).toContain("#10");
+    expect(incomingThreads([thread(), old], NOW).map((t) => t.id)).toEqual(["101"]);
   });
 
   it("Asked of you says nobody is waiting with no items", async () => {
