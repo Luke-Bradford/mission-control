@@ -1,8 +1,8 @@
-import { type GuardHitsView, seatCallSign, type Telemetry } from "@mc/core";
+import { type GuardHitsView, seatCallSign, type Telemetry, type TestLockHistory } from "@mc/core";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { RESOURCES, useResource } from "../data.ts";
-import { cost, kTokens, mss } from "../fmt.ts";
+import { cost, dur, kTokens, mss } from "../fmt.ts";
 import { followLink } from "../router.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE } from "./common.ts";
 import {
@@ -31,27 +31,37 @@ interface Tile {
   nt?: boolean;
 }
 
-/**
- * The KPI row (catalogue 2.6.2): today's numbers, scoped by the page's Agent and Account selects on the server. **Decision:** no tweening, and
- * Lock wait / Your response say "not tracked yet": Mission Control stores no figure for them.
- * Commits shows the hub's commits per run, `—` when no run finished in the window.
- */
+/** Today's KPI row (catalogue 2.6.2). */
 export function Kpis({ t }: { t: Telemetry | undefined }) {
   const d = t?.today;
   const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
   const lock = useTestLock();
+  const lockHistory = useResource<TestLockHistory>(RESOURCES.testLockHistory);
+  const history = lockHistory.data;
   const now = useSecond();
   const blocked = hits ? Object.values(hits.counts).reduce((a, b) => a + b, 0) : null;
   const holder = lock?.holder ?? null;
   const num = (f: (x: NonNullable<typeof d>) => string): string => (d ? f(d) : DASH);
   const cpr = t?.quality.commitsPerRun;
-  const commits: Pick<Tile, "value" | "title" | "nt"> = !t
-    ? { value: DASH }
-    : cpr === undefined
-      ? { value: NOT_TRACKED, title: NOT_TRACKED_TITLE, nt: true }
-      : cpr === null
-        ? { value: DASH, title: "No finished crew runs in the last 14 days." }
-        : { value: cpr.toFixed(1) };
+  // `—` while loading; a figure the hub does not send is not tracked.
+  const figure = (
+    loaded: boolean,
+    value: number | null | undefined,
+    show: (n: number) => string,
+  ): Pick<Tile, "value" | "title" | "nt"> =>
+    !loaded
+      ? { value: DASH }
+      : value === undefined
+        ? { value: NOT_TRACKED, title: NOT_TRACKED_TITLE, nt: true }
+        : { value: value === null ? DASH : show(value) };
+  const commits = figure(t !== undefined, d?.commits, String);
+  if (d?.commits !== undefined)
+    commits.title =
+      cpr === undefined
+        ? NOT_TRACKED_TITLE
+        : cpr === null
+          ? "No finished crew runs in the last 14 days."
+          : `${cpr.toFixed(1)} per run, last 14 days`;
   const tiles: Tile[] = [
     {
       key: "tokens",
@@ -77,7 +87,7 @@ export function Kpis({ t }: { t: Telemetry | undefined }) {
     {
       key: "commits",
       label: "Commits",
-      detail: cpr === undefined ? "today" : "per run, last 14 days",
+      detail: "today",
       ...commits,
     },
     {
@@ -96,18 +106,14 @@ export function Kpis({ t }: { t: Telemetry | undefined }) {
     {
       key: "lock",
       label: "Lock wait",
-      value: NOT_TRACKED,
-      detail: "today",
-      title: NOT_TRACKED_TITLE,
-      nt: true,
+      ...figure(history !== undefined || lockHistory.error !== null, history?.today.waitMs, mss),
+      detail: history ? `today · ${history.today.runs} runs` : "today",
     },
     {
       key: "capcom",
       label: "Your response",
-      value: NOT_TRACKED,
+      ...figure(t !== undefined, t?.capcom?.medianMs, dur),
       detail: "median, today",
-      title: NOT_TRACKED_TITLE,
-      nt: true,
     },
     {
       key: "guard",

@@ -822,6 +822,44 @@ describe("Agents panel", () => {
     expect(row.querySelector(".spark")).toBeNull();
   });
 
+  it("a loop cell shows the live tool and elapsed time once, beneath the step bar", async () => {
+    const detail = "x".repeat(60);
+    const row = crewRow({
+      loop: { phase: "working", text: "Implement cache", prNumber: null, parked: null },
+    });
+    stub({
+      rows: [
+        {
+          ...row,
+          digest: {
+            lastText: "Implement cache",
+            toolCalls: 1,
+            turns: 1,
+            lastEventAt: NOW,
+            model: null,
+            contextTokens: null,
+            contextWindow: null,
+            tools: {},
+            subagents: [],
+            minuteTokens: [],
+            turnUsage: [],
+            background: [],
+            compactions: 0,
+            liveTool: { name: "Bash", detail, since: NOW - 65_000 },
+          },
+        } as CrewRow,
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const agent = agentRows(container)[0] as HTMLElement;
+    const cell = agent.querySelector(".loopstep") as HTMLElement;
+    expect(cell.textContent).toContain(`Bash ${"x".repeat(40)}… · 1:05`);
+    expect(cell.querySelector(".stepbar")?.nextElementSibling?.textContent).toContain("1:05");
+    expect(agent.querySelector(".doing")?.textContent).toBe("Implement cache");
+    expect(agent.querySelector(".doing")?.textContent).not.toContain("Bash");
+  });
+
   it("a running seat's row says its tool, what it touches and for how long, on one line", async () => {
     const detail = "pnpm -s vitest run apps/server/test/backfill.test.ts --reporter=verbose";
     stub({

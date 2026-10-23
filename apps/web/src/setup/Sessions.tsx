@@ -1,4 +1,5 @@
 import {
+  type AttentionItem,
   type ConfigView,
   CREW_EFFORTS,
   type Crew,
@@ -14,8 +15,10 @@ import {
 } from "@mc/core";
 import { Fragment, useEffect, useId, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
+import { useTz } from "../clock.ts";
 import { modelLine, seatAreaText } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
+import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -319,6 +322,14 @@ function CrewSession({
   error: string | null;
   save: SaveSeats;
 }) {
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const tz = useTz();
+  const strays = (attention ?? []).flatMap((item) => {
+    if (item.kind !== "stray") return [];
+    const marker = ` changed in s/${session.id} `;
+    const end = item.text.indexOf(marker);
+    return end < 0 ? [] : [{ ...item, path: item.text.slice(0, end) }];
+  });
   const [removing, setRemoving] = useState<string | null>(null);
   const repo = config.repos.find((r) => r.id === session.repoId);
   const roles = rolesOf(config);
@@ -383,6 +394,7 @@ function CrewSession({
         {folders && folders.folders.length > 0 && (
           <ul className="tiles wrap" aria-label={`Folders of s/${session.id}`}>
             {folders.folders.map((f) => {
+              const stray = strays.filter((s) => s.path.startsWith(`${f.name}/`));
               const inner = (
                 <>
                   <span className="tile-vis wrap" aria-hidden="true">
@@ -402,13 +414,19 @@ function CrewSession({
                     )}
                     <span className="s">{`${f.name}/`}</span>
                   </span>
+                  {stray.length > 0 && <span className="xs crit-t">Stray change</span>}
+                  {stray.map((s) => (
+                    <span className="xs warn-t" key={s.key}>
+                      {s.path} · {tz ? hhmm(s.at, tz) : DASH}
+                    </span>
+                  ))}
                   <span className="sr-only">
                     {`${f.name}/: ${f.owners.length > 0 ? f.owners.join(", ") : FOLDER_FREE}`}
                   </span>
                 </>
               );
               return (
-                <li key={f.name} className="tile">
+                <li key={f.name} className={`tile${stray.length > 0 ? " stray" : ""}`}>
                   {pickable ? (
                     <button
                       type="button"

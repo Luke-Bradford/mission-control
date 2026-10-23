@@ -146,6 +146,7 @@ export type QueueRow = CrewRow & { queue?: CardQueueItem[] };
 export interface CardSeat {
   id: string;
   index: number;
+  hudState?: CrewRow["hudState"];
 }
 
 export const NOT_QUEUED = "Unassigned · FLIGHT will offer it to an agent";
@@ -189,7 +190,7 @@ export function cardReviewer(
     if (!rv) return false;
     return (pr && r.repoId === pr.repoId && rv.prNumber === pr.number) || rv.ref === ref;
   });
-  return row ? { id: row.id, index: row.index } : null;
+  return row ? { id: row.id, index: row.index, hudState: row.hudState } : null;
 }
 
 const CHECK_WORST: Record<PrCheck["state"], number> = { passing: 0, pending: 1, failing: 2 };
