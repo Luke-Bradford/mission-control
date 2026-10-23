@@ -898,7 +898,7 @@ describe("filters", () => {
 describe("lanes", () => {
   it("omits All mine without a GitHub login even when the hub operator is configured", async () => {
     localStorage.setItem("mc-lane", "@mine");
-    stub({ shopApp: [todo(1)] });
+    stub({ config: { ...CONFIG, githubLogin: null } as ConfigView, shopApp: [todo(1)] });
     await open();
     await screen.findByText("Ticket 1");
     expect(screen.queryByRole("button", { name: "All mine" })).toBeNull();
