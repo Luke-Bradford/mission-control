@@ -27,6 +27,7 @@ import {
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
   guardDenyOutput,
+  HOOK_RETRY_ENV,
   NEW_LOOP,
   NOT_ASIDE,
   notOnBoardText,
@@ -317,14 +318,19 @@ function make(
   return { sup, fetchTicket, log, tokens, lock, cfg };
 }
 
-/** What the fake CLI received: its start line, then every stdin line, parsed. */
-const recorded = () =>
-  existsSync(recordFile)
-    ? readFileSync(recordFile, "utf8")
-        .split("\n")
-        .filter((l) => l !== "")
-        .map((l) => JSON.parse(l))
-    : [];
+/**
+ * What the fake CLI received: its start line, then every stdin line, parsed. Only complete
+ * lines count: the fake may be mid-write, so a tail with no newline is not a record yet.
+ */
+const recorded = () => {
+  if (!existsSync(recordFile)) return [];
+  const text = readFileSync(recordFile, "utf8");
+  return text
+    .slice(0, text.lastIndexOf("\n") + 1)
+    .split("\n")
+    .filter((l) => l !== "")
+    .map((l) => JSON.parse(l));
+};
 const userLines = () =>
   recorded()
     .filter((l) => l.type === "user")
@@ -625,6 +631,7 @@ describe("two hubs, one card", () => {
     store,
     supervisor: made.sup,
     login: "me",
+    rules: async () => START_RULES,
     readCard: async (_repoId, issue) =>
       store.board("mc").find((c) => c.issueNumber === issue) ?? null,
     enabled: true,
@@ -759,6 +766,8 @@ describe("startRun", () => {
         bodyLength: TICKET.body.length,
         branch: BRANCH,
         area: ["apps/**"],
+        commands: [],
+        fullSuite: [],
       }),
     );
     expect(userLines()[0]).toMatch(
@@ -1130,6 +1139,44 @@ describe("startRun", () => {
     expect(denied).toContain(
       `Edit(/${realpathSync(join(root, "mc-crew", "guido-1-42"))}/pyproject.toml)`,
     );
+  });
+
+  it("a writer's brief names its repo's own commands and whole suite", async () => {
+    const { sup } = make({
+      repo: {
+        commands: { writer: ["uv run pytest", "uv run ruff check"], review: ["uv run pytest"] },
+        fullSuite: ["uv run pytest"],
+      },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain(
+      "Commands you may run here: `uv run pytest`, `uv run ruff check`. A whole suite (`uv run pytest`) takes the test lock",
+    );
+    expect(brief).not.toContain("pnpm");
+  });
+
+  it("a planner's brief names the repo's review commands, not the writer's", async () => {
+    // roles/FAO.md is the controller's file; this test brings its own role brief
+    const rolesDir = join(dir, "roles");
+    mkdirSync(rolesDir);
+    writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
+    const { sup } = make({
+      rolesDir,
+      repo: {
+        commands: { writer: ["uv run ruff check"], review: ["uv run pytest"] },
+        fullSuite: [],
+      },
+    });
+    sup.start();
+    await sup.startRun("fao-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("Commands you may run here: `uv run pytest`.");
+    expect(brief).not.toContain("ruff");
+    expect(brief).not.toContain("test lock");
   });
 
   it("a planner run has no branch", async () => {
@@ -1732,12 +1779,15 @@ describe("folding", () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(store.run(runId)?.tokens).not.toBeNull());
-    const run = store.run(runId);
-    expect(run?.model).toBe("claude-haiku-5-5");
-    expect(run?.costUsd).toBeGreaterThan(0);
-    expect(run?.summary).toMatch(/^echo: You are GUIDO-1, the backend developer/);
-    expect(store.digest(runId)).not.toBeNull();
+    // tokens can be stored before the result line brings the cost: wait for every field
+    await until(() => {
+      const run = store.run(runId);
+      expect(run?.tokens).not.toBeNull();
+      expect(run?.model).toBe("claude-haiku-5-5");
+      expect(run?.costUsd).toBeGreaterThan(0);
+      expect(run?.summary).toMatch(/^echo: You are GUIDO-1, the backend developer/);
+      expect(store.digest(runId)).not.toBeNull();
+    });
   });
 
   it("logs a fold that fails to write, and the seat carries on", async () => {
@@ -1907,7 +1957,21 @@ describe("startWatch", () => {
     writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
     return make({ rolesDir, extraSeat: FLIGHT });
   };
-  const BRIEF = watchBrief({ call: "FLIGHT-1", repo: "o/mc" });
+  const BRIEF = watchBrief({
+    call: "FLIGHT-1",
+    repo: "o/mc",
+    seats: [{ call: "GUIDO-1", area: ["apps/**"] }],
+  });
+
+  it("sends a brief that lists the session's developer seats and their areas", async () => {
+    const { sup } = flightMake();
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain(
+      "Developer seats and the files each may change: GUIDO-1: apps/**. start_seat refuses",
+    );
+  });
 
   it("is refused while the CLI is held, and starts no run", async () => {
     const hold = new CliHold();
@@ -1950,6 +2014,8 @@ describe("startWatch", () => {
       "mcp__mc__flight_state",
       "mcp__mc__promote",
       "mcp__mc__end_run",
+      "mcp__mc__create_ticket",
+      "mcp__mc__comment_ticket",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
@@ -2525,6 +2591,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       encoding: "utf8",
       timeout: 20_000,
       killSignal: "SIGKILL",
+      env: { ...process.env, [HOOK_RETRY_ENV]: "0" },
     });
     expect(r.status).toBe(2);
     expect(r.stdout).toBe(guardDenyOutput(GUARD_UNREACHABLE_TEXT));
@@ -3356,6 +3423,21 @@ describe("startReview", () => {
     return { ...m, ...r, runId };
   }
 
+  it("a review brief names the repo's review commands", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({
+      scratchRetro: true,
+      repo: { commands: { writer: ["uv run ruff check"], review: ["uv run pytest"] } },
+    });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("`uv run pytest` followed by a test file path");
+    expect(brief).not.toContain("pnpm");
+    expect(brief).not.toContain("ruff");
+  });
+
   it("startReview launches a scratch run", async () => {
     const r = reviewOfPush();
     const { sup } = make({ scratchRetro: true });
@@ -3398,6 +3480,7 @@ describe("startReview", () => {
         diffCut: false,
         since: false,
         touches: [],
+        commands: [],
       }),
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;

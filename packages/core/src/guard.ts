@@ -80,6 +80,15 @@ export const LOCK_WAIT_MS = Math.min(HOOK_TIMEOUT_SEEN_MS - 60_000, 10 * 60_000)
 export const GUARD_HOOK_TIMEOUT_S = LOCK_WAIT_MS / 1000 + 30;
 /** The hook's own deadline, inside the CLI's timeout (which would run the tool): then it denies. */
 export const HOOK_DEADLINE_MS = GUARD_HOOK_TIMEOUT_S * 1000 - 10_000;
+/**
+ * How long the hook keeps retrying a refused or reset connection (a hub restarting), from its first
+ * try, before it denies as unreachable. Kept well inside `HOOK_DEADLINE_MS`.
+ */
+export const HOOK_RETRY_MS = 60_000;
+/** An env var that shortens the retry window (ms; tests that run the hook against no hub). */
+export const HOOK_RETRY_ENV = "MC_HOOK_RETRY_MS";
+/** The pause between the hook's tries while the hub is down. */
+export const HOOK_RETRY_EVERY_MS = 1000;
 /** The route the guard hook asks, on the hub's loopback port. */
 export const GUARD_CHECK_PATH = "/api/guard/check";
 /** `POST /api/guard/check`'s body limit; the hook checks its body against it before posting. */
@@ -1759,10 +1768,16 @@ export function closesIssue(md: string, { repo, issue }: { repo: string; issue: 
  * closing keyword for anything but that issue, and a github.com URL with a `%` or a port. A match
  * from decoded text is named with its written form too. `repo` is the run's own `owner/name`.
  * Named references outside `NAMED_REFS` are the caller's to refuse first (`firstNamedRef`).
+ * With `allowOwnRepoRefs`, a bare `#n` or `GH-n` (an issue of `repo` itself) passes too; mentions,
+ * `owner/repo#n`, links, and closing keywords for another issue are still found.
  */
 export function firstPrNotifier(
   text: string,
-  { repo, issue }: { repo: string; issue: number | null },
+  {
+    repo,
+    issue,
+    allowOwnRepoRefs = false,
+  }: { repo: string; issue: number | null; allowOwnRepoRefs?: boolean },
 ): string | null {
   const d = decode(text);
   const t = d.text;
@@ -1771,8 +1786,8 @@ export function firstPrNotifier(
   const otherItem = (m: RegExpExecArray) => `${m[1]}/${m[2]}`.toLowerCase() !== own || notOwn(m[3]);
   const hit = earliest([
     ...allMatches(MENTION, t),
-    ...allMatches(ISSUE_REF, t, (m) => notOwn(m[1])),
-    ...allMatches(GH_REF, t, (m) => notOwn(m[1])),
+    ...allMatches(ISSUE_REF, t, (m) => !allowOwnRepoRefs && notOwn(m[1])),
+    ...allMatches(GH_REF, t, (m) => !allowOwnRepoRefs && notOwn(m[1])),
     ...allMatches(REPO_REF, t, otherItem),
     ...allMatches(ISSUE_URL, t, otherItem),
     ...allMatches(CLOSING_REF, t, (m) => !closesOwn(m, own, issue)),
