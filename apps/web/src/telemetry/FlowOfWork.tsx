@@ -1,8 +1,9 @@
-import { NO_SIZE, seatCallSign, type Telemetry } from "@mc/core";
+import { NO_SIZE, type Telemetry } from "@mc/core";
 import { dayLabel, dur, narrowDay } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { useSeatName } from "../seatName.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE, type Scope } from "./common.ts";
 
 function Stat({
@@ -31,6 +32,7 @@ const tickets = (n: number): string => `${n} ${n === 1 ? "ticket" : "tickets"}`;
 
 /** Flow of work (catalogue 2.6.3): throughput, cycle time, quality and review, You as CAPCOM. */
 export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+  const nameOf = useSeatName();
   const wait = <p className="pb s muted">{scope.wait}</p>;
   // A size with no tickets has no median, whatever the number says: no bar, and no say in the scale.
   const median = (r: { medianDays: number | null; tickets: number }): number | null =>
@@ -152,7 +154,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
           </div>
           {capcom?.longest && (
             <p className="note xs tnote">
-              Longest wait today: {seatCallSign(capcom.longest.agentId)}'s question,{" "}
+              Longest wait today: {nameOf(capcom.longest.agentId)}'s question,{" "}
               {dur(capcom.longest.ms)}. Agent time spent waiting on you today:{" "}
               {dur(capcom.agentWaitMs)}.
             </p>

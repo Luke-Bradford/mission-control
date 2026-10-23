@@ -9,7 +9,6 @@ import {
   STALL_MS,
   type StreamEvent,
   type StreamKind,
-  seatCallSign,
 } from "@mc/core";
 import { type FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { agentComms, commsKeys, commsLine, MentionText } from "../comms/messages.tsx";
@@ -20,6 +19,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { dur, hhmm, mss } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { useSeatName } from "../seatName.ts";
 import { toast } from "../shell/Toast.tsx";
 import { messageSeat, seatError } from "./seat.ts";
 import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
@@ -155,6 +155,7 @@ function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Rela
  * was written; a waiting run names its queued full suite and the lock holder.
  */
 function LiveCall({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+  const nameOf = useSeatName();
   const lock = useTestLock();
   const running = row.run?.status === "running";
   const waiting = running ? lock?.waiting.find((w) => w.runId === row.run?.id) : undefined;
@@ -165,7 +166,7 @@ function LiveCall({ row, now, tz }: { row: CrewRow; now: number; tz: string | nu
     return (
       <div id="liveCall">
         <div className="livecall">
-          {`⏸ Waiting for the test lock: ${row.repoId} full suite (${waiting.command}) ${mss(now - waiting.since)} behind ${seatCallSign(lock.holder.seatId)}`}
+          {`⏸ Waiting for the test lock: ${row.repoId} full suite (${waiting.command}) ${mss(now - waiting.since)} behind ${nameOf(lock.holder.seatId)}`}
         </div>
       </div>
     );
@@ -283,6 +284,7 @@ export function SeatComposer({
 
 /** The Activity panel (catalogue 2.4.4): the latest run's transcript, as inert text. */
 export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: string | null }) {
+  const nameOf = useSeatName();
   const [filter, setFilter] = useState<Filter>("all");
   const stream = useResource<AgentStream>(RESOURCES.stream(row.id));
   const config = useResource<ConfigView>(RESOURCES.config).data;
@@ -295,10 +297,10 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
     return list.map((c, i) => ({
       kind: "a2a",
       at: c.at,
-      text: commsLine(c, row.id),
+      text: commsLine(c, row.id, nameOf),
       key: keys[i] as string,
     }));
-  }, [activity, row.id, row.run]);
+  }, [activity, row.id, row.run, nameOf]);
   const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
   const runId = stream.data?.runId;
   const guard = useMemo<GuardRow[]>(
