@@ -641,6 +641,27 @@ describe("Threads and conversation", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       ...(activity ? { "/api/activity": activity } : {}),
+      ...Object.fromEntries(
+        ["guido-1", "retro-1"].map((id) => [
+          `/api/comms/${id}`,
+          {
+            messages: (activity ?? [])
+              .filter((m): m is CommsEvent => m.kind === "comms" && (m.who === id || m.to === id))
+              .sort((a, b) => a.at - b.at)
+              .map((m, i) => ({
+                id: String(i),
+                at: m.at,
+                from: m.who,
+                to: m.to,
+                ticket: null,
+                text: m.text,
+                tagged: m.text.includes(TAG),
+                direct: false,
+                seen: true,
+              })),
+          },
+        ]),
+      ),
       ...extra,
     });
   const MESSAGES = [
