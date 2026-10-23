@@ -23,14 +23,10 @@ const TOK_MODES = [
   { value: "hist", label: "History" },
 ] as const;
 
-/**
- * **Decision:** three buckets. The observed loops have no lock or review waits, so the mockup's
- * "waiting (lock, reviews)" and "blocked, parked or stalled" become one: waiting on you (amber,
- * which always means you).
- */
 const UTIL = [
   { key: "working", label: "working", color: "var(--ok)" },
-  { key: "waiting", label: "waiting on you", color: "var(--warn-mark)" },
+  { key: "waiting", label: "waiting (lock, reviews)", color: "var(--accent)" },
+  { key: "blocked", label: "blocked, parked or stalled", color: "var(--warn-mark)" },
   { key: "idle", label: "idle", color: "var(--line-2)" },
 ] as const;
 
@@ -107,13 +103,19 @@ function Utilisation({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
               <AgentTag id={r.agentId} index={indexOf(scope, r.agentId)} sm />
             </span>
             <span className="ubar">
-              {UTIL.filter((u) => r[u.key] > 0).map((u) => (
+              {UTIL.filter((u) => (r[u.key] ?? 0) > 0).map((u) => (
                 <i
                   key={u.key}
-                  title={`${u.label} ${Math.round(r[u.key])}%`}
+                  title={`${u.label} ${Math.round(r[u.key] ?? 0)}%`}
                   style={{ width: `${r[u.key]}%`, background: u.color }}
                 />
               ))}
+              {(r.unknown ?? 0) > 0 && (
+                <i
+                  title={`unknown ${Math.round(r.unknown ?? 0)}%`}
+                  style={{ width: `${r.unknown}%`, background: "var(--muted)" }}
+                />
+              )}
             </span>
             <span className="num xs">{Math.round(r.working)}%</span>
           </div>
@@ -181,7 +183,6 @@ function TokensPerTurn({
 function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const ms = (v: number | null): string => (v === null ? DASH : dur(v));
   return (
-    // Decision: no Slowest column; the digest keeps durations, not which call took them.
     <Panel id="tLat" title="Tool latency" sub="p50 and p95 per tool">
       {!t ? (
         <p className="pb s muted">{scope.wait}</p>
@@ -197,6 +198,7 @@ function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
                 <th className="r">p50</th>
                 <th className="r">p95</th>
                 <th className="r">Failed</th>
+                <th>Slowest</th>
               </tr>
             </thead>
             <tbody>
@@ -207,6 +209,11 @@ function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
                   <td className="r num">{ms(r.p50Ms)}</td>
                   <td className="r num">{ms(r.p95Ms)}</td>
                   <td className={`r num ${r.failed > 0 ? "warn-t" : "muted"}`}>{r.failed}</td>
+                  <td className="muted wrap">
+                    {r.slowest
+                      ? `${r.slowest.detail ?? DASH} (${dur(r.slowest.durationMs)}, ${r.slowest.agentId})`
+                      : DASH}
+                  </td>
                 </tr>
               ))}
             </tbody>
