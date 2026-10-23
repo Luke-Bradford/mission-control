@@ -9,6 +9,7 @@ import {
   type HudState,
   MACHINE_COLLECTOR,
   type MachineSample,
+  type Run,
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +19,7 @@ import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
 import type { RateLimits } from "../src/collectors/rate-limit.ts";
 import type { CcConfig } from "../src/config.ts";
 import * as hud from "../src/hud.ts";
+import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   BACKFILL_BUDGET_MS,
   BACKFILL_FIRST_DELAY_MS,
@@ -35,6 +37,8 @@ import {
   MAINTENANCE_INTERVAL_MS,
   PR_SWEEP_FIRST_DELAY_MS,
   PR_SWEEP_MS,
+  refreshOnSeatFree,
+  waitedPrNumbers,
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
@@ -126,6 +130,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
     makeRest: vi.fn(() => async () => ({ status: 200, headers: new Headers(), body: [] })),
     notifications: vi.fn(async () => ({ changed: true })),
     github: vi.fn(async () => ({ boards: true, escalations: true })),
+    githubPrs: vi.fn(async () => ({ boards: false, escalations: false })),
     prSweep: vi.fn(async () => ({ boards: true, escalations: false })),
     flow: vi.fn(async () => undefined),
     backfill: vi.fn(() => ({ folded: 0, left: 0, failed: 0 })),
@@ -1698,6 +1703,124 @@ describe("scheduler", () => {
       await s.tick("github");
       expect(row("github:shop-app")).toMatchObject({ ok: false, error: "board: boom" });
     });
+  });
+});
+
+describe("board and PR cadence", () => {
+  const MIN = 60_000;
+  const githubPrs = () =>
+    vi.fn<Collectors["githubPrs"]>(async () => ({ boards: false, escalations: false }));
+
+  function cadence(over: { waited?: (repoId: string) => number[] } = {}) {
+    vi.useFakeTimers({ now: NOW });
+    config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };
+    const prs = githubPrs();
+    const collectors = stubs({ githubPrs: prs });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: Date.now,
+      collectors,
+      waitedPrs: over.waited ?? (() => []),
+    });
+    return { s, prs, github: collectors.github as ReturnType<typeof vi.fn> };
+  }
+
+  it("with board_minutes 15 reads the boards once at start, then not for 15 min", async () => {
+    const { s, prs, github } = cadence();
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(github).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(15 * MIN - 1000);
+    expect(github).toHaveBeenCalledTimes(1);
+    expect(prs).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(github).toHaveBeenCalledTimes(2);
+    await s.stop();
+  });
+
+  it("a trigger reads the boards within 5 s; triggers within 30 s make one read", async () => {
+    const { s, github } = cadence();
+    s.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(github).toHaveBeenCalledTimes(1);
+    s.refreshBoards();
+    await vi.advanceTimersByTimeAsync(1000);
+    s.refreshBoards();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(github).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(5000);
+    s.refreshBoards(); // 10 s after the first trigger, inside the 30 s window
+    await vi.advanceTimersByTimeAsync(19_000);
+    expect(github).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(github).toHaveBeenCalledTimes(3);
+    await s.stop();
+  });
+
+  it("waited PRs are read every github_seconds, others only with the board", async () => {
+    const { s, prs, github } = cadence({ waited: (r) => (r === "shop-app" ? [7] : []) });
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(github).toHaveBeenCalledTimes(1);
+    expect(prs).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(prs).toHaveBeenCalledTimes(1);
+    expect(prs.mock.calls[0]?.[3]).toEqual([7]);
+    expect(github).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(13 * MIN);
+    expect(prs).toHaveBeenCalledTimes(14);
+    expect(github).toHaveBeenCalledTimes(1);
+    await s.stop();
+  });
+
+  it("reads no PR on the off ticks when the engine waits on none", async () => {
+    const { s, prs } = cadence();
+    s.start();
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(prs).not.toHaveBeenCalled();
+    await s.stop();
+  });
+});
+
+describe("refreshOnSeatFree", () => {
+  it("asks for a read on run-ended only; the returned function unsubscribes", () => {
+    let listener: (e: SupervisorEvent) => void = () => undefined;
+    const off = vi.fn();
+    const on = (fn: (e: SupervisorEvent) => void) => {
+      listener = fn;
+      return off;
+    };
+    const refresh = vi.fn();
+    const unsubscribe = refreshOnSeatFree(on, refresh);
+    listener({ kind: "run-ended", seatId: "s", runId: "r", endedBy: "exit" });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    listener({ kind: "idle", seatId: "s" } as SupervisorEvent);
+    listener({ kind: "evidence", seatId: "s", runId: "r" } as SupervisorEvent);
+    listener({ kind: "findings", seatId: "s", runId: "r" } as SupervisorEvent);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    expect(off).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("waitedPrNumbers", () => {
+  it("picks ci, review and pre-merge runs of the repo", () => {
+    const run = (repoId: string, loop: Record<string, unknown>) =>
+      ({ repoId, loop: { prNumber: null, ...loop } }) as unknown as Run;
+    const runs = [
+      run("shop-app", { phase: "ci", prNumber: 3 }),
+      run("shop-app", { phase: "review", prNumber: 5 }),
+      run("shop-app", { phase: "done", prNumber: 9, merging: { done: ["ready"] } }),
+      run("shop-app", { phase: "done", prNumber: 11, merging: { done: ["ready", "merge"] } }),
+      run("shop-app", { phase: "parked", prNumber: 12 }),
+      run("shop-app", { phase: "ci", prNumber: null }),
+      run("other", { phase: "ci", prNumber: 4 }),
+      run("shop-app", { phase: "ci", prNumber: 3 }),
+      { repoId: "shop-app", loop: null } as unknown as Run,
+    ];
+    expect(waitedPrNumbers(runs, "shop-app")).toEqual([3, 5, 9]);
   });
 });
 

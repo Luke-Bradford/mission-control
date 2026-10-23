@@ -165,6 +165,12 @@ describe("the route table", () => {
     }
   });
 
+  it("POST /api/github/refresh has a Reader comment that names a real reader", () => {
+    const text = readerComments().get("POST /api/github/refresh");
+    expect(text).toBeDefined();
+    expect(readerProblem(text as string)).toBeNull();
+  });
+
   it("matches by method as well as path", () => {
     const web = ["GET /api/crew", "POST /api/attention/ack"];
     expect(orphans(["GET /api/crew"], web, new Map())).toEqual([]);

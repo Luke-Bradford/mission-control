@@ -14,6 +14,8 @@ import {
   type MachineSample,
   NOTABLE_STATES,
   prSweepCollector,
+  type RepoId,
+  type Run,
   seatTurnText,
   stateChangeText,
   type TestLockState,
@@ -40,6 +42,7 @@ import { collectorName, DIGEST_RETENTION_MS, FOLD_WINDOW_MS } from "./collectors
 import { collectFlow } from "./collectors/flow.ts";
 import {
   collectGithub,
+  collectWaitedPrs,
   fetchTicket,
   githubToken,
   MISSING_SCOPE_PREFIX,
@@ -69,7 +72,9 @@ import {
   latestTranscriptLimits,
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
+import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { attentionItems, crew, NO_LOCK } from "./hud.ts";
+import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
@@ -134,6 +139,35 @@ export const BACKFILL_INTERVAL_MS = 30_000;
 /** start() delays the first backfill, so a (re)started server serves its first ticks unhindered. */
 export const BACKFILL_FIRST_DELAY_MS = 60_000;
 export const BACKFILL_BUDGET_MS = 1500;
+/** A trigger's board read waits this long, so a burst of triggers is one read. */
+export const BOARD_TRIGGER_DELAY_MS = 2000;
+/** Triggered board reads run at most once per this window (counted from the last board read). */
+export const BOARD_REFRESH_DEBOUNCE_MS = 30_000;
+
+/**
+ * The PRs the engine waits on in `repoId`: a looped run in CI or review, or one whose merge has not
+ * happened yet. Deduplicated, ascending.
+ */
+export function waitedPrNumbers(runs: Run[], repoId: RepoId): number[] {
+  const out = new Set<number>();
+  for (const r of runs) {
+    const loop = r.loop;
+    if (r.repoId !== repoId || !loop || loop.prNumber === null) continue;
+    const waiting =
+      loop.phase === "ci" ||
+      loop.phase === "review" ||
+      (loop.merging != null && !loop.merging.done.includes("merge"));
+    if (waiting) out.add(loop.prNumber);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** Asks `refresh` for a board read each time a seat's run ends (the seat is free for new work). */
+export function refreshOnSeatFree(on: Supervisor["on"], refresh: () => void): () => void {
+  return on((e) => {
+    if (e.kind === "run-ended") refresh();
+  });
+}
 
 type Gql = ReturnType<typeof makeGql>;
 type OnError = (source: string, err: unknown) => void;
@@ -149,6 +183,8 @@ export interface Collectors {
   /** `rates` is where every answer's `rateLimit` is recorded. */
   makeGql: (token: string, rates: RateLimits) => Gql;
   github: typeof collectGithub;
+  /** Re-reads only the PRs the engine waits on, between board reads. */
+  githubPrs: typeof collectWaitedPrs;
   /** The REST client for the operator's notifications (read-only, api.github.com only). */
   makeRest: (token: string) => Rest;
   notifications: typeof collectNotifications;
@@ -186,6 +222,8 @@ export interface SchedulerDeps {
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
   cliHold?: CliHold;
+  /** The PRs the engine waits on in a repo (CI running, a merge queued). Default: from the loop runs. */
+  waitedPrs?: (repoId: RepoId) => number[];
 }
 
 /** What the scheduler asks of the first loop's engine. */
@@ -206,6 +244,11 @@ export interface Scheduler {
   stop(): Promise<void>;
   /** Runs one job unless its previous run is still in flight. Never throws. */
   tick(job: Job): Promise<"ran" | "skipped">;
+  /**
+   * Asks for a full GitHub read (boards, escalations, PRs) within BOARD_TRIGGER_DELAY_MS, at most
+   * once per BOARD_REFRESH_DEBOUNCE_MS.
+   */
+  refreshBoards(): void;
   /** The live Claude Code sessions from the latest sessions read ([] before one / after a failure). */
   sessions(): LiveSession[];
   /** The latest machine sample; null before the first one. */
@@ -223,6 +266,7 @@ export function realCollectors(config: CcConfig): Collectors {
     githubToken,
     makeGql: (token, rates) => makeGql(token, fetch, rates),
     github: collectGithub,
+    githubPrs: collectWaitedPrs,
     makeRest: (token) => makeRest(token),
     notifications: collectNotifications,
     prSweep: sweepPullRequests,
@@ -275,6 +319,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let githubNotBefore = 0;
   /** The reset of the reading that caused the back-off; the back-off ends then, whoever reads next. */
   let githubResetAt = 0;
+  /** When the last board read began; boards are read on the first poll. */
+  let lastBoardAt = Number.NEGATIVE_INFINITY;
+  /** A trigger asked for a board read that has not run yet. */
+  let boardWanted = false;
+  let triggerTimer: NodeJS.Timeout | null = null;
+  /** Absent (a hand-built config): 0, so every GitHub poll reads the boards. */
+  const boardMs = (config.poll.boardMinutes ?? 0) * 60_000;
+  const waitedPrs =
+    deps.waitedPrs ??
+    ((repoId: RepoId) => waitedPrNumbers(store.loopRuns(now() - ENDED_RECONCILE_MS), repoId));
   let latestMachine: MachineSample | null = null;
   let machineCpus: CpuInfo[] | null = null;
   let machineMinute = -1;
@@ -522,7 +576,20 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       const changed = { boards: false, escalations: false };
       const startedAt = now();
       const spentBefore = rates.startPoll();
-      for (const repo of config.repos) {
+      // Half an interval of slack, as in githubDue: a tick just short of the mark is the mark.
+      const boardDue = boardWanted || startedAt - lastBoardAt >= boardMs - intervals.github / 2;
+      if (!boardDue && !(client instanceof Error)) {
+        // Between board reads only the PRs the engine waits on are read (CI, a merge).
+        for (const repo of config.repos) {
+          const numbers = waitedPrs(repo.id);
+          if (numbers.length === 0) continue;
+          await guarded(githubCollector(repo.id), async () => {
+            const r = await c.githubPrs(repo, store, client, numbers, now);
+            changed.boards ||= r.boards;
+          });
+        }
+      }
+      for (const repo of boardDue ? config.repos : []) {
         const collector = githubCollector(repo.id);
         if (client instanceof Error) recordStatus(collector, false, client.message);
         else {
@@ -544,8 +611,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           scopeLogged.add(repo.id);
         }
       }
+      if (!(client instanceof Error) && boardDue) {
+        lastBoardAt = startedAt;
+        boardWanted = false;
+      }
       if (!(client instanceof Error)) {
-        rates.endPoll(spentBefore);
+        // A waited-PR tick leaves `pollCost` at the last full poll's cost.
+        if (boardDue) rates.endPoll(spentBefore);
         const cause = rates.pollCause();
         githubBackoff = nextBackoff(githubBackoff, cause, now());
         githubNotBefore = startedAt + githubBackoff * intervals.github;
@@ -775,10 +847,25 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     backfill: BACKFILL_FIRST_DELAY_MS,
   };
 
+  const refreshBoards = () => {
+    boardWanted = true;
+    if (triggerTimer !== null) return;
+    const wait = Math.max(BOARD_TRIGGER_DELAY_MS, lastBoardAt + BOARD_REFRESH_DEBOUNCE_MS - now());
+    triggerTimer = setTimeout(() => {
+      triggerTimer = null;
+      // direct ticks skip githubDue; a poll still in flight is asked again
+      void tick("github").then((r) => {
+        if (r === "skipped") refreshBoards();
+      });
+    }, wait);
+    triggerTimer.unref();
+  };
+
   return {
     setEngine(e) {
       engine = e;
     },
+    refreshBoards,
     start() {
       if (timers.length > 0) return;
       unsubscribeCrew = bus.subscribe((t) => {
@@ -825,6 +912,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       unsubscribeCrew = null;
       if (cliRetry !== null) clearTimeout(cliRetry);
       cliRetry = null;
+      if (triggerTimer !== null) clearTimeout(triggerTimer);
+      triggerTimer = null;
       if (crewTimer !== null) clearTimeout(crewTimer);
       crewTimer = null;
       await Promise.all([...inFlight.values()]);

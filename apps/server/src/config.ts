@@ -143,7 +143,12 @@ export interface CcConfig {
     autonomy: RepoAutonomy;
   }[];
   loops: AdoptedLoop[];
-  poll: { usageMinutes: number; githubSeconds: number };
+  poll: {
+    usageMinutes: number;
+    githubSeconds: number;
+    /** Minutes between periodic board reads. Loaded: always set (default 15). Absent (a hand-built config): the board is read on every GitHub poll. */
+    boardMinutes?: number;
+  };
   /** Absent: no crew. */
   crew?: CrewConfig;
   /**
@@ -395,6 +400,7 @@ const fileSchema = z
     poll: z.strictObject({
       usage_minutes: z.number().min(5).max(240),
       github_seconds: z.number().min(30).max(3600),
+      board_minutes: z.number().min(5).max(60).default(15),
     }),
     updates: z
       .strictObject({
@@ -469,7 +475,11 @@ const fileSchema = z
         launchdLabel: l.launchd_label,
         ...(l.logs_dir === undefined ? {} : { logsDir: expandHome(l.logs_dir) }),
       })),
-      poll: { usageMinutes: f.poll.usage_minutes, githubSeconds: f.poll.github_seconds },
+      poll: {
+        usageMinutes: f.poll.usage_minutes,
+        githubSeconds: f.poll.github_seconds,
+        boardMinutes: f.poll.board_minutes,
+      },
       updates: { hub: f.updates.hub, cli: f.updates.cli },
       ...(f.crew === undefined
         ? {}
