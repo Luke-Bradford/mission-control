@@ -570,6 +570,17 @@ export interface MachineSample {
   agents: { count: number; rssBytes: number; cpuPct: number } | null;
 }
 
+/** `/api/machine`: the latest sample, with the crew's seat capacity for the Machine panel's agents row. */
+export interface MachineView {
+  latest: MachineSample | null;
+  /** `crew.max_seats`. */
+  maxSeats: number;
+  /** Configured crew seats, over all sessions. */
+  seats: number;
+  /** The most seats in any one session. */
+  perSessionMax: number;
+}
+
 /** One `/api/repos` row: a configured repo, without its status map. */
 export interface RepoView {
   id: RepoId;
