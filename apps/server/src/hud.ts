@@ -11,20 +11,26 @@ import {
   type AttentionOwner,
   agentState,
   type BoardItem,
+  CI_TRIES,
   type Crew,
+  type CrewAsideRun,
+  type CrewLoop,
   type CrewRow,
   crewHudState,
+  currentReview,
   type DriverStop,
   driverStopKey,
   type Escalation,
   escalationKind,
   FLIGHT_ANSWER_WAIT_MS,
+  fixesSent,
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
   isFlakeNoteKey,
   isHardRulesFlagKey,
   LOCK_WAITING_TEXT,
+  type LoopWait,
   laneOwner,
   lockBlockedText,
   loopText,
@@ -36,6 +42,7 @@ import {
   pathInArea,
   prYouAction,
   questionText,
+  REVIEW_ROUNDS,
   type Run,
   type RunDigest,
   type SeatSessionRow,
@@ -51,6 +58,8 @@ import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
+import { asideWakeDue } from "./engine/aside.ts";
+import { reviewerOf } from "./engine/engine.ts";
 import { flightLive, flightOwnSeatIds } from "./flight/state.ts";
 import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
@@ -225,6 +234,46 @@ function reviewingOf(store: Store, latest: Run | null): CrewRow["reviewing"] {
   return rv === null ? null : { prNumber: rv.prNumber, sha: rv.sha, ref: latest.ticket };
 }
 
+/** Open note keys that say the operator is next on a run in review. */
+const OPERATOR_NOTE_PREFIXES = ["ready:", "review:", "headmoved:"];
+/** A review in one of these states is still to come from the review seat. */
+const REVIEW_PENDING: readonly string[] = ["queued", "starting", "running", "failed"];
+
+/** What a looped run waits on; the first matching rule wins (null: its seat is on it, or it is done). */
+export function runWait(
+  config: CcConfig,
+  store: Store,
+  run: Run,
+  loop: NonNullable<Run["loop"]>,
+  lock: TestLockState,
+): LoopWait | null {
+  if (run.endedAt !== null || loop.phase === "done") return null;
+  if (lock.waiting.some((w) => w.runId === run.id)) return "lock";
+  if (loop.phase === "parked") return "operator";
+  if (asideWakeDue(store, run)) return "seat";
+  if (loop.phase === "ci") return "ci";
+  if (loop.phase !== "review") return null;
+  const keys = store.openNoteKeys(run.id);
+  if (keys.some((k) => OPERATOR_NOTE_PREFIXES.some((p) => k.startsWith(p)))) return "operator";
+  if (keys.some((k) => k.startsWith("behind:"))) return "main";
+  const push = store.runPush(run.id);
+  if (reviewerOf(config, run.agentId) !== null && push !== null) {
+    const cur = currentReview(store.reviewsOfRun(run.id), loop.epoch, push.sha);
+    if (cur === null || REVIEW_PENDING.includes(cur.state)) return "retro";
+  }
+  return null;
+}
+
+/** The current step's try and its limit, else null. */
+function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewLoop["tries"] {
+  if (loop.phase === "ci") return { n: loop.ciFails + 1, max: CI_TRIES };
+  if (loop.phase === "review") {
+    const sent = fixesSent(store.claimedKeys(run.id), run.id, loop.epoch);
+    return { n: Math.min(REVIEW_ROUNDS, 1 + sent), max: REVIEW_ROUNDS };
+  }
+  return null;
+}
+
 export function crew(
   config: CcConfig,
   store: Store,
@@ -256,6 +305,18 @@ export function crew(
   };
 
   const prCache: PrCache = new Map();
+  const crewLoop = (run: Run, ticket: string | null): CrewLoop | null =>
+    run.loop
+      ? {
+          phase: run.loop.phase,
+          text: loopText(ticket, run.loop),
+          prNumber: run.loop.prNumber,
+          parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
+          tries: runTries(store, run, run.loop),
+          wait: runWait(config, store, run, run.loop, lock),
+        }
+      : null;
+  const asideAll = store.asideRuns();
   const rows = loopViews(config, store, now, lock).map(
     ({ agent, runs, latest, view, seatRow }, index): CrewRow => {
       const digests: Map<string, RunDigest> = store.digests(runs.map((r) => r.id));
@@ -325,16 +386,26 @@ export function crew(
         sourceError: view.sourceError,
         ticket,
         ticketTitle: latest ? runTicketTitle(latest, ticket, ticketTitle(ticket)) : null,
-        loop:
-          agent.kind === "crew" && latest?.loop
-            ? {
-                phase: latest.loop.phase,
-                text: loopText(ticket, latest.loop),
-                prNumber: latest.loop.prNumber,
-                parked:
-                  latest.loop.phase === "parked" ? (latest.loop.parked?.reason ?? null) : null,
-              }
-            : null,
+        loop: agent.kind === "crew" && latest ? crewLoop(latest, ticket) : null,
+        asideRuns:
+          agent.kind === "crew"
+            ? asideAll
+                .filter((r) => r.agentId === agent.id && r.id !== latest?.id)
+                .flatMap((r): CrewAsideRun[] => {
+                  const t = runTicket(r, runPrs(config, store, r, prCache));
+                  const l = crewLoop(r, t);
+                  return l
+                    ? [
+                        {
+                          runId: r.id,
+                          ticket: t,
+                          ticketTitle: runTicketTitle(r, t, ticketTitle(t)),
+                          loop: l,
+                        },
+                      ]
+                    : [];
+                })
+            : [],
         run: latest
           ? {
               id: latest.id,

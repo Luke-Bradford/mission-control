@@ -207,6 +207,7 @@ describe("crew", () => {
       ticket: null,
       ticketTitle: null,
       loop: null,
+      asideRuns: [],
       run: null,
       prs: [],
       summary: null,
@@ -1032,6 +1033,8 @@ describe("crew seats in the rows", () => {
         text: "CI on abcdef1",
         prNumber: null,
         parked: null,
+        tries: { n: 1, max: 3 },
+        wait: "ci",
       });
       store.setRunLoop("c1", loopOf({ phase: "review", prNumber: 208 }));
       expect(rowOf(c, "GUIDO-1")?.loop).toEqual({
@@ -1039,6 +1042,8 @@ describe("crew seats in the rows", () => {
         text: "In review · PR #208",
         prNumber: 208,
         parked: null,
+        tries: { n: 1, max: 3 },
+        wait: null,
       });
       store.setRunLoop(
         "c1",
@@ -1052,6 +1057,8 @@ describe("crew seats in the rows", () => {
         text: "Blocked: CI failed 3 times",
         prNumber: null,
         parked: "CI failed 3 times",
+        tries: null,
+        wait: "operator",
       });
       store.setRunLoop("c1", loopOf({ phase: "working" }));
       expect(rowOf(c, "GUIDO-1")?.loop?.text).toBe("Working on mission-control#197");
@@ -1066,6 +1073,8 @@ describe("crew seats in the rows", () => {
         text: "Done · PR #9",
         prNumber: 9,
         parked: null,
+        tries: null,
+        wait: null,
       });
     });
     it("a parked-ended loop on an ended run still carries its reason", () => {
@@ -1091,6 +1100,144 @@ describe("crew seats in the rows", () => {
       store.upsertRun(run({ id: "l1", agentId: "shop-app-ta", repoId: "shop-app" }));
       store.setRunLoop("l1", loopOf({ phase: "review", prNumber: 3 }));
       expect(rowOf(withCrew(), "shop-app-ta")?.loop).toBeNull();
+      expect(rowOf(withCrew(), "shop-app-ta")?.asideRuns).toEqual([]);
+    });
+
+    describe("set-aside runs", () => {
+      const aside = { worktree: "/wt", wake: false };
+      it("lists the seat's other set-aside runs; the held run is the row's", () => {
+        const c = withCrew();
+        store.upsertRun(
+          crewRun({ id: "a", startedAt: NOW - 3 * MIN, ticket: "mission-control#5" }),
+        );
+        store.setRunLoop("a", loopOf({ phase: "review", prNumber: 12, aside }));
+        store.upsertRun(crewRun({ id: "b", startedAt: NOW - MIN }));
+        store.setRunLoop("b", loopOf({ phase: "working" }));
+        store.setSeatSession(seat({ runId: "b" }));
+        const row = rowOf(c, "GUIDO-1");
+        expect(row?.run?.id).toBe("b");
+        expect(row?.asideRuns).toHaveLength(1);
+        expect(row?.asideRuns?.[0]).toMatchObject({
+          runId: "a",
+          ticket: "mission-control#5",
+          loop: { phase: "review", prNumber: 12 },
+        });
+      });
+      it("a lone set-aside run the seat does not hold is the row's run, not an aside run", () => {
+        const c = withCrew();
+        store.upsertRun(crewRun({ id: "a" }));
+        store.setRunLoop("a", loopOf({ phase: "review", prNumber: 12, aside }));
+        store.setSeatSession(seat({ runId: null, state: "idle" }));
+        const row = rowOf(c, "GUIDO-1");
+        expect(row?.run?.id).toBe("a");
+        expect(row?.asideRuns).toEqual([]);
+      });
+    });
+
+    describe("wait", () => {
+      const aside = { worktree: "/wt", wake: false };
+      const waitOf = (c: CcConfig, lock?: TestLockState) =>
+        crew(c, store, NOW, lock).rows.find((r) => r.id === "GUIDO-1")?.loop?.wait;
+      const start = (over: Partial<RunLoop>, runOver: Partial<Run> = {}) => {
+        store.upsertRun(crewRun(runOver));
+        store.setSeatSession(seat({}));
+        store.setRunLoop("c1", loopOf(over));
+      };
+      const note = (key: string) =>
+        store.raiseNote({
+          key,
+          kind: "ready",
+          runId: "c1",
+          seatId: "GUIDO-1",
+          repoId: "shop-app",
+          text: "t",
+          at: NOW,
+        });
+      it("lock: the run is in line for the test lock", () => {
+        start({ phase: "working" });
+        const lock: TestLockState = {
+          holder: null,
+          waiting: [{ runId: "c1", seatId: "GUIDO-1", since: NOW - MIN }],
+        };
+        expect(waitOf(withCrew(), lock)).toBe("lock");
+      });
+      it("operator: the run is parked", () => {
+        start({ phase: "parked", parked: { kind: "ci", reason: "x", ended: false } });
+        expect(waitOf(withCrew())).toBe("operator");
+      });
+      it("seat: a set-aside run flagged to wake", () => {
+        start({ phase: "review", aside: { ...aside, wake: true } });
+        expect(waitOf(withCrew())).toBe("seat");
+      });
+      it("ci: the run is in CI", () => {
+        start({ phase: "ci" });
+        expect(waitOf(withCrew())).toBe("ci");
+      });
+      it("operator: a review with an open ready note", () => {
+        start({ phase: "review" });
+        note("ready:c1:abc");
+        expect(waitOf(withCrew())).toBe("operator");
+      });
+      it("main: a review with an open behind note", () => {
+        start({ phase: "review" });
+        note("behind:c1:abc");
+        expect(waitOf(withCrew())).toBe("main");
+      });
+      it("retro: a review with a review seat, a push and a queued review of it", () => {
+        start({ phase: "review", epoch: 1 });
+        store.setRunPush({ runId: "c1", sha: "abc123", at: NOW });
+        store.requestReview({
+          authorRunId: "c1",
+          repoId: "shop-app",
+          seatId: "RETRO-1",
+          prNumber: 4,
+          sha: "abc123",
+          epoch: 1,
+          attempt: 1,
+          round: 1,
+          at: NOW,
+        });
+        const c = withCrew();
+        const seats = c.crew?.sessions[0]?.seats ?? [];
+        for (const s of seats) if (s.id === "RETRO-1") s.mode = "scratch";
+        expect(waitOf(c)).toBe("retro");
+      });
+      it("null: working, and an ended run", () => {
+        start({ phase: "working" });
+        expect(waitOf(withCrew())).toBeNull();
+        store.upsertRun(crewRun({ status: "ok", endedAt: NOW - MIN }));
+        store.setRunLoop("c1", loopOf({ phase: "ci" }));
+        expect(waitOf(withCrew())).toBeNull();
+      });
+    });
+
+    describe("tries", () => {
+      const triesOf = (c: CcConfig) => rowOf(c, "GUIDO-1")?.loop?.tries;
+      it("ci: the CI try", () => {
+        store.upsertRun(crewRun());
+        store.setSeatSession(seat({}));
+        store.setRunLoop("c1", loopOf({ phase: "ci", ciFails: 1 }));
+        expect(triesOf(withCrew())).toEqual({ n: 2, max: 3 });
+      });
+      it("review: the round, from the fix lines claimed this epoch", () => {
+        store.upsertRun(crewRun());
+        store.setSeatSession(seat({}));
+        store.setRunLoop("c1", loopOf({ phase: "review", epoch: 0 }));
+        store.claimLine("fix:c1:0:7", {
+          runId: "c1",
+          seatId: "GUIDO-1",
+          origin: "engine",
+          text: "fix",
+          at: NOW,
+        });
+        expect(triesOf(withCrew())).toEqual({ n: 2, max: 3 });
+      });
+      it("working: none", () => {
+        store.upsertRun(crewRun());
+        store.setSeatSession(seat({}));
+        store.setRunLoop("c1", loopOf({ phase: "working" }));
+        expect(triesOf(withCrew())).toBeNull();
+      });
     });
   });
 

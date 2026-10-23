@@ -525,6 +525,22 @@ export interface CrewLoop {
   prNumber: number | null;
   /** The park reason while `phase` is `parked`, else null. */
   parked: string | null;
+  /** The current step's try and its limit (ci: CI tries; review: review rounds), else null. */
+  tries?: { n: number; max: number } | null;
+  /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
+  wait?: LoopWait | null;
+}
+
+/** What a looped run waits on; null: nothing (its seat is on it, or it is done). */
+export type LoopWait = "ci" | "retro" | "main" | "operator" | "lock" | "seat";
+
+/** A run its seat has set aside (in review, off the seat). */
+export interface CrewAsideRun {
+  runId: string;
+  /** Resolved as the row's `ticket` is (`repo#n`), else null. */
+  ticket: string | null;
+  ticketTitle: string | null;
+  loop: CrewLoop;
 }
 
 /** One `/api/crew` row: a configured loop as the HUD shows it. */
@@ -564,6 +580,8 @@ export interface CrewRow {
   ticketTitle: string | null;
   /** The latest run's loop; null when no loop drives it (always null until the engine lands). */
   loop: CrewLoop | null;
+  /** Crew: the seat's set-aside runs other than `run`, oldest first; [] for a loop row. */
+  asideRuns?: CrewAsideRun[];
   /** The latest run. */
   run: {
     id: string;
