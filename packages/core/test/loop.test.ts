@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
   asideEventText,
+  asideInCiEventText,
   CI_FAILED_TEXT,
   CI_PENDING_MAX_MS,
   CI_TRIES,
@@ -1877,6 +1878,7 @@ describe("set aside", () => {
 
   it("texts", () => {
     expect(asideEventText("SULU")).toBe("in review; SULU is free for its next ticket");
+    expect(asideInCiEventText("SULU")).toBe("in CI; SULU is free for its next ticket");
     expect(wokenEventText("SULU")).toBe("back to SULU for rework");
     expect(NEW_LOOP.aside).toBeNull();
   });
@@ -1885,6 +1887,27 @@ describe("set aside", () => {
     const a = reconcile(base()).actions;
     expect(a.filter((x) => x.kind === "set-aside")).toHaveLength(1);
     expect(sends(a)).toEqual([]);
+  });
+
+  it("sets aside in ci once the PR is open on the pushed sha", () => {
+    const ci = (over: Partial<LoopSnapshot> = {}) =>
+      base(
+        { pr: pr({ ci: "pending" }), review: facts([]), ...over },
+        { phase: "ci", pushFor: SHA, pushStartedAt: NOW - 60_000, cardFor: "ci:0" },
+      );
+    const r = reconcile(ci());
+    expect(r.actions.filter((x) => x.kind === "set-aside")).toHaveLength(1);
+    expect(r.loop.phase).toBe("ci");
+    expect(sends(r.actions)).toEqual([]);
+    const b = ci();
+    const not: [string, LoopSnapshot][] = [
+      ["no PR", ci({ pr: null })],
+      ["in turn", ci({ seat: { ...b.seat, inTurn: true } })],
+      ["head moved", ci({ pr: pr({ ci: "pending", headSha: SHA2 }) })],
+    ];
+    for (const [name, s] of not) {
+      expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+    }
   });
 
   it("no review seat: held", () => {
