@@ -9,7 +9,7 @@ export const seatError = (e: unknown): string =>
 
 const done = (): void => hub.refetch(RESOURCES.crew.path);
 
-/** Stop the seat's current turn. Both control routes require a `{}` body. */
+/** Stop the seat's current turn. */
 export async function interruptSeat(row: Pick<CrewRow, "id">): Promise<void> {
   try {
     await apiPost(ACTIONS.seatInterrupt(row.id), {});
@@ -19,9 +19,9 @@ export async function interruptSeat(row: Pick<CrewRow, "id">): Promise<void> {
 }
 
 /** End the seat's run; the checkout and branch stay. */
-export async function endSeat(row: Pick<CrewRow, "id">): Promise<void> {
+export async function endSeat(row: Pick<CrewRow, "id">, hold = false): Promise<void> {
   try {
-    await apiPost(ACTIONS.seatEnd(row.id), {});
+    await apiPost(ACTIONS.seatEnd(row.id), hold ? { hold: true } : {});
   } finally {
     done();
   }
@@ -52,5 +52,5 @@ export async function messageSeat(
 export const endAsideConfirm = (row: Pick<CrewRow, "id" | "kind">): string =>
   `End ${callSign(row)}'s set-aside run? Its CLI is not woken; the checkout and branch stay.`;
 
-export const endConfirm = (row: Pick<CrewRow, "id" | "kind">): string =>
-  `End ${callSign(row)}'s run? The checkout and branch stay; nothing is pushed.`;
+export const endConfirm = (row: Pick<CrewRow, "id" | "kind">, hold = false): string =>
+  `${hold ? "Stop" : "End"} ${callSign(row)}'s run? ${hold ? "Its area stays reserved until you remove it. " : ""}The checkout and branch stay; nothing is pushed.`;
