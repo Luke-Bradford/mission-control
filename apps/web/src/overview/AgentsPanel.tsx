@@ -46,7 +46,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Sparkline } from "../hud/Sparkline.tsx";
-import { agentPath, followLink, navigate } from "../router.ts";
+import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { inSession, useSession } from "../shell/session.ts";
@@ -314,6 +314,7 @@ export function AgentsPanel() {
   const [selected] = useSelectedAgent();
   const configRes = useResource<ConfigView>(RESOURCES.config);
   const config = configRes.data;
+  const firstSession = config?.crew?.sessions[0];
   // The seat the server treats as FLIGHT has its own row above; any other lists as an agent.
   const flightId = flightSeatId(config);
   const flight = crew.data?.rows.find((r) => r.id === flightId) ?? null;
@@ -330,6 +331,16 @@ export function AgentsPanel() {
       id="agentsP"
       title="Agents"
       sub={rows ? `${working} working · ${rows.length} agents · FLIGHT not counted` : undefined}
+      actions={
+        <button
+          type="button"
+          className="sm"
+          disabled={!firstSession}
+          onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
+        >
+          Add agent
+        </button>
+      }
     >
       <div
         className={rows && !rows.some((r) => r.loop) ? "scroll noloop" : "scroll"}
