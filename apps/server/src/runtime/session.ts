@@ -7,7 +7,7 @@
  * nothing here throws from an event handler or leaves a promise pending once the process is gone.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
@@ -35,6 +35,7 @@ import {
   type KeeperSpec,
   pidAlive,
   readKeeperExit,
+  readKeeperSecret,
   readPidFile,
 } from "./keeper.ts";
 
@@ -65,6 +66,10 @@ export interface SessionInput {
   dir: string;
   /** This keeper's id: the hub's cursor is only good for the keeper it was taken from. */
   spawn: string;
+  /** The CLI's own session id (`--session-id` or `--resume`): `endKeeper` knows the CLI's process by it. */
+  cliSessionId: string;
+  /** Where `endKeeper` says which pids it left alone; default: nowhere. */
+  log?: (msg: string) => void;
   /** Defaults CONTROL_TIMEOUT_MS and STOP_GRACE_MS; tests shorten them. */
   controlTimeoutMs?: number;
   stopGraceMs?: number;
@@ -95,6 +100,11 @@ export interface CrewSession {
   readonly ready: Promise<void>;
   /** The keeper line this driver has read up to: the next one wanted. */
   readonly lines: number;
+  /**
+   * Resolves once the `close` line has been handed to the socket, or the session has ended or been
+   * detached without sending one: a hub that is exiting waits on it, so a Stop is not lost.
+   */
+  readonly closeSent: Promise<void>;
 }
 
 type Json = Record<string, unknown>;
@@ -174,13 +184,16 @@ function createDriver(i: {
   stopGraceMs: number;
   /** Emit `attached` once the replay is in. */
   announce: boolean;
+  /** The keeper's secret, said in the hello; null for an older keeper whose spec has none. */
+  secret: string | null;
+  log?: (msg: string) => void;
 }) {
   const listeners = new Set<(e: SessionEvent) => void>();
   const pending = new Map<string, Pending>();
   let sock: Socket | null = null;
   let hello: KeeperHello | null = null;
-  /** Messages for the keeper written before the socket is linked. */
-  const outbox: Json[] = [];
+  /** Messages for the keeper written before the socket is linked, and who is told when each is written. */
+  const outbox: { obj: Json; done?: () => void }[] = [];
   let alive = true;
   let finished = false;
   let detached = false;
@@ -197,6 +210,10 @@ function createDriver(i: {
   const ready = new Promise<void>((r) => {
     resolveReady = r;
   });
+  let resolveCloseSent: () => void = () => {};
+  const closeSent = new Promise<void>((r) => {
+    resolveCloseSent = r;
+  });
 
   const emit = (e: SessionEvent) => {
     if (detached) return;
@@ -209,9 +226,11 @@ function createDriver(i: {
     }
   };
 
-  const transmit = (obj: Json) => {
-    if (sock === null) outbox.push(obj);
-    else if (!sock.destroyed) sock.write(`${JSON.stringify(obj)}\n`);
+  /** Writes a line to the keeper; `done` is called once the socket has taken it (at once when it cannot). */
+  const transmit = (obj: Json, done?: () => void) => {
+    if (sock === null) outbox.push({ obj, done });
+    else if (sock.destroyed) done?.();
+    else sock.write(`${JSON.stringify(obj)}\n`, () => done?.());
   };
 
   const rejectPending = () => {
@@ -234,6 +253,7 @@ function createDriver(i: {
     alive = false;
     rejectPending();
     resolveReady();
+    resolveCloseSent();
     emit({ kind: "exit", code: info.code, signal: info.signal });
     resolveExit(info.code);
   }
@@ -331,7 +351,7 @@ function createDriver(i: {
   async function lost(): Promise<void> {
     if (finished || detached) return;
     stderrText("the keeper ended unexpectedly");
-    await endKeeper(i.dir, i.stopGraceMs);
+    await endKeeper(i.dir, i.stopGraceMs, i.log);
     if (finished || detached) return;
     const e = readKeeperExit(i.dir);
     end({ code: e?.code ?? null, signal: e?.signal ?? null });
@@ -346,8 +366,13 @@ function createDriver(i: {
     s.on("close", () => {
       if (!finished && !detached) void lost();
     });
-    transmit({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: next });
-    for (const m of outbox.splice(0)) transmit(m);
+    transmit({
+      t: "hello",
+      version: KEEPER_PROTOCOL_VERSION,
+      from: next,
+      ...(i.secret === null ? {} : { secret: i.secret }),
+    });
+    for (const m of outbox.splice(0)) transmit(m.obj, m.done);
     reader.set(onLine);
     resolveReady();
     // Later than the caller's own turn, so the caller's listeners hear it (a replay's lines come
@@ -391,7 +416,7 @@ function createDriver(i: {
     close() {
       if (!stdinEnded && !finished) {
         stdinEnded = true;
-        transmit({ t: "close", graceMs: i.stopGraceMs });
+        transmit({ t: "close", graceMs: i.stopGraceMs }, resolveCloseSent);
       }
       return exited;
     },
@@ -404,6 +429,7 @@ function createDriver(i: {
       sock?.destroy();
       // nobody is left waiting on a keeper this driver no longer follows
       resolveReady();
+      resolveCloseSent();
       resolveExit(null);
     },
     on(listener) {
@@ -422,6 +448,7 @@ function createDriver(i: {
     get lines() {
       return next;
     },
+    closeSent,
   };
 
   return {
@@ -455,6 +482,7 @@ export function startSession(i: SessionInput): CrewSession {
   const stopGraceMs = i.stopGraceMs ?? STOP_GRACE_MS;
   rmSync(i.dir, { recursive: true, force: true });
   mkdirSync(i.dir, { mode: 0o700 });
+  const secret = randomBytes(32).toString("hex");
   const spec: KeeperSpec = {
     runId: i.spawn,
     spawn: i.spawn,
@@ -470,6 +498,8 @@ export function startSession(i: SessionInput): CrewSession {
     stdoutLineMax: i.stdoutLineMax ?? STDOUT_LINE_MAX,
     stderrLineMax: i.stderrLineMax ?? STDERR_LINE_MAX,
     stopGraceMs,
+    secret,
+    cliSessionId: i.cliSessionId,
   };
   writeFileSync(join(i.dir, KEEPER_SPEC_FILE), JSON.stringify(spec), { mode: 0o600 });
   const driver = createDriver({
@@ -477,6 +507,8 @@ export function startSession(i: SessionInput): CrewSession {
     controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
     stopGraceMs,
     announce: false,
+    secret,
+    log: i.log,
   });
   const log = openSync(join(i.dir, KEEPER_LOG_FILE), "a", 0o600);
   let keeper: ChildProcess;
@@ -512,7 +544,7 @@ export function startSession(i: SessionInput): CrewSession {
       return;
     }
     if (Date.now() - t0 > KEEPER_CONNECT_MS) {
-      void endKeeper(i.dir, stopGraceMs).then(() =>
+      void endKeeper(i.dir, stopGraceMs, i.log).then(() =>
         driver.failed(null, "could not start the CLI: the keeper did not answer"),
       );
       return;
@@ -528,7 +560,7 @@ export function startSession(i: SessionInput): CrewSession {
       const reader = lineReader(sock);
       const timer = setTimeout(() => {
         sock.destroy();
-        void endKeeper(i.dir, stopGraceMs).then(() =>
+        void endKeeper(i.dir, stopGraceMs, i.log).then(() =>
           driver.failed(null, "could not start the CLI: the keeper did not answer"),
         );
       }, KEEPER_HELLO_MS);
@@ -540,7 +572,7 @@ export function startSession(i: SessionInput): CrewSession {
           driver.link(sock, reader, h, 0);
         } else {
           sock.destroy();
-          void endKeeper(i.dir, stopGraceMs).then(() =>
+          void endKeeper(i.dir, stopGraceMs, i.log).then(() =>
             driver.failed(null, "could not start the CLI: the keeper spoke another version"),
           );
         }
@@ -568,6 +600,7 @@ export async function attachSession(i: {
   from: (h: KeeperHello) => number;
   controlTimeoutMs?: number;
   stopGraceMs?: number;
+  log?: (msg: string) => void;
 }): Promise<Attached> {
   try {
     const exitedResult = async (): Promise<Attached | null> => {
@@ -626,6 +659,9 @@ export async function attachSession(i: {
       controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
       stopGraceMs: i.stopGraceMs ?? STOP_GRACE_MS,
       announce: true,
+      // an older keeper's spec has no secret, and that keeper asks for none
+      secret: readKeeperSecret(i.dir),
+      log: i.log,
     });
     driver.link(s, reader, h, i.from(h));
     return { kind: "attached", session: driver.session, hello: h };

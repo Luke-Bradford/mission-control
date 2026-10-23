@@ -283,7 +283,7 @@ export async function readRepoClaudeMd(checkout: string, baseSha: string): Promi
  * the new hub.
  */
 export const MC_RESTART_TEXT =
-  "If an mc tool fails with ECONNREFUSED, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
+  "If an mc tool fails with ECONNREFUSED or ECONNRESET, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
 
 /**
  * The prompt file's text: the role brief, the restart line, then the repo's CLAUDE.md under its own

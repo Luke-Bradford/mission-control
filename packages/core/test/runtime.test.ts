@@ -733,6 +733,21 @@ describe("crew sandbox and scoped edits", () => {
     }
   });
 
+  it("grants no Unix socket inside the hub's data dir, in any mode", () => {
+    // a keeper's socket lives there: a seat that could connect to it could drive any seat's CLI
+    for (const mode of ["writer", "read-only"] as const) {
+      const j = JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook)).sandbox;
+      const sockets = [
+        ...((j.network?.allowUnixSockets as string[] | undefined) ?? []),
+        ...((j.allowUnixSockets as string[] | undefined) ?? []),
+      ];
+      for (const p of sockets) {
+        expect(p.startsWith(base.sandbox.dataDir)).toBe(false);
+      }
+      expect(JSON.stringify(j)).not.toContain("allowUnixSockets");
+    }
+  });
+
   it("turns off auto-allow for sandboxed Bash, so the sandbox never widens the allowlist", () => {
     for (const mode of ["writer", "read-only"] as const) {
       expect(
