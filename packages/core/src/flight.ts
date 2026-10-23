@@ -1,4 +1,5 @@
 import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
+import { pathsText } from "./loop.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
 
@@ -31,6 +32,9 @@ export const FLIGHT_DECISION_KINDS = [
   "end",
   "ticket",
   "comment",
+  "rerun",
+  "ruling",
+  "sync",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -234,15 +238,54 @@ export const WAITS_ON_ONLY_BACKLOG = "Not moved: waits_on is only for a move to 
 export const movedText = (ref: string, to: string): string =>
   `Moved ${ref} to ${to}. Recorded in Decided without you.`;
 
-/** The runs FLIGHT may end in an hour. */
-export const FLIGHT_ENDS_PER_HOUR = 6;
-export const notEndableSeatText = (call: string): string =>
-  `Not ended: ${call} is not a developer seat.`;
+/** The runs FLIGHT may end, the CI re-runs it may ask for, and the merges of main it may make, in an hour. */
+export const FLIGHT_ENDS_PER_HOUR = 4;
+export const FLIGHT_RERUNS_PER_HOUR = 4;
+export const FLIGHT_SYNCS_PER_HOUR = 6;
+const RECORDED = " Recorded in Decided without you.";
+
+/** The three run tools (`accept_ruling`, `sync_main`, `end_run`) name a developer run by its id. */
+export const notDevRunText = (runId: string): string => `Not done: ${runId} is not an unended run.`;
+export const notDevSeatText = (call: string): string =>
+  `Not done: ${call} is not a developer seat.`;
+
+export const notAcceptedText = (why: string): string => `Not accepted: ${why}.`;
+export const rerunStartedDecision = (call: string, sha7: string): string =>
+  `Re-running failed CI on ${sha7} for ${call}; call accept_ruling again when it finishes.`;
+export const rerunStartedText = (call: string, sha7: string): string =>
+  rerunStartedDecision(call, sha7) + RECORDED;
+export const rerunPendingText = (sha7: string): string => `The re-run on ${sha7} is still going.`;
+export const rulingAcceptedDecision = (call: string, sha7: string): string =>
+  `Re-run passed on ${sha7}: ${call}'s ruling is accepted.`;
+export const rulingAcceptedText = (call: string, sha7: string): string =>
+  rulingAcceptedDecision(call, sha7) + RECORDED;
+export const rulingRefusedDecision = (call: string, sha7: string): string =>
+  `Re-run failed on ${sha7}: ${call} gets the failure to fix.`;
+export const rulingRefusedText = (call: string, sha7: string): string =>
+  rulingRefusedDecision(call, sha7) + RECORDED;
+
+export const notMergedText = (why: string): string => `Not merged: ${why}.`;
+export const syncCurrentText = (call: string, main7: string): string =>
+  `${call}'s branch already has main ${main7}.`;
+export const syncedDecision = (call: string, main7: string, sha7: string): string =>
+  `Merged main ${main7} into ${call}'s branch as ${sha7}.`;
+export const syncedText = (call: string, main7: string, sha7: string): string =>
+  syncedDecision(call, main7, sha7) + RECORDED;
+export const syncConflictDecision = (call: string, files: readonly string[]): string =>
+  `Main conflicts in ${pathsText(files)}; ${call} resolves it.`;
+export const syncConflictText = (call: string, files: readonly string[]): string =>
+  syncConflictDecision(call, files) + RECORDED;
+
 export const notEndableRunText = (call: string): string =>
-  `Not ended: ${call} has no run, or its run is still working; end_run is for a parked run.`;
+  `Not ended: ${call}'s run is not parked or stalled.`;
+export const END_UNREADABLE_TEXT = "Not ended: the run's worktree could not be read.";
+export const endDirtyText = (call: string, paths: readonly string[]): string =>
+  `Not ended: ${call} has uncommitted changes in ${pathsText(paths)}.`;
 export const endedDecision = (call: string): string => `Ended ${call}'s run`;
+export const endedAsideDecision = (call: string): string => `Ended ${call}'s set-aside run.`;
 export const endedText = (call: string): string =>
-  `Ended ${call}'s run; ${call} is idle and takes its next ticket. Recorded in Decided without you.`;
+  `Ended ${call}'s run; ${call} is idle and takes its next ticket.${RECORDED}`;
+export const endedAsideText = (call: string): string => endedAsideDecision(call) + RECORDED;
 export const endFailedText = (why: string): string => `Not ended: ${why}`;
 
 export const OWN_SEAT_TEXT = "Not sent: that is your own seat.";
@@ -251,6 +294,9 @@ export const scratchSeatText = (call: string): string =>
 export const seatMessageCapText = (call: string, n: number): string =>
   `Not sent: you sent ${call} ${n} messages in the last hour, the most allowed.`;
 export const notParkedText = (call: string): string => `Not sent: ${call}'s run is not parked.`;
+export const notRunOfSeatText = (runId: string, call: string): string =>
+  `Not sent: ${runId} is not an unended run of ${call}.`;
+export const RUN_ID_NEEDS_UNPARK = "Not sent: runId goes with unpark: true.";
 export const parkNotYoursText = (kind: string): string =>
   `Not sent: a ${kind} park is the operator's call; pass it to them with mc ask_operator.`;
 export const unparkCapText = (n: number): string =>
@@ -373,6 +419,8 @@ export interface FlightPrRead {
 
 export interface FlightSeatState {
   id: string;
+  /** The seat's unended run; null when it has none. */
+  runId: string | null;
   call: string;
   role: string;
   loop: LoopKind;
@@ -398,6 +446,14 @@ export interface FlightState {
   /** The hub's own `gh` login; null when it could not be read. */
   hubLogin: string | null;
   seats: FlightSeatState[];
+  /** Runs set aside in review (off their seats), for `end_run` and `message_seat`'s runId. */
+  aside: {
+    runId: string;
+    seat: string;
+    ticket: string | null;
+    phase: LoopPhase;
+    parked: { kind: string; reason: string } | null;
+  }[];
   questions: { id: number; seat: string; ticket: string | null; text: string; ageMin: number }[];
   tickets: {
     ref: string;
@@ -419,6 +475,8 @@ export interface FlightState {
     ref: string;
     pr: number;
     seat: string;
+    /** The run holding the PR; "" when none does. */
+    runId: string;
     ready: boolean;
     state: "open" | "merged" | "closed";
     headSha: string | null;

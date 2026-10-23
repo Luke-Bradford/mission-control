@@ -45,8 +45,12 @@ import {
   dependsOn,
   duplicateLabelText,
   duplicateTitleText,
+  END_UNREADABLE_TEXT,
   ENGINE_OFF_TEXT,
   eligibleToStart,
+  endDirtyText,
+  endedAsideDecision,
+  endedAsideText,
   endedDecision,
   endedText,
   endFailedText,
@@ -71,7 +75,9 @@ import {
   FLIGHT_PR_FILES_LISTED,
   FLIGHT_PROMOTES_PER_HOUR,
   FLIGHT_READS_PER_HOUR,
+  FLIGHT_RERUNS_PER_HOUR,
   FLIGHT_STARTABLE,
+  FLIGHT_SYNCS_PER_HOUR,
   FLIGHT_TICKET_RESTART_MS,
   FLIGHT_TICKET_TITLE_MAX,
   FLIGHT_TICKET_TYPE_LABELS,
@@ -115,13 +121,17 @@ import {
   NOT_ON_BOARD,
   needsPlanText,
   noOpenQuestionText,
+  notAcceptedText,
+  notDevRunText,
+  notDevSeatText,
   notEndableRunText,
-  notEndableSeatText,
   notInSessionText,
+  notMergedText,
   notOnBoardText,
   notOnProjectText,
   notParkedText,
   notReadyText,
+  notRunOfSeatText,
   notSentText,
   notStartableSeatText,
   OWN_SEAT_TEXT,
@@ -151,7 +161,16 @@ import {
   READ_PR_DESCRIPTION,
   READY_LABEL,
   type RepoRules,
+  RUN_ID_NEEDS_UNPARK,
+  type Run,
+  rerunPendingText,
+  rerunStartedDecision,
+  rerunStartedText,
   restartRefusedText,
+  rulingAcceptedDecision,
+  rulingAcceptedText,
+  rulingRefusedDecision,
+  rulingRefusedText,
   START_FAILED,
   START_NO_GITHUB,
   START_NO_RULES,
@@ -168,6 +187,11 @@ import {
   startedText,
   startFailedText,
   startMissingNeedsText,
+  syncConflictDecision,
+  syncConflictText,
+  syncCurrentText,
+  syncedDecision,
+  syncedText,
   type TicketView,
   ticketReadText,
   unclosedMarkdown,
@@ -204,18 +228,29 @@ import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { crewDir, type Store } from "../store.ts";
-import { flightSeat, flightStartCap, flightState, markPrsShown, operatorItems } from "./state.ts";
+import {
+  flightSeat,
+  flightStartCap,
+  flightState,
+  markPrsShown,
+  operatorItems,
+  stalledSeats,
+} from "./state.ts";
 
 export interface FlightToolsDeps {
   config: CcConfig;
   store: Store;
   bus: ChangeBus;
-  supervisor: Pick<Supervisor, "message" | "busy" | "startRun" | "endRun">;
+  /** `endRun` ends a run on its seat; `endAsideRun` one set aside in review, which holds no seat. */
+  supervisor: Pick<Supervisor, "message" | "busy" | "startRun" | "endRun" | "endAsideRun">;
   /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
   login: string | null;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
-  engine: Pick<Engine, "onOperatorMessage" | "status"> | null;
+  engine: Pick<
+    Engine,
+    "onOperatorMessage" | "status" | "acceptRuling" | "syncMain" | "uncommitted"
+  > | null;
   /** The repo's rules (the area labels), as the engine reads them. */
   rules: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
@@ -282,11 +317,13 @@ const StartSeatArgs = z
   .refine((a) => (a.profile === undefined) === (a.profile_reason === undefined), {
     message: PROFILE_PAIR_TEXT,
   });
-const EndRunArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
+/** A developer run by its id: `accept_ruling`, `sync_main` and `end_run` take this. */
+const RunArgs = z.strictObject({ runId: z.string().min(1).max(200), basis: basisArg });
 const MessageSeatArgs = z.strictObject({
   seat: z.string().regex(SEAT_ID),
   text: text(MC_TEXT_MAX),
   unpark: z.boolean().optional(),
+  runId: z.string().min(1).max(200).optional(),
   basis: basisArg,
 });
 
@@ -334,6 +371,12 @@ const objectSchema = (properties: object, required: string[]) => ({
 });
 const BASIS_SCHEMA = { type: "string", minLength: 1, maxLength: FLIGHT_BASIS_MAX };
 const ISSUE_SCHEMA = { type: "integer", minimum: 1, maximum: MAX_ISSUE };
+const RUN_ID_SCHEMA = {
+  type: "string",
+  minLength: 1,
+  maxLength: 200,
+  description: "The run's id, from flight_state.",
+};
 const SEAT_SCHEMA = {
   type: "string",
   pattern: SEAT_ID.source,
@@ -773,18 +816,27 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function messageSeat(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, MessageSeatArgs, args);
     if (!c.ok) return c.result;
-    const { seat, text: body, unpark, basis } = c.args;
+    const { seat, text: body, unpark, runId, basis } = c.args;
     const cfg = seatCfg(seat);
     if (cfg === undefined) return fail(notInSessionText(seat));
     const call = seatCallSign(seat);
     if (seat === ctx.seatId) return fail(OWN_SEAT_TEXT);
     if (modeOfSeat(cfg) === "scratch") return fail(scratchSeatText(call));
+    if (runId !== undefined && unpark !== true) return fail(RUN_ID_NEEDS_UNPARK);
     const at = now();
     const capped = messageCap(at, call, seat);
     if (capped !== null) return fail(capped);
-    let lift: { runId: string; reason: string } | null = null;
+    let lift: { runId: string; reason: string; onSeat: boolean } | null = null;
     if (unpark === true) {
-      const run = unendedRun(seat);
+      // the seat's own run, or the run named: one set aside in review is on no seat
+      const named = runId === undefined ? null : store.run(runId);
+      if (
+        runId !== undefined &&
+        (named === null || named.endedAt !== null || named.agentId !== seat)
+      ) {
+        return fail(notRunOfSeatText(runId, call));
+      }
+      const run = named ?? unendedRun(seat);
       const parked = run?.loop?.phase === "parked" ? run.loop.parked : null;
       if (run === null || parked === null || parked === undefined) {
         return fail(notParkedText(call));
@@ -795,15 +847,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const n = store.countFlightDecisions({ kinds: ["unpark"], since: 0, targetRunId: run.id });
       if (n >= FLIGHT_UNPARKS_PER_RUN) return fail(unparkCapText(n));
       if (deps.engine?.status().on !== true) return fail(ENGINE_OFF_TEXT);
-      lift = { runId: run.id, reason: parked.reason };
+      lift = {
+        runId: run.id,
+        reason: parked.reason,
+        onSeat: store.seatSession(seat)?.runId === run.id,
+      };
     }
-    try {
-      await deps.supervisor.message(seat, `FLIGHT: ${body}`, {
-        interrupt: false,
-        questions: "none",
-      });
-    } catch (e) {
-      return fail(notSentText(e instanceof Error ? e.message : String(e)));
+    // (a set-aside run has no seat to message: the seat is on another run, or none)
+    if (lift === null || lift.onSeat) {
+      try {
+        await deps.supervisor.message(seat, `FLIGHT: ${body}`, {
+          interrupt: false,
+          questions: "none",
+        });
+      } catch (e) {
+        return fail(notSentText(e instanceof Error ? e.message : String(e)));
+      }
     }
     store.addComms({
       at,
@@ -841,41 +900,155 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: sentUnparkedText(call) };
   }
 
-  async function endRun(ctx: McToolContext, args: unknown): Promise<Result> {
-    const c = flightCall(deps, ctx, EndRunArgs, args);
+  /** The unended run of a developer seat in FLIGHT's session, by id; else the refusal to give. */
+  function devRun(runId: string): { run: Run; seat: string; call: string } | Result {
+    const run = store.run(runId);
+    const cfg = run === null ? undefined : seatCfg(run.agentId);
+    if (run === null || run.endedAt !== null || cfg === undefined) {
+      return fail(notDevRunText(runId));
+    }
+    const call = seatCallSign(run.agentId);
+    if (seatDef(cfg).loop !== "build") return fail(notDevSeatText(call));
+    return { run, seat: run.agentId, call };
+  }
+  const isRefusal = (x: object): x is Result => "text" in x;
+
+  /** The run's ticket and park, for the line a decision is filed under. */
+  const aboutRun = (call: string, run: Run): string =>
+    `${call}: ${run.ticket ?? run.id}${run.loop?.parked ? `, ${run.loop.parked.reason}` : ""}`;
+
+  async function acceptRuling(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, RunArgs, args);
     if (!c.ok) return c.result;
-    const { seat, basis } = c.args;
-    const cfg = seatCfg(seat);
-    if (cfg === undefined) return fail(notInSessionText(seat));
-    const call = seatCallSign(seat);
-    if (seat === ctx.seatId) return fail(OWN_SEAT_TEXT);
-    if (seatDef(cfg).loop !== "build") return fail(notEndableSeatText(call));
-    const run = unendedRun(seat);
-    if (run === null || run.loop?.phase !== "parked") return fail(notEndableRunText(call));
+    const found = devRun(c.args.runId);
+    if (isRefusal(found)) return found;
+    const { run, seat, call } = found;
+    const { basis } = c.args;
+    const engine = deps.engine;
+    if (engine === null || !engine.status().on) return fail(GITHUB_WRITES_OFF);
     const at = now();
+    const reran = lastHour(["rerun"], at);
+    const r = await engine.acceptRuling(run.id, { mayRerun: reran < FLIGHT_RERUNS_PER_HOUR });
+    const filed = (kind: "rerun" | "ruling", decision: string, said: string): Result => {
+      record(at, {
+        kind,
+        seatId: seat,
+        targetRunId: run.id,
+        about: aboutRun(call, run),
+        decision,
+        basis,
+      });
+      bus.emit("agents");
+      bus.emit("flight");
+      return { text: said };
+    };
+    const sha7 = (sha: string) => sha.slice(0, 7);
+    switch (r.kind) {
+      case "rerun":
+        return filed(
+          "rerun",
+          rerunStartedDecision(call, sha7(r.sha)),
+          rerunStartedText(call, sha7(r.sha)),
+        );
+      case "accepted":
+        return filed(
+          "ruling",
+          rulingAcceptedDecision(call, sha7(r.sha)),
+          rulingAcceptedText(call, sha7(r.sha)),
+        );
+      case "refused":
+        return filed(
+          "ruling",
+          rulingRefusedDecision(call, sha7(r.sha)),
+          rulingRefusedText(call, sha7(r.sha)),
+        );
+      case "pending":
+        return { text: rerunPendingText(sha7(r.sha)) };
+      case "capped":
+        return fail(capText("re-ran CI", reran));
+      case "not":
+        return fail(notAcceptedText(r.text));
+    }
+  }
+
+  async function syncMain(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, RunArgs, args);
+    if (!c.ok) return c.result;
+    const found = devRun(c.args.runId);
+    if (isRefusal(found)) return found;
+    const { run, seat, call } = found;
+    const { basis } = c.args;
+    const engine = deps.engine;
+    if (engine === null || !engine.status().on) return fail(GITHUB_WRITES_OFF);
+    const at = now();
+    const merged = lastHour(["sync"], at);
+    if (merged >= FLIGHT_SYNCS_PER_HOUR) return fail(capText("merged main", merged));
+    const r = await engine.syncMain(run.id);
+    if (r.kind === "refused") return fail(notMergedText(r.text));
+    const main7 = (sha: string) => sha.slice(0, 7);
+    if (r.kind === "current") return { text: syncCurrentText(call, main7(r.mainSha)) };
+    const [decision, said] =
+      r.kind === "merged"
+        ? [
+            syncedDecision(call, main7(r.mainSha), main7(r.sha)),
+            syncedText(call, main7(r.mainSha), main7(r.sha)),
+          ]
+        : [syncConflictDecision(call, r.files), syncConflictText(call, r.files)];
+    record(at, {
+      kind: "sync",
+      seatId: seat,
+      targetRunId: run.id,
+      about: aboutRun(call, run),
+      decision,
+      basis,
+    });
+    bus.emit("agents");
+    bus.emit("flight");
+    return { text: said };
+  }
+
+  async function endRun(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, RunArgs, args);
+    if (!c.ok) return c.result;
+    const found = devRun(c.args.runId);
+    if (isRefusal(found)) return found;
+    const { run, seat, call } = found;
+    const { basis } = c.args;
+    const at = now();
+    // on its seat: parked, or stalled (silent for the HUD's stall time); set aside: parked
+    const onSeat = store.seatSession(seat)?.runId === run.id;
+    const parked = run.loop?.phase === "parked";
+    const endable = onSeat ? parked || stalledSeats(config, store, at).has(seat) : parked;
+    if (!endable || (!onSeat && !run.loop?.aside)) return fail(notEndableRunText(call));
     const ended = lastHour(["end"], at);
     if (ended >= FLIGHT_ENDS_PER_HOUR) return fail(capText("ended runs", ended));
+    const dirty = (await deps.engine?.uncommitted(run.id)) ?? null;
+    if (dirty === null) return fail(END_UNREADABLE_TEXT);
+    if (dirty.length > 0) return fail(endDirtyText(call, dirty));
     try {
-      await deps.supervisor.endRun(seat);
+      if (onSeat) await deps.supervisor.endRun(seat);
+      else await deps.supervisor.endAsideRun(run.id);
     } catch (e) {
       return fail(endFailedText(e instanceof Error ? e.message : String(e)));
     }
-    // endRun leaves the seat stopped, out of rotation; an idle seat takes its next ticket
-    const after = store.seatSession(seat);
-    if (after !== null && after.runId === null && after.state === "stopped") {
-      store.setSeatSession({ ...after, state: "idle", reason: null, updatedAt: at });
+    if (onSeat) {
+      // endRun leaves the seat stopped, out of rotation; an idle seat takes its next ticket
+      const after = store.seatSession(seat);
+      if (after !== null && after.runId === null && after.state === "stopped") {
+        store.setSeatSession({ ...after, state: "idle", reason: null, updatedAt: at });
+      }
     }
     record(at, {
       kind: "end",
       seatId: seat,
       targetRunId: run.id,
-      about: `${call}: ${run.loop.parked?.reason ?? "parked"}`,
-      decision: endedDecision(call),
+      about: aboutRun(call, run),
+      decision: onSeat ? endedDecision(call) : endedAsideDecision(call),
       basis,
     });
     bus.emit("agents");
     bus.emit("flight");
-    return { text: endedText(call) };
+    return { text: onSeat ? endedText(call) : endedAsideText(call) };
   }
 
   async function promote(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -1505,12 +1678,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.messageSeat,
       description:
-        "Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget, review or ruling park, at most twice per run.",
+        "Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget, review or ruling park, at most twice per run. Give runId (with unpark) for a run set aside in review; the seat is on another run then, so the text is not delivered.",
       inputSchema: objectSchema(
         {
           seat: SEAT_SCHEMA,
           text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
           unpark: { type: "boolean" },
+          runId: RUN_ID_SCHEMA,
           basis: BASIS_SCHEMA,
         },
         ["seat", "text", "basis"],
@@ -1546,11 +1720,27 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.endRun,
-      description: `End a developer seat's run that is parked, or that reported with nothing to push, and leave the seat idle so it takes its next ticket. The basis says why nothing is lost by ending it. At most ${FLIGHT_ENDS_PER_HOUR} an hour. Never a run that is working.`,
-      inputSchema: objectSchema({ seat: SEAT_SCHEMA, basis: BASIS_SCHEMA }, ["seat", "basis"]),
+      description: `End a parked or stalled developer run, on its seat or set aside; refused with uncommitted changes. ${FLIGHT_ENDS_PER_HOUR} an hour.`,
+      inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
       modes: [],
       grantable: ["read-only"],
       call: endRun,
+    },
+    {
+      name: MC_TOOL_NAMES.acceptRuling,
+      description: `Settle a developer run parked on a CI ruling: the first call re-runs the failed jobs (once per commit, ${FLIGHT_RERUNS_PER_HOUR} an hour); call again when done.`,
+      inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
+      modes: [],
+      grantable: ["read-only"],
+      call: acceptRuling,
+    },
+    {
+      name: MC_TOOL_NAMES.syncMain,
+      description: `Merge main into a developer run's branch now (behind main, or parked on a conflict). ${FLIGHT_SYNCS_PER_HOUR} an hour.`,
+      inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
+      modes: [],
+      grantable: ["read-only"],
+      call: syncMain,
     },
     {
       name: MC_TOOL_NAMES.createTicket,
