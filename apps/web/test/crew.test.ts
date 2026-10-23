@@ -11,6 +11,7 @@ import {
   lockSince,
   loopLine,
   loopMarks,
+  loopStepLabel,
   loopTemplate,
   loopTryText,
   modelLine,
@@ -640,6 +641,14 @@ describe("loopTryText", () => {
     expect(loopTryText({ ...base, tries: { n: 1, max: 3 } })).toBe("");
     expect(loopTryText({ ...base, tries: null })).toBe("");
     expect(loopTryText(base)).toBe("");
+  });
+});
+
+describe("loopStepLabel", () => {
+  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  it("is the profile's step, else the phase label", () => {
+    expect(loopStepLabel({ ...base, step: "verify" })).toBe("verify");
+    expect(loopStepLabel(base)).toBe("CI");
   });
 });
 

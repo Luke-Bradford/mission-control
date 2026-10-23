@@ -2,8 +2,8 @@ import type { CrewLoop, HudState } from "@mc/core";
 import {
   LOOP_PATH,
   LOOP_PATH_TITLE,
-  LOOP_PHASE_LABEL,
   loopMarks,
+  loopStepLabel,
   loopTemplate,
   loopTryText,
   type StepMark,
@@ -35,7 +35,7 @@ export function LoopStep({
   return (
     <>
       <span className="ellip xs" title={loop.text}>
-        {loopTemplate(loop)} › <b>{LOOP_PHASE_LABEL[loop.phase]}</b>
+        {loopTemplate(loop)} › <b>{loopStepLabel(loop)}</b>
         {loopTryText(loop)}
       </span>
       <span className="stepbar" title={LOOP_PATH_TITLE} aria-hidden="true">

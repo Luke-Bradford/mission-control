@@ -398,9 +398,15 @@ describe("Agents panel", () => {
   });
 
   it("the Loop step names the run's template profile, else the build loop", async () => {
-    stub({ rows: [crewRow({ loop: { ...loopOf("ci", "CI on 08a7cfc"), profile: "hotfix" } })] });
+    stub({
+      rows: [
+        crewRow({
+          loop: { ...loopOf("ci", "CI on 08a7cfc"), profile: "feature", step: "verify" },
+        }),
+      ],
+    });
     render(<Overview />);
-    await stepLabel("hotfix › CI");
+    await stepLabel("feature › verify");
   });
 
   it("a run in line for the test lock says how long, in amber", async () => {

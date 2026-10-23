@@ -463,6 +463,9 @@ export const BUILD_LOOP_TEMPLATE = "build";
 /** The template on screen: the run's profile, else the build loop. */
 export const loopTemplate = (loop: CrewLoop): string => loop.profile ?? BUILD_LOOP_TEMPLATE;
 
+/** The step on screen: the profile's step for the phase, else the build loop's phase label. */
+export const loopStepLabel = (loop: CrewLoop): string => loop.step ?? LOOP_PHASE_LABEL[loop.phase];
+
 /** What a looped run waits on, as Overview words it (the server decides `wait`). */
 export const WAIT_TEXT = {
   ci: "waiting on CI",
