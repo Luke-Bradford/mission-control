@@ -144,7 +144,7 @@ import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
-import { crewGit } from "../runtime/git.ts";
+import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
 import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
@@ -297,13 +297,6 @@ const PATHSPEC_CHUNK = 200;
 
 /** Index modes the commit tool refuses: a symlink, a gitlink (nested repository). */
 const SPECIAL_MODES = new Set(["120000", "160000"]);
-
-/** Node's error for a child whose output passed maxBuffer (it is `killed` too: check this first). */
-const MAX_BUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-const overflowed = (e: unknown): boolean =>
-  (e as { code?: unknown } | null)?.code === MAX_BUFFER_CODE;
-/** The error execFile gives a child it killed at its timeout. */
-const timedOut = (e: unknown): boolean => (e as { killed?: unknown } | null)?.killed === true;
 
 /**
  * Anything but printable ASCII (0x20–0x7e): APFS folds some non-ASCII names (`ſ`, Kelvin `K`,

@@ -3202,6 +3202,14 @@ describe("crew routes", () => {
     const r = await post5("end");
     expect(r.statusCode).toBe(500);
     expect(r.json()).toEqual({ error: "crew action failed" });
+    expect(r.body).not.toContain("secret");
+  });
+
+  it("logs an unexpected error's message at warn", async () => {
+    supervisorFail = new Error("spawn git EAGAIN");
+    const r = await post5("end");
+    expect(r.json()).toEqual({ error: "crew action failed" });
+    expect(logs.join("")).toContain("spawn git EAGAIN");
   });
 
   it("GET context answers the usage, or null", async () => {

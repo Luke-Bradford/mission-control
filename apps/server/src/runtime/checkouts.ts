@@ -22,7 +22,7 @@ import {
 } from "@mc/core";
 import { SEAT_ID } from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
-import { crewGit, crewGitBytes, SAFE_CONFIG } from "./git.ts";
+import { crewGit, crewGitBytes, overflowed, SAFE_CONFIG, timedOut } from "./git.ts";
 
 const execFileP = promisify(execFile);
 
@@ -323,19 +323,28 @@ const NOT_ORIGIN = "the clone's objects don't match origin";
 const gitId = (type: string, body: Buffer) =>
   createHash("sha1").update(`${type} ${body.length}\0`).update(body).digest("hex");
 type ObjectType = "commit" | "tree" | "blob";
-type ReadObject = (type: ObjectType, id: string) => Promise<Buffer>;
+/** `file` names the base file being read, for the text of a failed read. */
+type ReadObject = (type: ObjectType, id: string, file: string) => Promise<Buffer>;
+
+/** The largest base object read: a lockfile can pass the 4 MiB default. */
+const BASE_OBJECT_MAX = 64 * 1024 * 1024;
 
 /**
  * Reads objects from the clone, each re-hashed against the id asked for: a seat can rewrite loose
- * objects in the shared store, and git reads them back unverified.
+ * objects in the shared store, and git reads them back unverified. A read that fails says why
+ * (too big, too slow, git's own failure); only an object that doesn't hash to its id is "not origin".
  */
-function verifiedObjects(read: (args: string[]) => Promise<Buffer>): ReadObject {
+function verifiedObjects(read: (args: string[], maxBuffer: number) => Promise<Buffer>): ReadObject {
   const seen = new Map<string, Buffer>();
-  return async (type, id) => {
+  return async (type, id, file) => {
     const hit = seen.get(id);
     if (hit !== undefined) return hit;
-    const body = await read(["cat-file", type, id]).catch((e) => {
-      throw new CheckoutError("protected", NOT_ORIGIN, { cause: e });
+    const body = await read(["cat-file", type, id], BASE_OBJECT_MAX).catch((e) => {
+      // an overflowed child is `killed` too: ask about the overflow first
+      const why = overflowed(e)
+        ? `${file} in origin's default branch is over ${BASE_OBJECT_MAX / 1024 / 1024} MiB`
+        : `could not read ${file} from the crew clone (${timedOut(e) ? "timed out" : "git failed"})`;
+      throw new CheckoutError("protected", why, { cause: e });
     });
     if (gitId(type, body) !== id) throw new CheckoutError("protected", NOT_ORIGIN);
     seen.set(id, body);
@@ -363,20 +372,20 @@ function treeEntry(tree: Buffer, name: string): { mode: string; id: string } | n
 
 /** The verified blob id of `file` in commit `baseSha`, or null when it is not a file there. */
 async function baseBlob(read: ReadObject, baseSha: string, file: string): Promise<string | null> {
-  const head = (await read("commit", baseSha)).toString("latin1").split("\n", 1)[0] ?? "";
+  const head = (await read("commit", baseSha, file)).toString("latin1").split("\n", 1)[0] ?? "";
   const tree = /^tree ([0-9a-f]{40})$/.exec(head)?.[1];
   if (tree === undefined) throw new CheckoutError("protected", NOT_ORIGIN);
   let id = tree;
   const parts = file.split("/");
   for (const [k, part] of parts.entries()) {
-    const e = treeEntry(await read("tree", id), part);
+    const e = treeEntry(await read("tree", id, file), part);
     const last = k === parts.length - 1;
     if (e === null || (last ? e.mode !== "100644" && e.mode !== "100755" : e.mode !== "40000")) {
       return null;
     }
     id = e.id;
   }
-  await read("blob", id);
+  await read("blob", id, file);
   return id;
 }
 
@@ -395,15 +404,22 @@ export async function readBaseFile(
   const common = await realpath(join(checkout, ".git")).catch((e) => {
     throw new CheckoutError("checkout", CHECKOUT_TEXT, { cause: e });
   });
-  const inClone = (args: string[]) => crewGitBytes(checkout, args, common, { gitDir: common });
-  const format = (await inClone(["rev-parse", "--show-object-format"])).toString("utf8").trim();
+  const inClone = (args: string[], maxBuffer?: number) =>
+    crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer });
+  const format = (
+    await inClone(["rev-parse", "--show-object-format"]).catch((e) => {
+      throw new CheckoutError("checkout", "could not read the crew clone", { cause: e });
+    })
+  )
+    .toString("utf8")
+    .trim();
   // the ids are re-hashed as sha1: a sha256 clone's would never match
   if (format !== "sha1") {
     throw new CheckoutError("protected", `the crew clone is a ${format} repository`);
   }
   const read = verifiedObjects(inClone);
   const id = await baseBlob(read, baseSha, file);
-  return id === null ? null : read("blob", id);
+  return id === null ? null : read("blob", id, file);
 }
 
 /**
@@ -495,7 +511,7 @@ async function fetchBaseAs(
   name: string,
 ) {
   if (!isAbsolute(i.worktreesRoot)) {
-    throw new CheckoutError("path", `${i.worktreesRoot} is not an absolute path`);
+    throw new CheckoutError("path", "crew.worktrees is not an absolute path");
   }
   if (!SEAT_ID.test(i.sessionId)) {
     throw new CheckoutError("path", `${i.sessionId} is not a session id`);
@@ -691,8 +707,8 @@ export async function prepareCheckout(i: CheckoutInput): Promise<Checkout> {
       if (format !== "sha1") {
         throw refuse(subject, `is in a ${format} repository`);
       }
-      const read = verifiedObjects((args) =>
-        crewGitBytes(i.checkout, args, common, { gitDir: common }),
+      const read = verifiedObjects((args, maxBuffer) =>
+        crewGitBytes(i.checkout, args, common, { gitDir: common, maxBuffer }),
       );
       await refuseChangedInputs(path, inputs, read, baseSha, subject);
       await install(path, branch);
@@ -849,8 +865,8 @@ export async function prepareScratch(i: ScratchInput): Promise<Scratch> {
       if (unsafe !== null) throw refuse(subject, unsafe);
       const format = (await inClone(["rev-parse", "--show-object-format"])).trim();
       if (format !== "sha1") throw refuse(subject, `is in a ${format} repository`);
-      const read = verifiedObjects((args) =>
-        crewGitBytes(i.checkout, args, common, { gitDir: common }),
+      const read = verifiedObjects((args, maxBuffer) =>
+        crewGitBytes(i.checkout, args, common, { gitDir: common, maxBuffer }),
       );
       await refuseChangedInputs(path, inputs, read, mergeBase, subject);
       await install(path, subject);
