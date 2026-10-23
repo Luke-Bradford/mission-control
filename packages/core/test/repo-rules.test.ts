@@ -72,9 +72,16 @@ describe("DEFAULT_REPO_RULES", () => {
   it("effectiveHardRules adds the defaults on a superuser repo only", () => {
     const own = { hardRules: ["x/**"] };
     expect(effectiveHardRules(own, "standard")).toEqual(["x/**"]);
-    expect(effectiveHardRules(own, "superuser")).toEqual(["x/**", ...DEFAULT_HARD_RULES]);
-    expect(effectiveHardRules({ hardRules: [] }, "superuser")).toEqual(DEFAULT_HARD_RULES);
-    // the floor's paths are hard-rule files by default, so a superuser repo always flags them
+    expect(effectiveHardRules(own, "superuser")).toEqual([
+      ...new Set(["x/**", ...DEFAULT_HARD_RULES, ...FLIGHT_FLOOR_PATHS]),
+    ]);
+    expect(effectiveHardRules({ hardRules: [] }, "superuser")).toEqual([
+      ...new Set([...DEFAULT_HARD_RULES, ...FLIGHT_FLOOR_PATHS]),
+    ]);
+    expect(effectiveHardRules(own, "superuser")).toEqual(
+      expect.arrayContaining([...FLIGHT_FLOOR_PATHS]),
+    );
+    // The fixed floor is included even when the repo omits it.
     expect(FLIGHT_FLOOR_PATHS).toEqual(["CLAUDE.md", ".github/workflows/**"]);
     expect(DEFAULT_HARD_RULES).toEqual(expect.arrayContaining(["CLAUDE.md", ".github/**"]));
   });

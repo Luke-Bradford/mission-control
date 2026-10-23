@@ -112,7 +112,7 @@ export function effectiveHardRules(
   powers: FlightPowers,
 ): string[] {
   return powers === "superuser"
-    ? [...new Set([...rules.hardRules, ...DEFAULT_HARD_RULES])]
+    ? [...new Set([...rules.hardRules, ...DEFAULT_HARD_RULES, ...FLIGHT_FLOOR_PATHS])]
     : rules.hardRules;
 }
 

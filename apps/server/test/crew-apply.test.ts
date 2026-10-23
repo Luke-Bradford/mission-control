@@ -395,6 +395,7 @@ describe("the reloader", () => {
   let listener: ((e: SupervisorEvent) => void) | null;
   let loaded: CcConfig | Error;
   let applied: CcConfig;
+  let rotateFlight: ReturnType<typeof vi.fn<() => void>>;
   let endRunByEngine: ReturnType<typeof vi.fn<(runId: string) => Promise<void>>>;
 
   const supervisor = () => ({
@@ -414,6 +415,7 @@ describe("the reloader", () => {
       store,
       bus,
       supervisor: supervisor(),
+      rotateFlight,
       log: () => {},
       load: () => {
         if (loaded instanceof Error) throw loaded;
@@ -439,6 +441,7 @@ describe("the reloader", () => {
     bus.subscribe((t) => topics.push(t));
     busy = new Set();
     endRunByEngine = vi.fn(async () => {});
+    rotateFlight = vi.fn();
     listener = null;
     applied = config([{ id: "s1", seats: [seat("guido-1")] }]);
     loaded = structuredClone(applied);
@@ -478,17 +481,17 @@ describe("the reloader", () => {
       });
     };
 
-    it("is no restart; it applies live and ends FLIGHT's run once", async () => {
+    it("is no hub restart; it applies live and requests one FLIGHT rotation", async () => {
       const r = make();
       raise("superuser");
       const out = await r.reload();
       expect(out.restartNeeded).toEqual([]);
       expect(applied.repos[0]?.flightPowers).toBe("superuser");
       expect(out.applied).toContain("repo shop-app flight_powers superuser");
-      expect(endRunByEngine).toHaveBeenCalledTimes(1);
-      expect(endRunByEngine).toHaveBeenCalledWith("flight-1:1");
+      expect(rotateFlight).toHaveBeenCalledTimes(1);
+      expect(endRunByEngine).not.toHaveBeenCalled();
       await r.reload();
-      expect(endRunByEngine).toHaveBeenCalledTimes(1);
+      expect(rotateFlight).toHaveBeenCalledTimes(1);
     });
 
     it("lowering applies live too", async () => {
@@ -499,7 +502,7 @@ describe("the reloader", () => {
       const out = await r.reload();
       expect(out.restartNeeded).toEqual([]);
       expect(applied.repos[0]?.flightPowers).toBe("standard");
-      expect(endRunByEngine).toHaveBeenCalledTimes(1);
+      expect(rotateFlight).toHaveBeenCalledTimes(1);
     });
 
     it("restartNeeded ignores flightPowers and nothing else in repos", () => {
@@ -511,23 +514,33 @@ describe("the reloader", () => {
       expect(restartNeeded(a, b)).toEqual(["repos"]);
     });
 
-    it("a failed run end is logged, not thrown", async () => {
-      endRunByEngine.mockRejectedValue(new Error("gone"));
-      const log = vi.fn();
-      const r = createCrewReloader({
-        configPath: path,
-        config: applied,
-        store,
-        bus,
-        supervisor: supervisor(),
-        log,
-        load: () => structuredClone(loaded as CcConfig),
-      });
-      raise("superuser");
-      await r.reload();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(log).toHaveBeenCalledWith("could not restart FLIGHT: gone");
-    });
+    it.each(["plan", "queues"])(
+      "applies powers before a failure in %s and a later config load",
+      async (where) => {
+        const r = make();
+        raise("superuser");
+        const target = loaded as CcConfig;
+        target.crew?.sessions[0]?.seats.push(seat("guido-2", { area: ["other/**"] }));
+        if (where === "plan") {
+          vi.spyOn(applied.accounts, "some").mockImplementation(() => {
+            throw new Error("plan failed");
+          });
+        } else {
+          target.crew?.sessions[0]?.seats.splice(0, 1);
+          vi.spyOn(store, "replaceQueues").mockImplementation(() => {
+            throw new Error("queues failed");
+          });
+        }
+        const out = await r.reload();
+        expect(applied.repos[0]?.flightPowers).toBe("superuser");
+        expect(out.applied).toContain("repo shop-app flight_powers superuser");
+        expect(rotateFlight).toHaveBeenCalledTimes(1);
+        loaded = new ConfigError("crew", "bad config");
+        await r.reload();
+        expect(applied.repos[0]?.flightPowers).toBe("superuser");
+        expect(rotateFlight).toHaveBeenCalledTimes(1);
+      },
+    );
   });
 
   it("a changed file is reloaded on the poll", async () => {
@@ -771,7 +784,7 @@ describe("the reloader", () => {
       config: applied,
       store,
       bus,
-      supervisor: { on, seatBusy: () => false, endRunByEngine },
+      supervisor: { on, seatBusy: () => false },
       log: () => {},
       load: () => structuredClone(loaded as CcConfig),
     });

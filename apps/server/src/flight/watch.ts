@@ -58,6 +58,8 @@ export interface FlightWatch {
   stop(): void;
   /** One pass; serialised; never throws. */
   check(): Promise<void>;
+  /** Refreshes FLIGHT between turns without consuming a crash restart. */
+  rotate(): void;
 }
 
 /** Whether any list of a `wakeFacts` string has an entry. */
@@ -77,6 +79,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** When FLIGHT itself was started; a rotation is left out. */
   let starts: number[] = [];
   let rotating = false;
+  let rotationRequested = false;
   let lastFailure: string | null = null;
   const announced = new Set<number>();
 
@@ -137,6 +140,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       });
       if (!rotating) starts.push(t);
       rotating = false;
+      rotationRequested = false; // the fresh session already sees the current config
       try {
         await supervisor.startWatch(id, { first: wakeLine(state) });
         markPrsShown(store, state);
@@ -159,9 +163,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (runId == null || facts === null || facts.inTurn) return;
     if (facts.rateLimitedUntil !== null && facts.rateLimitedUntil > t) return;
     const n = flightWakes(store, runId);
-    if (n >= FLIGHT_MAX_WAKES) {
+    if (rotationRequested || n >= FLIGHT_MAX_WAKES) {
       rotating = true;
       await supervisor.endRunByEngine(runId);
+      rotationRequested = false;
       return;
     }
     const state = flightState({
@@ -226,6 +231,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   return {
     check,
+    rotate() {
+      rotationRequested = true;
+      void check();
+    },
     start() {
       if (interval !== null) return;
       stopped = false;

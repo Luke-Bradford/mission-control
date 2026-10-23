@@ -227,7 +227,9 @@ export function createCrewReloader(deps: {
   config: CcConfig;
   store: Store;
   bus: ChangeBus;
-  supervisor: Pick<Supervisor, "on" | "seatBusy" | "endRunByEngine">;
+  supervisor: Pick<Supervisor, "on" | "seatBusy">;
+  /** The watch rotates FLIGHT between turns, outside its crash restart limit. */
+  rotateFlight?: () => void;
   now?: () => number;
   log?: (line: string) => void;
   /** Default `loadConfig`. */
@@ -284,19 +286,21 @@ export function createCrewReloader(deps: {
     }
   };
 
-  /** FLIGHT reads its powers at start: end its run, and the watch restarts the seat. */
-  function restartFlight(): void {
-    const seat = (config.crew?.sessions ?? [])
-      .flatMap((s) => s.seats)
-      .find((x) => !x.retiring && seatDef(x).loop === "watch");
-    const runId = seat === undefined ? null : store.seatSession(seat.id)?.runId;
-    if (runId === null || runId === undefined) return;
-    void supervisor.endRunByEngine(runId).catch((e: unknown) => {
-      log(`could not restart FLIGHT: ${e instanceof Error ? e.message : String(e)}`);
-    });
-  }
-
   function settle(): string[] {
+    // Guards read powers per call. Apply them even if unrelated crew edits cannot settle.
+    const powersApplied: string[] = [];
+    for (const repo of config.repos) {
+      const next = flightPowersOf(target, repo.id);
+      if ((repo.flightPowers ?? "standard") === next) continue;
+      repo.flightPowers = next;
+      powersApplied.push(`repo ${repo.id} flight_powers ${next}`);
+    }
+    if (powersApplied.length > 0) {
+      // Refresh the session's context after its turn; permissions already changed above.
+      deps.rotateFlight?.();
+      bus.emit("config");
+      bus.emit("agents");
+    }
     try {
       const plan = planCrew(config, target, busy);
       const nextRestart = restartNeeded(config, target);
@@ -318,15 +322,6 @@ export function createCrewReloader(deps: {
         else config.crew.lane = target.crew.lane;
         config.crew.laneDefault = target.crew.laneDefault ?? false;
       }
-      let powersChanged = false;
-      for (const repo of config.repos) {
-        const next = flightPowersOf(target, repo.id);
-        if ((repo.flightPowers ?? "standard") === next) continue;
-        repo.flightPowers = next;
-        powersChanged = true;
-        plan.applied.push(`repo ${repo.id} flight_powers ${next}`);
-      }
-      if (powersChanged) restartFlight();
       const changed =
         !isDeepStrictEqual(pending, plan.pending) || !isDeepStrictEqual(restart, nextRestart);
       pending = plan.pending;
@@ -335,10 +330,10 @@ export function createCrewReloader(deps: {
         bus.emit("config");
         bus.emit("agents");
       }
-      return plan.applied;
+      return [...powersApplied, ...plan.applied];
     } catch (e) {
       log(`could not apply config.yaml: ${e instanceof Error ? e.message : String(e)}`);
-      return [];
+      return powersApplied;
     }
   }
 

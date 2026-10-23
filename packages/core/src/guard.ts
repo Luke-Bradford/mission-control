@@ -2,7 +2,7 @@
  * The guard's pure core: the command rules, the full-suite matcher and the secret scan. The hub
  * route (`POST /api/guard/check`) and Mission Control's push and PR build on these; nothing here does I/O.
  */
-import { MC_TOOLS, READ_ONLY_CANNOT_WRITE } from "./mcp.ts";
+import { MC_TOOLS, type McToolName, mcTool, READ_ONLY_CANNOT_WRITE } from "./mcp.ts";
 import type { CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
@@ -13,6 +13,7 @@ export const GUARD_RULES = {
     "No GitHub comments, labels, board moves or Priority changes without your approval",
   "merge-push":
     "No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
+  "flight-powers": "Only repos with flight_powers: superuser may use these tools",
   "full-suite": "Full test suites only through Mission Control (one at a time)",
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
@@ -52,7 +53,7 @@ export const FLIGHT_POWERS = ["standard", "superuser"] as const;
 export type FlightPowers = (typeof FLIGHT_POWERS)[number];
 
 /** FLIGHT's mc tools only a superuser repo's seats may call; the power tickets add them. */
-export const MC_SUPERUSER_TOOLS: readonly string[] = [];
+export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [];
 
 /** What a power-gated tool says when the repo is not `superuser`. */
 export const needsSuperuserText = (repo: string): string =>
@@ -1313,10 +1314,10 @@ const deny = (rule: GuardRule, what: string): GuardVerdict => ({
 export function guardDecision(
   e: GuardEvent,
   ctx: GuardContext,
-  superuserTools: readonly string[] = MC_SUPERUSER_TOOLS,
+  superuserTools: readonly McToolName[] = MC_SUPERUSER_TOOLS,
 ): GuardVerdict {
-  if (superuserTools.includes(e.tool) && ctx.flightPowers !== "superuser") {
-    return deny("merge-push", `${e.tool} (needs flight_powers: superuser)`);
+  if (superuserTools.some((name) => mcTool(name) === e.tool) && ctx.flightPowers !== "superuser") {
+    return deny("flight-powers", `${e.tool} (needs flight_powers: superuser)`);
   }
   if (ctx.mode === "read-only") {
     if ((READ_ONLY_BUILTINS as readonly string[]).includes(e.tool)) {

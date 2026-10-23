@@ -29,11 +29,13 @@ import {
   UP_TO_DATE_MAIN,
   type VersionInfo,
 } from "@mc/core";
+import type { ChangeBus } from "./bus.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
 import { gitEnv } from "./files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
+import type { Store } from "./store.ts";
 
 /** How long `GET /api/version` reuses a `git fetch origin main`. */
 export const VERSION_CHECK_MS = 10 * 60_000;
@@ -73,6 +75,8 @@ export const autoUpdatePath = (path: string): boolean =>
 export interface HeldRange {
   commits: string[];
   paths: string[];
+  /** Symlinks and gitlinks, regardless of their path. */
+  unsafePaths?: string[];
 }
 /** The one Needs-you item for a range auto-Update holds. */
 export const HUB_UPDATE_HELD_KEY = "hub-update-held";
@@ -86,6 +90,39 @@ const named = (xs: readonly string[]) =>
     : xs.join(", ");
 export const hubCodeHeldText = (held: HeldRange): string =>
   `Update waits for you: main changes more than the page and docs. Auto-Update leaves that to a person: run Update. Commits: ${named(held.commits)}. Paths: ${named(held.paths)}.`;
+
+/** Keeps the one held Update note current, notifying Needs you only when it changes. */
+export function createHeldUpdateNote(
+  store: Store,
+  bus: ChangeBus,
+  enabled = true,
+): AutoUpdateDeps["held"] {
+  const held: AutoUpdateDeps["held"] = (range) => {
+    const open = store.notes().find((n) => n.key === HUB_UPDATE_HELD_KEY);
+    const text = range === null ? null : hubCodeHeldText(range);
+    if (text === (open?.text ?? null)) return;
+    const at = Date.now();
+    if (open !== undefined) store.clearNote(HUB_UPDATE_HELD_KEY, at);
+    if (text !== null) {
+      store.raiseNote({
+        key: HUB_UPDATE_HELD_KEY,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text,
+        at,
+      });
+    }
+    bus.emit("attention");
+  };
+  // The scheduler runs no tick when updates.hub is off; clear a persisted note now.
+  if (!enabled) held(null);
+  return held;
+}
+
+const heldPaths = (range: HeldRange): string[] =>
+  range.paths.filter((p) => !autoUpdatePath(p) || range.unsafePaths?.includes(p));
 
 export const NOT_ON_MAIN = "not on main";
 export const UNCOMMITTED_CHANGES = "the checkout has uncommitted changes";
@@ -341,22 +378,26 @@ export type AutoUpdateResult = "off" | "current" | "waiting" | "updated";
  */
 export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdateResult> {
   return async () => {
-    if (!deps.enabled) return "off";
+    if (!deps.enabled) {
+      deps.held(null);
+      return "off";
+    }
     try {
       const v = await deps.updater.check();
-      if (!v.canUpdate) {
-        if (v.reason !== UP_TO_DATE_MAIN) return "waiting";
+      if (!v.canUpdate && v.reason === UP_TO_DATE_MAIN) {
         deps.held(null);
         return "current";
       }
+      if (!v.canUpdate && !(v.behind !== null && v.behind > 0)) return "waiting";
       // only the allowlist goes live without a person; update() checks again after its own fetch
       const range = await deps.updater.changes();
       if (range === null) return "waiting";
-      const held = range.paths.filter((p) => !autoUpdatePath(p));
+      const held = heldPaths(range);
       if (held.length > 0) {
         deps.held({ commits: range.commits, paths: held });
         return "waiting";
       }
+      if (!v.canUpdate) return "waiting";
       if (deps.locked() !== null) return "waiting"; // update() itself refuses a busy crew unless the change is web-only
       let out: Awaited<ReturnType<Updater["update"]>>;
       try {
@@ -493,13 +534,24 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   async function changes(to = `origin/${MAIN}`): Promise<HeldRange | null> {
     try {
       // -z and no renames: a file moved out of hub code names both its old and new path
-      const [names, log] = await Promise.all([
-        gitOut(["diff", "--name-only", "-z", "--no-renames", base(), to]),
+      const [names, raw, log] = await Promise.all([
+        git(["diff", "--name-only", "-z", "--no-renames", base(), to]),
+        git(["diff", "--raw", "-z", "--no-renames", base(), to]),
         gitOut(["log", "--format=%h %s", `${base()}..${to}`]),
       ]);
+      const entries = raw.stdout.split("\0");
+      const unsafePaths: string[] = [];
+      for (let i = 0; i < entries.length - 1; i += 2) {
+        const modes = entries[i]?.slice(1).split(" ").slice(0, 2) ?? [];
+        const path = entries[i + 1];
+        if (path !== undefined && modes.some((m) => m === "120000" || m === "160000")) {
+          unsafePaths.push(path);
+        }
+      }
       return {
         commits: log.split("\n").filter((l) => l !== ""),
-        paths: names.split("\0").filter((p) => p !== ""),
+        paths: names.stdout.split("\0").filter((p) => p !== ""),
+        ...(unsafePaths.length > 0 ? { unsafePaths } : {}),
       };
     } catch {
       return null;
@@ -507,8 +559,8 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   }
 
   /** Whether every path changed from the running code to origin/main is web or docs; false if unreadable. */
-  async function webOnly(): Promise<boolean> {
-    const range = await changes();
+  async function webOnly(to = `origin/${MAIN}`): Promise<boolean> {
+    const range = await changes(to);
     if (range === null) return false;
     const { paths } = range;
     return paths.length > 0 && paths.every((p) => WEB_ONLY_PREFIXES.some((x) => p.startsWith(x)));
@@ -683,25 +735,36 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         // auto: what was fetched is checked, and exactly that commit is pulled below
         let checked: string | null = null;
         if (opts?.auto === true) {
-          const [tip, range] = await Promise.all([
-            gitOut(["rev-parse", `origin/${MAIN}`]).catch(() => null),
-            changes(),
+          const tip = await gitOut(["rev-parse", `origin/${MAIN}`]).catch(() => null);
+          if (tip === null || !/^[0-9a-f]{40,64}$/.test(tip)) {
+            throw new UpdateError(409, HUB_CODE_NEEDS_PERSON);
+          }
+          const [range, local, ancestor] = await Promise.all([
+            changes(tip),
+            changes("HEAD"),
+            git(["merge-base", "--is-ancestor", "HEAD", tip]).then(
+              () => true,
+              () => false,
+            ),
           ]);
-          const held = range?.paths.filter((p) => !autoUpdatePath(p));
-          if (tip === null || !/^[0-9a-f]{40,64}$/.test(tip) || range === null) {
+          if (range === null || local === null) {
             await log("failed: cannot read the range auto-Update would apply\n");
             throw new UpdateError(409, HUB_CODE_NEEDS_PERSON);
           }
-          if (held !== undefined && held.length > 0) {
+          const held = [...new Set([...heldPaths(range), ...heldPaths(local)])];
+          if (held.length > 0) {
             await log(`held for a person: ${held.join(", ")}\n`);
             throw new UpdateError(409, HUB_CODE_NEEDS_PERSON, {
-              held: { commits: range.commits, paths: held },
+              held: { commits: [...new Set([...range.commits, ...local.commits])], paths: held },
             });
+          }
+          if (!ancestor || (toPull === 0 && pulledNotRestarted)) {
+            throw new UpdateError(409, HUB_CODE_NEEDS_PERSON);
           }
           checked = tip;
         }
         // a web-only change leaves the seats alone: no wait for them, no restart
-        const webChange = await webOnly();
+        const webChange = await webOnly(checked ?? `origin/${MAIN}`);
         if (!webChange) {
           const busy = deps.crewRefusal();
           if (busy !== null) throw new UpdateError(409, busy);

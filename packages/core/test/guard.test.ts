@@ -87,13 +87,13 @@ describe("scratch mode", () => {
   });
 
   it("a superuser-only tool is denied on a standard repo and allowed on a superuser one", () => {
-    const e = { tool: "mcp__mc__x", input: {} };
-    expect(guardDecision(e, writer, ["mcp__mc__x"])).toEqual({
+    const e = { tool: "mcp__mc__promote", input: {} };
+    expect(guardDecision(e, writer, ["promote"])).toEqual({
       kind: "deny",
-      rule: "merge-push",
-      text: `${GUARD_RULES["merge-push"]}: mcp__mc__x (needs flight_powers: superuser)`,
+      rule: "flight-powers",
+      text: `${GUARD_RULES["flight-powers"]}: mcp__mc__promote (needs flight_powers: superuser)`,
     });
-    expect(guardDecision(e, { ...writer, flightPowers: "superuser" }, ["mcp__mc__x"])).toEqual({
+    expect(guardDecision(e, { ...writer, flightPowers: "superuser" }, ["promote"])).toEqual({
       kind: "allow",
     });
     expect(guardDecision(e, writer)).toEqual({ kind: "allow" });
@@ -112,7 +112,10 @@ describe("GUARD_RULES", () => {
     );
     expect(GUARD_RULES.network).toBe("No network from a crew's commands");
     expect(GUARD_RULES.secret).toBe("No secrets in a push");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(7);
+    expect(GUARD_RULES["flight-powers"]).toBe(
+      "Only repos with flight_powers: superuser may use these tools",
+    );
+    expect(Object.keys(GUARD_RULES)).toHaveLength(8);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });

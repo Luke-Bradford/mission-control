@@ -499,6 +499,7 @@ const SEAT_SCHEMA = {
 /**
  * What a FLIGHT tool checks, against the config as it is now: null when the repo has at least
  * `need`, else the refusal to give. Read per call, so a lowered repo loses its tools at once.
+ * A tool acting on another repo must check that target repo's powers, not its own seat's repo.
  */
 export function requirePowers(config: CcConfig, repoId: RepoId, need: FlightPowers): Result | null {
   if (FLIGHT_POWERS.indexOf(flightPowersOf(config, repoId)) >= FLIGHT_POWERS.indexOf(need))

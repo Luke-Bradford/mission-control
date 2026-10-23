@@ -53,11 +53,10 @@ import { onSignal } from "./shutdown.ts";
 import { Store } from "./store.ts";
 import {
   createAutoUpdate,
+  createHeldUpdateNote,
   createUpdater,
   crewRefusal,
-  HUB_UPDATE_HELD_KEY,
   headSha,
-  hubCodeHeldText,
   UPDATE_LOG,
 } from "./update.ts";
 
@@ -307,27 +306,14 @@ async function main(): Promise<void> {
         });
 
   // `updates.hub: auto`: the scheduler's `update` job runs Update when it would pass (never on a preview).
+  const heldUpdateNote = createHeldUpdateNote(store, bus, config.updates?.hub === "auto");
   const autoUpdate =
     updater === undefined
       ? undefined
       : createAutoUpdate({
           enabled: config.updates?.hub === "auto",
           updater,
-          held: (range) => {
-            if (range === null) store.clearNote(HUB_UPDATE_HELD_KEY, Date.now());
-            else {
-              store.raiseNote({
-                key: HUB_UPDATE_HELD_KEY,
-                kind: "blocked",
-                runId: null,
-                seatId: null,
-                repoId: null,
-                text: hubCodeHeldText(range),
-                at: Date.now(),
-              });
-            }
-            bus.emit("attention");
-          },
+          held: heldUpdateNote,
           blocked: () =>
             crewRefusal(config, supervisor, (id) => store.seatSession(id)) ??
             (lock.state().holder !== null ? "the test lock is held" : null),
@@ -344,6 +330,7 @@ async function main(): Promise<void> {
     store,
     bus,
     supervisor,
+    rotateFlight: () => flightWatch.rotate(),
     log: (line) => log(`crew: ${line}`),
   });
 

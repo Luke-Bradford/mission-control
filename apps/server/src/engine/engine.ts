@@ -1044,16 +1044,22 @@ export function createEngine(deps: EngineDeps): Engine {
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
     const pushed = store.runPush(run.id);
-    if (run.endedAt === null && pushed !== null && input.touches?.sha !== pushed.sha) {
+    const flightPowers = flightPowersOf(config, run.repoId);
+    if (
+      run.endedAt === null &&
+      pushed !== null &&
+      (input.touches?.sha !== pushed.sha || input.touches.flightPowers !== flightPowers)
+    ) {
+      input.touches = null; // an unreadable new floor must not reuse the old clearance
       const rules = await rulesFor(run.repoId);
       if (rules !== null) {
         try {
           const paths = await publisher.hardRuleTouches(
             run,
             pushed.sha,
-            effectiveHardRules(rules, flightPowersOf(config, run.repoId)),
+            effectiveHardRules(rules, flightPowers),
           );
-          input.touches = { sha: pushed.sha, paths };
+          input.touches = { sha: pushed.sha, paths, flightPowers };
         } catch (e) {
           log(
             `${runId}: could not read the hard-rule files: ${e instanceof Error ? e.message : String(e)}`,

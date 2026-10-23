@@ -31,7 +31,6 @@ import {
   GUARD_WINDOW_DAYS,
   type GuardHitsView,
   guardAckKey,
-  guardDecision,
   guardDenyOutput,
   ISSUE_REQUIRED,
   type LimitRow,
@@ -40,7 +39,6 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
-  MC_SUPERUSER_TOOLS,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -97,7 +95,6 @@ import {
   crewSeatGrants,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
-  flightPowersOf,
 } from "./config.ts";
 import {
   accountDuplicateReason,
@@ -123,6 +120,7 @@ import {
 } from "./files.ts";
 import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import {
   attentionItems,
@@ -209,7 +207,7 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 export interface AppDeps {
   config: CcConfig;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
-  superuserTools?: readonly string[];
+  superuserTools?: readonly McToolName[];
   gh?: GhRunner;
   knownSecrets?: McToolsDeps["knownSecrets"];
   store: Store;
@@ -893,15 +891,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             lock?.release(key);
             return answer();
           }
-          const verdict = guardDecision(
+          const verdict = crewGuardDecision(
+            config,
+            seat.repoId,
+            seatMode(who.seatId),
             { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
-            {
-              mode: seatMode(who.seatId),
-              repo: "dev",
-              flightPowers: flightPowersOf(config, seat.repoId),
-              fullSuite: config.repos.find((r) => r.id === seat.repoId)?.fullSuite ?? [],
-            },
-            deps.superuserTools ?? MC_SUPERUSER_TOOLS,
+            deps.superuserTools,
           );
           if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {

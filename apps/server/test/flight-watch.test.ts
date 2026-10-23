@@ -1003,6 +1003,35 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(2);
   });
 
+  it("a rotation requested before a fresh start needs no second session", async () => {
+    watch.rotate();
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(endCalls).toEqual([]);
+  });
+
+  it("a requested rotation waits for the turn and does not consume a start", async () => {
+    liveCrew();
+    facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    watch.rotate();
+    await watch.check();
+    expect(endCalls).toEqual([]);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(endCalls).toEqual(["r-flight"]);
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    startFails = "boom";
+    noFlight();
+    for (let i = 0; i < 3; i++) await watch.check();
+    expect(startCalls).toHaveLength(4);
+    expect(notesOpen()).toEqual([]);
+    await watch.check();
+    expect(notesOpen()).toHaveLength(1);
+  });
+
   it("rotates after 40 wakes, and the next start is not counted", async () => {
     liveCrew();
     for (let i = 1; i <= FLIGHT_MAX_WAKES; i++) {

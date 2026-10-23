@@ -426,7 +426,7 @@ function harness(): Harness {
         },
         async hardRuleTouches(_run, _sha, rules) {
           x.hardRuleLists.push([...rules]);
-          return x.touches.filter((path) => rules.some((rule) => globMatches(rule, path)));
+          return x.touches.filter((path) => rules.some((rule) => globMatches(rule, path, true)));
         },
         async gateFacts(_r, sha, known): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
@@ -672,7 +672,11 @@ describe("report to a draft PR", () => {
     h.touches = [".github/ci.yml"];
     report();
     await h.engine.reconcileRun(RUN);
-    expect(loopOf().touches).toEqual({ sha: SHA, paths: [".github/ci.yml"] });
+    expect(loopOf().touches).toEqual({
+      sha: SHA,
+      paths: [".github/ci.yml"],
+      flightPowers: "standard",
+    });
     expect(noteKeys()).toContain(`flag:${RUN}:hard-rules:${SHA}`);
   });
 
@@ -2905,7 +2909,23 @@ describe("the engine runs reviews", () => {
       expect(h.hardRuleLists).toEqual([
         expect.arrayContaining(["x/**", "CLAUDE.md", ".github/**"]),
       ]);
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: h.touches });
+      expect(loopOf().touches).toEqual({ sha: SHA, paths: h.touches, flightPowers: "superuser" });
+      expect(h.steps).toEqual([]);
+      expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
+        readyHardRuleText(`${REPO}#7`, 12, h.touches),
+      );
+    });
+
+    it("rechecks floor 7 when a repo is raised during review of the same sha", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["x/**"] });
+      h.touches = ["claude.md", ".github/workflows/ci.yml"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().touches?.paths).toEqual([]);
+      for (const repo of config.repos) repo.flightPowers = "superuser";
+      reported(first().id, []);
+      await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
+      expect(loopOf().touches).toEqual({ sha: SHA, paths: h.touches, flightPowers: "superuser" });
       expect(h.steps).toEqual([]);
       expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
         readyHardRuleText(`${REPO}#7`, 12, h.touches),
@@ -2919,7 +2939,7 @@ describe("the engine runs reviews", () => {
       await gateOpen();
       await vi.waitFor(() => expect(h.steps).toEqual(ALL));
       expect(h.hardRuleLists).toEqual([["x/**"]]);
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: [] });
+      expect(loopOf().touches).toEqual({ sha: SHA, paths: [], flightPowers: "standard" });
     });
 
     it("a merge refused finally parks the run as merge-step and runs no later step", async () => {

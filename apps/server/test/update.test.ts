@@ -9,6 +9,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,10 +29,12 @@ import {
   autoUpdatePath,
   CREW_STATE_UNREADABLE,
   createAutoUpdate,
+  createHeldUpdateNote,
   createUpdater,
   crewRefusal,
   type Exec,
   HUB_CODE_NEEDS_PERSON,
+  HUB_UPDATE_HELD_KEY,
   headSha,
   hubCodeHeldText,
   killLiveSteps,
@@ -1145,7 +1148,7 @@ describe("auto update", () => {
   }
   /** The pull: manual Update runs `git pull`; auto runs `git merge --ff-only <sha>`. */
   const pulls = (calls: Call[]) =>
-    calls.filter((c) => c.cmd.startsWith("git pull") || c.cmd.startsWith("git merge"));
+    calls.filter((c) => c.cmd.startsWith("git pull") || c.cmd.startsWith("git merge "));
   /** An updater that is never asked for git: a main with a change that restarts the hub. */
   const restarting = (update: () => Promise<{ restarting: true }>) => {
     const u = updater().u;
@@ -1293,9 +1296,144 @@ describe("auto update", () => {
     expect(held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["apps/server/src/x.ts"] }));
   });
 
+  it("refuses auto Update when HEAD diverges from the checked tip", async () => {
+    const startSha = head();
+    mkdirSync(join(hub, "docs"));
+    writeFileSync(join(hub, "docs/local.md"), "local");
+    git(hub, "add", "docs/local.md");
+    git(hub, "commit", "-qm", "local docs");
+    upstreamPath("apps/web/src/page.tsx");
+    const a = auto({}, updater({ startSha }));
+    await expect(a.u.update({ auto: true })).rejects.toMatchObject({
+      status: 409,
+      message: HUB_CODE_NEEDS_PERSON,
+    });
+    expect(pulls(a.calls)).toHaveLength(0);
+    expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+  });
+
+  it("refuses auto Update when HEAD contains hub code reverted at the checked tip", async () => {
+    const startSha = head();
+    upstreamPath("apps/server/src/x.ts");
+    git(hub, "pull", "-q", "--ff-only", "origin", "main");
+    git(dev, "revert", "--no-edit", "HEAD");
+    upstreamPath("apps/web/src/page.tsx");
+    const a = auto({}, updater({ startSha }));
+    await expect(a.u.update({ auto: true })).rejects.toMatchObject({
+      status: 409,
+      message: HUB_CODE_NEEDS_PERSON,
+    });
+    expect(pulls(a.calls)).toHaveLength(0);
+    expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+  });
+
+  it("refuses auto Update when nothing is left to pull but HEAD is not running", async () => {
+    const startSha = head();
+    upstreamPath("apps/web/src/page.tsx");
+    git(hub, "pull", "-q", "--ff-only", "origin", "main");
+    const a = auto({}, updater({ startSha }));
+    await expect(a.u.update({ auto: true })).rejects.toMatchObject({
+      status: 409,
+      message: HUB_CODE_NEEDS_PERSON,
+    });
+    expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+  });
+
+  it("checks the diff and web-only range against the captured tip", async () => {
+    upstreamPath("apps/web/src/page.tsx");
+    const tip = head(dev);
+    const { u, calls } = updater();
+    await expect(u.update({ auto: true })).resolves.toEqual({ swapped: true });
+    const diffs = calls.filter((c) => c.cmd.startsWith("git diff --name-only"));
+    expect(diffs.some((c) => c.cmd.endsWith(` ${tip}`))).toBe(true);
+    expect(diffs.some((c) => c.cmd.endsWith(" origin/main"))).toBe(false);
+  });
+
+  it.each(["symlink", "gitlink"])("holds a %s even under the allowlist", async (kind) => {
+    mkdirSync(join(dev, "docs"));
+    if (kind === "symlink") {
+      symlinkSync("../apps/server", join(dev, "docs", "linked"));
+      git(dev, "add", "docs/linked");
+    } else {
+      git(dev, "update-index", "--add", "--cacheinfo", `160000,${head(dev)},docs/linked`);
+    }
+    git(dev, "commit", "-qm", "linked docs");
+    git(dev, "push", "-q", "origin", "main");
+    const a = auto();
+    await expect(a.tick()).resolves.toBe("waiting");
+    expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
+    await expect(a.u.update({ auto: true })).rejects.toMatchObject({
+      status: 409,
+      message: HUB_CODE_NEEDS_PERSON,
+    });
+    expect(pulls(a.calls)).toHaveLength(0);
+  });
+
+  it("clears the held note when auto Update is off", async () => {
+    const a = auto({ enabled: false });
+    await expect(a.tick()).resolves.toBe("off");
+    expect(a.held).toHaveBeenCalledWith(null);
+    expect(a.calls).toEqual([]);
+  });
+
+  it("clears a persisted held note at startup when updates.hub is off, without a tick", () => {
+    const store = new Store(join(dir, "notes.sqlite"));
+    const bus = new ChangeBus();
+    const attention = vi.fn();
+    bus.subscribe(attention);
+    try {
+      createHeldUpdateNote(store, bus)({ commits: ["a first"], paths: ["package.json"] });
+      attention.mockClear();
+      createHeldUpdateNote(store, bus, false);
+      expect(store.notes()).toEqual([]);
+      expect(attention).toHaveBeenCalledTimes(1);
+      createHeldUpdateNote(store, bus, false);
+      expect(attention).toHaveBeenCalledTimes(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refreshes one held note and emits attention only when it changes", () => {
+    const store = new Store(join(dir, "notes.sqlite"));
+    const bus = new ChangeBus();
+    const attention = vi.fn();
+    bus.subscribe(attention);
+    const held = createHeldUpdateNote(store, bus);
+    const first = { commits: ["a first"], paths: ["apps/server/a.ts"] };
+    const next = {
+      commits: ["b second", "a first"],
+      paths: ["apps/server/b.ts", "apps/server/a.ts"],
+    };
+    try {
+      held(null);
+      expect(attention).not.toHaveBeenCalled();
+      held(first);
+      held(first);
+      expect(attention).toHaveBeenCalledTimes(1);
+      held(next);
+      expect(store.notes()).toMatchObject([
+        { key: HUB_UPDATE_HELD_KEY, text: hubCodeHeldText(next) },
+      ]);
+      expect(attention).toHaveBeenCalledTimes(2);
+      held(null);
+      held(null);
+      expect(store.notes()).toEqual([]);
+      expect(attention).toHaveBeenCalledTimes(3);
+      held(first);
+      expect(store.notes()).toMatchObject([{ text: hubCodeHeldText(first) }]);
+      expect(attention).toHaveBeenCalledTimes(4);
+    } finally {
+      store.close();
+    }
+  });
+
   it("a manual Update applies hub code and the page", async () => {
     upstreamPath("apps/server/src/x.ts");
-    expect(await updater().u.update()).toEqual({ restarting: true });
+    upstreamPath("apps/web/src/page.tsx");
+    const { u, calls } = updater();
+    expect(await u.update()).toEqual({ restarting: true });
+    expect(calls.some((c) => c.cmd === "git pull --ff-only origin main")).toBe(true);
   });
 
   it("clears the held item once main is current", async () => {
@@ -1355,6 +1493,9 @@ describe("auto update", () => {
     expect(pulls(a.calls)).toHaveLength(0);
     expect(a.record).not.toHaveBeenCalled();
     expect(a.restart).not.toHaveBeenCalled();
+    expect(a.held).toHaveBeenCalledWith(
+      expect.objectContaining({ paths: ["apps/server/src/x.txt"] }),
+    );
   });
 
   it("waits while the test lock is held", async () => {
