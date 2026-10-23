@@ -1,6 +1,7 @@
 import {
   type CrewRow,
   LOCK_OUTCOME_TEXT,
+  lockWaitingLine,
   seatCallSign,
   startOfLocalDay,
   TELEMETRY_RANGES,
@@ -27,6 +28,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
   const history = useResource<TestLockHistory>(RESOURCES.testLockHistory).data;
   const lock = useTestLock();
   const crew = useResource<{ rows: CrewRow[] }>(RESOURCES.crew).data;
+  const waits = new Map<string, number>();
   const holds = [...(history?.runs ?? [])];
   const h = lock?.holder;
   if (h && !holds.some((r) => r.runId === h.runId && r.startedAt === h.since))
@@ -173,13 +175,38 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
                     <td>
                       <span className="chipref">{r.command}</span>
                     </td>
-                    <td className="num">{mss(r.startedAt - r.queuedAt)}</td>
+                    <td className="num">
+                      {/* The live row's Waited is "—" because /api/test-lock gives no queued time. */}
+                      {history?.runs.some(
+                        (stored) => stored.runId === r.runId && stored.startedAt === r.startedAt,
+                      )
+                        ? mss(r.startedAt - r.queuedAt)
+                        : DASH}
+                    </td>
                     <td className="num">{mss((r.endedAt ?? now) - r.startedAt)}</td>
                     <td className={r.outcome === "freed" ? "warn-t" : "ok-t"}>{result(r)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {h && !history && <p className="pb s muted">History: {NOT_TRACKED}</p>}
+        {lock && (
+          <div className="pb">
+            {lock.waiting.length === 0 ? (
+              <p className="s muted">Nobody waiting.</p>
+            ) : (
+              lock.waiting.map((w) => {
+                const n = (waits.get(w.runId) ?? 0) + 1;
+                waits.set(w.runId, n);
+                return (
+                  <p key={`${w.runId}#${n}`} className="s warn-t">
+                    {lockWaitingLine(seatCallSign(w.seatId), mss(now - w.since))}
+                  </p>
+                );
+              })
+            )}
           </div>
         )}
       </Panel>

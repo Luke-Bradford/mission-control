@@ -100,6 +100,22 @@ const spanWidth = (cols: number[], gap: number, [first, last]: [number, number])
   cols.slice(first, last + 1).reduce((n, w) => n + w, 0) + gap * (last - first);
 
 describe("doing lines and run rows (hud.css)", () => {
+  it("Work in flight stretches the agent link across the row, below ticket and PR links", () => {
+    const row = rule(String.raw`#wifP \.row`);
+    expect(row).toContain("position: relative");
+    expect(row).toContain("cursor: pointer");
+    expect(rule(String.raw`#wifP \.row:hover`)).toContain("background: var(--surface-2)");
+    const stretched = rule(String.raw`#wifP \.agent-link::after`);
+    expect(stretched).toContain('content: ""');
+    expect(stretched).toContain("position: absolute");
+    expect(stretched).toContain("inset: 0");
+    const refs = rule(String.raw`#wifP \.row \.rref a`);
+    expect(refs).toContain("position: relative");
+    expect(refs).toContain("z-index: 1");
+    expect(rule(String.raw`\.row`)).not.toContain("cursor: pointer");
+    expect(rule(String.raw`\.row:hover`)).not.toContain("background:");
+  });
+
   it("a run's summary is its own two-line row under the ticket, opened by state alone", () => {
     const r = rule(String.raw`\.runrow button\.rsummary`);
     expect(r).toContain("grid-column: 2 / -1");
