@@ -327,6 +327,15 @@ describe("scanSecrets", () => {
       { where: "(name withheld)", line: 0, kind: "GitHub token" },
     ]);
   });
+  it("finds a token in a header-only file whose name git quotes", () => {
+    const q = `"a/${TOKEN}\\303\\251.empty" "b/${TOKEN}\\303\\251.empty"`;
+    const empty = `diff --git ${q}\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${empty}`), [])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "GitHub token" },
+    ]);
+    const plain = `diff --git "a/x\\303\\251" "b/x\\303\\251"\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${plain}`), [])).toEqual([]);
+  });
   it("ignores a deleted file named like a token", () => {
     const name = `${TOKEN}.txt`;
     const gone = `diff --git a/${name} b/${name}\ndeleted file mode 100644\nindex e69de29..0000000\n`;
