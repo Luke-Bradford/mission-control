@@ -321,11 +321,25 @@ function collect(
   });
   const compatible = (r: Run, pid: number | null) =>
     pid === null || r.id === `${loop.id}:${pid}.${r.seq}` || r.id.startsWith(`${loop.id}:t`);
-  /** An already-known run for the same iteration (same seq, start within 60 s): never mint a second id. */
-  const known = (seq: number, startedAt: number): Run | undefined =>
+  /**
+   * An already-known run for the same iteration (same seq, start within 60 s, pid-compatible): never
+   * mint a second id, and never merge two processes' iterations.
+   */
+  const known = (seq: number, startedAt: number, pid: number | null): Run | undefined =>
     [...changed.values(), ...storedRuns()].find(
-      (r) => r.seq === seq && Math.abs(r.startedAt - startedAt) <= SAME_START_MS,
+      (r) =>
+        r.seq === seq && Math.abs(r.startedAt - startedAt) <= SAME_START_MS && compatible(r, pid),
     );
+  /** The start time held in a transcript name (`iteration-<YYYYMMDDTHHMMSSZ>-...`), or null. */
+  const transcriptStart = (name: string | null): number | null => {
+    const m = name === null ? null : TRANSCRIPT_NAME.exec(basename(name));
+    const t = m?.[1];
+    if (!t) return null;
+    const ms = Date.parse(
+      `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}T${t.slice(9, 11)}:${t.slice(11, 13)}:${t.slice(13, 15)}Z`,
+    );
+    return Number.isNaN(ms) ? null : ms;
+  };
 
   /**
    * The known run an end line belongs to: same seq, pid-compatible, started at or before the end,
@@ -354,7 +368,7 @@ function collect(
         it.pid ??
         f?.pid ??
         (status && status.seq === it.seq && status.startedAt === it.at ? status.pid : null);
-      const existing = known(it.seq, it.at);
+      const existing = known(it.seq, it.at, pid);
       const r = existing
         ? { ...existing, endedAt: null, status: "unknown" as const }
         : blank(runId(loop, pid, it.seq, it.at), it.seq, it.at);
@@ -369,7 +383,13 @@ function collect(
       if (r) open.splice(open.indexOf(r), 1);
       else {
         const prior = unfinished(it.seq, it.pid, it.at);
-        r = prior ? { ...prior } : blank(runId(loop, it.pid, it.seq, it.at), it.seq, it.at);
+        r = prior
+          ? { ...prior }
+          : blank(
+              runId(loop, it.pid, it.seq, it.at),
+              it.seq,
+              transcriptStart(it.transcript) ?? it.at,
+            );
       }
       r.endedAt = it.at;
       r.status = it.event;
@@ -404,7 +424,7 @@ function collect(
     let r =
       changed.get(byPid) ??
       storedRuns().find((x) => x.id === byPid) ??
-      known(status.seq, status.startedAt);
+      known(status.seq, status.startedAt, status.pid);
     if (!r) r = blank(byPid, status.seq, status.startedAt);
     if (r.endedAt === null) {
       r = changed.get(r.id) ?? { ...r };

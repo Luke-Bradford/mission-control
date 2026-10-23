@@ -893,6 +893,31 @@ describe("local access", () => {
     expect((await post("/api/agents/shop-app-ta/resume")).statusCode).toBe(200);
   });
 
+  it("refuses a cross-site request under /api (403) before its handler runs", async () => {
+    const headers = { "sec-fetch-site": "cross-site" };
+    for (const url of [
+      "/api/boards/shop-app/setup",
+      "/api/boards/shop-app/items/1",
+      "/%61pi/boards/shop-app/setup",
+    ]) {
+      const r = await app.inject({ method: "GET", url, headers });
+      expect(r.statusCode, url).toBe(403);
+      expect(r.json()).toEqual({ error: "cross-site request refused" });
+    }
+    const p = await post("/api/boards/shop-app/setup", { ...json, ...headers });
+    expect(p.statusCode).toBe(403);
+    expect(p.json()).toEqual({ error: "cross-site request refused" });
+    expect(gqlCalls).toEqual([]);
+  });
+
+  it("lets same-origin, none and header-less GETs reach the handler", async () => {
+    for (const headers of [{ "sec-fetch-site": "same-origin" }, { "sec-fetch-site": "none" }, {}]) {
+      const r = await app.inject({ method: "GET", url: "/api/boards/shop-app/setup", headers });
+      expect(r.statusCode, JSON.stringify(headers)).toBe(200);
+    }
+    expect(gqlCalls.length).toBeGreaterThan(0);
+  });
+
   it("refuses an unexpected Host (421)", async () => {
     for (const host of ["localhost", "localhost:7420", "127.0.0.1:7420", "LOCALHOST:1"]) {
       expect(

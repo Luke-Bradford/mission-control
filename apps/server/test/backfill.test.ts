@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run, RunDigest } from "@mc/core";
@@ -175,6 +183,21 @@ describe("backfillRuns", () => {
       summary: "Run 1 done. More text.",
     });
     expect(store.countToFold(NOW - FOLD_WINDOW_MS)).toBe(0);
+  });
+
+  it("reads a read-only transcript, and leaves its size and mtime alone", () => {
+    const r = seed(1, 3 * DAY);
+    chmodSync(r.transcriptPath, 0o444);
+    const before = statSync(r.transcriptPath);
+    expect(backfillRuns({ config, store, now: NOW, budgetMs: 1500 })).toEqual({
+      folded: 1,
+      left: 0,
+      failed: 0,
+    });
+    expect(get(store, r.id)).toMatchObject({ costUsd: 0.5, sessionId: "s-1" });
+    const after = statSync(r.transcriptPath);
+    expect(after.size).toBe(before.size);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
   it("keeps a stored branch, whether or not the transcript names one", () => {
