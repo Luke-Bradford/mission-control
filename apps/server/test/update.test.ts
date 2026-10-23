@@ -25,12 +25,15 @@ import { CREW_LOCK_FILE, createSupervisor, type SeatBusy } from "../src/runtime/
 import { Store } from "../src/store.ts";
 import {
   type AutoUpdateDeps,
+  autoUpdatePath,
   CREW_STATE_UNREADABLE,
   createAutoUpdate,
   createUpdater,
   crewRefusal,
   type Exec,
+  HUB_CODE_NEEDS_PERSON,
   headSha,
+  hubCodeHeldText,
   killLiveSteps,
   liveStepPids,
   realExec,
@@ -563,6 +566,7 @@ describe("update", () => {
       const tick = createAutoUpdate({
         enabled: true,
         updater: upd.u,
+        held: vi.fn(),
         blocked: () => MID_TURN,
         locked: () => null,
         headSha: async () => head(),
@@ -1125,28 +1129,152 @@ describe("realExec", () => {
 describe("auto update", () => {
   function auto(over: Partial<AutoUpdateDeps> = {}, upd = updater()) {
     const record = vi.fn();
+    const held = vi.fn();
     const restart = vi.spyOn(upd.u, "restart");
     const tick = createAutoUpdate({
       enabled: true,
       updater: upd.u,
+      held,
       blocked: () => null,
       locked: () => null,
       headSha: async () => head(),
       record,
       ...over,
     });
-    return { ...upd, tick, record, restart };
+    return { ...upd, tick, record, restart, held };
   }
-  const pulls = (calls: Call[]) => calls.filter((c) => c.cmd.startsWith("git pull"));
+  /** The pull: manual Update runs `git pull`; auto runs `git merge --ff-only <sha>`. */
+  const pulls = (calls: Call[]) =>
+    calls.filter((c) => c.cmd.startsWith("git pull") || c.cmd.startsWith("git merge"));
+  /** An updater that is never asked for git: a main with a change that restarts the hub. */
+  const restarting = (update: () => Promise<{ restarting: true }>) => {
+    const u = updater().u;
+    return {
+      ...u,
+      check: async () => ({ sha: "s", behind: 1, checkedAt: 1, canUpdate: true, reason: null }),
+      changes: async () => ({ commits: ["abc x"], paths: ["apps/web/src/x.ts"] }),
+      update,
+      restart: vi.fn(),
+    };
+  };
 
-  it("runs Update once when main is ahead and nothing blocks it, and records the SHA", async () => {
-    upstreamCommit("b.txt");
+  it("runs Update once when main is ahead on the page and nothing blocks it, and records the SHA", async () => {
+    upstreamPath("apps/web/src/b.txt");
     const a = auto();
     await expect(a.tick()).resolves.toBe("updated");
-    expect(a.calls.map((c) => c.cmd)).toEqual(expect.arrayContaining(UPDATE_CMDS));
+    expect(a.calls.map((c) => c.cmd)).toEqual(
+      expect.arrayContaining(UPDATE_CMDS.filter((c) => !c.startsWith("git pull"))),
+    );
     expect(pulls(a.calls)).toHaveLength(1);
-    expect(a.record).toHaveBeenCalledWith(`Updated to ${head()} (auto)`);
-    expect(a.restart).toHaveBeenCalledTimes(1);
+    expect(pulls(a.calls)[0]?.cmd).toBe(`git merge --ff-only ${head()}`);
+    expect(a.record).toHaveBeenCalledWith(`Updated to ${head()} (auto, web only)`);
+    expect(a.held).toHaveBeenLastCalledWith(null);
+  });
+
+  it("holds a range that touches hub code: nothing is pulled and one item is raised", async () => {
+    upstreamPath("apps/server/src/x.ts");
+    const a = auto();
+    await expect(a.tick()).resolves.toBe("waiting");
+    expect(pulls(a.calls)).toHaveLength(0);
+    expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+    expect(a.held).toHaveBeenCalledWith({
+      commits: [expect.stringContaining("apps/server/src/x.ts")],
+      paths: ["apps/server/src/x.ts"],
+    });
+    expect(a.record).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "apps/web/package.json",
+    "apps/web/vite.config.ts",
+    "package.json",
+    "pnpm-lock.yaml",
+    "roles/FLIGHT.md",
+    ".github/workflows/ci.yml",
+    "a.config.js",
+  ])("holds %s", async (path) => {
+    upstreamPath("apps/web/src/ok.ts");
+    upstreamPath(path);
+    const a = auto();
+    await expect(a.tick()).resolves.toBe("waiting");
+    expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: [path] }));
+    expect(pulls(a.calls)).toHaveLength(0);
+  });
+
+  it("applies the page and docs", async () => {
+    for (const p of [
+      "apps/web/src/a.ts",
+      "apps/web/public/b.svg",
+      "apps/web/index.html",
+      "docs/c.md",
+    ]) {
+      expect(autoUpdatePath(p), p).toBe(true);
+    }
+    for (const p of [
+      "apps/web/package.json",
+      "CLAUDE.md",
+      "apps/web/vite.config.ts",
+      "README.md",
+    ]) {
+      expect(autoUpdatePath(p), p).toBe(false);
+    }
+  });
+
+  it("update({ auto: true }) refuses a range that moved to hub code after the check", async () => {
+    upstreamPath("apps/web/src/ok.ts");
+    const a = auto();
+    await a.u.check(); // looked fine
+    upstreamPath("apps/server/src/x.ts"); // then main moved
+    const e = (await a.u.update({ auto: true }).catch((x: unknown) => x)) as UpdateError;
+    expect([e.status, e.message]).toEqual([409, HUB_CODE_NEEDS_PERSON]);
+    expect(e.held?.paths).toEqual(["apps/server/src/x.ts"]);
+    expect(pulls(a.calls)).toHaveLength(0);
+    expect(readFileSync(logPath, "utf8")).toContain("held for a person");
+  });
+
+  it("raises the item when update() holds a range the tick's own read did not", async () => {
+    upstreamPath("apps/web/src/ok.ts");
+    const u = updater().u;
+    const held = vi.fn();
+    const tick = createAutoUpdate({
+      enabled: true,
+      updater: {
+        check: u.check,
+        changes: u.changes,
+        restart: u.restart,
+        update: async (o) => {
+          upstreamPath("apps/server/src/x.ts");
+          return u.update(o);
+        },
+      },
+      held,
+      blocked: () => null,
+      locked: () => null,
+      headSha: async () => head(),
+      record: vi.fn(),
+    });
+    await expect(tick()).resolves.toBe("waiting");
+    expect(held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["apps/server/src/x.ts"] }));
+  });
+
+  it("a manual Update applies hub code and the page", async () => {
+    upstreamPath("apps/server/src/x.ts");
+    expect(await updater().u.update()).toEqual({ restarting: true });
+  });
+
+  it("clears the held item once main is current", async () => {
+    const a = auto();
+    await expect(a.tick()).resolves.toBe("current");
+    expect(a.held).toHaveBeenCalledWith(null);
+  });
+
+  it("the held text names the commits and the paths", () => {
+    const text = hubCodeHeldText({
+      commits: ["a1 one", "b2 two"],
+      paths: ["apps/server/src/x.ts", "package.json"],
+    });
+    expect(text).toContain("a1 one, b2 two");
+    expect(text).toContain("apps/server/src/x.ts, package.json");
   });
 
   it("does nothing when main has not moved", async () => {
@@ -1157,16 +1285,27 @@ describe("auto update", () => {
   });
 
   it("waits while a seat is mid-turn, then updates on a later check", async () => {
-    upstreamCommit("b.txt");
-    let busy: string | null = "GUIDO-1 is mid-turn";
-    const a = auto({}, updater({ crewRefusal: () => busy }));
-    await expect(a.tick()).resolves.toBe("waiting");
-    expect(pulls(a.calls)).toHaveLength(0);
-    expect(a.record).not.toHaveBeenCalled();
-    busy = null;
-    await expect(a.tick()).resolves.toBe("updated");
-    expect(pulls(a.calls)).toHaveLength(1);
-    expect(a.record).toHaveBeenCalledTimes(1);
+    let busy = true;
+    const u = restarting(async () => {
+      if (busy) throw new UpdateError(409, "GUIDO-1 is mid-turn");
+      return { restarting: true };
+    });
+    const record = vi.fn();
+    const tick = createAutoUpdate({
+      enabled: true,
+      updater: u,
+      held: vi.fn(),
+      blocked: () => null,
+      locked: () => null,
+      headSha: async () => head(),
+      record,
+    });
+    await expect(tick()).resolves.toBe("waiting");
+    expect(record).not.toHaveBeenCalled();
+    busy = false;
+    await expect(tick()).resolves.toBe("updated");
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(u.restart).toHaveBeenCalledTimes(1);
   });
 
   it("waits on a change outside apps/web/ and docs/ while a seat is mid-turn", async () => {
@@ -1183,7 +1322,7 @@ describe("auto update", () => {
   });
 
   it("waits while the test lock is held", async () => {
-    upstreamCommit("b.txt");
+    upstreamPath("apps/web/src/b.txt");
     let held = true;
     const a = auto({ locked: () => (held ? "the test lock is held" : null) });
     await expect(a.tick()).resolves.toBe("waiting");
@@ -1193,21 +1332,32 @@ describe("auto update", () => {
   });
 
   it("holds the restart while a turn that started during the build is in flight", async () => {
-    upstreamCommit("b.txt");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let busy: string | null = null;
     // update() sees an idle crew; a seat is mid-turn by the time the build is done
-    const a = auto({ blocked: () => busy });
-    busy = "GUIDO-1 is mid-turn";
-    await expect(a.tick()).resolves.toBe("updated");
-    expect(a.restart).not.toHaveBeenCalled();
-    expect(a.record).not.toHaveBeenCalled();
+    const u = restarting(async () => {
+      busy = "GUIDO-1 is mid-turn";
+      return { restarting: true };
+    });
+    const record = vi.fn();
+    const tick = createAutoUpdate({
+      enabled: true,
+      updater: u,
+      held: vi.fn(),
+      blocked: () => busy,
+      locked: () => null,
+      headSha: async () => head(),
+      record,
+    });
+    await expect(tick()).resolves.toBe("updated");
+    expect(u.restart).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(VERSION_CHECK_FLOOR_MS);
-    expect(a.restart).not.toHaveBeenCalled();
+    expect(u.restart).not.toHaveBeenCalled();
     busy = null;
     await vi.advanceTimersByTimeAsync(VERSION_CHECK_FLOOR_MS);
-    expect(a.restart).toHaveBeenCalledTimes(1);
-    expect(a.record).toHaveBeenCalledTimes(1);
+    expect(u.restart).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledTimes(1);
   });
 
   it("never runs when off", async () => {

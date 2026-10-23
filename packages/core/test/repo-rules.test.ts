@@ -5,7 +5,9 @@ import {
   DEFAULT_HARD_RULES,
   DEFAULT_REPO_RULES,
   dependsOn,
+  effectiveHardRules,
   eligibleToStart,
+  FLIGHT_FLOOR_PATHS,
   inLane,
   otherLaneText,
   type RepoRules,
@@ -43,7 +45,7 @@ describe("DEFAULT_REPO_RULES", () => {
     });
   });
 
-  it("holds exactly the sixteen hard-rule globs", () => {
+  it("holds exactly the nineteen hard-rule globs", () => {
     expect(DEFAULT_HARD_RULES).toEqual([
       "apps/server/src/guard/**",
       "apps/server/src/mcp/**",
@@ -56,12 +58,25 @@ describe("DEFAULT_REPO_RULES", () => {
       "packages/core/src/review.ts",
       "packages/core/src/repo-rules.ts",
       "packages/core/src/runtime.ts",
+      "apps/server/src/update.ts",
+      "apps/server/src/config.ts",
+      "apps/server/src/crew-apply.ts",
       "loops/**",
       "roles/**",
       "CLAUDE.md",
       ".github/**",
       "config.example.yaml",
     ]);
+  });
+
+  it("effectiveHardRules adds the defaults on a superuser repo only", () => {
+    const own = { hardRules: ["x/**"] };
+    expect(effectiveHardRules(own, "standard")).toEqual(["x/**"]);
+    expect(effectiveHardRules(own, "superuser")).toEqual(["x/**", ...DEFAULT_HARD_RULES]);
+    expect(effectiveHardRules({ hardRules: [] }, "superuser")).toEqual(DEFAULT_HARD_RULES);
+    // the floor's paths are hard-rule files by default, so a superuser repo always flags them
+    expect(FLIGHT_FLOOR_PATHS).toEqual(["CLAUDE.md", ".github/workflows/**"]);
+    expect(DEFAULT_HARD_RULES).toEqual(expect.arrayContaining(["CLAUDE.md", ".github/**"]));
   });
 
   it("cannot be mutated", () => {

@@ -304,6 +304,7 @@ async function add(
     commands: defaultSeatCommands(),
     protectedFiles: [],
     autonomy: "draft",
+    flightPowers: "standard",
   };
   let next: CcConfig;
   try {

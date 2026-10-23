@@ -19,6 +19,7 @@ import {
   waitsOnText,
   wrongAreaText,
 } from "./flight.ts";
+import type { FlightPowers } from "./guard.ts";
 import { hudColumnOf } from "./hud.ts";
 import { type LoopKind, pathInArea } from "./runtime.ts";
 import type { BoardItem } from "./types.ts";
@@ -82,12 +83,38 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
   "packages/core/src/review.ts",
   "packages/core/src/repo-rules.ts",
   "packages/core/src/runtime.ts",
+  "apps/server/src/update.ts",
+  "apps/server/src/config.ts",
+  "apps/server/src/crew-apply.ts",
   "loops/**",
   "roles/**",
   "CLAUDE.md",
   ".github/**",
   "config.example.yaml",
 ]) as string[];
+
+/**
+ * Paths whose change FLIGHT never clears on a `superuser` repo, whatever its `hard_rules_by`: the
+ * operator or the delegate does (floor 7). CLAUDE.md is held whole, a superset of its
+ * `## Mission Control` block.
+ */
+export const FLIGHT_FLOOR_PATHS: readonly string[] = Object.freeze([
+  "CLAUDE.md",
+  ".github/workflows/**",
+]);
+
+/**
+ * The hard-rule globs the engine flags PRs by. On a `superuser` repo a repo's own list can only add
+ * to `DEFAULT_HARD_RULES`, so a repo cannot narrow the floor away.
+ */
+export function effectiveHardRules(
+  rules: Pick<RepoRules, "hardRules">,
+  powers: FlightPowers,
+): string[] {
+  return powers === "superuser"
+    ? [...new Set([...rules.hardRules, ...DEFAULT_HARD_RULES])]
+    : rules.hardRules;
+}
 
 export const DEFAULT_REPO_RULES: RepoRules = freezeRules({
   pickFrom: ["Ready"],

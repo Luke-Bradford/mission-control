@@ -39,6 +39,7 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
+  MC_SUPERUSER_TOOLS,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -94,6 +95,7 @@ import {
   crewSeatGrants,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
+  flightPowersOf,
 } from "./config.ts";
 import {
   addRepo,
@@ -189,6 +191,8 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
   config: CcConfig;
+  /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
+  superuserTools?: readonly string[];
   gh?: GhRunner;
   knownSecrets?: McToolsDeps["knownSecrets"];
   store: Store;
@@ -809,8 +813,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             {
               mode: seatMode(who.seatId),
               repo: "dev",
+              flightPowers: flightPowersOf(config, seat.repoId),
               fullSuite: config.repos.find((r) => r.id === seat.repoId)?.fullSuite ?? [],
             },
+            deps.superuserTools ?? MC_SUPERUSER_TOOLS,
           );
           if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {

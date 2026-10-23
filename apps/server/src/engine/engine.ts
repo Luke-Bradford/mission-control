@@ -27,6 +27,7 @@ import {
   deletedRemoteText,
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
+  effectiveHardRules,
   fillLoopText,
   fixSentText,
   hardRulesBySettingKey,
@@ -77,7 +78,7 @@ import {
   wokenEventText,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
-import type { CcConfig, CrewSeatConfig } from "../config.ts";
+import { type CcConfig, type CrewSeatConfig, flightPowersOf } from "../config.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
@@ -1032,7 +1033,11 @@ export function createEngine(deps: EngineDeps): Engine {
       const rules = await rulesFor(run.repoId);
       if (rules !== null) {
         try {
-          const paths = await publisher.hardRuleTouches(run, pushed.sha, rules.hardRules);
+          const paths = await publisher.hardRuleTouches(
+            run,
+            pushed.sha,
+            effectiveHardRules(rules, flightPowersOf(config, run.repoId)),
+          );
           input.touches = { sha: pushed.sha, paths };
         } catch (e) {
           log(

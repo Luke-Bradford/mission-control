@@ -47,10 +47,23 @@ export interface GuardEvent {
   input: { command?: string; file_path?: string; run_in_background?: boolean };
 }
 
+/** What FLIGHT may do on a repo: `superuser` is set only in the user config, never by the repo. */
+export const FLIGHT_POWERS = ["standard", "superuser"] as const;
+export type FlightPowers = (typeof FLIGHT_POWERS)[number];
+
+/** FLIGHT's mc tools only a superuser repo's seats may call; the power tickets add them. */
+export const MC_SUPERUSER_TOOLS: readonly string[] = [];
+
+/** What a power-gated tool says when the repo is not `superuser`. */
+export const needsSuperuserText = (repo: string): string =>
+  `${repo} has flight_powers: standard; this needs flight_powers: superuser in config.yaml`;
+
 export interface GuardContext {
   mode: CrewMode;
   /** Only "dev" for now; repo permission levels (spec §8c) slot in here. */
   repo: "dev";
+  /** The repo's current `flight_powers`, read from the live config on each call. */
+  flightPowers: FlightPowers;
   fullSuite: readonly string[];
 }
 
@@ -1297,7 +1310,14 @@ const deny = (rule: GuardRule, what: string): GuardVerdict => ({
 });
 
 /** The verdict for one tool call. A deny anywhere in a command line beats a lock. */
-export function guardDecision(e: GuardEvent, ctx: GuardContext): GuardVerdict {
+export function guardDecision(
+  e: GuardEvent,
+  ctx: GuardContext,
+  superuserTools: readonly string[] = MC_SUPERUSER_TOOLS,
+): GuardVerdict {
+  if (superuserTools.includes(e.tool) && ctx.flightPowers !== "superuser") {
+    return deny("merge-push", `${e.tool} (needs flight_powers: superuser)`);
+  }
   if (ctx.mode === "read-only") {
     if ((READ_ONLY_BUILTINS as readonly string[]).includes(e.tool)) {
       return deny("read-only", e.tool);
