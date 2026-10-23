@@ -26,12 +26,14 @@ export function LoopStep({
   loop,
   hudState,
   wait,
+  elapsed,
   live,
   now,
 }: {
   loop: CrewLoop;
   hudState: HudState;
   wait: string | null;
+  elapsed?: number | null;
   live?: RunDigest["liveTool"];
   now?: number;
 }) {
@@ -43,6 +45,12 @@ export function LoopStep({
       <span className="ellip xs" title={loop.text}>
         {loopTemplate(loop)} › <b>{loopStepLabel(loop)}</b>
         {loopTryText(loop)}
+        {elapsed !== undefined && (
+          <>
+            {" "}
+            · <span className="num">{elapsed === null ? "—" : mss(elapsed)}</span> in this step
+          </>
+        )}
       </span>
       <span className="stepbar" title={loopPathTitle(loop)} aria-hidden="true">
         {marks.map((m, i) => (

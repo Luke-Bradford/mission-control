@@ -1,9 +1,11 @@
 import {
   type ChangedFiles,
+  type ConfigView,
   type ContextUsage,
   type CrewRow,
   cacheHitPct,
   type LimitRow,
+  type RunLoopView,
 } from "@mc/core";
 import { type ReactNode, useEffect, useRef } from "react";
 import { useTz } from "../clock.ts";
@@ -21,6 +23,7 @@ import { hub, RESOURCES, SEAT_CONTEXT_REFRESH_MS, useResource } from "../data.ts
 import { cost, dur, kTokens, mss, rel } from "../fmt.ts";
 import { Meter, meterLevel } from "../hud/Meter.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
+import { LoopStep } from "../overview/LoopStep.tsx";
 
 const DASH = "—";
 /** The mockup's `m:ss` reads badly past an hour (`160:48`); from there it is `2h 41m`. */
@@ -66,6 +69,8 @@ const compactionsText = (d: CrewRow["digest"]): string =>
 
 /** A crew seat's Context tile: the CLI's own breakdown (`GET /api/seats/:id/context`). */
 function SeatContext({ row }: { row: CrewRow }) {
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const codex = config?.accounts.find((a) => a.id === row.accountId)?.vendor === "codex";
   const ref = RESOURCES.seatContext(row.id);
   const usage = useResource<ContextUsage | null>(ref).data ?? null;
   const running = seatTurn(row) === "running";
@@ -80,20 +85,22 @@ function SeatContext({ row }: { row: CrewRow }) {
   }, [running, ref.path]);
   const tail = compactionsText(row.digest);
   const window = usage?.window ?? row.contextWindow;
-  if (!usage || window === null || window <= 0) {
-    const pct = contextPct(row);
+  if (codex || !usage || window === null || window <= 0) {
+    const pct =
+      usage && window !== null && window > 0 ? (100 * usage.total) / window : contextPct(row);
     return (
       <Tile label="Context">
         <span className="v num">
           {pct === null ? DASH : `${Math.round(pct)}%`}
-          {pct !== null && row.contextWindow !== null && (
-            <small> of {Math.round(row.contextWindow / 1000)}k</small>
-          )}
+          {pct !== null && window !== null && <small> of {Math.round(window / 1000)}k</small>}
         </span>
         <span className={`ctxbar${meterLevel(pct)}`}>
           {pct !== null && <i style={{ width: `${Math.min(100, pct)}%` }} />}
         </span>
-        <span className="d">{tail}</span>
+        <span className="d">
+          {codex && "Codex reports the total, not a breakdown. · "}
+          {tail}
+        </span>
       </Tile>
     );
   }
@@ -130,6 +137,13 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
   const elapsed = run ? runElapsed(run, now) : null;
   const tz = useTz();
   const running = run?.status === "running";
+  const loopView = useResource<RunLoopView>(
+    row.loop && run ? RESOURCES.runLoop(run.id) : null,
+  ).data;
+  const stepTry = loopView?.tries?.findLast((t) => t.step === row.loop?.phase);
+  const stepElapsed = stepTry
+    ? Math.max(0, (stepTry.endedAt ?? run?.endedAt ?? now) - stepTry.startedAt)
+    : null;
   /** The Now line's hover text: the ticket's title, else (no ticket, not running) the run's summary. */
   const nowTitle = row.ticket ? row.ticketTitle : running ? null : row.summary;
   const activity = seatActivity(row, now);
@@ -166,25 +180,29 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
             {activity}
           </span>
         )}
-        <span className="d">
-          {run && !running ? (
-            <>
-              last run #{run.seq} · took{" "}
-              <span className="num">{elapsed === null ? DASH : dur(elapsed)}</span> · ended{" "}
-              {run.endedAt !== null && tz ? rel(run.endedAt, now, tz) : DASH}
-            </>
-          ) : run ? (
-            <>
-              run #{run.seq} ·{" "}
-              <span className="num">
-                {elapsed === null ? DASH : elapsed < HOUR_MS ? mss(elapsed) : dur(elapsed)}
-              </span>{" "}
-              in this run
-            </>
-          ) : (
-            "No runs yet"
-          )}
-        </span>
+        {row.loop && run && run.endedAt === null ? (
+          <LoopStep loop={row.loop} hudState={row.hudState} wait={null} elapsed={stepElapsed} />
+        ) : (
+          <span className="d">
+            {run && !running ? (
+              <>
+                last run #{run.seq} · took{" "}
+                <span className="num">{elapsed === null ? DASH : dur(elapsed)}</span> · ended{" "}
+                {run.endedAt !== null && tz ? rel(run.endedAt, now, tz) : DASH}
+              </>
+            ) : run ? (
+              <>
+                run #{run.seq} ·{" "}
+                <span className="num">
+                  {elapsed === null ? DASH : elapsed < HOUR_MS ? mss(elapsed) : dur(elapsed)}
+                </span>{" "}
+                in this run
+              </>
+            ) : (
+              "No runs yet"
+            )}
+          </span>
+        )}
       </Tile>
       {row.kind === "crew" ? (
         <SeatContext key={row.id} row={row} />
