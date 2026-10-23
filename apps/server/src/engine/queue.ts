@@ -13,6 +13,8 @@
  * card, and every card would meet it, so it is retried. A seat whose takes keep failing that way
  * raises one note of its own, which clears when a take succeeds. A note holds no raw error text.
  */
+import { realpath } from "node:fs/promises";
+import { join } from "node:path";
 import {
   areaLabelsFor,
   areaLabelsOf,
@@ -32,7 +34,8 @@ import {
 } from "@mc/core";
 import type { CardNow } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
-import { CheckoutError } from "../runtime/checkouts.ts";
+import { CheckoutError, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
+import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { wakeDueAsideRun } from "./aside.ts";
@@ -73,6 +76,8 @@ export interface TakeDeps {
   enabled: boolean;
   now: () => number;
   log?: (line: string) => void;
+  /** Runs git in the crew clone (default: `crewGit` there, with the slow-git timeout). */
+  git?: (args: string[]) => Promise<string>;
   /** Each seat's consecutive counted transient take failures since its last successful take; one map for the hub's life. */
   transientTakes: Map<string, number>;
   /** Called when a take-failed or take-stuck note is raised or cleared. */
@@ -80,6 +85,31 @@ export interface TakeDeps {
 }
 
 const refOf = (repoId: RepoId, issue: number) => `${repoId}#${issue}`;
+
+/** The branches on origin named for the ticket (`feature/<issue>` or `feature/<issue>-*`). */
+async function ticketHeads(deps: TakeDeps, checkout: string, issue: number): Promise<string[]> {
+  const git =
+    deps.git ??
+    (async (args: string[]) => {
+      const common = await realpath(join(checkout, ".git"));
+      return crewGit(checkout, args, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+    });
+  const base = `feature/${issue}`;
+  const out = await git([
+    "ls-remote",
+    "--heads",
+    "origin",
+    `refs/heads/${base}`,
+    `refs/heads/${base}-*`,
+  ]);
+  const prefix = "refs/heads/";
+  return out
+    .split("\n")
+    .map((l) => l.split("\t")[1]?.trim() ?? "")
+    .filter((r) => r.startsWith(prefix))
+    .map((r) => r.slice(prefix.length))
+    .filter((b) => b === base || b.startsWith(`${base}-`));
+}
 
 /** Priorities in the order they are picked; a card with none, or any other, comes after. */
 const priorityRank = (p: string | null): number => {
@@ -338,6 +368,22 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (latest === null || hudColumnOf(latest) !== "Ready" || claimedByOther(latest, deps.login)) {
     store.untake(seatId, repoId, issue);
     deps.log?.(`${seatId}: ${ref} is no longer Ready and unclaimed on GitHub`);
+    return;
+  }
+  // The API can be behind (a degraded GitHub served another hub's claim as still Ready); a branch
+  // on origin is not. One that no run of this hub made belongs to another hub's run of the ticket.
+  let heads: string[];
+  try {
+    heads = await ticketHeads(deps, found.session.checkout, issue);
+  } catch (e) {
+    store.untake(seatId, repoId, issue);
+    deps.log?.(`${seatId}: could not list origin's branches for ${ref}: ${takeReason(e)}`);
+    return;
+  }
+  const foreign = heads.find((b) => !store.hasRunOnBranch(repoId, b));
+  if (foreign !== undefined) {
+    store.dropQueued(seatId, repoId, issue);
+    deps.log?.(`${seatId}: ${ref} already has a branch on origin (${foreign}); not started`);
     return;
   }
   try {

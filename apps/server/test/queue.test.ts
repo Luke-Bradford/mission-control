@@ -66,6 +66,9 @@ const ME = "me";
 /** What the fresh read of a card finds; by default the stored card as it is. */
 let fresh: (issue: number) => CardNow | null;
 let readFails: boolean;
+/** What `git ls-remote` on origin answers, or the error it throws; the git calls made. */
+let remote: string | Error;
+let gitCalls: string[][];
 let myLogin: string | null;
 
 function makeConfig(autonomy: "merge" | "draft" = "merge"): CcConfig {
@@ -155,6 +158,11 @@ const takeDeps = (): TakeDeps => ({
   now: () => NOW,
   log: (l) => logs.push(l),
   onNotes: () => void noteCalls++,
+  git: async (args) => {
+    gitCalls.push(args);
+    if (remote instanceof Error) throw remote;
+    return remote;
+  },
   supervisor: {
     async startRun(seatId, issue, opts) {
       const fail = startFails(issue);
@@ -211,6 +219,8 @@ beforeEach(() => {
   logs = [];
   transientTakes = new Map();
   readFails = false;
+  remote = "";
+  gitCalls = [];
   myLogin = ME;
   fresh = (issue) => {
     const c = store.board(REPO).find((x) => x.issueNumber === issue);
@@ -507,6 +517,60 @@ describe("takeNext", () => {
     await take();
     expect(started).toEqual([]);
     expect(store.queue(SERVER).map((q) => q.takenAt)).toEqual([null]);
+  });
+
+  it("starts nothing, drops the row and logs when origin has the ticket's branch from another run", async () => {
+    await queued(card(59));
+    remote = "abc123\trefs/heads/feature/59-x\n";
+    await take();
+    expect(gitCalls).toEqual([
+      ["ls-remote", "--heads", "origin", "refs/heads/feature/59", "refs/heads/feature/59-*"],
+    ]);
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([]);
+    expect(logs).toContain(
+      `${SERVER}: ${REPO}#59 already has a branch on origin (feature/59-x); not started`,
+    );
+  });
+
+  it("ignores a head that only ends like the ticket's branch", async () => {
+    await queued(card(59));
+    remote = "abc123\trefs/heads/other/feature/59\n";
+    await take();
+    expect(started).toHaveLength(1);
+  });
+
+  it("starts when origin has no branch for the ticket", async () => {
+    await queued(card(59));
+    await take();
+    expect(started).toHaveLength(1);
+    expect(issues(SERVER)).toEqual([]);
+  });
+
+  it("starts when the branch on origin is from this hub's own earlier run", async () => {
+    await queued(card(59));
+    store.upsertRun(
+      run({
+        id: "guido-1:1",
+        agentId: SERVER,
+        branch: "feature/59-x",
+        ticket: `${REPO}#59`,
+        endedAt: NOW - 1,
+        status: "ok",
+      }),
+    );
+    remote = "abc123\trefs/heads/feature/59-x\n";
+    await take();
+    expect(started).toHaveLength(1);
+  });
+
+  it("untakes the row and logs when origin cannot be listed", async () => {
+    await queued(card(59));
+    remote = new Error("could not read from remote");
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER).map((q) => q.takenAt)).toEqual([null]);
+    expect(logs.some((l) => l.includes("could not list origin's branches"))).toBe(true);
   });
 
   it("starts a card the fresh read finds Ready and assigned to the hub", async () => {
