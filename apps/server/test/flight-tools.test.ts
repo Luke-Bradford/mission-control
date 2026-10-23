@@ -2032,6 +2032,7 @@ describe("flight_state", () => {
       atStop: false,
     };
     expect(await state()).toEqual({
+      discussions: [],
       time: "13:00",
       repo: "mc",
       lane: null,
@@ -3628,5 +3629,28 @@ describe("draft_reply", () => {
     ).toBe(true);
     expect(store.drafts()).toEqual([]);
     expect(ghCalls).toEqual([]);
+  });
+});
+
+describe("correlated discussion replies", () => {
+  it("returns tagged replies only to their original item, including late replies", async () => {
+    const a = store.ensureDiscussion("note:a", "v1");
+    const b = store.ensureDiscussion("note:b", "v1");
+    store.askDiscussion(a.id, "ask-a", "Why?", NOW);
+    store.askDiscussion(b.id, "ask-b", "Which?", NOW);
+    const args = {
+      about: "Item discussion",
+      decision: "Checked the code.",
+      basis: "Code",
+      discussion: { id: a.id, replyTo: "ask-a", messageId: "reply-a" },
+    };
+    expect((await call("log_decision", args)).isError).toBeUndefined();
+    expect(store.discussion("note:a", a.id)?.messages.at(-1)?.text).toBe(args.decision);
+    expect(store.discussion("note:b", b.id)?.messages).toHaveLength(1);
+    expect(
+      (await call("log_decision", { ...args, discussion: { ...args.discussion, id: b.id } }))
+        .isError,
+    ).toBe(true);
+    expect(decisions()).toEqual([]);
   });
 });

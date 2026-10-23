@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import type { PersonMessage, PersonSource } from "@mc/core";
+import type { ItemChatMessage, ItemDiscussion, PersonMessage, PersonSource } from "@mc/core";
 import {
   type AccountId,
   type AgentId,
@@ -239,6 +239,10 @@ CREATE TABLE IF NOT EXISTS keeper_cursors (
 CREATE TABLE IF NOT EXISTS briefs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, context TEXT NOT NULL,
   recommendation TEXT NOT NULL, options TEXT NOT NULL, basis TEXT NOT NULL, at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS item_discussions (
+  id TEXT PRIMARY KEY, item_key TEXT NOT NULL, version TEXT NOT NULL, messages TEXT NOT NULL, sent TEXT NOT NULL DEFAULT '[]',
+  UNIQUE(item_key, version)
 );
 CREATE INDEX IF NOT EXISTS briefs_key ON briefs(key);
 CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
@@ -3031,6 +3035,143 @@ export class Store {
       updatedAt: r.updated_at as number,
       updatedBy: r.updated_by as string,
     }));
+  }
+
+  /** A stable, bounded thread for one exact version of an item. */
+  ensureDiscussion(
+    itemKey: string,
+    version: string,
+    opening?: { text: string; at: number },
+  ): ItemDiscussion {
+    const id = randomUUID();
+    const messages: ItemChatMessage[] = opening
+      ? [
+          {
+            id: `${id}:opening`,
+            itemKey,
+            correlationId: id,
+            role: "flight",
+            text: opening.text,
+            at: opening.at,
+          },
+        ]
+      : [];
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO item_discussions (id, item_key, version, messages) VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, itemKey, version, JSON.stringify(messages));
+    const row = this.db
+      .prepare("SELECT id FROM item_discussions WHERE item_key = ? AND version = ?")
+      .get(itemKey, version) as Row;
+    return this.discussion(itemKey, row.id as string) as ItemDiscussion;
+  }
+
+  discussion(itemKey: string, id: string): ItemDiscussion | null {
+    const row = this.db
+      .prepare("SELECT * FROM item_discussions WHERE item_key = ? AND id = ?")
+      .get(itemKey, id) as Row | undefined;
+    return row
+      ? {
+          id,
+          itemKey,
+          version: row.version as string,
+          messages: JSON.parse(row.messages as string) as ItemChatMessage[],
+        }
+      : null;
+  }
+
+  private discussionById(id: string): ItemDiscussion | null {
+    const row = this.db.prepare("SELECT item_key FROM item_discussions WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row ? this.discussion(row.item_key as string, id) : null;
+  }
+
+  private saveDiscussion(thread: ItemDiscussion): void {
+    this.db
+      .prepare("UPDATE item_discussions SET messages = ? WHERE id = ?")
+      .run(JSON.stringify(thread.messages.slice(-100)), thread.id);
+  }
+
+  askDiscussion(id: string, messageId: string, text: string, at: number): boolean {
+    const thread = this.discussionById(id);
+    if (!thread) throw new Error("Unknown discussion.");
+    const prior = thread.messages.find((m) => m.id === messageId);
+    if (prior) {
+      if (prior.role !== "operator" || prior.text !== text)
+        throw new Error("Message id already used.");
+      return false;
+    }
+    thread.messages.push({
+      id: messageId,
+      itemKey: thread.itemKey,
+      correlationId: id,
+      role: "operator",
+      text,
+      at,
+    });
+    this.saveDiscussion(thread);
+    return true;
+  }
+
+  replyDiscussion(
+    id: string,
+    replyTo: string,
+    messageId: string,
+    text: string,
+    at: number,
+  ): boolean {
+    const thread = this.discussionById(id);
+    if (!thread?.messages.some((m) => m.id === replyTo && m.role === "operator")) return false;
+    const prior = thread.messages.find((m) => m.id === messageId || m.replyTo === replyTo);
+    if (prior) return prior.id === messageId && prior.replyTo === replyTo && prior.text === text;
+    thread.messages.push({
+      id: messageId,
+      itemKey: thread.itemKey,
+      correlationId: id,
+      replyTo,
+      role: "flight",
+      text,
+      at,
+    });
+    this.saveDiscussion(thread);
+    return true;
+  }
+
+  discussionSent(id: string, messageId: string): boolean {
+    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row ? (JSON.parse(row.sent as string) as string[]).includes(messageId) : false;
+  }
+
+  markDiscussionSent(id: string, messageId: string): void {
+    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as Row;
+    const sent = JSON.parse(row.sent as string) as string[];
+    this.db
+      .prepare("UPDATE item_discussions SET sent = ? WHERE id = ?")
+      .run(JSON.stringify([...new Set([...sent, messageId])].slice(-100)), id);
+  }
+
+  pendingDiscussions(): ItemDiscussion[] {
+    const rows = this.db
+      .prepare(`
+        SELECT d.item_key, d.id,
+          (SELECT MIN(json_extract(q.value, '$.at'))
+           FROM json_each(d.messages) AS q
+           WHERE json_extract(q.value, '$.role') = 'operator'
+             AND NOT EXISTS (
+               SELECT 1 FROM json_each(d.messages) AS r
+               WHERE json_extract(r.value, '$.replyTo') = json_extract(q.value, '$.id')
+             )) AS waiting_since
+        FROM item_discussions AS d
+        WHERE waiting_since IS NOT NULL
+        ORDER BY waiting_since ASC, d.rowid ASC
+        LIMIT 100
+      `)
+      .all() as Row[];
+    return rows.map((r) => this.discussion(r.item_key as string, r.id as string) as ItemDiscussion);
   }
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */

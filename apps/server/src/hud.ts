@@ -3,6 +3,7 @@
  * so the scheduler can build attention items without importing the API (api.ts imports the
  * scheduler).
  */
+import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import {
   type AgentView,
@@ -715,6 +716,21 @@ export function attentionItems(
       const brief = briefs.get(i.key);
       return { ...i, ...(brief === undefined ? {} : { brief }), acked: acks.has(i.key) };
     });
+}
+
+/** Identity of the ask and brief, independent of refresh time and read state. */
+export function attentionVersion(item: AttentionItem): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        key: item.key,
+        kind: item.kind,
+        text: item.text,
+        at: item.at,
+        brief: item.brief,
+      }),
+    )
+    .digest("hex");
 }
 
 /**
