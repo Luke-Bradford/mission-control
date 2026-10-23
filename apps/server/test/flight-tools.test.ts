@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  BRIEF_CLEARED_DECISION,
   BRIEFED_TEXT,
+  briefClearedText,
+  briefSavedDecision,
+  briefSavedText,
+  briefTooLongText,
   CI_LOG_EMPTY,
   capText,
   ciLogText,
@@ -14,6 +19,11 @@ import {
   claimedText,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
+  FLIGHT_BRIEF_EDITS_PER_HOUR,
+  FLIGHT_BRIEF_INPUT_MAX,
+  FLIGHT_BRIEF_SECTION_MAX,
+  FLIGHT_BRIEF_SECTIONS,
+  FLIGHT_BRIEF_TITLES,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
   FLIGHT_GH_READS_PER_HOUR,
@@ -450,6 +460,7 @@ describe("tool list", () => {
       "read_pr",
       "read_ci_log",
       "list_tickets",
+      "update_brief",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -2062,6 +2073,12 @@ describe("flight_state", () => {
       holds: [],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
+      brief: FLIGHT_BRIEF_SECTIONS.map((section) => ({
+        section,
+        title: FLIGHT_BRIEF_TITLES[section],
+        text: "",
+        ageMin: null,
+      })),
     });
   });
 
@@ -2905,6 +2922,107 @@ describe("brief_item", () => {
       refused(MC_FLIGHT_ONLY),
     );
     expect(store.briefs().size).toBe(0);
+  });
+});
+
+describe("update_brief", () => {
+  const GOALS = "Goals and priorities";
+  const save = (section: string, text: string, c = ctx()) =>
+    call("update_brief", { section, text, basis: "a wake" }, c);
+  const briefDecisions = () => decisions().filter((d) => d.kind === "brief");
+
+  it("replaces one section and leaves the others", async () => {
+    await save("goals", "Ship the brief.");
+    await save("risks", "Flaky api test.");
+    nowMs = NOW + 1000;
+    expect(await save("goals", "Ship the merge step.")).toEqual({
+      text: briefSavedText(GOALS, 20),
+    });
+    expect(store.flightBrief("s1")).toEqual([
+      {
+        sessionId: "s1",
+        section: "goals",
+        text: "Ship the merge step.",
+        updatedAt: NOW + 1000,
+        updatedBy: "flight-1",
+      },
+      {
+        sessionId: "s1",
+        section: "risks",
+        text: "Flaky api test.",
+        updatedAt: NOW,
+        updatedBy: "flight-1",
+      },
+    ]);
+    expect(briefDecisions()).toHaveLength(3);
+    expect(briefDecisions()[0]).toMatchObject({
+      about: "Brief: Goals and priorities",
+      decision: briefSavedDecision(20),
+    });
+    expect(seen).toContain("flight");
+    // the log keeps the size, not the text; flight_state's recent leaves brief edits out
+    expect(briefDecisions().map((d) => d.decision)).not.toContain("Ship the merge step.");
+    const state = JSON.parse((await call("flight_state", {}, ctx())).text) as {
+      recent: { kind: string }[];
+    };
+    expect(state.recent.filter((d) => d.kind === "brief")).toEqual([]);
+  });
+
+  it("clears a section with an empty text", async () => {
+    await save("goals", "x");
+    expect(await save("goals", "")).toEqual({ text: briefClearedText(GOALS) });
+    expect(store.flightBrief("s1")[0]?.text).toBe("");
+    expect(briefDecisions()[0]?.decision).toBe(BRIEF_CLEARED_DECISION);
+  });
+
+  it("holds the 4000-character cap", async () => {
+    const full = "x".repeat(FLIGHT_BRIEF_SECTION_MAX);
+    expect(await save("goals", full)).toEqual({ text: briefSavedText(GOALS, 4000) });
+    expect(await save("goals", "y".repeat(FLIGHT_BRIEF_SECTION_MAX + 1))).toEqual(
+      refused(briefTooLongText(GOALS, 4001)),
+    );
+    expect(store.flightBrief("s1")[0]?.text).toBe(full);
+    expect(briefDecisions()).toHaveLength(1);
+    const r = await save("goals", "z".repeat(FLIGHT_BRIEF_INPUT_MAX + 1));
+    expect(r).toMatchObject({ isError: true });
+    expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+  });
+
+  it("refuses an unknown section and a non-FLIGHT seat", async () => {
+    const r = await save("notes", "x");
+    expect(r.isError).toBe(true);
+    expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+    live("guido-1", "r-guido");
+    expect(await save("goals", "x", ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(store.flightBrief("s1")).toEqual([]);
+    expect(briefDecisions()).toEqual([]);
+  });
+
+  it("allows 30 edits an hour", async () => {
+    for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++) {
+      expect(await save("goals", `v${i}`)).not.toHaveProperty("isError");
+    }
+    expect(await save("goals", "one more")).toEqual(
+      refused(capText("updated your brief", FLIGHT_BRIEF_EDITS_PER_HOUR)),
+    );
+    nowMs = NOW + 61 * 60_000;
+    expect(await save("goals", "later")).not.toHaveProperty("isError");
+  });
+
+  it("is carried by flight_state", async () => {
+    await save("goals", "G");
+    nowMs = NOW + 5 * 60_000;
+    const s = JSON.parse((await call("flight_state", {})).text) as {
+      brief: { section: string; title: string; text: string; ageMin: number | null }[];
+    };
+    expect(s.brief).toHaveLength(9);
+    expect(s.brief[0]).toEqual({
+      section: "goals",
+      title: GOALS,
+      text: "G",
+      ageMin: 5,
+    });
+    expect(s.brief[8]).toMatchObject({ text: "", ageMin: null });
   });
 });
 
