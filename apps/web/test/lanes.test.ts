@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ALL_LANE, lanesFor, MINE_LANE, resolveLane } from "../src/board/lanes.ts";
-import { SESSION_ALL } from "../src/shell/session.ts";
 import { boardItem, REPOS } from "./fixtures.ts";
 
 describe("lanesFor", () => {
   it("All mine matches the configured assignee and has a GitHub query for the same repos", () => {
-    const mine = lanesFor(REPOS, SESSION_ALL, "pilot").find((l) => l.name === "All mine");
+    const mine = lanesFor(REPOS, "pilot").find((l) => l.name === "All mine");
     expect(mine).toBeDefined();
     expect(mine?.match(boardItem({ assignees: ["other", "PILOT"] }))).toBe(true);
     expect(mine?.match(boardItem({ assignees: ["other"] }))).toBe(false);
@@ -17,14 +16,14 @@ describe("lanesFor", () => {
     expect(new URL(mine?.url ?? "").searchParams.get("q")).toBe(mine?.query);
   });
   it("offers no All mine lane until the operator is known", () => {
-    const lanes = lanesFor(REPOS, SESSION_ALL, null);
+    const lanes = lanesFor(REPOS, null);
     expect(lanes.map((l) => l.id)).toEqual([ALL_LANE, "shop-app", "site-builder"]);
     expect(lanesFor(REPOS).map((l) => l.id)).toEqual([ALL_LANE, "shop-app", "site-builder"]);
     expect(resolveLane(lanes, null, MINE_LANE).id).toBe(ALL_LANE);
     expect(resolveLane(lanes, "shop-app", MINE_LANE, true).id).toBe(ALL_LANE);
   });
   it("All repos and All mine first, then one lane per repo with its GitHub query and project URL", () => {
-    const lanes = lanesFor(REPOS, SESSION_ALL, "pilot");
+    const lanes = lanesFor(REPOS, "pilot");
     expect(lanes.map((l) => [l.id, l.name])).toEqual([
       [ALL_LANE, "All repos"],
       [MINE_LANE, "All mine"],
@@ -77,20 +76,23 @@ describe("resolveLane on a ticket route", () => {
   });
 });
 
-describe("lanesFor under a session", () => {
-  it("SESSION_ALL offers every lane", () => {
-    expect(lanesFor(REPOS, SESSION_ALL, "pilot").map((l) => l.id)).toEqual([
+describe("session and lane independence", () => {
+  it("a single repo still offers the All repos lane", () => {
+    expect(lanesFor(REPOS.slice(0, 1)).map((l) => l.id)).toEqual([ALL_LANE, "shop-app"]);
+  });
+
+  it("a known login offers every lane", () => {
+    expect(lanesFor(REPOS, "pilot").map((l) => l.id)).toEqual([
       ALL_LANE,
       MINE_LANE,
       "shop-app",
       "site-builder",
     ]);
   });
-  it("a session offers only that repo's lane, and every route and stored lane resolves to it", () => {
-    const lanes = lanesFor(REPOS, "shop-app");
-    expect(lanes.map((l) => l.id)).toEqual(["shop-app"]);
-    expect(resolveLane(lanes, "site-builder", ALL_LANE, false).id).toBe("shop-app");
-    expect(resolveLane(lanes, "site-builder", null, true).id).toBe("shop-app");
-    expect(resolveLane(lanes, null, "gone", false).id).toBe("shop-app");
+
+  it("a session id does not name a repo lane", () => {
+    const lanes = lanesFor(REPOS);
+    expect(resolveLane(lanes, "s1", null).id).toBe(ALL_LANE);
+    expect(resolveLane(lanes, "s1", "shop-app").id).toBe("shop-app");
   });
 });

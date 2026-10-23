@@ -1,8 +1,11 @@
 /**
- * The header's session filter: `all`, or one repo id. A session is a repo until the engine creates
- * real ones (spec §8a.1). It filters Overview agent and Activity rows, Board cards, the Agent
+ * The header's session filter: `all`, or one crew session id.
+ * It filters Overview agent and Activity rows, Board cards, the Agent
  * picker, j/k, Comms threads, and Setup's Sessions panels and Loops rows (catalogue §1.1 item 2).
  */
+import type { ConfigView, Crew, CrewRow } from "@mc/core";
+import { useMemo } from "react";
+import { RESOURCES, useResource } from "../data.ts";
 import { store, useStore } from "./store.ts";
 
 export const SESSION_ALL = "all";
@@ -16,7 +19,52 @@ export function useSession(): [string, (s: string) => void] {
   return [useStore(session), setSession];
 }
 
-/** Whether something in `repoId` is in view under the filter. */
-export const inSession = (s: string, repoId: string): boolean => s === SESSION_ALL || s === repoId;
+/** Whether an id is in view under the filter. */
+export const inSession = (s: string, id: string | null): boolean => s === SESSION_ALL || s === id;
+
+/** Config includes empty sessions; crew can still name a session while config catches up. */
+export function useSessions(config?: ConfigView) {
+  const loaded = useResource<ConfigView>(RESOURCES.config).data;
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const configured = config ?? loaded;
+  return useMemo(() => {
+    const sessions = new Map(
+      (configured?.crew?.sessions ?? []).map((s) => [s.id, { id: s.id, repoId: s.repoId }]),
+    );
+    for (const row of crew?.rows ?? []) {
+      if (row.sessionId !== null && !sessions.has(row.sessionId))
+        sessions.set(row.sessionId, { id: row.sessionId, repoId: row.repoId });
+    }
+    return [...sessions.values()];
+  }, [configured, crew]);
+}
+
+/** Observed loops have no crew session and follow its repo instead. */
+export function inCrewSession(
+  session: string,
+  row: Pick<CrewRow, "sessionId" | "repoId">,
+  repo: string | null = session,
+): boolean {
+  return row.sessionId === null
+    ? repo !== null && inSession(repo, row.repoId)
+    : inSession(session, row.sessionId);
+}
+
+/** Repo-only data follows the chosen session's repo; agents follow its session id. */
+export function useSessionScope(config?: ConfigView) {
+  const [session] = useSession();
+  const sessions = useSessions(config);
+  // Only the explicit all option spans repos; an unknown/removed session has no repo.
+  const repo =
+    session === SESSION_ALL
+      ? SESSION_ALL
+      : (sessions.find((s) => s.id === session)?.repoId ?? null);
+  return {
+    session,
+    repo,
+    inView: (row: Pick<CrewRow, "sessionId" | "repoId">) => inCrewSession(session, row, repo),
+    inRepo: (id: string) => repo !== null && inSession(repo, id),
+  };
+}
 
 export const resetSession = (): void => session.set(SESSION_ALL);
