@@ -228,8 +228,8 @@ describe("Agents panel", () => {
     expect(flight.getAttribute("role")).toBeNull();
     expect(flight.hasAttribute("tabindex")).toBe(false);
     const btn = within(flight).getByRole("button", { name: "FLIGHT, open the dock" });
-    // the accessible name starts with the visible text (WCAG 2.5.3)
-    expect(btn.textContent).toBe("FLIGHT");
+    // the accessible name starts with the call sign, the visible text's first words (WCAG 2.5.3)
+    expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
   it("subtitle counts the working agents and says FLIGHT is not counted; no Add agent", async () => {
