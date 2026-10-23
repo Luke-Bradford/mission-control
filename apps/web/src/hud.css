@@ -1342,6 +1342,17 @@ main > section {
   display: grid;
   gap: 8px;
 }
+.lock.hot {
+  border-color: var(--warn-mark);
+  background: var(--warn-soft);
+}
+.lockq {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--fs-s);
+}
 .quotarow {
   display: grid;
   grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 1fr);

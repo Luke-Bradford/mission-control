@@ -12,6 +12,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
+import { Dock } from "../src/shell/Dock.tsx";
 import { setFlightUnread, toggleDock, useDock, useItem } from "../src/shell/overlays.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
@@ -276,7 +277,7 @@ describe("Needs you", () => {
     const byText = (t: string) => rows.find((r) => r.textContent?.includes(t)) as HTMLElement;
     fireEvent.click(within(byText("Bash")).getByRole("button", { name: "Discuss" }));
     expect(screen.getByTestId("item").textContent).toBe("stall:shop-app-ta:r-12");
-    fireEvent.click(within(byText("Which port?")).getByRole("button", { name: "Read the brief" }));
+    fireEvent.click(within(byText("Which port?")).getByRole("button", { name: "Answer" }));
     expect(screen.getByTestId("item").textContent).toBe("ask:7");
   });
 
@@ -652,7 +653,7 @@ describe("Threads and conversation", () => {
     stubMessages(MESSAGES);
     render(<Comms item={null} />);
     expect((await screen.findAllByText(FLIGHT_NO_SEAT)).length).toBe(1); // the thread row
-    expect(screen.getByText("FLIGHT's chat is in the dock.")).toBeTruthy();
+    expect(document.querySelector("#chatP #chatMsgs")).toBeNull(); // no seat: no chat
     const list = document.querySelector("#chanList") as HTMLElement;
     fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
     const msgs = await waitFor(() => {
@@ -767,13 +768,295 @@ describe("Threads fit and open", () => {
 });
 
 describe("FLIGHT thread and the dock", () => {
-  it("says the chat is in the dock while it is visible, and repeats the placeholder when it is not", async () => {
+  const seat = { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true };
+  const ASK = item({ key: "esc:a#1", brief: brief(), text: "first ask" });
+  const stubChat = (post: (b: unknown) => void = () => {}) =>
+    stubFetch({
+      "/api/attention": [ASK],
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat, decisions: [] },
+      "/api/agents/flight-1/stream": {
+        runId: "f-1",
+        events: [{ id: "e1", kind: "msg", text: "Hello from FLIGHT", at: NOW - MIN }],
+        truncated: false,
+        lastOutputAt: null,
+        reason: null,
+      },
+      "POST /api/seats/flight-1/message": (init: RequestInit | undefined) => {
+        post(JSON.parse(String(init?.body)));
+        return { status: 200, body: { ok: true } };
+      },
+    });
+
+  it("shows FLIGHT's conversation in #chatP whether or not the dock is shown, with unique ids", async () => {
+    stubChat();
+    render(
+      <>
+        <Dock />
+        <Comms item={null} />
+      </>,
+    );
+    act(() => toggleDock(true));
+    const chat = document.querySelector("#chatP") as HTMLElement;
+    await within(chat).findByText("Hello from FLIGHT");
+    expect(within(chat).getByText("Waiting on you · 1")).toBeTruthy();
+    expect(within(chat).getByText("first ask")).toBeTruthy();
+    expect(chat.querySelector("#chatMsgs")).toBeTruthy();
+    expect(chat.querySelector("#chatInput")).toBeTruthy();
+    expect(document.querySelectorAll("#dockMsgs")).toHaveLength(1);
+    expect(document.querySelectorAll("#chatMsgs")).toHaveLength(1);
+    expect(chat.querySelector("#dockMsgs")).toBeNull();
+    act(() => toggleDock(false));
+    expect(chat.querySelector("#chatMsgs")).toBeTruthy();
+  });
+
+  it("opens a waiting ask from its Open button", async () => {
+    stubChat();
+    render(
+      <>
+        <Probe />
+        <Comms item={null} />
+      </>,
+    );
+    const chat = document.querySelector("#chatP") as HTMLElement;
+    const ask = (await within(chat).findByText("first ask")).closest(".dask") as HTMLElement;
+    fireEvent.click(within(ask).getByRole("button", { name: "Open" }));
+    expect(screen.getByTestId("item").textContent).toBe("esc:a#1");
+  });
+
+  it("posts the message to FLIGHT's seat", async () => {
+    const post = vi.fn();
+    stubChat(post);
+    render(<Comms item={null} />);
+    const input = (await waitFor(() => {
+      const el = document.querySelector<HTMLInputElement>("#chatInput");
+      expect(el?.disabled).toBe(false);
+      return el;
+    })) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Reprioritise the board" } });
+    fireEvent.submit(document.querySelector("#chatForm") as HTMLElement);
+    await waitFor(() => expect(post).toHaveBeenCalledWith({ text: "Reprioritise the board" }));
+  });
+
+  it("says no seat is configured when there is none", async () => {
     stub();
     render(<Comms item={null} />);
-    expect(await screen.findByText("FLIGHT's chat is in the dock.")).toBeTruthy();
-    act(() => toggleDock(false));
-    await waitFor(() => expect(screen.queryByText("FLIGHT's chat is in the dock.")).toBeNull());
-    await waitFor(() => expect(screen.getAllByText(FLIGHT_NO_SEAT).length).toBe(2));
+    const chat = document.querySelector("#chatP") as HTMLElement;
+    await waitFor(() => expect(within(chat).getByText(FLIGHT_NO_SEAT)).toBeTruthy());
+    expect(document.querySelector("#chatMsgs")).toBeNull();
+  });
+});
+
+describe("An agent's thread: the message box", () => {
+  const stubThread = (rows: unknown[], post: (b: unknown) => void = () => {}) =>
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/activity": [],
+      "POST /api/seats/guido-1/message": (init: RequestInit | undefined) => {
+        post(JSON.parse(String(init?.body)));
+        return { status: 200, body: { ok: true } };
+      },
+    });
+  const openThread = async (name: RegExp) => {
+    const list = document.querySelector("#chanList") as HTMLElement;
+    fireEvent.click(await within(list).findByRole("button", { name }));
+  };
+
+  it("says a running seat is reached mid-turn", async () => {
+    stubThread([seatRow({ hudState: "running" })]);
+    render(<Comms item={null} />);
+    await openThread(/^guido-1/);
+    const input = await screen.findByPlaceholderText("Message GUIDO-1 (reaches it mid-turn)…");
+    expect(input).toBeTruthy();
+  });
+
+  it("says an idle seat's message is queued, and posts it to the seat", async () => {
+    const post = vi.fn();
+    stubThread([seatRow({ hudState: "idle" })], post);
+    render(<Comms item={null} />);
+    await openThread(/^guido-1/);
+    const input = await screen.findByPlaceholderText(
+      "Message GUIDO-1 (queued until its next turn)…",
+    );
+    fireEvent.change(input, { target: { value: "Use the cache" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith({ text: "Use the cache" }));
+  });
+
+  it("gives an observed loop's thread no box", async () => {
+    stubThread([crewRow()]);
+    render(<Comms item={null} />);
+    await openThread(/^shop-app-ta/);
+    await waitFor(() => expect(document.querySelector("#chatP #convo, #chatP .note")).toBeTruthy());
+    expect(document.querySelector("#chatP form")).toBeNull();
+  });
+});
+
+describe("Needs you: row actions", () => {
+  const live = { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true };
+  const LOCK = {
+    holder: { runId: "r-1", seatId: "guido-1", command: "pnpm -s test", since: NOW - 12 * MIN },
+    waiting: [{ runId: "r-2", seatId: "guido-2", since: NOW - MIN }],
+  };
+  const stall = (agentId: string) =>
+    item({
+      key: `stall:${agentId}`,
+      kind: "stalled",
+      agentId,
+      escalationId: null,
+      url: null,
+      tool: "Bash",
+      text: "No output",
+      at: NOW - 5 * MIN,
+    });
+  const stray = item({
+    key: "stray:1",
+    kind: "stray",
+    agentId: "guido-1",
+    escalationId: null,
+    url: null,
+    ticket: null,
+    text: "apps/odd.ts sits outside every area.",
+  });
+  const posts: { path: string; body: unknown }[] = [];
+  const route = (path: string, status = 200, body: unknown = { ok: true }) => ({
+    [`POST ${path}`]: (init: RequestInit | undefined) => {
+      posts.push({ path, body: JSON.parse(String(init?.body)) });
+      return { status, body };
+    },
+  });
+  const stubNeeds = (items: AttentionItem[], flight: unknown = { seat: live, decisions: [] }) => {
+    posts.length = 0;
+    return stubFetch({
+      "/api/attention": items,
+      "/api/crew": {
+        rows: [
+          seatRow({ id: "guido-1", hudState: "stalled" }),
+          seatRow({ id: "guido-2", index: 1, hudState: "stalled" }),
+          seatRow({ id: "flight-1", index: 2 }),
+        ],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": flight,
+      "/api/test-lock": LOCK,
+      ...route("/api/seats/guido-1/interrupt"),
+      ...route("/api/seats/guido-2/interrupt"),
+      ...route("/api/seats/flight-1/message"),
+    });
+  };
+  const rowOf = async (text: string | RegExp) =>
+    (await within(needs()).findByText(text)).closest(".nrow") as HTMLElement;
+
+  it("an approval and a question with no escalation read Answer, and it opens the Item panel", async () => {
+    stubNeeds([
+      item({
+        key: "ap:1",
+        kind: "approval",
+        escalationId: null,
+        url: null,
+        text: "Run the migration?",
+      }),
+      SEAT_Q,
+    ]);
+    render(
+      <>
+        <Comms item={null} />
+        <Probe />
+      </>,
+    );
+    const ap = await rowOf("Run the migration?");
+    expect(within(ap).queryByRole("button", { name: /Read the brief|Discuss/ })).toBeNull();
+    fireEvent.click(within(ap).getByRole("button", { name: "Answer" }));
+    expect(screen.getByTestId("item").textContent).toBe("ap:1");
+  });
+
+  it("a lock item and the stalled holder read Stop the run, which interrupts the holder", async () => {
+    stubNeeds([
+      item({
+        key: "lock:1",
+        kind: "lock",
+        agentId: "guido-1",
+        escalationId: null,
+        url: null,
+        text: "GUIDO-1 holds the test lock and has printed nothing",
+      }),
+      stall("guido-1"),
+    ]);
+    render(<Comms item={null} />);
+    await within(needs()).findByText(/holds the test lock/);
+    const stops = await within(needs()).findAllByRole("button", { name: "Stop the run" });
+    expect(stops).toHaveLength(2);
+    expect(within(needs()).queryByRole("button", { name: "Interrupt" })).toBeNull();
+    fireEvent.click(stops[0] as HTMLElement);
+    await waitFor(() =>
+      expect(posts).toContainEqual({ path: "/api/seats/guido-1/interrupt", body: {} }),
+    );
+  });
+
+  it("another stalled item reads Interrupt", async () => {
+    stubNeeds([stall("guido-2")]);
+    render(<Comms item={null} />);
+    const row = await rowOf(/in Bash/);
+    expect(within(row).queryByRole("button", { name: "Stop the run" })).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Interrupt" }));
+    await waitFor(() =>
+      expect(posts).toContainEqual({ path: "/api/seats/guido-2/interrupt", body: {} }),
+    );
+  });
+
+  it("a refused interrupt shows in the error line", async () => {
+    stubFetch({
+      "/api/attention": [stall("guido-2")],
+      "/api/crew": { rows: [seatRow({ id: "guido-2" })], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: live, decisions: [] },
+      "/api/test-lock": { holder: null, waiting: [] },
+      "POST /api/seats/guido-2/interrupt": () => ({
+        status: 409,
+        body: { error: "no turn to stop" },
+      }),
+    });
+    render(<Comms item={null} />);
+    const row = await rowOf(/in Bash/);
+    fireEvent.click(within(row).getByRole("button", { name: "Interrupt" }));
+    expect(await within(needs()).findByText("no turn to stop")).toBeTruthy();
+  });
+
+  it("a stray's Ask FLIGHT posts the question to FLIGHT and selects its thread", async () => {
+    stubNeeds([stray]);
+    render(<Comms item={null} />);
+    const list = document.querySelector("#chanList") as HTMLElement;
+    // its lamp names the thread's button before the call sign
+    fireEvent.click(await within(list).findByRole("button", { name: /guido-1/ }));
+    await waitFor(() => expect(document.querySelector("#chatP form")).toBeTruthy());
+    expect(document.querySelector("#chatMsgs")).toBeNull();
+    const row = await rowOf(/outside every area/);
+    await waitFor(() =>
+      expect(
+        (within(row).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(within(row).getByRole("button", { name: "Ask FLIGHT" }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      path: "/api/seats/flight-1/message",
+      body: { text: "apps/odd.ts sits outside every area. Whose is it?" },
+    });
+    await waitFor(() => expect(document.querySelector("#chatP #chatMsgs")).toBeTruthy());
+  });
+
+  it("Ask FLIGHT is off, with the reason, while FLIGHT is not live", async () => {
+    stubNeeds([stray], { seat: { ...live, live: false }, decisions: [] });
+    render(<Comms item={null} />);
+    const row = await rowOf(/outside every area/);
+    const b = within(row).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
+    await waitFor(() => expect(b.title).toBe("FLIGHT is stopped."));
+    expect(b.disabled).toBe(true);
   });
 });
 

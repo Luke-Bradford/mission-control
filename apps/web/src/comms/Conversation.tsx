@@ -7,23 +7,21 @@ import {
   type FlightView,
 } from "@mc/core";
 import { useLayoutEffect, useRef } from "react";
+import { SeatComposer } from "../agent/StreamPanel.tsx";
 import { useTz } from "../clock.ts";
-import { seatStatus } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
-import { flightOffText } from "../flight/flightTypes.ts";
+import { callSign, seatStatus, seatTurn } from "../crew.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
+import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
 import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { agentPath, followLink } from "../router.ts";
-import { useDock } from "../shell/overlays.ts";
+import { FlightChat } from "../shell/Dock.tsx";
 import { agentComms, CAPCOM_TAG, CommsEnd, commsKeys, MentionText } from "./messages.tsx";
 
-export const FLIGHT_IN_DOCK = "FLIGHT's chat is in the dock.";
-
-/** Comms › Conversation (catalogue 2.5.3): the selected thread; FLIGHT's is a placeholder until phase 3. */
+/** Comms › Conversation (catalogue 2.5.3): FLIGHT's chat, or the selected agent's thread. */
 export function Conversation({ row }: { row: CrewRow | null }) {
-  const dock = useDock().visible;
   const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
   const activity = useResource<ActivityRow[]>(RESOURCES.activity);
   const tz = useTz();
@@ -43,7 +41,11 @@ export function Conversation({ row }: { row: CrewRow | null }) {
         title="FLIGHT"
         sub="decisions and questions come to you here, tagged @CAPCOM"
       >
-        <p className="pb note">{dock ? FLIGHT_IN_DOCK : flightOffText(flightSeat)}</p>
+        {flightSeat === null ? (
+          <p className="pb note">{FLIGHT_NO_SEAT}</p>
+        ) : (
+          <FlightChat where="comms" />
+        )}
       </Panel>
     );
   }
@@ -101,6 +103,17 @@ export function Conversation({ row }: { row: CrewRow | null }) {
             );
           })}
         </div>
+      )}
+      {row.kind === "crew" && (
+        <SeatComposer
+          row={row}
+          placeholder={
+            seatTurn(row) === "running"
+              ? `Message ${callSign(row)} (reaches it mid-turn)…`
+              : `Message ${callSign(row)} (queued until its next turn)…`
+          }
+          onSent={() => hub.refetch(RESOURCES.activity.path)}
+        />
       )}
     </Panel>
   );

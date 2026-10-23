@@ -88,11 +88,13 @@ const Msg = memo(function Msg({ row, tz }: { row: DockRow; tz: string | null }) 
 
 /** The message box keeps its own text, so a keystroke re-renders this and nothing else in the dock. */
 function Composer({
+  where,
   seat,
   busy,
   err,
   onSend,
 }: {
+  where: ChatPlace;
   seat: FlightSeat | null;
   busy: boolean;
   err: string | null;
@@ -107,9 +109,9 @@ function Composer({
     if (await onSend(body)) setText("");
   };
   return (
-    <form className="composer" id="dockForm" onSubmit={(e) => void send(e)}>
+    <form className="composer" id={`${ID_PREFIX[where]}Form`} onSubmit={(e) => void send(e)}>
       <input
-        id="dockInput"
+        id={`${ID_PREFIX[where]}Input`}
         autoComplete="off"
         aria-label="Message FLIGHT"
         placeholder={
@@ -140,19 +142,17 @@ function Composer({
 /** Within this many pixels of the bottom the log follows new messages; further up it stays put. */
 const STICK_PX = 40;
 
+/** Where a FLIGHT conversation sits, which keeps its DOM ids unique: the dock, or Comms. */
+export type ChatPlace = "dock" | "comms";
+
+const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
+
 /**
- * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
- * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
+ * FLIGHT's conversation: the asks waiting on the operator, the message log and the message box.
+ * With no FLIGHT seat the log is empty and the input is switched off.
  */
-export function Dock() {
-  const { visible, wide, toggle } = useDock();
-  const hide = useRef<HTMLButtonElement>(null);
+export function FlightChat({ where }: { where: ChatPlace }) {
   const msgs = useRef<HTMLDivElement>(null);
-  const drawer = visible && !wide;
-  useReturnFocus(drawer);
-  useEffect(() => {
-    if (drawer) hide.current?.focus();
-  }, [drawer]);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
@@ -172,6 +172,97 @@ export function Dock() {
   useEffect(() => {
     if (open.length !== pending.length) setPending(open);
   }, [open, pending]);
+
+  const count = shown.length;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows
+  useEffect(() => {
+    const el = msgs.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [count]);
+  const onScroll = () => {
+    const el = msgs.current;
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
+  };
+
+  const send = async (body: string): Promise<boolean> => {
+    if (!seat?.live) return false;
+    const id = `p:${sent.current++}`;
+    const seen = all.flatMap((r) => (r.kind === "you" && sameMessage(r.text, body) ? [r.id] : []));
+    stick.current = true;
+    setPending((p) => [...p, { id, text: body, at: Date.now(), seen }]);
+    setBusy(true);
+    setErr(null);
+    try {
+      await apiPost(ACTIONS.seatMessage(seat.id), { text: body });
+      return true;
+    } catch (e) {
+      setPending((p) => p.filter((m) => m.id !== id));
+      setErr(failNote(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {seat && asks.length > 0 && (
+        <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
+          <div className="dwh">Waiting on you · {asks.length}</div>
+          {asks.map((i) => (
+            <div className="dask" key={i.key} data-testid="waiting-ask">
+              <Pill tone={i.kind === "decision" ? "warn" : "plain"}>{ATTENTION_LABEL[i.kind]}</Pill>
+              <span className="min0 ellip" title={i.text}>
+                {i.text}
+              </span>
+              <span className="spacer" />
+              <button type="button" className="sm" onClick={() => openItem(i.key)}>
+                Open
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div
+        className="dmsgs"
+        id={`${ID_PREFIX[where]}Msgs`}
+        role="log"
+        aria-label="Conversation with FLIGHT"
+        ref={msgs}
+        onScroll={onScroll}
+      >
+        {shown.map((r) => (
+          <Msg key={r.id} row={r} tz={tz} />
+        ))}
+      </div>
+      <Composer where={where} seat={seat} busy={busy} err={err} onSend={send} />
+    </>
+  );
+}
+
+const failNote = (e: unknown): string => {
+  const error = e instanceof Error ? e : new Error(String(e));
+  return errorNote(error) ?? error.message;
+};
+
+/**
+ * FLIGHT's dock (catalogue §1.4): a 380px column on wide screens, a drawer with a scrim below
+ * 1200px. With no FLIGHT seat configured the conversation is empty and the input is switched off.
+ */
+export function Dock() {
+  const { visible, wide, toggle } = useDock();
+  const hide = useRef<HTMLButtonElement>(null);
+  const drawer = visible && !wide;
+  useReturnFocus(drawer);
+  useEffect(() => {
+    if (drawer) hide.current?.focus();
+  }, [drawer]);
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const seat = flight?.seat ?? null;
+  const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
+  const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   // The reply last seen with the dock shown; undefined until the stream first loads, so history is not "new".
   const replyIds = useMemo(
@@ -196,40 +287,6 @@ export function Dock() {
     return () => setFlightUnread(0);
   }, [unread]);
 
-  const count = shown.length;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows
-  useEffect(() => {
-    const el = msgs.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [count]);
-  const onScroll = () => {
-    const el = msgs.current;
-    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
-  };
-
-  const fail = (e: unknown) => {
-    const error = e instanceof Error ? e : new Error(String(e));
-    setErr(errorNote(error) ?? error.message);
-  };
-  const send = async (body: string): Promise<boolean> => {
-    if (!seat?.live) return false;
-    const id = `p:${sent.current++}`;
-    const seen = all.flatMap((r) => (r.kind === "you" && sameMessage(r.text, body) ? [r.id] : []));
-    stick.current = true;
-    setPending((p) => [...p, { id, text: body, at: Date.now(), seen }]);
-    setBusy(true);
-    setErr(null);
-    try {
-      await apiPost(ACTIONS.seatMessage(seat.id), { text: body });
-      return true;
-    } catch (e) {
-      setPending((p) => p.filter((m) => m.id !== id));
-      fail(e);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
   const start = async () => {
     if (!seat) return;
     setBusy(true);
@@ -237,7 +294,7 @@ export function Dock() {
     try {
       await apiPost(ACTIONS.seatStart(seat.id), {});
     } catch (e) {
-      fail(e);
+      setErr(failNote(e));
     } finally {
       setBusy(false);
     }
@@ -289,38 +346,12 @@ export function Dock() {
                   : FLIGHT_NO_SEAT}
             </div>
           </div>
-          {seat && asks.length > 0 && (
-            <div className="dwait" id="dockWaiting">
-              <div className="dwh">Waiting on you · {asks.length}</div>
-              {asks.map((i) => (
-                <div className="dask" key={i.key} data-testid="waiting-ask">
-                  <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
-                    {ATTENTION_LABEL[i.kind]}
-                  </Pill>
-                  <span className="min0 ellip" title={i.text}>
-                    {i.text}
-                  </span>
-                  <span className="spacer" />
-                  <button type="button" className="sm" onClick={() => openItem(i.key)}>
-                    Open
-                  </button>
-                </div>
-              ))}
-            </div>
+          {err !== null && (
+            <p className="note err" role="alert">
+              {err}
+            </p>
           )}
-          <div
-            className="dmsgs"
-            id="dockMsgs"
-            role="log"
-            aria-label="Conversation with FLIGHT"
-            ref={msgs}
-            onScroll={onScroll}
-          >
-            {shown.map((r) => (
-              <Msg key={r.id} row={r} tz={tz} />
-            ))}
-          </div>
-          <Composer seat={seat} busy={busy} err={err} onSend={send} />
+          <FlightChat where="dock" />
         </div>
       </aside>
     </>
