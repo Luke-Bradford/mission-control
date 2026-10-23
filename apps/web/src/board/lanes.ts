@@ -12,12 +12,18 @@ export type Lane = {
 
 /** The All-repos lane's id; repo lanes use the repo id. */
 export const ALL_LANE = "*";
+/** The All-mine lane's id. */
+export const MINE_LANE = "@mine";
 
 /**
  * GitHub ORs repeated `repo:` qualifiers, so one query covers every repo. Under a session only
  * that repo's lane is offered (an unknown session id offers them all; the page hides the cards).
  */
-export function lanesFor(repos: RepoView[], session: string = SESSION_ALL): Lane[] {
+export function lanesFor(
+  repos: RepoView[],
+  session: string = SESSION_ALL,
+  operatorId: string | null = null,
+): Lane[] {
   const all: Lane = {
     id: ALL_LANE,
     name: "All repos",
@@ -39,7 +45,17 @@ export function lanesFor(repos: RepoView[], session: string = SESSION_ALL): Lane
     }),
   );
   const own = session === SESSION_ALL ? undefined : repoLanes.find((l) => l.id === session);
-  return own ? [own] : [all, ...repoLanes];
+  if (own) return [own];
+  if (operatorId === null) return [all, ...repoLanes];
+  const query = `${all.query} assignee:${operatorId}`;
+  const mine: Lane = {
+    id: MINE_LANE,
+    name: "All mine",
+    query,
+    url: `https://github.com/issues?q=${encodeURIComponent(query)}`,
+    match: (i) => (i.assignees ?? []).some((a) => a.toLowerCase() === operatorId.toLowerCase()),
+  };
+  return [all, mine, ...repoLanes];
 }
 
 /**
