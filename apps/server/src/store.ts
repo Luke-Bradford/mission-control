@@ -8,6 +8,7 @@ import {
   type AttentionKind,
   BLOCKING_SEVERITIES,
   type BoardItem,
+  COMMS_TEXT_MAX,
   type Escalation,
   type FlightDecision,
   type FlightDecisionKind,
@@ -140,6 +141,12 @@ CREATE TABLE IF NOT EXISTS loop_events (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
+-- Hand-offs between agents (Activity › Messages): who told whom what, about which ticket.
+CREATE TABLE IF NOT EXISTS comms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
+  to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
 -- The Activity page's hub rows (an automatic update); the primary key keeps a line landing once.
 CREATE TABLE IF NOT EXISTS hub_events (
   at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (at, text)
@@ -327,6 +334,15 @@ export interface BoardMove {
 }
 
 /** Who a seat line is from. */
+/** A hand-off between agents; `from` and `to` are seat ids, COMMS_CAPCOM or COMMS_MC. */
+export interface CommsRow {
+  at: number;
+  from: string;
+  to: string;
+  ticket: string | null;
+  text: string;
+}
+
 export type SeatLineOrigin = "operator" | "engine";
 
 /** A line sent to a seat; its key is what makes sending it once-only. */
@@ -1867,6 +1883,32 @@ export class Store {
       runId: r.run_id as string,
       text: r.text as string,
       at: r.at as number,
+    }));
+  }
+
+  /** Records a hand-off: whitespace runs made one space, trimmed, cut to COMMS_TEXT_MAX characters. */
+  addComms(row: CommsRow): void {
+    const chars = Array.from(row.text.replace(/\s+/g, " ").trim());
+    const text =
+      chars.length > COMMS_TEXT_MAX
+        ? `${chars.slice(0, COMMS_TEXT_MAX - 1).join("")}…`
+        : chars.join("");
+    this.db
+      .prepare("INSERT INTO comms (at, from_id, to_id, ticket, text) VALUES (?, ?, ?, ?, ?)")
+      .run(row.at, row.from, row.to, row.ticket, text);
+  }
+
+  /** The hand-offs at or after `since`, oldest first. */
+  comms(since: number): CommsRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM comms WHERE at >= ? ORDER BY at, id")
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      at: r.at as number,
+      from: r.from_id as string,
+      to: r.to_id as string,
+      ticket: r.ticket as string | null,
+      text: r.text as string,
     }));
   }
 

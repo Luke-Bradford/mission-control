@@ -669,6 +669,15 @@ describe("CI and review", () => {
     await h.engine.tick();
     expect(h.sent).toHaveLength(1);
     expect(h.excerpts).toHaveLength(excerpts);
+    expect(store.comms(0)).toEqual([
+      {
+        at: expect.any(Number),
+        from: "MC",
+        to: SEAT,
+        ticket: `${REPO}#7`,
+        text: expect.stringMatching(/^CI failed on aaaaaaa\./),
+      },
+    ]);
   });
 
   it("a seat in a turn is not written to", async () => {
@@ -2002,6 +2011,16 @@ describe("the engine runs reviews", () => {
     await h.engine.reconcileRun(RUN);
     await h.engine.tick();
     expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
+    // RETRO's findings to the author: recorded once, though the line was offered again
+    expect(store.comms(0)).toEqual([
+      {
+        at: expect.any(Number),
+        from: RETRO,
+        to: SEAT,
+        ticket: `${REPO}#7`,
+        text: expect.stringMatching(/^RETRO-1 reviewed aaaaaaa and found 2 issues/),
+      },
+    ]);
   });
 
   it("a fix round: the new push is reviewed as round 2", async () => {
@@ -2176,6 +2195,15 @@ describe("the engine runs reviews", () => {
         await h.engine.tick();
         expect(sentKeys().filter((k) => k.startsWith("conflict:"))).toHaveLength(1);
         expect(h.updates).toHaveLength(1);
+        expect(store.comms(0)).toEqual([
+          {
+            at: expect.any(Number),
+            from: "MC",
+            to: SEAT,
+            ticket: `${REPO}#7`,
+            text: expect.stringContaining("conflicted in: apps/a.ts, apps/b.ts"),
+          },
+        ]);
       });
 
       it("a conflicting PR in ci is merged with main", async () => {
