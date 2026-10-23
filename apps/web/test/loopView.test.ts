@@ -1,0 +1,189 @@
+import {
+  CI_TRIES,
+  DEFAULT_PROFILES,
+  type LoopTry,
+  REVIEW_ROUNDS,
+  REVIEW_STATUS_RUNNING,
+  type RunLoop,
+  type RunView,
+} from "@mc/core";
+import { describe, expect, it } from "vitest";
+import {
+  barClass,
+  barPlace,
+  ciCheck,
+  heldStep,
+  loopRule,
+  loopSpan,
+  reviewChecks,
+  runLimits,
+  stepChecks,
+  stepTries,
+  tryClass,
+  tryMinutes,
+  tryText,
+} from "../src/agent/loopView.ts";
+import { MIN, NOW, prView, run } from "./fixtures.ts";
+
+const loop = (over: Partial<RunLoop> = {}) =>
+  ({
+    phase: "ci",
+    prNumber: 77,
+    pushFor: "abc1234def5678",
+    epoch: 1,
+    budgetExtra: 0,
+    ...over,
+  }) as RunLoop;
+
+const tryOf = (over: Partial<LoopTry> = {}): LoopTry => ({
+  step: "ci",
+  fix: false,
+  n: 1,
+  startedAt: 0,
+  endedAt: 9 * MIN,
+  outcome: "pass",
+  reason: null,
+  ...over,
+});
+
+describe("ciCheck", () => {
+  const pr = (over = {}) => prView({ number: 77, headSha: "abc1234def5678", ...over });
+
+  it("ciCheck words each case", () => {
+    expect(ciCheck(loop({ pushFor: null }), [pr()])).toEqual({
+      text: "Nothing pushed yet",
+      state: "wait",
+    });
+    const waiting = {
+      text: "CI on abc1234: waiting for the push to show on GitHub",
+      state: "wait",
+    };
+    expect(ciCheck(loop(), [])).toEqual(waiting);
+    expect(ciCheck(loop(), undefined)).toEqual(waiting);
+    expect(ciCheck(loop(), [pr({ number: 78 })])).toEqual(waiting);
+    expect(ciCheck(loop(), [pr({ headSha: "fff0000" })])).toEqual(waiting);
+    expect(ciCheck(loop(), [pr({ ci: "passing" })])).toEqual({
+      text: "CI on abc1234",
+      state: "pass",
+    });
+    expect(ciCheck(loop(), [pr({ ci: "failing" })])).toEqual({
+      text: "CI on abc1234",
+      state: "fail",
+    });
+    expect(ciCheck(loop(), [pr({ ci: "pending" })])).toEqual({
+      text: "CI on abc1234",
+      state: "run",
+    });
+    expect(ciCheck(loop(), [pr({ ci: null })])).toEqual({
+      text: "CI on abc1234: no CI reported yet",
+      state: "wait",
+    });
+  });
+});
+
+describe("reviewChecks", () => {
+  it("reviewChecks maps the status", () => {
+    expect(reviewChecks(null, 77)).toEqual([
+      { text: "No QA review yet", state: "wait" },
+      { text: "PR #77 merged", state: "wait" },
+    ]);
+    const first = (state: "pending" | "success" | "failure", description: string) =>
+      reviewChecks({ state, description }, null)[0];
+    expect(first("pending", REVIEW_STATUS_RUNNING)).toEqual({
+      text: REVIEW_STATUS_RUNNING,
+      state: "run",
+    });
+    expect(first("pending", "QA review queued")).toEqual({
+      text: "QA review queued",
+      state: "wait",
+    });
+    expect(first("success", "QA review passed")?.state).toBe("pass");
+    expect(first("failure", "QA review found blocking issues")?.state).toBe("fail");
+    expect(reviewChecks(null, null)[1]).toEqual({ text: "PR merged", state: "wait" });
+  });
+
+  it("stepChecks has none for Working and Done", () => {
+    expect(stepChecks("working", loop(), null, [])).toEqual([]);
+    expect(stepChecks("done", loop(), null, [])).toEqual([]);
+    expect(stepChecks("ci", loop(), null, [])).toHaveLength(1);
+    expect(stepChecks("review", loop(), null, [])).toHaveLength(2);
+  });
+});
+
+describe("try helpers", () => {
+  it("try helpers", () => {
+    const failed = tryOf({ outcome: "fail", reason: "x" });
+    expect(tryText(failed)).toBe("fail: x");
+    expect(tryText(tryOf())).toBe("pass");
+    expect(tryClass(failed)).toBe("crit-t");
+    expect(tryClass(tryOf({ outcome: "parked" }))).toBe("crit-t");
+    expect(tryClass(tryOf({ outcome: "stopped" }))).toBe("crit-t");
+    expect(tryClass(tryOf({ outcome: "running" }))).toBe("fg2");
+    expect(tryClass(tryOf({ outcome: "waiting" }))).toBe("fg2");
+    expect(tryClass(tryOf())).toBe("ok-t");
+    expect(barClass(failed)).toBe("tl-fail");
+    expect(barClass(tryOf({ fix: true, outcome: "fail" }))).toBe("tl-fix");
+    expect(barClass(tryOf({ outcome: "stopped" }))).toBe("tl-fail");
+    expect(barClass(tryOf({ outcome: "running" }))).toBe("tl-run");
+    expect(barClass(tryOf({ outcome: "waiting" }))).toBe("tl-wait");
+    expect(barClass(tryOf({ outcome: "parked" }))).toBe("tl-wait");
+    expect(barClass(tryOf())).toBe("tl-pass");
+    expect(tryMinutes(tryOf({ startedAt: 0, endedAt: null }), 9.4 * MIN)).toBe(9);
+    expect(tryMinutes(tryOf({ startedAt: 0, endedAt: 19 * MIN }), 99 * MIN)).toBe(19);
+  });
+
+  it("picks the held step and a step's tries, fixes included", () => {
+    const tries = [
+      tryOf({ step: "working" }),
+      tryOf({ step: "review", fix: true }),
+      tryOf({ step: "review" }),
+    ];
+    expect(heldStep(tries)).toBe("review");
+    expect(heldStep([])).toBeNull();
+    expect(stepTries(tries, "review")).toHaveLength(2);
+    expect(stepTries(tries, "ci")).toEqual([]);
+  });
+});
+
+describe("barPlace", () => {
+  it("barPlace", () => {
+    const { end, total } = loopSpan(0, 40 * MIN, NOW);
+    expect(total).toBe(40 * MIN);
+    expect(barPlace(tryOf({ startedAt: 10 * MIN, endedAt: 19 * MIN }), 0, end, total)).toEqual({
+      left: 25,
+      width: 22.5,
+    });
+    expect(barPlace(tryOf({ startedAt: 30 * MIN, endedAt: null }), 0, end, total)).toEqual({
+      left: 75,
+      width: 25,
+    });
+    expect(loopSpan(5, null, 5).total).toBe(1);
+  });
+});
+
+describe("loopRule", () => {
+  it("states the parking rule of CI and review only", () => {
+    const limits = { tries: 3, rounds: 2 };
+    expect(loopRule("ci", limits)).toBe("↻ fail → back to Working · parks after 3 failures");
+    expect(loopRule("review", limits)).toBe(
+      "↻ Critical or Important findings → fix → CI → review · parks after 2 rounds",
+    );
+    expect(loopRule("working", limits)).toBeNull();
+    expect(loopRule("done", limits)).toBeNull();
+  });
+});
+
+describe("runLimits", () => {
+  it("runLimits", () => {
+    expect(runLimits()).toEqual({ tries: CI_TRIES, rounds: REVIEW_ROUNDS });
+    expect(runLimits({ ...run(), prs: [] })).toEqual({ tries: CI_TRIES, rounds: REVIEW_ROUNDS });
+    const profile = DEFAULT_PROFILES.find((p) => p.name === "small-change");
+    if (!profile) throw new Error("no small-change profile");
+    const small: RunView = {
+      ...run(),
+      prs: [],
+      profile: { profile, route: { by: "label", label: "chore" }, hash: "h" },
+    };
+    expect(runLimits(small)).toEqual({ tries: profile.tries, rounds: profile.rounds });
+  });
+});
