@@ -127,25 +127,28 @@ describe("loopTries", () => {
   it("puts a resumed try on In review when a review fix follows", () => {
     const events = evs(
       REPORTED,
-      "CI passed on abc1234",
+      "CI failed on abc1234",
+      REPORTED,
       parkedEventText("x"),
       [`${RUN}:resumed:1`, "resumed by operator"],
       [reviewEventKey(RUN, 7, "fix"), "sent"],
     );
     const tries = loopTries(run({}, { phase: "parked" }), events, null);
-    expect(tries[3]).toMatchObject({ step: "review", fix: false, outcome: "fail" });
-    expect(tries[4]).toMatchObject({ step: "review", fix: true });
+    expect(tries[3]).toMatchObject({ step: "ci", n: 2, outcome: "parked" });
+    expect(tries[4]).toMatchObject({ step: "review", fix: false, outcome: "fail" });
+    expect(tries[5]).toMatchObject({ step: "review", fix: true });
   });
 
   it("puts a resumed try on Working when a report follows", () => {
     const events = evs(
       REPORTED,
-      "CI failed on abc1234",
+      "CI passed on abc1234",
       parkedEventText("x"),
       [`${RUN}:resumed:1`, "resumed by operator"],
       REPORTED,
     );
     const tries = loopTries(run({}, { phase: "parked" }), events, null);
+    expect(tries[2]).toMatchObject({ step: "review", outcome: "parked" });
     expect(tries[3]).toMatchObject({ step: "working", outcome: "pass" });
     expect(tries[4]).toMatchObject({ step: "ci", outcome: "running" });
   });
