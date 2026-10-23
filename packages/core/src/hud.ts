@@ -18,6 +18,8 @@ export const STALL_TEXT = "No output";
 export const STREAM_TEXT_MAX = 2000;
 /** A file's diff (`/api/agents/:id/files/diff`) is cut at this many characters. */
 export const DIFF_MAX_CHARS = 200_000;
+/** The Files tab's answer for a read-only or scratch seat: it writes nothing. */
+export const READONLY_FILES_NOTE = "Read-only agent: no file changes.";
 
 /** Why Update is off, and the toast of a check, when the hub already runs origin/main's code. */
 export const UP_TO_DATE_MAIN = "Up to date with main.";

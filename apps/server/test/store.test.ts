@@ -1329,6 +1329,16 @@ describe("guard hits", () => {
     });
   });
 
+  it("counts only the given run's hits", () => {
+    store.addGuardHit(hit({ runId: "run-a" }));
+    store.addGuardHit(hit({ runId: "run-a", rule: "network" }));
+    store.addGuardHit(hit({ runId: "run-b" }));
+    store.addGuardHit(hit({ runId: null }));
+    expect(store.guardHitCount("run-a")).toBe(2);
+    expect(store.guardHitCount("run-b")).toBe(1);
+    expect(store.guardHitCount("run-c")).toBe(0);
+  });
+
   it("adds the table and its index to a database made before it", () => {
     const path = join(dir, "old.sqlite");
     new Store(path).addGuardHit(hit());
