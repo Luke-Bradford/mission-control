@@ -2128,6 +2128,18 @@ export class Store {
     return r.changes === 1;
   }
 
+  /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */
+  planLanded(run: Run): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM loop_events e JOIN runs r ON r.id = e.run_id
+           WHERE e.key = ? OR (e.key LIKE '%:plan' AND r.repo_id = ? AND r.ticket = ?) LIMIT 1`,
+        )
+        .get(`${run.id}:plan`, run.repoId, run.ticket) !== undefined
+    );
+  }
+
   /** The run's loop events, oldest first. */
   loopEventsOfRun(runId: string): LoopEvent[] {
     const rows = this.db
