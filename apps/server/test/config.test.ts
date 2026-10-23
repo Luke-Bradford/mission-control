@@ -265,6 +265,7 @@ describe("crew", () => {
     checkout?: string;
     worktrees?: string;
     repo?: string;
+    sessionId?: string;
     maxSeats?: number;
     node?: string;
     denyRead?: string[];
@@ -289,7 +290,7 @@ crew:
   ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
-    - id: shop-app
+    - id: ${opts.sessionId ?? "shop-app"}
       repo_id: ${opts.repo ?? "shop-app"}
       checkout: ${opts.checkout ?? "~/code/mc-crew/shop-app"}
       seats:
@@ -328,6 +329,10 @@ ${seats.join("\n")}
     for (const bad of ["0", "-5", "1.5", '"lots"']) {
       expect(fails(crewText({ budget: bad })).path).toBe("crew.runTokenBudget");
     }
+  });
+
+  it.each(["../x", "Shop", "a/b", ""])("refuses the session id %j (it is a folder name)", (id) => {
+    expect(fails(crewText({ sessionId: JSON.stringify(id) })).path).toBe("crew.sessions[0].id");
   });
 
   it("takes lane home or work only, and defaults lane_default to false", () => {
