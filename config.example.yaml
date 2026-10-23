@@ -109,4 +109,5 @@ crew:
       seats:
         - { id: guido-1, role: GUIDO, account_id: claude-main, model: sonnet, area: ["apps/server/**", "packages/core/**"] }
         - { id: inco-1, role: INCO, account_id: claude-main, model: sonnet, area: ["apps/web/**"] }
+        # A review seat (mode: scratch) may set light_model: the model for small changes (Size XS or S, or a chore, test or docs ticket).
         - { id: retro-1, role: RETRO, account_id: claude-main, model: opus }
