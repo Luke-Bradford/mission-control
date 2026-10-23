@@ -70,6 +70,7 @@ export const MERGE_NO_PR = "the run has no PR";
 export const MERGE_NO_SEAT = "the run's seat is no longer configured";
 export const MERGE_BAD_SHA = "not a commit sha";
 export const MERGE_HEAD_MOVED = "the PR's head is not the commit that passed the gate";
+export const MERGE_CONFLICTING = "the PR conflicts with main";
 export const MERGE_PR_NOT_OPEN = "the PR is not open";
 export const MERGE_NOT_RUN_BRANCH = "the branch is not this run's own";
 export const MERGE_BRANCH_MOVED = "the branch has commits that were not merged";
@@ -197,7 +198,7 @@ export interface Publisher {
   worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run): Promise<PublishResult>;
-  /** Merges the run's PR with a merge commit, only if its head is `sha` and it contains main. */
+  /** Merges the run's PR with a merge commit, only if its head is `sha`. */
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
   closeIssue(run: Run): Promise<PublishResult>;
@@ -978,7 +979,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               String(n),
               `--repo=${repo}`,
               "--json",
-              "state,headRefOid,baseRefName,headRefName,isCrossRepository",
+              "state,headRefOid,baseRefName,headRefName,isCrossRepository,mergeable",
             ],
             "pr view",
           );
@@ -995,6 +996,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           return pr.baseRefName === defaultBranch ? { ok: true } : final(MERGE_PR_NOT_RUNS);
         });
         if (!base.ok) return base;
+        if (pr.mergeable === "CONFLICTING") return transient(MERGE_CONFLICTING);
         const merged = await ghDo(
           ["pr", "merge", String(n), `--repo=${repo}`, "--merge", `--match-head-commit=${sha}`],
           "pr merge",

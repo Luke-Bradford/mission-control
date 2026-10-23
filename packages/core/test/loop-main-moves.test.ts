@@ -138,9 +138,20 @@ describe("main moves", () => {
   });
 
   it("a conflicting PR in review updates to main", () => {
-    expect(reconcile(behind({ pr: pr({ mergeable: "CONFLICTING" }) })).actions).toContainEqual(
-      update,
+    const a = reconcile(behind({ pr: pr({ mergeable: "CONFLICTING" }) })).actions;
+    expect(a).toContainEqual(update);
+    expect(kinds(a)).not.toContain("merge");
+    expect(kinds(a)).not.toContain("mark-ready");
+  });
+
+  it("hard-rule paths on a conflicting PR do not raise a ready note", () => {
+    const s = behind(
+      { pr: pr({ mergeable: "CONFLICTING" }) },
+      { touches: { sha: SHA, paths: ["a/x.ts"] }, gate: gateOf({ strays: ["a/x.ts"] }) },
     );
+    const a = reconcile(s).actions;
+    expect(a).toContainEqual(update);
+    expect(a.some((x) => x.kind === "note" && x.noteKind === "ready")).toBe(false);
   });
 
   it("not while the seat is in a turn or not idle", () => {
@@ -191,6 +202,8 @@ describe("main moves", () => {
   it("a conflicting aside run updates, and stays aside", () => {
     const r = reconcile(aside(behind({ pr: pr({ mergeable: "CONFLICTING" }) })));
     expect(r.actions).toContainEqual(update);
+    expect(kinds(r.actions)).not.toContain("merge");
+    expect(kinds(r.actions)).not.toContain("mark-ready");
     expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
   });
 

@@ -483,7 +483,12 @@ function gateView(s: LoopSnapshot, loop: RunLoop) {
   const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
   const clear = touches !== null && touches.paths.length === 0;
   const passes =
-    on && s.hardRulesSet === true && clear && gate?.hubOnly === true && gate.strays.length === 0;
+    on &&
+    s.pr?.mergeable !== "CONFLICTING" &&
+    s.hardRulesSet === true &&
+    clear &&
+    gate?.hubOnly === true &&
+    gate.strays.length === 0;
   return { on, P, touches, gate, clear, passes };
 }
 
@@ -816,6 +821,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
           } else {
             // only hard-rule files hold it: the operator merges
             const hardOnly =
+              s.pr?.mergeable !== "CONFLICTING" &&
               gv.touches !== null &&
               gv.touches.paths.length > 0 &&
               gv.gate?.hubOnly === true &&

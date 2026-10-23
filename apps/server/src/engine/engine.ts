@@ -86,6 +86,7 @@ import { wakeDueAsideRun } from "./aside.ts";
 import {
   CI_LOG_UNREADABLE,
   EMPTY_LOG,
+  MERGE_CONFLICTING,
   MERGE_HEAD_MOVED,
   NO_FAILED_RUN,
   type Publisher,
@@ -877,6 +878,12 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!r.ok) {
           // main may have moved: the gate's facts are read afresh
           cur.gate = null;
+          if (r.text === MERGE_CONFLICTING || /not mergeable/i.test(r.text)) {
+            // Stop this pass and refresh GitHub so the conflict routes to update-branch.
+            out.parked = true;
+            deps.pollGithub?.();
+            return;
+          }
           return refused(r, "merge");
         }
         stepDone("merge", a.sha, mergedText(cur.prNumber));

@@ -34,6 +34,7 @@ import {
   createPublisher,
   EARLIER_PR_OPEN,
   EMPTY_LOG,
+  MERGE_CONFLICTING,
   MERGE_PR_NOT_RUNS,
   NO_FAILED_RUN,
   REVIEW_STATUS_FAILED,
@@ -1172,7 +1173,7 @@ describe("merge steps", () => {
           "12",
           "--repo=o/mc",
           "--json",
-          "state,headRefOid,baseRefName,headRefName,isCrossRepository",
+          "state,headRefOid,baseRefName,headRefName,isCrossRepository,mergeable",
         ],
         ["pr", "merge", "12", "--repo=o/mc", "--merge", `--match-head-commit=${SHA}`],
       ]);
@@ -1183,6 +1184,18 @@ describe("merge steps", () => {
       ghAnswers = [view("MERGED")];
       expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
       expect(ghCalls).toHaveLength(1);
+    });
+
+    it("refuses a conflicting PR transiently without attempting to merge", async () => {
+      mainSame();
+      ghAnswers = [view("OPEN", SHA, { mergeable: "CONFLICTING" })];
+      expect(await publisher().merge(R, SHA)).toEqual({
+        ok: false,
+        text: MERGE_CONFLICTING,
+        transient: true,
+      });
+      expect(MERGE_CONFLICTING).toBe("the PR conflicts with main");
+      expect(ghCalls.map((c) => c[1])).toEqual(["view"]);
     });
 
     it("refuses finally when the head is not the sha", async () => {
