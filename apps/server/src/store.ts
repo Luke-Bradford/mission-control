@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, subject_type TEXT NOT NULL, title TEXT NOT NULL,
   number INTEGER, reason TEXT NOT NULL, url TEXT NOT NULL, author TEXT, snippet TEXT,
   updated_at INTEGER NOT NULL, last_read_at INTEGER, unread INTEGER NOT NULL,
-  first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT
+  first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT, handled_through INTEGER
 );
 `;
 
@@ -266,12 +266,14 @@ export interface NotificationRow {
   firstSeenAt: number;
   handledAt: number | null;
   handledHow: "marked" | "read" | null;
+  /** The `updatedAt` that was handled: a thread updated after it is open again. */
+  handledThrough: number | null;
 }
 
 /** What a GitHub read gives for a thread: the stored row less the bookkeeping the store owns. */
 export type NotificationRead = Omit<
   NotificationRow,
-  "unread" | "firstSeenAt" | "handledAt" | "handledHow"
+  "unread" | "firstSeenAt" | "handledAt" | "handledHow" | "handledThrough"
 >;
 
 const notificationRow = (r: Row): NotificationRow => ({
@@ -290,6 +292,7 @@ const notificationRow = (r: Row): NotificationRow => ({
   firstSeenAt: r.first_seen_at as number,
   handledAt: r.handled_at as number | null,
   handledHow: r.handled_how as NotificationRow["handledHow"],
+  handledThrough: r.handled_through as number | null,
 });
 
 /** One section of FLIGHT's brief, as stored. */
@@ -1728,8 +1731,9 @@ export class Store {
         const seen = new Set(rows.map((n) => n.id));
         const close = this.db.prepare(
           `UPDATE notifications SET unread = 0,
-             handled_at = CASE WHEN handled_at IS NULL OR updated_at > handled_at THEN ? ELSE handled_at END,
-             handled_how = CASE WHEN handled_at IS NULL OR updated_at > handled_at THEN 'read' ELSE handled_how END
+             handled_at = CASE WHEN handled_through IS NULL OR updated_at > handled_through THEN ? ELSE handled_at END,
+             handled_how = CASE WHEN handled_through IS NULL OR updated_at > handled_through THEN 'read' ELSE handled_how END,
+             handled_through = CASE WHEN handled_through IS NULL OR updated_at > handled_through THEN updated_at ELSE handled_through END
            WHERE id = ?`,
         );
         const unread = this.db.prepare("SELECT id FROM notifications WHERE unread = 1").all() as {
@@ -1763,7 +1767,8 @@ export class Store {
 
   /**
    * Closes the thread as handled at `at`, when it is open and still at `updatedAt` (a newer comment
-   * is never hidden by an old key). True when it did.
+   * is never hidden by an old key). `handled_through` records the version handled, so a comment
+   * that lands before `at` but after `updatedAt` still reopens it. True when it did.
    */
   markNotificationHandled(
     id: string,
@@ -1773,11 +1778,11 @@ export class Store {
   ): boolean {
     const r = this.db
       .prepare(
-        `UPDATE notifications SET handled_at = ?, handled_how = ?
+        `UPDATE notifications SET handled_at = ?, handled_how = ?, handled_through = ?
          WHERE id = ? AND updated_at = ? AND unread = 1
-           AND (handled_at IS NULL OR updated_at > handled_at)`,
+           AND (handled_through IS NULL OR updated_at > handled_through)`,
       )
-      .run(at, how, id, updatedAt);
+      .run(at, how, updatedAt, id, updatedAt);
     return Number(r.changes) > 0;
   }
 
@@ -1789,7 +1794,7 @@ export class Store {
     this.db
       .prepare(
         `DELETE FROM notifications
-         WHERE unread = 0 AND handled_at IS NOT NULL AND handled_at < ? AND updated_at <= handled_at`,
+         WHERE unread = 0 AND handled_at IS NOT NULL AND handled_at < ? AND updated_at <= handled_through`,
       )
       .run(before);
   }

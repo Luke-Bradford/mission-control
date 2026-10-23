@@ -149,8 +149,8 @@ describe("notifications", () => {
   });
 
   it("a 304 changes nothing and sends If-Modified-Since", async () => {
-    const first = fakeRest(() => [thread()]);
-    await collectNotifications(repos(), store, first.rest, NOW);
+    // an empty list leaves no unread row, so the conditional header is safe
+    await collectNotifications(repos(), store, fakeRest(() => []).rest, NOW);
     expect(store.getSetting(NOTIFICATIONS_MODIFIED_SETTING)).toBe(LAST_MODIFIED);
     const urls: string[] = [];
     const seen: Record<string, string>[] = [];
@@ -163,8 +163,31 @@ describe("notifications", () => {
     expect(r).toEqual({ changed: false });
     expect(urls).toEqual([NOTIFICATIONS_URL]);
     expect(seen[0]).toMatchObject({ "If-Modified-Since": LAST_MODIFIED });
-    expect(persons(NOW + MIN)).toHaveLength(1);
     expect(store.status().find((s) => s.collector === "github:.notifications")?.ok).toBe(true);
+  });
+
+  it("an unread row means the next poll sends no If-Modified-Since", async () => {
+    const first = fakeRest(() => [thread()]);
+    await collectNotifications(repos(), store, first.rest, NOW);
+    expect(store.getSetting(NOTIFICATIONS_MODIFIED_SETTING)).toBe(LAST_MODIFIED);
+    const second = fakeRest(() => [thread()]);
+    await collectNotifications(repos(), store, second.rest, NOW + MIN);
+    expect(second.seen[0]?.["If-Modified-Since"]).toBeUndefined();
+  });
+
+  it("a comment that lands before the handled click still reopens the thread", async () => {
+    await collectNotifications(repos(), store, fakeRest(() => [thread()]).rest, NOW);
+    // handled an hour after the 11:00 comment; a comment at 11:59:30 arrived before the click
+    const click = UPDATED + 60 * MIN;
+    expect(store.markNotificationHandled("101", UPDATED, "marked", click)).toBe(true);
+    const skewed = UPDATED + 59.5 * MIN;
+    await collectNotifications(
+      repos(),
+      store,
+      fakeRest(() => [thread({ updated_at: new Date(skewed).toISOString() })]).rest,
+      click + MIN,
+    );
+    expect(persons(click + MIN).map((i) => i.key)).toEqual([`person:101:${skewed}`]);
   });
 
   it("a failed read keeps the rows and records the error", async () => {

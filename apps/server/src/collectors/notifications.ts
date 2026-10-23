@@ -96,8 +96,8 @@ export function parsePersonKey(key: string): Thread | null {
 
 /** Still waiting on the operator: unread on GitHub, and not handled since its latest comment. */
 export const notificationOpen = (
-  n: Pick<NotificationRow, "unread" | "handledAt" | "updatedAt">,
-): boolean => n.unread && (n.handledAt === null || n.updatedAt > n.handledAt);
+  n: Pick<NotificationRow, "unread" | "handledThrough" | "updatedAt">,
+): boolean => n.unread && (n.handledThrough === null || n.updatedAt > n.handledThrough);
 
 export function reasonText(n: Pick<NotificationRow, "reason" | "subjectType">): string {
   if (n.reason === "author" && n.subjectType === "PullRequest") return "commented on your PR";
@@ -271,9 +271,12 @@ export async function collectNotifications(
 ): Promise<{ changed: boolean }> {
   try {
     const modified = store.getSetting(NOTIFICATIONS_MODIFIED_SETTING);
+    // Last-Modified tracks new activity, not reads: while a thread is unread here, a 304 could hide
+    // that it was read on GitHub, so the conditional header goes only when nothing is unread.
+    const anyUnread = store.notifications().some((n) => n.unread);
     const first = await rest(
       NOTIFICATIONS_URL,
-      modified === null ? undefined : { "If-Modified-Since": modified },
+      modified === null || anyUnread ? undefined : { "If-Modified-Since": modified },
     );
     if (first.status === 304) {
       store.setStatus(NOTIFICATIONS_COLLECTOR, true, null);
