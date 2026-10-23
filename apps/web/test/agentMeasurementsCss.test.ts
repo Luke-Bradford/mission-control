@@ -15,3 +15,10 @@ it("fits measured attempts and long live task text into narrow panels", () => {
   const narrow = css.split("@media (max-width: 999px) {")[1] ?? "";
   expect(narrow).toMatch(/\.agrid,[^{]+\{\s+grid-template-columns: minmax\(0, 1fr\);/);
 });
+
+it("wraps the rename editor and long call signs within narrow headers", () => {
+  expect(rule(".rename-editor")).toContain("flex-wrap: wrap;");
+  expect(rule(".rename-editor")).toContain("max-width: 100%;");
+  expect(rule(".rename-editor input")).toContain("min-width: 0;");
+  expect(rule(".idrow .big")).toContain("overflow-wrap: anywhere;");
+});
