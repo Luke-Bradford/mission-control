@@ -18,7 +18,7 @@ import { hms, MONTHS } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
-import { openAway, useDock } from "./overlays.ts";
+import { openAway, useDock, useFlightUnread } from "./overlays.ts";
 import { SESSION_ALL, useSession } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
@@ -285,15 +285,16 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
   );
 }
 
-/** FLIGHT's chat: toggles the dock. No badge until FLIGHT asks anything (phase 3). */
+/** FLIGHT's chat: toggles the dock; a badge counts replies not yet seen on its Chat tab. */
 function DockButton() {
   const dock = useDock();
+  const unread = useFlightUnread();
   return (
     <button
       type="button"
       className={`iconbtn${dock.visible ? " on" : ""}`}
       title="Show or hide FLIGHT's chat (f)"
-      aria-label="FLIGHT chat"
+      aria-label={unread > 0 ? `FLIGHT chat, ${unread} new` : "FLIGHT chat"}
       aria-pressed={dock.visible}
       onClick={dock.toggle}
     >
@@ -306,6 +307,7 @@ function DockButton() {
           strokeLinejoin="round"
         />
       </svg>
+      {unread > 0 && <span className="dock-unread">{unread}</span>}
     </button>
   );
 }
