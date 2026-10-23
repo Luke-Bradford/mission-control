@@ -358,6 +358,36 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     if (!(await have(g, mainSha))) throw new Error("origin's tip could not be fetched");
   }
 
+  /**
+   * Whether every commit on `tip` beyond `merged` is a hub-made `Merge main into <branch>`:
+   * two parents, each on main or another such commit. Nothing unmerged is in them.
+   */
+  async function onlyHubMerges(
+    g: G,
+    branch: string,
+    merged: string,
+    tip: string,
+    mainSha: string,
+  ): Promise<boolean> {
+    if (!(await yes(g, ["merge-base", "--is-ancestor", merged, tip]))) return false;
+    const rows = (await g(["log", "--format=%H%x09%an%x09%P%x09%s", tip, "--not", merged, mainSha]))
+      .split("\n")
+      .filter((l) => l !== "")
+      .map((l) => l.split("\t"));
+    const inRange = new Set(rows.map((r) => r[0]));
+    for (const [, author, parents, subject] of rows) {
+      const ps = (parents ?? "").split(" ").filter((p) => p !== "");
+      if (author !== MC_MERGE_AUTHOR || subject !== `Merge main into ${branch}`) return false;
+      if (ps.length !== 2) return false;
+      for (const p of ps) {
+        if (!inRange.has(p) && !(await yes(g, ["merge-base", "--is-ancestor", p, mainSha]))) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   /** The run's branch when it is of the run's shape for its issue, else null. */
   function ownBranch(run: Run): string | null {
     const issue = issueOf(run);
@@ -660,6 +690,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           const { defaultBranch } = await originNow(g, null);
           await fetchMain(g, defaultBranch, mainSha);
           const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+          // the work is on main already: the PR is merged, and the next pass sees it
+          if (await yes(g, ["merge-base", "--is-ancestor", before, mainSha])) {
+            return transient(UPDATE_UP_TO_DATE);
+          }
           try {
             await w(
               [
@@ -798,15 +832,26 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (branch === null) return final(MERGE_NOT_RUN_BRANCH);
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g): Promise<PublishResult> => {
-        const { defaultBranch, branchSha } = await originNow(g, branch);
+        const { defaultBranch, mainSha, branchSha } = await originNow(g, branch);
         if (branch === defaultBranch) return final(MERGE_NOT_RUN_BRANCH);
         if (branchSha === null) return { ok: true };
-        if (branchSha !== sha) return final(MERGE_BRANCH_MOVED);
+        let lease = sha;
+        if (branchSha !== sha) {
+          // past the merged head, only the hub's own main merges may sit on the branch
+          await fetchMain(g, defaultBranch, mainSha);
+          if (!(await have(g, branchSha))) {
+            await g(["fetch", "--no-tags", "origin", `refs/heads/${branch}`]);
+          }
+          if (!(await onlyHubMerges(g, branch, sha, branchSha, mainSha))) {
+            return final(MERGE_BRANCH_MOVED);
+          }
+          lease = branchSha;
+        }
         try {
           await g([
             "push",
             "--porcelain",
-            `--force-with-lease=refs/heads/${branch}:${sha}`,
+            `--force-with-lease=refs/heads/${branch}:${lease}`,
             "origin",
             "--delete",
             `refs/heads/${branch}`,
@@ -839,7 +884,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (tip !== run.loop?.merging?.sha) {
           const { defaultBranch, mainSha } = await originNow(g, null);
           await fetchMain(g, defaultBranch, mainSha);
-          if (!(await yes(g, ["merge-base", "--is-ancestor", tip, mainSha]))) {
+          const merged = run.loop?.merging?.sha;
+          const onMain = await yes(g, ["merge-base", "--is-ancestor", tip, mainSha]);
+          if (
+            !onMain &&
+            !(merged !== undefined && (await onlyHubMerges(g, branch, merged, tip, mainSha)))
+          ) {
             return final(MERGE_BRANCH_MOVED);
           }
         }

@@ -1115,7 +1115,11 @@ describe("merge steps", () => {
     });
 
     it("keeps a branch someone has pushed to since", async () => {
-      gitAnswers = { "ls-remote": lsRemote(MAIN, OTHER) };
+      gitAnswers = {
+        "ls-remote": lsRemote(MAIN, OTHER),
+        "rev-parse": "",
+        "merge-base": exit1,
+      };
       expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
         ok: false,
         transient: false,
