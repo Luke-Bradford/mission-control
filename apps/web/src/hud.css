@@ -2309,6 +2309,12 @@ td.wrap {
   display: grid;
   gap: 6px;
 }
+.nopts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
 .opt {
   display: grid;
   gap: 2px;

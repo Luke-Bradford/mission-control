@@ -1,5 +1,6 @@
 import type {
   AgentView,
+  AttentionBrief,
   AttentionItem,
   BoardItem,
   ConfigView,
@@ -201,6 +202,32 @@ export function item(over: Partial<AttentionItem> = {}): AttentionItem {
     ...over,
   };
 }
+
+export function brief(over: Partial<AttentionBrief> = {}): AttentionBrief {
+  return {
+    context: "The dev seat asks which port to preview on.",
+    recommendation: "Use 5174.",
+    options: [
+      { label: "5174", answer: "Use port 5174." },
+      { label: "5180", answer: "Use port 5180." },
+    ],
+    basis: "read config",
+    at: NOW,
+    ...over,
+  };
+}
+
+/** A crew seat's question to the operator. */
+export const SEAT_Q = item({
+  key: "ask:7",
+  kind: "question",
+  agentId: "mc-dev-1",
+  escalationId: null,
+  url: null,
+  ticket: null,
+  text: "Which port?",
+  brief: brief(),
+});
 
 /** An item from a hub that predates `owner`. */
 export function itemWithoutOwner(over: Partial<AttentionItem> = {}): AttentionItem {
