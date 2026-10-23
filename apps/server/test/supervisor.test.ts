@@ -2957,6 +2957,26 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(userLines()).toContain("hello again"));
   });
 
+  it("a Stop under way when the hub stops is finished, not cut off: the run ends ok", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const ending = first.sup.endRun("guido-1"); // not awaited: the close is still on its way
+    await first.sup.stopAll();
+    await ending;
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "operator" });
+    expect(seatState("guido-1")).toBe("idle");
+    expect(store.seatSession("guido-1")?.runId).toBeNull();
+    // the next hub finds nothing to take back, and leaves it that way
+    const { sup } = make();
+    sup.start();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "operator" });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+    expect(sup.seatFacts("guido-1")).toBeNull();
+  });
+
   it("a stop of an attached seat ends its CLI through the keeper", async () => {
     const first = make();
     first.sup.start();

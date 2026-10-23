@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { type McTool, type McToolContext, registerMcp } from "../src/mcp/server.ts";
+import { McpCalls, type McTool, type McToolContext, registerMcp } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { Store } from "../src/store.ts";
 
@@ -530,6 +530,110 @@ describe("auth and bad bodies", () => {
     expect(text).toContain("TypeError");
     expect(text).not.toContain(token);
     expect(text).not.toContain("hunter2");
+  });
+});
+
+describe("McpCalls", () => {
+  /** Whether `p` has settled, after the microtasks and a turn of the loop have run. */
+  const settled = async (p: Promise<unknown>) => {
+    let done = false;
+    void p.then(
+      () => {
+        done = true;
+      },
+      () => {
+        done = true;
+      },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    return done;
+  };
+  const later = () => {
+    let resolve: () => void = () => {};
+    let reject: (e: Error) => void = () => {};
+    const p = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { p, resolve, reject };
+  };
+
+  it("is idle at once when nothing is in flight", async () => {
+    expect(await settled(new McpCalls().idle())).toBe(true);
+  });
+
+  it("stays pending while a tracked call is, including one tracked after idle() was called", async () => {
+    const calls = new McpCalls();
+    const a = later();
+    const b = later();
+    calls.track(a.p);
+    const idle = calls.idle();
+    expect(await settled(idle)).toBe(false);
+    calls.track(b.p); // a call that starts while the restart waits is waited for too
+    a.resolve();
+    expect(await settled(idle)).toBe(false);
+    b.resolve();
+    expect(await settled(idle)).toBe(true);
+  });
+
+  it("counts a call that rejects as finished, and returns the promise it was given", async () => {
+    const calls = new McpCalls();
+    const a = later();
+    const tracked = calls.track(a.p);
+    expect(tracked).toBe(a.p);
+    const idle = calls.idle();
+    a.reject(new Error("tool failed"));
+    await expect(tracked).rejects.toThrow("tool failed");
+    expect(await settled(idle)).toBe(true);
+  });
+
+  it("a tools/call is in flight until its tool answers", async () => {
+    const mcpCalls = new McpCalls();
+    const gateOpen = later();
+    const a = buildApp({
+      config: {
+        operator: { id: "o", timezone: "Europe/London" },
+        accounts: [],
+        repos: [],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      bus: new ChangeBus(),
+      tokens,
+      mcpCalls,
+      mcpTools: () => [
+        {
+          name: "hold",
+          description: "waits",
+          inputSchema: { type: "object" },
+          modes: ["writer"],
+          call: async () => {
+            await gateOpen.p;
+            return { text: "done" };
+          },
+        },
+      ],
+      seatMode: () => "writer",
+    });
+    await a.ready();
+    try {
+      const reply = a.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        payload: JSON.stringify(msg(1, "tools/call", { name: "hold", arguments: {} })),
+      });
+      await new Promise((r) => setTimeout(r, 50)); // the request has reached its tool
+      const idle = mcpCalls.idle();
+      expect(await settled(idle)).toBe(false);
+      gateOpen.resolve();
+      const r = await reply;
+      expect(JSON.parse(r.body).result.content[0].text).toBe("done");
+      expect(await settled(idle)).toBe(true);
+    } finally {
+      await a.close();
+    }
   });
 });
 

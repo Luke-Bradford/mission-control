@@ -109,6 +109,7 @@ import type { TestLock } from "../guard/lock.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
+import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
   ACTIVE_SEAT_STATES,
   CREW_KEEPER_DIR,
@@ -2362,7 +2363,23 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       unholdResume?.();
       // The seats and their keepers keep running: the hub lets go of their sockets, with the lines
       // it has acted on stored, and keeps their tokens, files and holds for the next hub.
+      // A seat whose Stop or engine end is under way finishes it first, so `onExit` records the end
+      // as it always did: a detach would cut its close off. The wait is bounded.
+      const ending = [...live.values()].flatMap((l) =>
+        l.ending === null ? [] : [l.ending.catch(() => {})],
+      );
+      if (ending.length > 0) {
+        let t: NodeJS.Timeout | undefined;
+        await Promise.race([
+          Promise.all(ending),
+          new Promise<void>((r) => {
+            t = setTimeout(r, SHUTDOWN_TIMEOUT_MS / 2);
+          }),
+        ]);
+        clearTimeout(t);
+      }
       for (const l of [...live.values()]) {
+        if (l.ending !== null) continue; // still ending: its socket stays, so the close goes through
         fold(l);
         saveCursor(l);
         l.off();
