@@ -1,6 +1,7 @@
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Run } from "@mc/core";
 import { expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
@@ -356,6 +357,117 @@ it("counts only replies after CAPCOM's latest direct message and clears them whe
     ).toBe(true);
   } finally {
     await app.close();
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+it("bounds stored history and indexes both thread endpoints", () => {
+  const f = regressionFixture();
+  try {
+    for (let i = 0; i < 520; i++) {
+      f.store.addComms({
+        from: i % 2 ? "guido-1" : "peer",
+        to: i % 2 ? "peer" : "guido-1",
+        text: String(i),
+        at: i,
+        ticket: null,
+      });
+    }
+    const rows = f.store.threadComms("guido-1");
+    expect(rows).toHaveLength(500);
+    expect(rows[0]?.text).toBe("20");
+    expect(rows.at(-1)?.text).toBe("519");
+    const db = new DatabaseSync(join(f.dir, "db.sqlite"));
+    try {
+      for (const column of ["from_id", "to_id"]) {
+        const plan = db
+          .prepare(
+            `EXPLAIN QUERY PLAN SELECT * FROM comms WHERE ${column} = ? ORDER BY id DESC LIMIT 500`,
+          )
+          .all("guido-1");
+        expect(plan.map((r) => r.detail).join(" ")).toContain("USING INDEX");
+      }
+    } finally {
+      db.close();
+    }
+  } finally {
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+it("caps a long snapshot at the read route's accepted bound", async () => {
+  const f = regressionFixture();
+  const app = buildApp({ config: f.config, store: f.store, bus: new ChangeBus() });
+  try {
+    for (let i = 0; i < 10201; i++)
+      f.store.addComms({ from: "guido-1", to: "CAPCOM", text: String(i), at: i, ticket: null });
+    const snapshot = (await app.inject({ url: "/api/comms/guido-1" })).json();
+    expect(snapshot.messages.length).toBeLessThanOrEqual(10200);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/comms/guido-1/read",
+          payload: { messageIds: snapshot.messages.map((m: { id: string }) => m.id) },
+        })
+      ).statusCode,
+    ).toBe(200);
+  } finally {
+    await app.close();
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+it("accepts a displayed snapshot after tools evict every message from its source", async () => {
+  const f = regressionFixture();
+  const path = f.addRun(1, "@CAPCOM displayed");
+  const app = buildApp({ config: f.config, store: f.store, bus: new ChangeBus() });
+  try {
+    const snapshot = (await app.inject({ url: "/api/comms/guido-1" })).json();
+    appendFileSync(
+      path,
+      `${JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "working" }] } })}\n`.repeat(
+        201,
+      ),
+    );
+    expect((await app.inject({ url: "/api/comms/guido-1" })).json().messages).toEqual([]);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/comms/guido-1/read",
+          payload: { messageIds: snapshot.messages.map((m: { id: string }) => m.id) },
+        })
+      ).statusCode,
+    ).toBe(200);
+  } finally {
+    await app.close();
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps undated tags in source order before later dated tags", () => {
+  const f = regressionFixture();
+  try {
+    const path = f.addRun(1, "initial");
+    appendFileSync(
+      path,
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "@CAPCOM undated" },
+            { type: "text", text: "@CAPCOM undated second block" },
+          ],
+        },
+      })}\n${f.frame("@CAPCOM newest", 3000)}`,
+    );
+    expect(f.needs().find((i) => i.kind === "tag")?.text).toBe("@CAPCOM newest");
+  } finally {
     f.store.close();
     rmSync(f.dir, { recursive: true, force: true });
   }

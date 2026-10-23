@@ -79,7 +79,7 @@ import {
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
-import { threadMessages } from "./comms.ts";
+import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -556,7 +556,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const id = req.params.id;
         if (!agentById(id)) return reply.code(404).send({ error: "unknown agent" });
         const body = z
-          .object({ messageIds: z.array(z.string().max(300)).max(10200) })
+          .object({ messageIds: z.array(z.string().max(300)).max(COMMS_SNAPSHOT_LIMIT) })
           .strict()
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -572,6 +572,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!store.threadOwnsMessage(id, key)) return false;
           const p = commsPosition(key);
           const last = p && latest.get(p.source);
+          if (p && !last && p.source.startsWith("stream:")) {
+            const run = store.run(p.source.slice("stream:".length));
+            if (!run?.transcriptPath) return false;
+            try {
+              // With no messages left, only positions before the current event window
+              // may be stale snapshot IDs. Future offsets must still be rejected.
+              const first = readStream(run.transcriptPath, 200).events[0];
+              const boundary = first && commsPosition(`stream:${run.id}:${first.id}`);
+              return boundary !== null && boundary !== undefined && p.offset < boundary.offset;
+            } catch {
+              return false;
+            }
+          }
           return (
             p &&
             last &&

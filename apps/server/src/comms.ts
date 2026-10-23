@@ -5,6 +5,9 @@ import { readStream } from "./stream.ts";
 /** A thread scans at most three transcripts, with 200 events per transcript. */
 const THREAD_RUNS = 3;
 
+/** Shared ceiling for a displayed snapshot and its read acknowledgement. */
+export const COMMS_SNAPSHOT_LIMIT = 10200;
+
 /** Needs you scans only the newest run; the thread retains a small recent history. */
 export function threadMessages(
   store: Store,
@@ -47,12 +50,34 @@ export function threadMessages(
       // A missing transcript contributes no messages.
     }
   }
+  // Give undated messages a neighbouring time in their own source, without changing
+  // their public timestamp. Source positions break ties within that time.
+  const sourceTimes = new Map<string, number>();
+  const orderTimes = new Map<string, number>();
+  for (const m of messages) {
+    const p = commsPosition(m.id);
+    if (!p) continue;
+    if (m.at !== null) sourceTimes.set(p.source, m.at);
+    const at = m.at ?? sourceTimes.get(p.source);
+    if (at !== undefined) orderTimes.set(m.id, at);
+  }
+  sourceTimes.clear();
+  for (const m of messages.toReversed()) {
+    const p = commsPosition(m.id);
+    if (!p) continue;
+    if (m.at !== null) sourceTimes.set(p.source, m.at);
+    if (!orderTimes.has(m.id)) orderTimes.set(m.id, sourceTimes.get(p.source) ?? 0);
+  }
   const cursors = store.threadReadCursors(id);
   return messages
     .sort((a, b) => {
-      if (a.at === null) return b.at === null ? 0 : 1;
-      return b.at === null ? -1 : a.at - b.at;
+      const time = (orderTimes.get(a.id) ?? 0) - (orderTimes.get(b.id) ?? 0);
+      if (time !== 0) return time;
+      const ap = commsPosition(a.id);
+      const bp = commsPosition(b.id);
+      return ap && bp && ap.source === bp.source ? ap.offset - bp.offset || ap.block - bp.block : 0;
     })
+    .slice(-COMMS_SNAPSHOT_LIMIT)
     .map((m) => {
       const position = commsPosition(m.id);
       if (position === null) return { ...m, seen: false };

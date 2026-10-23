@@ -156,6 +156,8 @@ CREATE TABLE IF NOT EXISTS comms (
   to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
+CREATE INDEX IF NOT EXISTS comms_from_id ON comms(from_id, id);
+CREATE INDEX IF NOT EXISTS comms_to_id ON comms(to_id, id);
 CREATE TABLE IF NOT EXISTS comms_reads (
   thread_id TEXT NOT NULL, source_id TEXT NOT NULL, offset INTEGER NOT NULL, block INTEGER NOT NULL,
   PRIMARY KEY (thread_id, source_id)
@@ -497,6 +499,8 @@ export interface CommsRow {
   ticket: string | null;
   text: string;
 }
+
+export const THREAD_COMMS_LIMIT = 500;
 
 /** The source and position of a stable Comms/transcript message ID. */
 export function commsPosition(
@@ -2215,8 +2219,12 @@ export class Store {
   /** Stable stored message IDs for one thread, in insertion order. */
   threadComms(id: string): (CommsRow & { id: string })[] {
     const rows = this.db
-      .prepare("SELECT * FROM comms WHERE from_id = ? OR to_id = ? ORDER BY id DESC")
-      .all(id, id) as Row[];
+      .prepare(`SELECT * FROM comms WHERE id IN (
+          SELECT id FROM (SELECT id FROM comms WHERE from_id = ? ORDER BY id DESC LIMIT ?)
+          UNION
+          SELECT id FROM (SELECT id FROM comms WHERE to_id = ? ORDER BY id DESC LIMIT ?)
+        ) ORDER BY id DESC LIMIT ?`)
+      .all(id, THREAD_COMMS_LIMIT, id, THREAD_COMMS_LIMIT, THREAD_COMMS_LIMIT) as Row[];
     return rows.reverse().map((r) => ({
       id: `comms:${r.id}`,
       at: r.at as number,
