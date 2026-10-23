@@ -63,6 +63,7 @@ import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
+import { threadMessages } from "./comms.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
@@ -557,6 +558,38 @@ export function attentionItems(
   const briefs = store.briefs();
   const status = new Map(store.status().map((s) => [s.collector, s]));
   const items: OwnedItem[] = [];
+
+  for (const agent of configuredAgents(config)) {
+    const unread = threadMessages(store, agent.id, agent.kind === "crew", "attention").filter(
+      (m) => !m.seen,
+    );
+    const tags = unread.filter((m) => m.tagged);
+    const replies = unread.filter((m) => m.direct);
+    for (const [kind, messages] of [
+      ["tag", tags],
+      ["message", replies],
+    ] as const) {
+      const last = messages.at(-1);
+      if (!last) continue;
+      items.push({
+        owner: OWNER_OPERATOR,
+        key: `${kind}:${agent.id}:${last.id}`,
+        kind,
+        agentId: agent.id,
+        repoId: agent.repoId,
+        text:
+          kind === "tag"
+            ? last.text.replace(/^[→←]\s*[^:]+:\s*/, "")
+            : `${messages.length} new on your direct line`,
+        at: last.at ?? 0,
+        messageAt: last.at,
+        tool: null,
+        url: null,
+        escalationId: null,
+        ticket: last.ticket,
+      });
+    }
+  }
 
   for (const e of store.escalations()) {
     // an escalation whose issue the board has since seen closed no longer holds
