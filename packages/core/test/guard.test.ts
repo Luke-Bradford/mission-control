@@ -1528,6 +1528,24 @@ describe("firstCommitNotifier (Task 9)", () => {
   });
 });
 
+describe("firstPrNotifier allowOwnRepoRefs", () => {
+  const own = (text: string) =>
+    firstPrNotifier(text, { repo: "o/mc", issue: null, allowOwnRepoRefs: true });
+
+  it("lets a bare #n and GH-n through, which are this repo's own issues", () => {
+    expect(own("Depends on #12 and GH-13")).toBeNull();
+    expect(firstPrNotifier("Depends on #12", { repo: "o/mc", issue: null })).toBe("#12");
+  });
+
+  it("still finds mentions, other items by name or link, and closing keywords", () => {
+    expect(own("ask @octocat")).toBe("@octocat");
+    expect(own("see other/repo#5")).toBe("other/repo#5");
+    expect(own("see o/mc#5")).toBe("o/mc#5");
+    expect(own("see https://github.com/other/repo/issues/5")).not.toBeNull();
+    expect(own("fixes #5")).not.toBeNull();
+  });
+});
+
 describe("Task 9 fix round 1: notifiers", () => {
   const body = (text: string) => firstPrNotifier(text, { repo: "o/mc", issue: 42 });
   const title = (text: string) => firstPrNotifier(text, { repo: "o/mc", issue: 42 });
