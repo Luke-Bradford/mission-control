@@ -278,6 +278,7 @@ function make(
     node?: string;
     nodeNote?: string;
     scratchRetro?: boolean;
+    retroLightModel?: string;
     extraSeat?: CrewSeatConfig;
     /** A second, seatless session "other". */
     secondSession?: boolean;
@@ -302,6 +303,10 @@ function make(
   if (over.scratchRetro) {
     const retro = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "retro");
     if (retro) retro.mode = "scratch";
+  }
+  if (over.retroLightModel !== undefined) {
+    const retro = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "retro");
+    if (retro) retro.lightModel = over.retroLightModel;
   }
   if (over.extraSeat) cfg.crew?.sessions[0]?.seats.push(over.extraSeat);
   if (over.secondSession) {
@@ -3783,6 +3788,69 @@ describe("startReview", () => {
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
     expect(fs.denyRead).toContain(join(root, "mc-crew", "guido-1-42"));
+  });
+
+  describe("model", () => {
+    async function modelOf(
+      over: Parameters<typeof make>[0],
+      reviewOver?: Parameters<typeof reviewOfPush>[0],
+    ) {
+      const r = reviewOfPush(reviewOver);
+      const { sup } = make({ scratchRetro: true, ...over });
+      // the CLI's init later replaces the run's model with the one it reports
+      const upsert = vi.spyOn(store, "upsertRun");
+      sup.start();
+      await sup.startReview("retro", r.reviewId);
+      await until(() => expect(userLines()).toHaveLength(1));
+      const argv = recorded()[0]?.argv as string[];
+      const written = upsert.mock.calls.find(([run]) => run.reviewId === r.reviewId);
+      upsert.mockRestore();
+      return [written?.[0].model, argv[argv.indexOf("--model") + 1]];
+    }
+
+    it("a small change is reviewed on the light model", async () => {
+      store.replaceBoard("mc", [boardCard(42)]);
+      expect(await modelOf({ retroLightModel: "sonnet" })).toEqual(["sonnet", "sonnet"]);
+    });
+
+    it("a larger change keeps the seat's model", async () => {
+      store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
+      expect(await modelOf({ retroLightModel: "sonnet" })).toEqual(["haiku", "haiku"]);
+    });
+
+    it("a bug keeps the seat's model at any size", async () => {
+      store.replaceBoard("mc", [boardCard(42)]);
+      expect(
+        await modelOf({
+          retroLightModel: "sonnet",
+          fetchTicket: async () => ({ ...TICKET, labels: ["bug"] }),
+        }),
+      ).toEqual(["haiku", "haiku"]);
+    });
+
+    it("a full-depth profile keeps the full-depth model over the light model", async () => {
+      store.replaceBoard("mc", [boardCard(42)]);
+      expect(
+        await modelOf(
+          { retroLightModel: "sonnet" },
+          {
+            profile: {
+              profile: {
+                ...(DEFAULT_PROFILES[0] as Profile),
+                reviewer: { role: "RETRO", depth: "full" },
+              },
+              route: { by: "size", size: "S" },
+              hash: "h",
+            },
+          },
+        ),
+      ).toEqual([REVIEW_FULL_MODEL, REVIEW_FULL_MODEL]);
+    });
+
+    it("no light model: the seat's model", async () => {
+      store.replaceBoard("mc", [boardCard(42)]);
+      expect(await modelOf({})).toEqual(["haiku", "haiku"]);
+    });
   });
 
   it("startReview is refused while the CLI is held, and starts no run", async () => {

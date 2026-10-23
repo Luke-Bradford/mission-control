@@ -68,6 +68,7 @@ import {
   type Run,
   type RunLoop,
   retiringText,
+  reviewDepth,
   reworkFirstText,
   type SeatSessionRow,
   type SeatState,
@@ -1572,6 +1573,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
+      const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
+      // a full-depth profile wins; else a small change goes to the seat's light model, if it has one
+      const model =
+        author.profile?.profile.reviewer.depth === "full"
+          ? REVIEW_FULL_MODEL
+          : info.seat.lightModel !== undefined &&
+              reviewDepth({ labels: ticket.labels, size: card?.size ?? null }) === "light"
+            ? info.seat.lightModel
+            : info.seat.model;
 
       const checkout = info.session.checkout;
       const prev =
@@ -1623,8 +1633,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         endedAt: null,
         status: "running",
         sessionId: cliSessionId,
-        model:
-          author.profile?.profile.reviewer.depth === "full" ? REVIEW_FULL_MODEL : info.seat.model,
+        model,
         ...on,
         branch: null,
         ticket: author.ticket,
