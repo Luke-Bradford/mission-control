@@ -816,7 +816,7 @@ describe("Capacity and cost", () => {
         command: "pnpm test <script>agent text</script>",
         since: NOW - MIN,
       },
-      waiting: [{ runId: "queued", seatId: "guido-1", since: NOW - 30_000 }],
+      waiting: [{ runId: "queued", seatId: "guido-1", command: "pnpm test", since: NOW - 30_000 }],
     };
     stubFetch({
       [RESOURCES.config.path]: CFG,
