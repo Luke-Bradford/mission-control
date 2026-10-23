@@ -2,7 +2,7 @@
  * The HUD's styles, ported from the mockup (docs/prototype/mission-control-hud.html L1–565) with its
  * class names kept, so later phases can follow it. Rules for features nothing renders yet are left
  * out (folder tiles and forms, loop templates and steppers, FLIGHT's asks, drafts and incoming rows,
- * the sample-data chip, notification samples). The mockup's body-level classes (dock-hidden,
+ * the sample-data chip). The mockup's body-level classes (dock-hidden,
  * dock-open, bs-on) sit on `.app`, the React root. The kept Plan 2 components (TicketDetail,
  * ConfigYaml, Glossary) are styled fresh at the end.
  *
@@ -3000,6 +3000,17 @@ kbd {
   border-radius: var(--r-s);
   padding: 8px 10px;
   font-size: var(--fs-s);
+}
+.notif {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  margin-bottom: 8px;
+  box-shadow: var(--shadow);
+  max-width: 400px;
 }
 .tlist {
   list-style: none;

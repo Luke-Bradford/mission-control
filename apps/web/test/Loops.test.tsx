@@ -1,8 +1,11 @@
-import { type ConfigProfile, RETRY_NOTE } from "@mc/core";
+import { type ConfigProfile, type Crew, type CrewLoop, RETRY_NOTE } from "@mc/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Loops } from "../src/setup/Loops.tsx";
-import { CONFIG } from "./fixtures.ts";
+import { setSession } from "../src/shell/session.ts";
+import { Toast } from "../src/shell/Toast.tsx";
+import { settled, stubFetch } from "./fetchStub.ts";
+import { CONFIG, seatRow } from "./fixtures.ts";
 
 const TEMPLATES: ConfigProfile[] = [
   {
@@ -39,6 +42,7 @@ const TEMPLATES: ConfigProfile[] = [
 
 const cfg = { ...CONFIG, profiles: { source: "built-in", error: null, list: TEMPLATES } };
 
+beforeEach(() => stubFetch({ "/api/crew": { rows: [], firstRunToday: null } }));
 afterEach(cleanup);
 
 const steps = (region: HTMLElement): (string | null)[] =>
@@ -50,10 +54,10 @@ describe("Setup › Loops templates", () => {
   it("the Templates panel lists the profiles and draws the first one's steps", () => {
     render(<Loops config={cfg} />);
     const t = screen.getByRole("region", { name: "Templates" });
-    const buttons = within(t).getAllByRole("button");
+    const buttons = within(within(t).getByRole("list")).getAllByRole("button");
     expect(buttons.map((b) => b.textContent)).toEqual([
-      "feature · label type:feature, or any other ticket with no template label · 6 steps",
-      "small-change · label chore or test or docs, or Size XS or S with no template label · 4 steps",
+      "feature · label type:feature, or any other ticket with no template label · — running · 6 steps",
+      "small-change · label chore or test or docs, or Size XS or S with no template label · — running · 4 steps",
     ]);
     expect(buttons[0]?.getAttribute("aria-pressed")).toBe("true");
     const f = screen.getByRole("region", { name: "feature" });
@@ -69,6 +73,97 @@ describe("Setup › Loops templates", () => {
     expect(f.textContent).toContain("Up to 3 tries.");
     expect(f.textContent).toContain("RETRO, fresh eyes · full review");
     expect(f.textContent).toContain(RETRY_NOTE);
+  });
+
+  it.each([cfg, CONFIG])(
+    "New explains how to define a template, including without profiles",
+    (config) => {
+      render(
+        <>
+          <Loops config={config} />
+          <Toast />
+        </>,
+      );
+      fireEvent.click(
+        within(screen.getByRole("region", { name: "Templates" })).getByRole("button", {
+          name: "New",
+        }),
+      );
+      expect(screen.getByRole("status").textContent).toBe(
+        "New template: name the work type, draw the steps, give each step its checks and a limit, then bind it to a ticket label.",
+      );
+    },
+  );
+
+  const loop: CrewLoop = {
+    phase: "working",
+    text: "Working",
+    prNumber: null,
+    parked: null,
+    profile: "feature",
+    step: "implement",
+  };
+  const crew: Crew = {
+    firstRunToday: null,
+    rows: [
+      seatRow({ id: "inco-1", loop }),
+      seatRow({ id: "guido-2", loop: { ...loop, phase: "ci", step: "verify" } }),
+      seatRow({ id: "waiting-seat", hudState: "waiting", loop }),
+      seatRow({ id: "idle-seat", hudState: "idle", loop }),
+      seatRow({ id: "stopped-seat", hudState: "stopped", loop }),
+      seatRow({ id: "other-profile", loop: { ...loop, profile: "small-change" } }),
+      seatRow({ id: "no-loop", loop: null }),
+    ],
+  };
+
+  it("counts running seats per template and lists current occupants only on their step as inert text", async () => {
+    const unsafeId = "<img src=x onerror=alert(1)>";
+    const fetchFn = stubFetch({
+      "/api/crew": {
+        ...crew,
+        rows: crew.rows.map((r) => (r.id === "inco-1" ? { ...r, id: unsafeId } : r)),
+      },
+    });
+    render(<Loops config={cfg} />);
+    await settled(fetchFn, "/api/crew");
+    expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("2 running");
+    expect(screen.getByRole("button", { name: /^small-change/ }).textContent).toContain(
+      "1 running",
+    );
+    const card = screen.getByText("3 · implement").parentElement as HTMLElement;
+    expect(within(card).getByText("on this step")).toBeTruthy();
+    expect(within(card).getByText(unsafeId)).toBeTruthy();
+    expect(within(card).getByText("waiting-seat")).toBeTruthy();
+    expect(card.querySelector("img")).toBeNull();
+    expect(card.textContent).not.toMatch(/guido-2|idle-seat|stopped-seat|other-profile|no-loop/);
+    expect(screen.getByText("4 · verify").parentElement?.textContent).toContain("guido-2");
+    fireEvent.click(screen.getByRole("button", { name: /^small-change/ }));
+    expect(screen.getByText("1 · implement").parentElement?.textContent).toContain("other-profile");
+    expect(screen.queryByText(unsafeId)).toBeNull();
+  });
+
+  it.each(["shop-app", "s1"])("filters template counts and occupants for %s", async (session) => {
+    const fetchFn = stubFetch({
+      "/api/crew": {
+        ...crew,
+        rows: [
+          ...crew.rows,
+          seatRow({ id: "elsewhere", repoId: "site-builder", sessionId: "s2", loop }),
+        ],
+      },
+    });
+    setSession(session);
+    render(<Loops config={cfg} />);
+    await settled(fetchFn, "/api/crew");
+    expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("2 running");
+    expect(screen.queryByText("elsewhere")).toBeNull();
+  });
+
+  it("shows zero running after an empty crew loads", async () => {
+    const fetchFn = stubFetch({ "/api/crew": { rows: [], firstRunToday: null } });
+    render(<Loops config={cfg} />);
+    await settled(fetchFn, "/api/crew");
+    expect(screen.getByRole("button", { name: /^feature/ }).textContent).toContain("0 running");
   });
 
   it("picking a profile draws its steps", () => {
