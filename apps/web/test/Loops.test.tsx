@@ -1,4 +1,4 @@
-import { type ConfigProfile, ENGINE_NOT_RUNNING, RETRY_NOTE } from "@mc/core";
+import { type ConfigProfile, RETRY_NOTE } from "@mc/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Loops } from "../src/setup/Loops.tsx";
@@ -93,7 +93,14 @@ describe("Setup › Loops templates", () => {
     unmount();
     render(<Loops config={CONFIG} />);
     expect(screen.getByRole("region", { name: "Templates" }).textContent).toContain(
-      ENGINE_NOT_RUNNING,
+      "This server reads no template profiles.",
     );
+  });
+
+  it("with no observed loops the panel says so and has no table", () => {
+    render(<Loops config={{ ...cfg, loops: [] }} />);
+    const panel = screen.getByRole("region", { name: "Observed loops" });
+    expect(panel.textContent).toContain("No observed loops.");
+    expect(within(panel).queryByRole("table")).toBeNull();
   });
 });

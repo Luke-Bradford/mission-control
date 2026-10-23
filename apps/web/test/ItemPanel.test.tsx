@@ -1,7 +1,8 @@
-import { type AttentionItem, type AutonomyQuestion, FLIGHT_NOT_RUNNING } from "@mc/core";
+import type { AttentionItem, AutonomyQuestion } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
+import { FLIGHT_NO_SEAT, FLIGHT_STOPPED } from "../src/flight/flightTypes.ts";
 import { navigate } from "../src/router.ts";
 import { Dock } from "../src/shell/Dock.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
@@ -77,7 +78,7 @@ describe("ItemPanel, Ask FLIGHT", () => {
       (screen.getByLabelText("Reply, or ask FLIGHT about this") as HTMLInputElement).disabled,
     ).toBe(true);
     expect(screen.getByRole("button", { name: "Ask FLIGHT" }).getAttribute("title")).toBe(
-      FLIGHT_NOT_RUNNING,
+      FLIGHT_NO_SEAT,
     );
     expect((screen.getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement).disabled).toBe(
       true,
@@ -251,7 +252,7 @@ describe("ItemPanel, an escalation with a question", () => {
     const input = screen.getByLabelText("Reply, or ask FLIGHT about this") as HTMLInputElement;
     expect(input.disabled).toBe(true);
     expect(input.placeholder).toBe("Reply, or ask FLIGHT about this…");
-    expect(input.title).toBe(FLIGHT_NOT_RUNNING);
+    expect(input.title).toBe(FLIGHT_NO_SEAT);
   });
 });
 
@@ -359,13 +360,13 @@ describe("ItemPanel, acting on an item", () => {
     );
     const ask = within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
     expect(ask.disabled).toBe(true);
-    expect(ask.title).toBe(FLIGHT_NOT_RUNNING);
+    expect(ask.title).toBe(FLIGHT_STOPPED);
   });
 
   it("with FLIGHT stopped, an answer for FLIGHT cannot be sent", async () => {
     acting([{ ...SEAT_Q, agentId: "flight-1" }], STOPPED);
     const opt = (await within(panel()).findByRole("button", { name: "5174" })) as HTMLButtonElement;
-    await waitFor(() => expect(opt.title).toBe(FLIGHT_NOT_RUNNING));
+    await waitFor(() => expect(opt.title).toBe(FLIGHT_STOPPED));
     expect(opt.disabled).toBe(true);
     expect(
       (within(panel()).getByRole("button", { name: "Reply" }) as HTMLButtonElement).disabled,

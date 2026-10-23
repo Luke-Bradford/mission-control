@@ -478,7 +478,7 @@ describe("cards", () => {
     await screen.findByText("Ticket 1");
     const one = card(container, "shop-app#1") as HTMLElement;
     const two = card(container, "shop-app#2") as HTMLElement;
-    expect(within(one).getByText("Unassigned · not queued")).toBeTruthy();
+    expect(within(one).getByText("Unassigned · FLIGHT will offer it to an agent")).toBeTruthy();
     expect(within(two).getByText("No reviewer on it now")).toBeTruthy();
     expect(within(two).getByText(NO_PR_YET)).toBeTruthy();
     expect(one.textContent).not.toContain("—");

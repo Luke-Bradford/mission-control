@@ -1,10 +1,4 @@
-import {
-  type ConfigProfile,
-  type ConfigView,
-  ENGINE_NOT_RUNNING,
-  RETRY_NOTE,
-  SMALL_SIZES,
-} from "@mc/core";
+import { type ConfigProfile, type ConfigView, RETRY_NOTE, SMALL_SIZES } from "@mc/core";
 import { useState } from "react";
 import { Panel } from "../hud/Panel.tsx";
 import { inSession, useSession } from "../shell/session.ts";
@@ -101,6 +95,9 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
   );
 }
 
+const NO_PROFILES = "This server reads no template profiles.";
+const NO_OBSERVED_LOOPS = "No observed loops.";
+
 const TEMPLATES_NOTE =
   "Mission Control decides every move from its own checks; an agent saying it is done can only hold work back, never push it forward. cmd = Mission Control runs it · rule = read from the diff or the board · review = a fresh reviewer · gate = you or FLIGHT · agent = the agent's own evidence.";
 
@@ -111,37 +108,41 @@ export function Loops({ config }: { config: ConfigView }) {
   return (
     <>
       <Panel title="Observed loops" sub="read from config.yaml">
-        <div className="tw">
-          <table>
-            <thead>
-              <tr>
-                <th>Loop</th>
-                <th>Kind</th>
-                <th>Repo</th>
-                <th>Account</th>
-                <th>launchd label</th>
-                <th>Worktree</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loops.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.id}</td>
-                  <td>{l.kind}</td>
-                  <td>{l.repoId}</td>
-                  <td>{l.accountId}</td>
-                  <td className="mono">{l.launchdLabel}</td>
-                  <td className="mono">{l.worktree}</td>
+        {loops.length === 0 ? (
+          <p className="pb muted s">{NO_OBSERVED_LOOPS}</p>
+        ) : (
+          <div className="tw">
+            <table>
+              <thead>
+                <tr>
+                  <th>Loop</th>
+                  <th>Kind</th>
+                  <th>Repo</th>
+                  <th>Account</th>
+                  <th>launchd label</th>
+                  <th>Worktree</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {loops.map((l) => (
+                  <tr key={l.id}>
+                    <td>{l.id}</td>
+                    <td>{l.kind}</td>
+                    <td>{l.repoId}</td>
+                    <td>{l.accountId}</td>
+                    <td className="mono">{l.launchdLabel}</td>
+                    <td className="mono">{l.worktree}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
       {config.profiles === undefined ? (
         <Panel title="Templates" sub="loops/*.yaml">
           <div className="pb">
-            <p className="s">{ENGINE_NOT_RUNNING}</p>
+            <p className="s">{NO_PROFILES}</p>
             <p className="xs muted">{RETRY_NOTE}</p>
             <p className="note">{TEMPLATES_NOTE}</p>
           </div>

@@ -1,9 +1,10 @@
-import { FLIGHT_NOT_RUNNING, type FlightBriefView } from "@mc/core";
+import type { FlightBriefView } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { FLIGHT_NO_SEAT } from "./flightTypes.ts";
 
 const DASH = "—";
 export const BRIEF_EMPTY = "Nothing here yet.";
@@ -42,7 +43,7 @@ export function BriefPanel() {
       {view === undefined ? (
         <p className="pb note">{DASH}</p>
       ) : view.session === null ? (
-        <p className="pb note">{FLIGHT_NOT_RUNNING}</p>
+        <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (
         <div className="pb briefgrid">
           {view.sections.map((s) => (
@@ -68,7 +69,7 @@ export function BriefPanel() {
 export function SituationText() {
   const view = useBrief();
   if (view === undefined) return <p className="sittext note">{DASH}</p>;
-  if (view.session === null) return <p className="sittext note">{FLIGHT_NOT_RUNNING}</p>;
+  if (view.session === null) return <p className="sittext note">{FLIGHT_NO_SEAT}</p>;
   const text = situationText(view);
   if (text === "") return <p className="sittext note">{SITUATION_EMPTY}</p>;
   return (
@@ -84,7 +85,7 @@ export function WatchList() {
   const now = useSecond();
   const tz = useTz();
   if (view === undefined) return <p className="pb note">{DASH}</p>;
-  if (view.session === null) return <p className="pb note">{FLIGHT_NOT_RUNNING}</p>;
+  if (view.session === null) return <p className="pb note">{FLIGHT_NO_SEAT}</p>;
   const risks = view.sections.find((s) => s.section === "risks");
   if (!risks || risks.text.trim() === "") return <p className="pb note">{WATCH_EMPTY}</p>;
   return (

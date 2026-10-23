@@ -1,7 +1,6 @@
 import {
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
-  FLIGHT_NOT_RUNNING,
   type FlightBriefSectionKey,
   type FlightBriefView,
 } from "@mc/core";
@@ -11,7 +10,7 @@ import { hub } from "../src/data.ts";
 import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
-import type { FlightDecision, FlightView } from "../src/flight/flightTypes.ts";
+import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
 import { incomingCards, NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
@@ -101,7 +100,7 @@ const decided = (id: string, at: number, over: Partial<FlightDecision> = {}): Fl
 });
 const flightView = (over: Partial<FlightView> = {}): FlightView => ({
   seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
-  decisions: [decided("d1", NOW - 2 * HOUR), decided("d2", NOW - HOUR, { kind: "pass" })],
+  decisions: [decided("d1", NOW - 2 * HOUR), decided("d2", NOW - HOUR)],
   ...over,
 });
 function stubDecided(view: FlightView, extra: Record<string, unknown> = {}) {
@@ -114,39 +113,50 @@ function stubDecided(view: FlightView, extra: Record<string, unknown> = {}) {
 }
 
 describe("Decided without you", () => {
-  it("lists decisions newest first with tag, time, label, about, decision and basis", async () => {
-    stubDecided(flightView());
+  it("lists today's answers newest first with tag, time, about, decision and basis, and no kind pill", async () => {
+    stubDecided(
+      flightView({
+        decisions: [
+          decided("d1", NOW - 2 * HOUR),
+          decided("d2", NOW - HOUR),
+          decided("d3", NOW - 26 * HOUR),
+          decided("d4", NOW - HOUR, { kind: "brief" }),
+        ],
+      }),
+    );
     render(<Flight />);
     const rows = await screen.findAllByTestId("decided-row");
     expect(rows).toHaveLength(2);
     const first = rows[0]?.textContent ?? "";
     expect(first).toContain("GUIDO-1");
-    expect(first).toContain("Passed to you");
     expect(first).toContain("question d2");
     expect(first).toContain("yes d2 · because d2");
     expect(first).toMatch(/\d\d:\d\d/);
-    expect(rows[1]?.textContent).toContain("Answered");
+    expect(first).not.toContain("Answered");
+    expect(rows[1]?.textContent).toContain("question d1");
   });
 
-  it("says so when nothing was decided", async () => {
-    stubDecided(flightView({ decisions: [] }));
+  it("says so when nothing was decided without you today", async () => {
+    stubDecided(flightView({ decisions: [decided("d1", NOW - 2 * HOUR, { kind: "pass" })] }));
     const { container } = render(<Flight />);
     await waitFor(() =>
       expect(container.querySelector("#decidedP")?.textContent).toContain(
-        "Nothing decided in the last day.",
+        "Nothing decided without you today.",
       ),
     );
   });
 
-  it("says FLIGHT is not running with no seat", async () => {
+  it("shows a dash before FLIGHT loads, and says no seat is configured with none", async () => {
     stubDecided({ seat: null, decisions: [] });
     const { container } = render(<Flight />);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(container.querySelector("#decidedP")?.textContent).toContain(FLIGHT_NOT_RUNNING);
+    expect(container.querySelector("#decidedP .pb")?.textContent).toBe("—");
+    await waitFor(() =>
+      expect(container.querySelector("#decidedP")?.textContent).toContain(FLIGHT_NO_SEAT),
+    );
   });
 
   it("Overturn posts the exact text, then shows You overturned it", async () => {
-    const d = decided("d2", NOW - HOUR, { kind: "pass" });
+    const d = decided("d2", NOW - HOUR);
     const fn = stubDecided(flightView({ decisions: [d] }), {
       "POST /api/seats/flight-1/message": {},
     });
@@ -192,10 +202,9 @@ describe("FLIGHT page", () => {
     const { container } = render(<Flight />);
     for (const id of ["sitP", "watchP"]) {
       await waitFor(() =>
-        expect(container.querySelector(`#${id}`)?.textContent, id).toContain(FLIGHT_NOT_RUNNING),
+        expect(container.querySelector(`#${id}`)?.textContent, id).toContain(FLIGHT_NO_SEAT),
       );
     }
-    expect(container.querySelector("#sitP .phase")?.textContent).toBe("P2");
     expect(container.querySelector("#draftsP")?.textContent).toContain(DRAFTS_NOT_TRACKED);
   });
 
@@ -435,6 +444,29 @@ describe("FLIGHT page", () => {
     expect(screen.getByRole("button", { name: "Open what needs you" })).toBeTruthy();
   });
 
+  it("the Situation panel carries no phase badge, and counts what FLIGHT answered today", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": board,
+      "/api/boards/site-builder": [],
+      "/api/attention": [],
+      "/api/flight": flightView({
+        decisions: [
+          decided("d1", NOW - HOUR),
+          decided("d2", NOW - 2 * HOUR),
+          decided("d3", NOW - 26 * HOUR),
+          decided("d4", NOW - HOUR, { kind: "brief" }),
+        ],
+      }),
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    const strip = container.querySelector(".sitstats") as HTMLElement;
+    expect(strip.textContent).toContain("— answered by FLIGHT today");
+    await waitFor(() => expect(strip.textContent).toContain("2 answered by FLIGHT today"));
+    expect(container.querySelector("#sitP .phase")).toBeNull();
+  });
+
   it("the stats strip counts only the selected session's tickets and attention items", async () => {
     stubFetch({
       "/api/repos": REPOS,
@@ -457,7 +489,8 @@ describe("FLIGHT page", () => {
     await waitFor(() => expect(strip.textContent).toContain("3 tickets in progress"));
     expect(strip.textContent).toContain("2 decisions for you");
     act(() => setSession("site-builder"));
-    await waitFor(() => expect(strip.textContent).toContain("1 tickets in progress"));
+    await waitFor(() => expect(strip.textContent).toContain("1 ticket in progress"));
+    expect(strip.textContent).not.toContain("1 tickets");
     expect(strip.textContent).toContain("1 decision for you");
     expect(strip.textContent).toContain("1 routine approval");
     expect(strip.textContent).toContain("2 stalls");
@@ -616,7 +649,7 @@ describe("FLIGHT's brief", () => {
     stubFetch({ "/api/flight/brief": briefView({}, null), "/api/config": CONFIG });
     const { container } = render(<Flight />);
     await waitFor(() =>
-      expect(container.querySelector("#briefP")?.textContent).toContain(FLIGHT_NOT_RUNNING),
+      expect(container.querySelector("#briefP")?.textContent).toContain(FLIGHT_NO_SEAT),
     );
     expect(screen.queryAllByTestId("brief-section")).toHaveLength(0);
   });
@@ -639,7 +672,7 @@ describe("FLIGHT's brief", () => {
     stubDecided({ seat: null, decisions: [] });
     const { container } = render(<Flight />);
     await waitFor(() =>
-      expect(container.querySelector("#logP")?.textContent).toContain(FLIGHT_NOT_RUNNING),
+      expect(container.querySelector("#logP")?.textContent).toContain(FLIGHT_NO_SEAT),
     );
     expect(container.querySelector("#workLog")).toBeNull();
   });

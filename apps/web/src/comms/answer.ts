@@ -1,7 +1,7 @@
-import { type AttentionItem, type CrewRow, FLIGHT_NOT_RUNNING } from "@mc/core";
+import type { AttentionItem, CrewRow } from "@mc/core";
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
-import type { FlightSeat } from "../flight/flightTypes.ts";
+import { type FlightSeat, flightOffText } from "../flight/flightTypes.ts";
 import { toggleDock } from "../shell/overlays.ts";
 
 /** Where an answer to a Needs-you item goes. */
@@ -47,7 +47,7 @@ export async function sendAnswer(
     if (target.to === "seat") {
       await apiPost(ACTIONS.seatMessage(target.seatId), { text: body });
     } else {
-      if (!flight?.live) return FLIGHT_NOT_RUNNING;
+      if (!flight?.live) return flightOffText(flight);
       await apiPost(ACTIONS.seatMessage(flight.id), { text: flightText(item.key, about, body) });
       toggleDock(true);
     }

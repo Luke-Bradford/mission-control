@@ -1,12 +1,4 @@
-import {
-  type AttentionItem,
-  type ConfigView,
-  type Crew,
-  ENGINE_NOT_RUNNING,
-  FLIGHT_NOT_RUNNING,
-  type LimitRow,
-  type TestLockState,
-} from "@mc/core";
+import type { AttentionItem, ConfigView, Crew, LimitRow, TestLockState } from "@mc/core";
 import type { MouseEvent } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
@@ -22,17 +14,20 @@ import {
   isSeatFree,
   lockSince,
   modelLine,
+  NO_LOOP,
   needLine,
   needsLamp,
   SEAT_LAST_TICKET,
   SET_ASIDE_LABEL,
   seatItems,
+  seatRoleTitle,
   seatStatus,
   sparkValues,
   tokensPerMinute,
   waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
+import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
 import { cost, kTokens } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
@@ -95,7 +90,7 @@ function FlightRow({
             go();
           }}
         >
-          <AgentTag id="FLIGHT" index="flight" />
+          <AgentTag bare id="FLIGHT" index="flight" />
         </button>
         <span className="xs muted block">head agent</span>
       </span>
@@ -111,7 +106,7 @@ function FlightRow({
         ) : configPending ? (
           <span className="ellip s muted">Loading…</span>
         ) : (
-          <span className="ellip s">{FLIGHT_NOT_RUNNING}</span>
+          <span className="ellip s">{FLIGHT_NO_SEAT}</span>
         )}
       </span>
       <span className="xs fg2">{DASH}</span>
@@ -152,6 +147,9 @@ function AgentRow({
 }) {
   const mine = seatItems(row, items);
   const repoPrs = useReviewPrs(row);
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const roleTitle = seatRoleTitle(row.id, crew?.rows, config?.crew?.roles);
   const doing = doingLine(row, now, tz, repoPrs);
   const parts = needLine(row, items, now);
   const lamp = needsLamp(mine, true);
@@ -193,10 +191,12 @@ function AgentRow({
             followLink(e, to);
           }}
         >
-          <AgentTag id={row.id} index={row.index} />
+          <AgentTag bare id={row.id} index={row.index} />
         </a>
         <span className="xs muted block" title={modelLine(row)}>
-          {row.kind === "crew" ? `${row.role} · ${row.mode}` : `observed loop · ${row.loopKind}`}
+          {row.kind === "crew"
+            ? `${roleTitle ?? row.role} · ${row.mode}`
+            : `observed loop · ${row.loopKind}`}
         </span>
       </span>
       <span>
@@ -228,7 +228,7 @@ function AgentRow({
             wait={waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)}
           />
         ) : (
-          <span className="xs fg2" title={row.loop ? undefined : ENGINE_NOT_RUNNING}>
+          <span className="xs fg2" title={row.loop ? undefined : NO_LOOP}>
             {DASH}
           </span>
         )}

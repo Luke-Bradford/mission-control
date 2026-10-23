@@ -4,7 +4,6 @@ import {
   type BriefOption,
   type Crew,
   type Escalation,
-  FLIGHT_NOT_RUNNING,
   type FlightView,
   type TicketView,
 } from "@mc/core";
@@ -15,6 +14,7 @@ import { BriefOptions, ItemBrief } from "../comms/ItemBrief.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
+import { flightOffText } from "../flight/flightTypes.ts";
 import { dayMonth, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -102,7 +102,7 @@ export function ItemPanel() {
       () => closeItem(),
     );
   };
-  const flightTitle = live ? undefined : FLIGHT_NOT_RUNNING;
+  const flightTitle = live ? undefined : flightOffText(seat);
   const options = item?.brief?.options ?? [];
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
@@ -205,7 +205,7 @@ export function ItemPanel() {
             autoComplete="off"
             aria-label="Reply, or ask FLIGHT about this"
             placeholder="Reply, or ask FLIGHT about this…"
-            title={!replyOk && !live ? FLIGHT_NOT_RUNNING : undefined}
+            title={!replyOk && !live ? flightOffText(seat) : undefined}
             value={text}
             onChange={(e) => setText(e.target.value)}
             disabled={!replyOk && !live}

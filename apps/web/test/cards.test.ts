@@ -11,6 +11,7 @@ import {
   checksText,
   daysAgo,
   doneOutcome,
+  NOT_QUEUED,
   needsMe,
   priorityRank,
   type QueueRow,
@@ -282,5 +283,11 @@ describe("checksText", () => {
     expect(checksText(undefined)).toBeNull();
     expect(checksText([])).toBeNull();
     expect(checksText([c("mc/review", "passing")])).toBeNull();
+  });
+});
+
+describe("NOT_QUEUED", () => {
+  it("tells an unassigned Ready card that FLIGHT will offer it to an agent", () => {
+    expect(NOT_QUEUED).toBe("Unassigned · FLIGHT will offer it to an agent");
   });
 });
