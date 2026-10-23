@@ -67,6 +67,12 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
+import {
+  NO_OPEN_THREAD,
+  type NotificationsView,
+  notificationsView,
+  parsePersonKey,
+} from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import {
@@ -1369,6 +1375,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         bus.emit("attention");
         return { dismissed: key };
+      });
+
+      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)
+      api.get(
+        "/notifications",
+        async (): Promise<NotificationsView> => notificationsView(config, store, now()),
+      );
+
+      // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled; the web side is its own ticket)
+      api.post<{ Params: { key: string } }>("/attention/:key/handled", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const key = req.params.key;
+        const thread = key.length > 200 ? null : parsePersonKey(key);
+        // Local only: the thread stays unread on GitHub.
+        if (
+          thread === null ||
+          !store.markNotificationHandled(thread.id, thread.updatedAt, "marked", now())
+        ) {
+          return reply.code(404).send({ error: NO_OPEN_THREAD });
+        }
+        bus.emit("attention");
+        return { handled: key };
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => {

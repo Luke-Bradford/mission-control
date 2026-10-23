@@ -49,6 +49,12 @@ import {
 } from "./collectors/github.ts";
 import { type LaunchctlRunner, launchctl } from "./collectors/launchd.ts";
 import { type MachineResult, realMachineDeps, sampleMachine } from "./collectors/machine.ts";
+import {
+  collectNotifications,
+  makeRest,
+  NOTIFICATIONS_COLLECTOR,
+  type Rest,
+} from "./collectors/notifications.ts";
 import { nextBackoff, RateLimits } from "./collectors/rate-limit.ts";
 import { defaultIsAlive, type LiveSession, readSessions } from "./collectors/sessions.ts";
 import { collectStudioLoop, newStudioState } from "./collectors/studio-loop.ts";
@@ -143,6 +149,9 @@ export interface Collectors {
   /** `rates` is where every answer's `rateLimit` is recorded. */
   makeGql: (token: string, rates: RateLimits) => Gql;
   github: typeof collectGithub;
+  /** The REST client for the operator's notifications (read-only, api.github.com only). */
+  makeRest: (token: string) => Rest;
+  notifications: typeof collectNotifications;
   prSweep: typeof sweepPullRequests;
   flow: typeof collectFlow;
   backfill: typeof backfillRuns;
@@ -214,6 +223,8 @@ export function realCollectors(config: CcConfig): Collectors {
     githubToken,
     makeGql: (token, rates) => makeGql(token, fetch, rates),
     github: collectGithub,
+    makeRest: (token) => makeRest(token),
+    notifications: collectNotifications,
     prSweep: sweepPullRequests,
     flow: collectFlow,
     backfill: backfillRuns,
@@ -254,6 +265,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let liveSessions: LiveSession[] | null = null;
   let sessionsRead = false;
   let gql: Promise<Gql | Error> | null = null;
+  /** The REST client made with the same token as `gql`; null until the token is read. */
+  let rest: Rest | null = null;
   const rates = new RateLimits(store);
   /** The repos whose missing-scope line is logged already. */
   const scopeLogged = new Set<string>();
@@ -402,7 +415,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     // Never rejects (start() fires it with `void`): any failure becomes an Error value.
     gql ??= c
       .githubToken()
-      .then((token) => c.makeGql(token, rates))
+      .then((token) => {
+        rest = c.makeRest(token);
+        return c.makeGql(token, rates);
+      })
       .catch((e: unknown) => new Error(msg(e)));
     return gql;
   };
@@ -537,6 +553,15 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         githubResetAt = cause?.resetAt ? cause.resetAt : githubNotBefore;
         noteSlowed();
       }
+      // The operator's notifications ride the poll: same token, same back-off (it runs only when due).
+      let notified = false;
+      if (!(client instanceof Error) && rest !== null) {
+        const read = rest;
+        await guarded(NOTIFICATIONS_COLLECTOR, async () => {
+          notified = (await c.notifications(config.repos, store, read, now())).changed;
+        });
+      }
+      if (notified) emit("attention");
       // Board rows and PRs reach the board, escalations the attention items, only when they changed.
       if (changed.boards) emit("boards");
       if (changed.escalations) emit("escalations");
