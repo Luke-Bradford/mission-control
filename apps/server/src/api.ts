@@ -1570,7 +1570,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
-      api.get("/drafts", async () => store.drafts());
+      api.get("/drafts", async () => store.drafts(true));
       const postingDrafts = new Set<number>();
       const postingItems = new Set<string>();
       const postDraft = async (id: number, input: unknown, reply: FastifyReply) => {
@@ -1591,6 +1591,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           !repo ||
           !Number.isSafeInteger(n) ||
           n > 2 ** 31 - 1 ||
+          draft.via !== "GitHub" ||
           (draft.kind !== "issue" && draft.kind !== "pr")
         ) {
           return reply.code(400).send({ error: DRAFT_BAD_TARGET });

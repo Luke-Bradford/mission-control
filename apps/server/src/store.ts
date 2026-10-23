@@ -3088,6 +3088,9 @@ export class Store {
       .all() as Row[];
     return rows.map(({ metadata, completedAt, ...r }) => ({
       ...r,
+      to: r.target,
+      via: "GitHub",
+      where: r.target,
       ...(metadata ? JSON.parse(metadata as string) : {}),
       ...(completedAt === null ? {} : { completedAt }),
     })) as ReplyDraft[];
