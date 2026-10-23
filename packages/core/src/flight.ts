@@ -368,9 +368,16 @@ export interface FlightState {
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
-   * the PR waited on: once it is not "open", the hold is ready to release.
+   * the PR waited on: once it is not "open", the hold is ready to release. `told` is set once
+   * FLIGHT has been woken for that, so a hold it keeps does not wake it again.
    */
-  holds: { ref: string; waitsOn: number; ageMin: number; prState: "open" | "merged" | "closed" }[];
+  holds: {
+    ref: string;
+    waitsOn: number;
+    ageMin: number;
+    prState: "open" | "merged" | "closed";
+    told: boolean;
+  }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
 }
@@ -403,7 +410,7 @@ export function wakeSummary(s: FlightState): string {
   const parked = s.seats.filter((x) => x.parked !== null).length;
   const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
   const inReview = s.prs.filter((p) => p.state === "open").length;
-  const toRelease = s.holds.filter((h) => h.prState !== "open").length;
+  const toRelease = s.holds.filter((h) => h.prState !== "open" && !h.told).length;
   const parts = [
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
