@@ -11,13 +11,7 @@ import type { Store } from "../store.ts";
 const HOUR_MS = 60 * 60_000;
 
 /** The queries one GitHub poll sends; their costs add up to the poll's cost. */
-export const POLL_QUERIES: readonly string[] = [
-  "Board",
-  "Escalations",
-  "Milestones",
-  "PullRequests",
-  "Comments",
-];
+export const POLL_QUERIES: readonly string[] = ["Board", "Escalations", "PullRequests", "Comments"];
 
 /** The operation name of a GraphQL document (`query Board(...)`), or "anonymous". */
 export function queryName(query: string): string {

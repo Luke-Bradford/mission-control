@@ -26,7 +26,6 @@ import {
   type MachineSample,
   type MoveColumn,
   type PullRequestView,
-  type RepoGoal,
   type RepoId,
   type ReviewFinding,
   type ReviewRequest,
@@ -90,10 +89,6 @@ CREATE TABLE IF NOT EXISTS flow_issues (
 CREATE TABLE IF NOT EXISTS flow_prs (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, first_push_ci TEXT,
   PRIMARY KEY (repo_id, number)
-);
-CREATE TABLE IF NOT EXISTS goals (
-  repo_id TEXT PRIMARY KEY, title TEXT NOT NULL, due_on INTEGER, open INTEGER NOT NULL,
-  closed INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS file_offsets (path TEXT PRIMARY KEY, offset INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS collector_status (
@@ -317,7 +312,6 @@ const REPO_TABLES = {
   board_items: "issue_number",
   escalations: "id",
   pull_requests: "number",
-  goals: "repo_id",
 } as const;
 type RepoTable = keyof typeof REPO_TABLES;
 
@@ -1206,38 +1200,6 @@ export class Store {
         );
       }
     });
-  }
-
-  /** True when the stored row changed. */
-  replaceGoal(repoId: RepoId, goal: RepoGoal | null): boolean {
-    return this.changed("goals", repoId, () => {
-      if (goal === null) {
-        this.db.prepare("DELETE FROM goals WHERE repo_id = ?").run(repoId);
-        return;
-      }
-      this.db
-        .prepare(
-          `INSERT INTO goals (repo_id, title, due_on, open, closed) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(repo_id) DO UPDATE SET title = excluded.title, due_on = excluded.due_on,
-             open = excluded.open, closed = excluded.closed`,
-        )
-        .run(repoId, goal.title, goal.dueOn, goal.open, goal.closed);
-    });
-  }
-
-  goal(repoId: RepoId): RepoGoal | null {
-    const r = this.db.prepare("SELECT * FROM goals WHERE repo_id = ?").get(repoId) as
-      | Row
-      | undefined;
-    return r
-      ? {
-          repoId: r.repo_id as string,
-          title: r.title as string,
-          dueOn: r.due_on as number | null,
-          open: r.open as number,
-          closed: r.closed as number,
-        }
-      : null;
   }
 
   board(repoId: RepoId): BoardItem[] {
