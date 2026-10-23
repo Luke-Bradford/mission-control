@@ -2420,6 +2420,21 @@ export class Store {
     return rows.map(toQuestion);
   }
 
+  /** The seat's questions open at any time in [from, to), oldest first. */
+  questionsOverlapping(
+    agentId: AgentId,
+    from: number,
+    to: number,
+  ): { at: number; answeredAt: number | null }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT at, answered_at FROM seat_questions
+         WHERE agent_id = ? AND at < ? AND (answered_at IS NULL OR answered_at > ?) ORDER BY id`,
+      )
+      .all(agentId, to, from) as Row[];
+    return rows.map((r) => ({ at: r.at as number, answeredAt: r.answered_at as number | null }));
+  }
+
   /** One question by id, answered or not; null when there is none. */
   question(id: number): (SeatQuestion & { answeredAt: number | null }) | null {
     const r = this.db.prepare("SELECT * FROM seat_questions WHERE id = ?").get(id) as

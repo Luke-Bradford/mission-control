@@ -6,6 +6,8 @@
  */
 import type { LoopPhase } from "./types.ts";
 
+/** What `/api/config` gives as the source when no profiles file exists and the built-ins apply. */
+export const BUILTIN_PROFILES_SOURCE = "built-in";
 export const PROFILE_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 export const PROFILE_STEP_PHASES = ["working", "ci", "review"] as const;
 export type ProfileStepPhase = (typeof PROFILE_STEP_PHASES)[number];
