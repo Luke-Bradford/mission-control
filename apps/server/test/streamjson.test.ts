@@ -36,11 +36,15 @@ describe("foldTranscript", () => {
     // split between the two assistant lines that share a message id
     const a = foldTranscript(null, lines.slice(0, 4), 5);
     const b = foldTranscript(a, lines.slice(4), 5);
-    expect(b.tokens).toEqual(whole.tokens);
-    expect(b.costUsd).toBe(whole.costUsd);
-    expect(b.branch).toBe(whole.branch);
-    expect(b.resultCount).toBe(whole.resultCount);
-    expect(b.rateLimits).toEqual(whole.rateLimits);
+    expect(b).toEqual(whole);
+  });
+
+  it("folding on never changes the earlier facts", () => {
+    const a = foldTranscript(null, lines.slice(0, 4), 5);
+    const before = structuredClone(a);
+    // lines[1] is the rate_limit_event: folding on must push into a copy, not a's list
+    foldTranscript(a, [...lines.slice(4), lines[1] as string], 5);
+    expect(a).toEqual(before);
   });
 
   it("skips non-JSON and truncated lines without throwing", () => {
