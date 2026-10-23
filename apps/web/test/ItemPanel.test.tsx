@@ -96,6 +96,39 @@ describe("ItemPanel, Ask FLIGHT", () => {
     expect(text).toContain("Choose a cache eviction policy");
     expect(text.endsWith("why?")).toBe(true);
   });
+
+  const sent = async (items: AttentionItem[], escalations: ReturnType<typeof escalation>[]) => {
+    const fn = stubFetch({
+      "/api/attention": items,
+      "/api/escalations": escalations,
+      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": {
+        seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
+        decisions: [],
+      },
+      "POST /api/seats/flight-1/message": {},
+    });
+    render(<ItemPanel />);
+    act(() => openItem(items[0]?.key ?? ""));
+    const input = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: " why? " } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(input.value).toBe(""));
+    const call = fn.mock.calls.find(([p]) => p === "/api/seats/flight-1/message");
+    return JSON.parse(call?.[1]?.body as string).text as string;
+  };
+
+  it("sends the typed body alone from an item with no title to quote", async () => {
+    expect(await sent([item({ escalationId: null, text: "" })], [])).toBe("why?");
+  });
+
+  it("leads with Re:, a blank line and the body when the item has text", async () => {
+    expect(await sent([item({ escalationId: null, text: "Stalled on tests" })], [])).toBe(
+      "Re: Stalled on tests\n\nwhy?",
+    );
+  });
 });
 
 describe("ItemPanel, an escalation with a question", () => {
