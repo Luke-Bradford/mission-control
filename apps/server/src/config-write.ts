@@ -8,21 +8,16 @@
 import { type FileHandle, lstat, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import {
-  CONFIG_SEAT_MODES,
-  CREW_EFFORTS,
-  compactUtc,
-  type NewRepo,
-  ROLE_NAME,
-  type SeatInput,
-} from "@mc/core";
+import { CONFIG_SEAT_MODES, CREW_EFFORTS, compactUtc, type NewRepo, ROLE_NAME } from "@mc/core";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
 import {
   areaGlob,
   type CcConfig,
   ConfigError,
+  type ConfigSeatInput,
   defaultSeatCommands,
+  displayCallSign,
   MODEL_NAME,
   parseConfig,
   SEAT_ID,
@@ -70,13 +65,14 @@ export const noSessionText = (id: string): string => `no crew session s/${id} in
 
 export const SeatInputBody = z.strictObject({
   id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
+  displayCallSign: displayCallSign.optional(),
   role: z.string().regex(ROLE_NAME, "must be a role name"),
   accountId: z.string().min(1).max(64),
   model: z.string().max(100).regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/"),
   effort: z.enum(CREW_EFFORTS).optional(),
   mode: z.enum(CONFIG_SEAT_MODES).optional(),
   area: z.array(areaGlob).max(20),
-}) satisfies z.ZodType<SeatInput>;
+}) satisfies z.ZodType<ConfigSeatInput>;
 
 /** `POST /api/crew/sessions/:sessionId/seats`. */
 export const SeatsBody = z.strictObject({
@@ -170,8 +166,8 @@ async function readCurrent(
 export function setSessionSeats(
   path: string,
   sessionId: string,
-  base: SeatInput[],
-  seats: SeatInput[],
+  base: ConfigSeatInput[],
+  seats: ConfigSeatInput[],
   now: number,
 ): Promise<{ config: CcConfig; backup: string }> {
   const run = queue.then(() => setSeats(path, sessionId, base, seats, now));
@@ -182,10 +178,12 @@ export function setSessionSeats(
 async function setSeats(
   path: string,
   sessionId: string,
-  base: SeatInput[],
-  seats: SeatInput[],
+  base: ConfigSeatInput[],
+  seats: ConfigSeatInput[],
   now: number,
 ): Promise<{ config: CcConfig; backup: string }> {
+  const parsed = SeatsBody.safeParse({ base, seats });
+  if (!parsed.success) throw new ConfigWriteError("invalid", "invalid session seats");
   const { bytes, text, current } = await readCurrent(path);
   const i = current.crew?.sessions.findIndex((s) => s.id === sessionId) ?? -1;
   const session = current.crew?.sessions[i];
@@ -207,6 +205,8 @@ async function setSeats(
       node = doc.createNode({ id: seat.id }, { aliasDuplicateObjects: false });
       node.flow = true;
     }
+    if (seat.displayCallSign === undefined) node.delete("display_call_sign");
+    else node.set("display_call_sign", seat.displayCallSign);
     node.set("role", seat.role);
     node.set("account_id", seat.accountId);
     node.set("model", seat.model);

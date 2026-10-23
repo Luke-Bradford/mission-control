@@ -3049,6 +3049,26 @@ describe("set a session's seats (POST /api/crew/sessions/:sessionId/seats)", () 
     await a.close();
   });
 
+  it("saves a display call sign through the guarded seat editor", async () => {
+    const { a, reload } = reloading();
+    const base = seats();
+    const renamed = base.map((s) =>
+      s.id === "guido-1" ? { ...s, displayCallSign: "Orbit One" } : s,
+    );
+    expect((await send(a, { base, seats: renamed })).statusCode).toBe(200);
+    expect(seats()).toEqual(renamed);
+    expect(reload).toHaveBeenCalledTimes(1);
+    const saved = readFileSync(configPath, "utf8");
+    expect((await send(a, { base, seats: base })).statusCode).toBe(409);
+    for (const displayCallSign of ["", "  ", "x".repeat(65), "INCO-1"]) {
+      const invalid = renamed.map((s) => (s.id === "guido-1" ? { ...s, displayCallSign } : s));
+      expect((await send(a, { base: renamed, seats: invalid })).statusCode).toBe(400);
+      expect(readFileSync(configPath, "utf8")).toBe(saved);
+    }
+    expect(reload).toHaveBeenCalledTimes(1);
+    await a.close();
+  });
+
   it("writes, then reloads once", async () => {
     const { a, reload } = reloading();
     const base = seats();

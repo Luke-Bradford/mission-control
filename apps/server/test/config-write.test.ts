@@ -455,6 +455,34 @@ describe("setSessionSeats", () => {
   const change = (id: string, over: Partial<SeatInput>) =>
     set(read().map((s) => (s.id === id ? { ...s, ...over } : s)));
 
+  it("persists and clears a display call sign with a stale rename check", async () => {
+    const base = read();
+    const renamed = base.map((s) =>
+      s.id === "guido-1" ? { ...s, displayCallSign: "Orbit One" } : s,
+    );
+    const { backup } = await set(renamed, base);
+    expect(read()).toEqual(renamed);
+    expect(readFileSync(backup, "utf8")).toBe(COMMENTED);
+    const saved = readFileSync(path, "utf8");
+    expect((await writeError(set(base, base))).kind).toBe("conflict");
+    expect(readFileSync(path, "utf8")).toBe(saved);
+    expect(backups()).toHaveLength(1);
+    await set(base);
+    expect(read()).toEqual(base);
+    expect(readFileSync(path, "utf8")).not.toContain("display_call_sign");
+  });
+
+  it.each(["", "   ", "x".repeat(65), "Orbit\nOne", "INCO-1", "inco-1"])(
+    "refuses invalid or duplicate display call sign %j without writing",
+    async (displayCallSign) => {
+      const base = read();
+      const renamed = base.map((s) => (s.id === "guido-1" ? { ...s, displayCallSign } : s));
+      expect((await writeError(set(renamed))).kind).toBe("invalid");
+      expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+      expect(backups()).toEqual([]);
+    },
+  );
+
   it("adds a seat", async () => {
     const before = readFileSync(path);
     const { config, backup } = await set([...read(), inco2]);
