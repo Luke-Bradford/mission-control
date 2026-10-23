@@ -183,11 +183,12 @@ export function ActivityPanel() {
     return { e, key: `${base}#${n}` };
   });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the newest row when the list changes
+  const newest = keyed.at(-1)?.key ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the newest row when it changes
   useEffect(() => {
     const el = list.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [rows.length, filter]);
+  }, [newest, filter]);
 
   return (
     <Panel

@@ -46,6 +46,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Sparkline } from "../hud/Sparkline.tsx";
+import { firstWindow } from "../quota.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
@@ -82,7 +83,7 @@ function FlightRow({
   const turns = flight?.seat?.turns ?? null;
   const go = () => toggleDock(true);
   const status = row ? seatStatus(row) : null;
-  const five = row ? limits.find((l) => l.accountId === row.accountId && l.window === "5h") : null;
+  const quota = row ? firstWindow(limits, row.accountId) : null;
   const tpm = row ? tokensPerMinute(row.digest, now) : null;
   const tokens = row?.run?.tokens ? row.run.tokens.input + row.run.tokens.output : null;
   return (
@@ -129,7 +130,7 @@ function FlightRow({
         {row ? (
           <>
             <Meter label="ctx" pct={contextPct(row)} />
-            <Meter label="5h" pct={five ? five.used : null} />
+            <Meter label={quota?.window ?? "5h"} pct={quota ? quota.used : null} />
           </>
         ) : (
           <span className="xs fg2">{DASH}</span>
@@ -172,7 +173,7 @@ function AgentRow({
   const lamp = needsLamp(mine, true);
   const running = row.hudState === "running";
   const go = () => navigate(agentPath(row.id));
-  const five = limits.find((l) => l.accountId === row.accountId && l.window === "5h");
+  const quota = firstWindow(limits, row.accountId);
   const tpm = tokensPerMinute(row.digest, now);
   const spark = sparkValues(row.digest);
   const tokens = row.run?.tokens ? row.run.tokens.input + row.run.tokens.output : null;
@@ -259,7 +260,7 @@ function AgentRow({
       </span>
       <span className="meters2">
         <Meter label="ctx" pct={contextPct(row)} />
-        <Meter label="5h" pct={five ? five.used : null} />
+        <Meter label={quota?.window ?? "5h"} pct={quota ? quota.used : null} />
       </span>
       {parts.length > 0 && (
         <div className="need">
