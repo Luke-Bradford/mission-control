@@ -1,4 +1,5 @@
 import type { AttentionItem, AwaySettings } from "@mc/core";
+import { operatorItems } from "../attention.ts";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { untilLabel } from "../fmt.ts";
@@ -20,7 +21,8 @@ const BITS: { label: string; kinds: AttentionItem["kind"][]; plural: boolean }[]
 
 /** The Overview's banner (catalogue 2.1.1): the away strip when on, then All clear or the count. */
 export function NeedsBanner() {
-  const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const all = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const items = all && operatorItems(all);
   const away = useResource<AwaySettings>(RESOURCES.away).data;
   const lamp = items ? needsLamp(items, true) : null;
   // Acknowledged items still count (catalogue §1.3: until the thing is acted on): say how many are not.

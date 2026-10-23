@@ -31,6 +31,7 @@ import {
   GITHUB_RATE_LINE,
   HOUR,
   item,
+  itemWithoutOwner,
   limit5h,
   limit7d,
   MIN,
@@ -812,6 +813,29 @@ describe("Needs banner, acknowledged items", () => {
     expect(btn.textContent).toBe(
       "3things need you2 decisions1 stall· 1 not acknowledgedOpen Comms →",
     );
+  });
+
+  it("counts only the operator's items; one with no owner counts", async () => {
+    stubFetch({
+      "/api/attention": [
+        item({ key: "1" }),
+        itemWithoutOwner({ key: "2" }),
+        item({ key: "3", owner: "loop" }),
+      ],
+      "/api/settings/away": { on: false },
+    });
+    render(<NeedsBanner />);
+    const btn = await screen.findByRole("button", { name: /things need you/ });
+    expect(btn.textContent).toBe("2things need you2 decisions· 2 not acknowledgedOpen Comms →");
+  });
+
+  it("is all clear when every item is someone else's", async () => {
+    stubFetch({
+      "/api/attention": [item({ owner: "controller" })],
+      "/api/settings/away": { on: false },
+    });
+    render(<NeedsBanner />);
+    await screen.findByText("All clear");
   });
 
   it("adds nothing when every item is acknowledged", async () => {

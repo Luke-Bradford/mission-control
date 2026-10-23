@@ -15,7 +15,10 @@
  */
 import {
   areaLabelsFor,
+  areaLabelsOf,
   type BoardItem,
+  claimedByOther,
+  eligibleToStart,
   fillLoopText,
   hudColumnOf,
   NEW_LOOP,
@@ -45,8 +48,6 @@ export const TAKE_STUCK_TEXT =
   "{call} has failed to take a ticket {tries} times in a row: {reason}. It keeps trying each tick; this clears when a take succeeds.";
 /** The longest reason a take-failed note carries. */
 const REASON_MAX = 300;
-/** A research ticket is never taken by rule; `type:research` is the label the setup creates. */
-const RESEARCH_LABELS = ["research", "type:research"];
 
 export interface QueueDeps {
   config: CcConfig;
@@ -114,10 +115,6 @@ export function seatMayTake(store: Store, seatId: string): boolean {
   return row.runId === null || store.run(row.runId)?.endedAt != null;
 }
 
-/** Whether the card is assigned to a login other than the hub's own (any login, when the hub's is unknown). */
-export const claimedByOther = (card: Pick<BoardItem, "assignees">, login: string | null): boolean =>
-  (card.assignees ?? []).some((a) => a !== login);
-
 /** The cards in the Ready column (a closed card is Done, never Ready), in the order picked. */
 function readyCards(store: Store, repoId: RepoId): BoardItem[] {
   return store
@@ -130,10 +127,6 @@ function readyCards(store: Store, repoId: RepoId): BoardItem[] {
         a.issueNumber - b.issueNumber,
     );
 }
-
-/** The area labels (those the rules name) on a card. */
-export const areaLabelsOf = (rules: RepoRules, card: BoardItem): string[] =>
-  card.labels.filter((l) => Object.hasOwn(rules.areas, l));
 
 /**
  * Rebuilds every writer seat's queue in each `merge` repo whose rules can be read, and raises or
@@ -223,12 +216,28 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       ...group.filter((s) => seatMayTake(store, s.seat.id)),
       ...group.filter((s) => !seatMayTake(store, s.seat.id)),
     ];
+    const board = store.board(repoId);
     const cards = readyCards(store, repoId).flatMap((card) => {
       const ref = refOf(repoId, card.issueNumber);
-      if (takenRefs.has(ref) || active.has(ref)) return [];
       if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) return [];
-      if (claimedByOther(card, deps.login)) return [];
-      if (card.labels.some((l) => RESEARCH_LABELS.includes(l))) return [];
+      // the one start check, without the ticket body (the queue reads the board, not GitHub)
+      const startable = group.some(
+        ({ seat }) =>
+          eligibleToStart({
+            repoId,
+            issue: card.issueNumber,
+            card,
+            rules,
+            seat: { call: seatCallSign(seat.id), area: seat.area, loop: seatDef(seat).loop },
+            login: deps.login,
+            hasRun: takenRefs.has(ref) || active.has(ref),
+            lane: config.crew?.lane,
+            laneDefault: config.crew?.laneDefault ?? false,
+            body: null,
+            closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+          }) === null,
+      );
+      if (!startable) return [];
       const labels = areaLabelsOf(rules, card);
       const label = labels[0];
       return labels.length === 1 && label !== undefined ? [{ issue: card.issueNumber, label }] : [];
@@ -282,7 +291,7 @@ export function takeReason(e: unknown): string {
 
 /** Whether a refused start is the card's own: a stray worktree path, a protected branch, an issue GitHub doesn't have. */
 const isCardsOwn = (e: unknown): boolean =>
-  (e instanceof SupervisorError && e.status === 404) ||
+  (e instanceof SupervisorError && (e.status === 404 || e.status === 422)) ||
   (e instanceof CheckoutError && (e.code === "path" || e.code === "protected"));
 
 /**
