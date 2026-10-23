@@ -46,13 +46,18 @@ export function Comms({ item }: { item: string | null }) {
 
   const rows = crew?.rows ?? [];
   const inView = rows.filter((r) => inSession(session, r.repoId));
-  const row = inView.find((r) => r.id === selected) ?? null;
+  const row = rows.find((r) => r.id === selected) ?? null;
 
   return (
     <section id="page-comms">
       <div className="cgrid">
         <div className="col">
-          <NeedsList items={items} rows={rows} onAskFlight={() => select(FLIGHT_THREAD)} />
+          <NeedsList
+            items={items}
+            rows={rows}
+            onAskFlight={() => select(FLIGHT_THREAD)}
+            onRead={select}
+          />
           <Threads
             rows={inView}
             items={items ?? []}

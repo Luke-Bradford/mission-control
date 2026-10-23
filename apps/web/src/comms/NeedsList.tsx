@@ -92,10 +92,12 @@ export function NeedsList({
   items,
   rows,
   onAskFlight,
+  onRead,
 }: {
   items: AttentionItem[] | undefined;
   rows: CrewRow[];
   onAskFlight: () => void;
+  onRead: (id: string) => void;
 }) {
   const now = useSecond();
   const replies = useFlightUnread();
@@ -212,14 +214,20 @@ export function NeedsList({
                 )}
               </div>
               <div className="acts">
-                {i.escalationId === null && (
-                  <button type="button" className="sm primary" onClick={() => openItem(i.key)}>
-                    {ANSWERED_HERE.includes(i.kind)
-                      ? "Answer"
-                      : i.brief
-                        ? "Read the brief"
-                        : "Discuss"}
+                {(i.kind === "tag" || i.kind === "message") && agentId !== null ? (
+                  <button type="button" className="sm primary" onClick={() => onRead(agentId)}>
+                    Read
                   </button>
+                ) : (
+                  i.escalationId === null && (
+                    <button type="button" className="sm primary" onClick={() => openItem(i.key)}>
+                      {ANSWERED_HERE.includes(i.kind)
+                        ? "Answer"
+                        : i.brief
+                          ? "Read the brief"
+                          : "Discuss"}
+                    </button>
+                  )
                 )}
                 {agentId !== null && holdsLock(i, lock) && (
                   <button
@@ -264,6 +272,8 @@ export function NeedsList({
                 ) : (
                   // a stray is only acknowledged: the commit tool already set it aside
                   i.kind !== "stray" &&
+                  i.kind !== "tag" &&
+                  i.kind !== "message" &&
                   agentId !== null && (
                     <button
                       type="button"
