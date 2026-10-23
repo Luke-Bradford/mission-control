@@ -19,6 +19,14 @@ import { dayMonth, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
+import {
+  CATCH_UP_LABEL,
+  markHandled,
+  type NotificationsView,
+  type PersonThreadView,
+  whereOf,
+  whoOf,
+} from "../notifications.ts";
 import { agentPath, followLink } from "../router.ts";
 import { BuildChips } from "./buildStatus.tsx";
 import { closeItem, trapTab, useItem, useOverlay, useReturnFocus } from "./overlays.ts";
@@ -41,6 +49,7 @@ export function ItemPanel() {
   const escRes = useResource<Escalation[]>(RESOURCES.escalations);
   const escalations = escRes.data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
+  const notes = useResource<NotificationsView>(RESOURCES.notifications).data;
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -102,6 +111,7 @@ export function ItemPanel() {
       () => closeItem(),
     );
   };
+  const thread = item?.kind === "person" ? notes?.open.find((t) => t.key === item.key) : undefined;
   const flightTitle = live ? undefined : flightOffText(seat);
   const options = item?.brief?.options ?? [];
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
@@ -111,9 +121,16 @@ export function ItemPanel() {
       <div className="panel">
         <div className="ph" id="dsHead">
           <h2 id={head}>{item ? ATTENTION_LABEL[item.kind] : "Item"}</h2>
+          {thread && <b>{whoOf(thread)}</b>}
           {agentId !== null && <AgentTag id={agentId} index={agentIndex} sm />}
           {item && !holding && (
-            <span className="sub">{esc ? `opened ${when(esc.openedAt)}` : when(item.at)}</span>
+            <span className="sub">
+              {thread
+                ? `${whereOf(thread)} · ${when(thread.updatedAt)}`
+                : esc
+                  ? `opened ${when(esc.openedAt)}`
+                  : when(item.at)}
+            </span>
           )}
           <BuildChips panel="discuss" />
           <span className="act">
@@ -137,6 +154,8 @@ export function ItemPanel() {
               {item.brief && <ItemBrief brief={item.brief} />}
               {esc ? (
                 <EscalationBrief esc={esc} tz={tz} now={now} />
+              ) : thread ? (
+                <PersonBrief thread={thread} tz={tz} />
               ) : (
                 <div className="brief">
                   <div className="s qtext">
@@ -199,6 +218,23 @@ export function ItemPanel() {
             )}
           </div>
         )}
+        {item?.kind === "person" && !holding && (
+          <div className="composer" id="dsPerson">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                void act(
+                  () => markHandled(item.key),
+                  () => closeItem(),
+                )
+              }
+            >
+              Mark handled
+            </button>
+          </div>
+        )}
         <form className="composer" id="dsForm" onSubmit={submit}>
           <input
             id="dsInput"
@@ -231,6 +267,33 @@ export function ItemPanel() {
         </form>
       </div>
     </aside>
+  );
+}
+
+function PersonBrief({ thread, tz }: { thread: PersonThreadView; tz: string | null }) {
+  const tone = thread.catchUp === "new" ? "plain" : "warn";
+  return (
+    <div className="brief">
+      <div className="ctx">
+        <span className="bsec">Catch-up</span>
+        <div className="ctxline">
+          <Pill tone={tone}>{CATCH_UP_LABEL[thread.catchUp]}</Pill>
+          <span>
+            {thread.reasonText} · first seen {tz ? dayMonth(thread.firstSeenAt, tz) : "—"}
+          </span>
+        </div>
+      </div>
+      <b className="btitle qtext">{thread.title}</b>
+      {thread.snippet !== null && (
+        <>
+          <div className="bsec">The message</div>
+          <blockquote className="s qtext">{thread.snippet}</blockquote>
+        </>
+      )}
+      <div className="row">
+        <ExternalLink url={thread.url}>Open in GitHub ↗</ExternalLink>
+      </div>
+    </div>
   );
 }
 
