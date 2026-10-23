@@ -489,28 +489,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // CSRF defence (there is no login, so these are the only cross-site guard): a cross-site form
   // cannot send application/json, and a cross-site fetch carries a foreign Origin.
   app.addHook("onRequest", async (req, reply) => {
-    if (
-      (req.method === "POST" || req.method === "PUT") &&
-      mediaType(req.headers["content-type"]) !== "application/json"
-    ) {
-      return reply
-        .code(415)
-        .send({ error: `${req.method} requires Content-Type: application/json` });
+    if (req.method === "POST" && mediaType(req.headers["content-type"]) !== "application/json") {
+      return reply.code(415).send({ error: "POST requires Content-Type: application/json" });
     }
   });
 
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
-    if (
-      (req.method === "POST" || req.method === "PUT") &&
-      origin !== undefined &&
-      !isLocalOrigin(origin)
-    ) {
+    if (req.method === "POST" && origin !== undefined && !isLocalOrigin(origin)) {
       return reply.code(403).send({ error: "cross-origin request refused" });
     }
   });
 
-  // The Origin hook covers POST and PUT only, and a cross-site no-cors GET (an <img>, fetch with
+  // The Origin hook covers POST only, and a cross-site no-cors GET (an <img>, fetch with
   // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
   // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
   // callers that send no header (the guard hook, curl) are unaffected. The matched route is
@@ -1956,7 +1947,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/notification-preferences", async () => notifications.preferences());
 
       // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
-      api.put("/notification-preferences", async (req, reply) => {
+      api.post("/notification-preferences", async (req, reply) => {
         const body = NotificationPreferencesBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         notifications.setPreferences(body.data);

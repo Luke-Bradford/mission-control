@@ -494,7 +494,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/person:101:1/handled", {}],
   ["GET", "/api/notification-preferences"],
   [
-    "PUT",
+    "POST",
     "/api/notification-preferences",
     {
       categories: {
@@ -932,12 +932,7 @@ describe("local access", () => {
         expect((await post(url, json, body)).statusCode).toBe(401);
         continue;
       }
-      const r =
-        method === "GET"
-          ? await get(url)
-          : method === "PUT"
-            ? await app.inject({ method: "PUT", url, headers: json, payload: body })
-            : await post(url, json, body);
+      const r = method === "GET" ? await get(url) : await post(url, json, body);
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);

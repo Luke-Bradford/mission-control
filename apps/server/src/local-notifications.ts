@@ -180,7 +180,9 @@ export class LocalNotifications {
       const category = categoryOf(item);
       if (category === null || (item.owner !== undefined && item.owner !== "operator")) continue;
       const version =
-        category === "stalls" ? item.key : JSON.stringify([item.kind, item.text, item.at]);
+        category === "stalls"
+          ? JSON.stringify([item.kind, item.at])
+          : JSON.stringify([item.kind, item.text, item.at]);
       seen[item.key] = version;
       if (this.state.seen[item.key] !== version && !item.acked) this.emit(category, item.text);
     }

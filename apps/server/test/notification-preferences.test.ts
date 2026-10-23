@@ -75,7 +75,7 @@ it("defaults to the catalogue categories and validates guarded preference writes
   expect(
     (
       await app.inject({
-        method: "PUT",
+        method: "POST",
         url: "/api/notification-preferences",
         payload: { ...p, quietHours: { ...p.quietHours, timezone: "bad" } },
       })
@@ -84,7 +84,7 @@ it("defaults to the catalogue categories and validates guarded preference writes
   expect(
     (
       await app.inject({
-        method: "PUT",
+        method: "POST",
         url: "/api/notification-preferences",
         headers: { origin: "https://evil.example" },
         payload: p,
@@ -94,7 +94,7 @@ it("defaults to the catalogue categories and validates guarded preference writes
   expect(
     (
       await app.inject({
-        method: "PUT",
+        method: "POST",
         url: "/api/notification-preferences",
         headers: { "content-type": "text/plain" },
         payload: "{}",
@@ -106,7 +106,7 @@ it("defaults to the catalogue categories and validates guarded preference writes
 it("deduplicates unchanged items, persists across restarts and leaves attention open", async () => {
   const p = await preferences();
   p.softChime = false;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   await app.ready();
   note("demo");
   expect(await events()).toMatchObject([{ category: "decisions", text: "Choose the demo lane" }]);
@@ -143,16 +143,16 @@ it.each([
 it("filters disabled categories and enabled state without replaying suppressed items", async () => {
   const p = await preferences();
   p.categories.decisions = false;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   note("demo");
   expect(await events()).toEqual([]);
   p.categories.decisions = true;
   p.enabled = false;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   note("stall");
   expect(await events()).toEqual([]);
   p.enabled = true;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   bus.emit("attention");
   expect(await events()).toEqual([]);
 });
@@ -160,7 +160,7 @@ it("filters disabled categories and enabled state without replaying suppressed i
 it("emits a marked test with chime preference, invalidates and bounds the feed", async () => {
   const p = await preferences();
   p.softChime = false;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   const topics: string[] = [];
   const off = bus.subscribe((t) => topics.push(t));
   const response = await app.inject({
@@ -180,7 +180,7 @@ it("emits a marked test with chime preference, invalidates and bounds the feed",
 it("notifies only above 90 percent and only once per quota crossing", async () => {
   const p = await preferences();
   p.categories.quota = true;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   for (const [index, pct] of [90, 91, 95, 89, 92].entries()) {
     store.addUsage({
       accountId: "demo",
@@ -215,7 +215,7 @@ it("includes every agent message when opted in, even without a direct ask", asyn
   app = buildApp({ config: crewConfig, store, bus });
   const p = await preferences();
   p.categories.agentMessages = true;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   store.addComms({
     at: Date.now(),
     from: "demo-seat",
@@ -249,7 +249,7 @@ it("emits one away digest on return through settings invalidations", async () =>
 it("supports same-day quiet windows and never replays suppressed transitions", async () => {
   const p = await preferences();
   p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   note("quiet");
   expect(await events()).toEqual([]);
   vi.setSystemTime(new Date("2026-10-23T14:00:00Z"));
@@ -258,8 +258,36 @@ it("supports same-day quiet windows and never replays suppressed transitions", a
   note("after");
   expect(await events()).toHaveLength(1);
   p.categories.stalls = false;
-  await app.inject({ method: "PUT", url: "/api/notification-preferences", payload: p });
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   note("stall");
   expect(await events()).toHaveLength(1);
   expect((await app.inject("/api/attention")).json()).toHaveLength(3);
+});
+
+it.each([
+  [{ "content-type": "text/plain" }, "{}", 415],
+  [{ origin: "https://evil.example" }, {}, 403],
+] as const)("guards POST preference writes with %j", async (headers, payload, status) => {
+  const p = await preferences();
+  expect(
+    (await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p }))
+      .statusCode,
+  ).toBe(200);
+  expect(
+    (await app.inject({ method: "POST", url: "/api/notification-preferences", headers, payload }))
+      .statusCode,
+  ).toBe(status);
+  expect(await preferences()).toEqual(p);
+});
+
+it("notifies again when a cleared stall reopens between reconciliations", async () => {
+  await app.ready();
+  note("stall");
+  expect(await events()).toHaveLength(1);
+  store.clearNote("stall", Date.now());
+  vi.setSystemTime(new Date("2026-10-23T12:01:00Z"));
+  note("stall");
+  expect(await events()).toHaveLength(2);
+  bus.emit("attention");
+  expect(await events()).toHaveLength(2);
 });
