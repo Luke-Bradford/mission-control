@@ -924,6 +924,34 @@ describe("crew seats in the rows", () => {
     store.upsertRun(crewRun({ ticket: "shop-app#5", loop: NEW_LOOP }));
     store.setSeatSession(seat({}));
     expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("profile");
+    expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("steps");
+    expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("planned");
+  });
+
+  it("a crew row's loop carries the profile's steps and whether a planner's plan landed", () => {
+    const c = withCrew();
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+    store.upsertRun(
+      crewRun({
+        ticket: "shop-app#5",
+        loop: { ...NEW_LOOP, phase: "ci" },
+        profile: { profile: feature, route: { by: "size", size: "M" }, hash: "h" },
+      }),
+    );
+    store.setSeatSession(seat({}));
+    const loop = rowOf(c, "GUIDO-1")?.loop;
+    expect(loop?.steps).toEqual(feature.steps.map((s) => ({ name: s.name, phase: s.phase })));
+    expect(loop?.planned).toBe(false);
+    store.upsertRun(
+      run({ id: "p1", agentId: "RETRO-1", repoId: "shop-app", ticket: "shop-app#6" }),
+    );
+    store.addLoopEvent("p1:plan", "p1", "planned", NOW);
+    expect(rowOf(c, "GUIDO-1")?.loop?.planned).toBe(false);
+    store.upsertRun(
+      run({ id: "p2", agentId: "RETRO-1", repoId: "shop-app", ticket: "shop-app#5" }),
+    );
+    store.addLoopEvent("p2:plan", "p2", "planned", NOW);
+    expect(rowOf(c, "GUIDO-1")?.loop?.planned).toBe(true);
   });
 
   it("a writer seat's row lists its queue in order without the ticket it holds; other rows have none", () => {
