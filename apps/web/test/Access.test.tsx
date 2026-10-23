@@ -257,3 +257,136 @@ it("delivers new feed events after invalidation and does not repeat them", async
   );
   expect(native).toHaveBeenCalledOnce();
 });
+
+it("follows refreshed preferences until edited and saves only edited fields", async () => {
+  let server = structuredClone(PREFS);
+  const posted = vi.fn();
+  stubFetch({
+    "/api/notification-preferences": () => ({ status: 200, body: server }),
+    "POST /api/notification-preferences": (init?: RequestInit) => {
+      const patch = JSON.parse(String(init?.body));
+      posted(patch);
+      server = {
+        ...server,
+        ...patch,
+        categories: { ...server.categories, ...patch.categories },
+        quietHours: { ...server.quietHours, ...patch.quietHours },
+      };
+      return { status: 200, body: server };
+    },
+  });
+  render(<Access />);
+  await screen.findByLabelText("Soft chime");
+  server = { ...server, softChime: false };
+  act(() => hub.refetchTopic("settings"));
+  await waitFor(() => expect(screen.getByLabelText("Soft chime")).toHaveProperty("checked", false));
+  fireEvent.click(screen.getByLabelText("Quota above 90%"));
+  fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "21:00" } });
+  server = {
+    ...server,
+    categories: { ...server.categories, people: false },
+    quietHours: { ...server.quietHours, end: "09:00", timezone: "Europe/London" },
+  };
+  act(() => hub.refetchTopic("settings"));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Quiet hours end")).toHaveProperty("value", "09:00"),
+  );
+  expect(screen.getByLabelText("Quota above 90%")).toHaveProperty("checked", true);
+  expect(screen.getByLabelText("Quiet hours start")).toHaveProperty("value", "21:00");
+  server = { ...server, enabled: false };
+  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+  await screen.findByText("Preferences saved.");
+  expect(posted).toHaveBeenCalledWith({
+    ...server,
+    categories: { ...server.categories, quota: true },
+    quietHours: { ...server.quietHours, start: "21:00" },
+  });
+  expect(server.categories.people).toBe(false);
+  expect(server.quietHours.timezone).toBe("Europe/London");
+  server = { ...server, categories: { ...server.categories, quota: false } };
+  act(() => hub.refetchTopic("settings"));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Quota above 90%")).toHaveProperty("checked", false),
+  );
+});
+
+it("treats the first feed including tests as history even while preferences load", async () => {
+  const native = vi.fn();
+  vi.stubGlobal(
+    "Notification",
+    class {
+      static permission = "granted";
+      constructor() {
+        native();
+      }
+    },
+  );
+  let release!: (response: Response) => void;
+  let events = [
+    { ...event, id: "history-normal" },
+    { ...event, id: "history-test", test: true },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: string) =>
+      path === "/api/notification-preferences"
+        ? new Promise<Response>((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve(Response.json(events)),
+    ),
+  );
+  render(<BrowserNotifications />);
+  await waitFor(() =>
+    expect(hub.snapshot("/api/notifications/events", "attention").data).toEqual(events),
+  );
+  events = [...events, { ...event, id: "arrived-during-preferences" }];
+  act(() => hub.refetchTopic("attention"));
+  await waitFor(() =>
+    expect(hub.snapshot("/api/notifications/events", "attention").data).toEqual(events),
+  );
+  await act(async () => release(Response.json(PREFS)));
+  await waitFor(() => expect(native).toHaveBeenCalledTimes(1));
+});
+
+it.each(["events"])("waits for both refreshes when %s finishes first", async (first) => {
+  const native = vi.fn();
+  vi.stubGlobal(
+    "Notification",
+    class {
+      static permission = "granted";
+      constructor() {
+        native();
+      }
+    },
+  );
+  stubFetch({
+    "/api/notification-preferences": { ...PREFS, enabled: false },
+    "/api/notifications/events": [],
+  });
+  render(<BrowserNotifications />);
+  await waitFor(() =>
+    expect(hub.snapshot("/api/notifications/events", "attention").data).toEqual([]),
+  );
+  const pending = new Map<string, (response: Response) => void>();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: string) => new Promise<Response>((resolve) => pending.set(path, resolve))),
+  );
+  act(() => hub.refetchTopic("settings"));
+  const finish = async (which: string) => {
+    const path = which === "events" ? "/api/notifications/events" : "/api/notification-preferences";
+    await act(async () =>
+      pending.get(path)?.(
+        Response.json(which === "events" ? [{ ...event, id: `race-${first}` }] : PREFS),
+      ),
+    );
+  };
+  await finish(first);
+  expect(native).not.toHaveBeenCalled();
+  await finish(first === "events" ? "preferences" : "events");
+  await waitFor(() => expect(native).toHaveBeenCalledOnce());
+  act(() => hub.refetchTopic("attention"));
+  await finish("events");
+  expect(native).toHaveBeenCalledOnce();
+});

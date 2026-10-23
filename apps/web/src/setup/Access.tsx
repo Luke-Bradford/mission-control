@@ -1,6 +1,6 @@
 import type { NotificationCategory, NotificationEvent, NotificationPreferences } from "@mc/core";
 import { useState } from "react";
-import { apiPost } from "../api.ts";
+import { apiGet, apiPost } from "../api.ts";
 import { deliverNotification, enableBrowser, permissionState } from "../browserNotifications.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -32,8 +32,23 @@ const SAMPLES = [
   },
 ];
 
+type Edits = Partial<Omit<NotificationPreferences, "categories" | "quietHours">> & {
+  categories?: Partial<NotificationPreferences["categories"]>;
+  quietHours?: Partial<NotificationPreferences["quietHours"]>;
+};
+
+function applyEdits(base: NotificationPreferences, edits: Edits): NotificationPreferences {
+  return {
+    ...base,
+    ...edits,
+    categories: { ...base.categories, ...edits.categories },
+    quietHours: { ...base.quietHours, ...edits.quietHours },
+  };
+}
+
 function Preferences({ initial }: { initial: NotificationPreferences }) {
-  const [prefs, setPrefs] = useState(initial);
+  const [edits, setEdits] = useState<Edits>({});
+  const prefs = applyEdits(initial, edits);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -43,7 +58,12 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
     setError("");
     setMessage("");
     try {
-      setPrefs(await apiPost<NotificationPreferences>(ACTIONS.notificationPreferences, prefs));
+      const latest = await apiGet<NotificationPreferences>(RESOURCES.notificationPreferences.path);
+      await apiPost<NotificationPreferences>(
+        ACTIONS.notificationPreferences,
+        applyEdits(latest, edits),
+      );
+      setEdits({});
       hub.refetch(RESOURCES.notificationPreferences.path);
       hub.refetch(RESOURCES.notificationEvents.path);
       setMessage("Preferences saved.");
@@ -75,7 +95,7 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
           type="checkbox"
           checked={prefs.enabled !== false}
           disabled={busy}
-          onChange={(e) => setPrefs({ ...prefs, enabled: e.target.checked })}
+          onChange={(e) => setEdits({ ...edits, enabled: e.target.checked })}
         />{" "}
         Enable notifications
       </label>
@@ -86,7 +106,7 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
             checked={prefs.categories[key]}
             disabled={busy}
             onChange={(e) =>
-              setPrefs({ ...prefs, categories: { ...prefs.categories, [key]: e.target.checked } })
+              setEdits({ ...edits, categories: { ...edits.categories, [key]: e.target.checked } })
             }
           />{" "}
           {label}
@@ -102,7 +122,7 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
             value={prefs.quietHours.start}
             disabled={busy}
             onChange={(e) =>
-              setPrefs({ ...prefs, quietHours: { ...prefs.quietHours, start: e.target.value } })
+              setEdits({ ...edits, quietHours: { ...edits.quietHours, start: e.target.value } })
             }
             required
           />
@@ -116,7 +136,7 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
             value={prefs.quietHours.end}
             disabled={busy}
             onChange={(e) =>
-              setPrefs({ ...prefs, quietHours: { ...prefs.quietHours, end: e.target.value } })
+              setEdits({ ...edits, quietHours: { ...edits.quietHours, end: e.target.value } })
             }
             required
           />
@@ -128,7 +148,7 @@ function Preferences({ initial }: { initial: NotificationPreferences }) {
           type="checkbox"
           checked={prefs.softChime}
           disabled={busy}
-          onChange={(e) => setPrefs({ ...prefs, softChime: e.target.checked })}
+          onChange={(e) => setEdits({ ...edits, softChime: e.target.checked })}
         />{" "}
         Soft chime
       </label>

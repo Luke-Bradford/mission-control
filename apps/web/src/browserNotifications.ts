@@ -1,5 +1,5 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { RESOURCES, useResource } from "./data.ts";
 import { navigate } from "./router.ts";
 import { toast } from "./shell/Toast.tsx";
@@ -64,7 +64,7 @@ export function showNotification(event: NotificationEvent, prefs: NotificationPr
 
 export function createDelivery(show = showNotification) {
   const seen = new Set<string>();
-  return (event: NotificationEvent, prefs: NotificationPreferences) => {
+  const deliver = (event: NotificationEvent, prefs: NotificationPreferences) => {
     if (seen.has(event.id)) return;
     seen.add(event.id);
     const time = new Intl.DateTimeFormat("en-GB", {
@@ -85,6 +85,11 @@ export function createDelivery(show = showNotification) {
       return;
     show(event, prefs);
   };
+  return Object.assign(deliver, {
+    remember(events: NotificationEvent[]) {
+      for (const event of events) seen.add(event.id);
+    },
+  });
 }
 
 export const deliverNotification = createDelivery();
@@ -92,9 +97,24 @@ export const deliverNotification = createDelivery();
 export function BrowserNotifications() {
   const prefs = useResource<NotificationPreferences>(RESOURCES.notificationPreferences);
   const events = useResource<NotificationEvent[]>(RESOURCES.notificationEvents);
+  const initialized = useRef(false);
   useEffect(() => {
-    if (!prefs.data || !events.data) return;
+    // Seed history as soon as the first feed arrives, even if preferences are still loading.
+    if (!initialized.current && events.data && !events.loading && !events.error) {
+      deliverNotification.remember(events.data);
+      initialized.current = true;
+    }
+    // Cached data remains present during refreshes and after failures; it is not current.
+    if (
+      !prefs.data ||
+      !events.data ||
+      prefs.loading ||
+      events.loading ||
+      prefs.error ||
+      events.error
+    )
+      return;
     for (const event of events.data) deliverNotification(event, prefs.data);
-  }, [prefs.data, events.data]);
+  }, [prefs.data, prefs.loading, prefs.error, events.data, events.loading, events.error]);
   return null;
 }
