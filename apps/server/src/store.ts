@@ -3145,15 +3145,22 @@ export class Store {
 
   pendingDiscussions(): ItemDiscussion[] {
     const rows = this.db
-      .prepare("SELECT item_key, id FROM item_discussions ORDER BY rowid DESC LIMIT 100")
+      .prepare(`
+        SELECT d.item_key, d.id,
+          (SELECT MIN(json_extract(q.value, '$.at'))
+           FROM json_each(d.messages) AS q
+           WHERE json_extract(q.value, '$.role') = 'operator'
+             AND NOT EXISTS (
+               SELECT 1 FROM json_each(d.messages) AS r
+               WHERE json_extract(r.value, '$.replyTo') = json_extract(q.value, '$.id')
+             )) AS waiting_since
+        FROM item_discussions AS d
+        WHERE waiting_since IS NOT NULL
+        ORDER BY waiting_since ASC, d.rowid ASC
+        LIMIT 100
+      `)
       .all() as Row[];
-    return rows
-      .map((r) => this.discussion(r.item_key as string, r.id as string) as ItemDiscussion)
-      .filter((t) =>
-        t.messages.some(
-          (m) => m.role === "operator" && !t.messages.some((r) => r.replyTo === m.id),
-        ),
-      );
+    return rows.map((r) => this.discussion(r.item_key as string, r.id as string) as ItemDiscussion);
   }
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */

@@ -205,6 +205,40 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+it("keeps an older unanswered discussion visible and waking after 101 newer answered threads", () => {
+  const current = () => flightState({ config, store, busy: [], now: nowMs });
+  expect(pending(current())).toBe(false);
+  const waiting = store.ensureDiscussion("note:waiting", "v1");
+  store.askDiscussion(waiting.id, "waiting-question", "Why?", T0);
+  for (let n = 0; n < 101; n++) {
+    const answered = store.ensureDiscussion(`note:answered-${n}`, "v1");
+    store.askDiscussion(answered.id, `ask-${n}`, "Why?", T0 + n + 1);
+    expect(
+      store.replyDiscussion(answered.id, `ask-${n}`, `reply-${n}`, "Because", T0 + n + 2),
+    ).toBe(true);
+  }
+  expect(store.pendingDiscussions().map((t) => t.id)).toEqual([waiting.id]);
+  expect(current().discussions.map((t) => t.id)).toEqual([waiting.id]);
+  expect(pending(current())).toBe(true);
+  expect(store.replyDiscussion(waiting.id, "waiting-question", "answer", "Because", T0 + 200)).toBe(
+    true,
+  );
+  expect(pending(current())).toBe(false);
+});
+
+it("bounds pending discussions by the oldest unanswered question, not thread creation", () => {
+  const threads = [];
+  for (let n = 0; n < 102; n++) {
+    const thread = store.ensureDiscussion(`note:pending-${n}`, "v1");
+    // Keep the oldest wait first; the remaining questions reverse thread creation order.
+    store.askDiscussion(thread.id, `ask-${n}`, "Why?", T0 + (n === 0 ? 0 : 102 - n));
+    threads.push(thread.id);
+  }
+  expect(store.pendingDiscussions().map((t) => t.id)).toEqual(
+    [threads[0], ...threads.slice(1).reverse()].slice(0, 100),
+  );
+});
+
 const stored = (number: number, over: Partial<PullRequestView> = {}): PullRequestView => ({
   repoId: "mc",
   number,
