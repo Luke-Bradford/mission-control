@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { AttentionBrief, PersonMessage } from "@mc/core";
 import { GITHUB_COLLECTOR_PREFIX, type RepoId, startOfLocalDay } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { NotificationRead, NotificationRow, Store } from "../store.ts";
@@ -33,7 +35,54 @@ const REASON_TEXT: Record<(typeof PERSON_REASONS)[number], string> = {
   comment: "replied in a thread you commented on",
 };
 
-export const HANDLED_HOW_TEXT = { marked: "marked handled", read: "read on GitHub" } as const;
+export const HANDLED_HOW_TEXT = {
+  marked: "marked handled",
+  read: "read on GitHub",
+  replied: "replied on GitHub",
+  copied: "reply copied for Teams",
+  flight: "with FLIGHT",
+} as const;
+
+/** Source text stays untrusted display content; the digest binds a draft to that exact content. */
+export function sourceMessage(
+  body: unknown,
+  fallbackUrl: string,
+  fallbackAt: number,
+): PersonMessage | undefined {
+  if (
+    !isObj(body) ||
+    typeof body.body !== "string" ||
+    (typeof body.id !== "number" && typeof body.id !== "string")
+  )
+    return undefined;
+  const author = isObj(body.user) && typeof body.user.login === "string" ? body.user.login : null;
+  const url =
+    typeof body.html_url === "string" && body.html_url.startsWith(WEB_ORIGIN)
+      ? body.html_url
+      : fallbackUrl;
+  return {
+    source: {
+      kind: "github",
+      messageId: String(body.id),
+      revision: createHash("sha256")
+        .update(JSON.stringify([body.id, body.body, body.updated_at, author, url]))
+        .digest("hex"),
+    },
+    author,
+    at: typeof body.created_at === "string" ? ms(body.created_at) : fallbackAt,
+    text: body.body.slice(0, 12_000),
+    url,
+  };
+}
+
+/** Only a configured thread's issue/PR or comment endpoint can be used for source reads. */
+export function sourceReadUrl(repo: string, url: string): boolean {
+  const match =
+    /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/((?:issues|pulls)\/(?:comments\/)?[1-9]\d*)$/.exec(
+      url,
+    );
+  return match !== null && match[1]?.toLowerCase() === repo.toLowerCase();
+}
 
 export type CatchUpKind = "new" | "follow-up" | "old";
 
@@ -143,6 +192,9 @@ export interface PersonThreadView {
   updatedAt: number;
   firstSeenAt: number;
   catchUp: CatchUpKind;
+  message?: PersonMessage;
+  history?: PersonMessage[];
+  brief?: AttentionBrief;
 }
 
 export interface HandledThreadView {
@@ -164,6 +216,7 @@ export interface NotificationsView {
 /** The open person threads of configured repos, and the ones closed since the operator's local midnight. */
 export function notificationsView(config: CcConfig, store: Store, now: number): NotificationsView {
   const github = new Map(config.repos.map((r) => [r.id, r.github]));
+  const briefs = store.briefs();
   const dayStart = startOfLocalDay(now, config.operator.timezone);
   const open: PersonThreadView[] = [];
   const handledToday: HandledThreadView[] = [];
@@ -187,6 +240,9 @@ export function notificationsView(config: CcConfig, store: Store, now: number): 
         updatedAt: n.updatedAt,
         firstSeenAt: n.firstSeenAt,
         catchUp: catchUpKind(n, now),
+        message: n.message,
+        history: n.history,
+        brief: briefs.get(personKey(n)),
       });
     } else if (n.handledAt !== null && n.handledHow !== null && n.handledAt >= dayStart) {
       handledToday.push({
@@ -241,6 +297,7 @@ function keepThreads(raw: unknown[], repos: CcConfig["repos"]): Kept[] {
       continue;
     }
     const m = typeof url === "string" ? SUBJECT_URL.exec(url) : null;
+    if (m && m[1]?.toLowerCase() !== repo.github.toLowerCase()) continue;
     kept.push({
       id,
       repoId: repo.id,
@@ -304,7 +361,9 @@ export async function collectNotifications(
       let author: string | null;
       let snippet: string | null;
       let url: string;
-      if (stored !== null && stored.updatedAt === k.updatedAt) {
+      let message = stored?.message;
+      let history = stored?.history;
+      if (stored !== null && stored.updatedAt === k.updatedAt && stored.message) {
         ({ author, snippet, url } = stored);
       } else {
         author = null;
@@ -312,15 +371,50 @@ export async function collectNotifications(
         url = k.fallbackUrl;
         try {
           if (k.commentUrl === null) throw new Error("no comment url");
+          const repo = repos.find((r) => r.id === k.repoId);
+          if (!repo) throw new Error("unknown repo");
+          if (!sourceReadUrl(repo.github, k.commentUrl)) throw new Error("invalid source URL");
           const { body } = await rest(k.commentUrl);
           if (!isObj(body)) throw new Error("unexpected comment response");
           author = isObj(body.user) && typeof body.user.login === "string" ? body.user.login : null;
           snippet = snippetOf(body.body);
+          message = sourceMessage(body, k.fallbackUrl, k.updatedAt);
           if (typeof body.html_url === "string" && body.html_url.startsWith(WEB_ORIGIN)) {
             url = body.html_url;
           }
         } catch {
+          message = undefined;
+          history = undefined;
           misses++;
+        }
+        if (message && k.number !== null) {
+          history = [];
+          const latest = message;
+          const repo = repos.find((r) => r.id === k.repoId);
+          const kinds = k.subjectType === "PullRequest" ? ["issues", "pulls"] : ["issues"];
+          for (const kind of kinds) {
+            try {
+              if (!repo) throw new Error("unknown repo");
+              const listUrl = `${API_ORIGIN}repos/${repo.github}/${kind}/${k.number}/comments?per_page=100`;
+              let page = await rest(listUrl);
+              const last = /<([^>]+)>;\s*rel="last"/.exec(page.headers.get("link") ?? "")?.[1];
+              if (last?.startsWith(`${listUrl}&page=`)) page = await rest(last);
+              if (Array.isArray(page.body))
+                history.push(
+                  ...page.body
+                    .map((b) => sourceMessage(b, k.fallbackUrl, k.updatedAt))
+                    .filter(
+                      (m): m is PersonMessage =>
+                        m !== undefined &&
+                        m.source.messageId !== latest.source.messageId &&
+                        m.at <= latest.at,
+                    ),
+                );
+            } catch {
+              // Latest-message data remains usable when earlier comments cannot be fetched.
+            }
+          }
+          history = history.sort((a, b) => a.at - b.at).slice(-20);
         }
       }
       rows.push({
@@ -335,6 +429,8 @@ export async function collectNotifications(
         snippet,
         updatedAt: k.updatedAt,
         lastReadAt: k.lastReadAt,
+        message,
+        history,
       });
     }
 
