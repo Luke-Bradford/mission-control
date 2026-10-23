@@ -107,6 +107,8 @@ export interface CrewConfig {
   denyRead?: string[];
   /** Input + output tokens one run may use. Loaded: always set (default DEFAULT_RUN_TOKEN_BUDGET). */
   runTokenBudget?: number;
+  /** Unfinished runs (set aside, not done) a writer seat may hold before it takes no new ticket. Loaded: always set (default DEFAULT_MAX_OPEN_RUNS_PER_SEAT). */
+  maxOpenRunsPerSeat?: number;
   /** Start only cards labelled `lane:<lane>`; absent: no lane check. */
   lane?: CrewLane;
   /** Also start cards with no lane label. Loaded: always set (default false). */
@@ -266,6 +268,7 @@ export const ticketState = z.enum([
 ]) satisfies z.ZodType<TicketState>;
 const DEFAULT_MAX_SEATS = 8;
 export const DEFAULT_RUN_TOKEN_BUDGET = 400_000;
+export const DEFAULT_MAX_OPEN_RUNS_PER_SEAT = 2;
 export const SEAT_ID = /^[a-z][a-z0-9-]{0,30}$/;
 export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
@@ -393,6 +396,7 @@ const fileSchema = z
         node: nonEmpty.default(DEFAULT_CREW_NODE),
         deny_read: z.array(nonEmpty).default([]),
         run_token_budget: z.number().int().positive().default(DEFAULT_RUN_TOKEN_BUDGET),
+        max_open_runs_per_seat: z.number().int().positive().default(DEFAULT_MAX_OPEN_RUNS_PER_SEAT),
         lane: z.enum(CREW_LANES).optional(),
         lane_default: z.boolean().default(false),
         roles: z.record(z.string(), roleSchema).default({}),
@@ -461,6 +465,7 @@ const fileSchema = z
               node: expandHome(f.crew.node),
               denyRead: f.crew.deny_read.map(expandHome),
               runTokenBudget: f.crew.run_token_budget,
+              maxOpenRunsPerSeat: f.crew.max_open_runs_per_seat,
               ...(f.crew.lane === undefined ? {} : { lane: f.crew.lane }),
               laneDefault: f.crew.lane_default,
               roles: {

@@ -735,7 +735,11 @@ defaulted. `pick_from: []` and an area with no globs are refused, and an area gl
 repo-relative with `**` only as a trailing `/**`. Nothing uses the rules yet (the build loop will,
 and a refused block stops new tickets for that repo). This repo's own block is at the end of its
 `CLAUDE.md`. `crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
-run may use; the engine parks a run that goes over.
+run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
+its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
+the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+`crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
+hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
 **FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
 that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need

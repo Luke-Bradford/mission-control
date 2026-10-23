@@ -34,7 +34,12 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CardNow } from "../collectors/github.ts";
-import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import {
+  type CcConfig,
+  type CrewSeatConfig,
+  type CrewSessionConfig,
+  DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
+} from "../config.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
@@ -122,17 +127,28 @@ const isMerge = (config: CcConfig, repoId: RepoId): boolean =>
 
 /**
  * Whether the seat may take a ticket now: it has no seat row yet, or it is idle holding no run (or
- * only one that has ended), and no run of its own waits off the seat for rework (flagged to wake,
- * or its review has reported blocking findings not yet sent). A run the store
+ * only one that has ended), no run of its own waits off the seat for rework (flagged to wake,
+ * CI failing on its pushed sha, or its review has reported blocking findings not yet sent), and it
+ * holds fewer than `maxOpenRuns` set-aside runs that are not done. A run the store
  * does not know counts as live.
  */
-export function seatMayTake(store: Store, seatId: string): boolean {
+export function seatMayTake(
+  store: Store,
+  seatId: string,
+  maxOpenRuns: number = DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
+): boolean {
   if (wakeDueAsideRun(store, seatId) !== undefined) return false;
+  const open = store.asideRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
+  if (open.length >= maxOpenRuns) return false;
   const row = store.seatSession(seatId);
   if (row === null) return true;
   if (row.state !== "idle") return false;
   return row.runId === null || store.run(row.runId)?.endedAt != null;
 }
+
+/** The cap on a writer seat's unfinished runs. */
+export const maxOpenRunsOf = (config: CcConfig): number =>
+  config.crew?.maxOpenRunsPerSeat ?? DEFAULT_MAX_OPEN_RUNS_PER_SEAT;
 
 /** The cards in the Ready column (a closed card is Done, never Ready), in the order picked. */
 function readyCards(store: Store, repoId: RepoId): BoardItem[] {
@@ -154,6 +170,7 @@ function readyCards(store: Store, repoId: RepoId): BoardItem[] {
 export async function refillQueues(deps: QueueDeps): Promise<void> {
   const { config, store, now } = deps;
   const seats = writerSeats(config);
+  const maxOpen = maxOpenRunsOf(config);
   const rulesOf = new Map<RepoId, RepoRules>();
   /** Repos a queue may be built for; one whose rules cannot be read is in here but not above. */
   const eligible = new Set<RepoId>();
@@ -233,8 +250,8 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
   for (const [repoId, rules] of rulesOf) {
     const group = seats.filter((s) => s.session.repoId === repoId);
     const order = [
-      ...group.filter((s) => seatMayTake(store, s.seat.id)),
-      ...group.filter((s) => !seatMayTake(store, s.seat.id)),
+      ...group.filter((s) => seatMayTake(store, s.seat.id, maxOpen)),
+      ...group.filter((s) => !seatMayTake(store, s.seat.id, maxOpen)),
     ];
     const board = store.board(repoId);
     const repo = config.repos.find((r) => r.id === repoId);
@@ -375,7 +392,7 @@ async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConf
     if (
       other.id === seat.id ||
       session.repoId !== repoId ||
-      (seatMayTake(store, other.id) && !atQuotaStop(deps, other.accountId))
+      (seatMayTake(store, other.id, maxOpenRunsOf(config)) && !atQuotaStop(deps, other.accountId))
     ) {
       continue;
     }
@@ -438,7 +455,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (!deps.enabled || deps.login === null) return;
   const found = writerSeats(config).find((s) => s.seat.id === seatId);
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
-  if (!seatMayTake(store, seatId)) return;
+  if (!seatMayTake(store, seatId, maxOpenRunsOf(config))) return;
   if (atQuotaStop(deps, found.seat.accountId)) return;
   await claimBestReady(deps, found.session.repoId, found.seat);
 
