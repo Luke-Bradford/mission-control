@@ -426,9 +426,9 @@ export function tokensPerMinute(digest: RunDigest | null, now: number): number |
   return newest && now - newest[0] <= 2 * MINUTE ? newest[1] : 0;
 }
 
-/** The name on screen: a crew seat's id upper-cased (`GUIDO-1`), a loop's id as it is. */
-export const callSign = (row: Pick<CrewRow, "id" | "kind">): string =>
-  row.kind === "crew" ? seatCallSign(row.id) : row.id;
+/** The configured name, otherwise a crew seat's upper-case id or a loop's id as it is. */
+export const callSign = (row: Pick<CrewRow, "id" | "kind" | "displayCallSign">): string =>
+  row.displayCallSign ?? (row.kind === "crew" ? seatCallSign(row.id) : row.id);
 
 /** A role's title: its `here` text up to the first colon or comma, first letter up (`frontend developer` is `Frontend developer`). */
 export function roleTitle(here: string): string {

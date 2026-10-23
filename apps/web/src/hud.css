@@ -1720,6 +1720,9 @@ main > section {
   flex-wrap: wrap;
 }
 .idrow .big {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-family: var(--display);
   font-size: 26px;
   font-weight: 600;
@@ -3549,4 +3552,24 @@ button.nrow.thread.tagged {
 /* Person items retain their own scrolling brief and reply choices. */
 #discuss.person-item .panel {
   overflow: visible;
+.rename-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.rename-editor label {
+  min-width: 0;
+  max-width: 100%;
+}
+.rename-editor input {
+  min-width: 0;
+  width: 16ch;
+  max-width: 100%;
+}
+.rename-editor [role="alert"] {
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }

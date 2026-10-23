@@ -42,12 +42,13 @@ export function AgentTag({
   /** The element's DOM id, for an `aria-labelledby` that names a control by the call sign alone. */
   domId?: string;
 }) {
+  const row = useResource<Crew>(RESOURCES.crew).data?.rows.find((r) => r.id === id);
   const style = { "--c": agentColor(index) } as CSSProperties;
   const { suffix, title } = useRoleLabel(id, bare);
   return (
     <span className={`ag${sm ? " sm" : ""}`} style={style} title={title}>
       <i aria-hidden="true" />
-      <span id={domId}>{id}</span>
+      <span id={domId}>{row?.displayCallSign ?? id}</span>
       {suffix !== null && <span className="rt">{` · ${suffix}`}</span>}
     </span>
   );
