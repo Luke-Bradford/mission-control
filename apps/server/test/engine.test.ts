@@ -2005,7 +2005,15 @@ describe("the engine runs reviews", () => {
   it("blocking findings go to the author once, and the review run ends", async () => {
     await toReview();
     const id = first().id;
+    // a busy seat is offered the line again, and nothing is recorded until it goes through
+    h.busy = true;
     reported(id, [finding("Critical"), finding("Important"), finding("Minor")]);
+    await vi.waitFor(() => expect(store.review(id)?.state).toBe("reported"));
+    await h.engine.tick();
+    expect(sentKeys()).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+    h.busy = false;
+    await h.engine.tick();
     await vi.waitFor(() => expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]));
     expect(loopTexts()).toContain(fixSentText(2, "GUIDO-1"));
     expect(h.ended).toContain(`${RETRO}:${id}`);
@@ -2277,7 +2285,15 @@ describe("the engine runs reviews", () => {
       it("a conflict is left for the seat, and the line goes once", async () => {
         behindMain();
         h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
+        // a busy seat is offered the line again, and nothing is recorded until it goes through
+        h.busy = true;
         await gateOpen();
+        await vi.waitFor(() => expect(loopOf()?.mainMerge).toBeTruthy());
+        await h.engine.tick();
+        expect(sentKeys()).toEqual([]);
+        expect(store.comms(0)).toEqual([]);
+        h.busy = false;
+        await h.engine.tick();
         await vi.waitFor(() => expect(sentKeys()).toContain(`conflict:${RUN}:${MAIN}`));
         expect(loopOf()).toMatchObject({
           phase: "working",
