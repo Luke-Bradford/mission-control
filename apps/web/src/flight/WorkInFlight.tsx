@@ -5,17 +5,16 @@ import {
   HUD_STATE_TONE,
   type RunLoopView,
 } from "@mc/core";
-import { heldStep, stepTries } from "../agent/loopView.ts";
+import { heldStep } from "../agent/loopView.ts";
 import { useSecond, useTz } from "../clock.ts";
 import {
   doingLine,
   hasActiveRun,
   isLoopInFlight,
-  LOOP_PATH,
-  LOOP_PHASE_LABEL,
-  loopMarks,
+  loopSteps,
   runElapsed,
   type StepMark,
+  stepMarks,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { dur } from "../fmt.ts";
@@ -23,7 +22,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
-import { agentPath, followLink } from "../router.ts";
+import { agentPath, followLink, navigate } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
 
 const DASH = "—";
@@ -45,20 +44,26 @@ function StepCells({ r }: { r: CrewRow }) {
   const tries = useResource<RunLoopView>(r.run ? RESOURCES.runLoop(r.run.id) : null).data?.tries;
   const loop = r.loop;
   if (!loop) return null;
-  const marks = loopMarks(
+  const steps = loopSteps(loop);
+  const fixStep = steps.findIndex((s) => s.name === "fix");
+  const marks = stepMarks(
     loop,
     r.hudState,
     loop.phase === "parked" ? (heldStep(tries ?? []) ?? undefined) : undefined,
   );
   return (
     <span className="wsteps">
-      {LOOP_PATH.map((step, i) => {
+      {steps.map((step, i) => {
         const mark = marks[i] as StepMark;
-        const label = LOOP_PHASE_LABEL[step];
-        const n = tries ? stepTries(tries, step).filter((t) => !t.fix).length : 0;
+        const label = step.name;
+        // Fix tries carry their preceding phase unless the template has a dedicated fix step.
+        const n =
+          tries?.filter((t) => (t.fix && fixStep >= 0 ? i === fixStep : t.step === step.phase))
+            .length ?? 0;
         return (
           <span
-            key={step}
+            // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
+            key={`${i}:${step.name}`}
             className={["wstep", MARK_CLASS[mark]].filter(Boolean).join(" ")}
             title={n > 0 ? `${label} · ${n} ${n === 1 ? "try" : "tries"}` : undefined}
             aria-current={mark === "cur" || mark === "held" ? "step" : undefined}
@@ -79,26 +84,43 @@ function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null })
   const repoPrs = useReviewPrs(r);
   const doing = doingLine(r, now, tz, repoPrs);
   return (
-    <li className="row">
-      <a href={to} onClick={(e) => followLink(e, to)}>
-        <AgentTag id={r.id} index={r.index} />
-      </a>
-      <Pill tone={HUD_STATE_TONE[r.hudState]}>{HUD_STATE_LABEL[r.hudState]}</Pill>
-      {r.ticket && <TicketRef ticket={r.ticket} />}
-      {r.ticketTitle && (
-        <span className="s min0 ellip" title={r.ticketTitle}>
-          {r.ticketTitle}
+    <li>
+      {/* biome-ignore lint/a11y/useSemanticElements: A native anchor cannot contain the ticket and PR links. */}
+      <div
+        className="row"
+        role="link"
+        aria-label={`Open agent ${r.id}`}
+        tabIndex={0}
+        onClick={(e) => {
+          if (!(e.target as Element).closest("a")) followLink(e, to);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && e.target === e.currentTarget) {
+            e.preventDefault();
+            navigate(to);
+          }
+        }}
+      >
+        <a href={to} onClick={(e) => followLink(e, to)}>
+          <AgentTag id={r.id} index={r.index} />
+        </a>
+        <Pill tone={HUD_STATE_TONE[r.hudState]}>{HUD_STATE_LABEL[r.hudState]}</Pill>
+        {r.ticket && <TicketRef ticket={r.ticket} />}
+        {r.ticketTitle && (
+          <span className="s min0 ellip" title={r.ticketTitle}>
+            {r.ticketTitle}
+          </span>
+        )}
+        <StepCells r={r} />
+        {r.loop?.prNumber != null && (
+          <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
+        )}
+        <span className="s">{r.run?.branch ?? DASH}</span>
+        <span className="s num">{elapsed === null ? DASH : dur(elapsed)}</span>
+        <span className="s fg2 min0 ellip" title={doing}>
+          <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
         </span>
-      )}
-      <StepCells r={r} />
-      {r.loop?.prNumber != null && (
-        <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
-      )}
-      <span className="s">{r.run?.branch ?? DASH}</span>
-      <span className="s num">{elapsed === null ? DASH : dur(elapsed)}</span>
-      <span className="s fg2 min0 ellip" title={doing}>
-        <DoingLine row={r} now={now} tz={tz} repoPrs={repoPrs} />
-      </span>
+      </div>
     </li>
   );
 }
