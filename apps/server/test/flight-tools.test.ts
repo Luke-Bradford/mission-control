@@ -4178,3 +4178,68 @@ it.each([
     }
   },
 );
+
+describe("scheduled FLIGHT work", () => {
+  const plan = {
+    id: "report-1",
+    dueAt: NOW + 60_000,
+    kind: "report",
+    target: "guido-1",
+    label: "GUIDO-1 reports on the Example listing gap",
+    status: "pending",
+  };
+  const save = (entries: unknown[]) =>
+    call("update_brief", {
+      section: "coming_up",
+      text: "Reports and checks",
+      basis: "Agreed plan",
+      planned: { upsert: entries },
+    });
+
+  it("persists stable plans across restart, updates them, and removes completed or cancelled plans", async () => {
+    expect((await save([plan])).isError).toBeUndefined();
+    expect(flightBriefView(cfg, store).planned).toEqual([expect.objectContaining(plan)]);
+    expect((await save([{ ...plan, label: "Updated report" }])).isError).toBeUndefined();
+    expect(flightBriefView(cfg, store).planned).toHaveLength(1);
+    expect((await save([{ ...plan, status: "completed" }])).isError).toBe(true);
+    expect(
+      (await save([{ ...plan, status: "completed", detail: "Report received and read." }])).isError,
+    ).toBeUndefined();
+    expect(flightBriefView(cfg, store).planned).toEqual([]);
+    expect(
+      (await save([{ ...plan, id: "brief-1", kind: "brief", target: "crew" }])).isError,
+    ).toBeUndefined();
+    expect(
+      (await save([{ ...plan, id: "brief-1", kind: "brief", target: "crew", status: "cancelled" }]))
+        .isError,
+    ).toBeUndefined();
+    expect(flightBriefView(cfg, store).planned).toEqual([]);
+    expect((await save([plan])).isError).toBeUndefined();
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    expect(flightBriefView(cfg, store).planned).toEqual([expect.objectContaining(plan)]);
+  });
+
+  it("bounds stored plans across calls and rolls back a batch that exceeds the limit", async () => {
+    expect(
+      (await save(Array.from({ length: 100 }, (_, i) => ({ ...plan, id: `plan-${i}` })))).isError,
+    ).toBeUndefined();
+    expect((await save([{ ...plan, id: "overflow" }])).isError).toBe(true);
+    expect(flightBriefView(cfg, store).planned).toHaveLength(100);
+    expect(flightBriefView(cfg, store).planned?.some((p) => p.id === "overflow")).toBe(false);
+  });
+
+  it("rejects missing targets, invalid times and unbounded labels and plan lists", async () => {
+    for (const entry of [
+      { ...plan, target: "" },
+      { ...plan, dueAt: -1 },
+      { ...plan, label: "x".repeat(301) },
+      { ...plan, target: undefined },
+    ])
+      expect((await save([entry])).isError).toBe(true);
+    expect(
+      (await save(Array.from({ length: 101 }, (_, i) => ({ ...plan, id: `plan-${i}` })))).isError,
+    ).toBe(true);
+    expect(flightBriefView(cfg, store).planned ?? []).toEqual([]);
+  });
+});

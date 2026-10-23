@@ -16,12 +16,15 @@ import {
   COMMS_TEXT_MAX,
   type Escalation,
   FLIGHT_INCOMING_LIMIT,
+  FLIGHT_PLAN_LIMIT,
   FLIGHT_WATCH_LIMIT,
   type FlightArrivalDisposition,
   type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
+  type FlightPlanInput,
+  type FlightPlanOperation,
   type FlightWatchEntry,
   type FlightWatchOperation,
   type FlowIssue,
@@ -289,6 +292,10 @@ CREATE TABLE IF NOT EXISTS flight_brief (
   updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
 );
 CREATE TABLE IF NOT EXISTS flight_watch (
+  session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
+  PRIMARY KEY (session_id, id)
+);
+CREATE TABLE IF NOT EXISTS flight_plans (
   session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
   PRIMARY KEY (session_id, id)
 );
@@ -3093,6 +3100,44 @@ export class Store {
         "UPDATE drafts SET state = ?, text = COALESCE(?, text), completed_at = ? WHERE id = ? AND state = 'pending'",
       )
       .run(state, text ?? null, at, id);
+  }
+
+  setFlightPlans(session: string, operation: FlightPlanOperation, at: number): void {
+    this.transaction(() => {
+      const previous = new Map(this.flightPlans(session).map((p) => [p.id, p]));
+      for (const entry of operation.upsert ?? []) {
+        if (entry.status === "completed" && !entry.detail?.trim())
+          throw new Error("Completion needs an observed outcome.");
+        this.db
+          .prepare("INSERT OR REPLACE INTO flight_plans (session_id, id, entry) VALUES (?, ?, ?)")
+          .run(
+            session,
+            entry.id,
+            JSON.stringify({
+              ...entry,
+              createdAt: previous.get(entry.id)?.createdAt ?? at,
+            }),
+          );
+      }
+      const plans = this.flightPlans(session);
+      if (plans.filter((p) => p.status === "pending").length > FLIGHT_PLAN_LIMIT)
+        throw new Error("Too many planned entries.");
+      const finished = plans
+        .filter((p) => p.status !== "pending")
+        .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+      for (const entry of finished.slice(0, Math.max(0, plans.length - FLIGHT_PLAN_LIMIT)))
+        this.db
+          .prepare("DELETE FROM flight_plans WHERE session_id = ? AND id = ?")
+          .run(session, entry.id);
+    });
+  }
+
+  flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
+    return (
+      this.db
+        .prepare("SELECT entry FROM flight_plans WHERE session_id = ? ORDER BY id")
+        .all(session) as Row[]
+    ).map((r) => JSON.parse(r.entry as string) as FlightPlanInput & { createdAt: number });
   }
 
   setFlightWatch(session: string, operation: FlightWatchOperation, at: number): void {

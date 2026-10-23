@@ -119,7 +119,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
-import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
+import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
 import {
@@ -1565,6 +1565,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
       // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes, web follow-up)
       api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
+      // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline, web follow-up)
+      api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
+
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),

@@ -393,6 +393,27 @@ const WatchOperationArgs = z.strictObject({
   upsert: z.array(WatchEntryArgs).max(100).optional(),
   remove: z.array(BriefIdentity).max(100).optional(),
 });
+const PlanOperationArgs = z.strictObject({
+  upsert: z
+    .array(
+      z
+        .strictObject({
+          id: BriefIdentity,
+          dueAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+          kind: z.enum(["report", "PR recheck", "brief"]),
+          target: text(200),
+          label: text(300),
+          status: z.enum(["pending", "completed", "cancelled"]),
+          detail: text(MC_TEXT_MAX).optional(),
+        })
+        .refine(
+          (p) => p.status !== "completed" || !!p.detail?.trim(),
+          "Completion needs an observed outcome.",
+        ),
+    )
+    .max(100)
+    .optional(),
+});
 const ArrivalOperationArgs = z.strictObject({
   source: z.enum(["GitHub", "Teams", "Board"]),
   arrivalId: text(200),
@@ -401,6 +422,7 @@ const ArrivalOperationArgs = z.strictObject({
   detail: text(MC_TEXT_MAX),
 });
 const UpdateBriefArgs = z.strictObject({
+  planned: PlanOperationArgs.optional(),
   watch: WatchOperationArgs.optional(),
   arrival: ArrivalOperationArgs.optional(),
   section: z.enum(FLIGHT_BRIEF_SECTIONS),
@@ -1818,6 +1840,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         return fail("Not recorded: this arrival is not queued.");
     }
     try {
+      if (c.args.planned) store.setFlightPlans(session, c.args.planned, at);
       if (c.args.watch) store.setFlightWatch(session, c.args.watch, at);
       if (arrival && source) store.recordFlightArrival({ ...arrival, ...source, at });
       store.setFlightBriefSection({
@@ -1828,7 +1851,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         updatedBy: ctx.seatId,
       });
     } catch {
-      return fail("Not saved: at most 100 watch entries are allowed.");
+      return fail(
+        c.args.planned
+          ? "Not saved: at most 100 planned entries are allowed."
+          : "Not saved: at most 100 watch entries are allowed.",
+      );
     }
     record(at, {
       kind: "brief",
@@ -2080,6 +2107,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       inputSchema: objectSchema(
         {
           watch: z.toJSONSchema(WatchOperationArgs),
+          planned: z.toJSONSchema(PlanOperationArgs),
           arrival: z.toJSONSchema(ArrivalOperationArgs),
           section: { type: "string", enum: FLIGHT_BRIEF_SECTIONS },
           text: { type: "string", maxLength: FLIGHT_BRIEF_SECTION_MAX },
