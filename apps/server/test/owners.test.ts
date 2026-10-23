@@ -196,6 +196,11 @@ describe("Needs-you owners", () => {
     expect(o["note:cleanup:r2"]).toBe("controller");
   });
 
+  it("a flake note is the controller's", () => {
+    note("flake:r1:abc", "flag");
+    expect(owners()["note:flake:r1:abc"]).toBe("controller");
+  });
+
   it("a draft PR from another login's run is that lane's; the hub's own is the operator's", () => {
     store.replaceBoard("shop-app", [boardItem({})]);
     const key = `pr:shop-app#7:${NOW - 9 * DAY}`;

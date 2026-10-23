@@ -199,6 +199,7 @@ async function main(): Promise<void> {
         store,
         rules: engineRules,
         login: hubLogin,
+        fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
         now: Date.now,
         onNotes: () => bus.emit("attention"),
       }),
