@@ -338,7 +338,7 @@ describe("rerunFailed", () => {
     (...r: { databaseId: number; name: string; conclusion: string }[]) =>
     () => ({
       code: 0,
-      stdout: JSON.stringify(r),
+      stdout: JSON.stringify(r.map((x) => ({ status: "completed", ...x }))),
     });
 
   it("re-runs the failed jobs of each failed run, argv only", async () => {
@@ -353,6 +353,20 @@ describe("rerunFailed", () => {
     expect(out).toEqual([{ id: 11, name: "test" }]);
     expect(ghCalls[1]).toEqual(["run", "rerun", "--repo=o/mc", "11", "--failed"]);
     expect(ghCalls).toHaveLength(2);
+  });
+
+  it("answers running, and re-runs nothing, while a listed run has not completed", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "failure", status: "completed" },
+          { databaseId: 12, name: "lint", conclusion: "", status: "in_progress" },
+        ]),
+      }),
+    ];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toBe("running");
+    expect(ghCalls).toHaveLength(1);
   });
 
   it("answers null when gh refuses and nothing was re-run, or the sha is not a commit", async () => {
