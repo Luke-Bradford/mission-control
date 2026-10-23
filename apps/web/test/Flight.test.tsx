@@ -1098,6 +1098,59 @@ describe("FLIGHT's brief", () => {
     expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING);
   });
 
+  it("Incoming renders Teams matches as Asked of you", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [],
+      "/api/boards/site-builder": [],
+      "/api/flight/brief": briefView(),
+      "/api/config": CONFIG,
+      "/api/flight/incoming": {
+        entries: [
+          {
+            id: "teams-fictional",
+            source: "Teams",
+            arrivalId: "fictional",
+            version: "v1",
+            repoId: "shop-app",
+            sourceRef: {
+              kind: "teams",
+              url: "https://teams.microsoft.com/l/message/fictional",
+            },
+            arrivedAt: NOW,
+            at: NOW,
+            outcome: "Asked of you",
+            text: "Finch: Review requested",
+            detail: "Teams message",
+          },
+        ],
+      },
+      "/api/notifications": {
+        open: [
+          thread({
+            number: null,
+            message: {
+              source: { kind: "teams", messageId: "fictional", revision: "v1" },
+              author: "Finch",
+              at: NOW,
+              text: "Review requested",
+              url: "https://teams.microsoft.com/l/message/fictional",
+            },
+          }),
+        ],
+        handledToday: [],
+      },
+    });
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("incoming-row");
+    expect(rows[0]?.textContent).toContain("Teams");
+    expect(rows[0]?.textContent).toContain("Asked of you");
+    expect(rows[0]?.textContent).not.toContain("GitHub");
+    expect(screen.getByRole("link", { name: "Finch: Review requested" }).getAttribute("href")).toBe(
+      "https://teams.microsoft.com/l/message/fictional",
+    );
+  });
+
   it("Incoming lists recorded GitHub and Board arrivals newest first", async () => {
     const old = thread({ key: "person:303:1", id: "303", updatedAt: NOW - 30 * HOUR });
     const entries = [

@@ -35,6 +35,8 @@ const enc = encodeURIComponent;
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
+  teams: { path: "/api/sources/teams", topic: "attention" },
+  teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
   crew: { path: "/api/crew", topic: "agents" },
   // Reads each session's checkout folders from disk on each fetch, so once per visit.

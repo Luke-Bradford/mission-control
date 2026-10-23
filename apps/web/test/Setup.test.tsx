@@ -696,7 +696,7 @@ describe("Setup tabs", () => {
     );
     const teams = screen.getByRole("region", { name: "Microsoft Teams" });
     expect(teams.textContent).toContain("P5");
-    expect(teams.textContent).toContain("Work only; arrives in phase 5.");
+    expect(teams.textContent).toContain("Work only · phase 5.");
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(agents.textContent).toContain(
       "Claude (Agent SDK): messages, tool calls, usage per call, run totals with cost and timing, rate-limit events, context breakdown, subagent progress, task-list updates, hooks.",
@@ -716,12 +716,12 @@ describe("Setup tabs", () => {
       "Notifications: mentions of you or your team, review requests, and comments on your issues, PRs and threads feed Needs you, for the repos in your config.",
     );
     const teams = screen.getByRole("region", { name: "Microsoft Teams" });
-    expect(teams.textContent).toContain("Work only; arrives in phase 5.");
+    expect(teams.textContent).toContain("Work only · phase 5.");
     expect(teams.textContent).toContain(
-      'Will watch the chats and channels you pick for: your name or @mentions, your ticket and PR numbers, and words like "bug", "broken" or "urgent" near your areas.',
+      'Watches the chats and channels you pick for: your name or @mentions, your ticket and PR numbers, and words like "bug", "broken" or "urgent" near your areas.',
     );
     expect(teams.textContent).toContain(
-      "Matches will become Needs you items or a FLIGHT digest, with a link to the message. FLIGHT will be able to draft a GitHub issue from one for you to approve.",
+      "Matches become Needs you items or a FLIGHT digest, with a link to the message. FLIGHT can draft a GitHub issue from one for you to approve.",
     );
     expect(teams.textContent).toContain("Mission Control never posts to Teams.");
     const agents = screen.getByRole("region", { name: "Agents" });
