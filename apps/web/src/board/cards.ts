@@ -4,6 +4,7 @@ import {
   type CrewRow,
   type HudColumn,
   hudColumnOf,
+  OWNER_OPERATOR,
   type PrCheck,
   type PullRequestView,
   prYouAction,
@@ -84,9 +85,11 @@ export function cardAgent(item: BoardItem, crew: CrewRow[]): CrewRow | null {
 /** An escalation or a waiting PR names this card, or the agent working it has something waiting on you. */
 export function needsMe(item: BoardItem, items: AttentionItem[], crew: CrewRow[]): boolean {
   const ref = ticketRef(item);
-  if (items.some((a) => a.ticket === ref)) return true;
+  const mine = items.filter((a) => a.owner === OWNER_OPERATOR);
+  if (mine.some((a) => a.ticket === ref)) return true;
+  if (cardColumn(item) !== "In progress") return false;
   const agent = cardAgent(item, crew);
-  return agent !== null && items.some((a) => a.agentId === agent.id);
+  return agent !== null && mine.some((a) => a.agentId === agent.id);
 }
 
 /** Merged when any PR on the ticket is merged (not only the one the card shows), else Closed. */

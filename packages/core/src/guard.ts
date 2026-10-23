@@ -134,7 +134,7 @@ export function lockBusyText(call: string, command: string): string {
 /** `GET /api/test-lock`. */
 export interface TestLockState {
   holder: { runId: string; seatId: string; command: string; since: number } | null;
-  waiting: { runId: string; seatId: string; since: number }[];
+  waiting: { runId: string; seatId: string; command: string; since: number }[];
 }
 
 /** The ack key of a guard hit (the Guard drawer's [Ack]); it ages out with the other acks. */

@@ -1361,7 +1361,7 @@ describe("crew seats in the rows", () => {
         start({ phase: "working" });
         const lock: TestLockState = {
           holder: null,
-          waiting: [{ runId: "c1", seatId: "GUIDO-1", since: NOW - MIN }],
+          waiting: [{ runId: "c1", seatId: "GUIDO-1", command: "pnpm -s test", since: NOW - MIN }],
         };
         expect(waitOf(withCrew(), lock)).toBe("lock");
       });
@@ -1645,6 +1645,8 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       {
         key: strays[0]?.key,
         kind: "stray",
+        path: "docs/c.md",
+        sessionId: "shop-app-1",
         agentId: "GUIDO-1",
         repoId: "shop-app",
         text: "docs/c.md changed in s/shop-app-1 outside every agent's area",
@@ -1692,6 +1694,8 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         at: NOW - MIN,
       }),
     ]);
+    expect(items(c)[0]).not.toHaveProperty("path");
+    expect(items(c)[0]).not.toHaveProperty("sessionId");
     store.answerQuestions("GUIDO-1", NOW);
     expect(items(c)).toEqual([]);
   });
@@ -1833,7 +1837,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     store.setDigest("c2", digest({ lastEventAt: NOW - 20 * MIN }));
     const lock: TestLockState = {
       holder: { runId: "c1", seatId: "GUIDO-1", command: "pnpm -s test", since: NOW - 5 * MIN },
-      waiting: [{ runId: "c2", seatId: "GUIDO-2", since: NOW - 20 * MIN }],
+      waiting: [{ runId: "c2", seatId: "GUIDO-2", command: "pnpm -s test", since: NOW - 20 * MIN }],
     };
     store.setDigest("c1", digest({ lastEventAt: NOW - MIN }));
     const row = crew(c, store, NOW, lock).rows.find((r) => r.id === "GUIDO-2");
@@ -1853,7 +1857,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     store.setDigest("c2", digest({ lastEventAt: NOW - MIN }));
     const lock: TestLockState = {
       holder: { runId: "c1", seatId: "GUIDO-1", command: "pnpm -s test", since: NOW - 15 * MIN },
-      waiting: [{ runId: "c2", seatId: "GUIDO-2", since: NOW - 4 * MIN }],
+      waiting: [{ runId: "c2", seatId: "GUIDO-2", command: "pnpm -s test", since: NOW - 4 * MIN }],
     };
     const lockItems = items(c, lock).filter((i) => i.kind === "lock");
     expect(lockItems).toEqual([

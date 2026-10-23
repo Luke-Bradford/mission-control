@@ -30,7 +30,8 @@ import { toast } from "../shell/Toast.tsx";
 const DASH = "—";
 export const FOLDERS_UNREADABLE = "Could not read the checkout's folders.";
 export const FOLDER_FREE = "free";
-export const FOLDERS_NOTE = "Tiles show who owns each folder; areas can't overlap.";
+export const FOLDERS_NOTE =
+  "Tiles show who owns each folder; areas can't overlap. A stray change is outside every writer's area: it shows in Needs you, and FLIGHT can work out whose it is.";
 export const SESSIONS_NOTE =
   "A session is one repo and the agents working on it, as config.yaml lists them. Add, edit or remove an agent here: Mission Control writes config.yaml, keeps a backup beside it, and applies the change without a restart.";
 export const SAVE_NOTE =
@@ -324,12 +325,12 @@ function CrewSession({
 }) {
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const tz = useTz();
-  const strays = (attention ?? []).flatMap((item) => {
-    if (item.kind !== "stray") return [];
-    const marker = ` changed in s/${session.id} `;
-    const end = item.text.indexOf(marker);
-    return end < 0 ? [] : [{ ...item, path: item.text.slice(0, end) }];
-  });
+  // This session's stray files, from the item's own path (no parsing of its text).
+  const strays = (attention ?? []).flatMap((item) =>
+    item.kind === "stray" && item.sessionId === session.id && item.path
+      ? [{ ...item, path: item.path }]
+      : [],
+  );
   const [removing, setRemoving] = useState<string | null>(null);
   const repo = config.repos.find((r) => r.id === session.repoId);
   const roles = rolesOf(config);
