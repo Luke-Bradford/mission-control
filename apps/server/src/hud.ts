@@ -40,6 +40,7 @@ import {
   OWNER_OPERATOR,
   type PullRequestView,
   pathInArea,
+  profileStep,
   prYouAction,
   questionText,
   REVIEW_ROUNDS,
@@ -314,6 +315,12 @@ export function crew(
           parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
           tries: runTries(store, run, run.loop),
           wait: runWait(config, store, run, run.loop, lock),
+          ...(run.profile
+            ? {
+                profile: run.profile.profile.name,
+                step: profileStep(run.profile.profile, run.loop.phase),
+              }
+            : {}),
         }
       : null;
   const asideAll = store.asideRuns();

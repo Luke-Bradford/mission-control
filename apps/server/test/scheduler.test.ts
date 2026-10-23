@@ -119,7 +119,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
   return {
     ta: vi.fn(async () => undefined),
     studio: vi.fn(async () => undefined),
-    launchctl: vi.fn(async () => ({ code: 0 })),
+    launchctl: vi.fn(async () => ({ code: 0, stdout: "" })),
     sessions: vi.fn(() => []),
     githubToken: vi.fn(async () => "tok"),
     makeGql: vi.fn(() => async () => ({})),
