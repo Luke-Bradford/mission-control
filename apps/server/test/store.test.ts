@@ -2100,14 +2100,15 @@ describe("hub retention", () => {
         "attention",
         "expired",
       ];
-      if (table === "review_findings") owners.push("recentReview");
+      if (table === "review_findings") owners.push("recentReview", "recentAuthor");
       try {
         for (const [i, id] of owners.entries()) {
           store.upsertRun(
             run({
               id,
               ticket: `repo#${i}`,
-              endedAt: id === "open" ? null : id === "recent" ? now - 1 : 1,
+              endedAt:
+                id === "open" ? null : id === "recent" || id === "recentAuthor" ? now - 1 : 1,
               loop:
                 id === "parked"
                   ? { ...NEW_LOOP, phase: "parked" }

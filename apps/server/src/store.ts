@@ -1431,7 +1431,7 @@ export class Store {
             AND (v.run_id IS NULL OR EXISTS
               (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
           AND EXISTS (SELECT 1 FROM runs r
-            WHERE r.id = review_findings.author_run_id AND ${endedRun})`
+            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})`
         : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
             AND r.ended_at < ? AND ${endedRun}) ${extra}`;
       const select = this.db.prepare(
@@ -1441,8 +1441,11 @@ export class Store {
       let lastId = 0;
       while (batches < HISTORY_SWEEP_MAX_BATCHES) {
         let ids: { id: number }[] = [];
+        const cutoff = now - days * day;
+        // A finding ages from both its review's end and its author run's end.
+        const cutoffs = findings ? [cutoff, cutoff] : [cutoff];
         this.transaction(() => {
-          ids = select.all(lastId, now - days * day, HISTORY_BATCH_ROWS) as { id: number }[];
+          ids = select.all(lastId, ...cutoffs, HISTORY_BATCH_ROWS) as { id: number }[];
           if (ids.length === 0) return;
           this.db
             .prepare(`DELETE FROM ${table} WHERE rowid IN (${ids.map(() => "?").join(",")})`)
