@@ -45,6 +45,7 @@ export const RESOURCES = {
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
   attention: { path: "/api/attention", topic: "attention" },
+  notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
@@ -132,6 +133,8 @@ export const ACTIONS = {
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
+  /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */
+  handled: (key: string) => `/api/attention/${enc(key)}/handled`,
   /** Body: the whole AwaySettings. */
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */
