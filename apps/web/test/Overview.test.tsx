@@ -519,7 +519,12 @@ describe("Agents panel", () => {
   it("a run in line for the test lock says how long, in amber", async () => {
     stub({
       rows: [seatRow({ loop: { ...loopOf("working", "Working on the ticket"), wait: "lock" } })],
-      lock: { holder: null, waiting: [{ runId: "r-12", seatId: "guido-1", since: NOW - 65_000 }] },
+      lock: {
+        holder: null,
+        waiting: [
+          { runId: "r-12", seatId: "guido-1", command: "pnpm -s test", since: NOW - 65_000 },
+        ],
+      },
     });
     render(<Overview />);
     const el = await screen.findByText("in line for the test lock · 1:05");
@@ -572,8 +577,8 @@ describe("Agents panel", () => {
             since: NOW - 12 * MIN,
           },
           waiting: [
-            { runId: "r-2", seatId: "guido-2", since: NOW - MIN },
-            { runId: "r-3", seatId: "guido-3", since: NOW - MIN },
+            { runId: "r-2", seatId: "guido-2", command: "pnpm -s test", since: NOW - MIN },
+            { runId: "r-3", seatId: "guido-3", command: "pnpm -s test", since: NOW - MIN },
           ],
         },
         extra: interrupts(),
@@ -1286,7 +1291,7 @@ describe("Machine panel: the test lock box", () => {
 
   const HELD = {
     holder: { runId: "r-1", seatId: "guido-2", command: "pnpm -s test", since: NOW - 83_000 },
-    waiting: [{ runId: "r-2", seatId: "guido-3", since: NOW - 12_000 }],
+    waiting: [{ runId: "r-2", seatId: "guido-3", command: "pnpm -s test", since: NOW - 12_000 }],
   };
   const holder = (over: Partial<CrewRow> = {}) =>
     seatRow({ id: "guido-2", index: 1, ticket: "shop-app#3349", ...over });
