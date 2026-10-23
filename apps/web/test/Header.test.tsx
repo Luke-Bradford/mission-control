@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Header } from "../src/shell/Header.tsx";
+import { setFlightUnread } from "../src/shell/overlays.ts";
 import { useSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { THEME_KEY } from "../src/storage.ts";
@@ -44,6 +45,19 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   delete document.documentElement.dataset.theme;
+});
+
+describe("Header chat button", () => {
+  it("badges unread FLIGHT replies and names the count", () => {
+    routes();
+    render(<Header page="board" />);
+    act(() => setFlightUnread(2));
+    const btn = screen.getByRole("button", { name: "FLIGHT chat, 2 new" });
+    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
+    act(() => setFlightUnread(0));
+    const quiet = screen.getByRole("button", { name: "FLIGHT chat" });
+    expect(quiet.querySelector(".dock-unread")).toBeNull();
+  });
 });
 
 describe("Header", () => {
