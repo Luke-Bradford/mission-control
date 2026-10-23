@@ -259,22 +259,10 @@ function foldTasks(d: DigestState, ev: Json, content: unknown[]): void {
         continue;
       }
       if (b.name === "TaskUpdate") {
-        const taskId = str(input.taskId);
-        const task = taskId === null ? undefined : d.tasks.get(taskId);
-        if (taskId === null) continue;
-        if (!task) {
-          d.taskPatches.set(taskId, { ...d.taskPatches.get(taskId), ...input });
-          d.appliedTasks.add(id);
-          continue;
-        }
-        if (input.status === "deleted") d.tasks.delete(taskId);
-        else
-          d.tasks.set(taskId, {
-            ...task,
-            text: cleanStr(input.subject) ?? task.text,
-            status: status(input.status) ?? task.status,
-          });
-      } else if (b.name === "TodoWrite" && Array.isArray(input.todos)) {
+        d.taskCalls.set(id, { name: "TaskUpdate", input });
+        continue;
+      }
+      if (b.name === "TodoWrite" && Array.isArray(input.todos)) {
         if (
           input.todos.some(
             (todo) =>
@@ -299,6 +287,23 @@ function foldTasks(d: DigestState, ev: Json, content: unknown[]): void {
       const id = str(b.tool_use_id);
       const call = id === null ? undefined : d.taskCalls.get(id);
       if (!call || id === null || d.appliedTasks.has(id)) continue;
+      if (call.name === "TaskUpdate") {
+        const input = call.input;
+        const taskId = str(input.taskId);
+        if (taskId === null) continue;
+        const task = d.tasks.get(taskId);
+        if (!task) {
+          d.taskPatches.set(taskId, { ...d.taskPatches.get(taskId), ...input });
+        } else if (input.status === "deleted") d.tasks.delete(taskId);
+        else
+          d.tasks.set(taskId, {
+            ...task,
+            text: cleanStr(input.subject) ?? task.text,
+            status: status(input.status) ?? task.status,
+          });
+        d.appliedTasks.add(id);
+        continue;
+      }
       const raw =
         typeof b.content === "string"
           ? b.content

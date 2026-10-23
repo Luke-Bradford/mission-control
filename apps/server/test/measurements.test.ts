@@ -50,7 +50,12 @@ it("replays only the agent's task tools with stable identities", () => {
       input: { taskId: "7", status: "completed" },
     },
   ]);
-  const lines = [create, result, update];
+  const lines = [
+    create,
+    result,
+    update,
+    frame("user", 4, [{ type: "tool_result", tool_use_id: "update", content: "Updated" }]),
+  ];
   const whole = foldTranscript(null, lines, 0);
   expect(whole.digest.tasks).toEqual([{ id: "7", text: "Verify measurements", status: "done" }]);
   expect(foldTranscript(whole, lines, 0).digest.tasks).toEqual(whole.digest.tasks);
@@ -103,7 +108,13 @@ it("keeps an update arriving before the create result, ignores malformed replace
       input: { todos: [{ content: 4, status: "pending" }] },
     },
   ]);
-  const lines = [create, update, result, malformed];
+  const lines = [
+    create,
+    update,
+    frame("user", 2, [{ type: "tool_result", tool_use_id: "u", content: "Updated" }]),
+    result,
+    malformed,
+  ];
   const whole = foldTranscript(null, lines, 0);
   expect(whole.digest.tasks).toEqual([
     { id: "8", text: "Check boundaries", status: "in_progress" },
@@ -114,9 +125,10 @@ it("keeps an update arriving before the create result, ignores malformed replace
   const remove = frame("assistant", 5, [
     { type: "tool_use", id: "d", name: "TaskUpdate", input: { taskId: "8", status: "deleted" } },
   ]);
-  const deleted = foldTranscript(whole, [remove], 0);
+  const removed = frame("user", 6, [{ type: "tool_result", tool_use_id: "d", content: "Deleted" }]);
+  const deleted = foldTranscript(whole, [remove, removed], 0);
   expect(deleted.digest.tasks).toEqual([]);
-  expect(foldTranscript(deleted, [...lines, remove], 0).digest.tasks).toEqual([]);
+  expect(foldTranscript(deleted, [...lines, remove, removed], 0).digest.tasks).toEqual([]);
 });
 
 it("replaces TodoWrite lists and never interprets Markdown or background notifications as a plan", () => {
@@ -195,3 +207,50 @@ it("does not substitute a later timestamp for an untimed first content frame", (
     ).digest.speed?.firstTokenMs,
   ).toBeNull();
 });
+
+for (const status of ["completed", "deleted"]) {
+  it(`keeps a task unchanged when its ${status} update fails`, () => {
+    const initial = foldTranscript(
+      null,
+      [
+        frame("assistant", 1, [
+          { type: "tool_use", id: "c", name: "TaskCreate", input: { subject: "Keep task" } },
+        ]),
+        frame("user", 2, [
+          { type: "tool_result", tool_use_id: "c", content: "Task #1 created successfully" },
+        ]),
+      ],
+      0,
+    );
+    const update = frame("assistant", 3, [
+      {
+        type: "tool_use",
+        id: "u",
+        name: "TaskUpdate",
+        input: { taskId: "1", status, subject: "Changed" },
+      },
+    ]);
+    const failed = frame("user", 4, [
+      { type: "tool_result", tool_use_id: "u", is_error: true, content: "Update failed" },
+    ]);
+    const pending = foldTranscript(initial, [update], 0);
+    expect(foldTranscript(pending, [failed], 0).digest.tasks).toEqual(initial.digest.tasks);
+    expect(pending.digest.tasks).toEqual(initial.digest.tasks);
+    expect(
+      foldTranscript(
+        null,
+        [
+          update,
+          failed,
+          frame("assistant", 5, [
+            { type: "tool_use", id: "c2", name: "TaskCreate", input: { subject: "Keep task" } },
+          ]),
+          frame("user", 6, [
+            { type: "tool_result", tool_use_id: "c2", content: "Task #1 created successfully" },
+          ]),
+        ],
+        0,
+      ).digest.tasks,
+    ).toEqual(initial.digest.tasks);
+  });
+}

@@ -147,6 +147,32 @@ describe("changedFiles", () => {
     });
   });
 
+  it("reads several committed files with one bounded git log and keeps their newest commits", async () => {
+    const paths = ["a.ts", "b.ts", "c.ts"];
+    const { exec: baseExec, calls } = fakeGit({
+      committed: numstat(paths.map((path) => ["1", "0", path])),
+    });
+    const exec: GitExec = async (args) => {
+      if (args.includes("log")) {
+        calls.push(args);
+        return `\0${SHA}\0\na.ts\0b.ts\0\0${OTHER_SHA}\0\na.ts\0c.ts\0`;
+      }
+      return baseExec(args);
+    };
+    const result = await changedFiles(WT, exec);
+    const logs = calls.filter((args) => args.includes("log"));
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.slice(PREFIX)).toEqual([
+      "log",
+      "--no-show-signature",
+      "--format=%x00%H",
+      "--name-only",
+      "-z",
+      "origin/HEAD..HEAD",
+    ]);
+    expect(result.files.map((file) => file.commitSha)).toEqual([SHA, SHA, OTHER_SHA]);
+  });
+
   it("a binary file's `-` counts are null", async () => {
     const { exec } = fakeGit({ committed: numstat([["-", "-", "img/logo.png"]]) });
     expect((await changedFiles(WT, exec)).files).toEqual([
