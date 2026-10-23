@@ -1779,12 +1779,15 @@ describe("folding", () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(store.run(runId)?.tokens).not.toBeNull());
-    const run = store.run(runId);
-    expect(run?.model).toBe("claude-haiku-5-5");
-    expect(run?.costUsd).toBeGreaterThan(0);
-    expect(run?.summary).toMatch(/^echo: You are GUIDO-1, the backend developer/);
-    expect(store.digest(runId)).not.toBeNull();
+    // tokens can be stored before the result line brings the cost: wait for every field
+    await until(() => {
+      const run = store.run(runId);
+      expect(run?.tokens).not.toBeNull();
+      expect(run?.model).toBe("claude-haiku-5-5");
+      expect(run?.costUsd).toBeGreaterThan(0);
+      expect(run?.summary).toMatch(/^echo: You are GUIDO-1, the backend developer/);
+      expect(store.digest(runId)).not.toBeNull();
+    });
   });
 
   it("logs a fold that fails to write, and the seat carries on", async () => {
