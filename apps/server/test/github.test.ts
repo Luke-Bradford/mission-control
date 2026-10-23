@@ -1082,7 +1082,9 @@ describe("makeGql", () => {
       (async () => new Response("bad sekret", { status: 401 })) as unknown as typeof fetch,
     );
     await expect(http("q", {})).rejects.toThrow(/401/);
-    await http("q", {}).catch((e: Error) => expect(e.message).not.toContain("sekret"));
+    const httpErr = await http("q", {}).catch((e: unknown) => e);
+    expect(httpErr).toBeInstanceOf(Error);
+    expect((httpErr as Error).message).not.toContain("sekret");
     const gerr = makeGql(
       "sekret",
       (async () =>
@@ -1091,6 +1093,9 @@ describe("makeGql", () => {
         })) as unknown as typeof fetch,
     );
     await expect(gerr("q", {})).rejects.toThrow(/nope/);
+    const gerrErr = await gerr("q", {}).catch((e: unknown) => e);
+    expect(gerrErr).toBeInstanceOf(Error);
+    expect((gerrErr as Error).message).not.toContain("sekret");
     const partial = makeGql(
       "sekret",
       (async () =>
@@ -1105,6 +1110,7 @@ describe("makeGql", () => {
     const err = await partial("q", {}).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(GqlError);
     expect((err as GqlError).message).toBe("github: gone");
+    expect((err as Error).message).not.toContain("sekret");
     expect((err as GqlError).data).toEqual({ repository: { a0: null } });
     expect((err as GqlError).errors).toEqual([
       { type: "NOT_FOUND", path: ["repository", "a0"], message: "gone" },
@@ -1112,7 +1118,9 @@ describe("makeGql", () => {
     const boom = makeGql("sekret", (async () => {
       throw new Error("connect sekret");
     }) as unknown as typeof fetch);
-    await boom("q", {}).catch((e: Error) => expect(e.message).not.toContain("sekret"));
+    const boomErr = await boom("q", {}).catch((e: unknown) => e);
+    expect(boomErr).toBeInstanceOf(Error);
+    expect((boomErr as Error).message).not.toContain("sekret");
   });
 });
 
