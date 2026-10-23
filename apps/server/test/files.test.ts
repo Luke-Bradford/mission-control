@@ -138,9 +138,9 @@ describe("changedFiles", () => {
     });
     expect(await changedFiles(WT, exec)).toEqual({
       files: [
-        { path: "src/a.ts", add: 10, del: 2, state: "committed" },
-        { path: "src/b.ts", add: 1, del: 1, state: "uncommitted" },
-        { path: "notes/new.md", add: null, del: null, state: "untracked" },
+        { path: "src/a.ts", add: 10, del: 2, state: "committed", commitSha: null },
+        { path: "src/b.ts", add: 1, del: 1, state: "uncommitted", commitSha: null },
+        { path: "notes/new.md", add: null, del: null, state: "untracked", commitSha: null },
       ],
       note: null,
       sha: SHA,
@@ -150,7 +150,7 @@ describe("changedFiles", () => {
   it("a binary file's `-` counts are null", async () => {
     const { exec } = fakeGit({ committed: numstat([["-", "-", "img/logo.png"]]) });
     expect((await changedFiles(WT, exec)).files).toEqual([
-      { path: "img/logo.png", add: null, del: null, state: "committed" },
+      { path: "img/logo.png", add: null, del: null, state: "committed", commitSha: null },
     ]);
   });
 
@@ -162,8 +162,8 @@ describe("changedFiles", () => {
     });
     expect(await changedFiles(WT, exec)).toEqual({
       files: [
-        { path: "x.ts", add: 4, del: 1, state: "uncommitted" },
-        { path: "y.ts", add: null, del: null, state: "untracked" },
+        { path: "x.ts", add: 4, del: 1, state: "uncommitted", commitSha: null },
+        { path: "y.ts", add: null, del: null, state: "untracked", commitSha: null },
       ],
       note: NO_ORIGIN_HEAD_NOTE,
       sha: SHA,
@@ -539,8 +539,8 @@ describe("realGitExec on a scratch repo", () => {
     writeFileSync(join(dir, "ignored.txt"), "x\n");
     expect(await changedFiles(dir, realGitExec)).toEqual({
       files: [
-        { path: "a.txt", add: 1, del: 0, state: "uncommitted" },
-        { path: "new file.txt", add: null, del: null, state: "untracked" },
+        { path: "a.txt", add: 1, del: 0, state: "uncommitted", commitSha: null },
+        { path: "new file.txt", add: null, del: null, state: "untracked", commitSha: null },
       ],
       note: NO_ORIGIN_HEAD_NOTE,
       sha: git("rev-parse", "HEAD").trim(),
@@ -676,6 +676,28 @@ describe("realGitExec on a scratch repo", () => {
     }
   });
 
+  it("keeps file commits distinct from the snapshot and clears dirty provenance", async () => {
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    writeFileSync(join(dir, "first.txt"), "first\n");
+    git("add", "first.txt");
+    git("commit", "-q", "-m", "first");
+    const first = git("rev-parse", "HEAD").trim();
+    writeFileSync(join(dir, "second.txt"), "second\n");
+    git("add", "second.txt");
+    git("commit", "-q", "-m", "second");
+    const second = git("rev-parse", "HEAD").trim();
+    const list = await changedFiles(dir);
+    expect(list.sha).toBe(second);
+    expect(list.files.find((f) => f.path === "first.txt")?.commitSha).toBe(first);
+    expect(list.files.find((f) => f.path === "second.txt")?.commitSha).toBe(second);
+    writeFileSync(join(dir, "first.txt"), "dirty\n");
+    writeFileSync(join(dir, "third.txt"), "new\n");
+    const dirty = await changedFiles(dir);
+    expect(dirty.files.find((f) => f.path === "first.txt")?.commitSha).toBeNull();
+    expect(dirty.files.find((f) => f.path === "third.txt")?.commitSha).toBeNull();
+  });
+
   it("GIT_ATTR_SOURCE in the server's environment is not passed to git", async () => {
     const marker = markFilter(dir);
     writeFileSync(join(dir, ".gitattributes"), "*.txt filter=mark\n");
@@ -691,7 +713,13 @@ describe("realGitExec on a scratch repo", () => {
     try {
       const { r, ranWorktreeDiff } = await changedVia(dir);
       expect(ranWorktreeDiff).toBe(true);
-      expect(r.files).toContainEqual({ path: "a.txt", add: 1, del: 0, state: "uncommitted" });
+      expect(r.files).toContainEqual({
+        path: "a.txt",
+        add: 1,
+        del: 0,
+        state: "uncommitted",
+        commitSha: null,
+      });
       expect(existsSync(marker)).toBe(false);
       // the probe: with the variable, git applies that tree's filter
       execFileSync("git", ["-C", dir, "diff", "--numstat", "HEAD"]);
@@ -711,7 +739,15 @@ describe("realGitExec on a scratch repo", () => {
     git("add", "b.txt");
     git("commit", "-q", "-m", "b");
     expect(await changedFiles(dir, realGitExec)).toEqual({
-      files: [{ path: "b.txt", add: 2, del: 0, state: "committed" }],
+      files: [
+        {
+          path: "b.txt",
+          add: 2,
+          del: 0,
+          state: "committed",
+          commitSha: git("rev-parse", "HEAD").trim(),
+        },
+      ],
       note: null,
       sha: git("rev-parse", "HEAD").trim(),
     });
@@ -766,7 +802,13 @@ describe("realGitExec on a scratch repo", () => {
     writeFileSync(join(dir, "x.env"), "TOKEN=hunter2\n");
     writeFileSync(join(dir, "x\x07.env"), "harmless\n");
     const listed = (await changedFiles(dir, realGitExec)).files;
-    expect(listed).toContainEqual({ path: "x.env", add: null, del: null, state: "untracked" });
+    expect(listed).toContainEqual({
+      path: "x.env",
+      add: null,
+      del: null,
+      state: "untracked",
+      commitSha: null,
+    });
     expect(await fileDiff(dir, "x.env", realGitExec)).toBeNull();
   });
 

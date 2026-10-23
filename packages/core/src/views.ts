@@ -158,6 +158,8 @@ export interface ConfigView {
       checkout: string;
       seats: {
         id: AgentId;
+        focus?: string | null;
+        displayCallSign?: string | null;
         role: CrewRole;
         mode: CrewMode;
         loop?: LoopKind;

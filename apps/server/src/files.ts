@@ -345,6 +345,28 @@ async function readChanged(
     raw.set(path, r.path);
   }
   const all = [...byPath.values()];
+  for (const row of all.slice(0, FILES_MAX)) {
+    row.commitSha = null;
+    if (row.state !== "committed") continue;
+    try {
+      const sha = (
+        await exec([
+          ...base,
+          "log",
+          "--no-show-signature",
+          "--no-patch",
+          "-1",
+          "--format=%H",
+          "origin/HEAD..HEAD",
+          "--",
+          `:(literal)${raw.get(row.path)}`,
+        ])
+      ).trim();
+      if (/^[a-f0-9]{40,64}$/.test(sha)) row.commitSha = sha;
+    } catch {
+      notes.push("git could not read a file commit");
+    }
+  }
   if (all.length > FILES_MAX) notes.push(`showing the first ${FILES_MAX} of ${all.length} files`);
   const note = notes.length > 0 ? notes.join(" · ") : null;
   return { list: { files: all.slice(0, FILES_MAX), note }, raw };

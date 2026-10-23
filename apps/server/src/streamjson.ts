@@ -1,6 +1,7 @@
 import {
   cutAtWord,
   LIVE_DETAIL_MAX,
+  type LiveTask,
   leadSentence,
   MC_MCP_SERVER,
   type Run,
@@ -69,6 +70,10 @@ const TASK_STATUS: Record<string, SubagentInfo["status"]> = {
  * fold (never mutated in place), so folding on from an earlier facts object stays correct.
  */
 interface DigestState {
+  tasks: Map<string, LiveTask>;
+  taskPatches: Map<string, Json>;
+  taskCalls: Map<string, { name: string; input: Json }>;
+  appliedTasks: Set<string>;
   lastEventAt: number | null;
   contextTokens: number | null;
   /** contextWindow per model from the latest `result` line. */
@@ -83,7 +88,7 @@ interface DigestState {
   /** Top-level message id → usage, in first-seen order. */
   turns: Map<string, { input: number; output: number; cacheRead: number }>;
   /** Every frame's message id → its minute bucket and tokens (input + output). */
-  usage: Map<string, { minute: number | null; tokens: number }>;
+  usage: Map<string, { minute: number | null; at: number | null; tokens: number }>;
   minutes: Map<number, number>;
   subagents: Map<string, SubagentInfo>;
   /** Subagents whose task_notification (final numbers) has arrived. */
@@ -101,12 +106,19 @@ interface DigestState {
   /** The newest top-level `user` frame's time since the last top-level assistant message. */
   asked: number | null;
   /** Top-level message id → when it was asked, when its last frame came, its output tokens. */
-  replies: Map<string, { asked: number; last: number | null; output: number }>;
+  replies: Map<
+    string,
+    { asked: number; firstSeen: boolean; first: number | null; last: number | null; output: number }
+  >;
 }
 
 const digestStates = new WeakMap<TranscriptFacts, DigestState>();
 
 const emptyDigestState = (): DigestState => ({
+  tasks: new Map(),
+  taskPatches: new Map(),
+  taskCalls: new Map(),
+  appliedTasks: new Set(),
   lastEventAt: null,
   contextTokens: null,
   windows: null,
@@ -134,6 +146,10 @@ function copyDigestState(d: DigestState): DigestState {
   }
   return {
     ...d,
+    tasks: new Map([...d.tasks].map(([id, task]) => [id, { ...task }])),
+    taskPatches: new Map(d.taskPatches),
+    taskCalls: new Map(d.taskCalls),
+    appliedTasks: new Set(d.appliedTasks),
     pending: new Map(d.pending),
     tools,
     turns: new Map(d.turns),
@@ -228,6 +244,87 @@ function toolStats(d: DigestState, name: string) {
   return t;
 }
 
+/** Task tools belong to the top-level plan, independently of background task notifications. */
+function foldTasks(d: DigestState, ev: Json, content: unknown[]): void {
+  const status = (v: unknown): LiveTask["status"] | null =>
+    v === "completed" || v === "done" ? "done" : v === "in_progress" || v === "pending" ? v : null;
+  for (const b of content) {
+    if (!isObj(b)) continue;
+    if (ev.type === "assistant" && b.type === "tool_use") {
+      const id = str(b.id);
+      if (id === null || d.appliedTasks.has(id) || !isObj(b.input)) continue;
+      const input = b.input;
+      if (b.name === "TaskCreate") {
+        d.taskCalls.set(id, { name: "TaskCreate", input });
+        continue;
+      }
+      if (b.name === "TaskUpdate") {
+        const taskId = str(input.taskId);
+        const task = taskId === null ? undefined : d.tasks.get(taskId);
+        if (taskId === null) continue;
+        if (!task) {
+          d.taskPatches.set(taskId, { ...d.taskPatches.get(taskId), ...input });
+          d.appliedTasks.add(id);
+          continue;
+        }
+        if (input.status === "deleted") d.tasks.delete(taskId);
+        else
+          d.tasks.set(taskId, {
+            ...task,
+            text: cleanStr(input.subject) ?? task.text,
+            status: status(input.status) ?? task.status,
+          });
+      } else if (b.name === "TodoWrite" && Array.isArray(input.todos)) {
+        if (
+          input.todos.some(
+            (todo) =>
+              !isObj(todo) || cleanStr(todo.content) === null || status(todo.status) === null,
+          )
+        )
+          continue;
+        const tasks = new Map<string, LiveTask>();
+        for (const [i, todo] of input.todos.entries()) {
+          if (!isObj(todo)) continue;
+          const text = cleanStr(todo.content);
+          const st = status(todo.status);
+          if (text !== null && st !== null) {
+            const taskId = str(todo.id) ?? `todo-${i + 1}`;
+            tasks.set(taskId, { id: taskId, text, status: st });
+          }
+        }
+        d.tasks = tasks;
+      } else continue;
+      d.appliedTasks.add(id);
+    } else if (ev.type === "user" && b.type === "tool_result" && b.is_error !== true) {
+      const id = str(b.tool_use_id);
+      const call = id === null ? undefined : d.taskCalls.get(id);
+      if (!call || id === null || d.appliedTasks.has(id)) continue;
+      const raw =
+        typeof b.content === "string"
+          ? b.content
+          : Array.isArray(b.content)
+            ? b.content
+                .filter(isObj)
+                .map((x) => str(x.text) ?? "")
+                .join("\n")
+            : "";
+      const taskId = /Task #(\d+) created/.exec(raw)?.[1];
+      const text = cleanStr(call.input.subject);
+      if (taskId && text !== null) {
+        const patch = d.taskPatches.get(taskId);
+        if (patch?.status !== "deleted")
+          d.tasks.set(taskId, {
+            id: taskId,
+            text: cleanStr(patch?.subject) ?? text,
+            status: status(patch?.status) ?? "pending",
+          });
+        d.taskPatches.delete(taskId);
+        d.appliedTasks.add(id);
+      }
+    }
+  }
+}
+
 /** An assistant or user frame's content blocks: tool calls, tool results, usage, timestamps. */
 function digestFrame(d: DigestState, ev: Json): void {
   const at = timeOf(ev.timestamp);
@@ -237,24 +334,39 @@ function digestFrame(d: DigestState, ev: Json): void {
   const content = msg && Array.isArray(msg.content) ? msg.content : [];
 
   if (ev.type === "user" && top && at !== null) d.asked = at;
-  if (ev.type === "assistant" && top && msg && isObj(msg.usage)) {
+  if (ev.type === "assistant" && top && msg) {
     const id = str(msg.id);
     if (id !== null) {
       let reply = d.replies.get(id);
       // The first frame of a message takes the ask; a message with none is left out.
       if (!reply && !d.turns.has(id) && d.asked !== null) {
-        reply = { asked: d.asked, last: null, output: 0 };
+        reply = { asked: d.asked, firstSeen: false, first: null, last: null, output: 0 };
         d.replies.set(id, reply);
       }
       if (!d.turns.has(id)) d.asked = null;
       if (reply) {
-        reply.output = num(msg.usage.output_tokens);
+        if (isObj(msg.usage)) reply.output = num(msg.usage.output_tokens);
+        if (
+          !reply.firstSeen &&
+          content.some(
+            (b) =>
+              isObj(b) && ((b.type === "text" && str(b.text) !== null) || b.type === "tool_use"),
+          )
+        ) {
+          reply.firstSeen = true;
+          if (at !== null && at >= reply.asked) reply.first = at;
+        }
         if (at !== null && (reply.last === null || at > reply.last)) reply.last = at;
       }
     }
   }
 
-  if (ev.type === "assistant" && msg && isObj(msg.usage)) {
+  if (
+    ev.type === "assistant" &&
+    msg &&
+    isObj(msg.usage) &&
+    (numOrNull(msg.usage.input_tokens) !== null || numOrNull(msg.usage.output_tokens) !== null)
+  ) {
     const u = msg.usage;
     const input = num(u.input_tokens);
     const output = num(u.output_tokens);
@@ -267,11 +379,13 @@ function digestFrame(d: DigestState, ev: Json): void {
       if (minute !== null) {
         d.minutes.set(minute, (d.minutes.get(minute) ?? 0) - (prev?.tokens ?? 0) + tokens);
       }
-      d.usage.set(id, { minute, tokens });
+      d.usage.set(id, { minute, at: prev?.at ?? at, tokens });
       if (top) d.turns.set(id, { input, output, cacheRead });
     }
     if (top) d.contextTokens = input + cacheRead + num(u.cache_creation_input_tokens);
   }
+
+  if (top) foldTasks(d, ev, content);
 
   for (const block of content) {
     if (!isObj(block)) continue;
@@ -375,6 +489,8 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
     .sort((a, b) => a[0] - b[0]);
   const window = model !== null && d.windows ? d.windows[model] : undefined;
   return {
+    tasks: [...d.tasks.values()].map((task) => ({ ...task })),
+    attemptUsage: [...d.usage].map(([id, u]) => ({ id, at: u.at, tokens: u.tokens })),
     toolCalls: d.toolCalls,
     turns: d.turns.size,
     lastEventAt: d.lastEventAt,
@@ -396,16 +512,23 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
 
 /** Output tokens per second and the mean turn time over the replies with an ask and a last frame. */
 function replySpeed(d: DigestState): NonNullable<RunDigest["speed"]> {
+  let firstMs = 0;
+  let firstN = 0;
   let output = 0;
   let ms = 0;
   let n = 0;
   for (const r of d.replies.values()) {
+    if (r.first !== null) {
+      firstMs += r.first - r.asked;
+      firstN += 1;
+    }
     if (r.last === null) continue;
     output += r.output;
     ms += Math.max(0, r.last - r.asked);
     n += 1;
   }
   return {
+    firstTokenMs: firstN > 0 ? firstMs / firstN : null,
     tokensPerSec: n > 0 && ms > 0 ? output / (ms / 1000) : null,
     turnMs: n > 0 ? ms / n : null,
   };
