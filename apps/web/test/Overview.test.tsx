@@ -1507,8 +1507,9 @@ describe("Activity panel", () => {
     expect(act_.querySelectorAll(".arow")).toHaveLength(4);
   });
 
-  it("Steps keeps parked, error and queued-start state rows", async () => {
-    const texts = ["Running → Parked", "Running → Error: exit 1", "Idle → Running (from queue)"];
+  // A regression guard: these pass without the turn-line filter too, and fail only if it widens.
+  it("Steps keeps parked, error and woken state rows", async () => {
+    const texts = ["Running → Parked", "Running → Error: exit 1", "Error → Idle (run #3 woken)"];
     const activity: ActivityEvent[] = texts.map((text, i) => ({
       ...(events[0] as ActivityEvent),
       at: NOW - i * MIN,
