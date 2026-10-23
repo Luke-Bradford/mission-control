@@ -787,6 +787,20 @@ describe("attentionItems: PRs waiting on you", () => {
     expect(prItems()).toEqual([]);
   });
 
+  it("not while the ticket's run is still open, even set aside off its seat", () => {
+    seed([pr({ updatedAt: NOW - 2 * HOUR })]);
+    // an open run that no seat is running: status is not "running", ended_at is null
+    store.upsertRun(run({ ticket: "shop-app#42", status: "ok", endedAt: null }));
+    expect(prItems()).toEqual([]);
+    store.upsertRun(run({ ticket: "shop-app#42", status: "ok", endedAt: NOW - MIN }));
+    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: decide on the draft"]);
+  });
+
+  it("a PR on a ticket with no run is the operator's as before", () => {
+    seed([pr({ updatedAt: NOW - 2 * HOUR })]);
+    expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: decide on the draft"]);
+  });
+
   it("a changed PR is a new key, and an ack of the old one does not carry", () => {
     seed([pr()]);
     const old = prItems()[0]?.key as string;
