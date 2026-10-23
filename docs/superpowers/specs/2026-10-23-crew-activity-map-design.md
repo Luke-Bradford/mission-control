@@ -191,7 +191,7 @@ A docked seat's card shrinks to one line.
 | Refused calls (hub guard) | `guard_hits` | exists |
 | Edit churn `+n −m` | Edit/Write/MultiEdit inputs: `old_string`/`new_string`, `content` | **new count** (slice 1a); `streamjson.ts` reads these only for a one-line detail |
 | The branch's real diff | `git diff --numstat` against the base, per worktree | builds on `apps/server/src/files.ts`, which #343 (PR #350) extends for crew seats (slice 3) |
-| Merge conflicts between branches | `git merge-tree` on branch-tip SHAs | **new** (slice 6) |
+| Merge conflicts between branches | `git merge-tree` on open PRs' head commits (`pull_requests.head_sha`) | **new** (slice 6) |
 | Review findings | `review_findings` and the latest `reviews` row for the ticket | exists |
 | CI | `pull_requests.checks` at the head SHA | exists |
 | Test lock queue | `/api/test-lock` | exists |
@@ -269,7 +269,7 @@ Each slice is a crew ticket with `size` and `## Done when`.
 | # | Slice | Labels | Size | Depends on | Done when |
 |---|---|---|---|---|---|
 | 0 | Core: `MapSnapshot` and `MapDelta` types, and a sample fixture | area:core, type:feature | S | — | The types and fixture are exported from `@mc/core`; a test parses the fixture against them. |
-| 1a | Server: per-seat ring of calls in `apps/server/src/map/ring.ts`, tailing each crew run's transcript every 1 s: files per tool, result size, failure reason, CLI refusals, edit churn, Vitest summary | area:server, type:feature | M | 0 | a call appears in the ring within 2 s of its transcript line and closes at its result; each field is tested against a recorded transcript fixture, including an Edit and a result longer than `STREAM_TEXT_MAX`, whose churn and size must be exact. |
+| 1a | Server: per-seat ring of calls in `apps/server/src/map/ring.ts`, tailing each crew run's transcript every 1 s: files per tool, result size, failure reason, CLI refusals, edit churn, Vitest summary | area:server, type:feature | M | 0 | A call appears in the ring within 2 s of its transcript line and closes at its result; each field is tested against a recorded transcript fixture, including an Edit and a result longer than `STREAM_TEXT_MAX`, whose churn and size must be exact. |
 | 1b | Server: `map` deltas on `/api/stream?map=<repo>` with sequence numbers | area:server, type:feature | M | 1a | A test client receives ordered `call.start`/`call.end` frames for one repo only; a gap triggers the documented refetch. |
 | 2 | Server: `GET /api/repos/:repoId/map` snapshot (tree, imports, scope, badge data, findings, context, last `seq`) | area:server, type:feature | M | 1a | The snapshot for this repo validates against `MapSnapshot` and is under 300 KB. |
 | 3 | Server: real `+n −m` per seat, from `files.ts` | area:server, type:feature | M | #343 | Numstat for a fixture worktree matches `git diff --numstat` against its base; a new edit is reflected within 5 s of the ring recording it. |
