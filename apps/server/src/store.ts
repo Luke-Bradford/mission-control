@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS commit_lines (
 );
 CREATE INDEX IF NOT EXISTS run_commits_first ON run_commits(repo_id, sha, at, id);
 CREATE INDEX IF NOT EXISTS run_commits_branch ON run_commits(repo_id, branch);
+CREATE INDEX IF NOT EXISTS run_commits_at ON run_commits(at);
 -- The sha a run last pushed to its branch, or found origin already at (phase 2b): draft_pr needs
 -- it to be the branch's tip.
 CREATE TABLE IF NOT EXISTS run_pushes (run_id TEXT PRIMARY KEY, sha TEXT NOT NULL, at INTEGER NOT NULL);

@@ -35,8 +35,9 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** The real dependencies: no shell, 2 s timeout on each command. */
 export function realMachineDeps(): Omit<MachineDeps, "prevCpus" | "prev" | "now" | "testCommand"> {
-  const run = async (cmd: string, args: string[]) =>
-    (await execFileP(cmd, args, { timeout: COMMAND_TIMEOUT_MS, encoding: "utf8" })).stdout;
+  const run = async (cmd: string, args: string[], maxBuffer?: number) =>
+    (await execFileP(cmd, args, { timeout: COMMAND_TIMEOUT_MS, encoding: "utf8", maxBuffer }))
+      .stdout;
   return {
     cpus,
     totalmem,
@@ -47,7 +48,8 @@ export function realMachineDeps(): Omit<MachineDeps, "prevCpus" | "prev" | "now"
       return { bavail: Number(s.bavail), blocks: Number(s.blocks), bsize: Number(s.bsize) };
     },
     ps: () => run("ps", ["-axo", "pid=,rss=,%cpu=,comm="]),
-    psTree: () => run("ps", ["-axww", "-o", "pid=,ppid=,rss=,%cpu=,args="]),
+    // full command lines can pass the default 1 MB buffer on a busy machine
+    psTree: () => run("ps", ["-axww", "-o", "pid=,ppid=,rss=,%cpu=,args="], 8 * 1024 * 1024),
   };
 }
 
@@ -146,7 +148,7 @@ export function testRunUse(
     const args = squash(p.args);
     const first = args.split(" ")[0] as string;
     return (
-      `${args} `.includes(`${wanted} `) &&
+      ` ${args} `.replace(/["'/]/g, " ").includes(` ${wanted} `) &&
       !AGENT_COMMANDS.has(first.slice(first.lastIndexOf("/") + 1))
     );
   });
@@ -217,6 +219,7 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
       testRun = testRunUse(parsePsTree(await deps.psTree()), deps.testCommand);
     } catch (e) {
       errors.push(`ps tree: ${msg(e)}`);
+      testRun = deps.prev?.testRun ?? null;
     }
   }
 

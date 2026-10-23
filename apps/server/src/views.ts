@@ -281,6 +281,11 @@ export function activity(config: CcConfig, store: Store, now: number): ActivityR
       events.push({ ...row, at: l.endedAt, text: `${text}: ${label}` });
     }
   }
+  const ticketOf = new Map<string, string | null>();
+  const hitTicket = (runId: string): string | null => {
+    if (!ticketOf.has(runId)) ticketOf.set(runId, store.run(runId)?.ticket ?? null);
+    return ticketOf.get(runId) ?? null;
+  };
   for (const h of store.guardHits(since, ACTIVITY_LIMIT)) {
     if (!known.has(h.agentId)) continue;
     events.push({
@@ -289,7 +294,7 @@ export function activity(config: CcConfig, store: Store, now: number): ActivityR
       who: h.agentId,
       kind: "guard",
       text: `Denied: ${h.text}`,
-      ref: h.runId === null ? null : (store.run(h.runId)?.ticket ?? null),
+      ref: h.runId === null ? null : hitTicket(h.runId),
     });
   }
   for (const e of store.hubEvents(since)) {
