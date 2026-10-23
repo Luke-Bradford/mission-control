@@ -1,6 +1,7 @@
 import { ATTENTION_LABEL, type AttentionItem } from "@mc/core";
 import { isOperatorItem } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
+import { MentionText } from "../comms/messages.tsx";
 import { NEED_TEXT_MAX, needText, sortNeeds } from "../comms/NeedsList.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -73,7 +74,11 @@ export function AskedOfYou() {
                   {t.reasonText}: {t.title}
                 </span>
               </div>
-              {t.snippet !== null && <blockquote className="s qtext">{t.snippet}</blockquote>}
+              {t.snippet !== null && (
+                <blockquote className="s qtext">
+                  <MentionText text={t.snippet} />
+                </blockquote>
+              )}
               {take && (
                 <div className="s">
                   <span className="bsec">FLIGHT'S TAKE</span>{" "}

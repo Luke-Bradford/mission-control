@@ -235,7 +235,8 @@ export function itemWithoutOwner(over: Partial<AttentionItem> = {}): AttentionIt
   return rest as AttentionItem;
 }
 
-export const CONFIG: ConfigView = {
+export const CONFIG: ConfigView & { githubLogin?: string | null } = {
+  githubLogin: "octocat",
   operator: { id: "operator", timezone: "Europe/London" },
   accounts: [
     { id: "claude-main", vendor: "claude", alertAt: 85, stopAt: 95 },
