@@ -419,7 +419,8 @@ it("caps a long snapshot at the read route's accepted bound", async () => {
     f.store.close();
     rmSync(f.dir, { recursive: true, force: true });
   }
-});
+  // 10,201 inserts take several seconds on a loaded CI runner
+}, 30_000);
 
 it("accepts a displayed snapshot after tools evict every message from its source", async () => {
   const f = regressionFixture();
