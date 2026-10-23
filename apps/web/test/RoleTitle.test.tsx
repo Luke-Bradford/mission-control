@@ -63,6 +63,18 @@ describe("AgentTag role title", () => {
     expect(tag.getAttribute("title")).toBeNull();
   });
 
+  it("keeps a labelled control named by the call sign alone", async () => {
+    stubWidth(false);
+    stub();
+    render(
+      <button type="button" aria-labelledby="x">
+        <AgentTag domId="x" id="guido-1" index={0} />
+      </button>,
+    );
+    await screen.findByText(/Backend developer/);
+    expect(screen.getByRole("button", { name: "guido-1" })).toBeTruthy();
+  });
+
   it("moves the title into a tooltip on a narrow screen", async () => {
     stubWidth(true);
     stub();
