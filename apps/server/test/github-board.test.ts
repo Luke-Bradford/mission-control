@@ -381,6 +381,7 @@ describe("followPrs", () => {
     url: "u",
     branch: "work/7-x",
     ticket: "mc#7",
+    closingIssues: [7],
     state: "open",
     isDraft: false,
     review: null,
@@ -466,6 +467,37 @@ describe("followPrs", () => {
     store.upsertRun(run());
     const b = await follow("", "O_todo", [pr()]);
     expect(b.mutations()).toHaveLength(0);
+  });
+
+  it.each([
+    ["open", "", "O_todo", "O_review"],
+    ["merged", "In Review", "O_review", "O_done"],
+    ["closed", "In Review", "O_review", "O_todo"],
+  ] as const)(
+    "follows closing references for a %s PR, independent of its branch",
+    async (state, status, from, to) => {
+      const b = await follow(status, from, [pr({ state, ticket: "mc#99", closingIssues: [6, 7] })]);
+      expect(b.state.card).toBe(to);
+      expect(store.boardMoves(0)).toMatchObject([{ issue: 7, state: "done" }]);
+    },
+  );
+
+  it.each(["open", "merged", "closed"] as const)(
+    "does not move a branch-only ticket for a %s PR",
+    async (state) => {
+      const b = await follow(
+        state === "open" ? "" : "In Review",
+        state === "open" ? "O_todo" : "O_review",
+        [pr({ state, closingIssues: [] })],
+      );
+      expect(b.mutations()).toHaveLength(0);
+    },
+  );
+
+  it("moves a Blocked card after its run was parked", async () => {
+    store.upsertRun(run({ status: "blocked", endedAt: NOW }));
+    const b = await follow("Blocked", "O_blocked", [pr()]);
+    expect(b.state.card).toBe("O_review");
   });
 
   it("moves nothing in a draft repo", async () => {

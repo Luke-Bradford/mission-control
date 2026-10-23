@@ -163,7 +163,7 @@ const PR_FIELDS = `
         number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable
         author { login }
         assignees(first: 10) { nodes { login } }
-        closingIssuesReferences(first: 3) { nodes { number } }
+        closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
         commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
       `;
 
@@ -913,6 +913,15 @@ function mapPr(
     // The loops name the ticket in the branch and almost never write "Closes #n".
     ticket:
       inferTicket(branch, repo.id) ?? (typeof first === "number" ? `${repo.id}#${first}` : null),
+    closingIssues: Array.isArray(closing)
+      ? closing.flatMap((issue) =>
+          isObj(issue) &&
+          typeof issue.number === "number" &&
+          path(issue, "repository", "nameWithOwner") === repo.github
+            ? [issue.number]
+            : [],
+        )
+      : [],
     state: lookup(PR_STATES, n.state) ?? "closed",
     isDraft: n.isDraft === true,
     review: lookup(REVIEWS, n.reviewDecision),

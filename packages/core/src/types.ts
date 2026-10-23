@@ -287,6 +287,8 @@ export interface PullRequestView {
   /** `repo#number`, from the branch first, else the first closing reference; null when neither names one. */
   ticket: string | null;
   state: "open" | "closed" | "merged";
+  /** Issues in this repo the PR closes; absent on rows stored before closing references. */
+  closingIssues?: number[];
   isDraft: boolean;
   review: "approved" | "changes" | "requested" | null;
   ci: "passing" | "failing" | "pending" | null;

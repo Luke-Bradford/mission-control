@@ -596,6 +596,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           await guarded(githubCollector(repo.id), async () => {
             const r = await c.githubPrs(repo, store, client, numbers, now);
             changed.boards ||= r.boards;
+            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+              changed.boards = true;
           });
         }
       }
@@ -608,7 +610,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
             // Whoever opened a ticket's PR, its card follows (the engine moves only its runs').
-            changed.boards ||= await c.followPrs({ gql: client, store, config, now }, repo.id);
+            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+              changed.boards = true;
           });
           const error = store.status().find((s) => s.collector === collector)?.error;
           if (error?.includes(MISSING_SCOPE_PREFIX)) {
@@ -744,6 +747,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         else {
           await guarded(collector, async () => {
             if ((await c.prSweep(repo, store, client, now())).boards) boards = true;
+            if (await c.followPrs({ gql: client, store, config, now }, repo.id)) boards = true;
           });
         }
       }

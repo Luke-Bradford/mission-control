@@ -913,6 +913,7 @@ export class Store {
     this.addColumn("pull_requests", "author", "TEXT");
     this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
     this.transaction(() => {
@@ -1672,15 +1673,16 @@ export class Store {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
-         assignees, checks)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         assignees, checks, closing_issues)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
          created_at = excluded.created_at, updated_at = excluded.updated_at,
          merged_at = excluded.merged_at, read_at = excluded.read_at,
          head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
-         assignees = excluded.assignees, checks = excluded.checks, stale = 0`,
+         assignees = excluded.assignees, checks = excluded.checks,
+         closing_issues = excluded.closing_issues, stale = 0`,
     );
     for (const p of prs) {
       ins.run(
@@ -1703,6 +1705,7 @@ export class Store {
         p.author ?? null,
         JSON.stringify(p.assignees ?? []),
         JSON.stringify(p.checks ?? []),
+        JSON.stringify(p.closingIssues ?? []),
       );
     }
   }
@@ -1730,6 +1733,7 @@ export class Store {
       author: (r.author as string | null) ?? null,
       assignees: JSON.parse(r.assignees as string) as string[],
       checks: JSON.parse(r.checks as string) as PrCheck[],
+      closingIssues: JSON.parse(r.closing_issues as string) as number[],
     }));
   }
 

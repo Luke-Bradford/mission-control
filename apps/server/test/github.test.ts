@@ -1213,6 +1213,33 @@ describe("collectGithub size", () => {
 describe("collectGithub pull requests", () => {
   const prs = () => store.pullRequests("shop-app");
 
+  it("stores all closing issues in this repo separately from the branch ticket", async () => {
+    const { gql, calls } = stub({
+      prPages: [
+        prPage([
+          pull(1, {
+            headRefName: "fix/5-plan",
+            closingIssuesReferences: {
+              nodes: [
+                { number: 77, repository: { nameWithOwner: "octo-org/shop-app" } },
+                { number: 78, repository: { nameWithOwner: "octo-org/shop-app" } },
+                { number: 79, repository: { nameWithOwner: "other/shop-app" } },
+              ],
+            },
+          }),
+          pull(2),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(prs().find((p) => p.number === 1)).toMatchObject({
+      ticket: "shop-app#5",
+      closingIssues: [77, 78],
+    });
+    expect(prs().find((p) => p.number === 2)?.closingIssues).toEqual([]);
+    expect(calls.find((c) => c.q.includes("query PullRequests"))?.q).toContain("nameWithOwner");
+  });
+
   it("stores each PR's author and assignees", async () => {
     const { gql } = stub({
       prPages: [

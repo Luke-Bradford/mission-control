@@ -663,6 +663,7 @@ describe("Store", () => {
       author: "octo",
       assignees: ["a", "b"],
       checks: [],
+      closingIssues: [1, 3],
       ...over,
     });
     store.upsertPullRequests(
