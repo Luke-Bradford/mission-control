@@ -92,6 +92,28 @@ const priorityRank = (p: string | null): number => {
   return i === -1 ? PRIORITIES.length : i;
 };
 
+/** Per store, the PRs already listed as merged or closed (`repo#number:state`): each is listed once. */
+const shownByStore = new WeakMap<Store, Set<string>>();
+const shownPrs = (store: Store): Set<string> => {
+  const set = shownByStore.get(store) ?? new Set<string>();
+  shownByStore.set(store, set);
+  return set;
+};
+const shownKey = (p: { repoId: string; number: number; state: string }): string =>
+  `${p.repoId}#${p.number}:${p.state}`;
+
+/** FLIGHT has received `s`: each merged or closed PR in it is not listed again. */
+export function markPrsShown(store: Store, s: FlightState): void {
+  const shown = shownPrs(store);
+  for (const p of s.prs) {
+    if (p.state !== "open") shown.add(shownKey({ repoId: s.repo, number: p.pr, state: p.state }));
+  }
+}
+
+/** The facts a delivered state leaves behind: the PRs that will leave the list are not counted. */
+export const deliveredFacts = (s: FlightState): string =>
+  wakeFacts({ ...s, prs: s.prs.filter((p) => p.state === "open") });
+
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
 export function flightState(i: {
   config: CcConfig;
@@ -225,21 +247,38 @@ export function flightState(i: {
     });
 
   const ready = new Set(store.notes().flatMap((n) => (n.kind === "ready" ? [n.runId] : [])));
-  const prs = store
+  // The list is the stored read of the repo's PRs, not any run's phase or park: an open PR is
+  // listed at every wake until it merges or closes. A PR that left the open state is listed once.
+  const holders = store
     .loopRuns(now)
     .filter(
       (r) =>
         r.endedAt === null &&
-        r.loop?.phase === "review" &&
-        r.loop.prNumber !== null &&
+        r.repoId === session.repoId &&
+        r.loop?.prNumber != null &&
         mine.some((s) => s.id === r.agentId),
+    );
+  const stale = store.stalePullRequests(session.repoId);
+  const shown = shownPrs(store);
+  const prs = store
+    .pullRequests(session.repoId)
+    .filter(
+      (p) => p.state === "open" || (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_HOUR_MS),
     )
-    .map((r) => ({
-      ref: r.ticket ?? "",
-      pr: r.loop?.prNumber ?? 0,
-      seat: r.agentId,
-      ready: ready.has(r.id),
-    }));
+    .sort((a, b) => a.number - b.number)
+    .map((p) => {
+      const holder = holders.find((r) => r.loop?.prNumber === p.number);
+      return {
+        ref: p.ticket ?? holder?.ticket ?? "",
+        pr: p.number,
+        seat: holder?.agentId ?? "",
+        ready: holder !== undefined && ready.has(holder.id),
+        state: p.state,
+        headSha: p.headSha,
+        readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
+        stale: stale.has(p.number),
+      };
+    });
 
   return {
     time: clockHm(now, tz),
@@ -269,7 +308,7 @@ export function wakeFacts(s: FlightState): string {
       .map((x) => `${x.id}:${x.ticket}:${x.parked?.kind}`)
       .sort(),
     stopped: stoppedSeats(s),
-    prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}`).sort(),
+    prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}`).sort(),
   });
 }
 
