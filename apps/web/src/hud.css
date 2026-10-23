@@ -3511,3 +3511,21 @@ details.guard > summary {
 button.nrow.thread.tagged {
   background: var(--warn-soft);
 }
+
+.person-choices {
+  display: grid;
+  overflow: auto;
+  min-height: 0;
+}
+.person-choices .optlist,
+.person-choices textarea {
+  width: 100%;
+  min-width: 0;
+}
+.person-choices .opt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.person-choices textarea {
+  min-height: 6em;
+}
