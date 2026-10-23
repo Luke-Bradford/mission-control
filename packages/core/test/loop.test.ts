@@ -330,6 +330,8 @@ describe("state step", () => {
       [{ pr: null }, "no PR of the run has been read from GitHub"],
       [{ pr: pr({ headSha: SHA2 }) }, `PR #${pr().number} has head bbbbbbb, not aaaaaaa`],
       [{ pushed: { sha: SHA2, at: NOW } }, "the push is bbbbbbb, not the newest commit aaaaaaa"],
+      [{ headCommit: null }, "no commit is recorded for the run, but aaaaaaa is pushed"],
+      [{ pr: pr({ headSha: null }) }, `PR #${pr().number} has no head, not aaaaaaa`],
     ];
     for (const [over, why] of cases) {
       const r = reconcile(inCi(over, late));
