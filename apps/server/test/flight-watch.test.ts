@@ -278,6 +278,8 @@ describe("FLIGHT's PR list", () => {
         headSha: "sha7",
         readAt: "13:00",
         stale: false,
+        review: null,
+        failingChecks: [],
       },
     ]);
     store.markPullRequestsStale("mc");
@@ -348,6 +350,122 @@ describe("FLIGHT's PR list", () => {
     });
     store.upsertPullRequests("mc", [stored(7)], T0);
     expect(listed()).toMatchObject([{ pr: 7, seat: "guido-1", state: "open" }]);
+  });
+});
+
+describe("FLIGHT's evidence", () => {
+  const check = (name: string, state: "passing" | "failing" | "pending") => ({
+    name,
+    kind: "check" as const,
+    state,
+    conclusion: state,
+    attempt: 1,
+    url: null,
+  });
+  const review = (
+    sha: string,
+    spec: "pass" | "fail",
+    findings: number,
+    at = T0,
+    runId = "r-retro",
+    round = 1,
+  ) => {
+    const id = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 7,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round,
+      at,
+    });
+    if (id === null) throw new Error("review not queued");
+    store.setReviewState(id, ["queued"], "running", { runId, at });
+    store.recordFindings(id, runId, {
+      verdict: { spec, quality: "pass" },
+      summary: "s",
+      findings: Array.from({ length: findings }, () => ({
+        severity: "Critical" as const,
+        file: "a.ts",
+        line: 1,
+        summary: "x",
+        scenario: "y",
+        fix: "z",
+      })),
+      at,
+    });
+  };
+  const parkedOf = () =>
+    flightState({ config, store, busy: [], now: nowMs }).seats.find((s) => s.id === "guido-1")
+      ?.parked;
+  const park = (kind: string) => {
+    live("guido-1", "r-guido");
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind, reason: "x", ended: false },
+    });
+  };
+
+  it("carries RETRO's verdict, blocking findings, head and failing checks on a PR", () => {
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { checks: [check("lint", "failing"), check("test", "passing")] })],
+      T0,
+    );
+    review("sha7", "fail", 2);
+    expect(listed()[0]).toMatchObject({
+      headSha: "sha7",
+      failingChecks: ["lint"],
+      review: { spec: "fail", quality: "pass", blocking: 2, sha: "sha7" },
+    });
+  });
+
+  it("carries the latest reported review, not an earlier or unreported one", () => {
+    store.upsertPullRequests("mc", [stored(7, {})], T0);
+    review("sha6", "fail", 2, T0, "r-retro", 1);
+    review("sha7", "pass", 0, T0 + 1, "r-retro-2", 2);
+    const failed = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 7,
+      sha: "sha8",
+      epoch: 0,
+      attempt: 1,
+      round: 3,
+      at: T0 + 2,
+    });
+    if (failed === null) throw new Error("review not queued");
+    store.setReviewState(failed, ["queued"], "failed", { at: T0 + 2, failure: "crashed" });
+    expect(listed()[0]?.review).toEqual({
+      spec: "pass",
+      quality: "pass",
+      blocking: 0,
+      sha: "sha7",
+    });
+  });
+
+  it("carries a ruling park's last report, cut to 1,500 characters", () => {
+    park("ruling");
+    store.addEvidence("r-guido", "old", T0);
+    store.addEvidence("r-guido", "r".repeat(2000), T0 + 1);
+    expect(parkedOf()?.report).toHaveLength(1500);
+    expect(parkedOf()?.report?.startsWith("rrr")).toBe(true);
+  });
+
+  it("carries a review-ruling park's report too", () => {
+    park("review-ruling");
+    store.addEvidence("r-guido", "short", T0);
+    expect(parkedOf()?.report).toBe("short");
+  });
+
+  it("carries no report on other parks", () => {
+    park("silent");
+    store.addEvidence("r-guido", "note", T0);
+    expect(parkedOf()?.report).toBeUndefined();
   });
 });
 
@@ -1031,6 +1149,8 @@ describe("wakeSummary", () => {
     headSha: null,
     readAt: "12:00",
     stale: false,
+    review: null,
+    failingChecks: [],
   };
   const state = (over: Partial<FlightState>): FlightState => ({
     time: "12:00",

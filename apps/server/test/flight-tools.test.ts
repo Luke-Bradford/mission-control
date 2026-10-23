@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   type BoardItem,
   BRIEF_CLEARED_DECISION,
@@ -72,6 +73,7 @@ import {
   SEAT_ID,
 } from "../src/config.ts";
 import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
+import { flightBriefView } from "../src/flight/state.ts";
 import { createFlightTools, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
@@ -1069,6 +1071,7 @@ describe("start_seat", () => {
     };
     expect(await start()).toEqual(refused("Not started: the start failed."));
     expect(decisions()).toEqual([]);
+    expect(store.flightIncoming()).toEqual([]);
   });
 
   it("returns the supervisor's 422 text as it is", async () => {
@@ -2088,6 +2091,7 @@ describe("flight_state", () => {
       tickets: [
         {
           ref: "mc#2",
+          arrival: { source: "Board", arrivalId: "mc#2", version: String(NOW), arrivedAt: NOW },
           title: "Ticket 2",
           column: "Backlog",
           priority: "P0",
@@ -2099,6 +2103,12 @@ describe("flight_state", () => {
         },
         {
           ref: "mc#6",
+          arrival: {
+            source: "Board",
+            arrivalId: "mc#6",
+            version: String(NOW - 1000),
+            arrivedAt: NOW - 1000,
+          },
           title: "Ticket 6",
           column: "Ready",
           priority: "P1",
@@ -2110,6 +2120,7 @@ describe("flight_state", () => {
         },
         {
           ref: "mc#1",
+          arrival: { source: "Board", arrivalId: "mc#1", version: String(NOW), arrivedAt: NOW },
           title: "Ticket 1",
           column: "Ready",
           priority: "P1",
@@ -2131,6 +2142,8 @@ describe("flight_state", () => {
           headSha: "abc",
           readAt: "13:00",
           stale: false,
+          review: null,
+          failingChecks: [],
         },
       ],
       items: [{ key: "note:ready:r-pr", kind: "ready", ticket: "mc#7", text: "ready", ageMin: 0 }],
@@ -2997,14 +3010,80 @@ describe("brief_item", () => {
     };
     const args = B({ key: `person:101:${NOW}`, person });
     expect(await call("brief_item", args)).toEqual({ text: BRIEFED_TEXT });
+    expect(store.flightIncoming()).toEqual([
+      expect.objectContaining({
+        source: "GitHub",
+        arrivalId: "101",
+        outcome: "Reply drafted",
+        version: source.revision,
+      }),
+    ]);
     expect(store.drafts()).toHaveLength(1);
+    expect(store.drafts()[0]).toMatchObject({
+      to: "catalogue-helper",
+      via: "GitHub",
+      where: "mc#7",
+      context: "Review the plan",
+    });
     expect(ghCalls).toEqual([]);
     const edited = {
       ...args,
       person: { ...person, source: { ...source, revision: "wrong" } },
     };
     expect((await call("brief_item", edited)).isError).toBe(true);
+    expect(store.flightIncoming()).toHaveLength(1);
     expect(store.drafts()).toHaveLength(1);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("records stored Teams replies as drafted while keeping them copy-only", async () => {
+    const source = { kind: "teams" as const, messageId: "555", revision: "teams-v1" };
+    store.upsertNotifications(
+      [
+        {
+          id: "102",
+          repoId: "mc",
+          subjectType: "Issue",
+          title: "Teams review",
+          number: null,
+          reason: "mention",
+          url: "https://teams.microsoft.com/message/555",
+          author: "Reviewer",
+          snippet: "Please review",
+          updatedAt: NOW,
+          lastReadAt: null,
+          message: {
+            source,
+            author: "Reviewer",
+            at: NOW,
+            text: "Please review",
+            url: "https://teams.microsoft.com/message/555",
+          },
+        },
+      ],
+      false,
+      NOW,
+    );
+    const key = `person:102:${NOW}`;
+    const replies = [{ id: "review", label: "Review", text: "I will review." }];
+    expect(await call("brief_item", B({ key, person: { source, replies } }))).toEqual({
+      text: BRIEFED_TEXT,
+    });
+    expect(store.briefs().get(key)?.person?.replies).toEqual(replies);
+    expect(store.drafts()).toEqual([]);
+    expect(ghCalls).toEqual([]);
+    expect(store.flightIncoming()).toEqual([
+      expect.objectContaining({
+        source: "Teams",
+        arrivalId: "102",
+        version: source.revision,
+        outcome: "Reply drafted",
+      }),
+    ]);
+    expect(
+      await call("brief_item", B({ key, person: { source, assessment: ["Needs a decision"] } })),
+    ).toEqual({ text: BRIEFED_TEXT });
+    expect(store.flightIncoming()[0]?.outcome).toBe("Asked of you");
     expect(ghCalls).toEqual([]);
   });
 
@@ -3652,3 +3731,452 @@ describe("correlated discussion replies", () => {
     expect(decisions()).toEqual([]);
   });
 });
+
+describe("structured FLIGHT brief and arrivals", () => {
+  const watch = {
+    id: "check-preview",
+    state: "warn",
+    title: "Preview needs a reply",
+    detail: "The preview is ready for inspection.",
+    catchUp: { kind: "new" as const, line: "Preview arrived" },
+    next: "Read the prepared reply",
+  };
+  const save = (extra: Record<string, unknown>) =>
+    call("update_brief", {
+      section: "risks",
+      text: "Keep this prose: Stop the run is not a command.",
+      basis: "Preview checked",
+      ...extra,
+    });
+
+  it("round trips bounded watch entries through the tool and restart, updates and removes them", async () => {
+    expect((await save({ watch: { upsert: [watch] } })).isError).toBeUndefined();
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    expect(flightBriefView(cfg, store).watch).toEqual([expect.objectContaining(watch)]);
+    expect(flightBriefView(cfg, store).sections.find((s) => s.section === "risks")?.text).toContain(
+      "Stop the run is not a command",
+    );
+    store.setFlightWatch("s1", { upsert: [{ ...watch, state: "ok" }] }, NOW + 1);
+    expect(flightBriefView(cfg, store).watch?.[0]?.state).toBe("ok");
+    store.setFlightWatch("s1", { remove: [watch.id] }, NOW + 2);
+    expect(flightBriefView(cfg, store).watch).toEqual([]);
+  });
+
+  it("hides the whole stale lock item and never retargets a stale draft", async () => {
+    const id = store.addDraft("mc#41", "issue", "Preview reply", NOW);
+    expect(
+      (
+        await save({
+          watch: {
+            upsert: [
+              {
+                ...watch,
+                id: "stop-preview",
+                action: { kind: "lock-hold", runId: "gone", toolUseId: "held", since: NOW },
+              },
+              { ...watch, action: { kind: "draft", draftId: id, target: "mc#41" } },
+            ],
+          },
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(flightBriefView(cfg, store).watch?.map((w) => w.id)).toEqual([watch.id]);
+    store.finishDraft(id, "discarded");
+    store.addDraft("mc#42", "issue", "Other reply", NOW);
+    expect(flightBriefView(cfg, store).watch).toEqual([]);
+    const app = buildApp({ config: cfg, store, bus });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/drafts/${id}/post`,
+        payload: {},
+      });
+      expect(response.statusCode).toBe(404);
+      expect(store.drafts()[0]?.target).toBe("mc#42");
+      expect(ghCalls).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("records explicit No action once per arrival version and retains history after board changes", async () => {
+    board(card(232, { status: "Backlog" }));
+    const arrival = {
+      source: "Board",
+      arrivalId: "mc#232",
+      version: String(NOW),
+      outcome: "No action",
+      detail: "Already covered by the preview.",
+    };
+    expect((await save({ arrival })).isError).toBeUndefined();
+    expect((await save({ arrival })).isError).toBeUndefined();
+    const app = buildApp({ config: cfg, store, bus });
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/flight/incoming" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().entries).toEqual([expect.objectContaining(arrival)]);
+      store.replaceBoard("mc", [card(232, { status: "Ready" })]);
+      expect(
+        (await app.inject({ method: "GET", url: "/api/flight/incoming" })).json().entries,
+      ).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("refuses invented successful actions and invalid watch payloads without saving prose", async () => {
+    board(card(232, { status: "Backlog" }));
+    for (const outcome of ["Assigned", "Queued", "Reply drafted"]) {
+      expect(
+        (
+          await save({
+            arrival: {
+              source: "Board",
+              arrivalId: "mc#232",
+              version: String(NOW),
+              outcome,
+              detail: "Claimed success",
+            },
+          })
+        ).isError,
+      ).toBe(true);
+    }
+    expect(
+      (
+        await save({
+          watch: { upsert: [{ ...watch, action: { kind: "shell", command: "anything" } }] },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(store.flightBrief("s1")).toEqual([]);
+  });
+});
+
+it("records draft_reply only after it stores a real draft, without inventing an arrival", async () => {
+  board(card(41));
+  expect(
+    (await call("draft_reply", { target: "mc#41", kind: "issue", text: "Preview is ready" }))
+      .isError,
+  ).toBeUndefined();
+  expect(store.flightIncoming()).toEqual([
+    expect.objectContaining({ source: "Board", arrivalId: "mc#41", outcome: "Reply drafted" }),
+  ]);
+  expect(
+    (await call("draft_reply", { target: "missing#41", kind: "issue", text: "Preview is ready" }))
+      .isError,
+  ).toBe(true);
+  expect(store.flightIncoming()).toHaveLength(1);
+});
+
+it("persists distinct completed drafts and optional metadata, preserving unknown completion time", () => {
+  const legacy = store.addDraft("mc#41", "issue", "Earlier reply", NOW);
+  const id = store.addDraft("mc#42", "issue", "Prepared reply", NOW, {
+    to: "Preview team",
+    via: "Teams",
+    where: "Preview channel",
+    context: "Preview check",
+  });
+  store.finishDraft(id, "copied", undefined, NOW + 10);
+  const discarded = store.addDraft("mc#43", "pr", "Superseded reply", NOW);
+  store.finishDraft(discarded, "discarded", undefined, NOW + 20);
+  store.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.drafts()).toEqual([expect.objectContaining({ id: legacy, state: "pending" })]);
+  expect(store.drafts()[0]?.completedAt).toBeUndefined();
+  expect(flightBriefView(cfg, store).drafts).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id,
+        state: "copied",
+        completedAt: NOW + 10,
+        to: "Preview team",
+        via: "Teams",
+        where: "Preview channel",
+        context: "Preview check",
+      }),
+      expect.objectContaining({ id: discarded, state: "discarded", completedAt: NOW + 20 }),
+    ]),
+  );
+});
+
+it("replaces a queued outcome with the performed assignment while keeping one stable arrival", async () => {
+  board(card(41, { size: "S" }));
+  fetchImpl = async (n) => ticket(n, { body: "## Done when\n\nPreview is checked." });
+  store.replaceQueue("guido-1", [{ repoId: "mc", issue: 41 }]);
+  const arrival = {
+    source: "Board",
+    arrivalId: "mc#41",
+    version: String(NOW),
+    outcome: "Queued",
+    detail: "Waiting for a free seat",
+  };
+  expect(
+    (await call("update_brief", { section: "risks", text: "", basis: "Queue checked", arrival }))
+      .isError,
+  ).toBeUndefined();
+  const id = store.flightIncoming()[0]?.id;
+  expect(store.flightIncoming()[0]?.outcome).toBe("Queued");
+  expect(
+    (await call("start_seat", { seat: "guido-1", issue: 41, basis: "Preview ready" })).isError,
+  ).toBeUndefined();
+  expect(store.flightIncoming()).toEqual([
+    expect.objectContaining({ id, outcome: "Assigned", detail: "GUIDO-1: Preview ready" }),
+  ]);
+});
+
+it("shows Stop only for the exact blocked hold, including after restart", () => {
+  live("guido-1", "preview-run");
+  store.setSeatSession({ ...row("guido-1", "preview-run"), state: "running" });
+  const hold = {
+    runId: "preview-run",
+    toolUseId: "preview-suite",
+    seatId: "guido-1",
+    since: NOW,
+    command: "pnpm test",
+  };
+  store.addLockHold(hold);
+  store.setFlightWatch(
+    "s1",
+    {
+      upsert: [
+        {
+          id: "stop-preview",
+          state: "warn",
+          title: "Preview suite is blocking",
+          detail: "Another suite is waiting",
+          catchUp: { kind: "old", line: "The holder is silent" },
+          next: "Stop the run",
+          action: {
+            kind: "lock-hold",
+            runId: hold.runId,
+            toolUseId: hold.toolUseId,
+            since: hold.since,
+          },
+        },
+      ],
+    },
+    NOW,
+  );
+  store.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  const lock = { holder: hold, waiting: [{ ...hold, runId: "waiting-preview", seatId: "inco-1" }] };
+  const later = NOW + 20 * 60_000;
+  expect(flightBriefView(cfg, store, lock, later).watch).toHaveLength(1);
+  expect(flightBriefView(cfg, store, { ...lock, waiting: [] }, later).watch).toEqual([]);
+  expect(
+    flightBriefView(cfg, store, { ...lock, holder: { ...hold, since: NOW + 1 } }, later).watch,
+  ).toEqual([]);
+  store.deleteLockHold(hold.runId, hold.toolUseId);
+  expect(flightBriefView(cfg, store, lock, later).watch).toEqual([]);
+});
+
+it("bounds watch storage atomically and keeps newest arrival versions through restart", async () => {
+  const entries = Array.from({ length: 100 }, (_, i) => ({
+    id: `watch-${i}`,
+    state: "info" as const,
+    title: "Preview",
+    detail: "Checking preview",
+    catchUp: { kind: "new" as const, line: "Preview arrived" },
+    next: "Check preview",
+  }));
+  store.setFlightWatch("s1", { upsert: entries }, NOW);
+  expect(
+    (
+      await call("update_brief", {
+        section: "risks",
+        text: "Must not save",
+        basis: "Preview",
+        watch: { upsert: [{ ...entries[0], id: "overflow" }] },
+      })
+    ).isError,
+  ).toBe(true);
+  expect(store.flightWatch("s1")).toHaveLength(100);
+  expect(store.flightBrief("s1")).toEqual([]);
+  for (let i = 0; i < 101; i++)
+    store.recordFlightArrival({
+      source: "Board",
+      arrivalId: "mc#41",
+      version: String(i),
+      at: NOW + i,
+      arrivedAt: NOW,
+      text: "Preview",
+      outcome: "No action",
+      detail: "Already covered",
+    });
+  store.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.flightIncoming()).toHaveLength(100);
+  expect(store.flightIncoming().map((e) => e.version)).toEqual(
+    Array.from({ length: 100 }, (_, i) => String(100 - i)),
+  );
+});
+
+it("supplies Board arrival identity in flight_state so outcomes need no guessed version", async () => {
+  board(card(41));
+  const state = JSON.parse((await call("flight_state", {})).text);
+  expect(state.tickets[0]?.arrival).toEqual({
+    source: "Board",
+    arrivalId: "mc#41",
+    version: String(NOW),
+    arrivedAt: NOW,
+  });
+});
+
+it("serves every pending watch draft while bounding only finished draft history", () => {
+  const pending = Array.from({ length: 101 }, (_, i) =>
+    store.addDraft(`mc#${i + 1}`, "issue", "Pending reply", NOW + i),
+  );
+  const finished = Array.from({ length: 101 }, (_, i) => {
+    const id = store.addDraft("mc#200", "issue", "Finished reply", NOW + 200 + i);
+    store.finishDraft(id, "copied", undefined, NOW + 400 + i);
+    return id;
+  });
+  store.setFlightWatch(
+    "s1",
+    {
+      upsert: [
+        {
+          id: "old-pending",
+          state: "info",
+          title: "Reply ready",
+          detail: "Prepared reply",
+          catchUp: { kind: "old", line: "Still pending" },
+          next: "See draft",
+          action: { kind: "draft", draftId: pending[0] as number, target: "mc#1" },
+        },
+      ],
+    },
+    NOW,
+  );
+  const brief = flightBriefView(cfg, store);
+  expect(brief.watch).toHaveLength(1);
+  if (!brief.drafts) throw new Error("Missing served drafts");
+  expect(brief.drafts.filter((d) => d.state === "pending").map((d) => d.id)).toEqual(
+    [...pending].reverse(),
+  );
+  expect(brief.drafts.filter((d) => d.state !== "pending").map((d) => d.id)).toEqual(
+    finished.slice(1).reverse(),
+  );
+  expect(brief.drafts.find((d) => d.id === pending[0])).toMatchObject({
+    target: "mc#1",
+    state: "pending",
+  });
+});
+
+it("returns null repository metadata for arrivals written before provenance was stored", () => {
+  store.close();
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  db.prepare(
+    "INSERT INTO flight_incoming (id, source, arrival_id, version, at, entry) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(
+    "legacy",
+    "Board",
+    "mc#41",
+    String(NOW),
+    NOW,
+    JSON.stringify({
+      id: "legacy",
+      source: "Board",
+      arrivalId: "mc#41",
+      version: String(NOW),
+      arrivedAt: NOW,
+      at: NOW,
+      text: "Legacy arrival",
+      outcome: "No action",
+      detail: "Already covered",
+    }),
+  );
+  db.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.flightIncoming()[0]).toHaveProperty("repoId", null);
+  expect(store.flightIncoming()[0]).toHaveProperty("sourceRef", null);
+});
+
+it.each([
+  ["Issue", "mc", "github", "https://github.com/o/mc/issues/7", "github-issue"],
+  ["PullRequest", "mc", "github", "https://github.com/o/mc/pull/7", "github-pr"],
+  ["Issue", "mc", "teams", "https://teams.microsoft.com/message/555", "teams"],
+  ["Issue", "", "teams", "https://teams.microsoft.com/message/555", "teams"],
+  ["Issue", "mc", "github", "https://github.com.evil.test/o/mc/issues/7", null],
+  ["Issue", "mc", "teams", "https://evil.test/message/555", null],
+])(
+  "persists %s arrival provenance (%s, %s, %s) through restart",
+  async (subjectType, repoId, kind, url, expectedKind) => {
+    const source = { kind: kind as "github" | "teams", messageId: "555", revision: "v1" };
+    store.upsertNotifications(
+      [
+        {
+          id: "199",
+          repoId,
+          subjectType,
+          title: "Review requested",
+          number: 7,
+          reason: "mention",
+          url,
+          author: "Reviewer",
+          snippet: "Review please",
+          updatedAt: NOW,
+          lastReadAt: null,
+          message: { source, author: "Reviewer", at: NOW, text: "Review please", url },
+        },
+      ],
+      false,
+      NOW,
+    );
+    if (!repoId)
+      store.recordFlightArrival({
+        source: "Teams",
+        arrivalId: "199",
+        version: "v1",
+        arrivedAt: NOW,
+        at: NOW,
+        text: "Review requested",
+        outcome: "No action",
+        detail: "Already covered",
+      });
+    else
+      expect(
+        (
+          await call("brief_item", {
+            key: `person:199:${NOW}`,
+            context: "Review",
+            recommendation: "Check it",
+            basis: "Read message",
+            person: { source, assessment: ["Needs review"] },
+          })
+        ).isError,
+      ).toBeUndefined();
+    expect(ghCalls).toEqual([]);
+    store.markNotificationHandled("199", NOW, "flight", NOW);
+    // Remove the notification entirely: incoming must use its own persisted snapshot.
+    store.upsertNotifications([], true, NOW + 2 * 86400000);
+    store.pruneNotifications(NOW + 2 * 86400000);
+    expect(store.notification("199")).toBeNull();
+    store.recordFlightArrival({
+      source: kind === "teams" ? "Teams" : "GitHub",
+      arrivalId: "199",
+      version: "v1",
+      arrivedAt: NOW,
+      at: NOW + 2 * 86400000,
+      text: "Review requested",
+      outcome: "No action",
+      detail: "Review complete",
+    });
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    const app = buildApp({ config: cfg, store, bus });
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/flight/incoming" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().entries).toEqual([
+        expect.objectContaining({
+          repoId: repoId || null,
+          sourceRef: expectedKind ? { kind: expectedKind, url } : null,
+        }),
+      ]);
+    } finally {
+      await app.close();
+    }
+  },
+);
