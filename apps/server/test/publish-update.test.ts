@@ -400,6 +400,38 @@ describe("a merged branch (real git)", () => {
     await keptAfter();
   });
 
+  it("keeps a branch whose hub-looking merge has three parents", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    asHub(worktree, "merge", "-q", "--no-ff", "-m", `Merge main into ${BRANCH}`, mainSha);
+    const octo = execFileSync(
+      "git",
+      [
+        "commit-tree",
+        "HEAD^{tree}",
+        "-p",
+        "HEAD^1",
+        "-p",
+        "HEAD^2",
+        "-p",
+        git(worktree, "rev-parse", `${mainSha}~1`),
+        "-m",
+        `Merge main into ${BRANCH}`,
+      ],
+      {
+        cwd: worktree,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
+          GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
+        },
+      },
+    )
+      .toString()
+      .trim();
+    git(worktree, "reset", "-q", "--hard", octo);
+    await keptAfter();
+  });
+
   it("keeps a branch whose hub-looking merge carries an edit that is not the merge", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     git(worktree, "merge", "-q", "--no-ff", "--no-commit", mainSha);
