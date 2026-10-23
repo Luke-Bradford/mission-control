@@ -197,13 +197,13 @@ export function telemetry(
   let excluded = 0;
   for (const i of store.flowIssues(flowSince)) {
     if (i.doneAt === null) continue;
-    if (i.startAt === null) {
+    if (i.startAt === null || i.startAt > i.doneAt) {
       excluded += 1;
       continue;
     }
     const size = i.size ?? NO_SIZE;
     const list = bySize.get(size) ?? [];
-    list.push(Math.max(0, i.doneAt - i.startAt) / DAY_MS);
+    list.push((i.doneAt - i.startAt) / DAY_MS);
     bySize.set(size, list);
   }
   const standard: readonly string[] = TICKET_SIZES;

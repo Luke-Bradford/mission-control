@@ -337,6 +337,24 @@ describe("Store", () => {
     expect(s.usage("acc", "5h", 0)).toHaveLength(2);
   });
 
+  it("invalidates legacy cycle starts once, preserving PR flow and recollected rows", () => {
+    const path = join(dir, "flow.sqlite");
+    const old = new Store(path);
+    old.deleteSetting("flow-ready-start-v1");
+    const issue = { repoId: "r", number: 1, size: null, startAt: 10, doneAt: 20 };
+    const pr = { repoId: "r", number: 2, mergedAt: 20, firstPushCi: null };
+    old.replaceFlow("r", [issue], [pr]);
+    old.close();
+    const migrated = new Store(path);
+    expect(migrated.flowIssues(0)).toEqual([]);
+    expect(migrated.flowPrs(0)).toEqual([pr]);
+    migrated.replaceFlow("r", [issue], [pr]);
+    migrated.close();
+    const reopened = new Store(path);
+    expect(reopened.flowIssues(0)).toEqual([issue]);
+    reopened.close();
+  });
+
   it("runs the usage dedupe on the first open only, gated on PRAGMA user_version", () => {
     const path = join(dir, "once.sqlite");
     const userVersion = (db: DatabaseSync) =>

@@ -379,6 +379,24 @@ describe("flow of work", () => {
     });
   });
 
+  it("cycle time excludes missing Ready and Done before Ready from the median", () => {
+    store.replaceFlow(
+      "shop-app",
+      [
+        { repoId: "shop-app", number: 1, size: "M", startAt: NOW - 4 * DAY, doneAt: NOW - DAY },
+        { repoId: "shop-app", number: 2, size: "M", startAt: null, doneAt: NOW - DAY },
+        { repoId: "shop-app", number: 3, size: "M", startAt: NOW, doneAt: NOW - DAY },
+      ],
+      [],
+    );
+    expect(tel().cycleTime.rows.find((r) => r.size === "M")).toEqual({
+      size: "M",
+      medianDays: 3,
+      tickets: 1,
+    });
+    expect(tel().cycleTime.excluded).toBe(2);
+  });
+
   it("CI green on first push ignores PRs with unknown CI", () => {
     const fp = (number: number, firstPushCi: FlowPr["firstPushCi"]): FlowPr => ({
       repoId: "shop-app",
