@@ -21,6 +21,7 @@ import {
   dealQueues,
   refillQueues,
   seatMayTake,
+  TAKE_FAILED_KEY_PREFIX,
   TAKE_FAILED_TEXT,
   type TakeDeps,
   takeNext,
@@ -158,10 +159,15 @@ const takeDeps = (): TakeDeps => ({
     if (readFails) throw new Error("GitHub is down");
     return fresh(issue);
   },
-  git: async () => {
+  git: async (_checkout, args) => {
     if (lsRemoteError !== null) throw lsRemoteError;
     if (lsRemoteFails) throw new Error("origin is down");
-    return heads.map((h) => `${"a".repeat(40)}\trefs/heads/${h}\n`).join("");
+    // like ls-remote, only the heads the patterns match
+    const [exact = "", glob = ""] = args.slice(-2);
+    return heads
+      .filter((h) => h === exact || h.startsWith(glob.slice(0, -1)))
+      .map((h) => `${"a".repeat(40)}\trefs/heads/${h}\n`)
+      .join("");
   },
   transientTakes,
   now: () => NOW,
@@ -620,6 +626,16 @@ describe("takeNext", () => {
     expect(logs).toContain(
       `${SERVER}: ${REPO}#59 already has a branch on origin (feature/59-x); not started`,
     );
+  });
+
+  it("raises a take-failed note for a card with a foreign branch, so the next card starts", async () => {
+    await queued(card(59), card(60));
+    heads = ["feature/59-x"];
+    await take();
+    await refill();
+    await take();
+    expect(started.map((s) => s.issue)).toEqual([60]);
+    expect(store.notes().map((n) => n.key)).toContain(`${TAKE_FAILED_KEY_PREFIX}${REPO}#59`);
   });
 
   it("starts a card origin has no branch for", async () => {

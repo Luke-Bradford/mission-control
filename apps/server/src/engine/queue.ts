@@ -436,6 +436,21 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (foreign !== null) {
     store.dropQueued(seatId, repoId, issue);
     deps.log?.(`${seatId}: ${ref} already has a branch on origin (${foreign}); not started`);
+    // without a note the next refill deals the card again and it holds up the rest of the queue
+    store.raiseNote({
+      key: `${TAKE_FAILED_KEY_PREFIX}${ref}`,
+      kind: "question",
+      runId: null,
+      seatId,
+      repoId,
+      text: fillLoopText(TAKE_FAILED_TEXT, {
+        call: seatCallSign(seatId),
+        ref,
+        reason: `it already has a branch on origin (${foreign})`.slice(0, REASON_MAX),
+      }),
+      at: deps.now(),
+    });
+    deps.onNotes?.();
     return;
   }
   try {
