@@ -9,6 +9,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_HOUR_MS,
   FLIGHT_MAX_WAKES,
+  FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_REWAKE_MS,
   FLIGHT_STARTS_MAX,
@@ -70,6 +71,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   let lastFacts = "";
   let lastWakeAt = 0;
+  /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
+  let lastTurnEndAt = 0;
+  let stopped = false;
   /** When FLIGHT itself was started; a rotation is left out. */
   let starts: number[] = [];
   let rotating = false;
@@ -171,6 +175,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const listed = hasFacts(wake);
     const due =
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
+    const since = Math.max(lastWakeAt, lastTurnEndAt);
+    if (due && t - since < FLIGHT_MIN_WAKE_GAP_MS) {
+      later(since + FLIGHT_MIN_WAKE_GAP_MS - t);
+      return;
+    }
     if (due) {
       if ((await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state))) === "sent") {
         markPrsShown(store, state);
@@ -200,6 +209,17 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     timer.unref();
   }
 
+  let gapTimer: NodeJS.Timeout | null = null;
+  /** Checks again once the wake gap has passed; one pending re-check at a time. */
+  function later(ms: number): void {
+    if (gapTimer !== null || stopped) return;
+    gapTimer = setTimeout(() => {
+      gapTimer = null;
+      void check();
+    }, ms);
+    gapTimer.unref();
+  }
+
   let interval: NodeJS.Timeout | null = null;
   let offSupervisor: (() => void) | null = null;
   let offBus: (() => void) | null = null;
@@ -208,9 +228,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     check,
     start() {
       if (interval !== null) return;
+      stopped = false;
       offSupervisor = supervisor.on((e) => {
-        if (e.seatId === flightSeat(config)?.seat.id) void check();
-        else schedule();
+        if (e.seatId === flightSeat(config)?.seat.id) {
+          if (e.kind === "idle") lastTurnEndAt = now();
+          void check();
+        } else schedule();
       });
       offBus = bus.subscribe((topic) => {
         if (topic === "attention" || topic === "boards") schedule();
@@ -220,6 +243,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       void check();
     },
     stop() {
+      stopped = true;
       offSupervisor?.();
       offBus?.();
       offSupervisor = null;
@@ -228,6 +252,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       interval = null;
       if (timer !== null) clearTimeout(timer);
       timer = null;
+      if (gapTimer !== null) clearTimeout(gapTimer);
+      gapTimer = null;
     },
   };
 }
