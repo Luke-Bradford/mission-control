@@ -219,7 +219,7 @@ export function ItemPanel() {
           {item && !holding && (
             <span className="sub">
               {thread
-                ? `${item?.brief?.person?.source.kind === "teams" ? "Teams" : "GitHub"} · ${whereOf(thread).replace(/^GitHub · /, "")} · ${when(thread.updatedAt)}`
+                ? `${whereOf(thread)} · ${when(thread.updatedAt)}`
                 : item.kind !== "person" && item.brief
                   ? `raised by FLIGHT at ${tz ? hhmm(item.brief.at, tz) : "—"}`
                   : esc

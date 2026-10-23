@@ -459,11 +459,14 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/flight"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/flight/incoming"],
+  ["GET", "/api/flight/schedule"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["GET", "/api/accounts/status"],
+  ["GET", "/api/sources/teams"],
+  ["POST", "/api/sources/teams/selection", { selected: [] }],
   ["POST", "/api/accounts/claude-main/check"],
   ["POST", "/api/accounts", { name: "another", provider: "claude" }],
   ["POST", "/api/config/reload"],
@@ -963,6 +966,11 @@ describe("local access", () => {
       if (url === "/api/github/refresh") {
         // accepted, not done: the read happens later
         expect(r.statusCode, `${method} ${url}`).toBe(202);
+        continue;
+      }
+      if (url === "/api/sources/teams/selection") {
+        // the fixture has no config path: a valid selection can't be written
+        expect(r.statusCode, `${method} ${url}`).toBe(409);
         continue;
       }
       if (url === "/api/accounts" && method === "POST") {
@@ -3517,6 +3525,70 @@ describe("crew routes", () => {
       expect(r.statusCode).toBe(400);
       expect(r.json()).toEqual({ error: "issue: an issue number is required" });
       expect(supervisorCalls).toEqual([]);
+    });
+  });
+
+  it("returns an empty schedule without FLIGHT", async () => {
+    const res = await get("/api/flight/schedule");
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ session: null, entries: [] });
+  });
+
+  it("serves only actual pending plans ordered by due time, including later and overdue work", async () => {
+    config.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    const session = config.crew?.sessions[0]?.id ?? "";
+    const at = clock;
+    store.setFlightPlans(
+      session,
+      {
+        upsert: [
+          {
+            id: "later",
+            dueAt: at + 300 * 60_000,
+            kind: "brief",
+            target: "crew",
+            label: "Standup brief ready",
+            status: "pending",
+          },
+          {
+            id: "overdue",
+            dueAt: at - 60_000,
+            kind: "report",
+            target: "missing-seat",
+            label: "Example report",
+            status: "pending",
+          },
+          {
+            id: "done",
+            dueAt: at,
+            kind: "report",
+            target: "crew",
+            label: "Read report",
+            status: "completed",
+            detail: "Read the report",
+          },
+        ],
+      },
+      at,
+    );
+    const body = (await get("/api/flight/schedule")).json();
+    expect(body.session).toBe(session);
+    expect(body.entries.map((e: { id: string }) => e.id)).toEqual(["overdue", "later"]);
+    expect(body.entries[0]).toMatchObject({
+      label: "Example report",
+      overdue: true,
+      minutesFromNow: -1,
+    });
+    expect(body.entries[1]).toMatchObject({
+      label: "Standup brief ready",
+      overdue: false,
+      minutesFromNow: 300,
     });
   });
 

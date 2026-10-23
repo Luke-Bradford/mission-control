@@ -315,6 +315,7 @@ describe("RESOURCES", () => {
 
   it("names the HUD's resources and the topics that refresh them", () => {
     expect(RESOURCES.crew).toEqual({ path: "/api/crew", topic: "agents" });
+    expect(RESOURCES.flightIncoming).toEqual({ path: "/api/flight/incoming", topic: "flight" });
     expect(RESOURCES.attention).toEqual({ path: "/api/attention", topic: "attention" });
     expect(RESOURCES.machine).toEqual({ path: "/api/machine", topic: "machine" });
     expect(RESOURCES.away).toEqual({ path: "/api/settings/away", topic: "settings" });

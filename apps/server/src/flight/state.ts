@@ -27,6 +27,7 @@ import {
   type FlightBriefSection,
   type FlightBriefView,
   type FlightPark,
+  type FlightScheduleView,
   type FlightSeatState,
   type FlightState,
   type FlightView,
@@ -171,6 +172,26 @@ export function flightBriefSections(store: Store, sessionId: string | null): Fli
   });
 }
 
+/** Pending actual plans, including overdue work; a due time never proves completion. */
+export function flightScheduleView(
+  config: CcConfig,
+  store: Store,
+  now: number,
+): FlightScheduleView {
+  const session = flightSeat(config)?.session.id ?? null;
+  const entries = (session === null ? [] : store.flightPlans(session))
+    .filter((p) => p.status === "pending")
+    .sort((a, b) => a.dueAt - b.dueAt || a.id.localeCompare(b.id))
+    .map((p) => ({
+      ...p,
+      title: p.label,
+      at: p.dueAt,
+      minutesFromNow: Math.ceil((p.dueAt - now) / 60_000),
+      overdue: p.dueAt < now,
+    }));
+  return { session, entries };
+}
+
 export function flightBriefView(
   config: CcConfig,
   store: Store,
@@ -217,7 +238,13 @@ export function flightBriefView(
       lock.waiting.length > 0
     );
   });
-  return { session, sections: flightBriefSections(store, session), watch, drafts };
+  return {
+    session,
+    sections: flightBriefSections(store, session),
+    watch,
+    drafts,
+    planned: flightScheduleView(config, store, now).entries,
+  };
 }
 
 /** Source records supply identity and text; a notification alone never implies an action. */
@@ -541,7 +568,9 @@ export function flightState(i: {
       ageMin: Math.floor((now - x.at) / 60_000),
     }));
 
+  const planned = flightScheduleView(config, store, now).entries;
   return {
+    ...(planned.length > 0 ? { planned } : {}),
     discussions,
     time: clockHm(now, tz),
     repo: session.repoId,
@@ -581,6 +610,9 @@ export function wakeFacts(s: FlightState & { discussions?: ItemDiscussion[] }): 
       : [];
   return JSON.stringify({
     discussions: s.discussions?.map((t) => [t.id, t.messages.map((m) => m.id)]),
+    planned: (s.planned ?? [])
+      .filter((p) => p.minutesFromNow <= 0)
+      .map((p) => [p.id, p.dueAt, p.kind, p.target, p.label]),
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: free.length > 0 ? startable.map((t) => t.ref) : [],
@@ -620,6 +652,7 @@ const flightParkKind = (kind: string): boolean =>
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
 export function pending(s: FlightState & { discussions?: ItemDiscussion[] }): boolean {
   return (
+    (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
     (s.discussions?.length ?? 0) > 0 ||
     s.questions.length > 0 ||
     s.items.length > 0 ||
