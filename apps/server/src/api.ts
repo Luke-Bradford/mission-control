@@ -172,6 +172,9 @@ export const LOG_REDACT = {
   censor: "[redacted]",
 };
 
+const VIEWER_QUERY = "query { viewer { login } }";
+const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
+
 export interface AppDeps {
   config: CcConfig;
   gh?: GhRunner;
@@ -383,6 +386,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const now = deps.now ?? Date.now;
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
   const githubGql = deps.githubGql ?? (async () => makeGql(await githubToken()));
+  // The login the hub acts as: kept once read; null when it cannot be, and not tried again for
+  // GITHUB_LOGIN_RETRY_MS. Concurrent requests share one read.
+  let githubLogin: string | null = null;
+  let loginRead: Promise<string | null> | null = null;
+  let loginFailedAt = Number.NEGATIVE_INFINITY;
+  const readGithubLogin = (): Promise<string | null> | string | null => {
+    if (githubLogin !== null) return githubLogin;
+    if (loginRead) return loginRead;
+    if (now() - loginFailedAt < GITHUB_LOGIN_RETRY_MS) return null;
+    loginRead = (async () => {
+      try {
+        const gql = await githubGql();
+        const data = (await gql(VIEWER_QUERY, {})) as { viewer?: { login?: unknown } };
+        const login = data?.viewer?.login;
+        if (typeof login === "string" && login !== "") githubLogin = login;
+      } catch {
+        // not signed in to gh, or GitHub unreachable: the view says null
+      }
+      if (githubLogin === null) loginFailedAt = now();
+      loginRead = null;
+      return githubLogin;
+    })();
+    return loginRead;
+  };
   const refreshBoards = deps.refreshBoards ?? (() => bus.emit("boards"));
   const machine = deps.machine ?? (() => null);
   const readTranscript = deps.readStream ?? readStream;
@@ -1074,6 +1101,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         configView(
           config,
           deps.profilesPath === undefined ? undefined : profilesView(deps.profilesPath),
+          await readGithubLogin(),
         ),
       );
 
