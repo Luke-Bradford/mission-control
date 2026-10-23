@@ -60,7 +60,6 @@ import type { SeatState } from "../src/runtime.ts";
 import type { AgentState, PullRequestView, SeatSessionRow } from "../src/types.ts";
 
 const now = 1_000_000_000;
-const STATES: AgentState[] = ["working", "waiting-agent", "waiting-you", "idle", "error"];
 
 describe("constants", () => {
   it("holds the shared values", () => {
@@ -104,7 +103,6 @@ describe("hudState", () => {
         expect(h("idle")).toBe(paused ? "parked" : "idle");
       }
     }
-    expect(STATES).toHaveLength(5);
   });
   // Ruling R21: a run waiting on its own background shell writes nothing for a long time.
   it("allows a working run with a background task in flight BACKGROUND_STALL_MS of quiet", () => {
@@ -264,6 +262,7 @@ describe("attention", () => {
     expect(escalationKind({ kind: "operator-decision", source: "title" })).toBe("decision");
     expect(escalationKind({ kind: "mvp-ready", source: "title" })).toBe("approval");
     expect(escalationKind({ kind: "loop-blocked", source: "title" })).toBe("parked");
+    expect(escalationKind({ kind: "autonomy-question", source: "title" })).toBe("decision");
     expect(escalationKind({ kind: "operator-decision", source: "label" })).toBe("question");
     expect(escalationKind({ kind: "autonomy-question", source: "label" })).toBe("decision");
   });
@@ -277,6 +276,11 @@ describe("startOfLocalDay", () => {
     );
     expect(startOfLocalDay(Date.parse("2026-01-10T15:30:00Z"), tz)).toBe(
       Date.parse("2026-01-10T00:00:00Z"),
+    );
+  });
+  it("on a day with no local midnight, starts at the day's first instant", () => {
+    expect(startOfLocalDay(Date.parse("2018-11-04T15:00:00Z"), "America/Sao_Paulo")).toBe(
+      Date.parse("2018-11-04T03:00:00Z"),
     );
   });
   it("uses a 24h denominator at 23:00 on the 25-hour day", () => {
