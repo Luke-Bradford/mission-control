@@ -1,15 +1,27 @@
-import { FLIGHT_NOT_RUNNING } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  FLIGHT_BRIEF_SECTIONS,
+  FLIGHT_BRIEF_TITLES,
+  FLIGHT_NOT_RUNNING,
+  type FlightBriefSectionKey,
+  type FlightBriefView,
+} from "@mc/core";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
+import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
+import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
 import type { FlightDecision, FlightView } from "../src/flight/flightTypes.ts";
+import { incomingCards, NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
-import { Flight } from "../src/pages/Flight.tsx";
+import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
+import { DRAFTS_NOT_TRACKED, Flight } from "../src/pages/Flight.tsx";
+import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
 import {
   boardItem,
+  brief,
   CONFIG,
   crewRow,
   HOUR,
@@ -171,13 +183,20 @@ describe("Decided without you", () => {
 });
 
 describe("FLIGHT page", () => {
-  it("every FLIGHT-owned panel says so", async () => {
-    stub();
+  it("without a FLIGHT seat, the brief's panels say FLIGHT is not running", async () => {
+    stubFetch({
+      "/api/flight/brief": { session: null, sections: [] },
+      "/api/attention": [],
+      "/api/config": CONFIG,
+    });
     const { container } = render(<Flight />);
-    for (const id of ["sitP", "askP", "incP", "watchP", "draftsP", "decidedP"]) {
-      expect(container.querySelector(`#${id}`)?.textContent, id).toContain(FLIGHT_NOT_RUNNING);
+    for (const id of ["sitP", "watchP"]) {
+      await waitFor(() =>
+        expect(container.querySelector(`#${id}`)?.textContent, id).toContain(FLIGHT_NOT_RUNNING),
+      );
     }
     expect(container.querySelector("#sitP .phase")?.textContent).toBe("P2");
+    expect(container.querySelector("#draftsP")?.textContent).toContain(DRAFTS_NOT_TRACKED);
   });
 
   it("Work in flight is empty without crew runs, and does not list loops", async () => {
@@ -544,5 +563,201 @@ describe("FLIGHT page", () => {
     ]);
     expect(container.querySelector(".tlnext.narrow")?.textContent).toBe(`Next: ${all.join(" · ")}`);
     expect(container.querySelector(".tlnext.wide")?.textContent).toBe(`Next: ${bare.join(" · ")}`);
+  });
+});
+
+const briefView = (
+  over: Partial<Record<FlightBriefSectionKey, { text?: string; updatedAt?: number }>> = {},
+  session: string | null = "s1",
+): FlightBriefView => ({
+  session,
+  sections: FLIGHT_BRIEF_SECTIONS.map((section) => ({
+    section,
+    title: FLIGHT_BRIEF_TITLES[section],
+    text: over[section]?.text ?? "",
+    updatedAt: over[section]?.updatedAt ?? null,
+    updatedBy: null,
+  })),
+});
+
+const STREAM = {
+  runId: "r1",
+  truncated: false,
+  lastOutputAt: null,
+  reason: null,
+  events: [
+    { id: "0:0", at: NOW - 3 * HOUR, kind: "op", text: "[Mission Control] Wake: 2 questions\n{}" },
+    { id: "1:0", at: NOW - 2 * HOUR, kind: "op", text: "hi" },
+    { id: "2:0", at: NOW - HOUR, kind: "msg", text: "hello" },
+  ],
+};
+
+describe("FLIGHT's brief", () => {
+  it("the brief panel renders its nine sections, each with when it was last updated", async () => {
+    stubFetch({
+      "/api/flight/brief": briefView({
+        goals: { text: "Ship the **brief**.", updatedAt: NOW - 5 * MIN },
+      }),
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const secs = await screen.findAllByTestId("brief-section");
+    expect(secs).toHaveLength(9);
+    expect(secs.map((e) => e.querySelector("h3")?.textContent)).toEqual(
+      FLIGHT_BRIEF_SECTIONS.map((k) => FLIGHT_BRIEF_TITLES[k]),
+    );
+    expect(secs[0]?.textContent).toContain("updated 5 min ago");
+    expect(secs[0]?.querySelector(".md strong")?.textContent).toBe("brief");
+    expect(secs[1]?.textContent).toContain("never updated");
+    expect(secs[1]?.textContent).toContain(BRIEF_EMPTY);
+  });
+
+  it("the brief panel says FLIGHT is not running with no session", async () => {
+    stubFetch({ "/api/flight/brief": briefView({}, null), "/api/config": CONFIG });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#briefP")?.textContent).toContain(FLIGHT_NOT_RUNNING),
+    );
+    expect(screen.queryAllByTestId("brief-section")).toHaveLength(0);
+  });
+
+  it("the working log sits collapsed on the FLIGHT page with wake lines and decisions only", async () => {
+    stubDecided(flightView(), { "/api/agents/flight-1/stream": STREAM });
+    const { container } = render(<Flight />);
+    await waitFor(() => expect(container.querySelectorAll("#workLog .dmsg")).toHaveLength(3));
+    const log = container.querySelector("#workLog") as HTMLDetailsElement;
+    expect(log.tagName).toBe("DETAILS");
+    expect(log.open).toBe(false);
+    expect(log.querySelector("summary")?.textContent).toContain("3 entries");
+    expect(log.querySelectorAll(".dmsg.hub")).toHaveLength(1);
+    expect(log.querySelectorAll(".dmsg.decision")).toHaveLength(2);
+    expect(log.querySelector(".dmsg.you")).toBeNull();
+    expect(log.querySelector(".dmsg.flight")).toBeNull();
+  });
+
+  it("the working log is absent with no seat", async () => {
+    stubDecided({ seat: null, decisions: [] });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#logP")?.textContent).toContain(FLIGHT_NOT_RUNNING),
+    );
+    expect(container.querySelector("#workLog")).toBeNull();
+  });
+
+  it("the working log says so when nothing is logged", async () => {
+    stubDecided(flightView({ decisions: [] }), {
+      "/api/agents/flight-1/stream": { ...STREAM, events: [] },
+    });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#workLog")?.textContent).toContain(NOTHING_LOGGED),
+    );
+  });
+
+  it("Situation's paragraph is FLIGHT's goals and what is in progress", async () => {
+    stubFetch({
+      "/api/flight/brief": briefView({
+        goals: { text: "Ship the brief." },
+        in_progress: { text: "Wiring the page." },
+      }),
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    await waitFor(() => expect(container.querySelector("#sitP div.sittext")).not.toBeNull());
+    const t = container.querySelector("#sitP div.sittext")?.textContent ?? "";
+    expect(t).toContain("Ship the brief.");
+    expect(t.indexOf("Wiring the page.")).toBeGreaterThan(t.indexOf("Ship the brief."));
+  });
+
+  it("Situation says so with an empty brief", async () => {
+    stubFetch({ "/api/flight/brief": briefView(), "/api/config": CONFIG });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#sitP .sittext")?.textContent).toBe(SITUATION_EMPTY),
+    );
+  });
+
+  it("Asked of you lists the operator's items, with FLIGHT's take where it briefed one", async () => {
+    function Probe() {
+      return <span data-testid="item">{useItem() ?? "none"}</span>;
+    }
+    const items = [
+      item({ key: "b", kind: "approval", text: "Merge b?" }),
+      item({
+        key: "a",
+        kind: "decision",
+        text: "Pick a cache",
+        brief: brief({ recommendation: "Use LRU." }),
+      }),
+      item({ key: "c", kind: "stalled", owner: "flight" }),
+    ];
+    stubFetch({ "/api/attention": items, "/api/config": CONFIG });
+    render(
+      <>
+        <Probe />
+        <Flight />
+      </>,
+    );
+    const rows = await screen.findAllByTestId("ask-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("Pick a cache");
+    expect(rows[0]?.textContent).toContain("FLIGHT's take:");
+    expect(rows[0]?.textContent).toContain("Use LRU.");
+    expect(rows[1]?.textContent).toContain("Merge b?");
+    expect(rows[1]?.textContent).not.toContain("FLIGHT's take:");
+    fireEvent.click(within(rows[0] as HTMLElement).getByRole("button", { name: "Open" }));
+    expect(screen.getByTestId("item").textContent).toBe("a");
+  });
+
+  it("Asked of you says nobody is waiting with no items", async () => {
+    stubFetch({ "/api/attention": [], "/api/config": CONFIG });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING),
+    );
+  });
+
+  it("Incoming lists cards new in Backlog or Refinement; Watch list is FLIGHT's risks; Drafts are not tracked", async () => {
+    const cards = [
+      boardItem({ issueNumber: 12, status: "Backlog", createdAt: NOW - 30 * HOUR }),
+      boardItem({ issueNumber: 11, status: "Refinement", createdAt: NOW - 2 * HOUR }),
+      boardItem({ issueNumber: 10, status: "Backlog", createdAt: NOW - HOUR }),
+      boardItem({ issueNumber: 13, status: "Ready", createdAt: NOW - HOUR }),
+    ];
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": cards,
+      "/api/boards/site-builder": [],
+      "/api/flight/brief": briefView({ risks: { text: "The cache may thrash." } }),
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    const rows = await screen.findAllByTestId("incoming-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("#10");
+    expect(rows[1]?.textContent).toContain("#11");
+    expect(rows[1]?.textContent).toContain("Refinement");
+    expect(incomingCards(cards, NOW).map((c) => c.issueNumber)).toEqual([10, 11]);
+    await waitFor(() =>
+      expect(container.querySelector("#watchP")?.textContent).toContain("The cache may thrash."),
+    );
+    expect(container.querySelector("#draftsP")?.textContent).toContain(DRAFTS_NOT_TRACKED);
+  });
+
+  it("Incoming and Watch list say so when empty", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [],
+      "/api/boards/site-builder": [],
+      "/api/flight/brief": briefView(),
+      "/api/config": CONFIG,
+    });
+    const { container } = render(<Flight />);
+    await waitFor(() =>
+      expect(container.querySelector("#incP")?.textContent).toContain(NO_INCOMING),
+    );
+    await waitFor(() =>
+      expect(container.querySelector("#watchP")?.textContent).toContain(WATCH_EMPTY),
+    );
   });
 });
