@@ -989,6 +989,28 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
       ]);
     });
 
+    it("refuses an entry that differs from the worktrees folder only in case, before it exists", () => {
+      const worktrees = join(homedir(), "Dev/mc-crew");
+      const wrong = join(homedir(), "dev/MC-CREW");
+      expect(fails(crewText({ worktrees, denyRead: [wrong] })).message).toBe(holds(wrong));
+    });
+
+    it("refuses an entry inside the worktrees folder, or inside a session checkout", () => {
+      const worktrees = join(homedir(), "Dev/mc-crew");
+      const seatDir = join(worktrees, "guido-1-42");
+      const e = fails(crewText({ worktrees, denyRead: [seatDir] }));
+      expect(e.path).toBe("crew.deny_read");
+      expect(e.message).toBe(`crew.deny_read: ${seatDir} is inside the crew's own folders`);
+      const checkout = join(homedir(), "code/shop-app");
+      const sub = join(checkout, "src");
+      expect(fails(crewText({ worktrees, checkout, denyRead: [sub] })).message).toBe(
+        `crew.deny_read: ${sub} is inside the crew's own folders`,
+      );
+      expect(
+        load(crewText({ worktrees, denyRead: [join(homedir(), "work")] })).crew?.denyRead,
+      ).toEqual([join(homedir(), "work")]);
+    });
+
     // Worktrees and checkout outside every temp dir (HOME is under tmpdir in these tests), so only
     // the temp-dir rules can refuse.
     const outside = {
