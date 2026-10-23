@@ -201,6 +201,31 @@ describe("loadConfig", () => {
     expect(errorOf(() => loadConfig(p)).path).toBe("accounts[0].alertAt");
   });
 
+  it("names every schema error in one message", () => {
+    const p = tmpConfig((y) =>
+      y.replace("alert_at: 85", "alert_at: lots").replace("Todo: planned", "Todo: someday"),
+    );
+    const e = errorOf(() => loadConfig(p));
+    expect(e.path).toBe("accounts[0].alertAt");
+    expect(e.message).toContain("accounts[0].alertAt");
+    expect(e.message).toContain("repos[0].statusMap.Todo");
+  });
+
+  it("names at most 10 schema errors and counts the rest", () => {
+    // alert_at plus every status_map value of the first two repos: 1 + 5 + 6 = 12 errors.
+    const p = tmpConfig((y) => {
+      const cut = y.indexOf("# Mission Control itself");
+      const head = y
+        .slice(0, cut)
+        .replace("alert_at: 85", "alert_at: lots")
+        .replace(/^(\s+[A-Za-z ]+): (planned|in progress|review|blocked|done)$/gm, "$1: someday");
+      return head + y.slice(cut);
+    });
+    const e = errorOf(() => loadConfig(p));
+    expect(e.message.split("; ")).toHaveLength(10);
+    expect(e.message).toMatch(/ \(and 2 more\)$/);
+  });
+
   it("throws ConfigError with empty path for a missing file", () => {
     const e = errorOf(() => loadConfig("/nonexistent/cc/config.yaml"));
     expect(e.path).toBe("");
