@@ -47,6 +47,19 @@ describe("crewOrder", () => {
     expect(ids(rows)).toEqual(["b", "a"]);
   });
 
+  it("does not put a seat first for a set-aside run's item", () => {
+    const rows = [
+      crewRow({ id: "a", index: 0, hudState: "running", ticket: "shop-app#3349" }),
+      crewRow({ id: "b", index: 1, hudState: "running", ticket: "shop-app#3349" }),
+    ];
+    const old = {
+      ...item({ key: "ready:old", agentId: "b", ticket: "shop-app#3000", escalationId: null }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    expect(ids(crewOrder(rows, [old]))).toEqual(["a", "b"]);
+    expect(ids(crewOrder(rows, [{ ...old, ticket: "shop-app#3349" }]))).toEqual(["b", "a"]);
+  });
+
   it("ignores items with no agent", () => {
     const rows = [
       crewRow({ id: "a", index: 0, hudState: "idle" }),
