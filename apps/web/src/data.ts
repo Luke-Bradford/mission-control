@@ -49,6 +49,8 @@ export const RESOURCES = {
     topic: "attention",
   }),
   attention: { path: "/api/attention", topic: "attention" },
+  notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
+  notificationEvents: { path: "/api/notifications/events", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
@@ -139,6 +141,8 @@ export const RESOURCES = {
 
 /** POST endpoints. */
 export const ACTIONS = {
+  notificationPreferences: RESOURCES.notificationPreferences.path,
+  notificationTest: "/api/notifications/test",
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
   addAccount: "/api/accounts",
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
@@ -257,7 +261,12 @@ class Hub {
   /** Refetch only what is on screen and belongs to the changed topic. */
   refetchTopic(topic: Topic): void {
     for (const e of this.entries.values()) {
-      if (e.topic === topic && e.listeners.size > 0) void this.fetch(e);
+      if (
+        (e.topic === topic ||
+          (topic === "settings" && e.path === RESOURCES.notificationEvents.path)) &&
+        e.listeners.size > 0
+      )
+        void this.fetch(e);
     }
   }
 
