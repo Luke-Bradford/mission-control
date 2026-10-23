@@ -228,6 +228,16 @@ export interface BoardItem {
   projectId: string | null;
 }
 
+/** A check run or a commit status on a PR's head commit. */
+export interface PrCheck {
+  name: string; // a check run's name, or a status's context
+  kind: "check" | "status";
+  state: "passing" | "failing" | "pending";
+  conclusion: string; // a check run's conclusion (its status until done); a status's state
+  attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
+  url: string | null;
+}
+
 export interface PullRequestView {
   repoId: RepoId;
   number: number;
@@ -251,6 +261,8 @@ export interface PullRequestView {
   author?: string | null;
   /** Logins assigned to the PR; absent means none. */
   assignees?: string[];
+  /** The head commit's checks by name; absent on a row stored before them. */
+  checks?: PrCheck[];
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */

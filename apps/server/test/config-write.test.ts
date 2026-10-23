@@ -120,6 +120,7 @@ describe("addRepo", () => {
           statusMap: { Todo: "planned", "In Progress": "in progress", Done: "done" },
           needsYouLabels: ["needs-design"],
           fullSuite: [],
+          requiredChecks: [],
           commands: DEFAULT_SEAT_COMMANDS,
           protectedFiles: [],
           autonomy: "draft",

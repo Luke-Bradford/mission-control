@@ -581,6 +581,47 @@ describe("Store", () => {
     expect(migrated.board("r")[0]?.size).toBe("L");
   });
 
+  it("pull request checks round-trip; a row without them reads []", () => {
+    const base = {
+      repoId: "r1",
+      number: 1,
+      title: "t",
+      url: "u",
+      branch: "fix/1-x",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: "failing" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: null,
+      headSha: null,
+      mergeable: null,
+    };
+    const checks = [
+      {
+        name: "check",
+        kind: "check" as const,
+        state: "failing" as const,
+        conclusion: "FAILURE",
+        attempt: 2,
+        url: "https://example.test/job/2",
+      },
+    ];
+    store.upsertPullRequests(
+      "r1",
+      [
+        { ...base, checks },
+        { ...base, number: 2 },
+      ],
+      0,
+    );
+    const by = new Map(store.pullRequests("r1").map((p) => [p.number, p.checks]));
+    expect(by.get(1)).toEqual(checks);
+    expect(by.get(2)).toEqual([]);
+  });
+
   it("pull requests upsert, replace, scope to the repo and round-trip every field", () => {
     const pr = (repoId: string, number: number, over: object = {}) => ({
       repoId,
@@ -600,6 +641,7 @@ describe("Store", () => {
       mergeable: "MERGEABLE" as const,
       author: "octo",
       assignees: ["a", "b"],
+      checks: [],
       ...over,
     });
     store.upsertPullRequests(
