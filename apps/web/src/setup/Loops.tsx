@@ -1,7 +1,26 @@
-import { type ConfigProfile, type ConfigView, RETRY_NOTE, SMALL_SIZES } from "@mc/core";
+import { type ConfigProfile, type ConfigView, type Crew, RETRY_NOTE, SMALL_SIZES } from "@mc/core";
 import { useState } from "react";
+import { RESOURCES, useResource } from "../data.ts";
+import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { useSessionScope } from "../shell/session.ts";
+import { toast } from "../shell/Toast.tsx";
+
+function NewTemplate() {
+  return (
+    <button
+      type="button"
+      className="sm"
+      onClick={() =>
+        toast(
+          "New template: name the work type, draw the steps, give each step its checks and a limit, then bind it to a ticket label.",
+        )
+      }
+    >
+      New
+    </button>
+  );
+}
 
 /** What picks a profile: its labels, then what it catches when a ticket carries no template label. */
 export function profileTrigger(p: ConfigProfile): string {
@@ -39,11 +58,18 @@ function stepExtra(p: ConfigProfile, step: ConfigProfile["steps"][number]): stri
 /** The Templates panel and the picked profile's track (catalogue 2.7.2), read-only. */
 function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]> }) {
   const [picked, setPicked] = useState<string | null>(null);
+  const { inView } = useSessionScope();
+  const { data: crew } = useResource<Crew>(RESOURCES.crew);
+  const seats = crew?.rows.filter((r) => r.kind === "crew" && inView(r));
   const { list, error, source } = profiles;
   const p = list.find((x) => x.name === picked) ?? list[0];
   return (
     <>
-      <Panel title="Templates" sub={source === "built-in" ? "built-in profiles" : source}>
+      <Panel
+        title="Templates"
+        sub={source === "built-in" ? "built-in profiles" : source}
+        actions={<NewTemplate />}
+      >
         {error !== null ? (
           <p className="pb s">{`Could not read the template profiles: ${error}`}</p>
         ) : list.length === 0 ? (
@@ -57,7 +83,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
                   aria-pressed={x.name === p?.name}
                   onClick={() => setPicked(x.name)}
                 >
-                  {`${x.name} · ${profileTrigger(x)} · ${x.steps.length} steps`}
+                  {`${x.name} · ${profileTrigger(x)} · ${seats?.filter((r) => r.loop?.profile === x.name && r.hudState === "running").length ?? "—"} running · ${x.steps.length} steps`}
                 </button>
               </li>
             ))}
@@ -83,6 +109,20 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
             {p.steps.map((s, i) => (
               <div key={s.name} className="pcard">
                 <b>{`${i + 1} · ${s.name}`}</b>
+                <div className="row wrap">
+                  <span className="xs muted">on this step</span>
+                  {seats
+                    ?.filter(
+                      (r) =>
+                        r.loop?.profile === p.name &&
+                        r.loop.step === s.name &&
+                        r.hudState !== "idle" &&
+                        r.hudState !== "stopped",
+                    )
+                    .map((r) => (
+                      <AgentTag key={r.id} id={r.id} index={r.index} sm bare />
+                    ))}
+                </div>
                 <span className="s">{stepRole(p, s)}</span>
                 {stepExtra(p, s) !== null && <span className="s">{stepExtra(p, s)}</span>}
               </div>
@@ -140,7 +180,7 @@ export function Loops({ config }: { config: ConfigView }) {
         )}
       </Panel>
       {config.profiles === undefined ? (
-        <Panel title="Templates" sub="loops/*.yaml">
+        <Panel title="Templates" sub="loops/*.yaml" actions={<NewTemplate />}>
           <div className="pb">
             <p className="s">{NO_PROFILES}</p>
             <p className="xs muted">{RETRY_NOTE}</p>
