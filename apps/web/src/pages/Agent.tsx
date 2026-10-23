@@ -16,7 +16,8 @@ import { toast } from "../shell/Toast.tsx";
 
 /**
  * One agent in detail (catalogue §2.4): picker, need banner, header and tiles, then Activity beside
- * Runs and the side tabs. `/agent` with no id shows the selected agent, else the first in view.
+ * Runs and the side tabs. `/agent` with no id shows the selected agent, else the first running crew seat,
+ * else the first crew seat, else the first in view.
  */
 export function Agent({ id }: { id: string | null }) {
   const crew = useResource<Crew>(RESOURCES.crew);
@@ -29,12 +30,16 @@ export function Agent({ id }: { id: string | null }) {
 
   const all = crew.data ? [...crew.data.rows].sort((a, b) => a.index - b.index) : null;
   const inView = all?.filter((r) => inSession(session, r.repoId)) ?? [];
+  const crewSeats = inView.filter((r) => r.kind === "crew");
   const row =
     all === null
       ? null
       : ((id !== null
           ? all.find((r) => r.id === id)
-          : (inView.find((r) => r.id === selected) ?? inView[0])) ?? null);
+          : (inView.find((r) => r.id === selected) ??
+            crewSeats.find((r) => r.hudState === "running") ??
+            crewSeats[0] ??
+            inView[0])) ?? null);
   const shownId = row?.id ?? null;
 
   // The selection follows the agent on screen, so j/k step from it.
