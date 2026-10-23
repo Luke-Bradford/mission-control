@@ -44,6 +44,7 @@ import {
   reworkFirstText,
   START_NO_RULES,
   seatBusyText,
+  startClosedText,
   startMissingNeedsText,
   startNeedsPlanText,
   type TicketView,
@@ -509,6 +510,16 @@ describe("startRun eligibility", () => {
     expect(worktrees()).toEqual([]);
     expect(claim).not.toHaveBeenCalled();
   }
+
+  it("0: refuses a closed card", async () => {
+    onBoard(boardCard(42, { closed: true }));
+    await refused(422, startClosedText("mc#42"));
+  });
+
+  it("0: refuses a card in Done", async () => {
+    onBoard(boardCard(42, { status: "Done", state: "done" }));
+    await refused(422, startClosedText("mc#42"));
+  });
 
   it("1: refuses another lane", async () => {
     const { sup, cfg } = make({
