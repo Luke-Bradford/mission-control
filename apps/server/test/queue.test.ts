@@ -242,6 +242,17 @@ const run = (over: Partial<Run>): Run => ({
   ...over,
 });
 
+/** Two runs of the seat set aside in review: it is at the default cap. */
+const setAsideRuns = (agentId: string) => {
+  const loop = {
+    ...NEW_LOOP,
+    phase: "review" as const,
+    aside: { worktree: "/w/x", wake: false },
+  };
+  store.upsertRun(run({ id: "r-a", agentId, ticket: `${REPO}#8`, loop }));
+  store.upsertRun(run({ id: "r-b", agentId, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }));
+};
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-queue-"));
   store = new Store(join(dir, "mc.sqlite"));
@@ -527,6 +538,15 @@ describe("refillQueues", () => {
       expect(issues(SERVER)).toEqual([2]);
     });
 
+    it("deals a seat below its cap before one at it", async () => {
+      seatRow("idle");
+      setAsideRuns(SERVER);
+      store.replaceBoard(REPO, [card(1), card(2)]);
+      await refill();
+      expect(issues("guido-2")).toEqual([1]);
+      expect(issues(SERVER)).toEqual([2]);
+    });
+
     it("never deals one card to two seats, and leaves a taken card with its taker", async () => {
       store.replaceBoard(REPO, [card(1), card(2), card(3), card(4)]);
       await refill();
@@ -561,6 +581,17 @@ describe("refillQueues", () => {
       // guido-1 gets busy; guido-2 frees up
       store.upsertRun(run({ id: "r9", agentId: SERVER, ticket: `${REPO}#9` }));
       seatRow("running", "r9");
+      expect(issues(SERVER)).toEqual([1]);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([]);
+    });
+
+    it("takes the highest-Priority card dealt to a seat at its cap", async () => {
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      seatRow("idle");
+      setAsideRuns(SERVER);
       expect(issues(SERVER)).toEqual([1]);
       await take("guido-2");
       expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
