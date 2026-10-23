@@ -18,7 +18,13 @@ describe("CI", () => {
     for (const job of ["validate", "server", "web-core"]) {
       expect(workflow).toContain(`needs.${job}.result`);
     }
-    expect(workflow).toContain("pnpm exec vitest run --project server");
+    expect(workflow).toContain(
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression.
+      "pnpm exec vitest run --project server --shard=${{ matrix.shard }}/2",
+    );
+    expect(workflow).toMatch(
+      /server:\n {4}runs-on: ubuntu-latest\n {4}strategy:\n {6}matrix:\n {8}shard: \[1, 2\]/,
+    );
     expect(workflow).toContain("pnpm exec vitest run --project web --project core");
   });
 
