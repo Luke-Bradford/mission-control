@@ -1,4 +1,11 @@
-import type { AttentionItem, ConfigView, Crew, LimitRow, TestLockState } from "@mc/core";
+import {
+  type AttentionItem,
+  type ConfigView,
+  type Crew,
+  flightTurnShort,
+  type LimitRow,
+  type TestLockState,
+} from "@mc/core";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -28,7 +35,7 @@ import {
   waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
-import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
+import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
 import { cost, kTokens } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
@@ -71,6 +78,8 @@ function FlightRow({
   now: number;
   tz: string | null;
 }) {
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const turns = flight?.seat?.turns ?? null;
   const go = () => toggleDock(true);
   const status = row ? seatStatus(row) : null;
   const five = row ? limits.find((l) => l.accountId === row.accountId && l.window === "5h") : null;
@@ -109,8 +118,9 @@ function FlightRow({
         ) : (
           <span className="ellip s">{FLIGHT_NO_SEAT}</span>
         )}
+        <span className="xs muted block">coordinates the crew and brings you decisions</span>
       </span>
-      <span className="xs fg2">{DASH}</span>
+      <span className="xs fg2">{turns ? flightTurnShort(turns.n, turns.max) : DASH}</span>
       <span className="tok">
         <span className="num s">{tokens === null ? DASH : kTokens(tokens)}</span>
         {tpm !== null && <span className="xs muted num">{kTokens(tpm)}/min</span>}
