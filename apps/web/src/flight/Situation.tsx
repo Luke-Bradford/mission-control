@@ -1,8 +1,16 @@
-import type { AttentionItem, BoardItem, ReplyDraft, RepoView } from "@mc/core";
-import { cardColumn } from "../board/cards.ts";
+import type {
+  AttentionItem,
+  BoardItem,
+  Crew,
+  PullRequestView,
+  ReplyDraft,
+  RepoView,
+} from "@mc/core";
+import { cardColumn, cardYouWait } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
+import type { NotificationsView } from "../notifications.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
 import { SituationText } from "./Brief.tsx";
@@ -20,9 +28,12 @@ const count = (items: AttentionItem[], kinds: AttentionItem["kind"][]): number =
  * and the timeline are computed from today's data.
  */
 export function Situation() {
+  const notes = useResource<NotificationsView>(RESOURCES.notifications).data;
+  const crew = useResource<Crew>(RESOURCES.crew).data;
   const drafts = useResource<ReplyDraft[]>(RESOURCES.drafts).data;
   const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
+  const prs = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const [session] = useSession();
   const loaded = repos.length > 0 && boards.every((b) => b.data !== undefined);
@@ -41,6 +52,20 @@ export function Situation() {
   const flightView = useResource<FlightView>(RESOURCES.flight).data;
   const tz = useTz();
   const now = useNow();
+  const people = notes?.open.filter((t) => inSession(session, t.repoId)).length;
+  const otherPeople = all.filter((i) => {
+    const col = cardColumn(i);
+    return (
+      col === "Ready for QA" ||
+      (col === "In review" &&
+        cardYouWait(
+          i,
+          prs.flatMap((p) => p.data ?? []),
+          crew?.rows ?? [],
+          now,
+        ) === null)
+    );
+  }).length;
   const answered =
     flightView === undefined || tz === null
       ? "—"
@@ -51,12 +76,16 @@ export function Situation() {
       <div className="pb">
         <SituationText />
         <div className="sitstats">
+          <span className={people !== undefined && people > 0 ? "warn" : undefined}>
+            <b className="num">{people ?? "—"}</b> {people === 1 ? "person" : "people"} waiting on
+            you
+          </span>
           <span>
             <b className="num">{inProgress}</b> {inProgress === "1" ? "ticket" : "tickets"} in
             progress
           </span>
           <span>
-            <b className="num">{inColumn("In review", "Ready for QA")}</b> waiting on other people
+            <b className="num">{loaded ? otherPeople : "—"}</b> waiting on other people
           </span>
           <span className={decisions > 0 ? "warn" : undefined}>
             <b className="num">{num(decisions)}</b> {decisions === 1 ? "decision" : "decisions"} for
