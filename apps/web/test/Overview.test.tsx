@@ -1599,6 +1599,8 @@ describe("Activity panel", () => {
         comms({ at: NOW - MIN, who: "inco-1", text: "site talk" }),
         comms({ at: NOW - 2 * MIN, text: "shop talk" }),
         comms({ at: NOW - 3 * MIN, who: "MC", text: "hub talk" }),
+        comms({ at: NOW - 4 * MIN, who: "MC", to: "inco-1", text: "site ci" }),
+        comms({ at: NOW - 5 * MIN, who: "guido-1", to: "inco-1", text: "cross talk" }),
       ],
     });
     const { container } = render(<Overview />);
@@ -1609,6 +1611,8 @@ describe("Activity panel", () => {
     expect(within(act_).getByText("shop talk")).toBeTruthy();
     expect(within(act_).getByText("hub talk")).toBeTruthy();
     expect(within(act_).queryByText("site talk")).toBeNull();
+    expect(within(act_).queryByText("site ci")).toBeNull();
+    expect(within(act_).getByText("cross talk")).toBeTruthy();
   });
 
   it("an empty Messages list says No events yet.", async () => {
