@@ -46,6 +46,6 @@ What run 2 showed:
 - the node and pnpm toolchain folders;
 - `~/.gitconfig` and `~/.config/git`.
 
-This replaces today's deny list for credential folders: everything else in home becomes unreadable by default, browser profiles and `~/Library/Application Support` token files included. The build work is #487: `crewSandboxSettings` gains the home deny and the re-allow list, and the supervisor passes the toolchain and store paths.
+This adds to today's deny list for credential folders, which stays: everything else in home becomes unreadable by default too, browser profiles and `~/Library/Application Support` token files included. The build work is #487: `crewSandboxSettings` gains the home deny and the re-allow list, and the supervisor passes the toolchain and store paths.
 
 Still to check when that's built: a real seat running each repo's own commands. Repos whose tools read other files in home (for example a global npm or pip config) may need an entry in the new `crew.allow_read` that #487 adds.
