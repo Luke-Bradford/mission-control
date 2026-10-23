@@ -89,7 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.restoreAllMocks(); // a spy on hud must not outlive its test
+  vi.restoreAllMocks(); // the prune test's hud stubs must not carry into later tests
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -607,7 +607,9 @@ describe("scheduler", () => {
       });
 
       describe("between loop ticks", () => {
-        const crewCalls = () => vi.mocked(hud.crew).mock.calls.length;
+        // Only reads against this test's own store: a scheduler an earlier, timed-out test left
+        // ticking calls the same spy with its own store.
+        const crewCalls = () => vi.mocked(hud.crew).mock.calls.filter((c) => c[1] === store).length;
         /** Starts the scheduler and lets the start-up ticks' emits and their re-reads settle. */
         const started = async () => {
           vi.useFakeTimers();
