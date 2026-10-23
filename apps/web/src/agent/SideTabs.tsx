@@ -1,10 +1,10 @@
 import {
   type BoardItem,
   type ChangedFiles,
-  CREW_FILES_NOTE,
   type CrewRow,
   DIFF_MAX_CHARS,
   type FileDiff,
+  READONLY_FILES_NOTE,
   SUBAGENT_PILL,
   type TicketView,
 } from "@mc/core";
@@ -211,8 +211,8 @@ function Files({ agentId, files }: { agentId: string; files: Resource<ChangedFil
   if (!files.data) return <p className="s muted">Loading…</p>;
   const { files: list, note } = files.data;
   const shown = open !== null && list.some((f) => f.path === open) ? open : null;
-  // a crew seat's list is not read yet (phase 2b): its note alone, not "no changes"
-  const unread = note === CREW_FILES_NOTE;
+  // a read-only seat changes no files: its note alone, not "no changes"
+  const unread = note === READONLY_FILES_NOTE;
   return (
     <>
       {list.length === 0 && !unread && <span className="s muted">No file changes yet.</span>}
@@ -250,7 +250,7 @@ function Files({ agentId, files }: { agentId: string; files: Resource<ChangedFil
 export function SideTabs({ row }: { row: CrewRow }) {
   const [tab, setTab] = useState<Tab>("plan");
   const files = useResource<ChangedFiles>(RESOURCES.files(row.id));
-  const nFiles = files.data?.note === CREW_FILES_NOTE ? undefined : files.data?.files.length;
+  const nFiles = files.data?.note === READONLY_FILES_NOTE ? undefined : files.data?.files.length;
   const options = [
     { value: "plan", label: "Plan" },
     { value: "queue", label: "Queue" },

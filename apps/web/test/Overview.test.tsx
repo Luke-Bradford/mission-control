@@ -931,6 +931,16 @@ describe("Agents panel", () => {
     expect(row.querySelector(".meter.hi")).toBeTruthy(); // 82 % is amber
   });
 
+  it("a running row's cost is the live estimate", async () => {
+    const base = crewRow().run as NonNullable<CrewRow["run"]>;
+    stub({ rows: [crewRow({ run: { ...base, costEstimateUsd: 3.1 } })] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.textContent).toContain("~$3.10");
+    expect(row.textContent).not.toContain("~$2.47");
+  });
+
   it("sorts error before running before idle, agents with a need first", async () => {
     stub({
       rows: [
