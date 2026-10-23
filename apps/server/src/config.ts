@@ -497,6 +497,9 @@ function expandHome(p: string): string {
   return p.startsWith("~/") ? homedir() + p.slice(1) : p;
 }
 
+/** The most schema issues one config error names; the rest are counted. */
+const MAX_SCHEMA_ISSUES_NAMED = 10;
+
 const camel = (s: string) => s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 
 /** Render a zod issue path using the camelCase interface names; status_map keys are user data. */
@@ -930,9 +933,15 @@ export function parseConfig(
   }
   const parsed = fileSchema.safeParse(raw);
   if (!parsed.success) {
-    const issue = parsed.error.issues[0];
+    const [issue, ...rest] = parsed.error.issues;
     if (!issue) throw new ConfigError("", "invalid config");
-    throw new ConfigError(renderPath(issue.path), issue.message);
+    const named = rest.slice(0, MAX_SCHEMA_ISSUES_NAMED - 1);
+    const more = rest.length - named.length;
+    const message =
+      issue.message +
+      named.map((i) => `; ${renderPath(i.path)}: ${i.message}`).join("") +
+      (more > 0 ? ` (and ${more} more)` : "");
+    throw new ConfigError(renderPath(issue.path), message);
   }
   const cfg = parsed.data;
   for (const [list, items] of [
