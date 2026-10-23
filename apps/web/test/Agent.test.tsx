@@ -430,6 +430,35 @@ describe("Agent page: picker and selection", () => {
     expect($(again.container, "#ahead .big")?.textContent).toBe("shop-app-ta");
   });
 
+  it("/agent with nothing selected opens on the first running crew seat, else the first crew seat", async () => {
+    const rows = [
+      studio({ index: 0 }),
+      seatRow({ id: "guido-1", index: 1, hudState: "idle" }),
+      seatRow({ id: "guido-2", index: 2, hudState: "running" }),
+    ];
+    stub({ rows });
+    act(() => setSelectedAgent(null));
+    const running = render(<Agent id={null} />);
+    await vi.waitFor(() =>
+      expect($(running.container, "#ahead .big")?.textContent).toContain("GUIDO-2"),
+    );
+    running.unmount();
+    hub.clear();
+    stub({ rows: rows.map((r) => ({ ...r, hudState: "idle" as const })) });
+    act(() => setSelectedAgent(null));
+    const idle = render(<Agent id={null} />);
+    await vi.waitFor(() =>
+      expect($(idle.container, "#ahead .big")?.textContent).toContain("GUIDO-1"),
+    );
+  });
+
+  it("an agent in the path stays selected over the crew-seat default", async () => {
+    stub({ rows: [studio({ index: 0 }), seatRow({ index: 1, hudState: "running" })] });
+    act(() => setSelectedAgent(null));
+    const { container } = render(<Agent id="studio-builder" />);
+    await vi.waitFor(() => expect($(container, "#ahead .big")?.textContent).toBe("studio-builder"));
+  });
+
   it.each([
     [false, "GUIDO-1 · Backend developer", null],
     [true, "GUIDO-1", "Backend developer"],
