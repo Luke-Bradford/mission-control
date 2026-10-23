@@ -426,7 +426,12 @@ describe("needLine", () => {
     });
     const lock = (holder: string, waiting: string[]) => ({
       holder: { runId: "r-1", seatId: holder, command: "pnpm -s test", since: NOW - 12 * MIN },
-      waiting: waiting.map((seatId, i) => ({ runId: `w-${i}`, seatId, since: NOW - MIN })),
+      waiting: waiting.map((seatId, i) => ({
+        runId: `w-${i}`,
+        seatId,
+        command: "pnpm -s test",
+        since: NOW - MIN,
+      })),
     });
 
     it("holding the test lock reads Stop the run, with the seats waiting", () => {
@@ -774,8 +779,8 @@ describe("lockSince", () => {
   const lock = {
     holder: null,
     waiting: [
-      { runId: "r-1", seatId: "guido-1", since: 5 },
-      { runId: "r-1", seatId: "guido-1", since: 9 },
+      { runId: "r-1", seatId: "guido-1", command: "pnpm -s test", since: 5 },
+      { runId: "r-1", seatId: "guido-1", command: "pnpm -s test", since: 9 },
     ],
   };
   it("is the first entry's since for the run, else null", () => {

@@ -756,6 +756,9 @@ export interface AttentionItem {
   text: string;
   /** The live tool of a stall, so the client renders `{m:ss} in {tool}` without parsing text. */
   tool: string | null;
+  /** A stray's file and crew session; null for other kinds. */
+  path?: string | null;
+  sessionId?: string | null;
   at: number;
   url: string | null;
   escalationId: string | null;

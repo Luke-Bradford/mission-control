@@ -175,7 +175,12 @@ export class TestLock {
         h === null
           ? null
           : { runId: h.runId, seatId: h.seatId, command: h.command, since: h.since },
-      waiting: this.waiting.map((w) => ({ runId: w.key.runId, seatId: w.seatId, since: w.since })),
+      waiting: this.waiting.map((w) => ({
+        runId: w.key.runId,
+        seatId: w.seatId,
+        command: w.command,
+        since: w.since,
+      })),
     };
   }
 

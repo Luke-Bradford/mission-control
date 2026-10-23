@@ -17,8 +17,8 @@ describe("LockLines", () => {
         lock={{
           holder: { runId: "inco-1:x", seatId: "inco-1", command: "pnpm -s test", since: now },
           waiting: [
-            { runId: "guido-1:x", seatId: "guido-1", since: now },
-            { runId: "guido-1:x", seatId: "guido-1", since: now },
+            { runId: "guido-1:x", seatId: "guido-1", command: "pnpm -s test", since: now },
+            { runId: "guido-1:x", seatId: "guido-1", command: "pnpm -s test", since: now },
           ],
         }}
       />,
