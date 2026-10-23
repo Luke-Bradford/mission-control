@@ -34,6 +34,7 @@ import {
   fullAt5h,
   type MachineSample,
   NEW_LOOP,
+  otherLaneText,
   projectAtReset,
   type ReloadResult,
   type Run,
@@ -3088,6 +3089,14 @@ describe("crew routes", () => {
       expect(r.json()).toEqual({ error: text });
     }
     expect(seen).not.toContain("agents");
+  });
+
+  it("answers 422 with the start check's text", async () => {
+    const text = otherLaneText("shop-app#5", [], "work");
+    supervisorFail = new SupervisorError(422, text);
+    const r = await post5("start", { issue: 5 });
+    expect(r.statusCode).toBe(422);
+    expect(r.json()).toEqual({ error: text });
   });
 
   it("maps a CheckoutError to 422 with its fixed text", async () => {
