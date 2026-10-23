@@ -1,4 +1,10 @@
-import { type ContextUsage, type CrewRow, cacheHitPct, type LimitRow } from "@mc/core";
+import {
+  type ChangedFiles,
+  type ContextUsage,
+  type CrewRow,
+  cacheHitPct,
+  type LimitRow,
+} from "@mc/core";
 import { type ReactNode, useEffect, useRef } from "react";
 import { useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -19,7 +25,6 @@ import { TicketRef } from "../hud/RepoRef.tsx";
 const DASH = "—";
 /** The mockup's `m:ss` reads badly past an hour (`160:48`); from there it is `2h 41m`. */
 const HOUR_MS = 3_600_000;
-const SPEED_PHASE = "Arrives with the agent runtime (phase 2).";
 
 function Tile({
   label,
@@ -121,7 +126,10 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
   const pct = contextPct(row);
   const t = run?.tokens ?? null;
   const hit = t ? cacheHitPct(t) : null;
-  const subs = d?.subagents.length ?? 0;
+  const files = useResource<ChangedFiles>(RESOURCES.files(row.id)).data;
+  const add = files?.files.reduce((sum, f) => sum + (f.add ?? 0), 0);
+  const del = files?.files.reduce((sum, f) => sum + (f.del ?? 0), 0);
+  const commits = row.work?.commits;
   const quota = limits.filter((l) => l.accountId === row.accountId);
   const elapsed = run ? runElapsed(run, now) : null;
   const tz = useTz();
@@ -200,15 +208,16 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
         </span>
       </Tile>
       <Tile label="~Cost">
-        <span className="v num">{cost(run?.costUsd ?? null)}</span>
+        <span className="v num">
+          {cost((running ? (run.costEstimateUsd ?? run.costUsd) : run?.costUsd) ?? null)}
+        </span>
         <span className="d">API-equivalent, this run</span>
       </Tile>
       <Tile label="Speed">
-        <span className="v num" title={SPEED_PHASE}>
-          {DASH}
-          <small>tokens/s</small>
+        <span className="v num">
+          {d?.speed?.tokensPerSec ?? DASH} <small>tokens/s</small>
         </span>
-        <span className="d">{SPEED_PHASE}</span>
+        <span className="d">turn {d?.speed?.turnMs == null ? DASH : dur(d.speed.turnMs)}</span>
       </Tile>
       <Tile label="Work">
         <span className="v num">
@@ -216,7 +225,7 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
           <small>tool calls</small>
         </span>
         <span className="d">
-          {d ? `${d.turns} turns · ${subs} subagent${subs === 1 ? "" : "s"}` : DASH}
+          {`${d?.turns ?? DASH} turns · ${commits ?? DASH} commit${commits === 1 ? "" : "s"} · +${add ?? DASH} −${del ?? DASH} · ⊘${row.work?.denials ?? DASH}`}
         </span>
       </Tile>
       <Tile label={`Quota · ${row.accountId}`}>

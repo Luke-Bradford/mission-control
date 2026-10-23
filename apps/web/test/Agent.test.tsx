@@ -13,6 +13,7 @@ import {
   type LoopTry,
   METER_FULL_PCT,
   METER_WARN_PCT,
+  READONLY_FILES_NOTE,
   type ReviewStatus,
   type RunDigest,
   type RunLoop,
@@ -848,9 +849,9 @@ describe("Agent page: header and tiles", () => {
     expect($(tile("~Cost"), ".v")?.textContent).toBe("~$2.47");
     expect($(tile("~Cost"), ".d")?.textContent).toBe("API-equivalent, this run");
     expect($(tile("Speed"), ".v")?.textContent).toContain("—");
-    expect($(tile("Speed"), ".v")?.title).toContain("phase 2");
+    expect($(tile("Speed"), ".d")?.textContent).toBe("turn —");
     expect($(tile("Work"), ".v")?.textContent).toBe("37tool calls");
-    expect($(tile("Work"), ".d")?.textContent).toBe("21 turns · 1 subagent");
+    expect($(tile("Work"), ".d")?.textContent).toBe("21 turns · — commits · +0 −0 · ⊘—");
     expect(tile("Quota · claude-main").textContent).toContain("5h 41%");
   });
 
@@ -2563,10 +2564,82 @@ const seatLoaded = () => screen.findByText("GUIDO-1");
 const idleSeat = () => seat({ hudState: "idle" });
 
 describe("Agent page: driving a crew seat", () => {
-  it("a crew seat's Activity panel shows its run's events, and Files a plain note", async () => {
+  it.each([
+    ["running", null, 8.75, "~$8.75"],
+    ["running", 2.47, undefined, "~$2.47"],
+    ["ok", 2.47, 8.75, "~$2.47"],
+  ] as const)(
+    "uses the run cost for %s with estimate %s / %s",
+    async (status, costUsd, costEstimateUsd, expected) => {
+      stub({
+        rows: [seat({ run: { ...run({ status, costUsd }), costEstimateUsd } })],
+        extra: SEAT_ROUTES(),
+      });
+      render(<Agent id="guido-1" />);
+      await seatLoaded();
+      expect(
+        screen.getByText("~Cost", { selector: ".lbl" }).closest(".tile2")?.querySelector(".v")
+          ?.textContent,
+      ).toBe(expected);
+    },
+  );
+
+  it("shows the digest's token speed and turn time", async () => {
+    stub({
+      rows: [seat({ digest: digest({ speed: { tokensPerSec: 42.5, turnMs: 3400 } }) })],
+      extra: SEAT_ROUTES(),
+    });
+    render(<Agent id="guido-1" />);
+    await seatLoaded();
+    const tile = screen.getByText("Speed").closest(".tile2");
+    expect(tile?.querySelector(".v")?.textContent).toBe("42.5 tokens/s");
+    expect(tile?.querySelector(".d")?.textContent).toBe("turn 3.4s");
+    expect(tile?.textContent).not.toMatch(/phase 2|first token/);
+  });
+
+  it.each([1, 3])("shows turns, %s commits, line totals and guard denials", async (commits) => {
+    stub({
+      rows: [seat({ digest: digest(), work: { commits, denials: 2 } })],
+      files: {
+        files: [
+          { path: "a.ts", add: 12, del: 3, state: "committed" },
+          { path: "b.ts", add: 8, del: 4, state: "uncommitted" },
+          { path: "image.png", add: null, del: null, state: "untracked" },
+        ],
+        note: null,
+        sha: null,
+      },
+      extra: SEAT_ROUTES(),
+    });
+    render(<Agent id="guido-1" />);
+    await seatLoaded();
+    await waitFor(() =>
+      expect(screen.getByText("Work").closest(".tile2")?.querySelector(".d")?.textContent).toBe(
+        `21 turns · ${commits} commit${commits === 1 ? "" : "s"} · +20 −7 · ⊘2`,
+      ),
+    );
+  });
+
+  it("a read-only seat's Files tab shows only its note", async () => {
+    stub({
+      rows: [seat({ mode: "read-only" })],
+      files: { files: [], note: READONLY_FILES_NOTE, sha: null },
+      extra: SEAT_ROUTES(),
+    });
+    const { container } = render(<Agent id="guido-1" />);
+    await seatLoaded();
+    fireEvent.click(await screen.findByRole("button", { name: "Files 0" }));
+    expect($(container, "#sideBody")?.textContent).toBe(READONLY_FILES_NOTE);
+  });
+
+  it("a crew seat's Activity panel shows its run's events, and Files lists its changes", async () => {
     stub({
       rows: [seat(), studio()],
-      files: { files: [], note: CREW_FILES_NOTE, sha: null },
+      files: {
+        files: [{ path: "apps/web/src/agent/Tiles.tsx", add: 4, del: 2, state: "committed" }],
+        note: CREW_FILES_NOTE,
+        sha: null,
+      },
       extra: SEAT_ROUTES(),
     });
     const { container } = render(<Agent id="guido-1" />);
@@ -2577,8 +2650,11 @@ describe("Agent page: driving a crew seat", () => {
     expect(activity.textContent).not.toContain("Could not load the activity");
     const side = $(container, "#sideP") as HTMLElement;
     const tab = within(side).getByRole("button", { name: /^Files/ });
-    expect(tab.textContent).toBe("Files");
+    expect(tab.textContent).toBe("Files 1");
     fireEvent.click(tab);
+    expect(
+      await within(side).findByRole("button", { name: /apps\/web\/src\/agent\/Tiles.tsx/ }),
+    ).toBeTruthy();
     const note = await within(side).findByText(CREW_FILES_NOTE);
     expect(note.className).toContain("note");
     expect(side.querySelector(".crit-t")).toBeNull();

@@ -37,6 +37,7 @@ import {
   MIN,
   NOW,
   prView,
+  run,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -886,6 +887,19 @@ describe("Agents panel", () => {
     );
     hub.clear();
     expect(await fetched([seatRow({ hudState: "idle", review: null })])).toBe(false);
+  });
+
+  it.each([
+    ["running", 8.75],
+    ["ok", 2.47],
+  ] as const)("shows the %s run's cost in the crew row", async (status, expected) => {
+    stub({
+      rows: [seatRow({ run: { ...run({ status, costUsd: 2.47 }), costEstimateUsd: 8.75 } })],
+    });
+    const { container } = render(<Overview />);
+    await waitFor(() =>
+      expect(agentRows(container)[0]?.textContent).toContain(`~$${expected.toFixed(2)}`),
+    );
   });
 
   it("shows ticket, title, tokens, rate, cost, ctx and the account's 5h window", async () => {
