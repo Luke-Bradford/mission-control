@@ -606,6 +606,12 @@ export const FLIGHT_ANSWER_WAIT_MS = 20 * 60_000;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
 export const FLIGHT_REWAKE_MS = 60 * 60_000;
+/**
+ * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn
+ * raised (a reply, an item) would wake it again straight away: on 2026-10-23 that was a wake every
+ * second or two. A wake due sooner waits for the gap.
+ */
+export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** Starts of FLIGHT itself per hour, rotations not counted. */

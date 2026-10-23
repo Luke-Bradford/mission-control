@@ -93,6 +93,19 @@ export function stalledSeats(
   return new Set(rows.filter((r) => r.hudState === "stalled").map((r) => r.id));
 }
 
+/**
+ * A reply or `@CAPCOM` tag FLIGHT itself wrote: the operator's to read (Needs you still shows it),
+ * not work for FLIGHT. Listing it in the digest woke FLIGHT with every reply it wrote. Assumes one
+ * live FLIGHT seat (`flightSeat`).
+ */
+export const ownReply = (
+  item: Pick<AttentionItem, "kind" | "agentId">,
+  flightId: string | null,
+): boolean =>
+  (item.kind === "message" || item.kind === "tag") &&
+  flightId !== null &&
+  item.agentId === flightId;
+
 /** The ids FLIGHT can answer for: its own session's seats other than FLIGHT itself. */
 export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
   const found = flightSeat(config);
@@ -431,8 +444,9 @@ export function flightState(i: {
   });
 
   const briefed = store.briefs();
+  const flightId = flightSeat(config)?.seat.id ?? null;
   const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
-    .filter((x) => !briefed.has(x.key))
+    .filter((x) => !briefed.has(x.key) && !ownReply(x, flightId))
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import type { PersonMessage, PersonSource } from "@mc/core";
 import {
   type AccountId,
   type AgentId,
@@ -285,7 +286,9 @@ export interface NotificationRow {
   unread: boolean;
   firstSeenAt: number;
   handledAt: number | null;
-  handledHow: "marked" | "read" | null;
+  handledHow: "marked" | "read" | "replied" | "copied" | "flight" | null;
+  message?: PersonMessage;
+  history?: PersonMessage[];
   /** The `updatedAt` that was handled: a thread updated after it is open again. */
   handledThrough: number | null;
 }
@@ -297,6 +300,7 @@ export type NotificationRead = Omit<
 >;
 
 const notificationRow = (r: Row): NotificationRow => ({
+  ...(r.source_content ? JSON.parse(r.source_content as string) : {}),
   id: r.id as string,
   repoId: r.repo_id as string,
   subjectType: r.subject_type as string,
@@ -743,6 +747,9 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    this.addColumn("notifications", "source_content", "TEXT");
+    this.addColumn("briefs", "structured", "TEXT");
+    this.addColumn("drafts", "source", "TEXT");
     // An ok row last succeeded when it was recorded; a failing row's last success is unknown.
     this.whenColumnMissing("collector_status", "last_ok_at", () => {
       this.db.exec("ALTER TABLE collector_status ADD COLUMN last_ok_at INTEGER");
@@ -1740,13 +1747,13 @@ export class Store {
       const before = this.notificationsJson();
       const ins = this.db.prepare(
         `INSERT INTO notifications (id, repo_id, subject_type, title, number, reason, url, author,
-           snippet, updated_at, last_read_at, unread, first_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+           snippet, updated_at, last_read_at, unread, first_seen_at, source_content)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
          ON CONFLICT(id) DO UPDATE SET repo_id = excluded.repo_id,
            subject_type = excluded.subject_type, title = excluded.title, number = excluded.number,
            reason = excluded.reason, url = excluded.url, author = excluded.author,
            snippet = excluded.snippet, updated_at = excluded.updated_at,
-           last_read_at = excluded.last_read_at, unread = 1`,
+           last_read_at = excluded.last_read_at, unread = 1, source_content = excluded.source_content`,
       );
       for (const n of rows) {
         ins.run(
@@ -1762,6 +1769,7 @@ export class Store {
           n.updatedAt,
           n.lastReadAt,
           now,
+          JSON.stringify({ message: n.message, history: n.history }),
         );
       }
       if (complete) {
@@ -1810,7 +1818,7 @@ export class Store {
   markNotificationHandled(
     id: string,
     updatedAt: number,
-    how: "marked" | "read",
+    how: Exclude<NotificationRow["handledHow"], null>,
     at: number,
   ): boolean {
     const r = this.db
@@ -2921,6 +2929,27 @@ export class Store {
     );
   }
 
+  addSourceDraft(
+    target: string,
+    kind: ReplyDraft["kind"],
+    text: string,
+    at: number,
+    source: { itemKey: string; replyId: string; source: PersonSource },
+  ): number {
+    const id = this.addDraft(target, kind, text, at);
+    this.db.prepare("UPDATE drafts SET source = ? WHERE id = ?").run(JSON.stringify(source), id);
+    return id;
+  }
+
+  draftSource(
+    id: number,
+  ): { itemKey: string; replyId: string; source: PersonSource; state: string } | null {
+    const row = this.db.prepare("SELECT source, state FROM drafts WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row?.source ? { ...JSON.parse(row.source as string), state: row.state as string } : null;
+  }
+
   drafts(): ReplyDraft[] {
     return this.db
       .prepare(
@@ -3006,13 +3035,57 @@ export class Store {
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */
   addBrief(b: AttentionBrief & { key: string }): number {
-    const r = this.db
-      .prepare(
-        `INSERT INTO briefs (key, context, recommendation, options, basis, at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(b.key, b.context, b.recommendation, JSON.stringify(b.options), b.basis, b.at);
-    return Number(r.lastInsertRowid);
+    let id = 0;
+    this.transaction(() => {
+      const { key, context, recommendation, options, basis, at, ...structured } = b;
+      if (structured.person) {
+        const thread = /^person:(\d+):(\d+)$/.exec(key);
+        const n = thread ? this.notification(thread[1] as string) : null;
+        if (
+          !n ||
+          n.updatedAt !== Number(thread?.[2]) ||
+          !n.unread ||
+          (n.handledThrough !== null && n.updatedAt <= n.handledThrough) ||
+          !n.message ||
+          JSON.stringify(n.message.source) !== JSON.stringify(structured.person.source)
+        ) {
+          throw new Error("Source changed; refresh the item before drafting.");
+        }
+        const source = n.message.source;
+        structured.person = {
+          ...structured.person,
+          history: n.history,
+          replies: structured.person.replies?.map(({ draftId: _ignored, ...r }) => ({
+            ...r,
+            ...(structured.person?.source.kind === "github" && n.number !== null
+              ? {
+                  draftId: this.addSourceDraft(
+                    `${n.repoId}#${n.number}`,
+                    n.subjectType === "PullRequest" ? "pr" : "issue",
+                    r.text,
+                    at,
+                    { itemKey: key, replyId: r.id, source },
+                  ),
+                }
+              : {}),
+          })),
+        };
+      }
+      const r = this.db
+        .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          key,
+          context,
+          recommendation,
+          JSON.stringify(options),
+          basis,
+          at,
+          JSON.stringify(structured),
+        );
+      id = Number(r.lastInsertRowid);
+    });
+    return id;
   }
 
   /** The newest brief on each attention key. */
@@ -3021,16 +3094,30 @@ export class Store {
       .prepare("SELECT * FROM briefs WHERE id IN (SELECT MAX(id) FROM briefs GROUP BY key)")
       .all() as Row[];
     return new Map(
-      rows.map((r) => [
-        r.key as string,
-        {
-          context: r.context as string,
-          recommendation: r.recommendation as string,
-          options: JSON.parse(r.options as string) as BriefOption[],
-          basis: r.basis as string,
-          at: r.at as number,
-        },
-      ]),
+      rows
+        .filter((r) => {
+          const person = r.structured
+            ? (JSON.parse(r.structured as string) as AttentionBrief).person
+            : undefined;
+          if (!person) return true;
+          const thread = /^person:(\d+):(\d+)$/.exec(r.key as string);
+          const n = thread ? this.notification(thread[1] as string) : null;
+          return (
+            n?.updatedAt === Number(thread?.[2]) &&
+            JSON.stringify(n?.message?.source) === JSON.stringify(person.source)
+          );
+        })
+        .map((r) => [
+          r.key as string,
+          {
+            ...(r.structured ? JSON.parse(r.structured as string) : {}),
+            context: r.context as string,
+            recommendation: r.recommendation as string,
+            options: JSON.parse(r.options as string) as BriefOption[],
+            basis: r.basis as string,
+            at: r.at as number,
+          },
+        ]),
     );
   }
 
