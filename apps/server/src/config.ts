@@ -398,7 +398,7 @@ const fileSchema = z
         roles: z.record(z.string(), roleSchema).default({}),
         sessions: z.array(
           z.strictObject({
-            id: nonEmpty,
+            id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
             repo_id: nonEmpty,
             checkout: nonEmpty,
             seats: z.array(

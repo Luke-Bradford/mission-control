@@ -64,11 +64,12 @@ const BRANCH = "feature/42-fix-the-stop-race-in-the-claude-adapter";
 const input = () => ({
   checkout: clone,
   worktreesRoot: root,
+  sessionId: "a",
   seatId: "guido",
   issue: 42,
   title: TITLE,
 });
-const wtPath = () => join(root, "guido-42");
+const wtPath = () => join(root, "a", "guido-42");
 const fail = (p: Promise<unknown>) =>
   p.then(
     () => {
@@ -128,6 +129,22 @@ describe("prepareCheckout", () => {
       realpathSync(git(wtPath(), "rev-parse", "--absolute-git-dir")),
     );
     expect(dirname(r.gitDir)).toBe(join(clone, ".git", "worktrees"));
+  });
+
+  it("reuses a worktree that is still at the old flat path, and makes new ones in the session folder", async () => {
+    const flat = join(root, "guido-42");
+    git(clone, "worktree", "add", "-q", "-b", BRANCH, flat);
+    const r = await prepareCheckout(input());
+    expect(r).toMatchObject({ branch: BRANCH, path: flat, created: false });
+    expect(existsSync(wtPath())).toBe(false);
+    const fresh = await prepareCheckout({ ...input(), issue: 43, title: "Another" });
+    expect(dirname(fresh.path)).toBe(join(root, "a"));
+  });
+
+  it("refuses a session id that is not a folder name", async () => {
+    const e = await fail(prepareCheckout({ ...input(), sessionId: "../x" }));
+    expect(e.code).toBe("path");
+    expect(worktrees()).toHaveLength(1);
   });
 
   it("works from a checkout on a detached HEAD (the base never comes from it)", async () => {
@@ -552,6 +569,7 @@ describe("prepareDetachedCheckout", () => {
   const flightInput = (name = "flight-1-watch") => ({
     checkout: clone,
     worktreesRoot: root,
+    sessionId: "a",
     name,
   });
 
@@ -562,7 +580,7 @@ describe("prepareDetachedCheckout", () => {
     const r = await prepareDetachedCheckout(flightInput());
     expect(r).toMatchObject({
       branch: "",
-      path: join(root, "flight-1-watch"),
+      path: join(root, "a", "flight-1-watch"),
       created: true,
       baseSha: tip,
     });
@@ -587,7 +605,7 @@ describe("prepareDetachedCheckout", () => {
 });
 
 describe("review scratch checkouts", () => {
-  const scratchPath = () => join(root, "retro-review-7");
+  const scratchPath = () => join(root, "a", "retro-review-7");
   /** A PR branch off main's current tip; main then moves on. Returns { head, fork }. */
   function pr(files: Record<string, string>): { head: string; fork: string } {
     const fork = git(seed, "rev-parse", "HEAD");
@@ -600,6 +618,7 @@ describe("review scratch checkouts", () => {
   const scratchInput = (sha: string) => ({
     checkout: clone,
     worktreesRoot: root,
+    sessionId: "a",
     seatId: "retro",
     reviewId: 7,
     sha,

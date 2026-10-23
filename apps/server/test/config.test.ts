@@ -290,6 +290,7 @@ describe("crew", () => {
     checkout?: string;
     worktrees?: string;
     repo?: string;
+    sessionId?: string;
     maxSeats?: number;
     node?: string;
     denyRead?: string[];
@@ -314,7 +315,7 @@ crew:
   ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
-    - id: shop-app
+    - id: ${opts.sessionId ?? "shop-app"}
       repo_id: ${opts.repo ?? "shop-app"}
       checkout: ${opts.checkout ?? "~/code/mc-crew/shop-app"}
       seats:
@@ -353,6 +354,10 @@ ${seats.join("\n")}
     for (const bad of ["0", "-5", "1.5", '"lots"']) {
       expect(fails(crewText({ budget: bad })).path).toBe("crew.runTokenBudget");
     }
+  });
+
+  it.each(["../x", "Shop", "a/b", ""])("refuses the session id %j (it is a folder name)", (id) => {
+    expect(fails(crewText({ sessionId: JSON.stringify(id) })).path).toBe("crew.sessions[0].id");
   });
 
   it("takes lane home or work only, and defaults lane_default to false", () => {
@@ -582,6 +587,17 @@ ${modelless("flight-2", "FLIGHT")}
         }),
       );
       expect(cfg.crew?.roles?.FAO?.tools).toEqual(["report_plan", "read_ticket"]);
+    });
+
+    it("a watch role may hold read_ticket", () => {
+      const cfg = load(
+        crewText({
+          roles: [
+            "WATCHER: { prompt: roles/SCOUT.md, model: opus, mode: read-only, loop: watch, tools: [read_ticket] }",
+          ],
+        }),
+      );
+      expect(cfg.crew?.roles?.WATCHER?.tools).toEqual(["read_ticket"]);
     });
 
     it("a plan role may not hold another FLIGHT tool", () => {
