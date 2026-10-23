@@ -51,11 +51,13 @@ import {
   reviewStatusOf,
   seatCallSign,
   seatDef,
+  startOfLocalDay,
   stopForecast,
   TELEMETRY_RANGES,
   TEST_LOCK_UNAVAILABLE_TEXT,
   type Telemetry,
   type TelemetryRange,
+  type TestLockHistory,
   type TestLockState,
   TYPE_LABELS,
   UPDATE_UNAVAILABLE,
@@ -110,7 +112,7 @@ import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/
 import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
 import type { Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
-import { telemetry } from "./telemetry.ts";
+import { median, telemetry } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -762,6 +764,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
 
       api.get("/test-lock", async (): Promise<TestLockState> => lock?.state() ?? NO_LOCK);
+
+      // Reader: apps/web/src/telemetry/CapacityGroup.tsx (the Test lock table; the web part follows)
+      api.get("/test-lock/history", async (): Promise<TestLockHistory> => {
+        const at = now();
+        const runs = store.lockRuns(at - TELEMETRY_RANGES["7d"] * 60_000);
+        const today = runs.filter(
+          (r) => r.startedAt >= startOfLocalDay(at, config.operator.timezone),
+        );
+        const lengths = new Map<string, number[]>();
+        for (const r of runs) {
+          if (r.outcome !== "done" || r.endedAt === null) continue;
+          const list = lengths.get(r.command) ?? [];
+          list.push(r.endedAt - r.startedAt);
+          lengths.set(r.command, list);
+        }
+        return {
+          runs,
+          today: {
+            runs: today.length,
+            waitMs: today.reduce((sum, r) => sum + r.startedAt - r.queuedAt, 0),
+          },
+          usualMs: Object.fromEntries(
+            [...lengths]
+              .filter(([, list]) => list.length >= 3)
+              .map(([command, list]) => [command, median(list) as number]),
+          ),
+        };
+      });
 
       api.get<{ Querystring: { days?: unknown } }>(
         "/guard/hits",

@@ -11,6 +11,7 @@ import {
   type BoardItem,
   type BriefOption,
   type ChosenProfile,
+  COMMS_CAPCOM,
   COMMS_TEXT_MAX,
   type Escalation,
   type FlightBriefSectionKey,
@@ -47,6 +48,7 @@ import {
   type StoredFinding,
   type StrayKind,
   type Telemetry,
+  type TestLockRun,
   TITLE_MARKERS,
   type TokenUsage,
   type UsageSample,
@@ -210,6 +212,13 @@ CREATE TABLE IF NOT EXISTS test_lock_holds (
   run_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, seat_id TEXT NOT NULL, command TEXT NOT NULL,
   since INTEGER NOT NULL, PRIMARY KEY (run_id, tool_use_id)
 );
+-- One row per hold, retained for eight days.
+CREATE TABLE IF NOT EXISTS test_lock_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, seat_id TEXT NOT NULL,
+  command TEXT NOT NULL, queued_at INTEGER NOT NULL, started_at INTEGER NOT NULL,
+  ended_at INTEGER, outcome TEXT
+);
+CREATE INDEX IF NOT EXISTS test_lock_runs_started ON test_lock_runs(started_at);
 -- The last keeper line the hub acted on, per run: the next hub replays from here.
 CREATE TABLE IF NOT EXISTS keeper_cursors (
   run_id TEXT PRIMARY KEY, spawn TEXT NOT NULL, line INTEGER NOT NULL, rate_limited_until INTEGER
@@ -384,6 +393,8 @@ export function crewPromptPath(dbPath: string, runId: string): string {
  */
 /** One held call of the test lock, as stored. */
 export interface LockHoldRow {
+  /** When the call joined the line; `since` when absent. Not a column of `test_lock_holds`. */
+  queuedAt?: number;
   runId: string;
   toolUseId: string;
   seatId: string;
@@ -2401,6 +2412,56 @@ export class Store {
       .run(at, seatId);
   }
 
+  /** Commits since `since`, per agent, joined to their runs. */
+  commitsSince(since: number): { agentId: AgentId; n: number }[] {
+    const rows = this.db
+      .prepare(`SELECT r.agent_id, COUNT(*) AS n FROM run_commits c
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? GROUP BY r.agent_id ORDER BY r.agent_id`)
+      .all(since) as Row[];
+    return rows.map((r) => ({ agentId: r.agent_id as string, n: r.n as number }));
+  }
+
+  /** How long each cleared attention note of `kinds` raised since `since` stood open. */
+  noteWaits(kinds: string[], since: number): number[] {
+    if (kinds.length === 0) return [];
+    const rows = this.db
+      .prepare(`SELECT cleared_at - at AS wait FROM attention_notes
+      WHERE kind IN (${kinds.map(() => "?").join(",")}) AND at >= ? AND cleared_at IS NOT NULL
+      ORDER BY at, key`)
+      .all(...kinds, since) as Row[];
+    return rows.map((r) => r.wait as number);
+  }
+
+  /**
+   * Seat questions answered since `since` by the operator: a CAPCOM message to the seat up to 5 s
+   * after the answer. FLIGHT's answers and questions a run's end closed have none.
+   */
+  operatorAnswers(since: number): { agentId: AgentId; at: number; answeredAt: number }[] {
+    const rows = this.db
+      .prepare(`SELECT q.agent_id, q.at, q.answered_at FROM seat_questions q
+      WHERE q.answered_at >= ? AND EXISTS (SELECT 1 FROM comms c
+        WHERE c.from_id = ? AND c.to_id = q.agent_id
+        AND c.at BETWEEN q.answered_at AND q.answered_at + 5000)
+      ORDER BY q.answered_at, q.id`)
+      .all(since, COMMS_CAPCOM) as Row[];
+    return rows.map((r) => ({
+      agentId: r.agent_id as string,
+      at: r.at as number,
+      answeredAt: r.answered_at as number,
+    }));
+  }
+
+  /** Runs the operator ended since `since`; FLIGHT's `end_run` also ends as `operator`, so its runs are left out. */
+  operatorStops(since: number): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM runs r
+      WHERE r.ended_at >= ? AND r.ended_by = 'operator' AND NOT EXISTS (
+        SELECT 1 FROM flight_decisions d WHERE d.target_run_id = r.id AND d.kind = 'end'
+      )`)
+      .get(since) as Row;
+    return row.n as number;
+  }
+
   addLockHold(h: LockHoldRow): void {
     this.db
       .prepare(
@@ -2408,17 +2469,54 @@ export class Store {
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(h.runId, h.toolUseId, h.seatId, h.command, h.since);
+    this.db
+      .prepare(`INSERT INTO test_lock_runs (run_id, seat_id, command, queued_at, started_at)
+      SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (
+        SELECT 1 FROM test_lock_runs WHERE run_id = ? AND ended_at IS NULL
+      )`)
+      .run(h.runId, h.seatId, h.command, h.queuedAt ?? h.since, h.since, h.runId);
+    this.db.prepare("DELETE FROM test_lock_runs WHERE started_at < ?").run(h.since - 8 * 86400000);
   }
 
-  deleteLockHold(runId: string, toolUseId: string): void {
+  deleteLockHold(runId: string, toolUseId: string, at = Date.now()): void {
     this.db
       .prepare("DELETE FROM test_lock_holds WHERE run_id = ? AND tool_use_id = ?")
       .run(runId, toolUseId);
+    this.db
+      .prepare(`UPDATE test_lock_runs SET ended_at = ?, outcome = 'done'
+      WHERE run_id = ? AND ended_at IS NULL AND NOT EXISTS (
+        SELECT 1 FROM test_lock_holds WHERE run_id = ?
+      )`)
+      .run(at, runId, runId);
   }
 
   /** Every held call of the run. */
-  deleteLockHolds(runId: string): void {
+  deleteLockHolds(runId: string, at = Date.now()): void {
     this.db.prepare("DELETE FROM test_lock_holds WHERE run_id = ?").run(runId);
+    this.db
+      .prepare(
+        "UPDATE test_lock_runs SET ended_at = ?, outcome = 'freed' WHERE run_id = ? AND ended_at IS NULL",
+      )
+      .run(at, runId);
+  }
+
+  /** Holds of the test lock started since `since`, newest first, with their run's ticket. */
+  lockRuns(since: number): TestLockRun[] {
+    const rows = this.db
+      .prepare(`SELECT h.*, r.ticket FROM test_lock_runs h
+      LEFT JOIN runs r ON r.id = h.run_id WHERE h.started_at >= ?
+      ORDER BY h.started_at DESC, h.id DESC`)
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      runId: r.run_id as string,
+      seatId: r.seat_id as string,
+      command: r.command as string,
+      queuedAt: r.queued_at as number,
+      startedAt: r.started_at as number,
+      endedAt: r.ended_at as number | null,
+      outcome: r.outcome as TestLockRun["outcome"],
+      ticket: r.ticket as string | null,
+    }));
   }
 
   setKeeperCursor(c: KeeperCursor): void {

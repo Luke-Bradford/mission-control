@@ -544,3 +544,7 @@ export const lockWaitingLine = (call: string, elapsed: string): string =>
 export const lockHeaderText = (holder: string | null, queued: number): string =>
   `Lock: ${holder ?? "free"}${queued > 0 ? ` +${queued}` : ""}`;
 export const LOCK_HEADER_TITLE = "Full-suite test lock";
+
+export const lockUsualText = (min: number, over: boolean): string =>
+  `usually about ${min} min${over ? " · over its usual time" : ""}`;
+export const LOCK_OUTCOME_TEXT = { done: "finished", freed: "freed with its run" } as const;
