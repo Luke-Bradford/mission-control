@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ControlSubtype, type SessionEvent, STDERR_TEXT_MAX } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { endKeeper } from "../src/runtime/keeper.ts";
+import { expectNoLeftovers } from "./leftovers.ts";
 import { type CrewSession, startSession } from "../src/runtime/session.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
@@ -25,8 +26,21 @@ const keeperInput = () => ({
   cliSessionId: SID,
 });
 
+/** One tmp root for every folder this file makes: `afterAll` looks for processes that name it. */
+let root: string;
+beforeAll(() => {
+  root = realpathSync(mkdtempSync(join(tmpdir(), "mc-ss-")));
+});
+afterAll(async () => {
+  try {
+    await expectNoLeftovers(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-session-")));
+  dir = realpathSync(mkdtempSync(join(root, "t-")));
   transcript = join(dir, "seat.jsonl");
   keeperDirs = 0;
 });
@@ -48,6 +62,9 @@ function start(
       FAKE,
       "--session-id",
       SID,
+      // names the test's folder, so the leftover check finds a fake that outlives its test
+      "--record",
+      join(dir, "record.jsonl"),
       ...(bootDelayMs ? ["--boot-delay", String(bootDelayMs)] : []),
     ],
     cwd: dir,

@@ -14,7 +14,8 @@ import {
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { expectNoLeftovers } from "./leftovers.ts";
 import {
   endKeeper,
   HUB_ABSENT_TEXT,
@@ -37,8 +38,21 @@ const running: Promise<void>[] = [];
 const SECRET = "ab".repeat(32);
 const CLI_ID = "11111111-2222-4333-8444-555555555555";
 
+/** One tmp root for every folder this file makes: `afterAll` looks for processes that name it. */
+let root: string;
+beforeAll(() => {
+  root = realpathSync(mkdtempSync(join(tmpdir(), "mc-kp-")));
+});
+afterAll(async () => {
+  try {
+    await expectNoLeftovers(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-keeper-")));
+  dir = realpathSync(mkdtempSync(join(root, "t-")));
   transcript = join(dir, "seat.jsonl");
   folders = 0;
 });
@@ -61,7 +75,8 @@ function folderFor(script: string, over: Partial<KeeperSpec> = {}): string {
     spawn: "spawn-1",
     command: process.execPath,
     // the session id is a trailing argument: the CLI's command line carries it, as the real one does
-    args: ["-e", script, CLI_ID],
+    // the folder is the last argument, so the leftover check finds a CLI that outlives its test
+    args: ["-e", script, CLI_ID, dir],
     secret: SECRET,
     cliSessionId: CLI_ID,
     cwd: dir,

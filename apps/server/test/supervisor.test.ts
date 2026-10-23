@@ -58,7 +58,7 @@ import {
   waitsOnText,
   wrongAreaText,
 } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import { CliHold } from "../src/cli-update.ts";
@@ -106,6 +106,7 @@ import {
   Store,
 } from "../src/store.ts";
 import { crewRefusal } from "../src/update.ts";
+import { expectNoLeftovers } from "./leftovers.ts";
 
 /** prepareCheckout calls in flight at once, per clone (R22: they must queue). */
 const prep = vi.hoisted(() => ({
@@ -409,13 +410,26 @@ async function refusal(p: Promise<unknown> | (() => unknown)): Promise<Superviso
   throw new Error("expected a SupervisorError");
 }
 
+/** One tmp root for every folder this file makes: `afterAll` looks for processes that name it. */
+let tmpRoot: string;
+beforeAll(() => {
+  tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), "mc-sv-")));
+});
+afterAll(async () => {
+  try {
+    await expectNoLeftovers(tmpRoot);
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 beforeEach(() => {
   prep.failRemove = false;
   prep.resumeGate = null;
   prep.attachGate = null;
   prep.failWrite = false;
   prep.peers = [];
-  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-supervisor-")));
+  dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");
   clone = join(dir, "clone");
