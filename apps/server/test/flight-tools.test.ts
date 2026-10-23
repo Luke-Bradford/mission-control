@@ -1389,6 +1389,37 @@ describe("flight_state", () => {
     expect((await call("flight_state", { x: 1 })).isError).toBe(true);
   });
 
+  it("lists a merged PR the first time FLIGHT reads it, and not again", async () => {
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR 9",
+          url: "u",
+          branch: "feature/7-x",
+          ticket: "mc#7",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: NOW,
+          headSha: "abc",
+          mergeable: null,
+          author: null,
+          assignees: [],
+        },
+      ],
+      NOW,
+    );
+    const prs = async () => ((await state()) as { prs: unknown[] }).prs;
+    expect(await prs()).toMatchObject([{ pr: 9, state: "merged" }]);
+    expect(await prs()).toEqual([]);
+  });
+
   it("lists a stopped seat", async () => {
     store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
     const seats = ((await state()) as { seats: { id: string; state: string; free: boolean }[] })
@@ -1415,6 +1446,31 @@ describe("flight_state", () => {
     store.addQuestion({ agentId: "guido-1", runId: "r-old", text: "Old?", at: NOW - 9 * 60_000 });
     store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
     store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR 9",
+          url: "u",
+          branch: "feature/7-x",
+          ticket: "mc#7",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: "abc",
+          mergeable: null,
+          author: null,
+          assignees: [],
+        },
+      ],
+      NOW,
+    );
     store.raiseNote({
       key: "ready:r-pr",
       kind: "ready",
@@ -1521,7 +1577,18 @@ describe("flight_state", () => {
           blockedBy: ["mc#8"],
         },
       ],
-      prs: [{ ref: "mc#7", pr: 9, seat: "guido-1", ready: true }],
+      prs: [
+        {
+          ref: "mc#7",
+          pr: 9,
+          seat: "guido-1",
+          ready: true,
+          state: "open",
+          headSha: "abc",
+          readAt: "13:00",
+          stale: false,
+        },
+      ],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
     });

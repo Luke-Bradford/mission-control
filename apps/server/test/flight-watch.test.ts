@@ -12,6 +12,8 @@ import {
   type FlightSeatState,
   type FlightState,
   flightStartFailedText,
+  NEW_LOOP,
+  type PullRequestView,
   type Run,
   type SeatSessionRow,
   wakeSummary,
@@ -24,6 +26,7 @@ import {
   flightSeat,
   flightStartCap,
   flightState,
+  markPrsShown,
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
@@ -77,6 +80,7 @@ let sendCalls: { runId: string; key: string; text: string }[];
 let endCalls: string[];
 let statusCalls: number;
 let startFails: string | null;
+let sendFails = false;
 let facts: SeatFacts | null;
 let enabled: boolean;
 let started = 0;
@@ -143,6 +147,7 @@ beforeEach(() => {
   endCalls = [];
   statusCalls = 0;
   startFails = null;
+  sendFails = false;
   facts = null;
   enabled = true;
   started = 0;
@@ -176,6 +181,7 @@ beforeEach(() => {
       },
       send: async (runId, key, text): Promise<SendResult> => {
         sendCalls.push({ runId, key, text });
+        if (sendFails) return "busy";
         const ok = store.claimLine(key, {
           runId,
           seatId: "flight-1",
@@ -197,6 +203,114 @@ afterEach(() => {
   watch.stop();
   vi.useRealTimers();
   rmSync(dir, { recursive: true, force: true });
+});
+
+const stored = (number: number, over: Partial<PullRequestView> = {}): PullRequestView => ({
+  repoId: "mc",
+  number,
+  title: `PR ${number}`,
+  url: "u",
+  branch: `feature/${number}-x`,
+  ticket: `mc#${number}`,
+  state: "open",
+  isDraft: true,
+  review: null,
+  ci: null,
+  createdAt: T0,
+  updatedAt: T0,
+  mergedAt: null,
+  headSha: `sha${number}`,
+  mergeable: null,
+  author: null,
+  assignees: [],
+  ...over,
+});
+const listed = () => flightState({ config, store, busy: [], now: nowMs }).prs;
+
+describe("FLIGHT's PR list", () => {
+  it("keeps a PR listed, marked stale with its last good read, when a poll could not read it", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    expect(listed()).toEqual([
+      {
+        ref: "mc#7",
+        pr: 7,
+        seat: "",
+        ready: false,
+        state: "open",
+        headSha: "sha7",
+        readAt: "13:00",
+        stale: false,
+      },
+    ]);
+    store.markPullRequestsStale("mc");
+    expect(listed()).toMatchObject([{ pr: 7, state: "open", readAt: "13:00", stale: true }]);
+    store.upsertPullRequests("mc", [stored(7)], T0 + MIN);
+    expect(listed()[0]?.stale).toBe(false);
+  });
+
+  it("FLIGHT's first digest lists a merged PR once, and no second wake follows", async () => {
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    const first = JSON.parse(startCalls[0]?.first?.split("\n").at(-1) ?? "") as FlightState;
+    expect(first.prs.map((p) => [p.pr, p.state])).toEqual([
+      [7, "merged"],
+      [8, "open"],
+    ]);
+    expect(listed().map((p) => p.pr)).toEqual([8]);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+  });
+
+  it("lists a merged PR once, then drops it", () => {
+    store.upsertPullRequests("mc", [stored(7), stored(8)], T0);
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    expect(listed().map((p) => [p.pr, p.state])).toEqual([
+      [7, "merged"],
+      [8, "open"],
+    ]);
+    // reading is not delivering: it stays listed until FLIGHT has received it
+    expect(listed().map((p) => p.pr)).toEqual([7, 8]);
+    markPrsShown(store, flightState({ config, store, busy: [], now: nowMs }));
+    expect(listed().map((p) => p.pr)).toEqual([8]);
+  });
+
+  it("a wake that failed to send still lists the merged PR at the next one", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0);
+    sendFails = true;
+    await watch.check();
+    sendFails = false;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const last = JSON.parse(sendCalls[1]?.text.split("\n").at(-1) ?? "") as FlightState;
+    expect(last.prs.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("does not wake again when a merged PR leaves the list after its wake", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("still lists the PR of a parked run, with its seat", () => {
+    live("guido-1", "r-guido");
+    store.upsertRun(run("r-guido", "guido-1", { ticket: "mc#7" }));
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: "silent", reason: "x", ended: false },
+      prNumber: 7,
+    });
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    expect(listed()).toMatchObject([{ pr: 7, seat: "guido-1", state: "open" }]);
+  });
 });
 
 describe("the FLIGHT watcher", () => {
@@ -571,7 +685,16 @@ describe("wakeSummary", () => {
   });
   const park = { kind: "silent", reason: "x" };
   const q = { id: 1, seat: "guido-1", ticket: null, text: "t", ageMin: 0 };
-  const pr = { ref: "mc#1", pr: 1, seat: "guido-1", ready: false };
+  const pr = {
+    ref: "mc#1",
+    pr: 1,
+    seat: "guido-1",
+    ready: false,
+    state: "open" as const,
+    headSha: null,
+    readAt: "12:00",
+    stale: false,
+  };
   const state = (over: Partial<FlightState>): FlightState => ({
     time: "12:00",
     repo: "mc",
@@ -586,6 +709,9 @@ describe("wakeSummary", () => {
 
   it("says nothing new, then each part with its singular", () => {
     expect(wakeSummary(state({}))).toBe("nothing new");
+    expect(wakeSummary(state({ prs: [pr, { ...pr, pr: 2, state: "merged" }] }))).toBe(
+      "1 PR in review",
+    );
     expect(
       wakeSummary(
         state({
@@ -637,6 +763,9 @@ describe("wakeSummary", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
       expect(wakeSummary(stopped)).toBe("1 free seat · 1 stopped");
+      expect(wakeFacts(state({ prs: [{ ...pr, state: "merged" }] }))).not.toBe(
+        wakeFacts(state({ prs: [pr] })),
+      );
       expect(wakeFacts(stopped)).not.toBe(wakeFacts(state({ seats: [s({ free: true })] })));
     });
 
