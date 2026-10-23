@@ -482,6 +482,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
+  ["GET", "/api/attention/example/discussion"],
+  ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
   ["GET", "/api/notifications"],
@@ -921,6 +923,10 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
+      if (url.endsWith("/discussion")) {
+        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
+        continue;
+      }
       if (url.endsWith("/dismiss") || url.endsWith("/handled") || url.includes("/replies/")) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
@@ -1063,6 +1069,7 @@ describe("local access", () => {
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
+            .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
             .replace(
               /\/attention\/[^/]+\/replies\/[^/]+\/post$/,
               "/attention/:key/replies/:replyId/post",
