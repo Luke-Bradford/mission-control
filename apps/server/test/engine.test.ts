@@ -690,6 +690,15 @@ describe("CI and review", () => {
     await h.engine.tick();
     expect(h.sent).toHaveLength(1);
     expect(h.excerpts).toHaveLength(excerpts);
+    expect(store.comms(0)).toEqual([
+      {
+        at: expect.any(Number),
+        from: "MC",
+        to: SEAT,
+        ticket: `${REPO}#7`,
+        text: expect.stringMatching(/^CI failed on aaaaaaa\./),
+      },
+    ]);
   });
 
   it("a first CI failure is re-run once, without a word to the seat", async () => {
@@ -2077,13 +2086,31 @@ describe("the engine runs reviews", () => {
   it("blocking findings go to the author once, and the review run ends", async () => {
     await toReview();
     const id = first().id;
+    // a busy seat is offered the line again, and nothing is recorded until it goes through
+    h.busy = true;
     reported(id, [finding("Critical"), finding("Important"), finding("Minor")]);
+    await vi.waitFor(() => expect(store.review(id)?.state).toBe("reported"));
+    await h.engine.tick();
+    expect(sentKeys()).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
+    h.busy = false;
+    await h.engine.tick();
     await vi.waitFor(() => expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]));
     expect(loopTexts()).toContain(fixSentText(2, "GUIDO-1"));
     expect(h.ended).toContain(`${RETRO}:${id}`);
     await h.engine.reconcileRun(RUN);
     await h.engine.tick();
     expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
+    // RETRO's findings to the author: recorded once, though the line was offered again
+    expect(store.comms(0)).toEqual([
+      {
+        at: expect.any(Number),
+        from: RETRO,
+        to: SEAT,
+        ticket: `${REPO}#7`,
+        text: expect.stringMatching(/^RETRO-1 reviewed aaaaaaa and found 2 issues/),
+      },
+    ]);
   });
 
   it("a fix round: the new push is reviewed as round 2", async () => {
@@ -2339,7 +2366,15 @@ describe("the engine runs reviews", () => {
       it("a conflict is left for the seat, and the line goes once", async () => {
         behindMain();
         h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
+        // a busy seat is offered the line again, and nothing is recorded until it goes through
+        h.busy = true;
         await gateOpen();
+        await vi.waitFor(() => expect(loopOf()?.mainMerge).toBeTruthy());
+        await h.engine.tick();
+        expect(sentKeys()).toEqual([]);
+        expect(store.comms(0)).toEqual([]);
+        h.busy = false;
+        await h.engine.tick();
         await vi.waitFor(() => expect(sentKeys()).toContain(`conflict:${RUN}:${MAIN}`));
         expect(loopOf()).toMatchObject({
           phase: "working",
@@ -2352,6 +2387,15 @@ describe("the engine runs reviews", () => {
         await h.engine.tick();
         expect(sentKeys().filter((k) => k.startsWith("conflict:"))).toHaveLength(1);
         expect(h.updates).toHaveLength(1);
+        expect(store.comms(0)).toEqual([
+          {
+            at: expect.any(Number),
+            from: "MC",
+            to: SEAT,
+            ticket: `${REPO}#7`,
+            text: expect.stringContaining("conflicted in: apps/a.ts, apps/b.ts"),
+          },
+        ]);
       });
 
       it("a conflicting PR in ci is merged with main", async () => {
