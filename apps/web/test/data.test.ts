@@ -508,6 +508,35 @@ describe("activity reconciliation", () => {
     expect(fetch).toHaveBeenCalledTimes(4);
   });
 
+  it("drops a timer's queued full load when the last subscriber leaves during a delta", async () => {
+    const cached = row(Date.now(), "cached");
+    const fetch = await load([cached], [cached]);
+    hub.refetchTopic("agents");
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+
+    let release: (response: Response) => void = () => {};
+    fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    hub.refetchTopic("agents");
+    expect(fetch.mock.calls[2]?.[0]).toBe(`/api/activity?since=${Date.now() - 1}`);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(3);
+
+    off?.();
+    release(new Response("[]"));
+    await flush();
+    expect(hub.snapshot(path, "agents").loading).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("clears a pending timer when refetchAll does a full load", async () => {
     const fetch = await load([row(Date.now(), "cached")], []);
     hub.refetchTopic("agents");

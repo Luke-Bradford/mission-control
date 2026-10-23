@@ -305,7 +305,7 @@ class Hub {
       e.again = false;
       const fullAgain = e.fullAgain;
       e.fullAgain = false;
-      void this.fetch(e, fullAgain);
+      if (e.listeners.size > 0) void this.fetch(e, fullAgain);
     }
   }
 
