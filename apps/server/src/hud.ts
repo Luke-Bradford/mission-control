@@ -695,7 +695,8 @@ export function attentionItems(
   // A person waits on you: an open GitHub notification thread of a configured repo.
   const crewed = new Set(config.repos.map((r) => r.id));
   for (const n of store.notifications()) {
-    if (!crewed.has(n.repoId) || !notificationOpen(n)) continue;
+    if (!crewed.has(n.repoId) || !notificationOpen(n) || n.message?.disposition === "digest")
+      continue;
     items.push({
       owner: OWNER_OPERATOR,
       key: personKey(n),

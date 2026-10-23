@@ -365,3 +365,186 @@ it("refuses a channel message continuation that changes to a reply endpoint", as
   expect(read).toHaveBeenCalledTimes(1);
   store.close();
 });
+
+it("splits asks from digest signals and preserves legacy person items", async () => {
+  const { attentionItems } = await import("../src/hud.ts");
+  const { flightState, pending, wakeFacts, flightArrivalSource } = await import(
+    "../src/flight/state.ts"
+  );
+  const { wakeLine } = await import("@mc/core");
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(0, 1);
+  config.crew = {
+    worktrees: "/tmp/teams-test",
+    maxSeats: 1,
+    sessions: [
+      {
+        id: "work",
+        repoId: "work",
+        checkout: "/tmp/teams-test",
+        seats: [{ id: "flight-1", role: "FLIGHT", accountId: "test", model: "opus", area: [] }],
+      },
+    ],
+  };
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async () =>
+      response([
+        message("mention", "please check", {
+          mentions: [{ mentioned: { user: { id: "Operator" } } }],
+        }),
+        message("root", "ordinary thread", {
+          replies: [
+            message("reply", "can you check this?", { replyToId: "root" }),
+            message("own", "I will check", {
+              replyToId: "root",
+              from: { user: { id: "Operator" } },
+            }),
+          ],
+        }),
+        message("signal", "urgent catalog bug"),
+      ]),
+  });
+  await collectTeams(config, store, 1_500, {
+    token: async () => "secret",
+    fetch: async () => response([message("later-reply", "any update?", { replyToId: "root" })]),
+  });
+  const rows = store.notifications();
+  const byId = (id: string) => {
+    const row = rows.find((n) => n.message?.teams?.messageId === id);
+    if (!row?.message) throw new Error(`Missing message ${id}`);
+    return { ...row, message: row.message };
+  };
+  expect(byId("mention").message).toMatchObject({ disposition: "needs-you" });
+  expect(byId("reply").message).toMatchObject({ disposition: "needs-you" });
+  expect(byId("later-reply").message).toMatchObject({ disposition: "needs-you" });
+  expect(byId("signal").message).toMatchObject({ disposition: "digest" });
+  expect(attentionItems(config, store, 1_000).filter((x) => x.kind === "person")).toHaveLength(3);
+  const readState = () => flightState({ config, store, busy: [], now: 2_000 });
+  const state = readState();
+  expect(state.teamsDigest).toMatchObject({
+    title: "Teams: 1 matches to triage",
+    matches: [
+      { url: byId("signal").url, arrival: { source: "Teams", arrivalId: byId("signal").id } },
+    ],
+  });
+  expect(wakeLine(state)).toContain(byId("signal").message.url);
+  expect(wakeFacts(state)).toContain(byId("signal").message.source.revision);
+  expect(pending({ ...state, items: [] })).toBe(true);
+  const arrival = state.teamsDigest?.matches[0]?.arrival;
+  if (!arrival) throw new Error("Missing digest arrival");
+  const operation = { ...arrival, outcome: "No action" as const, detail: "Checked" };
+  expect(flightArrivalSource(config, store, operation)).not.toBeNull();
+  store.recordFlightArrival({ ...operation, text: "Checked", arrivedAt: 1_000, at: 2_000 });
+  expect(readState().teamsDigest).toBeUndefined();
+  expect(pending({ ...readState(), items: [] })).toBe(false);
+  await collectTeams(config, store, 2_500, {
+    token: async () => "secret",
+    fetch: async () =>
+      response([
+        message("signal", "urgent catalog bug: updated", {
+          lastModifiedDateTime: "2026-10-23T10:01:00Z",
+        }),
+      ]),
+  });
+  expect(readState().teamsDigest?.matches[0]?.arrival.version).not.toBe(arrival.version);
+  expect(pending({ ...readState(), items: [] })).toBe(true);
+  const legacy = store.notification(byId("signal").id);
+  if (!legacy?.message) throw new Error("Missing legacy message");
+  delete legacy.message.disposition;
+  store.upsertNotifications([{ ...legacy, updatedAt: legacy.updatedAt + 1 }], false, 3_000);
+  expect(attentionItems(config, store, 3_000).filter((x) => x.kind === "person")).toHaveLength(4);
+  store.close();
+});
+
+it("classifies replies using participation from later pages and later polls", async () => {
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(1);
+  let page = 0;
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async (_url, options) => {
+      expect(options?.method).toBe("GET");
+      return ++page === 1
+        ? response([message("reply", "See #42", { replyToId: "root" })], {
+            "@odata.nextLink": "https://graph.microsoft.com/v1.0/chats/chat-a/messages?$skip=50",
+          })
+        : response([
+            message("own", "Checking", { replyToId: "root", from: { user: { id: "Operator" } } }),
+          ]);
+    },
+  });
+  expect(page).toBe(2);
+  expect(store.notifications()[0]?.message?.disposition).toBe("needs-you");
+  await collectTeams(config, store, 2_000, {
+    token: async () => "secret",
+    fetch: async () => response([message("older-reply", "See #42", { replyToId: "later-root" })]),
+  });
+  const old = store.notifications().find((n) => n.message?.teams?.messageId === "older-reply");
+  expect(old?.message?.disposition).toBe("digest");
+  if (!old) throw new Error("Missing stored digest reply");
+  // Matches written by #490 predate thread metadata.
+  if (!old.message?.teams) throw new Error("Missing Teams metadata");
+  delete old.message.teams.threadId;
+  store.upsertNotifications([old], false, 2_000);
+  await collectTeams(config, store, 3_000, {
+    token: async () => "secret",
+    fetch: async () =>
+      response([
+        message("later-own", "Checking", {
+          replyToId: "later-root",
+          from: { user: { id: "Operator" } },
+        }),
+      ]),
+  });
+  expect(store.notification(old.id)?.message?.disposition).toBe("needs-you");
+  expect(store.notification(old.id)?.message?.source.revision).not.toBe(
+    old?.message?.source.revision,
+  );
+  store.close();
+});
+
+it("keeps a digest match triaged after arrival outcomes are evicted", async () => {
+  const { flightState, flightArrivalSource } = await import("../src/flight/state.ts");
+  const { FLIGHT_INCOMING_LIMIT } = await import("@mc/core");
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(1);
+  config.crew = {
+    worktrees: "/tmp/teams-test",
+    maxSeats: 1,
+    sessions: [
+      {
+        id: "work",
+        repoId: "work",
+        checkout: "/tmp/teams-test",
+        seats: [{ id: "flight-1", role: "FLIGHT", accountId: "test", model: "opus", area: [] }],
+      },
+    ],
+  };
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async () => response([message("signal", "See #42")]),
+  });
+  const readState = () => flightState({ config, store, busy: [], now: 2_000 });
+  const arrival = readState().teamsDigest?.matches[0]?.arrival;
+  if (!arrival) throw new Error("Missing digest arrival");
+  const operation = { ...arrival, outcome: "No action" as const, detail: "Checked" };
+  const source = flightArrivalSource(config, store, operation);
+  expect(source).not.toBeNull();
+  if (!source) throw new Error("Missing arrival source");
+  store.recordFlightArrival({ ...operation, ...source, at: 2_000 });
+  // Evict before reading state again: suppression must survive without the outcome log.
+  for (let i = 0; i < FLIGHT_INCOMING_LIMIT; i++) {
+    store.recordFlightArrival({
+      ...operation,
+      arrivalId: `other-${i}`,
+      text: "Other",
+      at: 3_000 + i,
+    });
+  }
+  expect(store.flightIncoming()).toHaveLength(FLIGHT_INCOMING_LIMIT);
+  expect(store.flightIncoming().some((o) => o.arrivalId === arrival.arrivalId)).toBe(false);
+  expect(store.notification(arrival.arrivalId)?.unread).toBe(true);
+  expect(readState().teamsDigest).toBeUndefined();
+  store.close();
+});
