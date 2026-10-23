@@ -390,6 +390,22 @@ const forSha = (sha: string | null | undefined): string =>
 
 const minutes = (ms: number): number => Math.round(ms / 60_000);
 
+/** Which fact kept a pushed run from reaching CI: the first of push, newest commit, PR, PR head. */
+function missingWhy(
+  headCommit: string | null,
+  pushed: LoopSnapshot["pushed"],
+  pr: LoopSnapshot["pr"],
+): string {
+  if (pushed === null) return "no push is recorded for the run";
+  if (headCommit === null)
+    return `no commit is recorded for the run, but ${sha7(pushed.sha)} is pushed`;
+  if (pushed.sha !== headCommit) {
+    return `the push is ${sha7(pushed.sha)}, not the newest commit ${sha7(headCommit)}`;
+  }
+  if (pr === null) return "no PR of the run has been read from GitHub";
+  return `PR #${pr.number} has ${pr.headSha === null ? "no head" : `head ${sha7(pr.headSha)}`}, not ${sha7(pushed.sha)}`;
+}
+
 const IN_PROGRESS = "In progress" satisfies MoveColumn;
 const IN_REVIEW = "In review" satisfies MoveColumn;
 const BLOCKED = "Blocked" satisfies MoveColumn;
@@ -660,7 +676,7 @@ function stateStep(s: LoopSnapshot): Step {
         return park(
           loop,
           "stuck",
-          `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}`,
+          `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
         );
       }
       return unchanged(loop);

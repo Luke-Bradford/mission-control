@@ -18,6 +18,7 @@ const pct = (v: number): string => `${Math.round(v)}%`;
  */
 export function LineChart({
   series,
+  bands = [],
   from,
   to,
   max = 100,
@@ -29,6 +30,7 @@ export function LineChart({
   height = 170,
 }: {
   series: LineSeries[];
+  bands?: { from: number; to: number; label: string }[];
   from: number;
   to: number;
   max?: number;
@@ -98,6 +100,30 @@ export function LineChart({
           setHover(i === null ? null : (times[i] ?? null)),
         )}
       >
+        {bands
+          .filter((b) => b.to > from && b.from < to)
+          .map((b) => {
+            const left = X(Math.max(from, b.from));
+            const right = X(Math.min(to, b.to));
+            return (
+              <g key={`${b.from}:${b.label}`}>
+                <rect
+                  className="band"
+                  x={left}
+                  y={yTop}
+                  width={Math.max(0, right - left)}
+                  height={yBottom - yTop}
+                  fill="var(--warn)"
+                  opacity={0.12}
+                >
+                  <title>{b.label}</title>
+                </rect>
+                <text className="ct" x={left + 3} y={yTop + 12}>
+                  {b.label}
+                </text>
+              </g>
+            );
+          })}
         <Grid max={max} ticks={ticks} y={Y} x0={x0} x1={x1} label={pct} />
         {limit && (
           <line

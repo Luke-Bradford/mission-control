@@ -278,10 +278,15 @@ describe("cardReviewer", () => {
     expect(cardReviewer(boardItem(), pr({ number: 40 }), [seat])).toEqual({
       id: "RETRO-1",
       index: 3,
+      hudState: "running",
     });
     expect(cardReviewer(boardItem(), pr({ number: 41 }), [seat])).toBeNull();
     const byRef = retro({ prNumber: 99, sha: "c".repeat(40), ref: ticketRef(boardItem()) });
-    expect(cardReviewer(boardItem(), null, [byRef])).toEqual({ id: "RETRO-1", index: 3 });
+    expect(cardReviewer(boardItem(), null, [byRef])).toEqual({
+      id: "RETRO-1",
+      index: 3,
+      hudState: "running",
+    });
     expect(cardReviewer(boardItem(), pr(), [retro(null)])).toBeNull();
   });
 });

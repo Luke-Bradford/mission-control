@@ -476,6 +476,12 @@ describe("cards", () => {
     await screen.findByText("Ticket 3349");
     const c = card(container, "shop-app#3349") as HTMLElement;
     expect(within(c).getByText("Reviewing:")).toBeTruthy();
+    expect(within(c).getByText("Running")).toBeTruthy();
+    expect(c.className).toContain("pulse-ok");
+    const reviewer = within(c).getByRole("link", { name: "RETRO-1" });
+    expect(reviewer.getAttribute("href")).toBe("/agent/RETRO-1");
+    fireEvent.click(reviewer);
+    expect(window.location.pathname).toBe("/agent/RETRO-1");
     expect(within(c).getByText("RETRO-1")).toBeTruthy();
     expect(within(c).getByText("check passing")).toBeTruthy();
     expect(within(c).queryByText(NO_REVIEWER)).toBeNull();

@@ -2,7 +2,7 @@ import { type CrewRow, LOCK_FREE_TEXT, LOCK_NOBODY_WAITING, seatCallSign } from 
 import { useState } from "react";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useSecond } from "../clock.ts";
-import { useTestLock } from "../components/LockLines.tsx";
+import { LockUsual, useTestLock } from "../components/LockLines.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { mss } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -80,6 +80,7 @@ export function LockBox() {
       </div>
       <div className="s fg2">
         <span className="num">{mss(now - h.since)}</span> elapsed
+        <LockUsual command={h.command} since={h.since} prefix=" · " />
         {stalled && quiet !== null && (
           <>
             {" · nothing printed for "}
