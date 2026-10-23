@@ -43,6 +43,7 @@ import {
   retiringText,
   reworkFirstText,
   START_NO_RULES,
+  seatBusyText,
   startMissingNeedsText,
   startNeedsPlanText,
   type TicketView,
@@ -2016,6 +2017,7 @@ describe("startWatch", () => {
       "mcp__mc__end_run",
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",
+      "mcp__mc__brief_item",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
@@ -3438,6 +3440,17 @@ describe("startReview", () => {
     expect(brief).not.toContain("ruff");
   });
 
+  it("startReview starts a review whose sha the pushed sha carries", async () => {
+    const pushSha = "e".repeat(40);
+    const r = reviewOfPush({ pushSha });
+    store.setRunLoop(r.author.id, { ...NEW_LOOP, carry: { from: r.sha, to: pushSha } });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).resolves.toMatchObject({
+      runId: expect.any(String),
+    });
+  });
+
   it("startReview launches a scratch run", async () => {
     const r = reviewOfPush();
     const { sup } = make({ scratchRetro: true });
@@ -3727,6 +3740,16 @@ describe("a run set aside in review", () => {
     const e = await refusal(sup.endAsideRun(runId));
     expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
     expect(store.run(runId)?.endedAt).toBeNull();
+    expect(existsSync(wt())).toBe(true);
+  });
+
+  it("endAsideRun says the seat is busy while another run is starting on it", async () => {
+    const { sup, runId } = await aside(false);
+    const starter = sup.startRun("guido-1", 43, { loop: NEW_LOOP });
+    const e = await refusal(sup.endAsideRun(runId));
+    expect([e.status, e.message]).toEqual([409, seatBusyText("GUIDO-1")]);
+    await starter;
+    expect(store.run(runId)).toMatchObject({ endedAt: null });
     expect(existsSync(wt())).toBe(true);
   });
 

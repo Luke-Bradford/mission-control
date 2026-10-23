@@ -111,6 +111,11 @@ export interface RunLoop {
     runs: { id: number; name: string }[];
     flaked?: boolean;
   } | null;
+  /**
+   * The hub's conflict-free merges of main made `to` from `from` (each merge's first parent the
+   * one before) and left the PR's own diff as it was at `from`: `to` goes by `from`'s review.
+   */
+  carry?: { from: string; to: string } | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */
@@ -589,6 +594,21 @@ export interface Crew {
   firstRunToday: number | null;
 }
 
+/** One answer FLIGHT suggests for an item that is a choice. */
+export interface BriefOption {
+  label: string;
+  answer: string;
+}
+
+/** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
+export interface AttentionBrief {
+  context: string;
+  recommendation: string;
+  options: BriefOption[];
+  basis: string;
+  at: number;
+}
+
 export interface AttentionItem {
   key: string;
   kind: AttentionKind;
@@ -607,6 +627,8 @@ export interface AttentionItem {
    * until every client that builds an item sets it.
    */
   owner?: AttentionOwner;
+  /** FLIGHT's brief, once it has written one. */
+  brief?: AttentionBrief;
   acked: boolean;
 }
 

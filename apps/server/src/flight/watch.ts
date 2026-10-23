@@ -43,6 +43,8 @@ export interface FlightWatchDeps {
   >;
   /** main.ts passes engineOn: off in a preview, with MC_NO_LOOP_WRITES=1, or with no crew. */
   enabled: boolean;
+  /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
+  login?: string | null;
   /** True while the seat has a pending change; FLIGHT is not started until it settles. */
   blocked?: (seatId: string) => boolean;
   now?: () => number;
@@ -121,7 +123,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         return;
       }
       if (deps.blocked?.(id) === true) return;
-      const state = flightState({ config, store, busy: supervisor.busy(), now: t });
+      const state = flightState({
+        config,
+        store,
+        busy: supervisor.busy(),
+        now: t,
+        hubLogin: deps.login ?? null,
+      });
       if (!rotating) starts.push(t);
       rotating = false;
       try {
@@ -152,7 +160,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       await supervisor.endRunByEngine(runId);
       return;
     }
-    const state = flightState({ config, store, busy: supervisor.busy(), now: t });
+    const state = flightState({
+      config,
+      store,
+      busy: supervisor.busy(),
+      now: t,
+      hubLogin: deps.login ?? null,
+    });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
     const due =

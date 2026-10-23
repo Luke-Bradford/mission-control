@@ -407,6 +407,7 @@ export function attentionItems(
   hubLogin: string | null = null,
 ): AttentionItem[] {
   const acks = store.acks();
+  const briefs = store.briefs();
   const status = new Map(store.status().map((s) => [s.collector, s]));
   const items: OwnedItem[] = [];
 
@@ -505,7 +506,10 @@ export function attentionItems(
 
   return items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
-    .map((i) => ({ ...i, acked: acks.has(i.key) }));
+    .map((i) => {
+      const brief = briefs.get(i.key);
+      return { ...i, ...(brief === undefined ? {} : { brief }), acked: acks.has(i.key) };
+    });
 }
 
 /**
