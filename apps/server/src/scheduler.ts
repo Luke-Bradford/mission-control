@@ -729,6 +729,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       emit("limits", "health");
     },
     maintenance: async () => {
+      await store.pruneHistory(now());
       store.pruneDigests(now() - DIGEST_RETENTION_MS);
       store.pruneAgentEvents(now() - AGENT_EVENT_RETENTION_MS);
     },

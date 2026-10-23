@@ -64,6 +64,9 @@ import {
   type UsageSample,
 } from "@mc/core";
 
+export const HISTORY_BATCH_ROWS = 500;
+export const HISTORY_SWEEP_MAX_BATCHES = 10;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS drafts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
@@ -873,6 +876,19 @@ export class Store {
       ["profile_hash", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS loop_events_run ON loop_events(run_id);
+      CREATE INDEX IF NOT EXISTS reviews_run ON reviews(run_id);
+      CREATE INDEX IF NOT EXISTS reviews_repo_pr ON reviews(repo_id, pr_number, state);
+      CREATE INDEX IF NOT EXISTS board_moves_run ON board_moves(run_id);
+      CREATE INDEX IF NOT EXISTS flight_decisions_target_kind ON flight_decisions(target_run_id, kind);
+      CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
+      CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
+      CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
+      CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
+      CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
+      CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
+    `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
@@ -1381,6 +1397,67 @@ export class Store {
       )
       .all() as Row[];
     return new Map(rows.map((r) => [r.agent_id as AgentId, r.to_state as HudState]));
+  }
+
+  private historyNextTable = 0;
+
+  /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
+  async pruneHistory(now: number): Promise<void> {
+    const day = 24 * 60 * 60_000;
+    const endedRun = `r.ended_at IS NOT NULL
+      AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
+      AND json_extract(r.loop, '$.aside') IS NULL
+      AND NOT EXISTS (SELECT 1 FROM reviews v
+        WHERE (v.author_run_id = r.id OR v.run_id = r.id)
+          AND (v.ended_at IS NULL OR v.state IN ('queued', 'starting', 'running')))`;
+    // Engine lines are claim keys. All runs remain, so their plan events remain too.
+    const tables = [
+      ["seat_lines", 7, "AND origin != 'engine'"],
+      ["loop_events", 30, "AND key NOT LIKE '%:plan'"],
+      ["run_evidence", 30, ""],
+      ["review_findings", 30, ""],
+    ] as const;
+    let batches = 0;
+    const start = this.historyNextTable;
+    for (let offset = 0; offset < tables.length; offset++) {
+      const index = (start + offset) % tables.length;
+      const [table, days, extra] = tables[index];
+      // Let other tables go first next time if this table consumes the sweep budget.
+      this.historyNextTable = (index + 1) % tables.length;
+      const findings = table === "review_findings";
+      const condition = findings
+        ? `EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
+            AND v.ended_at < ? AND v.state IN ('reported', 'failed', 'superseded')
+            AND (v.run_id IS NULL OR EXISTS
+              (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
+          AND EXISTS (SELECT 1 FROM runs r
+            WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})`
+        : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
+            AND r.ended_at < ? AND ${endedRun}) ${extra}`;
+      const select = this.db.prepare(
+        `SELECT rowid AS id FROM ${table} WHERE rowid > ? AND ${condition}
+         ORDER BY rowid LIMIT ?`,
+      );
+      let lastId = 0;
+      while (batches < HISTORY_SWEEP_MAX_BATCHES) {
+        let ids: { id: number }[] = [];
+        const cutoff = now - days * day;
+        // A finding ages from both its review's end and its author run's end.
+        const cutoffs = findings ? [cutoff, cutoff] : [cutoff];
+        this.transaction(() => {
+          ids = select.all(lastId, ...cutoffs, HISTORY_BATCH_ROWS) as { id: number }[];
+          if (ids.length === 0) return;
+          this.db
+            .prepare(`DELETE FROM ${table} WHERE rowid IN (${ids.map(() => "?").join(",")})`)
+            .run(...ids.map(({ id }) => id));
+        });
+        if (ids.length === 0) break;
+        lastId = ids[ids.length - 1].id;
+        batches++;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      if (batches === HISTORY_SWEEP_MAX_BATCHES) break;
+    }
   }
 
   /** Deletes the state changes recorded before `olderThan`. */

@@ -1302,43 +1302,29 @@ describe("agent files", () => {
     await a.close();
   });
 
-  it("a 502 is logged at warn with git's command and exit code, nothing a path could reveal", async () => {
+  it.each([false, true])("logs original files errors, diff=%s", async (diff) => {
     mkdirSync(join(dir, "wt-ta"));
-    const a = await withFiles(async () => {
-      throw new GitFailed(`fatal: not a git repository: ${dir}`, {
-        command: "diff",
-        exitCode: 128,
-      });
+    const error = new Error("original files failure");
+    const fail = async () => {
+      throw error;
+    };
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      changedFiles: fail,
+      fileDiff: fail,
+      logger: { stream: { write: (s: string) => void logs.push(s) } },
     });
-    await a.inject({ method: "GET", url: "/api/agents/shop-app-ta/files" });
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(warn).toMatchObject({ command: "diff", exitCode: 128 });
-    expect(logs.join("")).not.toContain(dir);
-    expect(logs.join("")).not.toContain("not a git repository");
-    await a.close();
-  });
-
-  it("a timed-out git is logged with its signal", async () => {
-    mkdirSync(join(dir, "wt-ta"));
-    const a = await withFiles(async () => {
-      throw new GitFailed("timed out", { command: "diff", exitCode: null, signal: "SIGTERM" });
+    logs.length = 0;
+    const response = await a.inject({
+      method: "GET",
+      url: `/api/agents/shop-app-ta/files${diff ? "/diff?path=a.ts" : ""}`,
     });
-    await a.inject({ method: "GET", url: "/api/agents/shop-app-ta/files" });
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(warn).toMatchObject({ command: "diff", exitCode: null, signal: "SIGTERM" });
-    await a.close();
-  });
-
-  it("an error that is not GitFailed is logged without a command or code", async () => {
-    mkdirSync(join(dir, "wt-ta"));
-    const a = await withFiles(async () => {
-      throw new Error(`boom at ${dir}`);
-    });
-    const r = await a.inject({ method: "GET", url: "/api/agents/shop-app-ta/files" });
-    expect(r.statusCode).toBe(502);
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(warn).toMatchObject({ command: null, exitCode: null });
-    expect(logs.join("")).not.toContain(dir);
+    expect(response.statusCode).toBe(502);
+    const completed = logs.map((s) => JSON.parse(s)).filter((s) => s.msg === "request completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0].err).toMatchObject({ message: error.message, stack: error.stack });
     await a.close();
   });
 
@@ -1409,7 +1395,7 @@ describe("agent file diff", () => {
     await a.close();
   });
 
-  it("git failing is 502 with fixed text; git's message is logged at warn without the worktree", async () => {
+  it("git failing is 502 with fixed text and its original error is logged", async () => {
     mkdirSync(join(dir, "wt-ta"));
     const a = await withDiff(async () => {
       throw new GitFailed("fatal: bad revision 'origin/HEAD...HEAD'");
@@ -1417,8 +1403,11 @@ describe("agent file diff", () => {
     const r = await a.inject({ method: "GET", url: url("a.ts") });
     expect(r.statusCode).toBe(502);
     expect(r.json()).toEqual({ error: "git failed" });
-    const warn = logs.map((l) => JSON.parse(l)).find((l) => l.level === 40);
-    expect(JSON.stringify(warn)).toContain("fatal: bad revision");
+    const completed = logs.map((l) => JSON.parse(l)).find((l) => l.msg === "request completed");
+    expect(completed.err).toMatchObject({
+      message: "fatal: bad revision 'origin/HEAD...HEAD'",
+      stack: expect.stringContaining("GitFailed"),
+    });
     expect(logs.join("")).not.toContain(join(dir, "wt-ta"));
     await a.close();
   });
@@ -4629,3 +4618,108 @@ it("bounds uncached telemetry reads, filters first and persists immutable counts
     read.mockRestore();
   }
 });
+
+it("does not log successful GET requests", async () => {
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/crew", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(200);
+  expect(logs).toEqual([]);
+});
+
+it("logs one response line for a 500", async () => {
+  vi.spyOn(store, "getSetting").mockImplementation(() => {
+    throw new Error("test failure");
+  });
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/settings/away", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(500);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0])).toMatchObject({ res: { statusCode: 500 } });
+  expect(JSON.parse(logs[0]).err).toMatchObject({
+    message: "test failure",
+    stack: expect.stringContaining("Error: test failure"),
+  });
+});
+
+it("logs a 4xx response once", async () => {
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/missing", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(404);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0])).toMatchObject({ res: { statusCode: 404 } });
+});
+
+it("logs a successful request taking over one second", async () => {
+  vi.spyOn(store, "getSetting").mockImplementationOnce(() => {
+    const until = performance.now() + 1010;
+    while (performance.now() < until) {
+      /* a slow store read */
+    }
+    return null;
+  });
+  logs.length = 0;
+  expect(
+    (await app.inject({ method: "GET", url: "/api/settings/away", headers: { host: "localhost" } }))
+      .statusCode,
+  ).toBe(200);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0]).responseTime).toBeGreaterThan(1000);
+});
+
+it("logs the error message and stack of an explicit 5xx response", async () => {
+  updaterCheckError = new UpdateError(502, "Could not reach origin.");
+  logs.length = 0;
+  const response = await post("/api/version/check");
+  expect(response.statusCode).toBe(502);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0]).err).toMatchObject({
+    message: "Could not reach origin.",
+    stack: expect.stringContaining("Could not reach origin."),
+  });
+});
+
+it("keeps claim keys and the review round for a retained run past seven days", async () => {
+  const retained = run({
+    id: "retained-loop",
+    endedAt: NOW - 8 * 86_400_000,
+    loop: { ...NEW_LOOP },
+  });
+  store.upsertRun(retained);
+  const key = `fix:${retained.id}:0:1`;
+  store.claimLine(key, {
+    runId: retained.id,
+    seatId: "flight-1",
+    origin: "engine",
+    text: "fix",
+    at: 1,
+  });
+  await store.pruneHistory(NOW);
+  expect(store.claimedKeys(retained.id)).toEqual({ [key]: 1 });
+  expect((await get(`/api/runs/${retained.id}/loop`)).json().round).toBe(2);
+});
+
+it.each([false, true])(
+  "logs the original caught exception with generic response: %s",
+  async (generic) => {
+    const error = generic
+      ? new Error("original private failure")
+      : new UpdateError(502, "Could not reach origin.");
+    error.stack = "Error: original failure\n    at originalThrowSite (updater.ts:123:4)";
+    updaterCheckError = error;
+    logs.length = 0;
+    const response = await post("/api/version/check");
+    expect(response.statusCode).toBe(generic ? 500 : 502);
+    expect(response.json().error).toBe(generic ? CHECK_FAILED : error.message);
+    const completed = logs
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.msg === "request completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0].err).toMatchObject({ message: error.message, stack: error.stack });
+  },
+);
