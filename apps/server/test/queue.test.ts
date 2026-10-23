@@ -725,6 +725,46 @@ describe("takeNext", () => {
     expect(seatMayTake(store, SERVER)).toBe(true);
   });
 
+  it("rework first: blocking findings on the sha the pushed head carries hold the seat", async () => {
+    const S = "a".repeat(40);
+    const P = "b".repeat(40);
+    const loop = (carry: { from: string; to: string } | null) => ({
+      ...NEW_LOOP,
+      phase: "review" as const,
+      aside: { worktree: "/w/x", wake: false },
+      carry,
+    });
+    store.upsertRun(
+      run({ id: "r-aside", agentId: SERVER, ticket: `${REPO}#9`, loop: loop({ from: S, to: P }) }),
+    );
+    store.setRunPush({ runId: "r-aside", sha: P, at: NOW });
+    const id = store.requestReview({
+      authorRunId: "r-aside",
+      repoId: REPO,
+      seatId: "retro",
+      prNumber: 1,
+      sha: S,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW,
+    });
+    if (id === null) throw new Error("no review");
+    store.setReviewState(id, ["queued"], "running", { at: NOW, runId: "rr" });
+    store.recordFindings(id, "rr", {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "s",
+      findings: [
+        { severity: "Important", file: "a.ts", line: 1, summary: "s", scenario: "w", fix: "f" },
+      ],
+      at: NOW,
+    });
+    seatRow("idle");
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    store.setRunLoop("r-aside", loop(null));
+    expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
   it.each(["stopped", "error", "starting", "running", "parked"] as const)(
     "never takes for a %s seat",
     async (state) => {

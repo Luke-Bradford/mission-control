@@ -2018,6 +2018,7 @@ describe("startWatch", () => {
       "mcp__mc__end_run",
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",
+      "mcp__mc__brief_item",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
@@ -3438,6 +3439,17 @@ describe("startReview", () => {
     expect(brief).toContain("`uv run pytest` followed by a test file path");
     expect(brief).not.toContain("pnpm");
     expect(brief).not.toContain("ruff");
+  });
+
+  it("startReview starts a review whose sha the pushed sha carries", async () => {
+    const pushSha = "e".repeat(40);
+    const r = reviewOfPush({ pushSha });
+    store.setRunLoop(r.author.id, { ...NEW_LOOP, carry: { from: r.sha, to: pushSha } });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).resolves.toMatchObject({
+      runId: expect.any(String),
+    });
   });
 
   it("startReview launches a scratch run", async () => {
