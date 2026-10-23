@@ -1840,6 +1840,27 @@ describe("Agent page: loop steps", () => {
       s.querySelector(".tdot")?.textContent,
     ]);
 
+  it("a bugfix run in CI shows the bugfix profile's steps with the CI step current", async () => {
+    const panel = await open(
+      loopOf({
+        phase: "ci",
+        profile: "bugfix",
+        step: "verify",
+        steps: DEFAULT_PROFILES.find((p) => p.name === "bugfix")?.steps,
+        planned: false,
+      }),
+    );
+    fireEvent.click(within(panel).getByRole("button", { name: "Steps" }));
+    expect(dots(panel)).toEqual([
+      ["reproduce", "1"],
+      ["fix", "✓"],
+      ["verify", "●"],
+      ["review", "4"],
+      ["draft PR", "5"],
+    ]);
+    expect(panel.querySelector('[aria-current="step"] .vname')?.textContent).toBe("verify");
+  });
+
   it.each([
     [
       "working",
