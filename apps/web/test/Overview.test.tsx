@@ -18,7 +18,7 @@ import {
   SEAT_TURN_START_TEXT,
   type TestLockState,
 } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
@@ -76,6 +76,10 @@ interface Data {
   crewStatus?: { enabled: boolean; note: string | null };
   /** The seats' repo's PRs. */
   prs?: PullRequestView[];
+  /** The crew's seat capacity, as `/api/machine` sends it. */
+  seats?: { maxSeats: number; seats: number; perSessionMax: number };
+  /** The activity feed, read at each fetch. */
+  activityNow?: () => ActivityRow[];
   /** More routes, by "METHOD path". */
   extra?: Record<string, unknown>;
 }
@@ -85,11 +89,13 @@ function stub(d: Data = {}) {
     ...d.extra,
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
-    "/api/machine": { latest: d.machine === undefined ? sample() : d.machine },
+    "/api/machine": { latest: d.machine === undefined ? sample() : d.machine, ...d.seats },
     "/api/limits": d.limits ?? [],
     "/api/limits/github": d.githubRate ?? { queries: {}, pollCost: null },
     "/api/health": d.health ?? [],
-    "/api/activity": d.activity ?? [],
+    "/api/activity": d.activityNow
+      ? () => ({ status: 200, body: d.activityNow?.() })
+      : (d.activity ?? []),
     "/api/settings/away": d.away ?? { on: false, until: "", may: {} },
     "/api/config": d.config ?? CONFIG,
     "/api/test-lock": d.lock ?? { holder: null, waiting: [] },
@@ -127,6 +133,18 @@ describe("Overview panels", () => {
 });
 
 describe("Agents panel", () => {
+  it("a row whose account has only a 7d window shows its 7d meter", async () => {
+    stub({
+      rows: [crewRow({ accountId: "codex-main" })],
+      limits: [limit7d({ accountId: "codex-main", used: 69 })],
+    });
+    const { container } = render(<Overview />);
+    await waitFor(() => expect(agentRows(container).length).toBe(1));
+    const text = agentRows(container)[0]?.textContent ?? "";
+    expect(text).toContain("7d 69%");
+    expect(text).not.toContain("5h");
+  });
+
   it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
     const crew = CREW_CONFIG.crew;
     const first = crew?.sessions[0];
@@ -1367,6 +1385,43 @@ describe("Machine panel", () => {
     expect(widths).toEqual(["5%", "32.4%"]);
   });
 
+  it("the agents row: 6 of 8 seats, up to 3 per session, room for 2 more", async () => {
+    stub({ seats: { maxSeats: 8, seats: 6, perSessionMax: 3 } });
+    const { container } = render(<Overview />);
+    const mach = container.querySelector("#machP") as HTMLElement;
+    const row = await waitFor(() => {
+      const r = mach.querySelector<HTMLElement>(".agentslots");
+      if (!r) throw new Error("no agents row");
+      return r;
+    });
+    expect(mach.querySelectorAll(".slots i").length).toBe(8);
+    expect(mach.querySelectorAll(".slots i.used").length).toBe(6);
+    expect(row.textContent).toContain("6 of 8");
+    expect(row.textContent).toContain("· up to 3 per session");
+    expect(row.textContent).toContain("Room for 2 more agents");
+    expect(within(row).getByText("Room for 2 more agents").className).toContain("ok-t");
+  });
+
+  it("No room for another agent when every seat is used or 2 GB is free", async () => {
+    stub({ seats: { maxSeats: 8, seats: 8, perSessionMax: 4 } });
+    const first = render(<Overview />);
+    const mach = first.container.querySelector("#machP") as HTMLElement;
+    const msg = await within(mach).findByText("No room for another agent");
+    expect(msg.className).toContain("warn-t");
+    expect(mach.querySelectorAll(".slots i.used").length).toBe(8);
+    cleanup();
+    hub.clear();
+
+    stub({
+      seats: { maxSeats: 8, seats: 6, perSessionMax: 3 },
+      machine: sample({ memUsedBytes: 62 * GIB }),
+    });
+    const second = render(<Overview />);
+    const mach2 = second.container.querySelector("#machP") as HTMLElement;
+    await within(mach2).findByText("No room for another agent");
+    expect(mach2.textContent).not.toContain("Room for");
+  });
+
   it("shows dashes and empty bars before the first sample", async () => {
     stub({ machine: null });
     const { container } = render(<Overview />);
@@ -1390,6 +1445,22 @@ describe("Machine panel", () => {
 });
 
 describe("Account quota panel", () => {
+  it("each account says when it was last read", async () => {
+    stub({
+      limits: [
+        limit5h({ accountId: "claude-main", sampledAt: NOW - 4 * MIN }),
+        limit7d({ accountId: "claude-main", sampledAt: NOW - 9 * MIN }),
+        limit7d({ accountId: "codex-main", sampledAt: NOW - 30_000 }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    await within(quota).findByText("read 4 min ago");
+    const rows = quota.querySelectorAll(".quotarow");
+    expect(rows[0]?.textContent).not.toContain("9 min");
+    expect(rows[1]?.textContent).toContain("read just now");
+  });
+
   const limits = [
     limit5h({ accountId: "claude-main", used: 100, resetAt: NOW + 2 * HOUR }),
     limit7d({ accountId: "claude-main", used: 60, fullAt: null }),
@@ -1550,6 +1621,36 @@ describe("Account quota panel", () => {
 });
 
 describe("Activity panel", () => {
+  it("with 120 rows, a replaced newest row scrolls the list to the bottom", async () => {
+    const base: ActivityRow[] = Array.from({ length: 120 }, (_, i) => ({
+      at: NOW - i * MIN,
+      who: "studio",
+      kind: "run-start",
+      text: `event ${i}`,
+      ref: null,
+      url: null,
+      status: null,
+      prs: [],
+      summary: null,
+    }));
+    let current: ActivityRow[] = base;
+    stub({ activityNow: () => current });
+    const { container } = render(<Overview />);
+    await screen.findByText("event 0");
+    const list = container.querySelector("#actList") as HTMLElement;
+    let top = 0;
+    Object.defineProperty(list, "scrollHeight", { get: () => 5000 });
+    Object.defineProperty(list, "scrollTop", { get: () => top, set: (v: number) => (top = v) });
+    top = 0;
+    current = [{ ...(base[0] as ActivityRow), at: NOW + MIN, text: "newest event" }, ...current];
+    act(() => {
+      hub.refetch("/api/activity");
+    });
+    await screen.findByText("newest event");
+    expect(top).toBe(5000);
+    expect(container.querySelectorAll("#actList .arow").length).toBe(120);
+  });
+
   const events: ActivityEvent[] = (
     [
       {

@@ -1,9 +1,11 @@
-import type { MachineSample } from "@mc/core";
+import type { MachineSample, MachineView } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { LockBox } from "./LockBox.tsx";
 
 const GIB = 2 ** 30;
+/** At or under this much free memory another agent does not fit. */
+const LOW_MEM_GB = 2;
 const DASH = "—";
 const NO_SAMPLE = "No machine sample yet";
 const AGENTS_COLOUR = "var(--fg-2)";
@@ -52,10 +54,43 @@ function usage(m: MachineSample | null) {
   return { cores, cpu, agentsCpu, memTotal, memUsed, agentsMem, memPct, diskFree, diskPct };
 }
 
-/** This Mac's CPU, memory and disk, and the test lock (catalogue 2.1.4). Slots arrive with the engine; lock history with run records (2c). */
+/** The agents row: a dot per seat up to the cap, and whether another agent fits (catalogue 2.1.4). */
+function AgentSlots({ view }: { view: MachineView }) {
+  const { maxSeats, seats, perSessionMax, latest } = view;
+  const free = maxSeats - seats;
+  const memFree =
+    latest && latest.memTotalBytes > 0 && latest.memUsedBytes !== null
+      ? (latest.memTotalBytes - latest.memUsedBytes) / GIB
+      : null;
+  const room = free > 0 && (memFree === null || memFree > LOW_MEM_GB);
+  const used = Math.min(seats, maxSeats);
+  return (
+    <div className="row s agentslots">
+      <span className="fg2">Agents</span>
+      <span className="slots">
+        {Array.from({ length: maxSeats }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: the dots are identical, only their count matters
+          <i key={i} className={i < used ? "used" : undefined} />
+        ))}
+      </span>
+      <span className="num">{`${seats} of ${maxSeats}`}</span>
+      {perSessionMax > 0 && <span className="muted">{`· up to ${perSessionMax} per session`}</span>}
+      <span className="spacer" />
+      {room ? (
+        <span className="ok-t">
+          Room for {free} more agent{free === 1 ? "" : "s"}
+        </span>
+      ) : (
+        <span className="warn-t">No room for another agent</span>
+      )}
+    </div>
+  );
+}
+
+/** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
 export function MachinePanel() {
-  const machine = useResource<{ latest: MachineSample | null }>(RESOURCES.machine).data;
-  const m = machine?.latest ?? null;
+  const view = useResource<MachineView>(RESOURCES.machine).data;
+  const m = view?.latest ?? null;
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
 
@@ -132,6 +167,7 @@ export function MachinePanel() {
               other apps
             </span>
           </div>
+          {view && typeof view.maxSeats === "number" && <AgentSlots view={view} />}
           <LockBox />
         </div>
       </div>
