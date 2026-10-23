@@ -326,6 +326,19 @@ describe("a merged branch (real git)", () => {
     expect(git(clone, "branch", "--list", BRANCH)).not.toBe("");
   });
 
+  it("keeps a branch whose hub merge sits on a head that is not on main", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    await publisher().updateBranch(run(), mainSha, worktree);
+    git(worktree, "push", "-q", "origin", BRANCH);
+    git(clone, "worktree", "remove", "--force", worktree);
+    expect(await publisher().deleteRemoteBranch(merging(tip), tip)).toMatchObject({
+      ok: false,
+      transient: false,
+    });
+    expect(remoteTip()).not.toBe("");
+  });
+
   it("keeps a branch whose extra merge is not the hub's", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     git(worktree, "merge", "-q", "--no-ff", "-m", `Merge main into ${BRANCH}`, mainSha);
