@@ -1,4 +1,4 @@
-import type { AgentStream, AttentionItem } from "@mc/core";
+import { type AgentStream, type AttentionItem, startOfLocalDay } from "@mc/core";
 import { isOperatorItem } from "../attention.ts";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
@@ -55,6 +55,16 @@ export function waitingAsks(
     .filter((i) => isOperatorItem(i) && (i.brief !== undefined || passed.has(i.key)))
     .sort((a, b) => a.at - b.at);
 }
+
+/** FLIGHT's `answer` decisions since the start of the local day. */
+export const answersToday = (
+  decisions: readonly FlightDecision[],
+  now: number,
+  tz: string,
+): FlightDecision[] => {
+  const from = startOfLocalDay(now, tz);
+  return decisions.filter((d) => d.kind === "answer" && d.at >= from);
+};
 
 /** The dock's rows: only what the operator and FLIGHT said to each other. */
 export const chatRows = (rows: readonly DockRow[]): DockRow[] =>

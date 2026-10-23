@@ -1,5 +1,5 @@
-import { type CrewRow, ENGINE_NOT_RUNNING, type RunLoopView } from "@mc/core";
-import { LOOP_PATH, LOOP_PHASE_LABEL } from "../crew.ts";
+import type { CrewRow, RunLoopView } from "@mc/core";
+import { LOOP_PATH, LOOP_PHASE_LABEL, NO_LOOP } from "../crew.ts";
 import type { Resource } from "../data.ts";
 import { barClass, barPlace, loopSpan, stepTries, tryMinutes, tryText } from "./loopView.ts";
 
@@ -21,7 +21,7 @@ export function LoopTimeline({
   loopView: Resource<RunLoopView>;
   now: number;
 }) {
-  if (!row.loop || !row.run) return <p className="s muted">{ENGINE_NOT_RUNNING}</p>;
+  if (!row.loop || !row.run) return <p className="s muted">{NO_LOOP}</p>;
   const view = loopView.data;
   if (!view) {
     return loopView.error ? (

@@ -175,7 +175,7 @@ describe("Setup tabs", () => {
     ).toEqual(["Loop", "Kind", "Repo", "Account", "launchd label", "Worktree"]);
     expect(within(table).getByText("/u/studio")).toBeTruthy();
     const t = screen.getByRole("region", { name: "Templates" });
-    expect(t.textContent).toContain(ENGINE_NOT_RUNNING);
+    expect(t.textContent).toContain("This server reads no template profiles.");
     expect(t.textContent).toContain(RETRY_NOTE);
     expect(t.textContent).toContain(
       "Mission Control decides every move from its own checks; an agent saying it is done can only hold work back, never push it forward. cmd = Mission Control runs it · rule = read from the diff or the board · review = a fresh reviewer · gate = you or FLIGHT · agent = the agent's own evidence.",
@@ -691,6 +691,13 @@ describe("Setup tabs", () => {
       const session = SESSIONS_CFG.crew?.sessions[0];
       if (!SESSIONS_CFG.crew || !session) throw new Error("no session");
       const p = await seats({
+        "/api/crew": {
+          rows: [
+            seatRow({ hudState: "running" }),
+            seatRow({ id: "retro-1", role: "RETRO", mode: "read-only", hudState: "idle" }),
+          ],
+          firstRunToday: null,
+        },
         "/api/config": {
           ...SESSIONS_CFG,
           crew: {
@@ -731,9 +738,22 @@ describe("Setup tabs", () => {
         "changed; applies when it is free",
       ]);
       expect(cells(rows[2] as HTMLElement)[3]).toBe("read-only");
-      expect(cells(rows[2] as HTMLElement)[4]).toBe("—");
+      await waitFor(() => expect(cells(rows[2] as HTMLElement)[4]).toBe("Idle"));
       expect(cells(rows[3] as HTMLElement)[4]).toBe("removed; finishing its run");
       expect(within(rows[3] as HTMLElement).queryByRole("button")).toBeNull();
+    });
+
+    it("Sessions: a seat with no crew row and no pending change has a dash for its status", async () => {
+      const p = await seats();
+      const t = within(p).getByRole("table", { name: "Seats of s/s1 in config.yaml" });
+      const rows = within(t).getAllByRole("row");
+      expect(within(rows[1] as HTMLElement).getAllByRole("cell")[4]?.textContent).toBe("—");
+    });
+
+    it("Sessions: the Reload button's wrapper spans the grid row", async () => {
+      await seats();
+      const wrap = screen.getByRole("button", { name: "Reload config.yaml" }).parentElement;
+      expect(wrap?.className).toBe("wide");
     });
 
     it("Add agent: defaults, tiles, body", async () => {

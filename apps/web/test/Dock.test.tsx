@@ -1,10 +1,9 @@
-import { FLIGHT_NOT_RUNNING } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as markdown from "../src/components/Markdown.tsx";
 import { hub } from "../src/data.ts";
 import * as conversation from "../src/flight/conversation.ts";
-import type { FlightView } from "../src/flight/flightTypes.ts";
+import { FLIGHT_NO_SEAT, type FlightView } from "../src/flight/flightTypes.ts";
 import { Dock } from "../src/shell/Dock.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { installKeys } from "../src/shell/keys.ts";
@@ -64,23 +63,24 @@ afterEach(() => {
 });
 
 describe("Dock content", () => {
-  it("says FLIGHT is not running, with no conversation and the input switched off", () => {
+  it("says no FLIGHT seat is configured, with no conversation and the input switched off", async () => {
     const { container } = render(<Dock />);
     const dock = dockEl(container) as HTMLElement;
+    expect(dock.querySelector(".meta")?.textContent).toBe("Loading…");
+    await waitFor(() => expect(dock.querySelector(".meta")?.textContent).toBe(FLIGHT_NO_SEAT));
     expect(dock.getAttribute("aria-label")).toBe("FLIGHT");
     expect(dock.querySelector(".dh")?.textContent).toContain("FLIGHT");
     expect(screen.getByText("Head agent").className).toBe("pill neutral");
-    expect(dock.querySelector(".meta")?.textContent).toBe(FLIGHT_NOT_RUNNING);
     expect(container.querySelector("#dockWaiting")).toBeNull();
     expect(container.querySelector("#dockMsgs")?.children.length).toBe(0);
     const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
     expect(input.disabled).toBe(true);
     expect(input.placeholder).toBe("Ask FLIGHT to assign, reprioritise or report…");
-    expect(input.title).toBe(FLIGHT_NOT_RUNNING);
+    expect(input.title).toBe(FLIGHT_NO_SEAT);
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("carries the P2 badge, which the build-status chips replace", () => {
+  it("carries no P2 badge in its header; the build-status chips show when on", () => {
     function On() {
       const [, set] = useBuildStatus();
       return (
@@ -95,9 +95,9 @@ describe("Dock content", () => {
         <Dock />
       </>,
     );
-    expect(container.querySelector("#dock .phase")?.textContent).toBe("P2");
+    expect(container.querySelector("#dockHead .phase")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "on" }));
-    expect(container.querySelector("#dock .phase")).toBeNull();
+    expect(container.querySelector("#dockHead .phase")).toBeNull();
     const chip = screen.getByText("P2");
     expect(chip.className).toContain("bs-later");
     expect(chip.getAttribute("title")).toBe("FLIGHT itself, with structured decision briefs.");

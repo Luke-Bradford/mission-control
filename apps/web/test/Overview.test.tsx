@@ -5,7 +5,6 @@ import {
   type CommsEvent,
   type CrewLoop,
   type CrewRow,
-  FLIGHT_NOT_RUNNING,
   GITHUB_SLOWED_PREFIX,
   type GithubRateState,
   type HealthRow,
@@ -20,6 +19,7 @@ import {
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
+import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { useItem } from "../src/shell/overlays.ts";
@@ -151,7 +151,7 @@ describe("Agents panel", () => {
     expect(within(flight).getByText("FLIGHT")).toBeTruthy();
     expect(within(flight).getByText("head agent")).toBeTruthy();
     expect(within(flight).getByText("Head").className).toContain("neutral");
-    expect(within(flight).getByText(FLIGHT_NOT_RUNNING)).toBeTruthy();
+    expect(within(flight).getByText(FLIGHT_NO_SEAT)).toBeTruthy();
     expect(flight.textContent).toContain("—");
   });
 
@@ -210,7 +210,7 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("1 working · 2 agents · FLIGHT not counted");
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
-    expect(within(flight).queryByText(FLIGHT_NOT_RUNNING)).toBeNull();
+    expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
     expect(within(flight).getByText("Head")).toBeTruthy();
     expect(within(flight).getByText("head agent")).toBeTruthy();
     expect(within(flight).getByText("Error")).toBeTruthy();
@@ -236,9 +236,9 @@ describe("Agents panel", () => {
     await screen.findByText("shop-app-ta");
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
     expect(within(flight).getByText("Loading…")).toBeTruthy();
-    expect(within(flight).queryByText(FLIGHT_NOT_RUNNING)).toBeNull();
+    expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
     release();
-    await within(flight).findByText(FLIGHT_NOT_RUNNING);
+    await within(flight).findByText(FLIGHT_NO_SEAT);
     unmount();
     hub.clear();
 
@@ -246,7 +246,7 @@ describe("Agents panel", () => {
     const failed = render(<Overview />);
     await screen.findByText("shop-app-ta");
     const row = failed.container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
-    expect(await within(row).findByText(FLIGHT_NOT_RUNNING)).toBeTruthy();
+    expect(await within(row).findByText(FLIGHT_NO_SEAT)).toBeTruthy();
     expect(within(row).queryByText("Loading…")).toBeNull();
   });
 
@@ -550,6 +550,23 @@ describe("Agents panel", () => {
     expect(row.querySelector(".doing")?.textContent).toBe("Run failed");
   });
 
+  it("on a wide screen a row's tag is the call sign alone; the role title is on the line under it", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: false,
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    stub({ rows: [seatRow()] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Backend developer · writer");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".ag")?.textContent).toBe("guido-1");
+    expect(row.querySelector(".ag")?.getAttribute("title")).toBe("Backend developer");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(flight.querySelector(".ag")?.textContent).toBe("FLIGHT");
+  });
+
   it("an agent's row carries model · effort · CLI version in the title of its role line", async () => {
     stub({
       rows: [
@@ -560,7 +577,7 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
     const [seat, loop] = agentRows(container);
-    expect(within(seat as HTMLElement).getByText("GUIDO · writer").title).toBe(
+    expect(within(seat as HTMLElement).getByText("Backend developer · writer").title).toBe(
       "claude-opus-4-1 · high · CLI 2.1.302",
     );
     expect(within(loop as HTMLElement).getByText(/^observed loop/).title).toBe("claude-opus-4-1");

@@ -47,7 +47,7 @@ function kv(
 export function yamlLines(c: ConfigView): Line[] {
   const L: Line[] = [
     comment(0, "~/.config/mission-control/config.yaml (or $MC_CONFIG) · read-only view"),
-    comment(0, "what the server loaded at start: edit the file and restart · forms: Plan 2"),
+    comment(0, "what the server loaded at start: edit the file and restart"),
     kv(0, "operator"),
     kv(1, "id", scalar(c.operator.id)),
     kv(1, "timezone", scalar(c.operator.timezone)),
@@ -58,8 +58,8 @@ export function yamlLines(c: ConfigView): Line[] {
     L.push(
       kv(1, "id", scalar(a.id), undefined, true),
       kv(2, "vendor", a.vendor),
-      kv(2, "alert_at", a.alertAt, "% of a window: notify you (Plan 4)"),
-      kv(2, "stop_at", a.stopAt, "% of a window: no new runs (Plan 3); forecast shown now"),
+      kv(2, "alert_at", a.alertAt, "% of a window: notify you (notifications are not built yet)"),
+      kv(2, "stop_at", a.stopAt, "% of a window: no new runs; forecast shown now"),
     );
   }
 

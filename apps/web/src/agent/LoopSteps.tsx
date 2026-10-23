@@ -1,12 +1,6 @@
-import {
-  type CrewRow,
-  ENGINE_NOT_RUNNING,
-  type PullRequestView,
-  type RunLoop,
-  type RunLoopView,
-} from "@mc/core";
+import type { CrewRow, PullRequestView, RunLoop, RunLoopView } from "@mc/core";
 import { useState } from "react";
-import { LOOP_PATH, LOOP_PHASE_LABEL, loopMarks, type StepMark } from "../crew.ts";
+import { LOOP_PATH, LOOP_PHASE_LABEL, loopMarks, NO_LOOP, type StepMark } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import {
@@ -89,7 +83,7 @@ export function LoopSteps({
 }) {
   const [toggled, setToggled] = useState<ReadonlySet<LoopStep>>(new Set());
   const loop = row.loop;
-  if (!loop) return <p className="s muted">{ENGINE_NOT_RUNNING}</p>;
+  if (!loop) return <p className="s muted">{NO_LOOP}</p>;
   const runLoop = view?.loop;
   const tries = view?.tries ?? [];
   const endAside = row.run && row.run.endedAt === null && (

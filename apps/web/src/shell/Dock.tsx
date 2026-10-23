@@ -1,10 +1,4 @@
-import {
-  type AgentStream,
-  ATTENTION_LABEL,
-  type AttentionItem,
-  clockHm,
-  FLIGHT_NOT_RUNNING,
-} from "@mc/core";
+import { type AgentStream, ATTENTION_LABEL, type AttentionItem, clockHm } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useTz } from "../clock.ts";
@@ -20,18 +14,17 @@ import {
   waitingAsks,
   withPending,
 } from "../flight/conversation.ts";
-import type { FlightDecision, FlightSeat, FlightView } from "../flight/flightTypes.ts";
+import {
+  FLIGHT_NO_SEAT,
+  type FlightDecision,
+  type FlightSeat,
+  type FlightView,
+  flightOffText,
+} from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { BuildChips } from "./buildStatus.tsx";
-import {
-  openItem,
-  setFlightUnread,
-  trapTab,
-  useBuildStatus,
-  useDock,
-  useReturnFocus,
-} from "./overlays.ts";
+import { openItem, setFlightUnread, trapTab, useDock, useReturnFocus } from "./overlays.ts";
 
 const CAPCOM = "@CAPCOM";
 
@@ -39,7 +32,7 @@ const CAPCOM = "@CAPCOM";
 const NO_DECISIONS: FlightDecision[] = [];
 
 /** The seat's state in words. */
-function stateWord(seat: FlightSeat): string {
+export function stateWord(seat: FlightSeat): string {
   if (!seat.live) return "stopped";
   switch (seat.state) {
     case "idle":
@@ -122,7 +115,7 @@ function Composer({
         placeholder={
           !seat || live ? "Ask FLIGHT to assign, reprioritise or report…" : "FLIGHT is stopped"
         }
-        title={seat ? undefined : FLIGHT_NOT_RUNNING}
+        title={live ? undefined : flightOffText(seat)}
         value={text}
         onChange={(e) => setText(e.target.value)}
         disabled={!live}
@@ -130,7 +123,7 @@ function Composer({
       <button
         type="submit"
         className="primary"
-        title={seat ? undefined : FLIGHT_NOT_RUNNING}
+        title={live ? undefined : flightOffText(seat)}
         disabled={!live || busy}
       >
         Send
@@ -153,7 +146,6 @@ const STICK_PX = 40;
  */
 export function Dock() {
   const { visible, wide, toggle } = useDock();
-  const [buildOn] = useBuildStatus();
   const hide = useRef<HTMLButtonElement>(null);
   const msgs = useRef<HTMLDivElement>(null);
   const drawer = visible && !wide;
@@ -268,7 +260,6 @@ export function Dock() {
           <div className="dh" id="dockHead">
             <AgentTag id="FLIGHT" index="flight" />
             <Pill tone="neutral">Head agent</Pill>
-            {!buildOn && <span className="phase">P2</span>}
             <BuildChips panel="dock" />
             <span className="spacer" />
             {seat && !live && (
@@ -291,7 +282,11 @@ export function Dock() {
               Hide
             </button>
             <div className="meta">
-              {seat ? `${seat.call} · ${seat.model} · ${stateWord(seat)}` : FLIGHT_NOT_RUNNING}
+              {flight === undefined
+                ? "Loading…"
+                : seat
+                  ? `${seat.call} · ${seat.model} · ${stateWord(seat)}`
+                  : FLIGHT_NO_SEAT}
             </div>
           </div>
           {seat && asks.length > 0 && (

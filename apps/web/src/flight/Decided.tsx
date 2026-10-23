@@ -1,15 +1,15 @@
-import { type Crew, clockHm, FLIGHT_NOT_RUNNING, seatCallSign } from "@mc/core";
+import { type Crew, clockHm, seatCallSign } from "@mc/core";
 import { useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { useTz } from "../clock.ts";
+import { useNow, useTz } from "../clock.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { kindLabel, overturnText } from "./conversation.ts";
-import type { FlightDecision, FlightView } from "./flightTypes.ts";
+import { answersToday, overturnText } from "./conversation.ts";
+import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "./flightTypes.ts";
 
 const DASH = "—";
-export const NO_DECISIONS = "Nothing decided in the last day.";
+export const NO_DECISIONS = "Nothing decided without you today.";
 
 function DecidedRow({
   d,
@@ -46,9 +46,6 @@ function DecidedRow({
       <div className="row">
         {call !== null && <AgentTag id={call} index={index} sm />}
         <span className="s">{tz === null ? DASH : clockHm(d.at, tz)}</span>
-        <Pill tone="neutral">{kindLabel(d.kind)}</Pill>
-        <span className="min0">{d.about}</span>
-        <span className="spacer" />
         {done ? (
           <Pill tone="plain">You overturned it</Pill>
         ) : (
@@ -62,6 +59,7 @@ function DecidedRow({
             Overturn
           </button>
         )}
+        <span className="min0">{d.about}</span>
       </div>
       <div className="s">
         <b>{d.decision}</b> · {d.basis}
@@ -75,17 +73,20 @@ function DecidedRow({
   );
 }
 
-/** "Decided without you" (catalogue §2.2): FLIGHT's decisions of the last day, newest first. */
+/** "Decided without you" (catalogue §2.2.7): the questions FLIGHT answered today, newest first. */
 export function Decided() {
   const view = useResource<FlightView>(RESOURCES.flight).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const tz = useTz();
-  if (!view?.seat) return <p className="pb note">{FLIGHT_NOT_RUNNING}</p>;
-  if (view.decisions.length === 0) return <p className="pb note">{NO_DECISIONS}</p>;
+  const now = useNow();
+  if (view === undefined) return <p className="pb note">{DASH}</p>;
+  if (!view.seat) return <p className="pb note">{FLIGHT_NO_SEAT}</p>;
+  const answers = tz === null ? [] : answersToday(view.decisions, now, tz);
+  if (answers.length === 0) return <p className="pb note">{NO_DECISIONS}</p>;
   const { seat } = view;
   return (
     <div>
-      {[...view.decisions]
+      {[...answers]
         .sort((a, b) => b.at - a.at)
         .map((d) => (
           <DecidedRow

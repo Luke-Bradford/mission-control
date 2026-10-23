@@ -1,10 +1,10 @@
-import { type AgentStream, clockHm, FLIGHT_NOT_RUNNING } from "@mc/core";
+import { type AgentStream, clockHm } from "@mc/core";
 import { useMemo } from "react";
 import { useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { type DockRow, dockRows, feedRows, kindLabel } from "./conversation.ts";
-import type { FlightView } from "./flightTypes.ts";
+import { FLIGHT_NO_SEAT, type FlightView } from "./flightTypes.ts";
 
 export const NOTHING_LOGGED = "Nothing logged yet.";
 
@@ -46,7 +46,7 @@ export function WorkingLog() {
       {view === undefined ? (
         <p className="pb note">—</p>
       ) : !seat ? (
-        <p className="pb note">{FLIGHT_NOT_RUNNING}</p>
+        <p className="pb note">{FLIGHT_NO_SEAT}</p>
       ) : (
         <details className="guard" id="workLog">
           <summary>{entriesLabel(rows.length)}</summary>

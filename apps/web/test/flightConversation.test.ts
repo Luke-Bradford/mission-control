@@ -1,6 +1,7 @@
 import type { AgentStream, StreamEvent } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
+  answersToday,
   type DockRow,
   dockRows,
   kindLabel,
@@ -140,5 +141,20 @@ describe("withPending", () => {
     );
     expect(open.map((p) => p.text)).toEqual(["later"]);
     expect(rows.map((r) => r.id)).toEqual(["a", "p:1"]);
+  });
+});
+
+describe("answersToday", () => {
+  const noon = Date.UTC(2026, 9, 23, 12);
+  const day = 24 * 3600 * 1000;
+
+  it("keeps the answers from today in the zone, and nothing else", () => {
+    const ds = [
+      decision("d1", noon - 1000),
+      decision("d2", noon - day),
+      decision("d3", noon - 2000, { kind: "brief" }),
+      decision("d4", noon - 500),
+    ];
+    expect(answersToday(ds, noon, "UTC").map((d) => d.id)).toEqual([1, 4]);
   });
 });

@@ -4,7 +4,6 @@ import {
   type AttentionItem,
   type CrewRow,
   clockHm,
-  FLIGHT_NOT_RUNNING,
   type FlightView,
   GUARD_NONE_TEXT,
   type GuardHitsView,
@@ -19,6 +18,7 @@ import { ExternalLink } from "../components/ExternalLink.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { flightOffText } from "../flight/flightTypes.ts";
 import { mss } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -160,7 +160,7 @@ export function NeedsList({
                         disabled={busy || !(target.to === "seat" || flightSeat?.live === true)}
                         title={
                           target.to === "flight" && flightSeat?.live !== true
-                            ? FLIGHT_NOT_RUNNING
+                            ? flightOffText(flightSeat)
                             : undefined
                         }
                         variant="row"

@@ -4,7 +4,7 @@ import {
   BACKGROUND_STALL_MS,
   type ConfigView,
   type CrewRow,
-  ENGINE_NOT_RUNNING,
+  type GuardHitsView,
   HUD_STATE_LABEL,
   STALL_MS,
   type StreamEvent,
@@ -43,16 +43,21 @@ const FILTERS: readonly { value: Filter; label: string }[] = [
 
 /** A message to or from the seat (`/api/activity`), shown in the transcript's time order. */
 type A2aRow = { kind: "a2a"; at: number; text: string; key: string };
-type StreamRow = StreamEvent | A2aRow;
-type RowKind = StreamKind | "a2a";
+/** A guard hit on this run (`/api/guard/hits`), shown in the transcript's time order. */
+type GuardRow = { kind: "guard"; at: number; text: string; key: string };
+type TimedRow = A2aRow | GuardRow;
+type StreamRow = StreamEvent | TimedRow;
+type RowKind = StreamKind | "a2a" | "guard";
 
-/** Which kinds each filter shows; Guard has none until the engine's guard exists. */
+const NO_GUARD_HITS = "No guard hits in this run.";
+
+/** Which kinds each filter shows. */
 const SHOWS: Record<Filter, readonly RowKind[] | null> = {
   all: null,
   talk: ["op", "msg", "a2a", "sys"],
   think: ["think"],
   tool: ["tool"],
-  guard: [],
+  guard: ["guard"],
 };
 
 /**
@@ -61,6 +66,7 @@ const SHOWS: Record<Filter, readonly RowKind[] | null> = {
  */
 const WHO: Record<RowKind, string> = {
   a2a: "agents",
+  guard: "guard",
   op: "prompt",
   think: "thinking",
   tool: "tool",
@@ -71,6 +77,7 @@ const WHO: Record<RowKind, string> = {
 /** The row class (the mockup's: `op` is styled as `you`). */
 const CLS: Record<RowKind, string> = {
   a2a: "a2a",
+  guard: "sys",
   op: "you",
   think: "think",
   tool: "tool",
@@ -101,19 +108,20 @@ function ToolText({ tool, rel }: { tool: NonNullable<StreamEvent["tool"]>; rel: 
 const MARKDOWN: readonly StreamKind[] = ["op", "msg"];
 
 /**
- * The transcript with the seat's messages in: each goes before the first event with a later `at`;
- * an event without an `at` keeps its place, a tie goes after the event, leftovers go last.
+ * The transcript with the seat's messages and guard hits in: each goes before the first event with
+ * a later `at`; an event without an `at` keeps its place, a tie goes after the event, leftovers go
+ * last. `timed` is in time order.
  */
-function mergeA2a(events: StreamEvent[], a2a: A2aRow[]): StreamRow[] {
+function mergeTimed(events: StreamEvent[], timed: TimedRow[]): StreamRow[] {
   const out: StreamRow[] = [];
   let next = 0;
   for (const ev of events) {
-    while (ev.at !== null && next < a2a.length && (a2a[next] as A2aRow).at < ev.at) {
-      out.push(a2a[next++] as A2aRow);
+    while (ev.at !== null && next < timed.length && (timed[next] as TimedRow).at < ev.at) {
+      out.push(timed[next++] as TimedRow);
     }
     out.push(ev);
   }
-  out.push(...a2a.slice(next));
+  out.push(...timed.slice(next));
   return out;
 }
 
@@ -125,6 +133,8 @@ function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Rela
       <div className="txt">
         {ev.kind === "a2a" ? (
           <MentionText text={ev.text} />
+        ) : ev.kind === "guard" ? (
+          ev.text
         ) : ev.kind === "tool" && ev.tool ? (
           <ToolText tool={ev.tool} rel={rel} />
         ) : MARKDOWN.includes(ev.kind) ? (
@@ -239,7 +249,7 @@ function Composer({ row }: { row: CrewRow }) {
       <span className="hint" id={HINT_ID}>
         {crew
           ? seatHint(row)
-          : `${row.id} is an observed loop; messaging arrives with the engine (phase 2).`}
+          : `${row.id} is an observed loop: Mission Control watches it and does not message it.`}
       </span>
     </form>
   );
@@ -263,8 +273,19 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
       key: keys[i] as string,
     }));
   }, [activity, row.id, row.run]);
+  const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
+  const runId = stream.data?.runId;
+  const guard = useMemo<GuardRow[]>(
+    () =>
+      (hits?.hits ?? [])
+        .filter((h) => h.agentId === row.id && h.runId === runId)
+        .sort((a, b) => a.at - b.at)
+        .map((h) => ({ kind: "guard", at: h.at, text: h.text, key: `guard:${h.id}` })),
+    [hits, row.id, runId],
+  );
+  const timed = useMemo(() => [...a2a, ...guard].sort((a, b) => a.at - b.at), [a2a, guard]);
   const shows = SHOWS[filter];
-  const all = mergeA2a(stream.data?.events ?? [], a2a);
+  const all = mergeTimed(stream.data?.events ?? [], timed);
   const events = all.filter((e) => shows === null || shows.includes(e.kind));
   const count = events.length;
 
@@ -283,10 +304,9 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
   };
 
   let empty: string | null = null;
-  if (filter === "guard") empty = ENGINE_NOT_RUNNING;
-  else if (stream.error && !stream.data)
-    empty = `Could not load the activity: ${stream.error.message}`;
+  if (stream.error && !stream.data) empty = `Could not load the activity: ${stream.error.message}`;
   else if (!stream.data) empty = "Loading…";
+  else if (filter === "guard" && count === 0) empty = NO_GUARD_HITS;
   else if (all.length === 0) empty = stream.data.reason ?? "No activity yet.";
   else if (count === 0) empty = "Nothing of this kind in this run.";
 
@@ -306,7 +326,7 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
         ) : (
           events.map((ev) => (
             <EventRow
-              key={ev.kind === "a2a" ? ev.key : `${stream.data?.runId}:${ev.id}`}
+              key={ev.kind === "a2a" || ev.kind === "guard" ? ev.key : `${runId}:${ev.id}`}
               ev={ev}
               tz={tz}
               rel={rel}

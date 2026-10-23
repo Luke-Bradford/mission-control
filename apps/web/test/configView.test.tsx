@@ -79,6 +79,14 @@ describe("scalar", () => {
     expect(scalar("x # y")).toBe('"x # y"');
     expect(scalar("")).toBe('""');
   });
+
+  it("carries no plan marks, and notes stop_at and alert_at as they are", () => {
+    render(<ConfigYaml config={CONFIG} />);
+    const yaml = yamlOf(screen.getByTestId("config-yaml"));
+    expect(yaml).not.toMatch(/Plan [234]/);
+    expect(yaml).toContain("% of a window: no new runs; forecast shown now");
+    expect(yaml).toContain("% of a window: notify you (notifications are not built yet)");
+  });
 });
 
 describe("Glossary", () => {
@@ -91,5 +99,24 @@ describe("Glossary", () => {
     expect(gloss?.textContent).toContain("API-equivalent");
     expect(gloss?.textContent).toContain("ta-loop (a scheduled task loop)");
     expect(gloss?.textContent).toContain("studio-loop (a build-driver loop)");
+  });
+
+  it("carries no plan marks and describes the crew and the states as they are", () => {
+    const { container } = render(<Glossary />);
+    const text = container.querySelector("dl.gloss")?.textContent ?? "";
+    expect(text).not.toMatch(/Plan [234]/);
+    expect(text).not.toContain("later plans");
+    expect(text).toContain(
+      "Crew seats come from the crew section of config.yaml, each with a role.",
+    );
+    expect(text).toContain(
+      "Each crew seat is one agent that Mission Control runs. Each adopted loop is one agent too:",
+    );
+    expect(text).toContain(
+      "The state pill reads Running · Stalled · Blocked · Parked · Waiting · Idle · Stopped · Error. Stalled = no output for 10 minutes (60 while a background task runs). paused = a ta-loop's PAUSE file exists.",
+    );
+    expect(text).toContain(
+      "no new runs start on the account there. alert_at notifications are not built yet.",
+    );
   });
 });

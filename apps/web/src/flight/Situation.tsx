@@ -1,10 +1,13 @@
 import type { AttentionItem, BoardItem, RepoView } from "@mc/core";
 import { cardColumn } from "../board/cards.ts";
+import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
 import { SituationText } from "./Brief.tsx";
+import { answersToday } from "./conversation.ts";
+import type { FlightView } from "./flightTypes.ts";
 import { Timeline } from "./Timeline.tsx";
 
 const NO_REPOS: RepoView[] = [];
@@ -32,19 +35,24 @@ export function Situation() {
   const decisions = count(items, ["decision"]);
   const approvals = count(items, ["approval", "question"]);
   const stalls = count(items, ["stalled", "error"]);
+  const inProgress = inColumn("In progress");
+  // An answer belongs to FLIGHT, not to a repo, so the session filter does not apply.
+  const flightView = useResource<FlightView>(RESOURCES.flight).data;
+  const tz = useTz();
+  const now = useNow();
+  const answered =
+    flightView === undefined || tz === null
+      ? "—"
+      : String(answersToday(flightView.decisions, now, tz).length);
 
   return (
-    <Panel
-      id="sitP"
-      title="Situation"
-      sub="FLIGHT's read of everything, updated as things change"
-      phase="P2"
-    >
+    <Panel id="sitP" title="Situation" sub="FLIGHT's read of everything, updated as things change">
       <div className="pb">
         <SituationText />
         <div className="sitstats">
           <span>
-            <b className="num">{inColumn("In progress")}</b> tickets in progress
+            <b className="num">{inProgress}</b> {inProgress === "1" ? "ticket" : "tickets"} in
+            progress
           </span>
           <span>
             <b className="num">{inColumn("In review", "Ready for QA")}</b> waiting on other people
@@ -56,6 +64,9 @@ export function Situation() {
           <span>
             <b className="num">{num(approvals)}</b> routine{" "}
             {approvals === 1 ? "approval" : "approvals"}
+          </span>
+          <span>
+            <b className="num">{answered}</b> answered by FLIGHT today
           </span>
           <span>
             <b className="num">{num(stalls)}</b> {stalls === 1 ? "stall" : "stalls"}

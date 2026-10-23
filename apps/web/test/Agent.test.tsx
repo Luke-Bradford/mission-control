@@ -8,7 +8,6 @@ import {
   type CrewLoop,
   type CrewRow,
   DEFAULT_PROFILES,
-  ENGINE_NOT_RUNNING,
   type FileDiff,
   type LimitRow,
   type LoopTry,
@@ -23,6 +22,7 @@ import {
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_LOOP } from "../src/crew.ts";
 import { hub } from "../src/data.ts";
 import { Agent } from "../src/pages/Agent.tsx";
 import { installKeys } from "../src/shell/keys.ts";
@@ -1143,9 +1143,46 @@ describe("Agent page: activity stream", () => {
     expect(who()).toEqual(["tool"]);
     fireEvent.click(within(seg).getByRole("button", { name: "Guard" }));
     expect(who()).toEqual([]);
-    expect($(container, "#stream")?.textContent).toContain(ENGINE_NOT_RUNNING);
+    expect($(container, "#stream")?.textContent).toContain("No guard hits in this run.");
     fireEvent.click(within(seg).getByRole("button", { name: "All" }));
     expect(who()).toHaveLength(6);
+  });
+
+  it("Guard shows this run's hits for this seat, and All shows them in time order", async () => {
+    const hit = (id: number, over: Record<string, unknown> = {}) => ({
+      id,
+      agentId: "shop-app-ta",
+      runId: "r-12",
+      rule: "git-write",
+      text: `git writes only through the mc tools (${id})`,
+      at: NOW - 8.5 * MIN,
+      acked: false,
+      ...over,
+    });
+    stub({
+      extra: {
+        "/api/guard/hits?days=7": {
+          hits: [
+            hit(1),
+            hit(2, { agentId: "studio-builder", text: "another seat's hit" }),
+            hit(3, { runId: "r-11", text: "an older run's hit" }),
+          ],
+          counts: { "git-write": 3 },
+        },
+      },
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const who = () => [...container.querySelectorAll("#stream .ev .who")].map((w) => w.textContent);
+    const seg = screen.getByRole("group", { name: "Activity filter" });
+    fireEvent.click(within(seg).getByRole("button", { name: "Guard" }));
+    await waitFor(() => expect(who()).toEqual(["guard"]));
+    const text = $(container, "#stream")?.textContent ?? "";
+    expect(text).toContain("git writes only through the mc tools (1)");
+    expect(text).not.toContain("another seat's hit");
+    expect(text).not.toContain("an older run's hit");
+    fireEvent.click(within(seg).getByRole("button", { name: "All" }));
+    expect(who()).toEqual(["prompt", "thinking", "guard", "tool", "to you", "system"]);
   });
 
   it("an open tool call stays open on its own event when the window drops events from the front", async () => {
@@ -1395,7 +1432,7 @@ describe("Agent page: activity stream", () => {
     expect(intr.title).toBe("Stop the current turn, then send");
     expect(
       screen.getByText(
-        "shop-app-ta is an observed loop; messaging arrives with the engine (phase 2).",
+        "shop-app-ta is an observed loop: Mission Control watches it and does not message it.",
       ),
     ).toBeTruthy();
   });
@@ -1602,7 +1639,7 @@ describe("Agent page: runs", () => {
     await loaded();
     const panel = $(container, "#loopP") as HTMLElement;
     fireEvent.click(within(panel).getByRole("button", { name: "Steps" }));
-    expect(panel.textContent).toContain(ENGINE_NOT_RUNNING);
+    expect(panel.textContent).toContain(NO_LOOP);
     expect(panel.querySelector(".runrow")).toBeNull();
   });
 
@@ -2070,10 +2107,10 @@ describe("Agent page: loop steps", () => {
     expect(panel.textContent).not.toContain("tokens so far");
   });
 
-  it("a row with no loop keeps the engine-not-running text", async () => {
+  it("a row with no loop says there is no loop in flight", async () => {
     const panel = await open(null);
     fireEvent.click(within(panel).getByRole("button", { name: "Steps" }));
-    expect(panel.textContent).toContain(ENGINE_NOT_RUNNING);
+    expect(panel.textContent).toContain(NO_LOOP);
     expect(panel.querySelector(".vstep")).toBeNull();
   });
 
@@ -2477,7 +2514,7 @@ describe("Agent page: driving a crew seat", () => {
     expect((input as HTMLInputElement).disabled).toBe(false);
     unmount();
     render(<Agent id="studio-builder" />);
-    await screen.findByText(/is an observed loop; messaging arrives/);
+    await screen.findByText(/is an observed loop: Mission Control watches it/);
     expect((screen.getByLabelText("Message this agent") as HTMLInputElement).disabled).toBe(true);
   });
 
@@ -2618,11 +2655,11 @@ describe("Agent page: driving a crew seat", () => {
     ).toBeTruthy();
     a.unmount();
     render(<Agent id="studio-builder" />);
-    await screen.findByText(/is an observed loop; messaging arrives/);
+    await screen.findByText(/is an observed loop: Mission Control watches it/);
     expect(
       screen.getByRole("textbox", {
         name: "Message this agent",
-        description: /is an observed loop; messaging arrives/,
+        description: /is an observed loop: Mission Control watches it/,
       }),
     ).toBeTruthy();
   });
@@ -2642,7 +2679,7 @@ describe("Agent page: driving a crew seat", () => {
     expect(chips).not.toContain("observed loop");
     a.unmount();
     const b = render(<Agent id="studio-builder" />);
-    await screen.findByText(/is an observed loop; messaging arrives/);
+    await screen.findByText(/is an observed loop: Mission Control watches it/);
     expect(b.container.querySelector("#ahead .chips")?.textContent).toContain("observed loop");
     expect(screen.queryByRole("button", { name: "End the run" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();

@@ -1,3 +1,4 @@
+import { BACKGROUND_STALL_MS, HUD_STATE_LABEL, HUD_STATES, STALL_MS } from "@mc/core";
 import { Panel } from "../../hud/Panel.tsx";
 
 /** Anchor for `/setup/sources#glossary` (where the old `/config` and `/settings#glossary` land). */
@@ -18,17 +19,16 @@ export function Glossary() {
             <code>status_map</code>) · <code>loop</code> · <code>run</code> · <code>session</code>{" "}
             (one CLI process) · <code>ticket</code> · <code>escalation</code> · usage{" "}
             <code>sample</code>. Every number on screen is computed from these: the loops' own logs,
-            GitHub and the vendors' usage readings. Roles, hosts, PR records, rules and watches
-            arrive with later plans.
+            GitHub and the vendors' usage readings. Crew seats come from the <code>crew</code>{" "}
+            section of config.yaml, each with a role.
           </dd>
           <dt>agent · loop</dt>
           <dd>
-            Today each <b>adopted loop</b> is one agent: one repo, one account, started by its own
-            launchd job (<code>launchd_label</code>) and observed by Mission Control through its{" "}
+            Each <b>crew seat</b> is one agent that Mission Control runs. Each <b>adopted loop</b>{" "}
+            is one agent too: one repo, one account, started by its own launchd job (
+            <code>launchd_label</code>) and observed by Mission Control through its{" "}
             <code>state_dir</code>, logs and git worktree. Kinds: <code>ta-loop</code> (a scheduled
-            task loop) and <code>studio-loop</code> (a build-driver loop). Steps, edges, side steps
-            and practices (Plan 2); Mission Control launching the loops, with one pause/resume for
-            all (Plan 3).
+            task loop) and <code>studio-loop</code> (a build-driver loop).
           </dd>
           <dt>run</dt>
           <dd>
@@ -52,12 +52,10 @@ export function Glossary() {
           </dd>
           <dt>agent states</dt>
           <dd>
-            <code>working</code> a run is in progress · <code>waiting on you</code> the latest run
-            ended blocked, or the repo has an open escalation with a title marker ·{" "}
-            <code>idle</code> no run in progress · <code>error</code> reading the loop failed (the
-            last good data stays on screen) · <code>waiting on agent</code> only queued or parked
-            runs (Plan 2). <b>paused</b> = the loop's PAUSE file exists; the studio loop's pause
-            arrives with cutover (Plan 3).
+            The state pill reads {HUD_STATES.map((s) => HUD_STATE_LABEL[s]).join(" · ")}.{" "}
+            <b>Stalled</b> = no output for {STALL_MS / 60_000} minutes (
+            {BACKGROUND_STALL_MS / 60_000} while a background task runs). <b>paused</b> = a
+            ta-loop's PAUSE file exists.
           </dd>
           <dt>escalation · needs you</dt>
           <dd>
@@ -67,7 +65,6 @@ export function Glossary() {
             <code>autonomy-question</code> block adds the question, a recommendation and answers.
             Issues with a <code>needs_you_labels</code> label are listed too but never change an
             agent's state. They head the Agents list under needs you; amber is reserved for them.
-            Urgency tiers, CTO picks and push to phone (Plan 4).
           </dd>
           <dt>durations</dt>
           <dd>
@@ -85,8 +82,8 @@ export function Glossary() {
             are the source of truth. <b>7d x→y%</b> = used now → <b>projected at reset</b> = latest
             sample + last-24h pace × hours to reset (no projection until enough samples). A 5h row
             shows used and reset only. <b>stop_at ≈</b> = when the pace reaches <code>stop_at</code>
-            ; stopping new runs there arrives with Plan 3, and <code>alert_at</code> notifications
-            with Plan 4. <b>stale</b> = the latest sample is older than an hour.
+            ; no new runs start on the account there. <code>alert_at</code> notifications are not
+            built yet. <b>stale</b> = the latest sample is older than an hour.
           </dd>
           <dt>≈$ · API-equivalent cost</dt>
           <dd>

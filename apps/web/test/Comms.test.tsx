@@ -4,19 +4,20 @@ import {
   type ActivityRow,
   type AttentionItem,
   type CommsEvent,
-  FLIGHT_NOT_RUNNING,
   GUARD_NONE_TEXT,
   type GuardHitsView,
   guardSummary,
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
 import { setFlightUnread, toggleDock, useDock, useItem } from "../src/shell/overlays.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import {
+  brief,
   CONFIG,
   crewRow,
   item,
@@ -82,6 +83,7 @@ function stub(items = ITEMS, post: (b: unknown) => void = () => {}, guard: unkno
     "/api/guard/hits?days=7": guard,
     "/api/crew": { rows: ROWS, firstRunToday: null },
     "/api/config": CONFIG,
+    "/api/flight": { seat: null, decisions: [] },
     "POST /api/attention/ack": (init: RequestInit | undefined) => {
       post(JSON.parse(String(init?.body)));
       return { status: 200, body: { ok: true } };
@@ -112,6 +114,80 @@ describe("Threads", () => {
     const doing = await screen.findByText(line);
     expect(doing.getAttribute("title")).toBe(line);
     expect(document.body.textContent).not.toContain("Dead collector fallback");
+  });
+});
+
+describe("Threads: the FLIGHT entry", () => {
+  const flightSeat = { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true };
+  const asks = [
+    item({ key: "esc:a#1", brief: brief(), text: "first" }),
+    item({ key: "esc:a#2", brief: brief(), text: "second" }),
+  ];
+  const flightStream = (events: { id: string; kind: string; text: string; at: number }[]) => ({
+    runId: "f-1",
+    events,
+    truncated: false,
+    lastOutputAt: null,
+    reason: null,
+  });
+  const stubFlight = (flight: unknown, extra: Record<string, unknown> = {}) =>
+    stubFetch({
+      "/api/attention": asks,
+      "/api/crew": {
+        rows: [seatRow(), seatRow({ id: "flight-1", index: 1 })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      "/api/flight": flight,
+      ...extra,
+    });
+
+  it("shows the asks open, the Head pill and FLIGHT's last message, and no second FLIGHT thread", async () => {
+    stubFlight(
+      { seat: flightSeat, decisions: [] },
+      {
+        "/api/agents/flight-1/stream": flightStream([
+          { id: "e1", kind: "msg", text: "older words", at: NOW - 2 * MIN },
+          { id: "e2", kind: "msg", text: "Latest word from FLIGHT", at: NOW - MIN },
+        ]),
+      },
+    );
+    render(<Comms item={null} />);
+    const list = document.querySelector("#chanList") as HTMLElement;
+    await waitFor(() => expect(within(list).getByText("2 for you")).toBeTruthy());
+    const entry = within(list).getAllByRole("button")[0] as HTMLElement;
+    expect(entry.textContent).toContain("Head");
+    await waitFor(() => expect(entry.textContent).toContain("Latest word from FLIGHT"));
+    expect(within(list).getByText("Latest word from FLIGHT").getAttribute("title")).toBe(
+      "Latest word from FLIGHT",
+    );
+    expect(within(list).queryByRole("button", { name: /^flight-1/i })).toBeNull();
+    expect(within(list).getAllByRole("button")).toHaveLength(2);
+    expect(document.querySelector("#cThreadsP .phase")).toBeNull();
+  });
+
+  it("says who and what state FLIGHT is in before it has said anything", async () => {
+    stubFlight({ seat: flightSeat, decisions: [] }, { "/api/attention": [] });
+    render(<Comms item={null} />);
+    const list = document.querySelector("#chanList") as HTMLElement;
+    await waitFor(() =>
+      expect(within(list).getAllByRole("button")[0]?.textContent).toContain(
+        "FLIGHT-1 · waiting for a wake",
+      ),
+    );
+    expect(within(list).queryByText(/for you/)).toBeNull();
+  });
+
+  it("says no seat is configured when there is none, and shows a dash before it loads", async () => {
+    stubFlight({ seat: null, decisions: [] }, { "/api/attention": [] });
+    render(<Comms item={null} />);
+    const list = document.querySelector("#chanList") as HTMLElement;
+    expect(within(list).getAllByRole("button")[0]?.textContent).toContain("—");
+    await waitFor(() =>
+      expect(within(list).getAllByRole("button")[0]?.textContent).toContain(
+        "No FLIGHT seat is configured.",
+      ),
+    );
   });
 });
 
@@ -414,7 +490,7 @@ describe("Threads and conversation", () => {
     });
     const buttons = within(list).getAllByRole("button");
     expect(buttons[0]?.textContent).toContain("Head");
-    expect(buttons[0]?.textContent).toContain(FLIGHT_NOT_RUNNING);
+    await waitFor(() => expect(buttons[0]?.textContent).toContain(FLIGHT_NO_SEAT));
     expect(within(list).getByText(/Idle since/)).toBeTruthy();
     expect(within(list).getByText(/^run #12/)).toBeTruthy();
     act(() => setSession("shop-app"));
@@ -562,6 +638,7 @@ describe("Threads and conversation", () => {
         firstRunToday: null,
       },
       "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
       ...(activity ? { "/api/activity": activity } : {}),
     });
   const MESSAGES = [
@@ -574,7 +651,7 @@ describe("Threads and conversation", () => {
   it("FLIGHT shows its placeholder; an agent's thread opens its messages", async () => {
     stubMessages(MESSAGES);
     render(<Comms item={null} />);
-    expect((await screen.findAllByText(FLIGHT_NOT_RUNNING)).length).toBe(1); // the thread row
+    expect((await screen.findAllByText(FLIGHT_NO_SEAT)).length).toBe(1); // the thread row
     expect(screen.getByText("FLIGHT's chat is in the dock.")).toBeTruthy();
     const list = document.querySelector("#chanList") as HTMLElement;
     fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
@@ -696,7 +773,7 @@ describe("FLIGHT thread and the dock", () => {
     expect(await screen.findByText("FLIGHT's chat is in the dock.")).toBeTruthy();
     act(() => toggleDock(false));
     await waitFor(() => expect(screen.queryByText("FLIGHT's chat is in the dock.")).toBeNull());
-    expect(screen.getAllByText(FLIGHT_NOT_RUNNING).length).toBe(2);
+    await waitFor(() => expect(screen.getAllByText(FLIGHT_NO_SEAT).length).toBe(2));
   });
 });
 
