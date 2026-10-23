@@ -135,6 +135,7 @@ function Thread({
   tz: string | null;
 }) {
   const mine = items.filter((i) => i.agentId === r.id);
+  const tagged = mine.some((i) => i.kind === "tag");
   const lamp = needsLamp(
     mine,
     mine.some((i) => !i.acked),
@@ -145,13 +146,14 @@ function Thread({
   return (
     <button
       type="button"
-      className={`nrow thread${selected ? " sel" : ""}`}
+      className={`nrow thread${selected ? " sel" : ""}${tagged ? " tagged" : ""}`}
       aria-pressed={selected}
       onClick={() => onSelect(r.id)}
     >
       {lamp ? <Lamp {...lamp} /> : <span />}
       <div className="tbody">
         <AgentTag id={r.id} index={r.index} sm />
+        {tagged && <Pill tone="warn">Tagged you</Pill>}
         <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
         <span className="s fg2 doing" title={line}>
           {line}

@@ -60,6 +60,10 @@ export const RESOURCES = {
       (account === "" ? "" : `&account=${enc(account)}`),
     topic: "agents",
   }),
+  comms: (agentId: string): ResourceRef => ({
+    path: `/api/comms/${enc(agentId)}`,
+    topic: "agents",
+  }),
   stream: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/stream`,
     topic: "agents",
@@ -129,6 +133,7 @@ export const RESOURCES = {
 
 /** POST endpoints. */
 export const ACTIONS = {
+  commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
