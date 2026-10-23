@@ -71,6 +71,15 @@ export interface ActivityEvent {
   summary: string | null;
 }
 
+/** A hand-off (catalogue §2.1.3 Messages): `who` sent `text` to `to`. Each is a seat id, COMMS_CAPCOM or COMMS_MC. */
+export interface CommsEvent extends Omit<ActivityEvent, "kind"> {
+  kind: "comms";
+  to: string;
+}
+
+/** One `/api/activity` row. */
+export type ActivityRow = ActivityEvent | CommsEvent;
+
 /** One agent's totals for one day (`YYYY-MM-DD` in the operator's timezone). */
 export interface MetricsDay {
   day: string;
