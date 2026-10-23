@@ -107,7 +107,7 @@ describe("Item panel: the question's own text", () => {
   it("keeps the panel and adds one line with the error when the body fails", async () => {
     open(() => ({ status: 500, body: { error: "boom" } }));
     await screen.findByText("Could not load the question: boom");
-    expect(screen.getByText("Answer on GitHub ↗")).toBeTruthy();
+    expect(screen.getByText("Reply on GitHub ↗")).toBeTruthy();
     expect(screen.getByText("Choose a cache eviction policy")).toBeTruthy();
   });
 
