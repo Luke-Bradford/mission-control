@@ -37,6 +37,7 @@ import {
   LOOPBACK_HOST,
   lockBusyText,
   type MachineSample,
+  type MachineView,
   type McToolName,
   METER_FULL_PCT,
   NEW_LOOP,
@@ -82,6 +83,7 @@ import {
   crewSeatDef,
   crewSeatGrants,
   crewSeatMode,
+  DEFAULT_MAX_SEATS,
 } from "./config.ts";
 import {
   addRepo,
@@ -963,7 +965,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/escalations", async () => store.escalations());
 
       api.get("/health", async () => store.status());
-      api.get("/machine", async () => ({ latest: machine() }));
+      api.get("/machine", async (): Promise<MachineView> => {
+        const sessions = config.crew?.sessions ?? [];
+        const counts = sessions.map((s) => s.seats.length);
+        return {
+          latest: machine(),
+          maxSeats: config.crew?.maxSeats ?? DEFAULT_MAX_SEATS,
+          seats: counts.reduce((a, b) => a + b, 0),
+          perSessionMax: Math.max(0, ...counts),
+        };
+      });
 
       api.get("/activity", async () => activity(config, store, now()));
 
