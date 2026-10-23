@@ -854,8 +854,26 @@ describe("ItemPanel, person variant", () => {
     return fn;
   };
 
-  it("Mark handled posts to the handled route and closes the panel", async () => {
-    const fn = openPerson({ handled: KEY });
+  it("Mark handled posts and keeps the person panel with the server's handled description", async () => {
+    let handled = false;
+    const t = thread();
+    const fn = stubFetch({
+      "/api/attention": () => ({ status: 200, body: handled ? [] : [personItem] }),
+      "/api/config": CONFIG,
+      "/api/notifications": () => ({
+        status: 200,
+        body: {
+          open: handled ? [] : [t],
+          handledToday: handled ? [{ ...t, how: "read on GitHub", at: NOW }] : [],
+        },
+      }),
+      [`POST /api/attention/${encodeURIComponent(KEY)}/handled`]: () => {
+        handled = true;
+        return { status: 200, body: { handled: KEY } };
+      },
+    });
+    render(<ItemPanel />);
+    act(() => openItem(KEY));
     await screen.findByText("The message");
     expect(screen.getByText("Asked of you")).toBeTruthy();
     expect(screen.getByText("alice")).toBeTruthy();
@@ -869,7 +887,38 @@ describe("ItemPanel, person variant", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
-    await waitFor(() => expect(document.querySelector("#discuss")).toBeNull());
+    await screen.findByText("Handled:", { exact: false });
+    expect(document.querySelector("#dsPerson")?.textContent).toBe("Handled: read on GitHub");
+    expect(document.querySelector("#discuss")).not.toBeNull();
+    expect(screen.getByText("can you look?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Mark handled" })).toBeNull();
+    act(() => {
+      closeItem();
+      openItem("missing");
+    });
+    expect(screen.queryByText("can you look?")).toBeNull();
+    expect(screen.queryByText("Handled:", { exact: false })).toBeNull();
+  });
+
+  it("highlights mentions in the message as inert text", async () => {
+    const snippet =
+      '@CAPCOM @operator <img src=x onerror="alert(1)"> @operator-other @someone @CAPCOM';
+    stubFetch({
+      "/api/attention": [personItem],
+      "/api/notifications": { open: [thread({ snippet })], handledToday: [] },
+      "/api/config": CONFIG,
+    });
+    render(<ItemPanel />);
+    act(() => openItem(KEY));
+    await screen.findByText("The message");
+    const quote = document.querySelector("#discuss blockquote") as HTMLElement;
+    expect(quote.textContent).toBe(snippet);
+    expect([...quote.querySelectorAll(".mention")].map((el) => el.textContent)).toEqual([
+      "@CAPCOM",
+      "@operator",
+      "@CAPCOM",
+    ]);
+    expect(quote.querySelector("img")).toBeNull();
   });
 
   it("a refused Mark handled shows the server's error in the panel", async () => {

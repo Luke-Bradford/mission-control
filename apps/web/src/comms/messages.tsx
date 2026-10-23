@@ -3,6 +3,7 @@ import {
   COMMS_CAPCOM,
   COMMS_MC,
   type CommsEvent,
+  type ConfigView,
   type Crew,
   seatCallSign,
 } from "@mc/core";
@@ -47,14 +48,18 @@ export function commsKeys(list: CommsEvent[]): string[] {
 
 /** Plain text with each mention picked out. */
 export function MentionText({ text }: { text: string }) {
-  const parts = text.split(CAPCOM_TAG);
+  const operator = useResource<ConfigView>(RESOURCES.config).data?.operator.id;
+  const parts = text.split(/(@[\w-]+)/);
   return (
     <>
       {parts.map((part, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
         <Fragment key={i}>
-          {i > 0 && <span className="mention">{CAPCOM_TAG}</span>}
-          {part}
+          {part === CAPCOM_TAG || (operator !== undefined && part === `@${operator}`) ? (
+            <span className="mention">{part}</span>
+          ) : (
+            part
+          )}
         </Fragment>
       ))}
     </>

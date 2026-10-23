@@ -7,6 +7,8 @@
 export const THEME_KEY = "mc-theme";
 /** FLIGHT's dock shown or hidden on wide screens. */
 export const DOCK_KEY = "mc-dock";
+/** Latest message seen in each Comms thread. */
+export const COMMS_SEEN_KEY = "mc-comms-seen";
 /** The Board's selected lane. */
 export const LANE_KEY = "mc-lane";
 /** The Board's All-repos layout: `together` or `apart`. */
