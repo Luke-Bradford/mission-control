@@ -103,6 +103,18 @@ describe("TestLock", () => {
       expect(store.lockHolds()).toEqual([]);
     });
 
+    it("stores the waiting calls granted together with the next holder", async () => {
+      await lock.acquire({ runId: "A", toolUseId: "a1" }, "guido-1", "pnpm -s test", 1000, live());
+      const wait = (toolUseId: string) =>
+        lock.acquire({ runId: "B", toolUseId }, "guido-2", "pnpm -s test", 1000, live());
+      const b1 = wait("b1");
+      const b2 = wait("b2");
+      lock.releaseRun("A");
+      expect(await b1).toBe(true);
+      expect(await b2).toBe(true);
+      expect(store.lockHolds().map((r) => `${r.runId}/${r.toolUseId}`)).toEqual(["B/b1", "B/b2"]);
+    });
+
     it("restores stored holds: the earliest run holds, and others' rows go", async () => {
       const row = (runId: string, toolUseId: string, since: number) => ({
         runId,
