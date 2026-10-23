@@ -18,11 +18,13 @@ import {
   areaLabelsOf,
   type BoardItem,
   claimedByOther,
+  DEFAULT_PROFILES,
   eligibleToStart,
   fillLoopText,
   hudColumnOf,
   NEW_LOOP,
   PRIORITIES,
+  type Profile,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
   type RepoId,
@@ -33,6 +35,7 @@ import {
 } from "@mc/core";
 import type { CardNow } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
@@ -60,6 +63,8 @@ export interface QueueDeps {
   login: string | null;
   /** A ticket as GitHub has it; a card whose body cannot be read is not dealt. */
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
+  /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
+  profiles?: () => readonly Profile[] | ProfilesError;
   now: () => number;
   /** Called when a note this module manages is raised or cleared. */
   onNotes?: () => void;
@@ -238,11 +243,21 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       const ref = refOf(repoId, card.issueNumber);
       readyRefs.add(ref);
       if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) continue;
+      // the card's template profile says whether it needs a plan; fails closed like an unreadable
+      // body: an unreadable profiles file, or a stored override naming no profile, deals nothing
+      const chosen = chooseRunProfile(
+        deps.profiles?.() ?? DEFAULT_PROFILES,
+        card.labels,
+        card.size,
+        store.profileOverride(repoId, card.issueNumber),
+      );
+      if ("refusal" in chosen) continue;
       // the one start check every start applies
       const startable = (body: string | null): boolean =>
         group.some(
           ({ seat }) =>
             eligibleToStart({
+              planRequired: chosen.profile.planRequired,
               repoId,
               issue: card.issueNumber,
               card,

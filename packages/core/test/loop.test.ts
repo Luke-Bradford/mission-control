@@ -1701,6 +1701,20 @@ describe("review decisions", () => {
     expect(sends(r.actions)).toEqual([]);
   });
 
+  it("a profile's round limit above 3 sends the third fix line instead of parking", () => {
+    const rows = [
+      fact({ id: 1, blocking: 1 }),
+      fact({ id: 2, blocking: 1, sha: SHA }),
+      fact({ id: 3, blocking: 1 }),
+    ];
+    const s = inReview(withReview(rows, [finding]), {
+      claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
+    });
+    const r = reconcile({ ...s, limits: { tries: 3, rounds: 4 } });
+    expect(r.loop.parked ?? null).toBeNull();
+    expect(sends(r.actions)).toEqual(["fix:r1:0:3"]);
+  });
+
   it("a clean review raises the ready note and the PR body edit", () => {
     const s = inReview(withReview([fact({ id: 4, minor: 2 })]));
     const a = reconcile(s).actions;
