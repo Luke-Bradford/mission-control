@@ -853,8 +853,10 @@ describe("hookMain", () => {
         value = v;
       });
       for (let t = 0; t <= ms && !done; t += 1000) {
-        // the token file is read for real, so wait for the hook's next sleep (or its answer)
-        for (let i = 0; i < 500 && !done && vi.getTimerCount() < 2; i++) {
+        // the token file is read for real, so wait for the hook's next sleep (or its answer), in
+        // real time: a spin count runs out on a loaded runner, and a second advanced early is lost
+        const by = performance.now() + 2000;
+        while (!done && vi.getTimerCount() < 2 && performance.now() < by) {
           await new Promise((r) => setImmediate(r));
         }
         await vi.advanceTimersByTimeAsync(1000);
