@@ -933,6 +933,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
 
+      // Reader: docs/runbook.md#what-it-observes (by hand until the HUD's refresh button reads it)
+      api.post("/github/refresh", async (_req, reply) => {
+        refreshBoards();
+        return reply.code(202).send({ ok: true });
+      });
+
       // What adding a repo would mean, read live from GitHub (reads only; nothing is written).
       api.post("/repos/preview", async (req, reply) => {
         const body = RepoLocation.safeParse(req.body);

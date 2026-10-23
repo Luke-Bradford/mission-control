@@ -682,7 +682,7 @@ The commit tool refuses such a message before it commits, so the seat can reword
 | `ta-loop:<id>` | `var/autonomy/loop.log`, `status.md`, `iteration-*.log` (stream-json) | 15 s |
 | `studio-loop:<id>` | `logs/driver.log`, `logs/fire.*.log` | 15 s |
 | `sessions` | `~/.claude/sessions/*.json` (live Claude sessions) | 15 s |
-| `github:<repo>` | Project v2 board items, plus open escalation issues (read-only GraphQL via the `gh` token) | `poll.github_seconds` |
+| `github:<repo>` | Project v2 board items, plus open escalation issues (read-only GraphQL via the `gh` token) | boards and escalations every `poll.board_minutes` (default 15), and at once (within a few seconds, at most every 30 s) when a seat frees up, after the hub changes GitHub, or on `POST /api/github/refresh`; PRs the engine waits on (CI, a merge) every `poll.github_seconds` |
 | `usage:<account>` | Claude: OAuth usage endpoint, then the newest transcript `rate_limit_event`. Codex: `codex app-server`, then the newest rollout. | `poll.usage_minutes` |
 | `github:<repo>:prs` | The repo's recent pull requests with their CI state and review decision (read-only GraphQL) | hourly, first 5 min after start |
 | `flow:<repo>` | Flow history: cycle time and first-push CI over the last 14 days (read-only GraphQL) | hourly, first 7 min after start (after the first PR sweep) |

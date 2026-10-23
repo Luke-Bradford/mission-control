@@ -461,6 +461,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["POST", "/api/config/reload"],
+  ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
   ["GET", "/api/crew/changes"],
   ["GET", "/api/telemetry?range=6h"],
@@ -690,6 +691,15 @@ describe("add a repo (POST /api/repos)", () => {
   });
 });
 
+describe("POST /api/github/refresh", () => {
+  it("answers 202 and asks for a refresh", async () => {
+    const r = await post("/api/github/refresh");
+    expect(r.statusCode).toBe(202);
+    expect(r.json()).toEqual({ ok: true });
+    expect(refreshed).toBe(1);
+  });
+});
+
 describe("board setup", () => {
   it("GET reports what is missing, without the project id, and writes nothing", async () => {
     const r = await get("/api/boards/shop-app/setup");
@@ -914,6 +924,11 @@ describe("local access", () => {
       if (url.endsWith("/dismiss") || url.endsWith("/handled") || url.includes("/replies/")) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
+      if (url === "/api/github/refresh") {
+        // accepted, not done: the read happens later
+        expect(r.statusCode, `${method} ${url}`).toBe(202);
         continue;
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);

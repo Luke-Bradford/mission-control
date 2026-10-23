@@ -158,20 +158,28 @@ export const PR_CHECKS_MAX = 50;
 /** The head commit's rollup: its state and each check run or commit status by name. */
 export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl checkSuite { workflowRun { runAttempt } } } ... on StatusContext { context state targetUrl } } } }`;
 
-const PRS_QUERY = `query PullRequests($owner: String!, $name: String!, $after: String) {
-  ${RATE_LIMIT_SELECTION}
-  repository(owner: $owner, name: $name) {
-    pullRequests(first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      pageInfo { hasNextPage endCursor }
-      nodes {
+/** What the board reads from a pull request; the page query and the one-PR query share it. */
+const PR_FIELDS = `
         number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable
         author { login }
         assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 3) { nodes { number } }
         commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
-      }
+      `;
+
+const PRS_QUERY = `query PullRequests($owner: String!, $name: String!, $after: String) {
+  ${RATE_LIMIT_SELECTION}
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {${PR_FIELDS}}
     }
   }
+}`;
+
+const PR_QUERY = `query PullRequest($owner: String!, $name: String!, $number: Int!) {
+  ${RATE_LIMIT_SELECTION}
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { ${PR_FIELDS} } }
 }`;
 
 const SEARCH_QUERY = `query Escalations($q: String!, $after: String) {
@@ -984,6 +992,46 @@ export async function sweepPullRequests(
     store.setStatus(collector, true, null);
   } catch (e) {
     store.setStatus(collector, false, `${errMsg(e)} at ${new Date(now).toISOString()}`);
+  }
+  return { boards, escalations: false };
+}
+
+/**
+ * Re-reads only the PRs the engine waits on (CI, a merge), one query each, merged into the stored
+ * rows. A failure keeps what was read so far, marks the repo's collector with `prs:`; it never throws.
+ * A success leaves the status alone: the next board read rewrites it.
+ */
+export async function collectWaitedPrs(
+  repo: CcConfig["repos"][number],
+  store: Store,
+  gql: Gql,
+  numbers: number[],
+  clock: () => number,
+): Promise<GithubChanges> {
+  const [owner = "", name = ""] = repo.github.split("/");
+  const readAt = clock();
+  const prs: PullRequestView[] = [];
+  let failure: string | null = null;
+  try {
+    for (const number of numbers) {
+      const node = path(
+        await call(gql, PR_QUERY, { owner, name, number }),
+        "repository",
+        "pullRequest",
+      );
+      const pr = isObj(node) ? mapPr(repo, node) : null;
+      if (pr) prs.push(pr);
+    }
+  } catch (e) {
+    failure = errMsg(e);
+  }
+  const boards = prs.length > 0 && store.upsertPullRequests(repo.id, prs, readAt);
+  if (failure !== null) {
+    store.setStatus(
+      githubCollector(repo.id),
+      false,
+      `prs: ${failure} at ${new Date(clock()).toISOString()}`,
+    );
   }
   return { boards, escalations: false };
 }
