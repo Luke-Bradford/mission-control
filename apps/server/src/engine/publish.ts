@@ -71,6 +71,9 @@ export const MERGE_NO_SEAT = "the run's seat is no longer configured";
 export const MERGE_BAD_SHA = "not a commit sha";
 export const MERGE_HEAD_MOVED = "the PR's head is not the commit that passed the gate";
 export const MERGE_CONFLICTING = "the PR conflicts with main";
+/** The run's Activity line, once per head, when its merge waits for main to be merged in. */
+export const MERGE_WAITS_ON_MAIN =
+  "merge waits: the PR conflicts with main, so main is merged in first";
 export const MERGE_PR_NOT_OPEN = "the PR is not open";
 export const MERGE_NOT_RUN_BRANCH = "the branch is not this run's own";
 export const MERGE_BRANCH_MOVED = "the branch has commits that were not merged";
@@ -991,20 +994,24 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (pr.isCrossRepository !== false || pr.headRefName !== ownBranch(run)) {
           return final(MERGE_PR_NOT_RUNS);
         }
+        if (pr.mergeable === "CONFLICTING") return transient(MERGE_CONFLICTING);
         const base = await inGit(run, async (g): Promise<PublishResult> => {
           const { defaultBranch } = await originNow(g, null);
           return pr.baseRefName === defaultBranch ? { ok: true } : final(MERGE_PR_NOT_RUNS);
         });
         if (!base.ok) return base;
-        if (pr.mergeable === "CONFLICTING") return transient(MERGE_CONFLICTING);
         const merged = await ghDo(
           ["pr", "merge", String(n), `--repo=${repo}`, "--merge", `--match-head-commit=${sha}`],
           "pr merge",
         );
-        if (merged.ok || !merged.transient) return merged;
-        // the merge may have gone through with the reply lost
+        if (merged.ok) return merged;
+        // the merge may have gone through with the reply lost, or GitHub has found a conflict
+        // its earlier answer did not show yet
         const after = await view();
-        return !isRefusal(after) && after.state === "MERGED" ? { ok: true } : merged;
+        if (!isRefusal(after) && after.state === "MERGED") return { ok: true };
+        if (!isRefusal(after) && after.mergeable === "CONFLICTING")
+          return transient(MERGE_CONFLICTING);
+        return merged;
       });
     },
 

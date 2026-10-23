@@ -81,7 +81,7 @@ import type {
   RerunStateResult,
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
-import { MERGE_CONFLICTING, MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
+import { MERGE_CONFLICTING, MERGE_HEAD_MOVED, MERGE_WAITS_ON_MAIN } from "../src/engine/publish.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
@@ -3015,7 +3015,7 @@ describe("the engine runs reviews", () => {
 
     it.each([
       ["MERGEABLE", MERGE_CONFLICTING],
-      ["UNKNOWN", "gh pr merge: Pull Request is not mergeable"],
+      ["UNKNOWN", MERGE_CONFLICTING],
     ] as const)(
       "refreshes a stale %s PR after a merge conflict without counting refusals",
       async (mergeable, text) => {
@@ -3052,6 +3052,34 @@ describe("the engine runs reviews", () => {
         expect(h.steps.filter((s) => s === "merge")).toHaveLength(4);
       },
     );
+
+    it("counts a merge refused for another reason (a branch policy), as before", async () => {
+      const refusal = {
+        ok: false,
+        text: "gh pr merge: Pull request is not mergeable: the base branch policy prohibits the merge.",
+        transient: true,
+      } as const;
+      h.stepResults.merge = Array(4).fill(refusal);
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "passing", mergeable: "MERGEABLE" });
+      reported(first().id, []);
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      expect(loopOf().transient).toBe(1);
+      expect(loopOf().lastRefusal).not.toBeNull();
+    });
+
+    it("leaves one Activity line while a merge waits on a conflict", async () => {
+      h.stepResults.merge = Array(2).fill({ ok: false, text: MERGE_CONFLICTING, transient: true });
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "passing", mergeable: "MERGEABLE" });
+      reported(first().id, []);
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      clock += ENGINE_TICK_MS;
+      await h.engine.reconcileRun(RUN);
+      expect(loopTexts().filter((t) => t === MERGE_WAITS_ON_MAIN)).toHaveLength(1);
+    });
 
     it("a repo that is not a merge workspace takes no merge step, whatever was planned", async () => {
       await toReview();

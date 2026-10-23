@@ -831,7 +831,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
                 noteKind: "ready",
                 text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
               });
-            } else if (s.hardRulesSet !== true) {
+            } else if (s.hardRulesSet !== true && s.pr?.mergeable !== "CONFLICTING") {
               notes.set(readyNoteKey(runId, rv.P), {
                 noteKind: "ready",
                 text: readyText(ticket.ref, n, rv.R.retro, rv.P, rv.cur.minor),
