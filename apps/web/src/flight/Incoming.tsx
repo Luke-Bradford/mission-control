@@ -51,7 +51,7 @@ export function Incoming() {
       {rows.map(({ entry, url }) => (
         <li className="incoming-row" key={entry.id} data-testid="incoming-row">
           <div className="row">
-            <Pill tone="plain">{entry.source}</Pill>
+            <Pill tone="plain">{entry.sourceRef?.kind === "teams" ? "Teams" : entry.source}</Pill>
             <span className="s">{tz === null ? DASH : rel(entry.arrivedAt, now, tz)}</span>
             <Pill
               tone={

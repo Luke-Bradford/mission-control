@@ -13,10 +13,11 @@ import { RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { TeamsSources } from "./TeamsSources.tsx";
 
 const DASH = "—";
 
-/** Setup › Sources (catalogue 2.7.5): GitHub's health, the config and glossary, and what is read. */
+/** Setup › Sources (catalogue 2.7.5): source health and selection, the config and glossary, and what is read. */
 export function Sources({
   config,
   error,
@@ -85,20 +86,25 @@ export function Sources({
           </p>
         </div>
       </Panel>
-      <Panel title="Microsoft Teams" sub="read-only" actions={<Pill tone="plain">P5</Pill>}>
+      <Panel
+        title="Microsoft Teams"
+        sub="read-only · Entra app Claude-Operator"
+        actions={<Pill tone="plain">P5</Pill>}
+      >
         <div className="pb">
-          <p className="s">Work only; arrives in phase 5.</p>
+          <p className="s">Work only · phase 5.</p>
+          <TeamsSources config={config} />
           <p className="s">
-            Will watch the chats and channels you pick for: your name or @mentions, your ticket and
-            PR numbers, and words like "bug", "broken" or "urgent" near your areas.
+            Watches the chats and channels you pick for: your name or @mentions, your ticket and PR
+            numbers, and words like "bug", "broken" or "urgent" near your areas.
           </p>
           <p className="s">
-            Matches will become Needs you items or a FLIGHT digest, with a link to the message.
-            FLIGHT will be able to draft a GitHub issue from one for you to approve.
+            Matches become Needs you items or a FLIGHT digest, with a link to the message. FLIGHT
+            can draft a GitHub issue from one for you to approve.
           </p>
           <p className="note">
-            Will poll on a timer; Graph change notifications need a public HTTPS endpoint, which a
-            local app doesn't have. Mission Control never posts to Teams.
+            Polls on a timer; Graph change notifications need a public HTTPS endpoint, which a local
+            app doesn't have. Mission Control never posts to Teams.
           </p>
         </div>
       </Panel>
