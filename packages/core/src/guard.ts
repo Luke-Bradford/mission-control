@@ -235,14 +235,17 @@ const RUNNERS = new Set([
   "bunx",
   "uvx",
 ]);
-/** `pnpm exec`, `npm x`, `yarn dlx`: a package manager running a command. */
+/** `pnpm exec`, `npm x`, `yarn dlx`: a package manager running a command (the verb may follow options: `pnpm -s exec`). */
 const PACKAGE_MANAGERS = new Set(["pnpm", "npm", "yarn"]);
 const PACKAGE_RUN_VERBS = new Set(["exec", "dlx", "x"]);
 
 /** Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner. */
 function runnerStart(name: string, rest: readonly string[]): number {
   if (RUNNERS.has(name)) return 0;
-  if (PACKAGE_MANAGERS.has(name) && PACKAGE_RUN_VERBS.has(rest[0] ?? "")) return 1;
+  if (PACKAGE_MANAGERS.has(name)) {
+    const i = rest.findIndex((w) => PACKAGE_RUN_VERBS.has(w));
+    return i === -1 ? -1 : i + 1;
+  }
   return -1;
 }
 

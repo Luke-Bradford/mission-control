@@ -1860,6 +1860,8 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
     "parallel git push ::: a",
     "pnpm exec git push",
     "pnpm dlx git push",
+    "pnpm -s exec git push",
+    "pnpm --filter web exec git push",
     "npx git push",
     "doas git push",
     "ionice -c 3 git push",
@@ -1909,6 +1911,7 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
     "git branch --points-at=HEAD",
     "npx tsc --noEmit",
     "pnpm exec tsc --noEmit",
+    "pnpm -s exec tsc --noEmit",
     "watch ls",
   ])("allows %s", (c) => {
     expect(ruleOf(bash(c))).toBe("allow");
