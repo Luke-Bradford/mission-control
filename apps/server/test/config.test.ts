@@ -73,7 +73,7 @@ describe("loadConfig", () => {
       kind: "studio-loop",
       launchdLabel: "com.site-builder.studio-build-driver",
     });
-    expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60 });
+    expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 });
   });
 
   it("reads updates.cli, defaulting to off", () => {
@@ -120,12 +120,38 @@ describe("loadConfig", () => {
           .replace("github_seconds: 60", `github_seconds: ${gh}`)
           .replace("usage_minutes: 30", `usage_minutes: ${usage}`),
       );
-    expect(loadConfig(poll(30, 5)).poll).toEqual({ usageMinutes: 5, githubSeconds: 30 });
-    expect(loadConfig(poll(3600, 240)).poll).toEqual({ usageMinutes: 240, githubSeconds: 3600 });
+    expect(loadConfig(poll(30, 5)).poll).toEqual({
+      usageMinutes: 5,
+      githubSeconds: 30,
+      boardMinutes: 15,
+    });
+    expect(loadConfig(poll(3600, 240)).poll).toEqual({
+      usageMinutes: 240,
+      githubSeconds: 3600,
+      boardMinutes: 15,
+    });
     expect(errorOf(() => loadConfig(poll(29, 30))).path).toBe("poll.githubSeconds");
     expect(errorOf(() => loadConfig(poll(3601, 30))).path).toBe("poll.githubSeconds");
     expect(errorOf(() => loadConfig(poll(60, 4))).path).toBe("poll.usageMinutes");
     expect(errorOf(() => loadConfig(poll(60, 241))).path).toBe("poll.usageMinutes");
+  });
+
+  it("bounds poll.board_minutes 5..60, default 15", () => {
+    // the example may or may not carry the line: drop it, then set the value under test
+    const board = (v: number) =>
+      tmpConfig((y) =>
+        y
+          .replace(/^ *board_minutes:.*\n/m, "")
+          .replace("github_seconds: 60", `github_seconds: 60\n  board_minutes: ${v}`),
+      );
+    expect(loadConfig(tmpConfig((y) => y)).poll.boardMinutes).toBe(15);
+    expect(
+      loadConfig(tmpConfig((y) => y.replace(/^ *board_minutes:.*\n/m, ""))).poll.boardMinutes,
+    ).toBe(15);
+    expect(loadConfig(board(5)).poll.boardMinutes).toBe(5);
+    expect(loadConfig(board(60)).poll.boardMinutes).toBe(60);
+    expect(errorOf(() => loadConfig(board(4))).path).toBe("poll.boardMinutes");
+    expect(errorOf(() => loadConfig(board(61))).path).toBe("poll.boardMinutes");
   });
 
   it("requires launchd_label to be letters, digits, dot, underscore or hyphen", () => {
