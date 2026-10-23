@@ -4,6 +4,8 @@ import {
   type AttentionItem,
   type CrewRow,
   clockHm,
+  FLIGHT_NOT_RUNNING,
+  type FlightView,
   GUARD_NONE_TEXT,
   type GuardHitsView,
   guardAckKey,
@@ -25,6 +27,8 @@ import { RepoRef } from "../hud/RepoRef.tsx";
 import { agentPath, navigate } from "../router.ts";
 import { openDockChat, openItem, useFlightUnread } from "../shell/overlays.ts";
 import { GUARD_DRAWER_ID } from "../telemetry/guardCopy.ts";
+import { type AnswerTarget, answerTarget, sendAnswer } from "./answer.ts";
+import { BriefOptions } from "./ItemBrief.tsx";
 
 /** Rows are cut here (catalogue 2.5.1). */
 export const NEED_TEXT_MAX = 170;
@@ -73,6 +77,7 @@ export function NeedsList({
 }) {
   const now = useSecond();
   const replies = useFlightUnread();
+  const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const list = sortNeeds((items ?? []).filter(isOperatorItem));
@@ -83,6 +88,12 @@ export function NeedsList({
     setBusy(true);
     setError(null);
     setError(await ackKeys(keys));
+    setBusy(false);
+  };
+  const answer = async (target: AnswerTarget, i: AttentionItem, body: string) => {
+    setBusy(true);
+    setError(null);
+    setError(await sendAnswer(target, flightSeat, i, i.text, body));
     setBusy(false);
   };
 
@@ -128,6 +139,7 @@ export function NeedsList({
           const lamp = needsLamp([i], !i.acked);
           const agentId = i.agentId;
           const row = rows.find((r) => r.id === agentId);
+          const target = answerTarget(i, rows, flightSeat);
           return (
             <div key={i.key} className={i.acked ? "nrow acked" : "nrow"} data-kind={i.kind}>
               {lamp && <Lamp {...lamp} />}
@@ -135,8 +147,35 @@ export function NeedsList({
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
                 {agentId !== null && <AgentTag id={agentId} index={row?.index ?? 0} sm />}{" "}
                 <NeedText item={i} now={now} />
+                {i.brief && (
+                  <>
+                    <div className="xs fg2">
+                      FLIGHT recommends:{" "}
+                      <MarkdownInline text={i.brief.recommendation} max={NEED_TEXT_MAX} />
+                    </div>
+                    {target.to !== "github" && (
+                      <BriefOptions
+                        options={i.brief.options}
+                        live
+                        disabled={busy || !(target.to === "seat" || flightSeat?.live === true)}
+                        title={
+                          target.to === "flight" && flightSeat?.live !== true
+                            ? FLIGHT_NOT_RUNNING
+                            : undefined
+                        }
+                        variant="row"
+                        onPick={(o) => answer(target, i, o.answer)}
+                      />
+                    )}
+                  </>
+                )}
               </div>
               <div className="acts">
+                {i.escalationId === null && (
+                  <button type="button" className="sm primary" onClick={() => openItem(i.key)}>
+                    {i.brief ? "Read the brief" : "Discuss"}
+                  </button>
+                )}
                 {i.escalationId !== null ? (
                   <>
                     <button type="button" className="sm primary" onClick={() => openItem(i.key)}>

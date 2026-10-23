@@ -114,6 +114,9 @@ const inCi = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): Lo
     { phase: "ci", reportedEvidenceId: 1, pushStartedAt: NOW - 120_000, cardFor: "ci:0", ...loop },
   );
 
+/** The one re-run of a failure on `sha`, asked for before the poll under test. */
+const reran = (sha: string = SHA): RunLoop["rerun"] => ({ sha, at: NOW - 1000, runs: [] });
+
 const events = (a: LoopAction[]): string[] =>
   a.flatMap((x) => (x.kind === "event" ? [x.text] : []));
 const outstanding = (a: LoopAction[]): LoopAction[] => a.filter((x) => x.kind !== "event");
@@ -368,22 +371,115 @@ describe("state step", () => {
   });
 
   it("12: failing CI counts, records the sha and returns to working", () => {
-    const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }));
+    const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }, { rerun: reran() }));
     expect(r.loop).toMatchObject({ phase: "working", ciFails: 1, ciFailedSha: SHA });
     expect(events(r.actions)).toEqual(["CI failed on aaaaaaa"]);
     expect(r.actions).toContainEqual({ kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA });
   });
 
   it("12: the third failure parks", () => {
-    let s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 1, ciFailedSha: SHA2 });
+    const rerun = reran();
+    let s = inCi(
+      { pr: pr({ ci: "failing" }) },
+      { ciFails: CI_TRIES - 1, ciFailedSha: SHA2, rerun },
+    );
     const r = reconcile(s);
     expect(r.loop.parked).toEqual({
       kind: "ci",
       reason: "CI failed 3 times; last on aaaaaaa",
       ended: false,
     });
-    s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 2, ciFailedSha: SHA2 });
+    s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 2, ciFailedSha: SHA2, rerun });
     expect(reconcile(s).loop.phase).toBe("working");
+  });
+
+  describe("a failed CI is re-run once", () => {
+    it("the first failure on a sha asks for a re-run and tells the seat nothing", () => {
+      const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }));
+      expect(r.loop).toMatchObject({
+        phase: "ci",
+        ciFails: 0,
+        ciFailedSha: null,
+        rerun: { sha: SHA, at: NOW, runs: [] },
+      });
+      expect(r.actions).toContainEqual({ kind: "rerun-ci", sha: SHA });
+      expect(r.actions.some((a) => a.kind === "ci-excerpt")).toBe(false);
+    });
+
+    it("no second re-run for the same sha", () => {
+      const s = inCi({ pr: pr({ ci: "failing" }) }, { rerun: reran() });
+      expect(reconcile(s).actions.some((a) => a.kind === "rerun-ci")).toBe(false);
+      const stale = inCi({ pr: pr({ ci: "failing", polledAt: NOW - 5000 }) }, { rerun: reran() });
+      expect(reconcile(stale).actions.some((a) => a.kind === "rerun-ci")).toBe(false);
+    });
+
+    it("a poll from before the re-run is waited out", () => {
+      const r = reconcile(
+        inCi({ pr: pr({ ci: "failing", polledAt: NOW - 5000 }) }, { rerun: reran() }),
+      );
+      expect(r.loop).toMatchObject({ phase: "ci", ciFails: 0, ciFailedSha: null });
+      expect(r.actions.some((a) => a.kind === "ci-excerpt")).toBe(false);
+    });
+
+    it("a second failure is a real one and reaches the seat", () => {
+      const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }, { rerun: reran() }));
+      expect(r.loop).toMatchObject({ phase: "working", ciFails: 1, ciFailedSha: SHA });
+      expect(r.actions).toContainEqual({ kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA });
+    });
+
+    it("a pass after the re-run is recorded as a flake and the run goes on", () => {
+      const rerun = { sha: SHA, at: NOW - 1000, runs: [{ id: 99, name: "CI" }] };
+      const r = reconcile(inCi({ pr: pr({ ci: "passing" }) }, { rerun }));
+      expect(r.loop).toMatchObject({ phase: "review", rerun: { flaked: true } });
+      expect(events(r.actions)).toEqual([
+        "CI passed on aaaaaaa",
+        "CI flaked on aaaaaaa: passed on re-run",
+      ]);
+      const next = reconcile({ ...inCi({ pr: pr({ ci: "passing" }) }), loop: r.loop });
+      expect(next.actions).toContainEqual({
+        kind: "note",
+        key: `flake:r1:${SHA}`,
+        noteKind: "flag",
+        text: `${REF}: CI failed on aaaaaaa and passed on re-run (a flake): CI run 99`,
+      });
+    });
+
+    it("a flake note is never cleared by the loop, at done or after a later sha is re-run", () => {
+      const key = `flake:r1:${SHA}`;
+      const done = reconcile(
+        snap(
+          { openNotes: [key], pr: pr({ ci: "passing" }) },
+          {
+            phase: "done",
+            cardFor: "done:0",
+            rerun: { sha: SHA, at: NOW - 1000, runs: [], flaked: true },
+          },
+        ),
+      );
+      expect(done.actions).not.toContainEqual({ kind: "clear-note", key });
+      const later = reconcile(
+        inCi({ openNotes: [key], pr: pr({ ci: "failing" }) }, { rerun: reran(SHA2) }),
+      );
+      expect(later.actions).not.toContainEqual({ kind: "clear-note", key });
+    });
+
+    it("the CI-pending clock runs from the re-run, not the push", () => {
+      const old = { pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } };
+      const pending = pr({ ci: "pending" });
+      const r = reconcile(
+        inCi({ ...old, pr: pending }, { rerun: { sha: SHA, at: NOW - 60_000, runs: [] } }),
+      );
+      expect(r.loop.phase).toBe("ci");
+      expect(r.loop.parked).toBeNull();
+      const other = reconcile(inCi({ ...old, pr: pending }, { rerun: reran(SHA2) }));
+      expect(other.loop.parked?.kind).toBe("ci-pending");
+    });
+
+    it("a pass with no failure before is no flake", () => {
+      const r = reconcile(inCi({ pr: pr({ ci: "passing" }) }));
+      expect(r.loop.rerun ?? null).toBeNull();
+      expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
+    });
   });
 
   it("13: CI pending for thirty minutes parks", () => {
@@ -817,7 +913,7 @@ describe("sequences", () => {
   });
 
   it("a crash after a CI failure repeats the excerpt", () => {
-    const s = inCi({ pr: pr({ ci: "failing" }) });
+    const s = inCi({ pr: pr({ ci: "failing" }) }, { rerun: reran() });
     const r = reconcile(s);
     expect(r.loop.phase).toBe("working");
     const next = again(s, r.loop);
@@ -847,7 +943,13 @@ describe("sequences", () => {
           pushed: { sha, at: NOW - 1000 },
           pr: pr({ headSha: sha, ci: "failing" }),
         },
-        { ...loop, phase: "ci", ciFails: i, ciFailedSha: i === 0 ? null : (shas[i - 1] ?? null) },
+        {
+          ...loop,
+          phase: "ci",
+          ciFails: i,
+          ciFailedSha: i === 0 ? null : (shas[i - 1] ?? null),
+          rerun: reran(sha),
+        },
       );
       last = reconcile(ci);
       loop = last.loop;
@@ -2252,5 +2354,113 @@ describe("merge workspace", () => {
       close: "close the issue",
       "delete-remote": "delete the remote branch",
     });
+  });
+});
+
+describe("carried review", () => {
+  const RETRO = "RETRO-1";
+  const SHA3 = "ddddddd4444";
+  const fact = (over: Partial<ReviewFact> = {}): ReviewFact => ({
+    id: 1,
+    sha: SHA,
+    epoch: 0,
+    attempt: 1,
+    state: "reported",
+    blocking: 0,
+    minor: 0,
+    failure: null,
+    ...over,
+  });
+  const finding: ReviewFinding = {
+    severity: "Important",
+    file: "a.ts",
+    line: 3,
+    summary: "s",
+    scenario: "w",
+    fix: "f",
+  };
+  /** The head moved from SHA (reviewed) to SHA2 by a hub-made merge of main. */
+  const carried = (
+    over: Partial<LoopSnapshot> = {},
+    loop: Partial<RunLoop> = {},
+    row: Partial<ReviewFact> = {},
+    findings: ReviewFinding[] = [],
+  ): LoopSnapshot => {
+    const head = over.pushed?.sha ?? SHA2;
+    return snap(
+      {
+        autoMerge: true,
+        hardRulesSet: true,
+        headCommit: head,
+        pushed: { sha: head, at: NOW - 60_000 },
+        pr: pr({ ci: "passing", headSha: head }),
+        evidence: { id: 1, at: 2000, ruling: false },
+        evidenceCount: 1,
+        review: { retro: RETRO, rows: [fact(row)], findings },
+        ...over,
+      },
+      {
+        phase: "review",
+        reportedEvidenceId: 1,
+        cardFor: "review:0",
+        gate: { sha: head, mainSha: "cccccccc3333", containsMain: true, hubOnly: true, strays: [] },
+        touches: { sha: head, paths: [] },
+        carry: { from: SHA, to: SHA2 },
+        ...loop,
+      },
+    );
+  };
+  const of = (a: LoopAction[], kind: LoopAction["kind"]): LoopAction[] =>
+    a.filter((x) => x.kind === kind);
+
+  it("a hub-made, conflict-free main merge carries a clean verdict, with no new request-review", () => {
+    const a = reconcile(carried()).actions;
+    expect(of(a, "request-review")).toEqual([]);
+    expect(a).toContainEqual({ kind: "merge", sha: SHA2 });
+    const fresh = reconcile(carried({}, { carry: null })).actions;
+    expect(of(fresh, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+  });
+
+  it("a running review isn't superseded by such a merge", () => {
+    const cases: [Partial<LoopSnapshot>, Partial<RunLoop>][] = [
+      [{}, {}],
+      [{}, { phase: "ci" }],
+      [{ pr: pr({ ci: "passing", headSha: SHA }) }, {}],
+    ];
+    for (const [over, loop] of cases) {
+      const a = reconcile(carried(over, loop, { state: "running" })).actions;
+      expect(of(a, "supersede-review")).toEqual([]);
+      expect(of(a, "request-review")).toEqual([]);
+    }
+    const fresh = reconcile(carried({}, { carry: null }, { state: "running" })).actions;
+    expect(of(fresh, "supersede-review")).toEqual([{ kind: "supersede-review", reviewId: 1 }]);
+  });
+
+  it("a seat commit, a foreign commit, or a changed PR diff each still request a fresh review", () => {
+    const seatCommit = reconcile(carried({ pushed: { sha: SHA3, at: NOW - 60_000 } })).actions;
+    expect(of(seatCommit, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA3, attempt: 1 },
+    ]);
+    const foreign = reconcile(carried({}, { carry: { from: "eeeeeee5555", to: SHA2 } })).actions;
+    expect(of(foreign, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+    const changed = reconcile(carried({}, { carry: null })).actions;
+    expect(of(changed, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+    const waived = reconcile(carried({}, { reviewWaivedSha: SHA })).actions;
+    expect(of(waived, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+  });
+
+  it("a blocking verdict carries as blocking", () => {
+    const r = reconcile(carried({}, {}, { blocking: 1 }, [finding]));
+    expect(of(r.actions, "request-review")).toEqual([]);
+    expect(of(r.actions, "merge")).toEqual([]);
+    expect(sends(r.actions)).toContain("fix:r1:0:1");
   });
 });

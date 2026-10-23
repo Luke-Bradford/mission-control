@@ -29,10 +29,12 @@ import {
   type RepoRules,
   seatCallSign,
   seatDef,
+  type TicketView,
 } from "@mc/core";
 import type { CardNow } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
-import { CheckoutError } from "../runtime/checkouts.ts";
+import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
+import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { wakeDueAsideRun } from "./aside.ts";
@@ -56,6 +58,8 @@ export interface QueueDeps {
   rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** The hub's own `gh` login; null when it could not be read, so any assigned card is another's. */
   login: string | null;
+  /** A ticket as GitHub has it; a card whose body cannot be read is not dealt. */
+  fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   now: () => number;
   /** Called when a note this module manages is raised or cleared. */
   onNotes?: () => void;
@@ -67,8 +71,12 @@ export interface TakeDeps {
   supervisor: Pick<Supervisor, "startRun">;
   /** The hub's own `gh` login; null when it could not be read, and then nothing is taken. */
   login: string | null;
+  /** A repo's board rules (read at origin/HEAD); an error means no card is moved between queues. */
+  rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** The card as GitHub has it now (the issue and its project item); null when it is not there. */
   readCard: (repoId: RepoId, issue: number) => Promise<CardNow | null>;
+  /** Git in the session's clone (default `crewGit` on the clone's own git dir); tests fake it. */
+  git?: (checkout: string, args: string[], timeoutMs: number) => Promise<string>;
   /** false: a preview, crew off, or loop writes disabled; nothing is taken. */
   enabled: boolean;
   now: () => number;
@@ -80,6 +88,12 @@ export interface TakeDeps {
 }
 
 const refOf = (repoId: RepoId, issue: number) => `${repoId}#${issue}`;
+
+/** Ticket bodies read for the queue, by card; a body is current while the card's `updatedAt` is. */
+const bodyCache = new Map<string, { updatedAt: number; body: string }>();
+
+/** Empties the body cache (for tests). */
+export const clearBodyCache = (): void => bodyCache.clear();
 
 /** Priorities in the order they are picked; a card with none, or any other, comes after. */
 const priorityRank = (p: string | null): number => {
@@ -210,6 +224,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       if (q.takenAt !== null) takenRefs.add(refOf(q.repoId, q.issue));
     }
   }
+  const readyRefs = new Set<string>();
   for (const [repoId, rules] of rulesOf) {
     const group = seats.filter((s) => s.session.repoId === repoId);
     const order = [
@@ -217,31 +232,53 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       ...group.filter((s) => !seatMayTake(store, s.seat.id)),
     ];
     const board = store.board(repoId);
-    const cards = readyCards(store, repoId).flatMap((card) => {
+    const repo = config.repos.find((r) => r.id === repoId);
+    const cards: { issue: number; label: string }[] = [];
+    for (const card of readyCards(store, repoId)) {
       const ref = refOf(repoId, card.issueNumber);
-      if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) return [];
-      // the one start check, without the ticket body (the queue reads the board, not GitHub)
-      const startable = group.some(
-        ({ seat }) =>
-          eligibleToStart({
-            repoId,
-            issue: card.issueNumber,
-            card,
-            rules,
-            seat: { call: seatCallSign(seat.id), area: seat.area, loop: seatDef(seat).loop },
-            login: deps.login,
-            hasRun: takenRefs.has(ref) || active.has(ref),
-            lane: config.crew?.lane,
-            laneDefault: config.crew?.laneDefault ?? false,
-            body: null,
-            closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
-          }) === null,
-      );
-      if (!startable) return [];
+      readyRefs.add(ref);
+      if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) continue;
+      // the one start check every start applies
+      const startable = (body: string | null): boolean =>
+        group.some(
+          ({ seat }) =>
+            eligibleToStart({
+              repoId,
+              issue: card.issueNumber,
+              card,
+              rules,
+              seat: { call: seatCallSign(seat.id), area: seat.area, loop: seatDef(seat).loop },
+              login: deps.login,
+              hasRun: takenRefs.has(ref) || active.has(ref),
+              lane: config.crew?.lane,
+              laneDefault: config.crew?.laneDefault ?? false,
+              body,
+              closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+            }) === null,
+        );
+      // the board alone first: only a card that passes it has its body read
+      if (!startable(null)) continue;
+      // fails closed: a body that cannot be read, or a ticket GitHub no longer has, is not dealt
+      // a body is read again only when the card has changed since (updatedAt includes the issue's)
+      const hit = bodyCache.get(ref);
+      let body: string;
+      if (hit !== undefined && hit.updatedAt === card.updatedAt) body = hit.body;
+      else {
+        try {
+          const ticket = repo === undefined ? null : await deps.fetchTicket(repo, card.issueNumber);
+          if (ticket === null) continue;
+          body = ticket.body;
+        } catch {
+          continue;
+        }
+        bodyCache.set(ref, { updatedAt: card.updatedAt, body });
+      }
+      if (!startable(body)) continue;
       const labels = areaLabelsOf(rules, card);
       const label = labels[0];
-      return labels.length === 1 && label !== undefined ? [{ issue: card.issueNumber, label }] : [];
-    });
+      if (labels.length === 1 && label !== undefined)
+        cards.push({ issue: card.issueNumber, label });
+    }
     const hands = dealQueues(
       order.map((s) => ({ id: s.seat.id, labels: areaLabelsFor(rules, s.seat.area) })),
       cards,
@@ -254,6 +291,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       })),
     );
   }
+  for (const ref of bodyCache.keys()) if (!readyRefs.has(ref)) bodyCache.delete(ref);
 }
 
 /**
@@ -304,6 +342,79 @@ export const isTransientStart = (e: unknown): boolean =>
   (e instanceof CheckoutError && (e.code === "fetch" || e.code === "checkout"));
 
 /**
+ * A seat about to take picks, in `readyCards` order, the first card of its own queue and the queues
+ * of the seats that may not take now (busy, or at their account's quota stop), among the cards its area labels cover. A card from another
+ * seat's queue moves to the head of this seat's, so a busy seat's queue never holds back a higher
+ * Priority. A card a seat holds taken stays with it.
+ */
+async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConfig): Promise<void> {
+  const { config, store } = deps;
+  const rules = await deps.rules(repoId);
+  if (rules instanceof RepoRulesError) return;
+  const own = store.queue(seat.id);
+  if (own.some((q) => q.takenAt !== null)) return;
+  const labels = areaLabelsFor(rules, seat.area);
+  const holder = new Map<number, string>();
+  for (const q of own) if (q.repoId === repoId) holder.set(q.issue, seat.id);
+  for (const { session, seat: other } of writerSeats(config)) {
+    if (
+      other.id === seat.id ||
+      session.repoId !== repoId ||
+      (seatMayTake(store, other.id) && !atQuotaStop(deps, other.accountId))
+    ) {
+      continue;
+    }
+    for (const q of store.queue(other.id)) {
+      if (q.repoId === repoId && q.takenAt === null) holder.set(q.issue, other.id);
+    }
+  }
+  const best = readyCards(store, repoId).find((c) => {
+    const l = areaLabelsOf(rules, c);
+    const label = l[0];
+    return (
+      holder.has(c.issueNumber) && l.length === 1 && label !== undefined && labels.includes(label)
+    );
+  });
+  if (best === undefined) return;
+  const from = holder.get(best.issueNumber);
+  if (from === undefined || from === seat.id) return;
+  store.dropQueued(from, repoId, best.issueNumber);
+  store.replaceQueue(seat.id, [
+    { repoId, issue: best.issueNumber },
+    ...own
+      .filter((q) => q.issue !== best.issueNumber)
+      .map((q) => ({ repoId: q.repoId, issue: q.issue })),
+  ]);
+}
+
+/** The first of the ticket's branches on origin that no run of this hub is on, else null. */
+async function foreignBranch(
+  deps: TakeDeps,
+  checkout: string,
+  repoId: RepoId,
+  issue: number,
+): Promise<string | null> {
+  const git =
+    deps.git ??
+    (async (cwd, args, timeoutMs) => {
+      const common = await cloneGitDir(cwd);
+      return crewGit(cwd, args, common, { gitDir: common, timeoutMs });
+    });
+  const out = await git(
+    checkout,
+    ["ls-remote", "--heads", "origin", `feature/${issue}`, `feature/${issue}-*`],
+    CREW_GIT_SLOW_MS,
+  );
+  for (const line of out.split("\n")) {
+    const name = line.split("\t")[1]?.trim();
+    if (name === undefined || !name.startsWith("refs/heads/")) continue;
+    const branch = name.slice("refs/heads/".length);
+    if (!deps.store.hasRunOnBranch(repoId, branch)) return branch;
+  }
+  return null;
+}
+
+/**
  * The seat's next queued ticket, started as a looped run. Nothing happens for a draft repo, a
  * preview, a seat that is not idle or has a run, or an account at its quota stop.
  */
@@ -314,6 +425,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
   if (!seatMayTake(store, seatId)) return;
   if (atQuotaStop(deps, found.seat.accountId)) return;
+  await claimBestReady(deps, found.session.repoId, found.seat);
 
   const taken = store.takeQueued(seatId, deps.now());
   if (taken === null) return;
@@ -338,6 +450,40 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (latest === null || hudColumnOf(latest) !== "Ready" || claimedByOther(latest, deps.login)) {
     store.untake(seatId, repoId, issue);
     deps.log?.(`${seatId}: ${ref} is no longer Ready and unclaimed on GitHub`);
+    return;
+  }
+  // GitHub's API can lag behind another hub's claim; origin's refs do not. A branch for the ticket
+  // that no run of this hub made is another hub's work.
+  let foreign: string | null;
+  try {
+    foreign = await foreignBranch(deps, found.session.checkout, repoId, issue);
+  } catch (e) {
+    if (!(e instanceof CheckoutError)) {
+      store.untake(seatId, repoId, issue);
+      deps.log?.(`${seatId}: could not list origin's branches for ${ref}: ${takeReason(e)}`);
+      return;
+    }
+    // a broken clone: startRun refuses it the same way, and counts it toward the take-stuck note
+    foreign = null;
+  }
+  if (foreign !== null) {
+    store.dropQueued(seatId, repoId, issue);
+    deps.log?.(`${seatId}: ${ref} already has a branch on origin (${foreign}); not started`);
+    // without a note the next refill deals the card again and it holds up the rest of the queue
+    store.raiseNote({
+      key: `${TAKE_FAILED_KEY_PREFIX}${ref}`,
+      kind: "question",
+      runId: null,
+      seatId,
+      repoId,
+      text: fillLoopText(TAKE_FAILED_TEXT, {
+        call: seatCallSign(seatId),
+        ref,
+        reason: `it already has a branch on origin (${foreign})`.slice(0, REASON_MAX),
+      }),
+      at: deps.now(),
+    });
+    deps.onNotes?.();
     return;
   }
   try {

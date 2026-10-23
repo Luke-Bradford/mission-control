@@ -28,6 +28,7 @@ import {
   itemWithoutOwner,
   NOW,
   prView,
+  SEAT_Q,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -164,6 +165,47 @@ describe("Needs you", () => {
     expect(labels).toEqual(["FLIGHT", "controller", "loop", "work lane"]);
     expect(within(drawer).getByText("F item").closest(".nrow")?.textContent).toContain("FLIGHT");
     expect(within(drawer).getByText("L item").closest(".nrow")?.textContent).toContain("work lane");
+  });
+
+  it("a row with a brief shows FLIGHT's recommendation and its options send to the seat", async () => {
+    const posts: unknown[] = [];
+    stubFetch({
+      "/api/attention": [SEAT_Q],
+      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/seats/mc-dev-1/message": (init: RequestInit | undefined) => {
+        posts.push(JSON.parse(String(init?.body)));
+        return { status: 200, body: {} };
+      },
+    });
+    render(<Comms item={null} />);
+    const row = (await within(needs()).findByText("Which port?")).closest(".nrow") as HTMLElement;
+    expect(row.textContent).toContain("FLIGHT recommends: Use 5174.");
+    const b = within(row).getByRole("button", { name: "5174" }) as HTMLButtonElement;
+    await waitFor(() => expect(b.disabled).toBe(false));
+    fireEvent.click(b);
+    await waitFor(() => expect(posts).toEqual([{ text: "Use port 5174." }]));
+  });
+
+  it("every row opens the item panel", async () => {
+    stub([ITEMS[1] as AttentionItem, SEAT_Q]);
+    render(
+      <>
+        <Comms item={null} />
+        <Probe />
+      </>,
+    );
+    const rows = await waitFor(() => {
+      const r = [...needs().querySelectorAll<HTMLElement>(".nrow")];
+      expect(r).toHaveLength(2);
+      return r as [HTMLElement, HTMLElement];
+    });
+    const byText = (t: string) => rows.find((r) => r.textContent?.includes(t)) as HTMLElement;
+    fireEvent.click(within(byText("Bash")).getByRole("button", { name: "Discuss" }));
+    expect(screen.getByTestId("item").textContent).toBe("stall:shop-app-ta:r-12");
+    fireEvent.click(within(byText("Which port?")).getByRole("button", { name: "Read the brief" }));
+    expect(screen.getByTestId("item").textContent).toBe("ask:7");
   });
 
   it("has no Being handled section when every item is the operator's", async () => {

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  BRIEFED_TEXT,
   claimedText,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
@@ -13,8 +14,10 @@ import {
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
+  MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
+  READ_OTHER_REPO,
   type RepoRules,
   type Run,
   type RunLoop,
@@ -25,6 +28,7 @@ import {
   type TicketView,
   ticketHasRunText,
   twoAreasText,
+  WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
   wrongAreaText,
 } from "@mc/core";
@@ -33,6 +37,7 @@ import { ChangeBus } from "../src/bus.ts";
 import { type CcConfig, type CrewSeatConfig, SEAT_ID } from "../src/config.ts";
 import { createFlightTools, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
+import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -105,6 +110,10 @@ let endImpl: (seatId: string) => Promise<void>;
 let fetchImpl: (n: number) => Promise<TicketView | null>;
 let moveCalls: Move[];
 let moveImpl: () => Promise<MoveResult>;
+let ghCalls: string[][];
+let ghImpl: (args: string[]) => Promise<GhResult>;
+let secrets: string[];
+let logs: string[];
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -176,11 +185,22 @@ beforeEach(() => {
   fetchImpl = async () => null;
   moveCalls = [];
   moveImpl = async () => ({ ok: true, changed: true });
+  ghCalls = [];
+  ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
+  secrets = [];
+  logs = [];
   tools = createFlightTools({
     config: cfg,
     store,
     bus,
     login: "me",
+    gh: async (a) => {
+      ghCalls.push(a);
+      return ghImpl(a);
+    },
+    dbPath: join(dir, "mc.sqlite"),
+    knownSecrets: async () => secrets,
+    log: (l) => logs.push(l),
     supervisor: {
       message: async (...a) => {
         messageCalls.push(a);
@@ -375,6 +395,9 @@ describe("tool list", () => {
       "flight_state",
       "promote",
       "end_run",
+      "create_ticket",
+      "comment_ticket",
+      "brief_item",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -1371,6 +1394,37 @@ describe("flight_state", () => {
     expect((await call("flight_state", { x: 1 })).isError).toBe(true);
   });
 
+  it("lists a merged PR the first time FLIGHT reads it, and not again", async () => {
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR 9",
+          url: "u",
+          branch: "feature/7-x",
+          ticket: "mc#7",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: NOW,
+          headSha: "abc",
+          mergeable: null,
+          author: null,
+          assignees: [],
+        },
+      ],
+      NOW,
+    );
+    const prs = async () => ((await state()) as { prs: unknown[] }).prs;
+    expect(await prs()).toMatchObject([{ pr: 9, state: "merged" }]);
+    expect(await prs()).toEqual([]);
+  });
+
   it("lists a stopped seat", async () => {
     store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
     const seats = ((await state()) as { seats: { id: string; state: string; free: boolean }[] })
@@ -1397,6 +1451,31 @@ describe("flight_state", () => {
     store.addQuestion({ agentId: "guido-1", runId: "r-old", text: "Old?", at: NOW - 9 * 60_000 });
     store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
     store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR 9",
+          url: "u",
+          branch: "feature/7-x",
+          ticket: "mc#7",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: "abc",
+          mergeable: null,
+          author: null,
+          assignees: [],
+        },
+      ],
+      NOW,
+    );
     store.raiseNote({
       key: "ready:r-pr",
       kind: "ready",
@@ -1503,7 +1582,20 @@ describe("flight_state", () => {
           blockedBy: ["mc#8"],
         },
       ],
-      prs: [{ ref: "mc#7", pr: 9, seat: "guido-1", ready: true }],
+      prs: [
+        {
+          ref: "mc#7",
+          pr: 9,
+          seat: "guido-1",
+          ready: true,
+          state: "open",
+          headSha: "abc",
+          readAt: "13:00",
+          stale: false,
+        },
+      ],
+      items: [{ key: "note:ready:r-pr", kind: "ready", ticket: "mc#7", text: "ready", ageMin: 0 }],
+      holds: [],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
     });
@@ -1753,5 +1845,623 @@ describe("promote", () => {
     moveImpl = async () => ({ ok: false, reason: "card not on the project" });
     expect(await call("promote", P())).toEqual(refused("Not moved: card not on the project"));
     expect(decisions()).toEqual([]);
+  });
+
+  describe("holds", () => {
+    const pr = (number: number, state: "open" | "merged" | "closed" = "open") => ({
+      repoId: "mc",
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch: `feature/${number}-x`,
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: "abc",
+      mergeable: null,
+      author: null,
+      assignees: [],
+    });
+    const H = (over: Record<string, unknown> = {}) => P({ to: "Backlog", waits_on: 246, ...over });
+
+    beforeEach(() => {
+      board(backlog({ status: "Ready" }));
+      store.upsertPullRequests("mc", [pr(246), pr(247, "merged"), pr(248, "closed")], NOW);
+    });
+
+    it("holds a Ready card FLIGHT did not move, behind an open PR", async () => {
+      expect((await call("promote", H())).isError).toBeUndefined();
+      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Backlog" }]);
+      expect(store.activeHolds()).toMatchObject([
+        { ref: "mc#7", waitsOn: 246, basis: "it is complete", releasedAt: null },
+      ]);
+      expect(decisions()).toMatchObject([
+        { kind: "promote", ref: "mc#7", decision: "Held in Backlog behind PR #246" },
+      ]);
+    });
+
+    it("holds a Refinement card too, and counts under the promote cap", async () => {
+      board(backlog({ status: "Refinement" }));
+      expect((await call("promote", H())).isError).toBeUndefined();
+      for (let i = 0; i < 9; i++) addDecision({ kind: "promote" });
+      expect((await call("promote", H())).text).toContain("moved tickets 10 times");
+    });
+
+    it("refuses a hold on a card with a run", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      expect(await call("promote", H())).toEqual(refused("Not moved: mc#7 has a run."));
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("refuses a hold behind a merged, closed or unknown PR", async () => {
+      for (const n of [247, 248, 999]) {
+        expect(await call("promote", H({ waits_on: n }))).toEqual(
+          refused(`Not moved: PR #${n} is not an open PR in mc.`),
+        );
+      }
+      expect(moveCalls).toEqual([]);
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("refuses waits_on on a move that is not to Backlog, and a hold from Backlog", async () => {
+      board(backlog());
+      expect(await call("promote", P({ waits_on: 246 }))).toEqual(refused(WAITS_ON_ONLY_BACKLOG));
+      expect(await call("promote", P({ to: "Refinement", waits_on: 246 }))).toEqual(
+        refused(WAITS_ON_ONLY_BACKLOG),
+      );
+      expect((await call("promote", H())).isError).toBe(true);
+      expect(moveCalls).toEqual([]);
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("keeps a new hold while the stored board still shows the card in Ready", async () => {
+      await call("promote", H());
+      await call("flight_state", {});
+      expect(store.activeHolds()).toHaveLength(1);
+      board(backlog());
+      await call("flight_state", {});
+      board(backlog({ status: "Ready" }));
+      await call("flight_state", {});
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("releases a hold whose card a run has taken, though the board never showed it in Backlog", async () => {
+      await call("promote", H());
+      board(backlog({ status: "Ready" }));
+      await call("flight_state", {});
+      expect(store.activeHolds()).toHaveLength(1);
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      await call("flight_state", {});
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("releases the hold when the card is promoted again", async () => {
+      await call("promote", H());
+      board(backlog());
+      expect((await call("promote", P())).isError).toBeUndefined();
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("keeps the hold when the promote again is refused", async () => {
+      await call("promote", H());
+      board(backlog({ labels: [] }));
+      expect((await call("promote", P())).isError).toBe(true);
+      expect(store.activeHolds()).toHaveLength(1);
+    });
+  });
+});
+
+describe("create_ticket", () => {
+  const BODY = "## Outcome\n\nIt works.\n\n## Done when\n\n- a test passes\n";
+  const C = (over: Record<string, unknown> = {}) => ({
+    title: "Server: fix the flake",
+    body: BODY,
+    labels: ["area:server", "lane:guido", "bug"],
+    basis: "CI flaked twice on main",
+    ...over,
+  });
+  const okGh = (open: { number: number; title: string }[] = []) => {
+    ghImpl = async (a) => {
+      if (a[0] === "issue" && a[1] === "list") {
+        return { code: 0, stdout: JSON.stringify(open), stderr: "" };
+      }
+      if (a[0] === "issue" && a[1] === "create") {
+        return { code: 0, stdout: "https://github.com/o/mc/issues/42\n", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+  };
+  beforeEach(() => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "merge";
+    engineOn = true;
+    okGh();
+  });
+
+  it("does not claim Backlog in a draft repo, where no card moves", async () => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "draft";
+    const r = await call("create_ticket", C());
+    expect(r.isError).toBeUndefined();
+    expect(r.text).toContain("draft workspace");
+    expect(r.text).not.toContain("Backlog");
+    expect(moveCalls).toEqual([]);
+    expect(decisions()).toHaveLength(1);
+  });
+
+  it("lists the repo's open issues for the duplicate check, not a search", async () => {
+    await call("create_ticket", C({ title: "Server: drop the -v flag" }));
+    expect(ghCalls[0]).toEqual([
+      "issue",
+      "list",
+      "--repo=o/mc",
+      "--state=open",
+      "--json=number,title",
+      "--limit=1000",
+    ]);
+    expect(ghCalls[0]?.some((a) => a.startsWith("--search"))).toBe(false);
+  });
+
+  it("serialises calls, so the cap holds when two are in flight together", async () => {
+    for (let i = 0; i < 9; i++) addDecision({ kind: "ticket", at: NOW - 60_000 });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = ghImpl;
+    ghImpl = async (a) => {
+      if (a[1] === "list") await gate;
+      return inner(a);
+    };
+    const both = Promise.all([
+      call("create_ticket", C({ title: "First" })),
+      call("create_ticket", C({ title: "Second" })),
+    ]);
+    release();
+    const results = await both;
+    expect(results.filter((r) => r.isError === undefined)).toHaveLength(1);
+    expect(results.filter((r) => r.isError === true)).toHaveLength(1);
+    expect(results.find((r) => r.isError === true)?.text).toContain("filed tickets 10 times");
+    expect(ghCalls.filter((a) => a[1] === "create")).toHaveLength(1);
+  });
+
+  it("writes nothing while the engine is off", async () => {
+    engineOn = false;
+    expect(await call("create_ticket", C())).toEqual(
+      refused("Not done: the loop engine is off on this server, so nothing is written to GitHub."),
+    );
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("is shown only to a granted role", () => {
+    expect(named("create_ticket")).toMatchObject({ modes: [], grantable: ["read-only"] });
+  });
+
+  it("files the issue with its labels, adds it to the project, moves it to Backlog and records it", async () => {
+    expect(await call("create_ticket", C())).toEqual({
+      text: "Filed mc#42, on the project in Backlog. Recorded in Decided without you.",
+    });
+    expect(ghCalls[1]).toEqual([
+      "issue",
+      "create",
+      "--repo=o/mc",
+      "--title=Server: fix the flake",
+      `--body=${BODY}`,
+      "--label=area:server",
+      "--label=lane:guido",
+      "--label=bug",
+    ]);
+    expect(ghCalls[2]).toEqual([
+      "project",
+      "item-add",
+      "1",
+      "--owner=o",
+      "--url=https://github.com/o/mc/issues/42",
+    ]);
+    expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 42, column: "Backlog" }]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "ticket",
+        ref: "mc#42",
+        about: "mc#42: Server: fix the flake",
+        decision: "Filed #42",
+        basis: "CI flaked twice on main",
+      },
+    ]);
+    expect(seen).toContain("flight");
+  });
+
+  it("refuses a seat that is not FLIGHT", async () => {
+    live("guido-1", "r-guido");
+    expect(await call("create_ticket", C(), ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+    expect(ghCalls).toEqual([]);
+  });
+
+  it.each([
+    ["no area", ["lane:guido"]],
+    ["two areas", ["area:server", "area:web", "lane:guido"]],
+    ["no lane", ["area:server"]],
+    ["two lanes", ["area:server", "lane:guido", "lane:inco"]],
+    ["an unknown label", ["area:server", "lane:guido", "wontfix"]],
+    ["a repeated label", ["area:server", "lane:guido", "bug", "bug"]],
+  ])("refuses %s", async (_what, labels) => {
+    const r = await call("create_ticket", C({ labels }));
+    expect(r.isError).toBe(true);
+    expect(r.text.startsWith("Not filed: ")).toBe(true);
+    expect(ghCalls).toEqual([]);
+    expect(decisions()).toEqual([]);
+  });
+
+  it("takes each type label", async () => {
+    for (const t of ["type:feature", "bug", "chore", "test", "docs"]) {
+      okGh();
+      const labels = ["area:web", "lane:inco", t];
+      const r = await call("create_ticket", C({ title: `T ${t}`, labels }));
+      expect(r.isError).toBeUndefined();
+    }
+  });
+
+  it("refuses a body without ## Outcome or ## Done when", async () => {
+    expect((await call("create_ticket", C({ body: "## Done when\n\n- x\n" }))).text).toBe(
+      "Not filed: the body needs ## Outcome as a heading line.",
+    );
+    expect((await call("create_ticket", C({ body: "## Outcome\n\nx\n" }))).text).toBe(
+      "Not filed: the body needs ## Done when as a heading line.",
+    );
+    expect((await call("create_ticket", C({ body: "text" }))).text).toBe(
+      "Not filed: the body needs ## Outcome and ## Done when as a heading line.",
+    );
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses a title that matches an open issue exactly, naming it", async () => {
+    okGh([
+      { number: 9, title: "Server: fix the flake please" },
+      { number: 17, title: "Server: fix the flake" },
+    ]);
+    expect(await call("create_ticket", C())).toEqual(
+      refused(
+        "Not filed: an open issue with that title exists: #17. Comment on it with mc comment_ticket.",
+      ),
+    );
+    expect(ghCalls.some((a) => a[1] === "create")).toBe(false);
+    expect(decisions()).toEqual([]);
+  });
+
+  it("refuses at 10 an hour, and again once the hour has passed", async () => {
+    for (let i = 0; i < 10; i++) addDecision({ kind: "ticket", at: NOW - 60_000 });
+    expect(await call("create_ticket", C())).toEqual(
+      refused(
+        "Not done: you filed tickets 10 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    expect(ghCalls).toEqual([]);
+    nowMs = NOW + 3_600_000;
+    expect((await call("create_ticket", C())).isError).toBeUndefined();
+  });
+
+  it("holds the cap across calls", async () => {
+    for (let i = 0; i < 10; i++) {
+      expect((await call("create_ticket", C({ title: `T${i}` }))).isError).toBeUndefined();
+    }
+    expect((await call("create_ticket", C({ title: "T10" }))).isError).toBe(true);
+  });
+
+  it("refuses a mention, an issue reference, and a secret, without calling gh", async () => {
+    for (const body of [
+      `${BODY}\nask @someone\n`,
+      `${BODY}\nsee other/repo#12\n`,
+      `${BODY}\nsee o/mc#12\n`,
+      `${BODY}\nsee https://github.com/other/repo/issues/12\n`,
+    ]) {
+      const r = await call("create_ticket", C({ body }));
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("The ticket is posted to GitHub");
+    }
+    expect((await call("create_ticket", C({ title: "fix @someone" }))).isError).toBe(true);
+    secrets = ["s3cr3t-token-value"];
+    const r = await call("create_ticket", C({ body: `${BODY}\ntoken s3cr3t-token-value\n` }));
+    expect(r.isError).toBe(true);
+    expect(r.text).not.toContain("s3cr3t-token-value");
+    expect(ghCalls).toEqual([]);
+    expect(store.guardHits(0)).toHaveLength(1);
+  });
+
+  it("lets a #n of the repo's own issues through, so a Depends on line works", async () => {
+    const r = await call("create_ticket", C({ body: `${BODY}\nDepends on #12, #13\n` }));
+    expect(r.isError).toBeUndefined();
+    expect(ghCalls.some((a) => a[1] === "create")).toBe(true);
+  });
+
+  it("refuses bad arguments", async () => {
+    for (const bad of [
+      C({ title: "" }),
+      C({ title: "a\nb" }),
+      C({ title: "x".repeat(201) }),
+      C({ body: "" }),
+      C({ labels: "bug" }),
+      C({ basis: "" }),
+      C({ extra: 1 }),
+    ]) {
+      const r = await call("create_ticket", bad);
+      expect(r.isError).toBe(true);
+      expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+    }
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("answers a gh failure with a fixed text and logs it, redacting known secrets", async () => {
+    secrets = ["tok-123"];
+    ghImpl = async (a) =>
+      a[1] === "list"
+        ? { code: 0, stdout: "[]", stderr: "" }
+        : { code: 1, stdout: "", stderr: "bad tok-123" };
+    const r = await call("create_ticket", C());
+    expect(r).toEqual(refused("Not filed: GitHub refused issue create; see the server log."));
+    expect(logs.join("\n")).toContain("[redacted]");
+    expect(logs.join("\n")).not.toContain("tok-123");
+    expect(decisions()).toEqual([]);
+  });
+
+  it("says so when the issue is filed but not added to the project, and still records it", async () => {
+    ghImpl = async (a) => {
+      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
+      if (a[1] === "create") {
+        return { code: 0, stdout: "https://github.com/o/mc/issues/42\n", stderr: "" };
+      }
+      return { code: 1, stdout: "", stderr: "no scope" };
+    };
+    const r = await call("create_ticket", C());
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("Filed mc#42");
+    expect(decisions()).toHaveLength(1);
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("reports an unconfirmed Backlog move but still counts the ticket as filed", async () => {
+    moveImpl = async () => ({ ok: false, reason: "card not on the project" });
+    expect(await call("create_ticket", C())).toEqual({
+      text: "Filed mc#42, on the project, but not confirmed in Backlog. Recorded in Decided without you.",
+    });
+    expect(decisions()).toHaveLength(1);
+  });
+
+  it("refuses an unparseable gh answer, and records nothing", async () => {
+    ghImpl = async (a) =>
+      a[1] === "list"
+        ? { code: 0, stdout: "[]", stderr: "" }
+        : { code: 0, stdout: "created!", stderr: "" };
+    expect((await call("create_ticket", C())).isError).toBe(true);
+    expect(decisions()).toEqual([]);
+  });
+});
+
+describe("comment_ticket", () => {
+  const K = (over: Record<string, unknown> = {}) => ({
+    issue: 12,
+    text: "The flake is back on main.",
+    basis: "seen in CI",
+    ...over,
+  });
+  beforeEach(() => {
+    engineOn = true;
+  });
+
+  it("writes nothing while the engine is off", async () => {
+    engineOn = false;
+    expect((await call("comment_ticket", K())).isError).toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("is shown only to a granted role", () => {
+    expect(named("comment_ticket")).toMatchObject({ modes: [], grantable: ["read-only"] });
+  });
+
+  it("posts the comment in the session repo and records it", async () => {
+    expect(await call("comment_ticket", K())).toEqual({
+      text: "Commented on #12. Recorded in Decided without you.",
+    });
+    expect(ghCalls).toEqual([
+      ["issue", "comment", "12", "--repo=o/mc", "--body=The flake is back on main."],
+    ]);
+    expect(decisions()).toMatchObject([
+      { kind: "comment", ref: "mc#12", decision: "Commented", basis: "seen in CI" },
+    ]);
+    expect(seen).toContain("flight");
+  });
+
+  it("refuses a seat that is not FLIGHT", async () => {
+    live("guido-1", "r-guido");
+    expect(await call("comment_ticket", K(), ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses at 20 an hour", async () => {
+    for (let i = 0; i < 20; i++) addDecision({ kind: "comment", at: NOW - 60_000 });
+    expect(await call("comment_ticket", K())).toEqual(
+      refused(
+        "Not done: you posted comments 20 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("lets a #n of the repo's own issues through", async () => {
+    expect((await call("comment_ticket", K({ text: "same as #13" }))).isError).toBeUndefined();
+  });
+
+  it("refuses a mention, another repo's issue, and a secret", async () => {
+    for (const text of ["ping @someone", "see other/repo#13", "see o/mc#13"]) {
+      const r = await call("comment_ticket", K({ text }));
+      expect(r.isError).toBe(true);
+      expect(r.text.startsWith("Not commented: ")).toBe(true);
+    }
+    secrets = ["s3cr3t-token-value"];
+    const s = await call("comment_ticket", K({ text: "key s3cr3t-token-value" }));
+    expect(s.isError).toBe(true);
+    expect(s.text).not.toContain("s3cr3t-token-value");
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("refuses bad arguments", async () => {
+    for (const bad of [K({ issue: 0 }), K({ text: "" }), K({ basis: "" }), K({ extra: 1 })]) {
+      const r = await call("comment_ticket", bad);
+      expect(r.isError).toBe(true);
+      expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+    }
+  });
+
+  it("answers a gh failure with a fixed text, and records nothing", async () => {
+    ghImpl = async () => ({ code: 1, stdout: "", stderr: "Could not resolve to an issue" });
+    expect(await call("comment_ticket", K())).toEqual(
+      refused("Not commented: GitHub refused the comment on #12; see the server log."),
+    );
+    expect(logs).toHaveLength(1);
+    expect(decisions()).toEqual([]);
+  });
+});
+
+describe("brief_item", () => {
+  const KEY = "note:blocked:r1:0";
+  const raise = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
+    store.raiseNote({
+      key,
+      kind: "blocked",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#7 parked",
+      at: NOW,
+      ...over,
+    });
+  const B = (over: Record<string, unknown> = {}) => ({
+    key: KEY,
+    context: "mc#7 is parked since 11:00.",
+    recommendation: "Un-park it.",
+    options: [
+      { label: "Un-park", answer: "go" },
+      { label: "Leave", answer: "wait" },
+    ],
+    basis: "read the park",
+    ...over,
+  });
+  beforeEach(() => {
+    raise();
+    seen.length = 0;
+  });
+
+  it("stores a brief on an operator item and emits attention", async () => {
+    expect(await call("brief_item", B())).toEqual({ text: BRIEFED_TEXT });
+    expect(store.briefs().get(KEY)).toEqual({
+      context: "mc#7 is parked since 11:00.",
+      recommendation: "Un-park it.",
+      options: [
+        { label: "Un-park", answer: "go" },
+        { label: "Leave", answer: "wait" },
+      ],
+      basis: "read the park",
+      at: NOW,
+    });
+    expect(seen).toEqual(["attention"]);
+    expect(decisions()).toEqual([]);
+  });
+
+  it("takes no options, and cuts long texts at MC_TEXT_MAX", async () => {
+    const long = "x".repeat(MC_TEXT_MAX + 50);
+    await call("brief_item", B({ context: long, options: undefined }));
+    const b = store.briefs().get(KEY);
+    expect(b?.context).toHaveLength(MC_TEXT_MAX);
+    expect(b?.context.endsWith("…")).toBe(true);
+    expect(b?.options).toEqual([]);
+  });
+
+  it("keeps the newest brief on a key", async () => {
+    await call("brief_item", B());
+    nowMs = NOW + 1000;
+    await call("brief_item", B({ recommendation: "Leave it." }));
+    expect(store.briefs().get(KEY)?.recommendation).toBe("Leave it.");
+  });
+
+  it("allows 20 briefs an hour, then refuses the 21st", async () => {
+    for (let i = 0; i < 20; i++) expect((await call("brief_item", B())).isError).toBeUndefined();
+    expect(await call("brief_item", B())).toEqual(
+      refused(
+        "Not done: you briefed items 20 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    nowMs = NOW + 61 * 60_000;
+    raise("blocked:r1:0", { at: nowMs });
+    expect((await call("brief_item", B())).isError).toBeUndefined();
+  });
+
+  it("refuses a key that is not the operator's item", async () => {
+    expect(await call("brief_item", B({ key: "note:nope" }))).toEqual(
+      refused("Not briefed: note:nope is not an item in the operator's Needs-you list."),
+    );
+    raise("cleanup-branch:x");
+    expect((await call("brief_item", B({ key: "note:cleanup-branch:x" }))).isError).toBe(true);
+    expect(store.briefs().size).toBe(0);
+  });
+
+  it("refuses one or five options, and a seat that is not FLIGHT", async () => {
+    const opt = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ label: `L${i}`, answer: `A${i}` }));
+    for (const n of [1, 5]) {
+      const r = await call("brief_item", B({ options: opt(n) }));
+      expect(r.isError).toBe(true);
+      expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+    }
+    live("guido-1", "r-guido");
+    expect(await call("brief_item", B(), ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+    expect(store.briefs().size).toBe(0);
+  });
+});
+
+describe("read_ticket of a loop escalation", () => {
+  const esc = (n: number, repoId: string) => ({
+    id: `${repoId}#${n}`,
+    repoId,
+    issueNumber: n,
+    title: "[loop-blocked] x",
+    kind: "loop-blocked" as const,
+    source: "title" as const,
+    openedAt: NOW,
+    url: "u",
+    question: null,
+  });
+
+  it("reads an open loop escalation's issue in another configured repo, and nothing else there", async () => {
+    store.replaceEscalations("other", [esc(4, "other")]);
+    fetchImpl = async (n) => ticket(n, { title: "Esc", body: "Body" });
+    expect((await call("read_ticket", { issue: 4, repo: "other" })).isError).toBeUndefined();
+    expect(fetchRepos).toEqual(["other"]);
+    expect(await call("read_ticket", { issue: 5, repo: "other" })).toEqual(
+      refused(READ_OTHER_REPO),
+    );
+    expect(await call("read_ticket", { issue: 4, repo: "nope" })).toEqual(refused(READ_OTHER_REPO));
+    live("fao-1", "r-fao");
+    expect(await call("read_ticket", { issue: 4, repo: "other" }, ctx("fao-1", "r-fao"))).toEqual(
+      refused(READ_OTHER_REPO),
+    );
+    expect(fetchRepos).toEqual(["other"]);
+  });
+
+  it("still reads the session repo when repo names it", async () => {
+    fetchImpl = async (n) => ticket(n);
+    expect((await call("read_ticket", { issue: 3, repo: "mc" })).isError).toBeUndefined();
+    expect(fetchRepos).toEqual(["mc"]);
   });
 });

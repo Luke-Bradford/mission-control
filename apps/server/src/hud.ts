@@ -22,6 +22,7 @@ import {
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
+  isFlakeNoteKey,
   isHardRulesFlagKey,
   LOCK_WAITING_TEXT,
   laneOwner,
@@ -406,6 +407,7 @@ export function attentionItems(
   hubLogin: string | null = null,
 ): AttentionItem[] {
   const acks = store.acks();
+  const briefs = store.briefs();
   const status = new Map(store.status().map((s) => [s.collector, s]));
   const items: OwnedItem[] = [];
 
@@ -504,7 +506,10 @@ export function attentionItems(
 
   return items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
-    .map((i) => ({ ...i, acked: acks.has(i.key) }));
+    .map((i) => {
+      const brief = briefs.get(i.key);
+      return { ...i, ...(brief === undefined ? {} : { brief }), acked: acks.has(i.key) };
+    });
 }
 
 /**
@@ -544,7 +549,7 @@ function endedParkGone(
  * operator's, unless the repo's rules say the controller merges hard-rule PRs.
  */
 function noteOwner(store: Store, n: Pick<AttentionNote, "key" | "repoId">): AttentionOwner {
-  if (isCleanupNoteKey(n.key)) return OWNER_CONTROLLER;
+  if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key)) return OWNER_CONTROLLER;
   if (
     isHardRulesFlagKey(n.key) &&
     n.repoId !== null &&

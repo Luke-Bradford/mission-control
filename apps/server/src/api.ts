@@ -394,6 +394,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // The Origin hook covers POST only, and a cross-site no-cors GET (an <img>, fetch with
+  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
+  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
+  // callers that send no header (the guard hook, curl) are unaffected. The matched route is
+  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
+  app.addHook("onRequest", async (req, reply) => {
+    const path = req.routeOptions.url ?? req.url;
+    if (path.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site") {
+      return reply.code(403).send({ error: "cross-site request refused" });
+    }
+  });
+
   // Unmatched GET/HEAD outside /api: the web app.
   const serveWeb = deps.webRoot ? webHandler(deps.webRoot) : null;
   app.setNotFoundHandler((req, reply) => {
@@ -746,7 +758,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           result = await addRepo(configPath, repo, now());
         } catch (e) {
-          if (e instanceof ConfigWriteError && e.kind === "duplicate") {
+          if (e instanceof ConfigWriteError && (e.kind === "duplicate" || e.kind === "current")) {
             return reply.code(409).send({ error: e.message });
           }
           // ConfigWriteError messages never carry file contents; anything else is logged by name only.

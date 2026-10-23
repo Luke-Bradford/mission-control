@@ -7,19 +7,24 @@ import {
   freezeRules,
   NEW_LOOP,
   QUEUE_DEPTH,
+  REFUSAL_TRIES,
   type RepoRules,
   type Run,
   type SeatState,
   startMissingNeedsText,
   startNeedsPlanText,
+  type TicketView,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
+  clearBodyCache,
   dealQueues,
+  type QueueDeps,
   refillQueues,
   seatMayTake,
+  TAKE_FAILED_KEY_PREFIX,
   TAKE_FAILED_TEXT,
   type TakeDeps,
   takeNext,
@@ -66,7 +71,14 @@ const ME = "me";
 /** What the fresh read of a card finds; by default the stored card as it is. */
 let fresh: (issue: number) => CardNow | null;
 let readFails: boolean;
+/** The body a ticket read finds; null: GitHub has no such ticket. */
+let bodyOf: (issue: number) => string | null;
 let myLogin: string | null;
+/** The branches the fake `git ls-remote` finds on origin, and whether it fails. */
+let heads: string[];
+let lsRemoteFails: boolean;
+/** An error the fake `git` throws as is (a broken clone); takes precedence over `lsRemoteFails`. */
+let lsRemoteError: Error | null;
 
 function makeConfig(autonomy: "merge" | "draft" = "merge"): CcConfig {
   return {
@@ -123,7 +135,7 @@ const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
   subIssues: null,
   blockedBy: [],
   milestone: null,
-  size: null,
+  size: "S",
   closed: false,
   prioritySource: null,
   // a lower number is older
@@ -133,12 +145,31 @@ const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
   ...over,
 });
 
-const refill = (rulesOf: () => Promise<RepoRules | RepoRulesError> = async () => rules) =>
+const ticketWith = (n: number, body: string): TicketView => ({
+  number: n,
+  title: "t",
+  url: "u",
+  state: "open",
+  body,
+  bodyTruncated: false,
+  labels: [],
+  milestone: null,
+  subIssues: [],
+  pullRequests: [],
+});
+const refill = (
+  rulesOf: () => Promise<RepoRules | RepoRulesError> = async () => rules,
+  fetchTicket: QueueDeps["fetchTicket"] = async (_repo, n) => {
+    const body = bodyOf(n);
+    return body === null ? null : ticketWith(n, body);
+  },
+) =>
   refillQueues({
     config,
     store,
     rules: rulesOf,
     login: ME,
+    fetchTicket,
     now: () => NOW,
     onNotes: () => void noteCalls++,
   });
@@ -147,9 +178,20 @@ const takeDeps = (): TakeDeps => ({
   store,
   enabled,
   login: myLogin,
+  rules: async () => rules,
   readCard: async (_repoId, issue) => {
     if (readFails) throw new Error("GitHub is down");
     return fresh(issue);
+  },
+  git: async (_checkout, args) => {
+    if (lsRemoteError !== null) throw lsRemoteError;
+    if (lsRemoteFails) throw new Error("origin is down");
+    // like ls-remote, only the heads the patterns match
+    const [exact = "", glob = ""] = args.slice(-2);
+    return heads
+      .filter((h) => h === exact || h.startsWith(glob.slice(0, -1)))
+      .map((h) => `${"a".repeat(40)}\trefs/heads/${h}\n`)
+      .join("");
   },
   transientTakes,
   now: () => NOW,
@@ -211,6 +253,11 @@ beforeEach(() => {
   logs = [];
   transientTakes = new Map();
   readFails = false;
+  clearBodyCache();
+  bodyOf = () => "## Done when\n- x\n## Plan\n- y\n";
+  heads = [];
+  lsRemoteFails = false;
+  lsRemoteError = null;
   myLogin = ME;
   fresh = (issue) => {
     const c = store.board(REPO).find((x) => x.issueNumber === issue);
@@ -224,6 +271,59 @@ afterEach(() => {
 });
 
 describe("refillQueues", () => {
+  it("deals no card without a done-when, Size M without a plan, or a ticket GitHub lacks", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { size: "S" }),
+      card(2, { size: "S" }),
+      card(3, { size: "M" }),
+      card(4, { size: "S" }),
+      card(5, { size: "S" }),
+    ]);
+    bodyOf = (n) =>
+      n === 2
+        ? "no section"
+        : n === 3
+          ? "## Done when\n- x\n"
+          : n === 5
+            ? null
+            : "## Done when\n- x\n";
+    await refill();
+    expect(issues(SERVER)).toEqual([1, 4]);
+  });
+
+  it("reads a card's body once while the card is unchanged, and again once it changes", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    let reads = 0;
+    const counting: QueueDeps["fetchTicket"] = async (_repo, n) => {
+      reads++;
+      return ticketWith(n, "## Done when\n- x\n## Plan\n- y\n");
+    };
+    await refill(undefined, counting);
+    await refill(undefined, counting);
+    expect(reads).toBe(1);
+    store.replaceBoard(REPO, [card(1, { updatedAt: NOW + 1000 })]);
+    await refill(undefined, counting);
+    expect(reads).toBe(2);
+  });
+
+  it("does not cache a failed read", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    await refill(undefined, async () => {
+      throw new Error("GitHub is down");
+    });
+    expect(issues(SERVER)).toEqual([]);
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+  });
+
+  it("deals nothing when the body read fails", async () => {
+    store.replaceBoard(REPO, [card(1, { size: "S" })]);
+    await refill(undefined, async () => {
+      throw new Error("GitHub is down");
+    });
+    expect(issues(SERVER)).toEqual([]);
+  });
+
   it("leaves out a Ready card assigned to another login and keeps one assigned to the hub", async () => {
     store.replaceBoard(REPO, [
       card(1, { assignees: ["other"] }),
@@ -439,6 +539,86 @@ describe("refillQueues", () => {
     });
   });
 
+  describe("a free seat and a busy seat sharing an area, at take time", () => {
+    beforeEach(() => {
+      const first = config.crew?.sessions[0]?.seats[0];
+      if (first === undefined) throw new Error("no seat");
+      config.crew?.sessions[0]?.seats.push({ ...first, id: "guido-2" });
+    });
+
+    const busyServer = async (...cards: BoardItem[]) => {
+      store.replaceBoard(REPO, cards);
+      await refill();
+      store.upsertRun(run({ id: "r9", agentId: SERVER, ticket: `${REPO}#9` }));
+      seatRow("running", "r9");
+    };
+
+    it("takes the highest-Priority card even when it was dealt to the busy seat", async () => {
+      // both free at refill: P1 (#1) lands on guido-1, P2 (#2) on guido-2
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      // guido-1 gets busy; guido-2 frees up
+      store.upsertRun(run({ id: "r9", agentId: SERVER, ticket: `${REPO}#9` }));
+      seatRow("running", "r9");
+      expect(issues(SERVER)).toEqual([1]);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([]);
+    });
+
+    it("leaves the deal alone when both seats are free", async () => {
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 2, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([1]);
+    });
+
+    it("never moves a card outside the free seat's area labels", async () => {
+      await busyServer(
+        card(1, { priority: "P1", labels: ["area:web"] }),
+        card(2, { priority: "P2" }),
+      );
+      // the web card sits in a busy seat's queue, ahead of the card guido-2 may take
+      store.replaceQueue(WEB, []);
+      store.replaceQueue(SERVER, [
+        { repoId: REPO, issue: 1 },
+        { repoId: REPO, issue: 2 },
+      ]);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 2, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([1]);
+    });
+
+    it("takes the card queued on an idle seat that is at its account's quota stop", async () => {
+      config.accounts.push({ id: "claude-alt", vendor: "claude", alertAt: 80, stopAt: 95 });
+      const second = config.crew?.sessions[0]?.seats.find((s) => s.id === "guido-2");
+      if (second === undefined) throw new Error("no seat");
+      second.accountId = "claude-alt";
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: NOW - 1000,
+        pct: 95,
+        resetAt: NOW + DAY,
+        source: "test",
+      });
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      await take(SERVER);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
+    });
+
+    it("leaves a card the busy seat holds taken", async () => {
+      await busyServer(card(1, { priority: "P1" }), card(2, { priority: "P2" }));
+      store.takeQueued(SERVER, NOW);
+      await take("guido-2");
+      expect(started.map((s) => s.issue)).toEqual([2]);
+      expect(store.queue(SERVER).map((q) => q.takenAt)).toEqual([NOW]);
+    });
+  });
+
   it("dealQueues deals in turn, skips a seat without the label, and stops at the depth", () => {
     const hands = dealQueues(
       [
@@ -516,6 +696,67 @@ describe("takeNext", () => {
     expect(started).toHaveLength(1);
   });
 
+  it("starts nothing and drops the row when origin has a branch for the ticket from no run of this hub", async () => {
+    await queued(card(59));
+    heads = ["feature/59-x"];
+    await take();
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([]);
+    expect(logs).toContain(
+      `${SERVER}: ${REPO}#59 already has a branch on origin (feature/59-x); not started`,
+    );
+  });
+
+  it("raises a take-failed note for a card with a foreign branch, so the next card starts", async () => {
+    await queued(card(59), card(60));
+    heads = ["feature/59-x"];
+    await take();
+    await refill();
+    await take();
+    expect(started.map((s) => s.issue)).toEqual([60]);
+    expect(store.notes().map((n) => n.key)).toContain(`${TAKE_FAILED_KEY_PREFIX}${REPO}#59`);
+  });
+
+  it("starts a card origin has no branch for", async () => {
+    await queued(card(59));
+    await take();
+    expect(started).toHaveLength(1);
+  });
+
+  it("starts a card whose branch on origin is from this hub's own earlier run", async () => {
+    await queued(card(59));
+    heads = ["feature/59-x"];
+    store.upsertRun(
+      run({
+        id: "r-old",
+        agentId: SERVER,
+        ticket: `${REPO}#59`,
+        branch: "feature/59-x",
+        endedAt: NOW,
+      }),
+    );
+    await take();
+    expect(started).toHaveLength(1);
+  });
+
+  it("untakes the row when origin's branches cannot be listed", async () => {
+    await queued(card(59));
+    lsRemoteFails = true;
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER).map((q) => [q.issue, q.takenAt])).toEqual([[59, null]]);
+    expect(logs.some((l) => l.includes("could not list origin's branches"))).toBe(true);
+  });
+
+  it("leaves a broken clone to startRun, so the take-stuck note is raised", async () => {
+    await queued(card(59));
+    lsRemoteError = new CheckoutError("checkout", "x");
+    startFails = () => new CheckoutError("checkout", "x");
+    for (let i = 0; i < REFUSAL_TRIES; i++) await take();
+    expect(started).toEqual([]);
+    expect(store.notes().map((n) => n.key)).toEqual([`question:take-stuck:${SERVER}`]);
+  });
+
   it("starts nothing when the hub does not know its own login", async () => {
     await queued(card(1));
     myLogin = null;
@@ -562,6 +803,46 @@ describe("takeNext", () => {
     // another seat's rework does not hold this one
     store.upsertRun(run({ id: "r-other", agentId: WEB, ticket: `${REPO}#8`, loop: aside(true) }));
     store.setRunLoop("r-aside", aside(false));
+    expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
+  it("rework first: blocking findings on the sha the pushed head carries hold the seat", async () => {
+    const S = "a".repeat(40);
+    const P = "b".repeat(40);
+    const loop = (carry: { from: string; to: string } | null) => ({
+      ...NEW_LOOP,
+      phase: "review" as const,
+      aside: { worktree: "/w/x", wake: false },
+      carry,
+    });
+    store.upsertRun(
+      run({ id: "r-aside", agentId: SERVER, ticket: `${REPO}#9`, loop: loop({ from: S, to: P }) }),
+    );
+    store.setRunPush({ runId: "r-aside", sha: P, at: NOW });
+    const id = store.requestReview({
+      authorRunId: "r-aside",
+      repoId: REPO,
+      seatId: "retro",
+      prNumber: 1,
+      sha: S,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW,
+    });
+    if (id === null) throw new Error("no review");
+    store.setReviewState(id, ["queued"], "running", { at: NOW, runId: "rr" });
+    store.recordFindings(id, "rr", {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "s",
+      findings: [
+        { severity: "Important", file: "a.ts", line: 1, summary: "s", scenario: "w", fix: "f" },
+      ],
+      at: NOW,
+    });
+    seatRow("idle");
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    store.setRunLoop("r-aside", loop(null));
     expect(seatMayTake(store, SERVER)).toBe(true);
   });
 

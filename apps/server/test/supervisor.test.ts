@@ -27,6 +27,7 @@ import {
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
   guardDenyOutput,
+  HOOK_RETRY_ENV,
   NEW_LOOP,
   NOT_ASIDE,
   notOnBoardText,
@@ -42,6 +43,7 @@ import {
   retiringText,
   reworkFirstText,
   START_NO_RULES,
+  seatBusyText,
   startMissingNeedsText,
   startNeedsPlanText,
   type TicketView,
@@ -621,6 +623,7 @@ describe("two hubs, one card", () => {
       store,
       rules,
       login: "me",
+      fetchTicket: async () => ({ ...TICKET, labels }),
       now: () => Date.now(),
     });
     return made;
@@ -630,6 +633,7 @@ describe("two hubs, one card", () => {
     store,
     supervisor: made.sup,
     login: "me",
+    rules: async () => START_RULES,
     readCard: async (_repoId, issue) =>
       store.board("mc").find((c) => c.issueNumber === issue) ?? null,
     enabled: true,
@@ -1777,12 +1781,15 @@ describe("folding", () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(store.run(runId)?.tokens).not.toBeNull());
-    const run = store.run(runId);
-    expect(run?.model).toBe("claude-haiku-5-5");
-    expect(run?.costUsd).toBeGreaterThan(0);
-    expect(run?.summary).toMatch(/^echo: You are GUIDO-1, the backend developer/);
-    expect(store.digest(runId)).not.toBeNull();
+    // tokens can be stored before the result line brings the cost: wait for every field
+    await until(() => {
+      const run = store.run(runId);
+      expect(run?.tokens).not.toBeNull();
+      expect(run?.model).toBe("claude-haiku-5-5");
+      expect(run?.costUsd).toBeGreaterThan(0);
+      expect(run?.summary).toMatch(/^echo: You are GUIDO-1, the backend developer/);
+      expect(store.digest(runId)).not.toBeNull();
+    });
   });
 
   it("logs a fold that fails to write, and the seat carries on", async () => {
@@ -2009,6 +2016,9 @@ describe("startWatch", () => {
       "mcp__mc__flight_state",
       "mcp__mc__promote",
       "mcp__mc__end_run",
+      "mcp__mc__create_ticket",
+      "mcp__mc__comment_ticket",
+      "mcp__mc__brief_item",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
@@ -2584,6 +2594,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       encoding: "utf8",
       timeout: 20_000,
       killSignal: "SIGKILL",
+      env: { ...process.env, [HOOK_RETRY_ENV]: "0" },
     });
     expect(r.status).toBe(2);
     expect(r.stdout).toBe(guardDenyOutput(GUARD_UNREACHABLE_TEXT));
@@ -3430,6 +3441,17 @@ describe("startReview", () => {
     expect(brief).not.toContain("ruff");
   });
 
+  it("startReview starts a review whose sha the pushed sha carries", async () => {
+    const pushSha = "e".repeat(40);
+    const r = reviewOfPush({ pushSha });
+    store.setRunLoop(r.author.id, { ...NEW_LOOP, carry: { from: r.sha, to: pushSha } });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).resolves.toMatchObject({
+      runId: expect.any(String),
+    });
+  });
+
   it("startReview launches a scratch run", async () => {
     const r = reviewOfPush();
     const { sup } = make({ scratchRetro: true });
@@ -3719,6 +3741,16 @@ describe("a run set aside in review", () => {
     const e = await refusal(sup.endAsideRun(runId));
     expect([e.status, e.message]).toEqual([409, NOT_ASIDE]);
     expect(store.run(runId)?.endedAt).toBeNull();
+    expect(existsSync(wt())).toBe(true);
+  });
+
+  it("endAsideRun says the seat is busy while another run is starting on it", async () => {
+    const { sup, runId } = await aside(false);
+    const starter = sup.startRun("guido-1", 43, { loop: NEW_LOOP });
+    const e = await refusal(sup.endAsideRun(runId));
+    expect([e.status, e.message]).toEqual([409, seatBusyText("GUIDO-1")]);
+    await starter;
+    expect(store.run(runId)).toMatchObject({ endedAt: null });
     expect(existsSync(wt())).toBe(true);
   });
 

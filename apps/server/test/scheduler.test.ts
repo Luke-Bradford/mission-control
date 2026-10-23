@@ -89,6 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks(); // the prune test's hud stubs must not carry into later tests
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -493,6 +494,10 @@ describe("scheduler", () => {
     expect(await s.tick("maintenance")).toBe("ran");
     expect(prune).toHaveBeenCalledWith(NOW - 30 * 24 * 60 * 60_000);
 
+    // An hour of fake time runs the 15 s loop ticks 240 times each; with the real crew read and
+    // ack sweep behind them that took seconds, and under CI load past the test's timeout.
+    vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+    vi.spyOn(hud, "attentionItems").mockReturnValue([]);
     vi.useFakeTimers();
     prune.mockClear();
     const t = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
@@ -602,7 +607,9 @@ describe("scheduler", () => {
       });
 
       describe("between loop ticks", () => {
-        const crewCalls = () => vi.mocked(hud.crew).mock.calls.length;
+        // Only reads against this test's own store: a scheduler an earlier, timed-out test left
+        // ticking calls the same spy with its own store.
+        const crewCalls = () => vi.mocked(hud.crew).mock.calls.filter((c) => c[1] === store).length;
         /** Starts the scheduler and lets the start-up ticks' emits and their re-reads settle. */
         const started = async () => {
           vi.useFakeTimers();
@@ -873,6 +880,16 @@ describe("scheduler", () => {
     t = NOW + ACK_ABSENT_MS + 1;
     await s.tick("github");
     expect([...store.acks().keys()]).toEqual(["esc:shop-app#9"]);
+  });
+
+  it("the studio tick alone drops an ack absent over 7 days", async () => {
+    store.ack(["esc:gone"], NOW);
+    let t = NOW;
+    const s = createScheduler({ config, store, bus, now: () => t, collectors: stubs() });
+    await s.tick("studio");
+    t = NOW + ACK_ABSENT_MS + 1;
+    await s.tick("studio");
+    expect(store.acks().has("esc:gone")).toBe(false);
   });
 
   it("does not sweep acks from the usage or machine jobs", async () => {
