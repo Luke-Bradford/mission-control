@@ -1287,15 +1287,40 @@ describe("Account quota panel", () => {
     ).toBeTruthy();
     const rows = quota.querySelectorAll(".quotarow");
     expect(rows.length).toBe(2);
-    expect(rows[0]?.textContent).toContain("5h 100%");
-    expect(rows[0]?.textContent).toContain("7d 60%");
-    expect(rows[1]?.textContent).toContain("no 5h window");
+    expect(rows[0]?.textContent).toContain("5h 100% used · resets 15:00");
+    expect(rows[0]?.textContent).toContain("7d 60% used · resets Sun 18 Oct 19:00");
+    expect(rows[1]?.textContent).toContain("5h: none on this plan");
     expect(
       quota.querySelector('[title^="claude-main 7d: 60% used · not filling at this rate"]'),
     ).toBeTruthy();
     expect(quota.querySelector(".meter.full")).toBeTruthy();
     expect(quota.textContent).toContain(
-      "Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every 30 min. Hover a bar for its reset time.",
+      "Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every 30 min.",
+    );
+  });
+
+  it("every slot reads used %, then the reset: the time today, else weekday, date and time", async () => {
+    stub({
+      limits: [
+        limit5h({ accountId: "claude-main", used: 21, resetAt: NOW + 4 * HOUR + 20 * MIN }),
+        limit7d({ accountId: "claude-main", used: 73, resetAt: Date.UTC(2026, 9, 28, 2, 0) }),
+        limit7d({ accountId: "codex-main", used: 9, resetAt: Date.UTC(2026, 9, 29, 16, 22) }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    await waitFor(() => expect(quota.querySelectorAll(".quotarow").length).toBe(2));
+    const rows = quota.querySelectorAll(".quotarow");
+    expect(rows[0]?.textContent).toContain("5h 21% used · resets 17:20");
+    expect(rows[0]?.textContent).toContain("7d 73% used · resets Wed 28 Oct 02:00");
+    expect(rows[1]?.textContent).toContain("5h: none on this plan");
+    expect(rows[1]?.textContent).toContain("7d 9% used · resets Thu 29 Oct 16:22");
+    // the none slot is shaped like a bar slot, and the 7d slots match across rows
+    const slot = (r: Element | undefined, i: number) => r?.children[i];
+    expect(slot(rows[1], 1)?.querySelector(".track")).toBeTruthy();
+    expect(slot(rows[1], 2)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
+    expect(slot(rows[1], 2)?.querySelectorAll("*").length).toBe(
+      slot(rows[0], 2)?.querySelectorAll("*").length,
     );
   });
 
