@@ -1136,6 +1136,27 @@ describe("Store", () => {
   });
 });
 
+describe("FLIGHT's brief", () => {
+  it("keeps the FLIGHT brief across a reopen", () => {
+    const path = join(dir, "brief.sqlite");
+    const first = new Store(path);
+    const r = {
+      sessionId: "s1",
+      section: "lessons" as const,
+      text: "Read the log.",
+      updatedAt: 1,
+      updatedBy: "flight-1",
+    };
+    first.setFlightBriefSection(r);
+    first.setFlightBriefSection({ ...r, text: "Read the log first.", updatedAt: 2 });
+    first.close();
+    const again = new Store(path);
+    expect(again.flightBrief("s1")).toEqual([{ ...r, text: "Read the log first.", updatedAt: 2 }]);
+    expect(again.flightBrief("s2")).toEqual([]);
+    again.close();
+  });
+});
+
 describe("seat sessions", () => {
   const seat = (over: Partial<SeatSessionRow> = {}): SeatSessionRow => ({
     seatId: "guido",

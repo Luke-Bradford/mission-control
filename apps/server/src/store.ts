@@ -13,6 +13,7 @@ import {
   type ChosenProfile,
   COMMS_TEXT_MAX,
   type Escalation,
+  type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
@@ -220,9 +221,23 @@ CREATE TABLE IF NOT EXISTS holds (
   basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
+-- FLIGHT's living brief: one row per crew session and section.
+CREATE TABLE IF NOT EXISTS flight_brief (
+  session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
+  updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
+);
 `;
 
 type Row = Record<string, SQLInputValue>;
+
+/** One section of FLIGHT's brief, as stored. */
+export interface FlightBriefRow {
+  sessionId: string;
+  section: FlightBriefSectionKey;
+  text: string;
+  updatedAt: number;
+  updatedBy: string;
+}
 
 /** A card FLIGHT holds in Backlog behind an open PR. */
 export interface Hold {
@@ -2453,6 +2468,32 @@ export class Store {
       about: r.about as string,
       decision: r.decision as string,
       basis: r.basis as string,
+    }));
+  }
+
+  /** Replaces one section of a session's brief. */
+  setFlightBriefSection(r: FlightBriefRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO flight_brief (session_id, section, text, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, section) DO UPDATE SET
+           text = excluded.text, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+      )
+      .run(r.sessionId, r.section, r.text, r.updatedAt, r.updatedBy);
+  }
+
+  /** The stored sections of a session's brief. */
+  flightBrief(sessionId: string): FlightBriefRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM flight_brief WHERE session_id = ? ORDER BY section")
+      .all(sessionId) as Row[];
+    return rows.map((r) => ({
+      sessionId: r.session_id as string,
+      section: r.section as FlightBriefSectionKey,
+      text: r.text as string,
+      updatedAt: r.updated_at as number,
+      updatedBy: r.updated_by as string,
     }));
   }
 

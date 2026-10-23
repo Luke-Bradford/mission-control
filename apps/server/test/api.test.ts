@@ -34,6 +34,7 @@ import {
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
+  type FlightBriefView,
   type FlightView,
   fullAt5h,
   type MachineSample,
@@ -440,6 +441,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/flight"],
+  ["GET", "/api/flight/brief"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
@@ -3062,6 +3064,39 @@ describe("crew routes", () => {
       expect(r.statusCode).toBe(400);
       expect(r.json()).toEqual({ error: "issue: an issue number is required" });
       expect(supervisorCalls).toEqual([]);
+    });
+  });
+
+  describe("GET /api/flight/brief", () => {
+    it("has no session and nine empty sections without a watch seat", async () => {
+      const body = (await get("/api/flight/brief")).json<FlightBriefView>();
+      expect(body.session).toBeNull();
+      expect(body.sections).toHaveLength(9);
+      expect(body.sections.every((s) => s.text === "" && s.updatedAt === null)).toBe(true);
+    });
+
+    it("lists FLIGHT's saved sections in order", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.setFlightBriefSection({
+        sessionId: config.crew?.sessions[0]?.id ?? "",
+        section: "crew",
+        text: "GUIDO builds.",
+        updatedAt: 5,
+        updatedBy: "flight-1",
+      });
+      const body = (await get("/api/flight/brief")).json<FlightBriefView>();
+      expect(body.session).toBe(config.crew?.sessions[0]?.id);
+      expect(body.sections[5]).toMatchObject({
+        section: "crew",
+        text: "GUIDO builds.",
+        updatedBy: "flight-1",
+      });
     });
   });
 
