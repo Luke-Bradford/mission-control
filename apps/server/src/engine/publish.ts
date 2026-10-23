@@ -444,7 +444,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       .filter((l) => l !== "")
       .map((l) => l.split("\t"));
     const inRange = new Set(rows.map((r) => r[0]));
-    for (const [, author, parents, subject] of rows) {
+    for (const [commit, author, parents, subject] of rows) {
       const ps = (parents ?? "").split(" ").filter((p) => p !== "");
       if (author !== MC_MERGE_AUTHOR || subject !== `Merge main into ${branch}`) return false;
       if (ps.length !== 2) return false;
@@ -453,8 +453,22 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           return false;
         }
       }
+      // the tree must be the clean merge of the parents, so no edit rides along
+      if ((await mergeTree(g, ps)) !== (await g(["rev-parse", `${commit}^{tree}`])).trim()) {
+        return false;
+      }
     }
     return true;
+  }
+
+  /** The tree of a clean merge of two commits, or null when they conflict. */
+  async function mergeTree(g: G, [a, b]: string[]): Promise<string | null> {
+    try {
+      return (await g(["merge-tree", "--write-tree", a as string, b as string])).trim();
+    } catch (e) {
+      if ((e as { code?: unknown } | null)?.code === 1) return null;
+      throw e;
+    }
   }
 
   /** The run's branch when it is of the run's shape for its issue, else null. */
