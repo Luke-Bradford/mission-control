@@ -34,6 +34,7 @@ import {
   crewRefusal,
   type Exec,
   HUB_CODE_NEEDS_PERSON,
+  HUB_HEAD_OFF_MAIN,
   HUB_UPDATE_HELD_KEY,
   headSha,
   hubCodeHeldText,
@@ -1306,7 +1307,7 @@ describe("auto update", () => {
     const a = auto({}, updater({ startSha }));
     await expect(a.u.update({ auto: true })).rejects.toMatchObject({
       status: 409,
-      message: HUB_CODE_NEEDS_PERSON,
+      message: HUB_HEAD_OFF_MAIN,
     });
     expect(pulls(a.calls)).toHaveLength(0);
     expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
@@ -1327,16 +1328,12 @@ describe("auto update", () => {
     expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
   });
 
-  it("refuses auto Update when nothing is left to pull but HEAD is not running", async () => {
+  it("retries an auto web-only Update whose pull landed but whose build failed", async () => {
     const startSha = head();
     upstreamPath("apps/web/src/page.tsx");
     git(hub, "pull", "-q", "--ff-only", "origin", "main");
     const a = auto({}, updater({ startSha }));
-    await expect(a.u.update({ auto: true })).rejects.toMatchObject({
-      status: 409,
-      message: HUB_CODE_NEEDS_PERSON,
-    });
-    expect(a.calls.some((c) => c.cmd.startsWith("pnpm"))).toBe(false);
+    await expect(a.u.update({ auto: true })).resolves.toEqual({ swapped: true });
   });
 
   it("checks the diff and web-only range against the captured tip", async () => {

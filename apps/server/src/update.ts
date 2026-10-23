@@ -89,7 +89,12 @@ const named = (xs: readonly string[]) =>
     ? `${xs.slice(0, HELD_NAMED).join(", ")} and ${xs.length - HELD_NAMED} more`
     : xs.join(", ");
 export const hubCodeHeldText = (held: HeldRange): string =>
-  `Update waits for you: main changes more than the page and docs. Auto-Update leaves that to a person: run Update. Commits: ${named(held.commits)}. Paths: ${named(held.paths)}.`;
+  held.unsafePaths !== undefined && held.unsafePaths.length > 0
+    ? `Update waits for you: main adds a symlink or submodule (${named(held.unsafePaths)}), which auto-Update never applies: run Update after checking it. Commits: ${named(held.commits)}.`
+    : `Update waits for you: main changes more than the page and docs. Auto-Update leaves that to a person: run Update. Commits: ${named(held.commits)}. Paths: ${named(held.paths)}.`;
+/** Auto-Update's refusal when the checkout's HEAD is not on origin/main's history. */
+export const HUB_HEAD_OFF_MAIN =
+  "the checkout's HEAD is not on origin/main's history; a person runs this Update";
 
 /** Keeps the one held Update note current, notifying Needs you only when it changes. */
 export function createHeldUpdateNote(
@@ -389,6 +394,15 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
         return "current";
       }
       if (!v.canUpdate && !(v.behind !== null && v.behind > 0)) return "waiting";
+      // a preview, or a checkout Update would refuse anyway, raises nothing
+      if (
+        !v.canUpdate &&
+        (v.reason === PREVIEW_SERVER ||
+          v.reason === NOT_ON_MAIN ||
+          v.reason === UNCOMMITTED_CHANGES)
+      ) {
+        return "waiting";
+      }
       // only the allowlist goes live without a person; update() checks again after its own fetch
       const range = await deps.updater.changes();
       if (range === null) return "waiting";
@@ -535,8 +549,8 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     try {
       // -z and no renames: a file moved out of hub code names both its old and new path
       const [names, raw, log] = await Promise.all([
-        git(["diff", "--name-only", "-z", "--no-renames", base(), to]),
-        git(["diff", "--raw", "-z", "--no-renames", base(), to]),
+        git(["diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=none", base(), to]),
+        git(["diff", "--raw", "-z", "--no-renames", "--ignore-submodules=none", base(), to]),
         gitOut(["log", "--format=%h %s", `${base()}..${to}`]),
       ]);
       const entries = raw.stdout.split("\0");
@@ -758,8 +772,11 @@ export function createUpdater(deps: UpdaterDeps): Updater {
               held: { commits: [...new Set([...range.commits, ...local.commits])], paths: held },
             });
           }
-          if (!ancestor || (toPull === 0 && pulledNotRestarted)) {
-            throw new UpdateError(409, HUB_CODE_NEEDS_PERSON);
+          // HEAD on tip's history and both ranges checked: a retry after a failed install or build
+          // (HEAD already pulled, not yet restarted) goes through
+          if (!ancestor) {
+            await log("failed: HEAD is not on origin/main's history\n");
+            throw new UpdateError(409, HUB_HEAD_OFF_MAIN);
           }
           checked = tip;
         }
