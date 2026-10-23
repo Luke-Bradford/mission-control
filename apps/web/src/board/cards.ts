@@ -4,10 +4,13 @@ import {
   type CrewRow,
   type HudColumn,
   hudColumnOf,
+  type PrCheck,
   type PullRequestView,
   prYouAction,
+  REVIEW_STATUS_CONTEXT,
   startOfLocalDay,
 } from "@mc/core";
+import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL } from "../crew.ts";
 
 const DAY = 86_400_000;
 
@@ -126,4 +129,79 @@ export function cardYouWait(
   if (!pr || cardColumn(item) === "Done") return null;
   const action = prYouAction(pr, cardAgent(item, crew) !== null, now);
   return action === null ? null : { action, waiting: waitingText(now - pr.updatedAt) };
+}
+
+/**
+ * Contract-first (the server data ticket adds this to mc/core's CrewRow): a writer seat's queued
+ * tickets, 1 the next it takes. Switch to the core type once that merges.
+ */
+export interface CardQueueItem {
+  ref: string;
+  issue: number;
+  pos: number;
+}
+export type QueueRow = CrewRow & { queue?: CardQueueItem[] };
+
+/** A seat named on a card: its call sign and config index (its colour). */
+export interface CardSeat {
+  id: string;
+  index: number;
+}
+
+export const NOT_QUEUED = "Unassigned · not queued";
+export const NO_PR_YET = "No PR yet";
+export const NO_REVIEWER = "No reviewer on it now";
+export const NO_LOOP_STEP = "no template step";
+
+/** `feature › implement · try 2 of 3`: the agent's template, step and try; the run number when it has no loop. */
+export function cardStep(agent: CrewRow): string {
+  const loop = agent.loop;
+  if (!loop) return `${agent.run ? `run #${agent.run.seq}` : "run"} · ${NO_LOOP_STEP}`;
+  const tpl = loop.profile ?? BUILD_LOOP_TEMPLATE;
+  const node = loop.step ?? LOOP_PHASE_LABEL[loop.phase];
+  const tries = loop.tries ? ` · try ${loop.tries.n} of ${loop.tries.max}` : "";
+  return `${tpl} › ${node}${tries}`;
+}
+
+/** The seat a Ready card is queued for and its place in that queue; null when it is not queued. */
+export function cardQueue(
+  item: BoardItem,
+  crew: readonly QueueRow[],
+): (CardSeat & { pos: number }) | null {
+  if (cardColumn(item) !== "Ready") return null;
+  const ref = ticketRef(item);
+  for (const row of crew) {
+    const entry = row.queue?.find((q) => q.ref === ref);
+    if (entry) return { id: row.id, index: row.index, pos: entry.pos };
+  }
+  return null;
+}
+
+/** The seat reviewing the card's PR (or the card's ticket); null when none is. */
+export function cardReviewer(
+  item: BoardItem,
+  pr: PullRequestView | null,
+  crew: readonly CrewRow[],
+): CardSeat | null {
+  const ref = ticketRef(item);
+  const row = crew.find((r) => {
+    const rv = r.reviewing;
+    if (!rv) return false;
+    return (pr && r.repoId === pr.repoId && rv.prNumber === pr.number) || rv.ref === ref;
+  });
+  return row ? { id: row.id, index: row.index } : null;
+}
+
+const CHECK_WORST: Record<PrCheck["state"], number> = { passing: 0, pending: 1, failing: 2 };
+
+/** `check passing · e2e failing`: the PR's checks by name, worst state per name, without mc/review; null when none. */
+export function checksText(checks: readonly PrCheck[] | undefined): string | null {
+  const byName = new Map<string, PrCheck["state"]>();
+  for (const c of checks ?? []) {
+    if (c.name === REVIEW_STATUS_CONTEXT) continue;
+    const seen = byName.get(c.name);
+    if (seen === undefined || CHECK_WORST[c.state] > CHECK_WORST[seen]) byName.set(c.name, c.state);
+  }
+  if (byName.size === 0) return null;
+  return [...byName].map(([name, state]) => `${name} ${state}`).join(" · ");
 }

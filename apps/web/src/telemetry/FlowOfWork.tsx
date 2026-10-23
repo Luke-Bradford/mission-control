@@ -1,20 +1,27 @@
-import {
-  ENGINE_NOT_RUNNING,
-  FLIGHT_NOT_RUNNING,
-  NO_REVIEWS,
-  NO_SIZE,
-  type Telemetry,
-} from "@mc/core";
+import { NO_REVIEWS, NO_SIZE, type Telemetry } from "@mc/core";
 import { dayLabel, narrowDay } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { DASH, type Scope } from "./common.ts";
+import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE, type Scope } from "./common.ts";
 
-function Stat({ value, label, title }: { value: string; label: string; title?: string }) {
+function Stat({
+  value,
+  label,
+  title,
+  nt,
+}: {
+  value: string;
+  label: string;
+  title?: string;
+  /** The figure is not stored: small and muted. */
+  nt?: boolean;
+}) {
   return (
     <div className="stat2">
-      <b title={title}>{value}</b>
+      <b className={nt ? "nt" : undefined} title={title}>
+        {value}
+      </b>
       <span>{label}</span>
     </div>
   );
@@ -30,6 +37,23 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
     r.tickets === 0 ? null : r.medianDays;
   const longest = Math.max(1, ...(t?.cycleTime.rows.map((r) => median(r) ?? 0) ?? []));
   const ci = t?.quality.ciGreenFirstPushPct ?? null;
+  const reviewed = `${t?.quality.reviewedPrs ?? 0} merged PRs with a review`;
+  const noReviewed = "No merged PRs with a review in the last 14 days.";
+  // A review figure the hub does not send is not tracked; one it sends as null has no PRs to show.
+  const reviewStat = (
+    value: number | null | undefined,
+    show: (n: number) => string,
+  ): { value: string; title: string; nt?: boolean } =>
+    !t
+      ? { value: DASH, title: scope.wait }
+      : value === undefined
+        ? { value: NOT_TRACKED, title: NOT_TRACKED_TITLE, nt: true }
+        : value === null
+          ? { value: DASH, title: noReviewed }
+          : { value: show(value), title: reviewed };
+  const rounds = reviewStat(t?.quality.reviewRoundsPerPr, (n) => n.toFixed(1));
+  const firstPass = reviewStat(t?.quality.firstPassReviewPct, (n) => `${Math.round(n)}%`);
+  const notTracked = { value: NOT_TRACKED, title: NOT_TRACKED_TITLE, nt: true };
 
   return (
     <div className="tgrid">
@@ -87,11 +111,11 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
       <Panel id="tQual" title="Quality and review" sub="last 14 days">
         <div className="pb">
           <div className="stats">
-            <Stat value={DASH} label="verify passed first try" title={ENGINE_NOT_RUNNING} />
-            <Stat value={DASH} label="fix rounds per ticket" title={ENGINE_NOT_RUNNING} />
-            <Stat value={DASH} label="median wait for a human review" title={NO_REVIEWS} />
-            <Stat value={DASH} label="RETRO findings per PR" title={ENGINE_NOT_RUNNING} />
-            <Stat value={DASH} label="PRs sent back by reviewers" title={NO_REVIEWS} />
+            <Stat {...notTracked} label="verify passed first try" />
+            <Stat {...rounds} label="review rounds per PR" />
+            <Stat {...firstPass} label="passed the first review round" />
+            <Stat {...notTracked} label="median wait for a human review" title={NO_REVIEWS} />
+            <Stat {...notTracked} label="PRs sent back by reviewers" title={NO_REVIEWS} />
             <Stat
               value={ci === null ? DASH : `${Math.round(ci)}%`}
               label="CI green on first push"
@@ -109,10 +133,10 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
       <Panel id="tCapcom" title="You as CAPCOM" sub="how long work waits on you">
         <div className="pb">
           <div className="stats">
-            <Stat value={DASH} label="decisions today" title={FLIGHT_NOT_RUNNING} />
-            <Stat value={DASH} label="median response" title={FLIGHT_NOT_RUNNING} />
-            <Stat value={DASH} label="slowest 10%" title={FLIGHT_NOT_RUNNING} />
-            <Stat value={DASH} label="runs you stopped or interrupted" title={FLIGHT_NOT_RUNNING} />
+            <Stat {...notTracked} label="decisions today" />
+            <Stat {...notTracked} label="median response" />
+            <Stat {...notTracked} label="slowest 10%" />
+            <Stat {...notTracked} label="runs you stopped or interrupted" />
           </div>
         </div>
       </Panel>

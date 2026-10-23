@@ -210,6 +210,7 @@ describe("crew", () => {
       ticketTitle: null,
       loop: null,
       asideRuns: [],
+      queue: [],
       run: null,
       prs: [],
       summary: null,
@@ -799,6 +800,13 @@ describe("attentionItems: PRs waiting on you", () => {
     expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: decide on the draft"]);
   });
 
+  it("a PR's item clears once its ticket is closed on the board", () => {
+    seed([pr()]);
+    expect(prItems()).toHaveLength(1);
+    store.replaceBoard("shop-app", [boardItem({ closed: true })]);
+    expect(prItems()).toEqual([]);
+  });
+
   it("a PR on a ticket with no run is the operator's as before", () => {
     seed([pr({ updatedAt: NOW - 2 * HOUR })]);
     expect(prItems().map((i) => i.text)).toEqual(["PR #7 · You: decide on the draft"]);
@@ -916,6 +924,22 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("profile");
   });
 
+  it("a writer seat's row lists its queue in order without the ticket it holds; other rows have none", () => {
+    const c = withCrew();
+    store.replaceQueue("GUIDO-1", [
+      { repoId: "shop-app", issue: 5 },
+      { repoId: "shop-app", issue: 3 },
+      { repoId: "shop-app", issue: 8 },
+    ]);
+    store.takeQueued("GUIDO-1", NOW);
+    expect(rowOf(c, "GUIDO-1")?.queue).toEqual([
+      { ref: "shop-app#3", issue: 3, pos: 1 },
+      { ref: "shop-app#8", issue: 8, pos: 2 },
+    ]);
+    expect(rowOf(c, "RETRO-1")?.queue).toEqual([]);
+    expect(rowOf(c, "shop-app-ta")?.queue).toEqual([]);
+  });
+
   it("a scratch seat's crew row says scratch", () => {
     const c = withCrew();
     const retro = c.crew?.sessions[0]?.seats.find((s) => s.id === "RETRO-1");
@@ -1026,21 +1050,68 @@ describe("crew seats in the rows", () => {
     });
 
     it("names the open PR and its state", () => {
-      expect(reviewOf([pr({ isDraft: true })])).toEqual({ prNumber: 7, state: "draft" });
-      expect(reviewOf([pr({})])).toEqual({ prNumber: 7, state: "open" });
-      expect(reviewOf([pr({ review: "requested" })])).toEqual({ prNumber: 7, state: "open" });
-      expect(reviewOf([pr({ review: "changes" })])).toEqual({ prNumber: 7, state: "changes" });
-      expect(reviewOf([pr({ review: "approved" })])).toEqual({ prNumber: 7, state: "approved" });
+      expect(reviewOf([pr({ isDraft: true })])).toEqual({
+        prNumber: 7,
+        state: "draft",
+        reviewing: null,
+      });
+      expect(reviewOf([pr({})])).toEqual({ prNumber: 7, state: "open", reviewing: null });
+      expect(reviewOf([pr({ review: "requested" })])).toEqual({
+        prNumber: 7,
+        state: "open",
+        reviewing: null,
+      });
+      expect(reviewOf([pr({ review: "changes" })])).toEqual({
+        prNumber: 7,
+        state: "changes",
+        reviewing: null,
+      });
+      expect(reviewOf([pr({ review: "approved" })])).toEqual({
+        prNumber: 7,
+        state: "approved",
+        reviewing: null,
+      });
     });
 
     it("names the newest of several open PRs on the branch", () => {
       expect(reviewOf([pr({ number: 7 }), pr({ number: 9 }), pr({ number: 8 })])).toEqual({
         prNumber: 9,
         state: "open",
+        reviewing: null,
       });
       expect(
         reviewOf([pr({ number: 9, state: "closed" }), pr({ number: 7, review: "approved" })]),
-      ).toEqual({ prNumber: 7, state: "approved" });
+      ).toEqual({ prNumber: 7, state: "approved", reviewing: null });
+    });
+
+    it("names the review seat while a review of the open PR is queued, starting or running", () => {
+      let attempt = 0;
+      const ask = (prNumber: number, at: number, repoId = "shop-app") => {
+        attempt += 1;
+        return store.requestReview({
+          authorRunId: "c1",
+          repoId,
+          seatId: "RETRO-1",
+          prNumber,
+          sha: "c".repeat(40),
+          epoch: 0,
+          attempt,
+          round: 1,
+          at,
+        });
+      };
+      const reviewing = () => reviewOf([pr({ number: 7 })])?.reviewing;
+      expect(reviewing()).toBeNull();
+      // other PRs, in this repo or another, leave PR 7 alone
+      expect(ask(8, NOW - MIN)).not.toBeNull();
+      expect(ask(7, NOW - MIN, "site-builder")).not.toBeNull();
+      expect(reviewing()).toBeNull();
+      const id = ask(7, NOW - MIN) as number;
+      expect(reviewing()).toBe("RETRO-1");
+      store.setReviewState(id, ["queued"], "running", { at: NOW, runId: "rr" });
+      expect(reviewing()).toBe("RETRO-1");
+      store.setReviewState(id, ["running"], "superseded", { at: NOW });
+      expect(reviewing()).toBeNull();
     });
 
     it("is null for a loop row", () => {
