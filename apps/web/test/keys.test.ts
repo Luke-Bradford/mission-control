@@ -152,7 +152,7 @@ describe("nextAgent", () => {
   });
 
   it("follows crewOrder: an agent that needs you comes first", () => {
-    expect(nextAgent(rows, [item({ agentId: "c", ticket: null })], "all", null, 1)).toBe("c");
+    expect(nextAgent(rows, [item({ agentId: "c" })], "all", null, 1)).toBe("c");
   });
 
   it("is null when no agent is in view", () => {

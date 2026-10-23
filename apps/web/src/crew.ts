@@ -27,13 +27,16 @@ import {
 import { cutText, hhmm, mss, prLabel, wkdTime } from "./fmt.ts";
 
 /**
- * The attention items a seat's row shows: the seat's own, about the run it is working now. Items
- * carry the ticket, not the run, so one about another ticket belongs to a run the seat has set
- * aside (in review, ready to merge, parked) and shows under that ticket in Needs you instead.
+ * The attention items a seat's row shows: the seat's own, about the run it is working now. Run
+ * items carry the ticket, not the run, so one about another ticket belongs to a run the seat has
+ * set aside (in review, ready to merge, parked) and shows under that ticket in Needs you instead.
+ * An escalation is the repo's, not a run's, and always stays.
  */
 export function seatItems(row: CrewRow, items: AttentionItem[]): AttentionItem[] {
   return items.filter(
-    (i) => i.agentId === row.id && (i.ticket === null || i.ticket === row.ticket),
+    (i) =>
+      i.agentId === row.id &&
+      (i.escalationId !== null || i.ticket === null || i.ticket === row.ticket),
   );
 }
 

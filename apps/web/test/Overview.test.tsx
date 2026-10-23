@@ -697,7 +697,7 @@ describe("Agents panel", () => {
       rows: [crewRow({ hudState: "blocked" })],
       items: [
         item({ key: "p:1", kind: "parked", text: "Needs a rebase decision", ticket: null }),
-        item({ key: "esc:shop-app#4001", kind: "decision", ticket: "shop-app#3349" }),
+        item({ key: "esc:shop-app#4001", kind: "decision" }),
       ],
     });
     const { container } = render(
@@ -715,7 +715,7 @@ describe("Agents panel", () => {
 
   it("a set-aside run's ready note shows in Needs you, not as a lamp or need line on the seat's row", async () => {
     const ready = {
-      ...item({ key: "ready:old", kind: "decision", ticket: "shop-app#3000" }),
+      ...item({ key: "ready:old", kind: "decision", ticket: "shop-app#3000", escalationId: null }),
       kind: "ready",
     } as unknown as AttentionItem;
     stub({ rows: [crewRow({ ticket: "shop-app#3349" })], items: [ready] });
@@ -725,12 +725,13 @@ describe("Agents panel", () => {
     expect(row.classList.contains("needs")).toBe(false);
     expect(row.querySelector(".need")).toBeNull();
     expect(screen.queryByText("Ready to merge")).toBeNull();
+    expect(container.querySelector("#nbanner .nbanner b.num")?.textContent).toBe("1");
   });
 
   it("a row is not a button around buttons:its call sign is the link to the Agent page", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "esc:shop-app#4001", kind: "decision", ticket: "shop-app#3349" })],
+      items: [item({ key: "esc:shop-app#4001", kind: "decision" })],
     });
     const { container } = render(<Overview />);
     await screen.findByRole("button", { name: "Answer" });

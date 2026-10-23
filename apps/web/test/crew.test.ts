@@ -420,7 +420,7 @@ describe("needLine", () => {
 
   it("leaves out a set-aside run's items: another ticket's ready note is not the row's", () => {
     const old = {
-      ...item({ key: "ready:old", agentId: "a", ticket: "shop-app#3000" }),
+      ...item({ key: "ready:old", agentId: "a", ticket: "shop-app#3000", escalationId: null }),
       kind: "ready",
     } as unknown as AttentionItem;
     const seatLevel = item({ key: "stall:a", agentId: "a", kind: "stalled", ticket: null });
