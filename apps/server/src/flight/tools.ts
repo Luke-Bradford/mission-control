@@ -10,12 +10,11 @@ import {
   accountStoppedText,
   answeredText,
   answerMessageText,
-  areaLabelsFor,
+  areaLabelsOf,
   askerRunEndedText,
   COMMENTED_DECISION,
   CREATE_NO_REPO,
   capText,
-  claimedText,
   commentedText,
   commentFailedText,
   commentTextText,
@@ -26,9 +25,11 @@ import {
   createFailedText,
   createLabelsText,
   createTextText,
+  dependsOn,
   duplicateLabelText,
   duplicateTitleText,
   ENGINE_OFF_TEXT,
+  eligibleToStart,
   endedDecision,
   endedText,
   endFailedText,
@@ -127,14 +128,10 @@ import {
   startFailedText,
   startMissingNeedsText,
   type TicketView,
-  ticketHasRunText,
   ticketReadText,
-  twoAreasText,
   unclosedMarkdown,
   unknownLabelText,
   unparkCapText,
-  waitsOnText,
-  wrongAreaText,
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
@@ -142,7 +139,7 @@ import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
-import { accountAtStop, areaLabelsOf, claimedByOther } from "../engine/queue.ts";
+import { accountAtStop } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import type { GhRunner } from "../mcp/gh.ts";
@@ -248,9 +245,6 @@ const CommentTicketArgs = z.strictObject({
   text: text(MC_TEXT_MAX),
   basis: basisArg,
 });
-/** A line of a ticket body that names its dependencies. */
-const DEPENDS_ON_LINE = /^.*\bDepends on\b.*$/gim;
-
 const objectSchema = (properties: object, required: string[]) => ({
   type: "object",
   properties,
@@ -516,52 +510,40 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
-    const areas = areaLabelsOf(rules, card);
-    if (areas.length >= 2) return fail(twoAreasText(ref, areas));
-    const label = areas[0];
-    if (label !== undefined && !areaLabelsFor(rules, cfg.area).includes(label)) {
-      return fail(wrongAreaText(call, ref, areas));
+    let body: string;
+    try {
+      body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+    } catch {
+      return fail(START_NO_GITHUB);
     }
-    if (store.activeTickets().has(ref)) return fail(ticketHasRunText(ref));
-    // a card the engine has taken for a seat has no run yet, while it reads the card
-    const taken = store.staleTakes(Number.POSITIVE_INFINITY);
-    if (taken.some((r) => r.repoId === repo.id && r.issue === issue)) {
-      return fail(ticketHasRunText(ref));
-    }
-    if (claimedByOther(card, deps.login)) {
-      return fail(
-        claimedText(
-          ref,
-          (card.assignees ?? []).filter((a) => a !== deps.login),
-        ),
-      );
-    }
-    const open = card.blockedBy.filter((b) => !b.closed).map((b) => b.ref);
-    if (open.length > 0) return fail(waitsOnText(ref, open));
+    const board = store.board(repo.id);
+    const refusal = eligibleToStart({
+      repoId: repo.id,
+      issue,
+      card,
+      rules,
+      seat: { call, area: cfg.area, loop: loopKind },
+      login: deps.login,
+      // a card the engine has taken for a seat has no run yet, while it reads the card
+      hasRun:
+        store.activeTickets().has(ref) ||
+        store
+          .staleTakes(Number.POSITIVE_INFINITY)
+          .some((r) => r.repoId === repo.id && r.issue === issue),
+      lane: config.crew?.lane,
+      laneDefault: config.crew?.laneDefault ?? false,
+      body,
+      closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+    });
+    if (refusal !== null) return fail(refusal);
     if (planner) {
-      let body: string;
-      try {
-        body = (await deps.fetchTicket(repo, issue))?.body ?? "";
-      } catch {
-        return fail(START_NO_GITHUB);
-      }
       if (hasPlanSection(body)) return fail(planAlreadyText(ref));
       if (unclosedMarkdown(body)) return fail(planUnclosedText(ref));
-      const missing = rules.needs.filter((n) =>
-        n === "done_when" ? !hasDoneWhenSection(body) : card.size === null,
-      );
-      if (missing.length > 0) return fail(startMissingNeedsText(ref, missing));
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
       if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
-    } else if (column !== "Ready" && !card.labels.includes(READY_LABEL)) {
-      let body: string;
-      try {
-        body = (await deps.fetchTicket(repo, issue))?.body ?? "";
-      } catch {
-        return fail(START_NO_GITHUB);
-      }
-      if (!hasPlanSection(body)) return fail(notReadyText(ref));
+    } else if (column !== "Ready" && !card.labels.includes(READY_LABEL) && !hasPlanSection(body)) {
+      return fail(notReadyText(ref));
     }
     try {
       // a planner starts with no loop: the engine never reconciles it or moves its card
@@ -574,6 +556,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         );
       }
     } catch (e) {
+      // the supervisor's own eligibility refusal: the same text start_seat gives
+      if (e instanceof SupervisorError && e.status === 422) return fail(e.message);
       return fail(
         e instanceof SupervisorError || e instanceof CheckoutError
           ? startFailedText(e.message)
@@ -737,11 +721,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (areas.length >= 2) return fail(moveTwoAreasText(ref, areas));
       if (areas.length === 0) return fail(moveNoAreaText(ref));
       const waits = new Set(card.blockedBy.filter((b) => !b.closed).map((b) => b.ref));
-      for (const line of body.match(DEPENDS_ON_LINE) ?? []) {
-        for (const m of line.matchAll(/#(\d+)/g)) {
-          const dep = board.find((i) => i.issueNumber === Number(m[1]));
-          if (dep === undefined || !dep.closed) waits.add(`${repo.id}#${m[1]}`);
-        }
+      for (const n of dependsOn(body)) {
+        const dep = board.find((i) => i.issueNumber === n);
+        if (dep === undefined || !dep.closed) waits.add(`${repo.id}#${n}`);
       }
       if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits]));
     }

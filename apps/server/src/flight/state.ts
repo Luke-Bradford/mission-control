@@ -18,6 +18,7 @@ import {
   type FlightState,
   type FlightView,
   hudColumnOf,
+  inLane,
   PRIORITIES,
   READY_LABEL,
   seatCallSign,
@@ -198,6 +199,7 @@ export function flightState(i: {
     .filter(
       (b) =>
         !b.closed &&
+        inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
         FLIGHT_STARTABLE.includes(hudColumnOf(b)) &&
         !active.has(`${b.repoId}#${b.issueNumber}`) &&
         !b.blockedBy.some((x) => !x.closed),

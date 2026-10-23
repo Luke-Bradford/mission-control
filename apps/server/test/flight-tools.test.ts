@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  claimedText,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
   FLIGHT_NOTED,
@@ -17,8 +18,15 @@ import {
   type RepoRules,
   type Run,
   type RunLoop,
+  researchText,
   type SeatSessionRow,
+  startMissingNeedsText,
+  startNeedsPlanText,
   type TicketView,
+  ticketHasRunText,
+  twoAreasText,
+  waitsOnText,
+  wrongAreaText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
@@ -678,7 +686,14 @@ describe("start_seat", () => {
   const start = (over: Record<string, unknown> = {}) =>
     call("start_seat", { seat: "guido-1", issue: 7, basis: "ready", ...over });
 
-  beforeEach(() => board(card(7)));
+  // a card and a body that pass the start check: a Size and a Done when section
+  const sc = (n: number, over: Partial<BoardItem> = {}) => card(n, { size: "S", ...over });
+  const DONE = "## Done when\n\n- it works\n";
+
+  beforeEach(() => {
+    board(sc(7));
+    fetchImpl = async (n) => ticket(n, { body: DONE });
+  });
 
   it("starts the seat with the loop when the engine is on", async () => {
     engineOn = true;
@@ -703,12 +718,12 @@ describe("start_seat", () => {
   });
 
   it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {
-    board(card(7, { assignees: ["other"] }));
+    board(sc(7, { assignees: ["other"] }));
     expect(await start()).toEqual(
       refused("Not started: mc#7 is assigned to other; another hub or person has it."),
     );
     expect(startCalls).toEqual([]);
-    board(card(7, { assignees: ["me"] }));
+    board(sc(7, { assignees: ["me"] }));
     expect((await start()).isError).toBeUndefined();
     expect(startCalls).toHaveLength(1);
   });
@@ -728,17 +743,17 @@ describe("start_seat", () => {
     });
 
     it("refuses a card whose area is not the seat's", async () => {
-      board(card(7, { labels: ["area:server"] }));
+      board(sc(7, { labels: ["area:server"] }));
       expect(await start({ seat: "inco-1" })).toEqual(
         refused("Not started: mc#7 is in area:server, not INCO-1's area."),
       );
       expect(startCalls).toEqual([]);
-      board(card(7, { labels: ["area:web"] }));
+      board(sc(7, { labels: ["area:web"] }));
       expect((await start({ seat: "inco-1" })).isError).toBeUndefined();
     });
 
     it("refuses a card with two area labels", async () => {
-      board(card(7, { labels: ["area:server", "area:web"] }));
+      board(sc(7, { labels: ["area:server", "area:web"] }));
       expect(await start()).toEqual(
         refused(
           "Not started: mc#7 spans two areas (area:server, area:web); ask the operator to split it.",
@@ -760,7 +775,7 @@ describe("start_seat", () => {
     repo.autonomy = "merge";
     expect(await start()).toEqual({ text: "Started GUIDO-1 on mc#7." });
     expect(startCalls).toHaveLength(1);
-    board(card(8, { blockedBy: [{ ref: "mc#9", closed: false }] }));
+    board(sc(8, { blockedBy: [{ ref: "mc#9", closed: false }] }));
     expect(await start({ issue: 8 })).toEqual(refused("Not started: mc#8 waits on mc#9."));
   });
 
@@ -834,14 +849,14 @@ describe("start_seat", () => {
 
   it("7: refuses a card that is missing, in the wrong column, active or blocked", async () => {
     expect(await start({ issue: 8 })).toEqual(refused("Not started: mc#8 is not on the board."));
-    board(card(7, { status: "In progress", state: "in progress" }));
+    board(sc(7, { status: "In progress", state: "in progress" }));
     expect(await start()).toEqual(refused("Not started: mc#7 is in In progress."));
-    board(card(7));
+    board(sc(7));
     live("inco-1", "r-i", { ticket: "mc#7" });
     expect(await start()).toEqual(refused("Not started: mc#7 already has a run."));
     store.upsertRun(run("r-i", "inco-1", { ticket: "mc#7", endedAt: NOW, status: "ok" }));
     board(
-      card(7, {
+      sc(7, {
         blockedBy: [
           { ref: "mc#3", closed: false },
           { ref: "mc#4", closed: true },
@@ -853,8 +868,8 @@ describe("start_seat", () => {
   });
 
   it("8: needs a Ready column, the ready label or a Plan section", async () => {
-    board(card(7, { status: "Backlog" }));
-    fetchImpl = async (n) => ticket(n, { body: "just words\n## Planning\n" });
+    board(sc(7, { status: "Backlog" }));
+    fetchImpl = async (n) => ticket(n, { body: `${DONE}just words\n## Planning\n` });
     expect(await start()).toEqual(
       refused("Not started: mc#7 has no ## Plan section, no ready label, and is not in Ready."),
     );
@@ -863,16 +878,17 @@ describe("start_seat", () => {
     };
     expect(await start()).toEqual(refused("Not started: GitHub could not be reached."));
     expect(startCalls).toEqual([]);
-    // the label, with no fetch
+    // the label, with the body read once for the start check
     fetchCalls.length = 0;
-    board(card(7, { status: "Backlog", labels: ["ready"] }));
+    fetchImpl = async (n) => ticket(n, { body: DONE });
+    board(sc(7, { status: "Backlog", labels: ["ready"] }));
     expect((await start()).isError).toBeUndefined();
-    expect(fetchCalls).toEqual([]);
+    expect(fetchCalls).toEqual([7]);
   });
 
   it("starts a Backlog card with a Plan section in its body", async () => {
-    board(card(7, { status: "Backlog" }));
-    fetchImpl = async (n) => ticket(n, { body: "Intro\n## Plan\nsteps" });
+    board(sc(7, { status: "Backlog" }));
+    fetchImpl = async (n) => ticket(n, { body: `${DONE}Intro\n## Plan\nsteps` });
     expect(await start()).toEqual({ text: "Started GUIDO-1 on mc#7." });
   });
 
@@ -886,6 +902,95 @@ describe("start_seat", () => {
     };
     expect(await start()).toEqual(refused("Not started: the start failed."));
     expect(decisions()).toEqual([]);
+  });
+
+  it("returns the supervisor's 422 text as it is", async () => {
+    startImpl = async () => {
+      throw new SupervisorError(422, "Not started: mc#7 is not on the board.");
+    };
+    expect(await start()).toEqual(refused("Not started: mc#7 is not on the board."));
+  });
+
+  it("refuses when GitHub cannot be reached for the ticket", async () => {
+    fetchImpl = async () => {
+      throw new Error("net");
+    };
+    expect(await start()).toEqual(refused("Not started: GitHub could not be reached."));
+    expect(startCalls).toEqual([]);
+  });
+
+  describe("the shared start check", () => {
+    const AREAS = { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] };
+    const nothingStarted = async (text: string) => {
+      expect(await start()).toEqual(refused(text));
+      expect(startCalls).toEqual([]);
+    };
+    beforeEach(() => {
+      rulesNow = { ...DEFAULT_REPO_RULES, areas: AREAS };
+      board(sc(7, { labels: ["area:server"] }));
+    });
+
+    it("1: another lane", async () => {
+      const crew = cfg.crew;
+      if (crew === undefined) throw new Error("no crew");
+      crew.lane = "work";
+      board(sc(7, { labels: ["area:server", "lane:home"] }));
+      await nothingStarted(
+        "Not started: mc#7 has lane:home; this hub starts only lane:work cards.",
+      );
+    });
+
+    it("2: two areas", async () => {
+      board(sc(7, { labels: ["area:server", "area:web"] }));
+      await nothingStarted(twoAreasText("mc#7", ["area:server", "area:web"]));
+    });
+
+    it("3: no area label", async () => {
+      board(sc(7, { labels: [] }));
+      await nothingStarted("Not started: mc#7 has no area label.");
+    });
+
+    it("4: another seat's area", async () => {
+      board(sc(7, { labels: ["area:server"] }));
+      expect(await start({ seat: "inco-1" })).toEqual(
+        refused(wrongAreaText("INCO-1", "mc#7", ["area:server"])),
+      );
+      expect(startCalls).toEqual([]);
+    });
+
+    it("5: a ticket with a run", async () => {
+      live("inco-1", "r-i", { ticket: "mc#7" });
+      await nothingStarted(ticketHasRunText("mc#7"));
+    });
+
+    it("6: a card assigned to another login", async () => {
+      board(sc(7, { labels: ["area:server"], assignees: ["other"] }));
+      await nothingStarted(claimedText("mc#7", ["other"]));
+    });
+
+    it("7: an open blocker, or an open Depends on issue", async () => {
+      board(sc(7, { labels: ["area:server"], blockedBy: [{ ref: "mc#3", closed: false }] }));
+      await nothingStarted(waitsOnText("mc#7", ["mc#3"]));
+      board(sc(7, { labels: ["area:server"] }), sc(5, { closed: true }), sc(6));
+      fetchImpl = async (n) => ticket(n, { body: `${DONE}Depends on #5, #6\n` });
+      await nothingStarted(waitsOnText("mc#7", ["mc#6"]));
+    });
+
+    it("8: a research ticket", async () => {
+      board(sc(7, { labels: ["area:server", "research"] }));
+      await nothingStarted(researchText("mc#7"));
+    });
+
+    it("9: a missing Done when or Size", async () => {
+      fetchImpl = async (n) => ticket(n, { body: "text" });
+      board(sc(7, { labels: ["area:server"], size: null }));
+      await nothingStarted(startMissingNeedsText("mc#7", ["done_when", "size"]));
+    });
+
+    it("10: Size M with no plan", async () => {
+      board(sc(7, { labels: ["area:server"], size: "M" }));
+      await nothingStarted(startNeedsPlanText("mc#7", "M"));
+    });
   });
 });
 
@@ -920,6 +1025,7 @@ describe("start_seat planner", () => {
     expect(await plan()).toEqual({ text: "Started FAO-1 on mc#7." });
     nowMs += 60 * 60_000;
     board(sized({ status: "Ready" }));
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
     expect(
       await call("start_seat", { seat: "guido-1", issue: 7, basis: "planned, ready" }),
     ).toEqual({ text: "Started GUIDO-1 on mc#7." });
@@ -1000,7 +1106,7 @@ describe("start_seat planner", () => {
   it("starts a build seat as before, and refuses a watch seat", async () => {
     const mc = cfg.repos[0];
     if (mc !== undefined) mc.autonomy = "draft";
-    board(card(7));
+    board(card(7, { size: "S" }));
     expect((await call("start_seat", { seat: "guido-1", issue: 7, basis: "b" })).isError).toBe(
       undefined,
     );

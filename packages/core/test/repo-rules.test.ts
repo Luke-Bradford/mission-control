@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   areaLabelsFor,
+  claimedText,
   DEFAULT_HARD_RULES,
   DEFAULT_REPO_RULES,
+  dependsOn,
+  eligibleToStart,
+  inLane,
+  otherLaneText,
   type RepoRules,
+  researchText,
+  type StartCheck,
+  startMissingNeedsText,
+  startNeedsPlanText,
+  ticketHasRunText,
+  twoAreasText,
+  waitsOnText,
+  wrongAreaText,
 } from "../src/index.ts";
 
 const rules: RepoRules = {
@@ -92,5 +105,144 @@ describe("areaLabelsFor", () => {
 
   it("matches nothing for a seat whose area is elsewhere", () => {
     expect(areaLabelsFor(rules, ["docs/**"])).toEqual([]);
+  });
+});
+
+describe("dependsOn and inLane", () => {
+  it("reads the issues on Depends on lines only, once each", () => {
+    const body = "Depends on #3 and #5\nSee #9\nalso depends on: #3\n";
+    expect(dependsOn(body)).toEqual([3, 5]);
+  });
+
+  it("starts every card when the hub has no lane", () => {
+    expect(inLane(["lane:home", "lane:work"], undefined, false)).toBe(true);
+  });
+
+  it("starts a card of its own lane only", () => {
+    expect(inLane(["lane:home"], "home", false)).toBe(true);
+    expect(inLane(["lane:work"], "home", true)).toBe(false);
+    expect(inLane(["lane:home", "lane:work"], "home", true)).toBe(false);
+  });
+
+  it("starts a card with no lane label only on the default-lane hub", () => {
+    expect(inLane([], "home", false)).toBe(false);
+    expect(inLane([], "home", true)).toBe(true);
+  });
+});
+
+describe("eligibleToStart", () => {
+  const ref = "mc#7";
+  const base = (over: Partial<StartCheck> = {}): StartCheck => ({
+    repoId: "mc",
+    issue: 7,
+    card: { labels: ["area:server"], assignees: [], blockedBy: [], size: "S" },
+    rules: {
+      areas: { "area:server": ["apps/server/**"], "area:web": ["apps/web/**"] },
+      needs: ["done_when", "size"],
+    },
+    seat: { call: "GUIDO-1", area: ["apps/server/**"], loop: "build" },
+    login: "me",
+    hasRun: false,
+    lane: undefined,
+    laneDefault: false,
+    body: "## Done when\n- x\n",
+    closed: () => true,
+    ...over,
+  });
+  const card = (over: Partial<StartCheck["card"]>): Partial<StartCheck> => ({
+    card: { ...base().card, ...over },
+  });
+
+  it("gives null for an eligible card", () => {
+    expect(eligibleToStart(base())).toBeNull();
+  });
+
+  it("1: refuses another lane, or none", () => {
+    expect(
+      eligibleToStart(base({ lane: "work", ...card({ labels: ["area:server", "lane:home"] }) })),
+    ).toBe(otherLaneText(ref, ["lane:home"], "work"));
+    expect(eligibleToStart(base({ lane: "work" }))).toBe(
+      "Not started: mc#7 has no lane label; this hub starts only lane:work cards.",
+    );
+  });
+
+  it("2: refuses two areas", () => {
+    expect(eligibleToStart(base(card({ labels: ["area:server", "area:web"] })))).toBe(
+      twoAreasText(ref, ["area:server", "area:web"]),
+    );
+  });
+
+  it("3: refuses no area label, unless the rules name none", () => {
+    expect(eligibleToStart(base(card({ labels: [] })))).toBe(
+      "Not started: mc#7 has no area label.",
+    );
+    expect(
+      eligibleToStart(base({ ...card({ labels: [] }), rules: { areas: {}, needs: [] } })),
+    ).toBeNull();
+  });
+
+  it("4: refuses an area that is not the seat's", () => {
+    expect(eligibleToStart(base(card({ labels: ["area:web"] })))).toBe(
+      wrongAreaText("GUIDO-1", ref, ["area:web"]),
+    );
+  });
+
+  it("5: refuses a ticket that has a run", () => {
+    expect(eligibleToStart(base({ hasRun: true }))).toBe(ticketHasRunText(ref));
+  });
+
+  it("6: refuses a card assigned to another login", () => {
+    expect(eligibleToStart(base(card({ assignees: ["other", "me"] })))).toBe(
+      claimedText(ref, ["other"]),
+    );
+  });
+
+  it("7: refuses open blockers and open Depends on issues, once each", () => {
+    const c = base({
+      ...card({
+        blockedBy: [
+          { ref: "mc#3", closed: false },
+          { ref: "mc#4", closed: true },
+        ],
+      }),
+      body: "## Done when\n- x\nDepends on #3, #5\n",
+      closed: (n) => (n === 3 ? false : undefined),
+    });
+    expect(eligibleToStart(c)).toBe(waitsOnText(ref, ["mc#3", "mc#5"]));
+  });
+
+  it("8: refuses a research ticket to a developer seat only", () => {
+    const research = card({ labels: ["area:server", "research"] });
+    expect(eligibleToStart(base(research))).toBe(researchText(ref));
+    expect(
+      eligibleToStart(base({ ...research, seat: { ...base().seat, loop: "plan" } })),
+    ).toBeNull();
+  });
+
+  it("9: refuses a missing Done when or Size", () => {
+    const text = startMissingNeedsText(ref, ["done_when", "size"]);
+    const c = base({ ...card({ size: null }), body: "text" });
+    expect(eligibleToStart(c)).toBe(text);
+    expect(eligibleToStart({ ...c, seat: { ...c.seat, loop: "plan" } })).toBe(text);
+  });
+
+  it("10: refuses Size M without a plan, for a developer seat only", () => {
+    const m = base(card({ size: "M" }));
+    expect(eligibleToStart(m)).toBe(startNeedsPlanText(ref, "M"));
+    expect(eligibleToStart({ ...m, body: "## Done when\n- x\n## Plan\n" })).toBeNull();
+    expect(eligibleToStart({ ...m, seat: { ...m.seat, loop: "plan" } })).toBeNull();
+  });
+
+  it("gives the first refusal", () => {
+    expect(eligibleToStart(base({ lane: "work", hasRun: true }))).toBe(
+      otherLaneText(ref, [], "work"),
+    );
+  });
+
+  it("skips the body checks with a null body, but not an open blocker", () => {
+    const c = base({ ...card({ size: "M" }), body: null, closed: () => false });
+    expect(eligibleToStart(c)).toBeNull();
+    const blocked = { ...c, ...card({ size: "M", blockedBy: [{ ref: "mc#3", closed: false }] }) };
+    expect(eligibleToStart(blocked)).toBe(waitsOnText(ref, ["mc#3"]));
   });
 });
