@@ -86,6 +86,7 @@ import {
   sourceReadUrl,
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
+import { teamsStatus } from "./collectors/teams.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
 import {
@@ -96,6 +97,7 @@ import {
   crewSeatGrants,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
+  TeamsSelection,
 } from "./config.ts";
 import {
   accountDuplicateReason,
@@ -108,6 +110,7 @@ import {
   RepoLocation,
   SeatsBody,
   setSessionSeats,
+  setTeamsSelection,
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
@@ -2040,6 +2043,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         return notifications.test();
+      });
+
+      // Reader: apps/web/src/data.ts (Sources status; web wiring is a separate ticket)
+      api.get("/sources/teams", async () => teamsStatus(config, store));
+
+      // Reader: apps/web/src/data.ts (Sources selection; web wiring is a separate ticket)
+      api.post("/sources/teams/selection", async (req, reply) => {
+        const body = z.strictObject({ selected: TeamsSelection }).safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: "Invalid Teams selection" });
+        if (!deps.configPath || deps.seatWrites === false)
+          return reply.code(409).send({ error: "Config writes unavailable" });
+        if (
+          body.data.selected.some(
+            (s) => s.lane !== "work" || !config.repos.some((r) => r.id === s.repoId),
+          )
+        )
+          return reply
+            .code(400)
+            .send({ error: "Teams sources must belong to a configured work repo" });
+        try {
+          const next = await setTeamsSelection(deps.configPath, body.data.selected, now());
+          config.sources = next.sources;
+          bus.emit("attention");
+          return teamsStatus(config, store);
+        } catch {
+          return reply.code(409).send({ error: "Teams selection could not be saved" });
+        }
       });
 
       // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)

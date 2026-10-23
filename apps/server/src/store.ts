@@ -1793,9 +1793,14 @@ export class Store {
    * Merges the unread threads `rows` into the table: a new row is first seen `now`; an existing one
    * is unread again, keeping `first_seen_at` and its handled fields. `complete` (`rows` is the whole
    * unread list): every other unread row is read on GitHub, and closes as `read` if it was open.
-   * True when any row changed.
+   * With a source, completeness applies only to that source. True when any row changed.
    */
-  upsertNotifications(rows: NotificationRead[], complete: boolean, now: number): boolean {
+  upsertNotifications(
+    rows: NotificationRead[],
+    complete: boolean,
+    now: number,
+    source?: "github" | "teams",
+  ): boolean {
     let changed = false;
     this.transaction(() => {
       const before = this.notificationsJson();
@@ -1838,7 +1843,13 @@ export class Store {
         const unread = this.db.prepare("SELECT id FROM notifications WHERE unread = 1").all() as {
           id: string;
         }[];
-        for (const { id } of unread) if (!seen.has(id)) close.run(now, id);
+        for (const { id } of unread)
+          if (
+            !seen.has(id) &&
+            (source === undefined ||
+              (this.notification(id)?.message?.source.kind ?? "github") === source)
+          )
+            close.run(now, id);
       }
       changed = this.notificationsJson() !== before;
     });

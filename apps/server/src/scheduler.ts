@@ -62,6 +62,7 @@ import { nextBackoff, RateLimits } from "./collectors/rate-limit.ts";
 import { defaultIsAlive, type LiveSession, readSessions } from "./collectors/sessions.ts";
 import { collectStudioLoop, newStudioState } from "./collectors/studio-loop.ts";
 import { collectTaLoop, newTaState } from "./collectors/ta-loop.ts";
+import { collectTeams } from "./collectors/teams.ts";
 import { sampleClaude } from "./collectors/usage-claude.ts";
 import { sampleCodex } from "./collectors/usage-codex.ts";
 import { WINDOWS } from "./collectors/usage-common.ts";
@@ -79,6 +80,7 @@ import type { Store } from "./store.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
+  | "teams"
   | "ta"
   | "studio"
   | "sessions"
@@ -95,6 +97,7 @@ export type Job =
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
 export const JOBS: readonly Job[] = [
   "sessions",
+  "teams",
   "ta",
   "studio",
   "github",
@@ -208,6 +211,7 @@ export interface Collectors {
 
 export interface SchedulerDeps {
   config: CcConfig;
+  teamsEnabled?: boolean;
   store: Store;
   bus: ChangeBus;
   now?: () => number;
@@ -736,6 +740,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       }
       if (boards) emit("boards");
     },
+    teams: async () => {
+      if (deps.teamsEnabled === false) return;
+      if ((await collectTeams(config, store, now())).changed) {
+        emit("attention");
+        emit("flight");
+      }
+    },
     flow: async () => {
       if (config.repos.length === 0) return;
       const client = await loadGql();
@@ -825,6 +836,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   };
 
   const intervals: Record<Job, number> = {
+    teams: 60_000,
     ta: LOOP_INTERVAL_MS,
     studio: LOOP_INTERVAL_MS,
     sessions: LOOP_INTERVAL_MS,

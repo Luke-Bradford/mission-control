@@ -94,6 +94,7 @@ async function main(): Promise<void> {
   const cliHold = new CliHold();
   const scheduler = createScheduler({
     config,
+    teamsEnabled: !isPreview(port, process.env),
     store,
     bus,
     cliHold,
