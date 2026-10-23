@@ -124,6 +124,22 @@ describe("loopTries", () => {
     expect(tries[3]).toMatchObject({ startedAt: at(2), endedAt: at(4) });
   });
 
+  it("leaves the CI try open across an engine re-run of a failed CI", () => {
+    const rerun: [string, string] = [`${RUN}:rerun:abc`, "CI failed on abc1234; re-ran build"];
+    const passed = loopTries(run(), evs(REPORTED, rerun, "CI passed on abc1234"), null);
+    expect(passed.map((t) => [t.step, t.outcome])).toEqual([
+      ["working", "pass"],
+      ["ci", "pass"],
+      ["review", "waiting"],
+    ]);
+    const failed = loopTries(run(), evs(REPORTED, rerun, "CI failed on abc1234"), null);
+    expect(failed.map((t) => [t.step, t.n, t.outcome])).toEqual([
+      ["working", 1, "pass"],
+      ["ci", 1, "fail"],
+      ["working", 2, "running"],
+    ]);
+  });
+
   it("puts a resumed try on In review when a review fix follows", () => {
     const events = evs(
       REPORTED,

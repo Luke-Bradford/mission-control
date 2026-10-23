@@ -15,6 +15,8 @@ const CI_PASSED_PREFIX = "CI passed on ";
 const CI_FAILED_PREFIX = "CI failed on ";
 const MERGED_TEXT = "merged";
 const PARKED_PREFIX = parkedEventText("");
+/** The engine's flake re-run of a failed CI: the run stays on CI, so it changes no try. */
+const RERUN_KEY = (runId: string): string => `${runId}:rerun:`;
 
 type Step = LoopTry["step"];
 
@@ -30,6 +32,7 @@ function reviewIdOf(runId: string, key: string, step: string): string | null {
 /** The step a run is on after `event`, when it says so; used to place a try opened by a resume. */
 function impliedStep(runId: string, e: LoopEvent): Step | null {
   if (e.text === REPORTED_TEXT) return "working";
+  if (e.key.startsWith(RERUN_KEY(runId))) return "ci";
   if (e.text.startsWith(CI_PASSED_PREFIX) || e.text.startsWith(CI_FAILED_PREFIX)) return "ci";
   if (
     reviewIdOf(runId, e.key, "fix") !== null ||
@@ -75,6 +78,7 @@ export function loopTries(run: Run, events: LoopEvent[], review: ReviewStatus | 
   for (const [i, e] of events.entries()) {
     const reviewReported = reviewIdOf(run.id, e.key, "reported");
     if (reviewReported !== null) reported.set(reviewReported, e.text);
+    if (e.key.startsWith(RERUN_KEY(run.id))) continue;
     const fixOf = reviewIdOf(run.id, e.key, "fix");
     if (e.text === REPORTED_TEXT || e.key.startsWith(`${run.id}:update:`)) {
       close(e.at, "pass");
