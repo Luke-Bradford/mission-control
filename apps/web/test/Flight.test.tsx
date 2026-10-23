@@ -778,7 +778,7 @@ describe("FLIGHT page", () => {
     await waitFor(() => expect(container.querySelectorAll(".tlev").length).toBe(3));
     const text = container.querySelector("#timeline")?.textContent ?? "";
     expect(text).toContain("claude-main 5h window resets");
-    expect(text).toContain("Board and escalations poll (every 60 s)");
+    expect(text).toContain("Board and notifications poll (every 60 s)");
     expect(text).toContain("Usage read (every 30 min)");
     const later = container.querySelector(".tllater") as HTMLElement;
     expect(later.textContent).toBe("Later: Sun 19:00 codex 5h window resets");

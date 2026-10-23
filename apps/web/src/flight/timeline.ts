@@ -1,9 +1,16 @@
-import { githubCollector, type HealthRow, type LimitRow, USAGE_COLLECTOR_PREFIX } from "@mc/core";
+import {
+  type FlightScheduleEntry,
+  githubCollector,
+  type HealthRow,
+  type LimitRow,
+  USAGE_COLLECTOR_PREFIX,
+} from "@mc/core";
 
 export const TIMELINE_MINUTES = 240;
 const MIN = 60_000;
 
 export interface TimelineEvent {
+  id?: string;
   at: number;
   label: string;
 }
@@ -22,7 +29,7 @@ function latest(health: HealthRow[], match: (collector: string) => boolean): num
 /**
  * What is coming up, soonest first: each limit window's reset, the next board poll and the next
  * usage read (their last status time plus the interval; a poll already due is shown as now).
- * Resets already in the past are dropped.
+ * Resets already in the past are dropped; pending plans remain until their outcome is observed.
  */
 export function upcoming(input: {
   now: number;
@@ -30,6 +37,7 @@ export function upcoming(input: {
   /** The configured repos: their `githubCollector(id)` rows are the board polls. */
   repoIds: string[];
   health: HealthRow[];
+  planned?: FlightScheduleEntry[];
   poll: { usageMinutes: number; githubSeconds: number };
 }): TimelineEvent[] {
   const { now, limits, repoIds, health, poll } = input;
@@ -43,7 +51,7 @@ export function upcoming(input: {
   if (github !== null) {
     out.push({
       at: Math.max(now, github + poll.githubSeconds * 1000),
-      label: `Board and escalations poll (every ${intervalText(poll.githubSeconds)})`,
+      label: `Board and notifications poll (every ${intervalText(poll.githubSeconds)})`,
     });
   }
   const usage = latest(health, (c) => c.startsWith(USAGE_COLLECTOR_PREFIX));
@@ -52,6 +60,11 @@ export function upcoming(input: {
       at: Math.max(now, usage + poll.usageMinutes * MIN),
       label: `Usage read (every ${intervalText(poll.usageMinutes * 60)})`,
     });
+  }
+  for (const entry of input.planned ?? []) {
+    if (entry.status === "pending") {
+      out.push({ id: `plan:${entry.id}`, at: entry.dueAt, label: entry.label });
+    }
   }
   return out.sort((a, b) => a.at - b.at);
 }
