@@ -1993,3 +1993,48 @@ it("retains complete and legacy briefs across restart without inventing checked 
   expect(store.briefs().get(complete.key)).toEqual(completeBrief);
   expect(store.briefs().get(legacy.key)?.checked).toBeUndefined();
 });
+
+it("deduplicates a large history with an indexed first-commit lookup", () => {
+  for (let i = 0; i < 500; i++) {
+    for (const [runId, at] of [
+      ["first", i],
+      ["retry", i + 1000],
+    ] as const)
+      store.addRunCommit({ runId, repoId: "repo", branch: "b", sha: String(i), at });
+  }
+  expect(store.telemetryCommits(0, 2000)).toHaveLength(500);
+  expect(store.telemetryCommits(0, 2000).every((c) => c.runId === "first")).toBe(true);
+  expect(store.telemetryCommits(1000, 2000)).toEqual([]);
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    const plan = db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT id FROM run_commits WHERE repo_id = ? AND sha = ? ORDER BY at, id LIMIT 1",
+      )
+      .all("repo", "1");
+    expect(plan.map((r) => r.detail).join(" ")).toContain("USING COVERING INDEX run_commits_first");
+  } finally {
+    db.close();
+  }
+});
+
+it("retains each reopened attention episode and closes notes by run", () => {
+  const note = {
+    key: "review",
+    kind: "review" as const,
+    runId: "r",
+    seatId: "seat",
+    repoId: "repo",
+    text: "review",
+    at: 10,
+  };
+  store.raiseNote(note);
+  store.raiseNote({ ...note, at: 15 });
+  store.clearNote(note.key, 20);
+  store.raiseNote({ ...note, at: 30 });
+  store.clearNotesFor("r", 40);
+  expect(store.telemetryNoteIntervals("seat", 0, 50, ["review"])).toEqual([
+    [10, 20],
+    [30, 40],
+  ]);
+});

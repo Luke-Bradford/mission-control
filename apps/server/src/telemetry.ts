@@ -11,6 +11,7 @@ import {
   type ReviewRow,
   type Run,
   type RunDigest,
+  stallStart,
   startOfLocalDay,
   TELEMETRY_POINTS,
   TELEMETRY_RANGES,
@@ -332,8 +333,28 @@ export function telemetry(
       ...questions,
       ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["blocked"]),
     ];
+    // Ordinary loop transitions are not recorded. Bound carried state by run activity,
+    // using the same foreground/background silence threshold as the HUD.
+    const active = runs
+      .filter((r) => r.agentId === agent.id)
+      .map((r): Interval => {
+        const d = digests.get(r.id);
+        const last = Math.max(r.startedAt, d?.lastEventAt ?? r.startedAt);
+        return [
+          r.startedAt,
+          Math.min(
+            r.endedAt ?? now,
+            stallStart(last, agent.kind === "loop" && (d?.background.length ?? 0) > 0),
+          ),
+        ];
+      });
     const boundaries = [
-      ...new Set([dayStart, now, ...events.map((e) => e.at), ...[...waits, ...blocked].flat()]),
+      ...new Set([
+        dayStart,
+        now,
+        ...events.map((e) => e.at),
+        ...[...waits, ...blocked, ...active].flat(),
+      ]),
     ]
       .filter((at) => at >= dayStart && at <= now)
       .sort((a, b) => a - b);
@@ -349,18 +370,21 @@ export function telemetry(
       }
       const overlaps = (intervals: Interval[]) =>
         intervals.some(([start, end]) => start < b && end > a);
+      const recordedAt = events[eventIndex - 1]?.at ?? -Infinity;
+      const supported = active.some(([start, end]) => start <= recordedAt && start < b && end > a);
+      const carried = state !== null && state !== "idle" && !supported ? "idle" : state;
       const category =
         overlaps(blocked) ||
-        state === "blocked" ||
-        state === "parked" ||
-        state === "stalled" ||
-        state === "error"
+        carried === "blocked" ||
+        carried === "parked" ||
+        carried === "stalled" ||
+        carried === "error"
           ? "blocked"
-          : overlaps(waits) || state === "waiting"
+          : overlaps(waits) || carried === "waiting"
             ? "waiting"
-            : state === "running"
+            : carried === "running"
               ? "working"
-              : state === null
+              : carried === null
                 ? "unknown"
                 : "idle";
       ms[category] += b - a;

@@ -150,6 +150,13 @@ const pr = (n: number, mergedAt: number | null, repoId = "shop-app"): PullReques
 const state = (agentId: string, when: number, to: "running" | "waiting" | "blocked" | "idle") =>
   store.addAgentEvent({ agentId, at: when, from: "idle", to, text: "recorded state" });
 
+// Recorded state tests also need a run whose activity supports the interval.
+const activity = (agentId: string, start: number, end: number) => {
+  const id = `activity:${agentId}:${start}`;
+  store.upsertRun(run({ id, agentId, startedAt: start, endedAt: end }));
+  store.setDigest(id, digest({ lastEventAt: end }));
+};
+
 const ALL: TelemetryScope = { agent: null, account: null };
 const tel = (range: "1h" | "6h" | "24h" | "7d" = "6h", now = NOW, scope = ALL) =>
   telemetry(config, store, range, now, scope);
@@ -217,6 +224,7 @@ describe("today, in the operator's timezone", () => {
         tokens: tok(300, 0),
       }),
     );
+    store.setDigest("a", digest({ lastEventAt: at("2026-10-25T02:30:00Z") }));
     state("shop-app-ta", at("2026-10-24T23:00:00Z"), "idle");
     state("shop-app-ta", at("2026-10-24T23:30:00Z"), "running");
     state("shop-app-ta", at("2026-10-25T02:30:00Z"), "idle");
@@ -265,6 +273,7 @@ describe("utilisation", () => {
         openedAt: at("2026-10-16T23:00:00Z"),
       }),
     ]);
+    activity("shop-app-ta", at("2026-10-17T07:00:00Z"), now);
     state("shop-app-ta", at("2026-10-16T23:00:00Z"), "idle");
     state("studio-builder", at("2026-10-16T23:00:00Z"), "idle");
     state("shop-app-ta", at("2026-10-17T07:00:00Z"), "waiting");
@@ -292,6 +301,7 @@ describe("utilisation", () => {
       }),
     );
     store.replaceEscalations("shop-app", [escalation({ openedAt: at("2026-10-16T12:00:00Z") })]);
+    activity("shop-app-ta", at("2026-10-16T12:00:00Z"), now);
     state("shop-app-ta", at("2026-10-16T12:00:00Z"), "waiting");
     state("shop-app-ta", at("2026-10-17T07:00:00Z"), "running");
     state("shop-app-ta", at("2026-10-17T11:00:00Z"), "waiting");
@@ -1197,6 +1207,7 @@ describe("crew seats", () => {
     // local midnight 2026-10-16T23:00Z: 16h elapsed at NOON
     const seatShare = () => tel("6h", NOON).utilisation.find((u) => u.agentId === "GUIDO-1");
     const ran = () => {
+      store.setDigest("c1", digest({ lastEventAt: at("2026-10-17T11:00:00Z") }));
       state("GUIDO-1", at("2026-10-16T23:00:00Z"), "idle");
       state("GUIDO-1", at("2026-10-17T07:00:00Z"), "running");
       state("GUIDO-1", at("2026-10-17T11:00:00Z"), "idle");
@@ -1240,6 +1251,7 @@ describe("crew seats", () => {
       });
       state("shop-app-ta", at("2026-10-16T23:00:00Z"), "idle");
       state("shop-app-ta", at("2026-10-17T07:00:00Z"), "waiting");
+      activity("shop-app-ta", at("2026-10-17T07:00:00Z"), NOON);
       expect(tel("6h", NOON).utilisation.find((u) => u.agentId === "shop-app-ta")).toEqual({
         agentId: "shop-app-ta",
         working: 0,
@@ -1275,6 +1287,7 @@ describe("recorded state intervals", () => {
   it("clips midnight and separates overlapping waits, stalled, parked and idle", () => {
     const midnight = at("2026-10-16T23:00:00Z");
     const now = midnight + 8 * HOUR;
+    activity("shop-app-ta", midnight - HOUR, midnight + 6 * HOUR);
     for (const [offset, from, to] of [
       [-1, "idle", "running"],
       [2, "running", "waiting"],
@@ -1344,6 +1357,7 @@ it("counts committed lines once across retries and preserves unknown commit coun
 
 it("unions overlapping lock and cleared review waits without counting them as work", () => {
   const midnight = at("2026-10-16T23:00:00Z");
+  activity("shop-app-ta", midnight, midnight + 4 * HOUR);
   state("shop-app-ta", midnight, "running");
   store.addLockHold({
     runId: "lock",
@@ -1456,4 +1470,15 @@ it("does not recount an old commit when a retry records it in a newer range", ()
     additions: null,
     deletions: null,
   });
+});
+
+it("expires recovered running evidence at last activity plus the stall threshold or run end", () => {
+  const start = NOW - 3 * HOUR;
+  store.upsertRun(run({ id: "recovered", startedAt: start, endedAt: null }));
+  store.setDigest("recovered", digest({ lastEventAt: start + 5 * MIN }));
+  state("shop-app-ta", start, "running");
+  const elapsed = NOW - at("2026-10-16T23:00:00Z");
+  expect(tel().utilisation[0]?.working).toBeCloseTo(((15 * MIN) / elapsed) * 100);
+  store.upsertRun(run({ id: "recovered", startedAt: start, endedAt: start + 7 * MIN }));
+  expect(tel().utilisation[0]?.working).toBeCloseTo(((7 * MIN) / elapsed) * 100);
 });
