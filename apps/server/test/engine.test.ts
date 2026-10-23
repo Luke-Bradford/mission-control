@@ -3111,6 +3111,10 @@ describe("the engine runs reviews", () => {
 
     it("a CI failure wakes the run first, then its excerpt goes", async () => {
       await inCi();
+      // the first failure on a sha is re-run; the seat hears of the failure on a later poll
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      clock += 1000;
       setPr({ ci: "failing" });
       await h.engine.reconcileRun(RUN);
       await vi.waitFor(() => expect(sentKeys()).toEqual([`ci:${RUN}:${SHA}`]));
