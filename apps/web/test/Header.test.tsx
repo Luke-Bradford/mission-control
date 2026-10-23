@@ -9,7 +9,7 @@ import { Toast } from "../src/shell/Toast.tsx";
 import { THEME_KEY } from "../src/storage.ts";
 import { setTheme } from "../src/theme.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, crewRow, HOUR, item, MIN, NOW, REPOS } from "./fixtures.ts";
+import { CONFIG, crewRow, HOUR, item, itemWithoutOwner, MIN, NOW, REPOS } from "./fixtures.ts";
 
 const crew = (over: Partial<Crew> = {}): Crew => ({
   rows: [crewRow()],
@@ -121,6 +121,20 @@ describe("Header", () => {
     expect(btn.title).toBe("Everything waiting on you (on Comms) · 1 not acknowledged");
     fireEvent.click(btn);
     expect(window.location.pathname).toBe("/comms");
+  });
+
+  it("counts only the operator's items; one with no owner counts", async () => {
+    routes({
+      attention: [
+        item({ key: "a" }),
+        itemWithoutOwner({ key: "b" }),
+        item({ key: "c", owner: "flight" }),
+        item({ key: "d", owner: "lane:octo" }),
+      ],
+    });
+    render(<Header page="overview" />);
+    const btn = await screen.findByRole("button", { name: /^Needs you 2:/ });
+    expect(btn.textContent).toBe("Needs you 2");
   });
 
   it("the Needs-you pill exposes one title: the lamp inside adds none", async () => {

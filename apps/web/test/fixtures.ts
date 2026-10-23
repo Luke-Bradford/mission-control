@@ -197,8 +197,15 @@ export function item(over: Partial<AttentionItem> = {}): AttentionItem {
     escalationId: "shop-app#4001",
     ticket: "shop-app#4001",
     acked: false,
+    owner: "operator",
     ...over,
   };
+}
+
+/** An item from a hub that predates `owner`. */
+export function itemWithoutOwner(over: Partial<AttentionItem> = {}): AttentionItem {
+  const { owner: _owner, ...rest } = item(over);
+  return rest as AttentionItem;
 }
 
 export const CONFIG: ConfigView = {
