@@ -447,6 +447,9 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
+  ["GET", "/api/drafts"],
+  ["POST", "/api/drafts/guido-1/post"],
+  ["POST", "/api/drafts/guido-1/discard"],
   ["GET", "/api/flight"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/health"],
@@ -865,6 +868,11 @@ describe("local access", () => {
       }
       if (url.startsWith("/api/runs/")) {
         // the fixture has no such run: unknown is a 404, not a refusal
+        expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
+      if (url.startsWith("/api/drafts/")) {
+        // the fixture has no such draft: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }

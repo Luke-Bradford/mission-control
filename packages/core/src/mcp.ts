@@ -31,6 +31,7 @@ export const MC_TOOL_NAMES = {
   readCiLog: "read_ci_log",
   listTickets: "list_tickets",
   updateBrief: "update_brief",
+  draftReply: "draft_reply",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -61,6 +62,7 @@ export const MC_TOOLS = {
   readCiLog: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.readCiLog}`,
   listTickets: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.listTickets}`,
   updateBrief: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.updateBrief}`,
+  draftReply: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.draftReply}`,
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */

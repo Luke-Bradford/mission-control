@@ -2296,6 +2296,7 @@ describe("startWatch", () => {
       "mcp__mc__read_ci_log",
       "mcp__mc__list_tickets",
       "mcp__mc__update_brief",
+      "mcp__mc__draft_reply",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
