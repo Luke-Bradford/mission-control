@@ -14,6 +14,26 @@ agents share one queue.
 - Work on one ticket at a time, and keep PRs small. Tickets say the outcome and when they are done.
   If one is unclear or too big, say so on the ticket rather than guessing.
 
+## Fold, don't file
+
+New tickets are the last resort.
+- **A review finding** is fixed in the PR where it was found. If it can't be (it is outside the PR's
+  area or scope), add one line to the open rolling minor-findings ticket (currently #321):
+  `- PR #N, file:line: finding`. There is no ticket per finding or per PR.
+- **A related gap** goes into an open ticket in the same area that hasn't started (Backlog,
+  Refinement or Ready). Edit its body, or comment asking its planner to fold it in: a seat's brief
+  is the body, so a comment alone is never built. A ticket that is In progress, in review or Done
+  can't take it: open a new ticket that says `Follows #N`.
+- **A fold never adds a second area.** A screen and the server data it reads are one web ticket
+  plus one server ticket, and the web one says `Depends on #N`.
+
+Open a new ticket only when no open ticket in its area fits, and say in it which ones you checked
+(searched by area label and column).
+
+**Priority:** the Priority field orders the work. Within a priority, a gap between the HUD and the
+mockup comes before crew machinery that changes no screen. Machinery that is broken (a failing gate,
+a stuck loop, a seat that can't start) comes first of all.
+
 ## Ticket shape
 
 A seat's brief is the ticket's title and body. It has the repo checkout but no network, so it cannot
@@ -56,7 +76,7 @@ open links. A Ready ticket therefore carries everything needed to build it.
   admins either, and no force-push.
 - Every PR gets a review: RETRO (the QA seat) or a fresh reviewer, agent or person. GitHub requires
   no approvals, so this is a working rule, not a setting. Critical and Important findings are fixed
-  on the branch before merge. Minor ones are fixed or filed as a ticket.
+  on the branch before merge. Minor ones are fixed, or added as a line to the rolling minor-findings ticket.
 - Hard-rule files, the ones that confine or drive the crew, are merged by a maintainer, never
   automatically. They are the guard, MCP, runtime and engine code (`apps/server/src/{guard,mcp,runtime,engine}/**`,
   `packages/core/src/guard.ts`, `packages/core/src/runtime.ts`), `loops/**`, `roles/**`,
