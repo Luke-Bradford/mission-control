@@ -126,6 +126,17 @@ describe("HUD chrome", () => {
     expect(within(runs).getByText("inco-1")).toBeTruthy();
   });
 
+  it("falls back to all sessions in the header once config shows the chosen one was removed", async () => {
+    stub();
+    act(() => setSession("removed"));
+    render(<Header page="overview" />);
+    await waitFor(() =>
+      expect((screen.getByRole("combobox", { name: "Session" }) as HTMLSelectElement).value).toBe(
+        "all",
+      ),
+    );
+  });
+
   it("keeps a removed session empty for both agents and repo data after config loads", async () => {
     stub();
     act(() => setSession("alpha"));

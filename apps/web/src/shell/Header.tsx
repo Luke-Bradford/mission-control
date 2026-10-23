@@ -1,13 +1,14 @@
 import {
   type AttentionItem,
   type AwaySettings,
+  type ConfigView,
   type Crew,
   LOCK_HEADER_TITLE,
   lockHeaderText,
   type MachineSample,
   seatCallSign,
 } from "@mc/core";
-import { type ReactNode, useMemo, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
 import { operatorItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -20,7 +21,7 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { openAway, useDock } from "./overlays.ts";
-import { SESSION_ALL, useSession, useSessions } from "./session.ts";
+import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
 const TABS: readonly { page: Page; label: string; needs?: (i: AttentionItem) => boolean }[] = [
@@ -111,6 +112,13 @@ function NeedsLamp({ items }: { items: AttentionItem[] }) {
 function SessionSelect() {
   const sessions = useSessions();
   const [session, setSession] = useSession();
+  const configLoaded = useResource<ConfigView>(RESOURCES.config).data !== undefined;
+  // A chosen session that has since been removed falls back to all sessions, not empty pages.
+  useEffect(() => {
+    if (configLoaded && session !== SESSION_ALL && !sessions.some((s) => s.id === session)) {
+      resetSession();
+    }
+  }, [configLoaded, session, sessions]);
   return (
     <select
       id="sess"
