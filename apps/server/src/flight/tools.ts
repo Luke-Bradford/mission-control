@@ -1840,19 +1840,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         return fail("Not recorded: this arrival is not queued.");
     }
     try {
-      if (c.args.planned) store.setFlightPlans(session, c.args.planned, at);
-      if (c.args.watch) store.setFlightWatch(session, c.args.watch, at);
-      if (arrival && source) store.recordFlightArrival({ ...arrival, ...source, at });
-      store.setFlightBriefSection({
-        sessionId: session,
-        section,
-        text: body,
-        updatedAt: at,
-        updatedBy: ctx.seatId,
-      });
-    } catch {
+      store.updateFlightBrief(
+        {
+          sessionId: session,
+          section,
+          text: body,
+          updatedAt: at,
+          updatedBy: ctx.seatId,
+        },
+        c.args.planned,
+        c.args.watch,
+        arrival && source ? { ...arrival, ...source, at } : undefined,
+      );
+    } catch (error) {
       return fail(
-        c.args.planned
+        error instanceof Error && error.message === "Too many planned entries."
           ? "Not saved: at most 100 planned entries are allowed."
           : "Not saved: at most 100 watch entries are allowed.",
       );

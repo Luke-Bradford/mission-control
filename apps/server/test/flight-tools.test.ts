@@ -4220,6 +4220,57 @@ describe("scheduled FLIGHT work", () => {
     expect(flightBriefView(cfg, store).planned).toEqual([expect.objectContaining(plan)]);
   });
 
+  it("rejects an overflowing watch without changing plans, watch, brief or the edit budget", async () => {
+    expect((await save([plan])).isError).toBeUndefined();
+    const watch = {
+      id: "watch-0",
+      state: "warn" as const,
+      title: "Waiting",
+      detail: "Awaiting report",
+      catchUp: { kind: "new" as const, line: "Report due" },
+      next: "Read report",
+    };
+    store.setFlightWatch(
+      "s1",
+      { upsert: Array.from({ length: 100 }, (_, i) => ({ ...watch, id: `watch-${i}` })) },
+      NOW,
+    );
+    const before = {
+      plans: store.flightPlans("s1"),
+      watch: store.flightWatch("s1"),
+      brief: store.flightBrief("s1"),
+      decisions: decisions(),
+    };
+    const result = await call("update_brief", {
+      section: "coming_up",
+      text: "Changed brief",
+      basis: "Combined update",
+      planned: {
+        upsert: [
+          { ...plan, label: "Changed report" },
+          { ...plan, id: "new-plan" },
+        ],
+      },
+      watch: {
+        upsert: [
+          { ...watch, title: "Changed watch" },
+          { ...watch, id: "overflow" },
+        ],
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Not saved");
+    expect(store.flightPlans("s1")).toEqual(before.plans);
+    expect(store.flightWatch("s1")).toEqual(before.watch);
+    expect(store.flightBrief("s1")).toEqual(before.brief);
+    expect(decisions()).toEqual(before.decisions);
+    for (let i = 1; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++)
+      expect((await save([plan])).isError).toBeUndefined();
+    expect(await save([plan])).toEqual(
+      refused(capText("updated your brief", FLIGHT_BRIEF_EDITS_PER_HOUR)),
+    );
+  });
+
   it("bounds stored plans across calls and rolls back a batch that exceeds the limit", async () => {
     expect(
       (await save(Array.from({ length: 100 }, (_, i) => ({ ...plan, id: `plan-${i}` })))).isError,
