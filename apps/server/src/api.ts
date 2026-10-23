@@ -17,6 +17,7 @@ import {
   type CrewSessionFolders,
   DEFAULT_AWAY,
   type FileDiff,
+  fixesSent,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -42,9 +43,12 @@ import {
   NEW_LOOP,
   pace5h,
   projectAtReset,
+  REVIEW_ROUNDS,
   type RepoProfile,
   type RepoView,
+  type RunLoopView,
   type RunView,
+  reviewStatusOf,
   seatCallSign,
   seatDef,
   stopForecast,
@@ -89,6 +93,7 @@ import { flightBriefView, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
+import { loopTries } from "./loophistory.ts";
 import { bearer, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
@@ -1143,11 +1148,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null) return reply.code(404).send({ error: "unknown run" });
-        return {
+        const loop = run.loop ?? null;
+        const events = store.loopEventsOfRun(run.id);
+        const pushed = store.runPush(run.id);
+        const review =
+          loop && pushed
+            ? reviewStatusOf(
+                store.reviewsOfRun(run.id),
+                loop.epoch,
+                pushed.sha,
+                loop.reviewWaivedSha ?? null,
+              )
+            : null;
+        const view: RunLoopView = {
           runId: run.id,
-          loop: run.loop ?? null,
-          events: store.loopEventsOfRun(run.id),
+          loop,
+          events,
+          tries: loopTries(run, events, review),
+          round: loop
+            ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
+            : null,
+          budget:
+            loop && config.crew?.runTokenBudget !== undefined
+              ? config.crew.runTokenBudget + loop.budgetExtra
+              : null,
+          review,
         };
+        return view;
       });
 
       // Read-only: the top-level directories of each session's checkout, with the writer that owns
