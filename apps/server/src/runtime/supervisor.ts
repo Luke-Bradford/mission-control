@@ -12,7 +12,7 @@
  * resumes them rather than marking them failed.
  *
  * Each process gets the mc tools (`--mcp-config`) and the guard hook, both keyed to a per-run token
- * issued at its spawn (a resume gets a new one). The token lives in hub memory and in two 0600
+ * issued at its spawn (a resume gets a new one; a hub restart first restores each active run's token and test-lock holds (`restoreRuns`), and `start()` drops those of every run it does not reattach). The token lives in hub memory and in two 0600
  * files in `{DB dir}/crew/`, which only the hub and the hook (outside the sandbox) read; argv, env
  * and settings carry the files' paths only. When the process exits, for any reason, the token is
  * revoked, the run's test-lock hold freed and both files removed.
@@ -68,6 +68,7 @@ import {
   type Run,
   type RunLoop,
   retiringText,
+  reviewDepth,
   reworkFirstText,
   type SeatSessionRow,
   type SeatState,
@@ -1572,6 +1573,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
+      const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
+      // a full-depth profile wins; else a small change goes to the seat's light model, if it has one
+      const model =
+        author.profile?.profile.reviewer.depth === "full"
+          ? REVIEW_FULL_MODEL
+          : info.seat.lightModel !== undefined &&
+              reviewDepth({ labels: ticket.labels, size: card?.size ?? null }) === "light"
+            ? info.seat.lightModel
+            : info.seat.model;
 
       const checkout = info.session.checkout;
       const prev =
@@ -1623,8 +1633,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         endedAt: null,
         status: "running",
         sessionId: cliSessionId,
-        model:
-          author.profile?.profile.reviewer.depth === "full" ? REVIEW_FULL_MODEL : info.seat.model,
+        model,
         ...on,
         branch: null,
         ticket: author.ticket,
@@ -1994,6 +2003,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
   }
 
+  /** Revokes the token and frees the test-lock holds `restoreRuns` put back, for every active run. */
+  function dropRestored(): void {
+    try {
+      for (const row of store.activeSeatSessions()) {
+        if (row.runId === null) continue;
+        deps.tokens.revoke(row.runId);
+        deps.lock.releaseRun(row.runId);
+      }
+    } catch (e) {
+      log(`could not drop restored runs: ${errText(e)}`);
+    }
+  }
+
   return {
     start() {
       if (!deps.enabled || !crew || started) return;
@@ -2002,6 +2024,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (crew.nodeNote !== undefined) {
         lockNote = crew.nodeNote;
         log(crew.nodeNote);
+        dropRestored();
         return;
       }
       // Never throws: an unwritable crew dir (EACCES, EROFS, ENOSPC…) leaves crew off with a note,
@@ -2016,6 +2039,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
       } catch (e) {
         cannot(e);
+        dropRestored();
         return;
       }
       noteFlatWorktrees();
@@ -2026,6 +2050,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         } catch (e) {
           if ((e as NodeJS.ErrnoException).code !== "EEXIST") {
             cannot(e);
+            dropRestored();
             return;
           }
           let pid = Number.NaN;
@@ -2038,6 +2063,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           // (one process runs one supervisor, and start() runs once)
           if (pid !== process.pid && pidAlive(pid)) {
             lockNote = `crew lock held by pid ${pid}`;
+            dropRestored();
             return;
           }
           try {
@@ -2049,9 +2075,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (!holdsLock) {
         lockNote = "crew lock could not be taken";
+        dropRestored();
         return;
       }
       sweepRunFiles();
+      // until a seat outlives a restart, no run is reattached, so every run's are dropped
+      dropRestored();
       void sweepScratch();
       // runs whose resume was held back go once the CLI passes its smoke test again
       unholdResume = deps.cliHold?.onRelease(() => {

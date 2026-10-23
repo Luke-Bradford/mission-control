@@ -1,4 +1,5 @@
 import { fillLoopText, RATE_LIMIT_RETRY_MS } from "./loop.ts";
+import type { ReviewDepth } from "./profiles.ts";
 import type { SeatState } from "./runtime.ts";
 
 export const REVIEW_STATES = [
@@ -19,6 +20,22 @@ export const BLOCKING_SEVERITIES: readonly FindingSeverity[] = ["Critical", "Imp
 
 export const VERDICTS = ["pass", "fail"] as const;
 export type Verdict = (typeof VERDICTS)[number];
+
+/** A change is small with one of these labels or sizes (CLAUDE.md, Review). */
+export const LIGHT_REVIEW_LABELS: readonly string[] = ["chore", "test", "docs"];
+export const LIGHT_REVIEW_SIZES: readonly string[] = ["XS", "S"];
+/** These labels keep the full review whatever the size. */
+export const FULL_REVIEW_LABELS: readonly string[] = ["type:feature", "bug"];
+
+/** How closely a change is reviewed; where the rules overlap, full wins. */
+export function reviewDepth(t: { labels: readonly string[]; size: string | null }): ReviewDepth {
+  if (t.labels.some((l) => FULL_REVIEW_LABELS.includes(l))) return "full";
+  if (t.size !== null && !LIGHT_REVIEW_SIZES.includes(t.size)) return "full";
+  const small =
+    t.labels.some((l) => LIGHT_REVIEW_LABELS.includes(l)) ||
+    (t.size !== null && LIGHT_REVIEW_SIZES.includes(t.size));
+  return small ? "light" : "full";
+}
 
 export interface ReviewVerdict {
   spec: Verdict;
