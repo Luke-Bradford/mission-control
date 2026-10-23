@@ -203,7 +203,7 @@ CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
 -- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
 CREATE TABLE IF NOT EXISTS holds (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
-  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER
+  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 `;
@@ -217,6 +217,8 @@ export interface Hold {
   basis: string;
   at: number;
   releasedAt: number | null;
+  /** The stored board has shown the card in Backlog since the hold; until then a Ready card is just stale. */
+  seen: boolean;
 }
 
 /** One path a refused commit had outside the seat's area. */
@@ -2413,7 +2415,13 @@ export class Store {
       basis: r.basis as string,
       at: r.at as number,
       releasedAt: r.released_at as number | null,
+      seen: r.seen === 1,
     }));
+  }
+
+  /** The board has shown the card's open hold in Backlog. */
+  markHoldSeen(ref: string): void {
+    this.db.prepare("UPDATE holds SET seen = 1 WHERE ref = ? AND released_at IS NULL").run(ref);
   }
 
   /** How many briefs were written at or after `since`. */

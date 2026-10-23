@@ -312,10 +312,13 @@ export function flightState(i: {
   // gone from the stored read left the poll's lists, so its hold is ready to release.
   const holds = store.activeHolds().flatMap((h) => {
     const card = board.find((b) => `${b.repoId}#${b.issueNumber}` === h.ref);
-    if (card === undefined || card.closed || hudColumnOf(card) !== "Backlog") {
+    // The stored board lags the move to Backlog until the next poll, so a card is only past its
+    // hold once the board has shown it in Backlog.
+    if (card === undefined || card.closed || (h.seen && hudColumnOf(card) !== "Backlog")) {
       store.releaseHold(h.ref, now);
       return [];
     }
+    if (!h.seen && hudColumnOf(card) === "Backlog") store.markHoldSeen(h.ref);
     const prState = prStates.get(h.waitsOn) ?? "closed";
     return [
       {

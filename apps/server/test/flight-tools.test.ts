@@ -1914,6 +1914,17 @@ describe("promote", () => {
       expect(moveCalls).toEqual([]);
     });
 
+    it("keeps a new hold while the stored board still shows the card in Ready", async () => {
+      await call("promote", H());
+      await call("flight_state", {});
+      expect(store.activeHolds()).toHaveLength(1);
+      board(backlog());
+      await call("flight_state", {});
+      board(backlog({ status: "Ready" }));
+      await call("flight_state", {});
+      expect(store.activeHolds()).toEqual([]);
+    });
+
     it("releases the hold when the card is promoted again", async () => {
       await call("promote", H());
       board(backlog());
