@@ -292,7 +292,13 @@ const MAX_ISSUE = 2 ** 31 - 1;
 const issueNumber = z.number().int().min(1).max(MAX_ISSUE);
 const basisArg = text(FLIGHT_BASIS_MAX);
 
+const DiscussionReplyArgs = z.strictObject({
+  id: z.string().uuid(),
+  replyTo: z.string().min(1).max(100),
+  messageId: z.string().min(1).max(100),
+});
 const LogDecisionArgs = z.strictObject({
+  discussion: DiscussionReplyArgs.optional(),
   seat: z.string().regex(SEAT_ID).optional(),
   about: text(FLIGHT_ABOUT_MAX),
   decision: text(FLIGHT_DECISION_MAX),
@@ -617,7 +623,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function logDecision(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, LogDecisionArgs, args);
     if (!c.ok) return c.result;
-    const { seat, about, decision, basis } = c.args;
+    const { seat, about, decision, basis, discussion } = c.args;
+    if (discussion) {
+      if (
+        !store.replyDiscussion(
+          discussion.id,
+          discussion.replyTo,
+          discussion.messageId,
+          decision,
+          now(),
+        )
+      )
+        return fail("Unknown discussion question or conflicting reply.");
+      bus.emit("attention");
+      return { text: FLIGHT_NOTED };
+    }
     if (seat !== undefined) {
       const mine = flightSeat(config)?.session.seats.some((s) => s.id === seat) === true;
       if (!mine) return { text: notInSessionText(seat), isError: true };
@@ -1738,10 +1758,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.logDecision,
       description:
-        "Record a decision that no other tool recorded, with its basis: a ticket you held back, a question you left to the operator, the PRs ready for review.",
+        "Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.",
       inputSchema: {
         type: "object",
         properties: {
+          discussion: z.toJSONSchema(DiscussionReplyArgs),
           seat: {
             type: "string",
             description: "The seat the decision is about, if one (e.g. guido-1).",
