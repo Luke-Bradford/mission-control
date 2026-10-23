@@ -3,13 +3,17 @@ import { join } from "node:path";
 import {
   type ActivityRow,
   type AttentionItem,
+  COMMS_CAPCOM,
+  COMMS_MC,
   type CommsEvent,
+  type CommsThreadMessage,
   GUARD_NONE_TEXT,
   type GuardHitsView,
   guardSummary,
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hub } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Dock } from "../src/shell/Dock.tsx";
@@ -18,6 +22,7 @@ import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import {
+  boardItem,
   brief,
   CONFIG,
   crewRow,
@@ -215,6 +220,62 @@ describe("Needs you", () => {
     const link = within(decision).getByRole("link", { name: "Open on GitHub ↗" });
     expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/4001");
     expect(decision.className).not.toContain("acked");
+  });
+
+  it("a person row links to its source", async () => {
+    stub([item({ kind: "person", agentId: null, escalationId: null })]);
+    render(<Comms item={null} />);
+    const link = await within(needs()).findByRole("link", { name: "Open in GitHub ↗" });
+    expect(link.getAttribute("href")).toBe(item().url);
+  });
+
+  it("a stall queued for the lock names the seat holding it", async () => {
+    stubFetch({
+      "/api/attention": [ITEMS[1]],
+      "/api/test-lock": {
+        holder: { seatId: "studio", runId: "r-12", command: "pnpm test", since: NOW - MIN },
+        waiting: [{ runId: "r-13", seatId: "shop-app-ta", since: NOW - MIN }],
+      },
+    });
+    render(<Comms item={null} />);
+    await within(needs()).findByText("2:15 in Bash · waiting on the test lock (studio)");
+  });
+
+  it("a stall that isn't queued for the lock says nothing about it", async () => {
+    stubFetch({
+      "/api/attention": [ITEMS[1]],
+      "/api/test-lock": {
+        holder: { seatId: "studio", runId: "r-12", command: "pnpm test", since: NOW - MIN },
+        waiting: [],
+      },
+    });
+    render(<Comms item={null} />);
+    await within(needs()).findByText("2:15 in Bash");
+  });
+
+  it("a PR names its ticket, title and wait time", async () => {
+    stubFetch({
+      "/api/attention": [
+        item({
+          kind: "pr",
+          escalationId: null,
+          agentId: null,
+          ticket: "shop-app#3349",
+          text: "PR #40 · You: decide on the draft",
+          at: NOW - 5 * MIN,
+          url: "https://github.com/octo-org/shop-app/pull/40",
+        }),
+      ],
+      "/api/boards/shop-app": [boardItem({ title: "Quote <img src=x> cache" })],
+      "/api/config": CONFIG,
+    });
+    render(<Comms item={null} />);
+    await waitFor(() =>
+      expect(needs().textContent).toContain(
+        "shop-app#3349 · PR #40 · Quote <img src=x> cache: waiting 5m 00s for you to decide on the draft",
+      ),
+    );
+    expect(needs().querySelector("img")).toBeNull();
   });
 
   it("counts only the operator's items and lists the rest, labelled, under Being handled", async () => {
@@ -631,39 +692,73 @@ describe("Threads and conversation", () => {
     summary: null,
     ...over,
   });
-  const stubMessages = (activity?: ActivityRow[], extra: Record<string, unknown> = {}) =>
-    stubFetch({
-      "/api/attention": [],
+  const stubMessages = (activity: ActivityRow[] = [], extra: Record<string, unknown> = {}) => {
+    const read = new Set<string>();
+    const messages = (id: string): CommsThreadMessage[] =>
+      activity
+        .map((m, index) => ({ m, index }))
+        .filter(
+          (entry): entry is { m: CommsEvent; index: number } =>
+            entry.m.kind === "comms" && (entry.m.who === id || entry.m.to === id),
+        )
+        .sort((a, b) => a.m.at - b.m.at)
+        .map(({ m, index }) => ({
+          id: String(index),
+          at: m.at,
+          from: m.who,
+          to: m.to,
+          ticket: null,
+          text: m.text,
+          tagged: m.who === id && m.text.includes(TAG),
+          direct: m.who === id && m.to === COMMS_CAPCOM,
+          seen: read.has(`${id}:${index}`),
+        }));
+    return stubFetch({
+      "/api/attention": () => ({
+        status: 200,
+        body: ["guido-1", "retro-1"].flatMap((id) => {
+          const unread = messages(id).filter((m) => !m.seen);
+          return (["tag", "message"] as const).flatMap((kind) => {
+            const matching = unread.filter((m) => (kind === "tag" ? m.tagged : m.direct));
+            const last = matching.at(-1);
+            return last
+              ? [
+                  item({
+                    key: `${kind}:${id}:${last.id}`,
+                    kind,
+                    agentId: id,
+                    escalationId: null,
+                    text: kind === "tag" ? last.text : `${matching.length} new on your direct line`,
+                    at: last.at ?? 0,
+                  }),
+                ]
+              : [];
+          });
+        }),
+      }),
       "/api/crew": {
         rows: [seatRow(), seatRow({ id: "retro-1", index: 1 })],
         firstRunToday: null,
       },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
-      ...(activity ? { "/api/activity": activity } : {}),
+      "/api/activity": activity,
       ...Object.fromEntries(
-        ["guido-1", "retro-1"].map((id) => [
-          `/api/comms/${id}`,
-          {
-            messages: (activity ?? [])
-              .filter((m): m is CommsEvent => m.kind === "comms" && (m.who === id || m.to === id))
-              .sort((a, b) => a.at - b.at)
-              .map((m, i) => ({
-                id: String(i),
-                at: m.at,
-                from: m.who,
-                to: m.to,
-                ticket: null,
-                text: m.text,
-                tagged: m.text.includes(TAG),
-                direct: false,
-                seen: true,
-              })),
-          },
+        ["guido-1", "retro-1"].flatMap((id) => [
+          [`/api/comms/${id}`, () => ({ status: 200, body: { messages: messages(id) } })],
+          [
+            `POST /api/comms/${id}/read`,
+            (init: RequestInit | undefined) => {
+              const { messageIds } = JSON.parse(String(init?.body)) as { messageIds: string[] };
+              for (const messageId of messageIds) read.add(`${id}:${messageId}`);
+              return { status: 200, body: { ok: true } };
+            },
+          ],
         ]),
       ),
       ...extra,
     });
+  };
   const MESSAGES = [
     comms({ at: NOW - MIN, who: "guido-1", to: "retro-1", text: `Draft PR is up ${TAG}` }),
     comms({ at: NOW - 2 * MIN, who: "MC", to: "guido-1", text: "CI failed on lint" }),
@@ -671,13 +766,140 @@ describe("Threads and conversation", () => {
     comms({ at: NOW - 4 * MIN, who: "retro-1", to: "CAPCOM", text: "Not guido's" }),
   ];
 
+  it("agent tags and direct replies count, Read opens their thread and seen state survives a revisit", async () => {
+    const messages = [
+      comms({ to: "retro-1", text: `Please check ${TAG}` }),
+      comms({ who: "retro-1", text: "One reply" }),
+      comms({ who: "retro-1", text: "Another reply", at: NOW + 1 }),
+      comms({ who: COMMS_CAPCOM, to: "guido-1", text: TAG }),
+      comms({ who: COMMS_MC, to: "guido-1", text: TAG }),
+    ];
+    stubMessages(messages);
+    const view = render(<Comms item={null} />);
+    await screen.findByText("2 · 2 not acknowledged");
+    const list = document.querySelector("#chanList") as HTMLElement;
+    const guido = within(list).getByText("guido-1").closest("button") as HTMLButtonElement;
+    expect(within(guido).getByText("Tagged you")).toBeTruthy();
+    expect(guido.classList.contains("tagged")).toBe(true);
+    const tag = needs().querySelector('[data-kind="tag"]') as HTMLElement;
+    fireEvent.click(within(tag).getByRole("button", { name: "Read" }));
+    expect(guido.getAttribute("aria-pressed")).toBe("true");
+    await screen.findByText("1 · 1 not acknowledged");
+    expect(within(guido).queryByText("Tagged you")).toBeNull();
+    const reply = within(needs())
+      .getByText("2 new on your direct line")
+      .closest(".nrow") as HTMLElement;
+    fireEvent.click(within(reply).getByRole("button", { name: "Read" }));
+    expect(within(list).getByText("retro-1").closest("button")?.getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    await screen.findByText("nothing waiting");
+    view.unmount();
+    render(<Comms item={null} />);
+    expect(needs().querySelector(".nrow")).toBeNull();
+    messages.push(comms({ text: "A fresh reply", at: NOW + MIN }));
+    act(() => {
+      hub.refetchTopic("agents");
+      hub.refetchTopic("attention");
+    });
+    await within(needs()).findByText("1 new on your direct line");
+  });
+
+  it("a reply with the same timestamp becomes unread and stays seen after reading", async () => {
+    const messages = [comms({ text: "First reply" })];
+    stubMessages(messages);
+    const view = render(<Comms item={null} />);
+    fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));
+    await screen.findByText("nothing waiting");
+    const list = document.querySelector("#chanList") as HTMLElement;
+    fireEvent.click(within(list).getByRole("button", { name: /retro-1/ }));
+    messages.push(comms({ text: "Same-time reply" }));
+    act(() => {
+      hub.refetchTopic("agents");
+      hub.refetchTopic("attention");
+    });
+    await within(needs()).findByText("1 new on your direct line");
+    fireEvent.click(within(needs()).getByRole("button", { name: "Read" }));
+    await screen.findByText("nothing waiting");
+    view.unmount();
+    render(<Comms item={null} />);
+    expect(needs().querySelector(".nrow")).toBeNull();
+  });
+
+  it("Read opens a thread from another session", async () => {
+    setSession("site-builder");
+    stubMessages([comms({ text: "Reply from another session" })]);
+    render(<Comms item={null} />);
+    fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));
+    await waitFor(() =>
+      expect(document.querySelector("#convo")?.textContent).toContain("Reply from another session"),
+    );
+    await screen.findByText("nothing waiting");
+  });
+
+  it("messages arriving in the open thread stay seen after switching threads", async () => {
+    const messages = [comms({ text: "First reply" })];
+    stubMessages(messages);
+    render(<Comms item={null} />);
+    fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));
+    await within(document.querySelector("#chatP") as HTMLElement).findByText("First reply");
+    await screen.findByText("nothing waiting");
+    messages.push(comms({ text: "Live reply", at: NOW }));
+    act(() => {
+      hub.refetchTopic("agents");
+      hub.refetchTopic("attention");
+    });
+    await within(document.querySelector("#convo") as HTMLElement).findByText("Live reply");
+    await screen.findByText("nothing waiting");
+    const list = document.querySelector("#chanList") as HTMLElement;
+    fireEvent.click(within(list).getByRole("button", { name: /retro-1/ }));
+    expect(needs().querySelector(".nrow")).toBeNull();
+  });
+
+  it.each(["tag", "message"] as const)(
+    "Read on a server %s item selects and clears its thread",
+    async (kind) => {
+      let read = false;
+      stubMessages([comms({ text: "Read this thread" })], {
+        "/api/attention": () => ({
+          status: 200,
+          body: read
+            ? []
+            : [
+                item({
+                  kind,
+                  agentId: "guido-1",
+                  escalationId: null,
+                  text: "Read this thread",
+                }),
+              ],
+        }),
+        "POST /api/comms/guido-1/read": () => {
+          read = true;
+          return { status: 200, body: { ok: true } };
+        },
+      });
+      render(<Comms item={null} />);
+      fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));
+      const list = document.querySelector("#chanList") as HTMLElement;
+      expect(
+        within(list)
+          .getByRole("button", { name: /guido-1/ })
+          .getAttribute("aria-pressed"),
+      ).toBe("true");
+      await screen.findByText("nothing waiting");
+    },
+  );
+
   it("FLIGHT shows its placeholder; an agent's thread opens its messages", async () => {
     stubMessages(MESSAGES);
     render(<Comms item={null} />);
     await waitFor(() => expect(screen.getAllByText(FLIGHT_NO_SEAT)).toHaveLength(2));
     expect(document.querySelector("#chatP #chatMsgs")).toBeNull(); // no seat: no chat
     const list = document.querySelector("#chanList") as HTMLElement;
-    fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
+    fireEvent.click(
+      (await within(list).findByText("guido-1")).closest("button") as HTMLButtonElement,
+    );
     const msgs = await waitFor(() => {
       const found = [...document.querySelectorAll<HTMLElement>("#convo .msg")];
       expect(found).toHaveLength(3);
@@ -708,12 +930,14 @@ describe("Threads and conversation", () => {
     const fetch = stubMessages([], { "POST /api/seats/retro-1/message": { ok: true } });
     render(<Comms item={null} />);
     const list = document.querySelector("#chanList") as HTMLElement;
-    fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
+    fireEvent.click(
+      (await within(list).findByText("guido-1")).closest("button") as HTMLButtonElement,
+    );
     const input = screen.getByLabelText("Message this agent") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Draft for guido" } });
     expect(input.value).toBe("Draft for guido");
 
-    fireEvent.click(within(list).getByRole("button", { name: /^retro-1/ }));
+    fireEvent.click(within(list).getByRole("button", { name: /retro-1/ }));
     const next = screen.getByLabelText("Message this agent") as HTMLInputElement;
     expect(next.value).toBe("");
     fireEvent.change(next, { target: { value: "Message for retro" } });
@@ -746,7 +970,9 @@ describe("Threads and conversation", () => {
     stubMessages([]);
     render(<Comms item={null} />);
     const list = document.querySelector("#chanList") as HTMLElement;
-    fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
+    fireEvent.click(
+      (await within(list).findByText("guido-1")).closest("button") as HTMLButtonElement,
+    );
     expect(await screen.findByText("No messages yet.")).toBeTruthy();
   });
 });
@@ -1036,7 +1262,7 @@ describe("Needs you: row actions", () => {
       stall("guido-1"),
     ]);
     render(<Comms item={null} />);
-    await within(needs()).findByText(/holds the test lock/);
+    expect(await within(needs()).findAllByText(/holds the test lock/)).toHaveLength(2);
     const stops = await within(needs()).findAllByRole("button", { name: "Stop the run" });
     expect(stops).toHaveLength(2);
     expect(within(needs()).queryByRole("button", { name: "Interrupt" })).toBeNull();
@@ -1080,7 +1306,9 @@ describe("Needs you: row actions", () => {
     render(<Comms item={null} />);
     const list = document.querySelector("#chanList") as HTMLElement;
     // its lamp names the thread's button before the call sign
-    fireEvent.click(await within(list).findByRole("button", { name: /guido-1/ }));
+    fireEvent.click(
+      (await within(list).findByText("guido-1")).closest("button") as HTMLButtonElement,
+    );
     await waitFor(() => expect(document.querySelector("#chatP form")).toBeTruthy());
     expect(document.querySelector("#chatMsgs")).toBeNull();
     const row = await rowOf(/outside every area/);

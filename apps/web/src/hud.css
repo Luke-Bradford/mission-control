@@ -2195,7 +2195,8 @@ pre.diff .h {
 .chan.on {
   background: var(--accent-soft);
 }
-.chan.tagged {
+.chan.tagged,
+button.nrow.thread.tagged {
   background: var(--warn-soft);
 }
 .chan .s2 {
