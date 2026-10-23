@@ -3032,8 +3032,38 @@ export class Store {
     ).map((r) => JSON.parse(r.entry as string) as FlightWatchEntry);
   }
 
-  recordFlightArrival(entry: Omit<FlightArrivalDisposition, "id">): void {
+  recordFlightArrival(entry: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">): void {
     const id = JSON.stringify([entry.source, entry.arrivalId, entry.version]);
+    const notification = entry.source === "Board" ? null : this.notification(entry.arrivalId);
+    const board =
+      entry.source === "Board"
+        ? this.board(entry.arrivalId.split("#")[0] ?? "").find(
+            (c) => `${c.repoId}#${c.issueNumber}` === entry.arrivalId,
+          )
+        : undefined;
+    const repoId = notification?.repoId || board?.repoId || null;
+    const kind =
+      entry.source === "Teams"
+        ? "teams"
+        : notification?.subjectType === "PullRequest"
+          ? "github-pr"
+          : "github-issue";
+    const url = notification?.message?.url ?? notification?.url ?? board?.url;
+    let sourceRef: FlightArrivalDisposition["sourceRef"] = null;
+    if (url) {
+      try {
+        const parsed = new URL(url);
+        if (
+          parsed.origin ===
+            (kind === "teams" ? "https://teams.microsoft.com" : "https://github.com") &&
+          !parsed.username &&
+          !parsed.password
+        )
+          sourceRef = { kind, url };
+      } catch {
+        /* Invalid source URLs are never offered as links. */
+      }
+    }
     this.transaction(() => {
       const previous = this.db.prepare("SELECT entry FROM flight_incoming WHERE id = ?").get(id) as
         | Row
@@ -3052,7 +3082,12 @@ export class Store {
           entry.arrivalId,
           entry.version,
           entry.at,
-          JSON.stringify({ ...entry, id }),
+          JSON.stringify({
+            ...entry,
+            id,
+            repoId: saved ? (saved.repoId ?? null) : repoId,
+            sourceRef: saved ? (saved.sourceRef ?? null) : sourceRef,
+          }),
         );
       this.db
         .prepare(
@@ -3067,7 +3102,10 @@ export class Store {
       this.db
         .prepare("SELECT entry FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?")
         .all(FLIGHT_INCOMING_LIMIT) as Row[]
-    ).map((r) => JSON.parse(r.entry as string) as FlightArrivalDisposition);
+    ).map((r) => {
+      const entry = JSON.parse(r.entry as string) as FlightArrivalDisposition;
+      return { ...entry, repoId: entry.repoId ?? null, sourceRef: entry.sourceRef ?? null };
+    });
   }
 
   /** Records one of FLIGHT's decisions; returns its id. */

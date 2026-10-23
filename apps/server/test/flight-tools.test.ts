@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   type BoardItem,
   BRIEF_CLEARED_DECISION,
@@ -4060,3 +4061,120 @@ it("serves every pending watch draft while bounding only finished draft history"
     state: "pending",
   });
 });
+
+it("returns null repository metadata for arrivals written before provenance was stored", () => {
+  store.close();
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  db.prepare(
+    "INSERT INTO flight_incoming (id, source, arrival_id, version, at, entry) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(
+    "legacy",
+    "Board",
+    "mc#41",
+    String(NOW),
+    NOW,
+    JSON.stringify({
+      id: "legacy",
+      source: "Board",
+      arrivalId: "mc#41",
+      version: String(NOW),
+      arrivedAt: NOW,
+      at: NOW,
+      text: "Legacy arrival",
+      outcome: "No action",
+      detail: "Already covered",
+    }),
+  );
+  db.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.flightIncoming()[0]).toHaveProperty("repoId", null);
+  expect(store.flightIncoming()[0]).toHaveProperty("sourceRef", null);
+});
+
+it.each([
+  ["Issue", "mc", "github", "https://github.com/o/mc/issues/7", "github-issue"],
+  ["PullRequest", "mc", "github", "https://github.com/o/mc/pull/7", "github-pr"],
+  ["Issue", "mc", "teams", "https://teams.microsoft.com/message/555", "teams"],
+  ["Issue", "", "teams", "https://teams.microsoft.com/message/555", "teams"],
+  ["Issue", "mc", "github", "https://github.com.evil.test/o/mc/issues/7", null],
+  ["Issue", "mc", "teams", "https://evil.test/message/555", null],
+])(
+  "persists %s arrival provenance (%s, %s, %s) through restart",
+  async (subjectType, repoId, kind, url, expectedKind) => {
+    const source = { kind: kind as "github" | "teams", messageId: "555", revision: "v1" };
+    store.upsertNotifications(
+      [
+        {
+          id: "199",
+          repoId,
+          subjectType,
+          title: "Review requested",
+          number: 7,
+          reason: "mention",
+          url,
+          author: "Reviewer",
+          snippet: "Review please",
+          updatedAt: NOW,
+          lastReadAt: null,
+          message: { source, author: "Reviewer", at: NOW, text: "Review please", url },
+        },
+      ],
+      false,
+      NOW,
+    );
+    if (!repoId)
+      store.recordFlightArrival({
+        source: "Teams",
+        arrivalId: "199",
+        version: "v1",
+        arrivedAt: NOW,
+        at: NOW,
+        text: "Review requested",
+        outcome: "No action",
+        detail: "Already covered",
+      });
+    else
+      expect(
+        (
+          await call("brief_item", {
+            key: `person:199:${NOW}`,
+            context: "Review",
+            recommendation: "Check it",
+            basis: "Read message",
+            person: { source, assessment: ["Needs review"] },
+          })
+        ).isError,
+      ).toBeUndefined();
+    expect(ghCalls).toEqual([]);
+    store.markNotificationHandled("199", NOW, "flight", NOW);
+    // Remove the notification entirely: incoming must use its own persisted snapshot.
+    store.upsertNotifications([], true, NOW + 2 * 86400000);
+    store.pruneNotifications(NOW + 2 * 86400000);
+    expect(store.notification("199")).toBeNull();
+    store.recordFlightArrival({
+      source: kind === "teams" ? "Teams" : "GitHub",
+      arrivalId: "199",
+      version: "v1",
+      arrivedAt: NOW,
+      at: NOW + 2 * 86400000,
+      text: "Review requested",
+      outcome: "No action",
+      detail: "Review complete",
+    });
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    const app = buildApp({ config: cfg, store, bus });
+    try {
+      const res = await app.inject({ method: "GET", url: "/api/flight/incoming" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().entries).toEqual([
+        expect.objectContaining({
+          repoId: repoId || null,
+          sourceRef: expectedKind ? { kind: expectedKind, url } : null,
+        }),
+      ]);
+    } finally {
+      await app.close();
+    }
+  },
+);

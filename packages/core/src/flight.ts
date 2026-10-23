@@ -699,6 +699,8 @@ export interface FlightArrivalIdentity {
 }
 export interface FlightArrivalDisposition extends FlightArrivalIdentity {
   id: string;
+  repoId: string | null;
+  sourceRef: { kind: "github-issue" | "github-pr" | "teams"; url: string } | null;
   at: number;
   text: string;
   outcome: FlightArrivalOutcome;

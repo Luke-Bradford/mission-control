@@ -55,6 +55,8 @@ it("keeps legacy briefs and drafts valid beside the complete additive response",
     entries: [
       {
         id: "arrival",
+        repoId: "demo",
+        sourceRef: null,
         source: "Board",
         arrivalId: "demo#41",
         version: "1",
