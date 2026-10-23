@@ -85,6 +85,8 @@ export const HOOK_DEADLINE_MS = GUARD_HOOK_TIMEOUT_S * 1000 - 10_000;
  * try, before it denies as unreachable. Kept well inside `HOOK_DEADLINE_MS`.
  */
 export const HOOK_RETRY_MS = 60_000;
+/** An env var that shortens the retry window (ms; tests that run the hook against no hub). */
+export const HOOK_RETRY_ENV = "MC_HOOK_RETRY_MS";
 /** The pause between the hook's tries while the hub is down. */
 export const HOOK_RETRY_EVERY_MS = 1000;
 /** The route the guard hook asks, on the hub's loopback port. */

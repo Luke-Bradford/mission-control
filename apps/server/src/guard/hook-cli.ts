@@ -15,7 +15,7 @@
  */
 import { writeSync } from "node:fs";
 import { request } from "node:http";
-import { HOOK_DEADLINE_MS } from "@mc/core";
+import { HOOK_DEADLINE_MS, HOOK_RETRY_ENV, HOOK_RETRY_MS } from "@mc/core";
 import { FAILED, type HookResult, hookMain } from "./hook.ts";
 
 /** The one stderr line on a failure; the CLI shows it (and the command line) to the model. */
@@ -60,6 +60,12 @@ function postHttp(
   });
 }
 
+/** `HOOK_RETRY_MS`, or less if the env var says so (it can only shorten the wait: still fail closed). */
+function retryMs(): number {
+  const n = Number(process.env[HOOK_RETRY_ENV]);
+  return Number.isFinite(n) && n >= 0 && n < HOOK_RETRY_MS ? n : HOOK_RETRY_MS;
+}
+
 function finish(r: HookResult): never {
   let exit = r.exit;
   try {
@@ -91,5 +97,7 @@ process.on("unhandledRejection", fail);
 // covers reading stdin too: a CLI that never closes it still gets a deny in time
 setTimeout(fail, HOOK_DEADLINE_MS);
 readStdin()
-  .then((stdin) => hookMain(stdin, [process.argv[2] ?? "", process.argv[3] ?? ""], postHttp))
+  .then((stdin) =>
+    hookMain(stdin, [process.argv[2] ?? "", process.argv[3] ?? ""], postHttp, retryMs()),
+  )
   .then(finish, fail);

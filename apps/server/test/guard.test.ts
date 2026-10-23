@@ -17,6 +17,7 @@ import {
   guardAckKey,
   guardDenyOutput,
   HOOK_DEADLINE_MS,
+  HOOK_RETRY_ENV,
   HOOK_RETRY_MS,
   LOCK_WAIT_MS,
   lockBusyText,
@@ -995,6 +996,7 @@ describe("hook-cli.ts run as the CLI runs it", () => {
       encoding: "utf8",
       timeout: 20_000,
       killSignal: "SIGKILL",
+      env: { ...process.env, [HOOK_RETRY_ENV]: "0" },
     });
 
   it("prints exactly the deny form, one fixed stderr line, and exits 2 when the hub is not there", () => {
@@ -1035,7 +1037,13 @@ describe("hook-cli.ts run as the CLI runs it", () => {
         tokenFile,
         "http://127.0.0.1:1/api/guard/check",
       ],
-      { input: stdin, encoding: "utf8", timeout: 20_000, killSignal: "SIGKILL" },
+      {
+        input: stdin,
+        encoding: "utf8",
+        timeout: 20_000,
+        killSignal: "SIGKILL",
+        env: { ...process.env, [HOOK_RETRY_ENV]: "0" },
+      },
     );
     expect(r.status).toBe(2);
     expect(r.stdout).toBe(DENY_UNREACHABLE);

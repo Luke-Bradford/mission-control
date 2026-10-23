@@ -120,7 +120,12 @@ function verdict(status: number, text: string): string | null {
   return guardDenyOutput(reason);
 }
 
-async function decide(stdin: string, argv: readonly string[], post: HookPost): Promise<HookResult> {
+async function decide(
+  stdin: string,
+  argv: readonly string[],
+  post: HookPost,
+  retryMs: number,
+): Promise<HookResult> {
   const [tokenFile, url] = argv;
   if (typeof tokenFile !== "string" || typeof url !== "string") return FAILED;
   const target = new URL(url);
@@ -143,7 +148,7 @@ async function decide(stdin: string, argv: readonly string[], post: HookPost): P
       res = await post(url, token, body);
     } catch (err) {
       // only a hub that is not there is waited for; any other failure is a deny at once
-      if (!isConnectionError(err) || Date.now() - started + HOOK_RETRY_EVERY_MS > HOOK_RETRY_MS) {
+      if (!isConnectionError(err) || Date.now() - started + HOOK_RETRY_EVERY_MS > retryMs) {
         return FAILED;
       }
       await new Promise((resolve) => setTimeout(resolve, HOOK_RETRY_EVERY_MS));
@@ -163,13 +168,14 @@ export async function hookMain(
   stdin: string,
   argv: readonly [string, string],
   post: HookPost,
+  retryMs: number = HOOK_RETRY_MS,
 ): Promise<HookResult> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<HookResult>((resolve) => {
     timer = setTimeout(() => resolve(FAILED), HOOK_DEADLINE_MS);
   });
   try {
-    return await Promise.race([decide(stdin, argv, post).catch(() => FAILED), deadline]);
+    return await Promise.race([decide(stdin, argv, post, retryMs).catch(() => FAILED), deadline]);
   } finally {
     clearTimeout(timer);
   }
