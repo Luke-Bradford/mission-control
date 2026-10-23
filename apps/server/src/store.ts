@@ -751,6 +751,14 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    // Discard the old later-state fallback starts; the next flow collection reads Ready history.
+    if (this.getSetting("flow-ready-start-v1") === null) {
+      this.transaction(() => {
+        if (this.getSetting("flow-ready-start-v1") !== null) return;
+        this.db.exec("DELETE FROM flow_issues");
+        this.setSetting("flow-ready-start-v1", "1");
+      }, true);
+    }
     this.addColumn("notifications", "source_content", "TEXT");
     this.addColumn("briefs", "structured", "TEXT");
     this.addColumn("drafts", "source", "TEXT");
