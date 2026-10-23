@@ -12,6 +12,7 @@ export type Lane = {
 
 /** The All-repos lane's id; repo lanes use the repo id. */
 export const ALL_LANE = "*";
+/** The All-mine lane's id. */
 export const MINE_LANE = "@mine";
 
 /**
@@ -30,16 +31,6 @@ export function lanesFor(
     url: null,
     match: () => true,
   };
-  const query = `${all.query} assignee:${operatorId ?? "@me"}`;
-  const mine: Lane = {
-    id: MINE_LANE,
-    name: "All mine",
-    query,
-    url: operatorId === null ? null : `https://github.com/issues?q=${encodeURIComponent(query)}`,
-    match: (i) =>
-      operatorId !== null &&
-      (i.assignees ?? []).some((a) => a.toLowerCase() === operatorId.toLowerCase()),
-  };
   const repoLanes = repos.map(
     (r): Lane => ({
       id: r.id,
@@ -54,7 +45,17 @@ export function lanesFor(
     }),
   );
   const own = session === SESSION_ALL ? undefined : repoLanes.find((l) => l.id === session);
-  return own ? [own] : [all, mine, ...repoLanes];
+  if (own) return [own];
+  if (operatorId === null) return [all, ...repoLanes];
+  const query = `${all.query} assignee:${operatorId}`;
+  const mine: Lane = {
+    id: MINE_LANE,
+    name: "All mine",
+    query,
+    url: `https://github.com/issues?q=${encodeURIComponent(query)}`,
+    match: (i) => (i.assignees ?? []).some((a) => a.toLowerCase() === operatorId.toLowerCase()),
+  };
+  return [all, mine, ...repoLanes];
 }
 
 /**

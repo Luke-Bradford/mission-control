@@ -16,14 +16,15 @@ describe("lanesFor", () => {
     );
     expect(new URL(mine?.url ?? "").searchParams.get("q")).toBe(mine?.query);
   });
-  it("All mine matches nothing and offers no link until the operator is known", () => {
-    const mine = lanesFor(REPOS).find((l) => l.name === "All mine");
-    expect(mine).toBeDefined();
-    expect(mine?.match(boardItem({ assignees: ["pilot"] }))).toBe(false);
-    expect(mine?.url).toBeNull();
+  it("offers no All mine lane until the operator is known", () => {
+    const lanes = lanesFor(REPOS, SESSION_ALL, null);
+    expect(lanes.map((l) => l.id)).toEqual([ALL_LANE, "shop-app", "site-builder"]);
+    expect(lanesFor(REPOS).map((l) => l.id)).toEqual([ALL_LANE, "shop-app", "site-builder"]);
+    expect(resolveLane(lanes, null, MINE_LANE).id).toBe(ALL_LANE);
+    expect(resolveLane(lanes, "shop-app", MINE_LANE, true).id).toBe(ALL_LANE);
   });
   it("All repos and All mine first, then one lane per repo with its GitHub query and project URL", () => {
-    const lanes = lanesFor(REPOS);
+    const lanes = lanesFor(REPOS, SESSION_ALL, "pilot");
     expect(lanes.map((l) => [l.id, l.name])).toEqual([
       [ALL_LANE, "All repos"],
       [MINE_LANE, "All mine"],
@@ -39,12 +40,12 @@ describe("lanesFor", () => {
   it("a repo lane links the address GitHub reports for its Project", () => {
     const projectUrl = "https://github.com/orgs/octo-org/projects/2";
     const lanes = lanesFor(REPOS.map((r, i) => (i === 0 ? { ...r, projectUrl } : r)));
-    expect(lanes[2]?.url).toBe(projectUrl);
-    expect(lanes[3]?.url).toBe("https://github.com/users/octo-org/projects/3");
+    expect(lanes[1]?.url).toBe(projectUrl);
+    expect(lanes[2]?.url).toBe("https://github.com/users/octo-org/projects/3");
   });
 
   it("a repo lane matches only its repo's items", () => {
-    const [all, , shopApp] = lanesFor(REPOS);
+    const [all, shopApp] = lanesFor(REPOS);
     const a = boardItem({ repoId: "shop-app" });
     const b = boardItem({ repoId: "site-builder" });
     expect([a, b].filter((i) => all?.match(i))).toEqual([a, b]);
@@ -78,7 +79,7 @@ describe("resolveLane on a ticket route", () => {
 
 describe("lanesFor under a session", () => {
   it("SESSION_ALL offers every lane", () => {
-    expect(lanesFor(REPOS, SESSION_ALL).map((l) => l.id)).toEqual([
+    expect(lanesFor(REPOS, SESSION_ALL, "pilot").map((l) => l.id)).toEqual([
       ALL_LANE,
       MINE_LANE,
       "shop-app",

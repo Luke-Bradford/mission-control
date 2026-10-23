@@ -888,9 +888,9 @@ describe("filters", () => {
 });
 
 describe("lanes", () => {
-  it("All mine uses the configured operator across repos, links its query and is remembered", async () => {
+  it("All mine uses the hub's GitHub login across repos, links its query and is remembered", async () => {
     stub({
-      config: { ...CONFIG, operator: { ...CONFIG.operator, id: "pilot" } },
+      config: { ...CONFIG, githubLogin: "pilot" } as ConfigView, // githubLogin: #395
       shopApp: [
         todo(1, { assignees: ["pilot"] }),
         todo(2, { assignees: ["someone-else"] }),
