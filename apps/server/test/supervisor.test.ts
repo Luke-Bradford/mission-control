@@ -118,6 +118,7 @@ const prep = vi.hoisted(() => ({
   failRemove: false,
   /** Set: every line written to a CLI session throws, as to one whose process is gone. */
   failWrite: false,
+  sessions: [] as import("../src/runtime/session.ts").CrewSession[],
   /** Set: every existingCheckout (a resume's) waits for it. */
   resumeGate: null as Promise<void> | null,
   /** Set: every attachSession (a restart's take-back) waits for it. */
@@ -174,6 +175,7 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
     },
     startSession: (...a: Parameters<typeof real.startSession>) => {
       const session = real.startSession(...a);
+      prep.sessions.push(session);
       return new Proxy(session, {
         get(target, key) {
           if (key === "send" && prep.failWrite) {
@@ -428,6 +430,7 @@ beforeEach(() => {
   prep.resumeGate = null;
   prep.attachGate = null;
   prep.failWrite = false;
+  prep.sessions = [];
   prep.peers = [];
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
@@ -2424,6 +2427,21 @@ describe("reattach after a restart", () => {
     expect(starts()).toHaveLength(1);
   });
 
+  it.each(["idle", "error"] as const)(
+    "rechecks a %s seat holding an unended run at startup",
+    async (state) => {
+      const { runId, row } = await leftActive();
+      if (row === null) throw new Error("missing seat");
+      store.setSeatSession({ ...row, state });
+      const { sup } = make();
+      sup.start();
+      await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+      expect(store.seatSession("guido-1")).toMatchObject({ runId, state: "idle" });
+      expect(await sup.send(runId, "fix", "fix it")).toBe("sent");
+      await until(() => expect(userLines()).toContain("fix it"));
+    },
+  );
+
   it("resumes an active run once, appending to its transcript and sending nothing", async () => {
     const { runId, row, transcript } = await leftActive();
     const { sup } = make();
@@ -3911,6 +3929,50 @@ describe("supervisor events (Plan 7a)", () => {
       const { sup } = make(); // not started: the run is not resumed
       expect(await sup.send(runId, "k", "x")).toBe("busy");
       expect(store.claimedKeys(runId)).toEqual({});
+    });
+
+    it("answers no-session when the CLI is gone, without claiming the line", async () => {
+      const { sup, runId } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      expect(await sup.send(runId, "k", "fix it")).toBe("no-session");
+      expect(store.claimedKeys(runId)).toEqual({});
+      expect(store.run(runId)?.endedAt).toBeNull();
+    });
+
+    it("resumes a missing CLI once on its run, then sends the pending line", async () => {
+      const { sup, runId } = await idleRun();
+      const sessionId = store.seatSession("guido-1")?.cliSessionId;
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      const release = holdResume();
+      try {
+        const resume = sup.resumeRun(runId);
+        await sup.resumeRun(runId);
+        expect(await sup.send(runId, "k", "fix it")).toBe("busy");
+        release();
+        await resume;
+      } finally {
+        release();
+      }
+      expect(prep.sessions).toHaveLength(2);
+      expect(store.seatSession("guido-1")).toMatchObject({ runId, cliSessionId: sessionId });
+      expect(await sup.send(runId, "k", "fix it")).toBe("sent");
+      await until(() => expect(userLines()).toContain("fix it"));
+      expect(userLines().filter((line) => line === "fix it")).toHaveLength(1);
+    });
+
+    it("fails a missing session whose checkout is gone, and does not retry it", async () => {
+      const { sup, runId, seen } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+      await sup.resumeRun(runId);
+      await sup.resumeRun(runId);
+      expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
+      expect(store.seatSession("guido-1")?.reason).toBe("could not resume: checkout missing");
+      expect(ended(seen)).toHaveLength(1);
+      expect(await sup.send(runId, "k", "fix it")).toBe("gone");
     });
 
     it("sends to a seat parked by a rate limit", async () => {

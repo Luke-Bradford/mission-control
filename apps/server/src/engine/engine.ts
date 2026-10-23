@@ -115,6 +115,7 @@ export interface EngineDeps {
     Supervisor,
     | "on"
     | "send"
+    | "resumeRun"
     | "seat"
     | "seatFacts"
     | "endRunByEngine"
@@ -276,6 +277,13 @@ export function createEngine(deps: EngineDeps): Engine {
       if (chains.get(runId) === p) chains.delete(runId);
     });
     return p;
+  }
+
+  /** A missing CLI leaves the line unclaimed; the next pass sends it after the take-back. */
+  async function send(runId: string, key: string, text: string) {
+    const sent = await supervisor.send(runId, key, text);
+    if (sent === "no-session") await supervisor.resumeRun(runId);
+    return sent;
   }
 
   /** Like `onChain`, resolving to what `fn` returned (`fallback` when it threw). */
@@ -645,7 +653,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "send": {
-        const sent = await supervisor.send(run.id, a.key, a.text);
+        const sent = await send(run.id, a.key, a.text);
         if (sent === "sent" && a.key.startsWith("fix:")) {
           const id = Number(a.key.slice(a.key.lastIndexOf(":") + 1));
           const rv = store.review(id);
@@ -669,7 +677,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const text = fillLoopText(head, { sha7: a.sha.slice(0, 7) }) + excerpt;
-        const sent = await supervisor.send(run.id, a.key, text);
+        const sent = await send(run.id, a.key, text);
         if (sent === "sent") handOff(COMMS_MC, text);
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
@@ -1038,6 +1046,14 @@ export function createEngine(deps: EngineDeps): Engine {
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
     if (!seatKnown(run.agentId)) return;
+    if (
+      run.endedAt === null &&
+      supervisor.seat(run.agentId)?.runId === run.id &&
+      supervisor.seatFacts(run.agentId) === null
+    ) {
+      await supervisor.resumeRun(run.id);
+      return;
+    }
     const at = now();
     const input: RunLoop = { ...stored };
     const pr = findPr(run, input);
@@ -1300,6 +1316,10 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       const facts = supervisor.seatFacts(row.seatId);
       const holdsRun = seatRow?.runId === rrun.id && rrun.endedAt === null;
+      if (holdsRun && facts === null) {
+        await supervisor.resumeRun(rrun.id);
+        continue;
+      }
       const turnEnded = seatRow?.lastTurnEndedAt ?? null;
       const at = now();
       const action = reviewRunStep({
@@ -1330,7 +1350,7 @@ export function createEngine(deps: EngineDeps): Engine {
       });
       if (action === null) continue;
       if (action.kind === "send") {
-        await supervisor.send(rrun.id, action.key, action.text);
+        await send(rrun.id, action.key, action.text);
         continue;
       }
       if (store.setReviewState(row.id, ["running"], "failed", { at, failure: action.reason })) {

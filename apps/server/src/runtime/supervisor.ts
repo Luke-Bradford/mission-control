@@ -338,7 +338,7 @@ export type SupervisorEvent =
   | { kind: "findings"; seatId: string; runId: string };
 
 /** What `send` did with a keyed line. */
-export type SendResult = "sent" | "busy" | "dup" | "gone";
+export type SendResult = "sent" | "busy" | "no-session" | "dup" | "gone";
 
 /** What the snapshot reads of a seat's process. */
 export interface SeatFacts {
@@ -358,11 +358,14 @@ export interface Supervisor {
   emitFindings(seatId: string, runId: string): void;
   /**
    * Writes the hub's keyed line to the seat, only between turns. `gone`: the run ended or is not
-   * its seat's current run; `busy`: no live process yet, or a turn is on (the key stays free), or
-   * this server does not run crew (disabled, or without the crew lock); `dup`: the key was used.
+   * its seat's current run; `no-session`: the CLI is gone; `busy`: a start, resume, turn or end is
+   * on, or this server does not run crew (disabled, or without the crew lock). Neither claims
+   * the key. `dup`: the key was used.
    * Allowed while the seat is rate-limited. Never answers questions.
    */
   send(runId: string, key: string, text: string): Promise<SendResult>;
+  /** Takes back a held run with no live CLI as at restart; a failed resume ends it once. */
+  resumeRun(runId: string): Promise<void>;
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
   /**
@@ -872,7 +875,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    */
   function sweepRunFiles(): void {
     try {
-      const activeRows = store.activeSeatSessions();
+      const activeRows = heldSessions();
       const active = new Set(activeRows.map((r) => r.runId));
       const keeping = new Set(
         activeRows.flatMap((r) =>
@@ -1296,6 +1299,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /** Held unended runs are recovered even when their seat's state was left stopped or in error. */
+  function heldSessions(): SeatSessionRow[] {
+    const rows = new Map(store.activeSeatSessions().map((row) => [row.seatId, row]));
+    for (const { seatId } of store.liveSeatRuns()) {
+      if (rows.has(seatId)) continue;
+      const row = store.seatSession(seatId);
+      if (row !== null) rows.set(seatId, row);
+    }
+    return [...rows.values()];
+  }
+
   /**
    * Takes each active run's seat back after the lock is taken (spec §8b.2), once, in order. A seat
    * still running under its keeper is attached to: the lines it wrote meanwhile are replayed and
@@ -1307,24 +1321,42 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * rejection escapes).
    */
   async function reattach(): Promise<void> {
-    for (const row of store.activeSeatSessions()) {
+    for (const row of heldSessions()) {
       if (stopping) return;
-      // a seat with a process, or a start under way, has nothing to take back
-      if (starting.has(row.seatId) || live.has(row.seatId)) continue;
-      starting.add(row.seatId);
-      try {
-        await takeBack(row);
-      } catch (e) {
-        log(`${row.seatId}: could not resume: ${errText(e)}`);
-        try {
-          failResume(row, RESUME_FAILED);
-        } catch {
-          // the store is failing too: already logged
-        }
-      } finally {
-        starting.delete(row.seatId);
-      }
+      await recoverSession(row);
     }
+  }
+
+  async function recoverSession(row: SeatSessionRow): Promise<void> {
+    const l = live.get(row.seatId);
+    if (starting.has(row.seatId) || l?.session.alive || l?.ending != null) return;
+    starting.add(row.seatId);
+    try {
+      if (l !== undefined) {
+        fold(l);
+        l.off();
+        l.session.detach();
+        live.delete(row.seatId);
+      }
+      await takeBack(row);
+    } catch (e) {
+      log(`${row.seatId}: could not resume: ${errText(e)}`);
+      try {
+        failResume(row, RESUME_FAILED);
+      } catch {
+        // the store is failing too: already logged
+      }
+    } finally {
+      starting.delete(row.seatId);
+    }
+  }
+
+  async function resumeRun(runId: string): Promise<void> {
+    if (!mayAct() || stopping) return;
+    const run = store.run(runId);
+    if (run === null || runGone(runId, run.agentId)) return;
+    const row = store.seatSession(run.agentId);
+    if (row !== null) await recoverSession(row);
   }
 
   /** One active run's seat after a restart: attach to its keeper, record its end, or resume it. */
@@ -2306,17 +2338,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   async function send(runId: string, key: string, text: string): Promise<SendResult> {
-    if (!mayAct()) return "busy";
+    if (!mayAct() || stopping) return "busy";
     const run = store.run(runId);
     if (run === null) return "gone";
     const seatId = run.agentId;
     if (runGone(runId, seatId)) return "gone";
     const l = live.get(seatId);
-    if (!l?.session.alive || l.ending !== null || l.run.id !== runId || l.attaching) return "busy";
+    if (starting.has(seatId) || l?.ending != null) return "busy";
+    if (!l?.session.alive) return "no-session";
+    if (l.run.id !== runId || l.attaching) return "busy";
     return enqueue(l, (): SendResult => {
       // the run may have ended while this waited its turn in the chain
       if (runGone(runId, seatId)) return "gone";
       if (l.ending !== null) return "busy";
+      if (!l.session.alive) return "no-session";
       if (l.inTurn) return "busy";
       const claimed = store.claimLine(key, { runId, seatId, origin: "engine", text, at: now() });
       if (!claimed) return "dup";
@@ -2324,7 +2359,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         writeLine(l, text);
       } catch {
         store.dropLine(key);
-        return "busy";
+        return l.session.alive ? "busy" : "no-session";
       }
       return "sent";
     });
@@ -2333,7 +2368,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** Revokes the token and frees the test-lock holds `restoreRuns` put back, for every active run. */
   function dropRestored(): void {
     try {
-      for (const row of store.activeSeatSessions()) {
+      for (const row of heldSessions()) {
         if (row.runId === null) continue;
         deps.tokens.revoke(row.runId);
         deps.lock.releaseRun(row.runId);
@@ -2512,6 +2547,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     endAsideRun,
 
     send,
+
+    resumeRun,
 
     on(fn) {
       listeners.add(fn);
