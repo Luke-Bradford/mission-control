@@ -3246,6 +3246,12 @@ describe("report_plan", () => {
       expect(await plan(`${TWO}\n\n- **Create** \`src/d.ts\``)).toEqual({ text: MC_PLAN_WRITTEN });
     });
 
+    it("checks a path after a long run of code spans without hanging", async () => {
+      expect(
+        await plan(`${TWO}\n\nCreate ${"`a` ".repeat(40)}then change \`src/missing.ts\`.`),
+      ).toEqual(refused(planMissingPathsText(["src/missing.ts"])));
+    });
+
     it("still checks a path after a create cue that is not the one created", async () => {
       expect(await plan(`${TWO}\n\nCreate \`src/b.ts\` to call \`src/missing.ts\`.`)).toEqual(
         refused(planMissingPathsText(["src/missing.ts"])),

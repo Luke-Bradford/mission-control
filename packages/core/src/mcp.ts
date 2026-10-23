@@ -383,7 +383,7 @@ function planPathMentions(plan: string): { path: string; creates: boolean }[] {
       out.push({
         path: p,
         creates:
-          /\b(?:creat(?:e|es|ed|ing)|new files?)[*_]*\s*:?[*_]*\s*(?:`[^`\s]+`\s*(?:,|and|&)?\s*)*$/i.test(
+          /\b(?:creat(?:e|es|ed|ing)|new files?)[*_]*\s*:?[*_]*\s*(?:`[^`\s]+`\s*(?:(?:,|and|&)\s*)?)*$/i.test(
             before,
           ),
       });
