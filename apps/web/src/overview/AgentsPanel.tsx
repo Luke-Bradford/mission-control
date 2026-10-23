@@ -59,8 +59,11 @@ function FlightRow({
   limits,
   now,
   tz,
+  configPending,
 }: {
   row: Crew["rows"][number] | null;
+  /** The config that names the FLIGHT seat is still loading (no data, no error). */
+  configPending: boolean;
   limits: LimitRow[];
   now: number;
   tz: string | null;
@@ -98,6 +101,8 @@ function FlightRow({
           <span className="ellip xs fg2 doing" title={doingLine(row, now, tz, undefined)}>
             <DoingLine row={row} now={now} tz={tz} repoPrs={undefined} />
           </span>
+        ) : configPending ? (
+          <span className="ellip s muted">Loading…</span>
         ) : (
           <span className="ellip s">{FLIGHT_NOT_RUNNING}</span>
         )}
@@ -269,7 +274,8 @@ export function AgentsPanel() {
   const now = useSecond();
   const [session] = useSession();
   const [selected] = useSelectedAgent();
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const configRes = useResource<ConfigView>(RESOURCES.config);
+  const config = configRes.data;
   // The seat the server treats as FLIGHT has its own row above; any other lists as an agent.
   const flightId = flightSeatId(config);
   const flight = crew.data?.rows.find((r) => r.id === flightId) ?? null;
@@ -299,7 +305,13 @@ export function AgentsPanel() {
           <span className="right">Tokens · ~cost</span>
           <span>Context · quota</span>
         </div>
-        <FlightRow row={flight} limits={limits} now={now} tz={tz} />
+        <FlightRow
+          row={flight}
+          configPending={!config && !configRes.error}
+          limits={limits}
+          now={now}
+          tz={tz}
+        />
         <CrewOff className="pb muted s" />
         {rows?.map((row) => (
           <AgentRow

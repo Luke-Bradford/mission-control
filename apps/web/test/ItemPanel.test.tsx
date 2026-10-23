@@ -102,10 +102,10 @@ describe("ItemPanel, Ask FLIGHT", () => {
     expect(text.endsWith("why?")).toBe(true);
   });
 
-  const sent = async (items: AttentionItem[], escalations: ReturnType<typeof escalation>[]) => {
+  const sent = async (items: AttentionItem[]) => {
     const fn = stubFetch({
       "/api/attention": items,
-      "/api/escalations": escalations,
+      "/api/escalations": [],
       "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
       "/api/config": CONFIG,
       "/api/flight": {
@@ -124,17 +124,24 @@ describe("ItemPanel, Ask FLIGHT", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
     await waitFor(() => expect(input.value).toBe(""));
     const call = fn.mock.calls.find(([p]) => p === "/api/seats/flight-1/message");
+    expect(call).toBeTruthy();
     return JSON.parse(call?.[1]?.body as string).text as string;
   };
 
   it("leads with the key alone from an item with no title to quote", async () => {
-    expect(await sent([item({ escalationId: null, text: "" })], [])).toBe(
+    expect(await sent([item({ escalationId: null, text: "" })])).toBe(
+      "Re: esc:shop-app#4001\n\nwhy?",
+    );
+  });
+
+  it("a whitespace-only title gets no Re: line either", async () => {
+    expect(await sent([item({ escalationId: null, text: "   " })])).toBe(
       "Re: esc:shop-app#4001\n\nwhy?",
     );
   });
 
   it("leads with Re:, the key, a blank line and the body when the item has text", async () => {
-    expect(await sent([item({ escalationId: null, text: "Stalled on tests" })], [])).toBe(
+    expect(await sent([item({ escalationId: null, text: "Stalled on tests" })])).toBe(
       "Re: esc:shop-app#4001 · Stalled on tests\n\nwhy?",
     );
   });

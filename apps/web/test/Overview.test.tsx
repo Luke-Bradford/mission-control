@@ -201,7 +201,7 @@ describe("Agents panel", () => {
     stub({
       config: flightConfig([{ id: "flight-1" }]),
       rows: [
-        seat({ id: "flight-1", index: 3, role: "FLIGHT", hudState: "error", ticket: null }),
+        seat({ id: "flight-1", index: 3, hudState: "error", ticket: null }),
         seat({ id: "dev-1", index: 0 }),
         seat({ id: "dev-2", index: 1, hudState: "idle" }),
       ],
@@ -218,6 +218,34 @@ describe("Agents panel", () => {
     expect(agentRows(container)).toHaveLength(2);
     expect(screen.queryByText("flight-1")).toBeNull();
     expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
+  });
+
+  it("while the config loads the FLIGHT row says Loading…; a config error keeps not running", async () => {
+    const fn = stub({ rows: [crewRow()] });
+    const answer = fn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    fn.mockImplementation(async (...a: unknown[]) => {
+      if (a[0] === "/api/config") await gate;
+      return answer(...a);
+    });
+    const { container, unmount } = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(within(flight).getByText("Loading…")).toBeTruthy();
+    expect(within(flight).queryByText(FLIGHT_NOT_RUNNING)).toBeNull();
+    release();
+    await within(flight).findByText(FLIGHT_NOT_RUNNING);
+    unmount();
+
+    stub({ rows: [crewRow()], config: () => ({ status: 503, body: { error: "loading" } }) });
+    const failed = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const row = failed.container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(await within(row).findByText(FLIGHT_NOT_RUNNING)).toBeTruthy();
+    expect(within(row).queryByText("Loading…")).toBeNull();
   });
 
   it("the FLIGHT row is not itself a button: its call sign is the button that opens the dock", async () => {
