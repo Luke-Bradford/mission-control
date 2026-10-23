@@ -80,6 +80,15 @@ export const LOCK_WAIT_MS = Math.min(HOOK_TIMEOUT_SEEN_MS - 60_000, 10 * 60_000)
 export const GUARD_HOOK_TIMEOUT_S = LOCK_WAIT_MS / 1000 + 30;
 /** The hook's own deadline, inside the CLI's timeout (which would run the tool): then it denies. */
 export const HOOK_DEADLINE_MS = GUARD_HOOK_TIMEOUT_S * 1000 - 10_000;
+/**
+ * How long the hook keeps retrying a refused or reset connection (a hub restarting), from its first
+ * try, before it denies as unreachable. Kept well inside `HOOK_DEADLINE_MS`.
+ */
+export const HOOK_RETRY_MS = 60_000;
+/** An env var that shortens the retry window (ms; tests that run the hook against no hub). */
+export const HOOK_RETRY_ENV = "MC_HOOK_RETRY_MS";
+/** The pause between the hook's tries while the hub is down. */
+export const HOOK_RETRY_EVERY_MS = 1000;
 /** The route the guard hook asks, on the hub's loopback port. */
 export const GUARD_CHECK_PATH = "/api/guard/check";
 /** `POST /api/guard/check`'s body limit; the hook checks its body against it before posting. */
