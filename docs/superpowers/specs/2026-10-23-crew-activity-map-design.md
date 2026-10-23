@@ -26,7 +26,7 @@ It shows what is happening now. History (commits, merges, past runs) stays in ea
 - **Which repo.** Overview has the global session selector, not a repo selector, so the panel has its
   own repo picker:
   - a selected session (`s/{id}`) sets it to that session's repo;
-  - "All sessions" defaults it to the repo with the most running crew seats;
+  - "All sessions" defaults it to the repo with the most running crew seats, ties going to the repo whose seat started most recently; with no crew seat running, it keeps the last picked repo, or else the first configured one;
   - several sessions on one repo show together.
 - **Which activity counts.**
   - Only crew seats' work on the picked repo's checkouts. A seat's reads and edits in another repo's
@@ -183,8 +183,8 @@ A docked seat's card shrinks to one line.
 | Signal | Source | Today |
 |---|---|---|
 | Seat state, stalled, parked and its reason | the supervisor and the crew row Overview reads | exists |
-| Calls: tool, input, start, end, `is_error`, result text | transcript tail (`stream.ts` pairs each call with its result) | parsed; **add**: the files per tool, result size, failure reason, and the Vitest summary |
-| A call's files | the transcript `tool_use` input: `file_path` (Read, Edit, Write), `notebook_path`, `path`/`pattern` (Grep, Glob), and path-like tokens in a Bash `command` | **new**, in the ring (slice 1a) |
+| Calls: tool, input, start, end, `is_error`, result text | a new tail of each crew run's `transcriptPath`, read with `readNewLines` (`tail.ts`) every 1 s, reusing `stream.ts`'s per-line parsing (`itemsOf`); `stream.ts` itself only reads a transcript backwards on request | **new** (slice 1a): the tail, plus the files per tool, result size, failure reason and the Vitest summary |
+| A call's files | the transcript `tool_use` input: `file_path` (Read, Edit, Write), `notebook_path`, `path`/`pattern` (Grep, Glob), and path-like tokens in a Bash `command` (best effort: a path counts only if it exists in the tree) | **new**, in the ring (slice 1a) |
 | Refused calls (CLI side) | transcript `system/permission_denied` | **new parse** (slice 1a); `stream.ts` does not read it today |
 | Refused calls (hub guard) | `guard_hits` | exists |
 | Edit churn `+n −m` | Edit/Write/MultiEdit inputs: `old_string`/`new_string`, `content` | **new count** (slice 1a); `streamjson.ts` reads these only for a one-line detail |
@@ -197,7 +197,9 @@ A docked seat's card shrinks to one line.
 | Messages | `comms`, `seat_questions` | exists |
 | Tree and imports | `git ls-tree` at `origin/HEAD`, import lines parsed | **new, cheap** (slice 2) |
 
-Calls come from the transcript tail only, not the guard hook. The hook forwards only `command`,
+Calls come from the transcript only, not the guard hook, and the ring lives in a new
+`apps/server/src/map/ring.ts`, outside `runtime/**`: it does not touch the supervisor's own transcript
+fold. The hook forwards only `command`,
 `file_path` and `run_in_background`, and widening it touches hard-rule files. The transcript carries
 every call's full input about a second later, which is enough here.
 
@@ -206,7 +208,7 @@ every call's full input about a second later, which is enough here.
 The contract lives in `packages/core` as `MapSnapshot` and `MapDelta`, with a sample fixture (slice 0).
 Server and web build against those types.
 
-- **`GET /api/repos/:id/map`** returns a `MapSnapshot`:
+- **`GET /api/repos/:repoId/map`** returns a `MapSnapshot`:
   - the tree (paths and line counts) and the imports;
   - per seat: state and since, ticket and title, calls in flight (tool, detail, files, since), scope
     (read files, and modified files with `+n −m` and whether it is real diff or churn), recently
@@ -216,13 +218,16 @@ Server and web build against those types.
 - **Deltas** are a protocol extension. `/api/stream` today only pings `event: changed` with a topic,
   to every subscriber, with no payload, selection or ordering. The extension:
   - `GET /api/stream?map=<repo>` also sends `event: map` frames, carrying `{seq, …delta}` for that
-    repo only. Without the parameter, a client sees no change.
+    repo only, through a per-connection subscription. The existing `changed` pings are unchanged, and
+    without the parameter a client sees no change.
   - Delta kinds:
     - `call.start` {seat, tool, detail, files, writeTok}, where `writeTok` is set for writes only;
     - `call.end` {seat, files, resultTok, error, refused, why, tests};
     - `edit` {seat, file, add, rem};
     - `state` {seat, state, since};
-    - `message`, `review`, `diff` {seat, file, add, rem}.
+    - `message` {from, to, kind, ticket};
+    - `review` {seat, ticket, round, counts};
+    - `diff` {seat, file, add, rem}.
   - A client that sees a gap in `seq`, or reconnects, refetches the snapshot.
 - **The ring.** Each seat's last 15 minutes of calls are kept in memory. Nothing new is persisted.
 - **Reader comments.** The web panel reads these routes. Until it lands, each route carries a valid
@@ -262,18 +267,18 @@ Each slice is a crew ticket with `size` and `## Done when`.
 | # | Slice | Labels | Size | Depends on | Done when |
 |---|---|---|---|---|---|
 | 0 | Core: `MapSnapshot` and `MapDelta` types, and a sample fixture | area:core, type:feature | S | — | The types and fixture are exported from `@mc/core`; a test parses the fixture against them. |
-| 1a | Server: per-seat ring of calls from the transcript tail: files per tool, result size, failure reason, CLI refusals, edit churn, Vitest summary | area:server, type:feature | M | 0 | A call appears in the ring within 2 s of its transcript line and closes at its result; each field is tested against a recorded transcript fixture. |
+| 1a | Server: per-seat ring of calls in `apps/server/src/map/ring.ts`, tailing each crew run's transcript every 1 s: files per tool, result size, failure reason, CLI refusals, edit churn, Vitest summary | area:server, type:feature | M | 0 | A call appears in the ring within 2 s of its transcript line and closes at its result; each field is tested against a recorded transcript fixture. |
 | 1b | Server: `map` deltas on `/api/stream?map=<repo>` with sequence numbers | area:server, type:feature | M | 1a | A test client receives ordered `call.start`/`call.end` frames for one repo only; a gap triggers the documented refetch. |
-| 2 | Server: `GET /api/repos/:id/map` snapshot (tree, imports, scope, badge data, findings, context, last `seq`) | area:server, type:feature | M | 1a | The snapshot for this repo validates against `MapSnapshot` and is under 300 KB. |
-| 3 | Server: real `+n −m` per seat, from `files.ts` | area:server, type:feature | M | #343 | Numstat for a fixture worktree matches `git diff --numstat` against its base; edits since are picked up within 3 s. |
-| 4a | Web: the panel: repo picker, layout, file colour code, levels, search, camera and file drawer | area:web, type:feature | M | 0 | Layout, colour code, level and band logic are pure functions with unit tests; the panel renders the fixture; the three.js scene is a thin shell. |
+| 2 | Server: `GET /api/repos/:repoId/map` snapshot (tree, imports, scope, badge data, findings, context, last `seq`) | area:server, type:feature | M | 1a | The snapshot for this repo validates against `MapSnapshot` and is under 300 KB. |
+| 3 | Server: real `+n −m` per seat, from `files.ts` | area:server, type:feature | M | #343 | Numstat for a fixture worktree matches `git diff --numstat` against its base; a new edit is reflected within 5 s of the ring recording it. |
+| 4a | Web: the panel: repo picker, layout, file colour code, levels, search, camera and file drawer | area:web, type:feature | M | 0 | Layout, colour code, level and band logic are pure functions with unit tests; the panel renders the fixture; the three.js scene is a thin shell; the crit and warn pins stay distinguishable from every s1–s7 agent colour. |
 | 4b | Web: agents, orbs, flows, sparks, message arcs, and the selection and zoom behaviour | area:web, type:feature | M | 4a | State labels and orb placement are pure functions with unit tests; the panel animates the fixture's deltas. |
 | 5 | Web: cards, badges, "stuck" and the drawers (lane, refusals, findings) | area:web, type:feature | M | 0 | Each badge's text and age come from the fixture; each opens its drawer; the stuck rule is unit-tested. |
-| 6 | Server: branch conflict check (`git merge-tree` on branch tips, cached by SHA pair, isolated object directory) | area:server, type:feature | M | 2 | Two fixture branches with conflicting tips report a conflict naming both; nothing is written to the crew's clones. |
+| 6 | Server: branch conflict check (`git merge-tree` on branch tips, cached by SHA pair, isolated object directory; branch tips from `pull_requests`) | area:server, type:feature | M | 0 | Two fixture branches with conflicting tips report a conflict naming both; nothing is written to the crew's clones. |
 
 No slice touches a hard-rule file, so all can merge on the normal gate.
 
-**Estimate, from the crew's own record** (merged tickets on this repo, 2026-10-20 to 23; indicative):
+**Estimate, from the crew's own record** (indicative). Source: the hub's database, all merged tickets it has recorded for this repo (2026-10-20 to 23). For each ticket: its runs joined to its merged PR, grouped by the board's Size field, taking the first run's start to the merge, and the sum of its runs' durations.
 
 | Size | Sample | Median seat-hours per ticket (plan, build and review) | Median first start to merge |
 |---|---|---|---|
@@ -282,8 +287,8 @@ No slice touches a hard-rule file, so all can merge on the normal gate.
 | L | 4 | 1.9 | 26 h |
 
 - **Work.** One S and eight Ms come to about 11–12 seat-hours.
-- **Critical path.** 0 → 1a → 1b, with 2 and the web slices in parallel behind 0, is about 4 Ms after
-  the S: roughly 30 hours at median start to merge.
+- **Critical path.** The longest chains are 0 → 1a → 2, 0 → 1a → 1b and 0 → 4a → 4b: an S and two Ms
+  each, about 19 h at median start to merge. Slices 3, 5 and 6 run alongside.
 - **Elapsed.** With GUIDO on the server slices and INCO on the web slices, about 2 days of crew time if
   prioritised, or 3 days with normal queueing. Rework rounds would add to that.
 - **Operator time.** Reviewing the result.
