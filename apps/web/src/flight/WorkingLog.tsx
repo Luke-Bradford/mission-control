@@ -1,6 +1,7 @@
 import { type AgentStream, clockHm } from "@mc/core";
 import { useMemo } from "react";
 import { useTz } from "../clock.ts";
+import { Expandable } from "../components/Expandable.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { type DockRow, dockRows, feedRows, kindLabel } from "./conversation.ts";
@@ -20,7 +21,9 @@ function LogRow({ row, tz }: { row: DockRow; tz: string | null }) {
         {at}
       </div>
       <div className="txt">
-        {row.kind === "decision" ? `${row.d.about} → ${row.d.decision}` : row.text}
+        <Expandable lines={2}>
+          {row.kind === "decision" ? `${row.d.about} → ${row.d.decision}` : row.text}
+        </Expandable>
       </div>
     </div>
   );

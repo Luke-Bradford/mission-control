@@ -65,6 +65,7 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
               <HBar
                 key={r.step}
                 label={r.step}
+                title={r.step}
                 pct={(r.tokens / mostStep) * 100}
                 value={kTokens(r.tokens)}
                 extra={`${cost(r.costUsd)} · ${r.runs} runs`}

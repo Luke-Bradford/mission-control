@@ -62,7 +62,9 @@ export function QuotaPanel() {
           return (
             <div className="quotarow" key={a}>
               <span className="min0">
-                <span className="ellip">{a}</span>
+                <span className="ellip" title={a}>
+                  {a}
+                </span>
                 {read && <span className="xs muted block">{read}</span>}
               </span>
               {cell(a, "5h")}

@@ -303,7 +303,8 @@ describe("cards", () => {
     expect(within(c).getByText("M")).toBeTruthy();
     const ms = within(c).getByText("MVP");
     expect(ms.title).toBe("MVP — launch");
-    expect(c.querySelectorAll(".lb").length).toBe(3);
+    expect(c.querySelectorAll(".lb").length).toBe(4);
+    expect(within(c).getByText("+1").title).toBe("a, b, c, d");
     fireEvent.click(screen.getByRole("button", { name: "shop-app" }));
     const lane = card(container, "shop-app#1") as HTMLElement;
     expect(within(lane).getByText("#1")).toBeTruthy();

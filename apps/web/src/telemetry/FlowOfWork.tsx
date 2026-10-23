@@ -108,6 +108,7 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
                 <HBar
                   key={r.size}
                   label={r.size === NO_SIZE ? "no size" : r.size}
+                  title={r.size === NO_SIZE ? "no size" : r.size}
                   pct={((days ?? 0) / longest) * 100}
                   value={days === null ? DASH : `${days.toFixed(1)} d`}
                   extra={tickets(r.tickets)}
