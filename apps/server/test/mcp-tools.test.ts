@@ -62,6 +62,7 @@ import {
   planNoProfilesText,
   planTooLongText,
   planUnknownProfileText,
+  planUnsafePathsText,
   planWrittenText,
   prNamedRefText,
   prNotifyText,
@@ -3240,8 +3241,66 @@ describe("report_plan", () => {
       ).toEqual({ text: MC_PLAN_WRITTEN });
     });
 
-    it("accepts a missing path the line says is new", async () => {
-      expect(await plan(`${TWO}\n\nAdd \`src/b.ts\` (new). Change \`src/a.ts\`.`)).toEqual({
+    it("accepts a missing path the same line says it creates", async () => {
+      expect(await plan(`${TWO}\n\nCreate \`src/b.ts\`. Change \`src/a.ts\`.`)).toEqual({
+        text: MC_PLAN_WRITTEN,
+      });
+      expect(await plan(`${TWO}\n\nNew file \`src/c.ts\`.`)).toEqual({ text: MC_PLAN_WRITTEN });
+      expect(await plan(`${TWO}\n\n- Create: \`src/b.ts\`, \`src/c.ts\`.`)).toEqual({
+        text: MC_PLAN_WRITTEN,
+      });
+      expect(await plan(`${TWO}\n\n- **Create** \`src/d.ts\``)).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
+    it("accepts a later mention of a path an earlier line creates", async () => {
+      expect(
+        await plan(`${TWO}\n\n- Create \`src/b.ts\`.\n- Export \`src/b.ts\` from \`src/a.ts\`.`),
+      ).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
+    it("checks a path after a long run of code spans without hanging", async () => {
+      expect(
+        await plan(`${TWO}\n\nCreate ${"`a` ".repeat(40)}then change \`src/missing.ts\`.`),
+      ).toEqual(refused(planMissingPathsText(["src/missing.ts"])));
+    });
+
+    it("still checks a path after a create cue that is not the one created", async () => {
+      expect(await plan(`${TWO}\n\nCreate \`src/b.ts\` to call \`src/missing.ts\`.`)).toEqual(
+        refused(planMissingPathsText(["src/missing.ts"])),
+      );
+    });
+
+    it("does not skip a path because the line says new elsewhere", async () => {
+      expect(await plan(`${TWO}\n\nAdd a new case to \`src/wrong.ts\`.`)).toEqual(
+        refused(planMissingPathsText(["src/wrong.ts"])),
+      );
+    });
+
+    it("refuses a path that leaves the checkout, even on a create line", async () => {
+      for (const bad of ["../../x.ts", "/etc/x.conf", "~/x.sh", "src/../../x.ts"]) {
+        expect(await plan(`${TWO}\n\nCreate \`${bad}\`.`)).toEqual(
+          refused(planUnsafePathsText([bad])),
+        );
+      }
+    });
+
+    it("checks a path with a :line suffix without the suffix", async () => {
+      expect(await plan(`${TWO}\n\nChange \`src/missing.ts:12\`.`)).toEqual(
+        refused(planMissingPathsText(["src/missing.ts"])),
+      );
+    });
+
+    it("skips the path check when the seat session has no worktree", async () => {
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: FAO_RUN,
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      expect(await plan(`${TWO}\n\nChange \`src/missing.ts\`.`)).toEqual({
         text: MC_PLAN_WRITTEN,
       });
     });

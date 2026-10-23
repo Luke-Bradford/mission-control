@@ -114,6 +114,8 @@ import {
   planTextText,
   planTooLongText,
   planUnknownProfileText,
+  planUnsafePaths,
+  planUnsafePathsText,
   planWrittenText,
   prAlreadyOpenText,
   prClosesLine,
@@ -1743,6 +1745,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       if (tests === null) return { text: MC_PLAN_NO_TESTS, isError: true };
       const doneWhen = doneWhenCount(body);
       if (tests < doneWhen) return { text: planFewTestsText(tests, doneWhen), isError: true };
+      const unsafe = planUnsafePaths(plan);
+      if (unsafe.length > 0) return { text: planUnsafePathsText(unsafe), isError: true };
       if (live.worktree !== null) {
         const missing: string[] = [];
         for (const p of planPaths(plan)) {
