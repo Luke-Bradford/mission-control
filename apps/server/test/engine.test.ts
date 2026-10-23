@@ -216,6 +216,16 @@ const prRow = (over: Partial<PullRequestView> = {}): PullRequestView => ({
   mergedAt: null,
   headSha: SHA,
   mergeable: "MERGEABLE",
+  checks: [
+    {
+      name: "mc/review",
+      kind: "status",
+      state: "passing",
+      conclusion: "SUCCESS",
+      attempt: null,
+      url: null,
+    },
+  ],
   ...over,
 });
 
@@ -745,6 +755,29 @@ describe("CI and review", () => {
         text: expect.stringMatching(/^CI failed on aaaaaaa\./),
       },
     ]);
+  });
+
+  it("a failing check is named in the CI failed event", async () => {
+    await inCi();
+    const failing = {
+      ci: "failing" as const,
+      checks: [
+        {
+          name: "check",
+          kind: "check" as const,
+          state: "failing" as const,
+          conclusion: "FAILURE",
+          attempt: 1,
+          url: null,
+        },
+      ],
+    };
+    setPr(failing);
+    await h.engine.reconcileRun(RUN);
+    clock += 1000;
+    setPr(failing);
+    await h.engine.reconcileRun(RUN);
+    expect(loopTexts()).toContain("CI failed on aaaaaaa (failing: check)");
   });
 
   it("a first CI failure is re-run once, without a word to the seat", async () => {
@@ -2482,6 +2515,28 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.steps).toEqual([]);
       expect(noteKeys().some((k) => k.startsWith("behind:"))).toBe(true);
+    });
+
+    it("mc/review not passing on GitHub is not merged", async () => {
+      report();
+      await h.engine.reconcileRun(RUN);
+      setPr({
+        ci: "passing",
+        checks: [
+          {
+            name: "mc/review",
+            kind: "status",
+            state: "pending",
+            conclusion: "PENDING",
+            attempt: null,
+            url: null,
+          },
+        ],
+      });
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
     });
 
     describe("main moves", () => {

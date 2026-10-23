@@ -19,6 +19,8 @@ import {
   COMMS_MC,
   cardMark,
   carriedFrom,
+  checkState,
+  ciVerdict,
   cleanupBranchNoteKey,
   closedIssueText,
   deletedLocalText,
@@ -48,6 +50,7 @@ import {
   NEW_LOOP,
   parkedEventText,
   REFUSAL_TRIES,
+  REVIEW_STATUS_CONTEXT,
   type RepoId,
   type RepoRules,
   type ReviewFact,
@@ -373,6 +376,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const current = !ended && row?.runId === run.id;
     const evidence = store.latestEvidence(run.id);
     const pr = findPr(run, loop);
+    const repo = config.repos.find((r) => r.id === run.repoId);
+    const verdict = ciVerdict(pr?.checks ?? [], repo?.requiredChecks ?? []);
     const item = store.board(run.repoId).find((b) => b.issueNumber === issue);
     const pushed = store.runPush(run.id);
     const turnEnded = row?.lastTurnEndedAt ?? null;
@@ -449,8 +454,14 @@ export function createEngine(deps: EngineDeps): Engine {
               mergeable: pr.mergeable,
               polledAt: store.pullRequestReadAt(run.repoId, pr.number) ?? 0,
               isDraft: pr.isDraft,
+              checks: {
+                failing: verdict.failing,
+                pending: verdict.pending,
+                missing: verdict.missing,
+              },
+              reviewStatus: checkState(pr.checks ?? [], REVIEW_STATUS_CONTEXT),
             },
-      autoMerge: config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge",
+      autoMerge: repo?.autonomy === "merge",
       hardRulesSet: mergeAllowed,
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),

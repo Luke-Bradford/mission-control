@@ -868,6 +868,15 @@ describe("ticket route, lane and session", () => {
     expect(localStorage.getItem("mc-lane")).toBeNull();
   });
 
+  it("a session with a stored lane for a repo no longer configured shows no note", async () => {
+    localStorage.setItem("mc-lane", "gone-repo");
+    stub({ shopApp: [todo(1, { title: "Mine" })] });
+    act(() => setSession("shop-app"));
+    const { container } = await open();
+    await screen.findByText("Mine");
+    expect(container.textContent).not.toContain("Showing s/");
+  });
+
   it("a session with a stored All repos lane shows no note", async () => {
     localStorage.setItem("mc-lane", "*");
     stub({ shopApp: [todo(1, { title: "Mine" })] });

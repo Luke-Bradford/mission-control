@@ -81,7 +81,26 @@ const ev = (status: string, daysAgo: number, project = 2) => ({
 const timeline = (...nodes: unknown[]) => ({ timelineItems: { nodes } });
 const commits = (...states: (string | null)[]) => ({
   commits: {
-    nodes: states.map((s) => ({ commit: { statusCheckRollup: s === null ? null : { state: s } } })),
+    nodes: states.map((s) => ({
+      commit: {
+        statusCheckRollup:
+          s === null
+            ? null
+            : {
+                state: s,
+                contexts: {
+                  nodes: [
+                    {
+                      __typename: "CheckRun",
+                      name: "check",
+                      status: s === "PENDING" ? "IN_PROGRESS" : "COMPLETED",
+                      conclusion: s === "PENDING" ? null : s,
+                    },
+                  ],
+                },
+              },
+      },
+    })),
   },
 });
 
@@ -236,6 +255,41 @@ describe("collectFlow pull requests", () => {
     expect(by.get(12)).toBeNull();
     expect(by.get(13)).toBe("pending");
     expect(store.flowPrs(since)[0]).toMatchObject({ repoId: "shop-app", mergedAt: NOW - DAY });
+  });
+
+  it("a failing mc/review on the first push does not fail its CI", async () => {
+    store.upsertPullRequests("shop-app", [pr(10)], 0);
+    const { gql } = stub(
+      {},
+      {
+        10: {
+          commits: {
+            nodes: [
+              {
+                commit: {
+                  statusCheckRollup: {
+                    state: "FAILURE",
+                    contexts: {
+                      nodes: [
+                        {
+                          __typename: "CheckRun",
+                          name: "check",
+                          status: "COMPLETED",
+                          conclusion: "SUCCESS",
+                        },
+                        { __typename: "StatusContext", context: "mc/review", state: "FAILURE" },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    );
+    await run(gql);
+    expect(store.flowPrs(since)[0]?.firstPushCi).toBe("passing");
   });
 
   it("reads only PRs merged within FLOW_DAYS, 20 aliases per query", async () => {
