@@ -12,18 +12,33 @@ export type Lane = {
 
 /** The All-repos lane's id; repo lanes use the repo id. */
 export const ALL_LANE = "*";
+export const MINE_LANE = "@mine";
 
 /**
  * GitHub ORs repeated `repo:` qualifiers, so one query covers every repo. Under a session only
  * that repo's lane is offered (an unknown session id offers them all; the page hides the cards).
  */
-export function lanesFor(repos: RepoView[], session: string = SESSION_ALL): Lane[] {
+export function lanesFor(
+  repos: RepoView[],
+  session: string = SESSION_ALL,
+  operatorId: string | null = null,
+): Lane[] {
   const all: Lane = {
     id: ALL_LANE,
     name: "All repos",
     query: [...repos.map((r) => `repo:${r.github}`), "is:issue"].join(" "),
     url: null,
     match: () => true,
+  };
+  const query = `${all.query} assignee:${operatorId ?? "@me"}`;
+  const mine: Lane = {
+    id: MINE_LANE,
+    name: "All mine",
+    query,
+    url: operatorId === null ? null : `https://github.com/issues?q=${encodeURIComponent(query)}`,
+    match: (i) =>
+      operatorId !== null &&
+      (i.assignees ?? []).some((a) => a.toLowerCase() === operatorId.toLowerCase()),
   };
   const repoLanes = repos.map(
     (r): Lane => ({
@@ -39,7 +54,7 @@ export function lanesFor(repos: RepoView[], session: string = SESSION_ALL): Lane
     }),
   );
   const own = session === SESSION_ALL ? undefined : repoLanes.find((l) => l.id === session);
-  return own ? [own] : [all, ...repoLanes];
+  return own ? [own] : [all, mine, ...repoLanes];
 }
 
 /**

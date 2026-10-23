@@ -1,4 +1,11 @@
-import { type CrewRow, type PrCheck, type PullRequestView, startOfLocalDay } from "@mc/core";
+import {
+  type CrewRow,
+  OWNER_CONTROLLER,
+  OWNER_FLIGHT,
+  type PrCheck,
+  type PullRequestView,
+  startOfLocalDay,
+} from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   cardAgent,
@@ -92,6 +99,19 @@ describe("doneOutcome", () => {
 
 describe("cardAgent and needsMe", () => {
   const i = boardItem();
+  it.each([OWNER_FLIGHT, OWNER_CONTROLLER, undefined] as const)(
+    "ignores attention owned by %s, whether linked to the ticket or its agent",
+    (owner) => {
+      expect(needsMe(i, [item({ owner, ticket: ticketRef(i) })], [crewRow()])).toBe(false);
+      expect(needsMe(i, [item({ owner, ticket: null })], [crewRow()])).toBe(false);
+    },
+  );
+  it.each(["Ready", "In review", "Ready for QA", "Done"])(
+    "an agent's need does not follow its card into %s",
+    (status) => {
+      expect(needsMe(boardItem({ status }), [item({ ticket: null })], [crewRow()])).toBe(false);
+    },
+  );
   it("only a running run on the ticket marks the card", () => {
     const done = crewRow({ run: { ...RUN, status: "ok", endedAt: NOW } });
     expect(cardAgent(i, [done])).toBeNull();

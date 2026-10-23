@@ -1,31 +1,50 @@
 import { describe, expect, it } from "vitest";
-import { ALL_LANE, lanesFor, resolveLane } from "../src/board/lanes.ts";
+import { ALL_LANE, lanesFor, MINE_LANE, resolveLane } from "../src/board/lanes.ts";
 import { SESSION_ALL } from "../src/shell/session.ts";
 import { boardItem, REPOS } from "./fixtures.ts";
 
 describe("lanesFor", () => {
-  it("All repos first, then one lane per repo with its GitHub query and project URL", () => {
+  it("All mine matches the configured assignee and has a GitHub query for the same repos", () => {
+    const mine = lanesFor(REPOS, SESSION_ALL, "pilot").find((l) => l.name === "All mine");
+    expect(mine).toBeDefined();
+    expect(mine?.match(boardItem({ assignees: ["other", "PILOT"] }))).toBe(true);
+    expect(mine?.match(boardItem({ assignees: ["other"] }))).toBe(false);
+    expect(mine?.match(boardItem({ assignees: [] }))).toBe(false);
+    expect(mine?.match(boardItem())).toBe(false);
+    expect(mine?.query).toBe(
+      "repo:octo-org/shop-app repo:octo-org/site-builder is:issue assignee:pilot",
+    );
+    expect(new URL(mine?.url ?? "").searchParams.get("q")).toBe(mine?.query);
+  });
+  it("All mine matches nothing and offers no link until the operator is known", () => {
+    const mine = lanesFor(REPOS).find((l) => l.name === "All mine");
+    expect(mine).toBeDefined();
+    expect(mine?.match(boardItem({ assignees: ["pilot"] }))).toBe(false);
+    expect(mine?.url).toBeNull();
+  });
+  it("All repos and All mine first, then one lane per repo with its GitHub query and project URL", () => {
     const lanes = lanesFor(REPOS);
     expect(lanes.map((l) => [l.id, l.name])).toEqual([
       [ALL_LANE, "All repos"],
+      [MINE_LANE, "All mine"],
       ["shop-app", "shop-app"],
       ["site-builder", "site-builder"],
     ]);
     expect(lanes[0]?.query).toBe("repo:octo-org/shop-app repo:octo-org/site-builder is:issue");
     expect(lanes[0]?.url).toBeNull();
-    expect(lanes[1]?.query).toBe("repo:octo-org/shop-app is:issue");
-    expect(lanes[1]?.url).toBe("https://github.com/users/octo-org/projects/2");
+    expect(lanes[2]?.query).toBe("repo:octo-org/shop-app is:issue");
+    expect(lanes[2]?.url).toBe("https://github.com/users/octo-org/projects/2");
   });
 
   it("a repo lane links the address GitHub reports for its Project", () => {
     const projectUrl = "https://github.com/orgs/octo-org/projects/2";
     const lanes = lanesFor(REPOS.map((r, i) => (i === 0 ? { ...r, projectUrl } : r)));
-    expect(lanes[1]?.url).toBe(projectUrl);
-    expect(lanes[2]?.url).toBe("https://github.com/users/octo-org/projects/3");
+    expect(lanes[2]?.url).toBe(projectUrl);
+    expect(lanes[3]?.url).toBe("https://github.com/users/octo-org/projects/3");
   });
 
   it("a repo lane matches only its repo's items", () => {
-    const [all, shopApp] = lanesFor(REPOS);
+    const [all, , shopApp] = lanesFor(REPOS);
     const a = boardItem({ repoId: "shop-app" });
     const b = boardItem({ repoId: "site-builder" });
     expect([a, b].filter((i) => all?.match(i))).toEqual([a, b]);
@@ -61,6 +80,7 @@ describe("lanesFor under a session", () => {
   it("SESSION_ALL offers every lane", () => {
     expect(lanesFor(REPOS, SESSION_ALL).map((l) => l.id)).toEqual([
       ALL_LANE,
+      MINE_LANE,
       "shop-app",
       "site-builder",
     ]);

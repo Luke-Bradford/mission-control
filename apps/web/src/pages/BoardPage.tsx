@@ -1,6 +1,7 @@
 import {
   type AttentionItem,
   type BoardItem,
+  type ConfigView,
   type Crew,
   DONE_RANGES,
   HUD_COLUMNS,
@@ -13,9 +14,16 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { BriefModal } from "../board/BriefModal.tsx";
 import { standup, weekly } from "../board/brief.ts";
-import { cardAgent, cardColumn, daysAgo, needsMe, priorityRank } from "../board/cards.ts";
+import {
+  cardAgent,
+  cardColumn,
+  cardQueue,
+  daysAgo,
+  needsMe,
+  priorityRank,
+} from "../board/cards.ts";
 import { Kanban } from "../board/Kanban.tsx";
-import { ALL_LANE, lanesFor, resolveLane } from "../board/lanes.ts";
+import { ALL_LANE, lanesFor, MINE_LANE, resolveLane } from "../board/lanes.ts";
 import { type BoardLayout, type DoneRange, Toolbar } from "../board/Toolbar.tsx";
 import { useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
@@ -54,6 +62,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const prRes = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
   const crew = useResource<Crew>(RESOURCES.crew).data?.rows;
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const operatorId = useResource<ConfigView>(RESOURCES.config).data?.operator.id ?? null;
   const tz = useTz();
   const now = useNow();
   const [session] = useSession();
@@ -68,7 +77,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const [storedLayout, setStoredLayout] = useState(() => readKey(BOARD_LAYOUT_KEY));
 
   const ticketRoute = repoId !== null && ticket !== null;
-  const lanes = useMemo(() => lanesFor(repos, session), [repos, session]);
+  const lanes = useMemo(() => lanesFor(repos, session, operatorId), [repos, session, operatorId]);
   const lane = resolveLane(lanes, repoId, stored, ticketRoute);
   // /board/:repo selects that repo's lane and is then remembered; a ticket route does not.
   useEffect(() => {
@@ -97,7 +106,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const pickLane = (id: string) => {
     writeKey(LANE_KEY, id);
     setStored(id);
-    navigate(id === ALL_LANE ? "/board" : boardPath(id));
+    navigate(id === ALL_LANE || id === MINE_LANE ? "/board" : boardPath(id));
   };
 
   const all = useMemo(() => boards.flatMap((b) => b.data ?? []), [boards]);
@@ -115,7 +124,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const shown = inLane.filter(
     (i) =>
       (priority === "" || i.priority === priority) &&
-      (!agentOnly || cardAgent(i, rows) !== null) &&
+      (!agentOnly || cardAgent(i, rows) !== null || cardQueue(i, rows) !== null) &&
       (!mineOnly || needsMe(i, items, rows)),
   );
   const priorities = [
@@ -226,7 +235,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         ) : (
           <Kanban
             items={shown}
-            showRepo={lane.id === ALL_LANE}
+            showRepo={lane.id === ALL_LANE || lane.id === MINE_LANE}
             notIn={layoutOn ? notIn : undefined}
             {...kanbanProps}
           />
