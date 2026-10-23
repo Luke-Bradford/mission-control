@@ -29,6 +29,7 @@ import {
   type RepoRules,
   seatCallSign,
   seatDef,
+  type TicketView,
 } from "@mc/core";
 import type { CardNow } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
@@ -56,6 +57,8 @@ export interface QueueDeps {
   rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** The hub's own `gh` login; null when it could not be read, so any assigned card is another's. */
   login: string | null;
+  /** A ticket as GitHub has it; a card whose body cannot be read is not dealt. */
+  fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   now: () => number;
   /** Called when a note this module manages is raised or cleared. */
   onNotes?: () => void;
@@ -219,31 +222,46 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       ...group.filter((s) => !seatMayTake(store, s.seat.id)),
     ];
     const board = store.board(repoId);
-    const cards = readyCards(store, repoId).flatMap((card) => {
+    const repo = config.repos.find((r) => r.id === repoId);
+    const cards: { issue: number; label: string }[] = [];
+    for (const card of readyCards(store, repoId)) {
       const ref = refOf(repoId, card.issueNumber);
-      if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) return [];
-      // the one start check, without the ticket body (the queue reads the board, not GitHub)
-      const startable = group.some(
-        ({ seat }) =>
-          eligibleToStart({
-            repoId,
-            issue: card.issueNumber,
-            card,
-            rules,
-            seat: { call: seatCallSign(seat.id), area: seat.area, loop: seatDef(seat).loop },
-            login: deps.login,
-            hasRun: takenRefs.has(ref) || active.has(ref),
-            lane: config.crew?.lane,
-            laneDefault: config.crew?.laneDefault ?? false,
-            body: null,
-            closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
-          }) === null,
-      );
-      if (!startable) return [];
+      if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) continue;
+      // the one start check every start applies
+      const startable = (body: string | null): boolean =>
+        group.some(
+          ({ seat }) =>
+            eligibleToStart({
+              repoId,
+              issue: card.issueNumber,
+              card,
+              rules,
+              seat: { call: seatCallSign(seat.id), area: seat.area, loop: seatDef(seat).loop },
+              login: deps.login,
+              hasRun: takenRefs.has(ref) || active.has(ref),
+              lane: config.crew?.lane,
+              laneDefault: config.crew?.laneDefault ?? false,
+              body,
+              closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+            }) === null,
+        );
+      // the board alone first: only a card that passes it has its body read
+      if (!startable(null)) continue;
+      // fails closed: a body that cannot be read, or a ticket GitHub no longer has, is not dealt
+      let body: string;
+      try {
+        const ticket = repo === undefined ? null : await deps.fetchTicket(repo, card.issueNumber);
+        if (ticket === null) continue;
+        body = ticket.body;
+      } catch {
+        continue;
+      }
+      if (!startable(body)) continue;
       const labels = areaLabelsOf(rules, card);
       const label = labels[0];
-      return labels.length === 1 && label !== undefined ? [{ issue: card.issueNumber, label }] : [];
-    });
+      if (labels.length === 1 && label !== undefined)
+        cards.push({ issue: card.issueNumber, label });
+    }
     const hands = dealQueues(
       order.map((s) => ({ id: s.seat.id, labels: areaLabelsFor(rules, s.seat.area) })),
       cards,

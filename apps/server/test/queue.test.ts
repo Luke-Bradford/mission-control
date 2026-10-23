@@ -12,12 +12,14 @@ import {
   type SeatState,
   startMissingNeedsText,
   startNeedsPlanText,
+  type TicketView,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
   dealQueues,
+  type QueueDeps,
   refillQueues,
   seatMayTake,
   TAKE_FAILED_TEXT,
@@ -66,6 +68,8 @@ const ME = "me";
 /** What the fresh read of a card finds; by default the stored card as it is. */
 let fresh: (issue: number) => CardNow | null;
 let readFails: boolean;
+/** The body a ticket read finds; null: GitHub has no such ticket. */
+let bodyOf: (issue: number) => string | null;
 let myLogin: string | null;
 
 function makeConfig(autonomy: "merge" | "draft" = "merge"): CcConfig {
@@ -123,7 +127,7 @@ const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
   subIssues: null,
   blockedBy: [],
   milestone: null,
-  size: null,
+  size: "S",
   closed: false,
   prioritySource: null,
   // a lower number is older
@@ -133,12 +137,31 @@ const card = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
   ...over,
 });
 
-const refill = (rulesOf: () => Promise<RepoRules | RepoRulesError> = async () => rules) =>
+const ticketWith = (n: number, body: string): TicketView => ({
+  number: n,
+  title: "t",
+  url: "u",
+  state: "open",
+  body,
+  bodyTruncated: false,
+  labels: [],
+  milestone: null,
+  subIssues: [],
+  pullRequests: [],
+});
+const refill = (
+  rulesOf: () => Promise<RepoRules | RepoRulesError> = async () => rules,
+  fetchTicket: QueueDeps["fetchTicket"] = async (_repo, n) => {
+    const body = bodyOf(n);
+    return body === null ? null : ticketWith(n, body);
+  },
+) =>
   refillQueues({
     config,
     store,
     rules: rulesOf,
     login: ME,
+    fetchTicket,
     now: () => NOW,
     onNotes: () => void noteCalls++,
   });
@@ -212,6 +235,7 @@ beforeEach(() => {
   logs = [];
   transientTakes = new Map();
   readFails = false;
+  bodyOf = () => "## Done when\n- x\n## Plan\n- y\n";
   myLogin = ME;
   fresh = (issue) => {
     const c = store.board(REPO).find((x) => x.issueNumber === issue);
@@ -225,6 +249,34 @@ afterEach(() => {
 });
 
 describe("refillQueues", () => {
+  it("deals no card without a done-when, Size M without a plan, or a ticket GitHub lacks", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { size: "S" }),
+      card(2, { size: "S" }),
+      card(3, { size: "M" }),
+      card(4, { size: "S" }),
+      card(5, { size: "S" }),
+    ]);
+    bodyOf = (n) =>
+      n === 2
+        ? "no section"
+        : n === 3
+          ? "## Done when\n- x\n"
+          : n === 5
+            ? null
+            : "## Done when\n- x\n";
+    await refill();
+    expect(issues(SERVER)).toEqual([1, 4]);
+  });
+
+  it("deals nothing when the body read fails", async () => {
+    store.replaceBoard(REPO, [card(1, { size: "S" })]);
+    await refill(undefined, async () => {
+      throw new Error("GitHub is down");
+    });
+    expect(issues(SERVER)).toEqual([]);
+  });
+
   it("leaves out a Ready card assigned to another login and keeps one assigned to the hub", async () => {
     store.replaceBoard(REPO, [
       card(1, { assignees: ["other"] }),

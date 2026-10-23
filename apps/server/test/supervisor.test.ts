@@ -623,6 +623,7 @@ describe("two hubs, one card", () => {
       store,
       rules,
       login: "me",
+      fetchTicket: async () => ({ ...TICKET, labels }),
       now: () => Date.now(),
     });
     return made;
