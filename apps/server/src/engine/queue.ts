@@ -425,9 +425,13 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   try {
     foreign = await foreignBranch(deps, found.session.checkout, repoId, issue);
   } catch (e) {
-    store.untake(seatId, repoId, issue);
-    deps.log?.(`${seatId}: could not list origin's branches for ${ref}: ${takeReason(e)}`);
-    return;
+    if (!(e instanceof CheckoutError)) {
+      store.untake(seatId, repoId, issue);
+      deps.log?.(`${seatId}: could not list origin's branches for ${ref}: ${takeReason(e)}`);
+      return;
+    }
+    // a broken clone: startRun refuses it the same way, and counts it toward the take-stuck note
+    foreign = null;
   }
   if (foreign !== null) {
     store.dropQueued(seatId, repoId, issue);

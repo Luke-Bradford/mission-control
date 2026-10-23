@@ -7,6 +7,7 @@ import {
   freezeRules,
   NEW_LOOP,
   QUEUE_DEPTH,
+  REFUSAL_TRIES,
   type RepoRules,
   type Run,
   type SeatState,
@@ -70,6 +71,8 @@ let myLogin: string | null;
 /** The branches the fake `git ls-remote` finds on origin, and whether it fails. */
 let heads: string[];
 let lsRemoteFails: boolean;
+/** An error the fake `git` throws as is (a broken clone); takes precedence over `lsRemoteFails`. */
+let lsRemoteError: Error | null;
 
 function makeConfig(autonomy: "merge" | "draft" = "merge"): CcConfig {
   return {
@@ -156,6 +159,7 @@ const takeDeps = (): TakeDeps => ({
     return fresh(issue);
   },
   git: async () => {
+    if (lsRemoteError !== null) throw lsRemoteError;
     if (lsRemoteFails) throw new Error("origin is down");
     return heads.map((h) => `${"a".repeat(40)}\trefs/heads/${h}\n`).join("");
   },
@@ -221,6 +225,7 @@ beforeEach(() => {
   readFails = false;
   heads = [];
   lsRemoteFails = false;
+  lsRemoteError = null;
   myLogin = ME;
   fresh = (issue) => {
     const c = store.board(REPO).find((x) => x.issueNumber === issue);
@@ -646,6 +651,15 @@ describe("takeNext", () => {
     expect(started).toEqual([]);
     expect(store.queue(SERVER).map((q) => [q.issue, q.takenAt])).toEqual([[59, null]]);
     expect(logs.some((l) => l.includes("could not list origin's branches"))).toBe(true);
+  });
+
+  it("leaves a broken clone to startRun, so the take-stuck note is raised", async () => {
+    await queued(card(59));
+    lsRemoteError = new CheckoutError("checkout", "x");
+    startFails = () => new CheckoutError("checkout", "x");
+    for (let i = 0; i < REFUSAL_TRIES; i++) await take();
+    expect(started).toEqual([]);
+    expect(store.notes().map((n) => n.key)).toEqual([`question:take-stuck:${SERVER}`]);
   });
 
   it("starts nothing when the hub does not know its own login", async () => {
