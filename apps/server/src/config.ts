@@ -869,12 +869,19 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
   });
   // A denial over the crew's own folders would leave a seat unable to read its worktree, its clone's
   // git dir, or the temp dirs the CLI works in.
-  const ownFolders = crewOwnFolders(crew);
+  // Compared lowercased: on a case-insensitive disk a folder that doesn't exist yet keeps whatever
+  // case it was written in, and resolves to the crew's own folder once it does.
+  const lower = (p: string) => realish(p).toLowerCase();
+  const ownFolders = crewOwnFolders(crew).map(lower);
+  const crewDirs = [crew.worktrees, ...crew.sessions.map((s) => s.checkout)].map(lower);
   for (const p of crew.denyRead ?? []) {
     if (!isAbsolute(p)) throw new ConfigError("crew.deny_read", `${p} is not an absolute path`);
-    const real = realish(p);
+    const real = lower(p);
     if (ownFolders.some((own) => isInside(own, real))) {
       throw new ConfigError("crew.deny_read", `${p} holds the crew's own folders`);
+    }
+    if (crewDirs.some((dir) => isInside(real, dir))) {
+      throw new ConfigError("crew.deny_read", `${p} is inside the crew's own folders`);
     }
   }
   if (seatCount > crew.maxSeats) {
