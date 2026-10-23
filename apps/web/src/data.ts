@@ -53,6 +53,7 @@ export const RESOURCES = {
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
   drafts: { path: "/api/drafts", topic: "flight" },
+  flightIncoming: { path: "/api/flight/incoming", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
@@ -257,7 +258,11 @@ class Hub {
   /** Refetch only what is on screen and belongs to the changed topic. */
   refetchTopic(topic: Topic): void {
     for (const e of this.entries.values()) {
-      if (e.topic === topic && e.listeners.size > 0) void this.fetch(e);
+      // The server filters watch rows using both the lock and crew state. Refetch
+      // the brief when either changes, including rows omitted from its last response.
+      const briefChanged =
+        e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
+      if ((e.topic === topic || briefChanged) && e.listeners.size > 0) void this.fetch(e);
     }
   }
 

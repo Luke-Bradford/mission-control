@@ -8,6 +8,9 @@ export const NO_DRAFTS = "No drafts to send.";
 export const postedText = (where: string): string =>
   `Posted on ${where} as you. Clicking Post was your approval.`;
 
+export const draftRowId = (id: number, target: string): string =>
+  `draft-${id}-${encodeURIComponent(target)}`;
+
 function DraftRow({ draft }: { draft: ReplyDraft }) {
   const [text, setText] = useState(draft.text);
   const [editing, setEditing] = useState(false);
@@ -30,7 +33,7 @@ function DraftRow({ draft }: { draft: ReplyDraft }) {
     }
   };
   return (
-    <div className="pb">
+    <div className="pb" id={draftRowId(draft.id, draft.target)} tabIndex={-1}>
       <p>
         <b>{draft.target}</b> · {draft.kind === "pr" ? "PR" : "Issue"}
       </p>

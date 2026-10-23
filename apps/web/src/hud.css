@@ -3553,6 +3553,22 @@ button.nrow.thread.tagged {
 #discuss.person-item .panel {
   overflow: visible;
 }
+.watch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-block: 10px;
+}
+.watch-row .min0,
+.incoming-row {
+  overflow-wrap: anywhere;
+}
+.incoming-row {
+  padding-block: 10px;
+}
+.lamp.info {
+  background: var(--accent);
+}
 .rename-editor {
   display: flex;
   flex-wrap: wrap;
