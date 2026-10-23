@@ -3240,6 +3240,16 @@ describe("report_plan", () => {
         text: MC_PLAN_WRITTEN,
       });
       expect(await plan(`${TWO}\n\nNew file \`src/c.ts\`.`)).toEqual({ text: MC_PLAN_WRITTEN });
+      expect(await plan(`${TWO}\n\n- Create: \`src/b.ts\`, \`src/c.ts\`.`)).toEqual({
+        text: MC_PLAN_WRITTEN,
+      });
+      expect(await plan(`${TWO}\n\n- **Create** \`src/d.ts\``)).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
+    it("still checks a path after a create cue that is not the one created", async () => {
+      expect(await plan(`${TWO}\n\nCreate \`src/b.ts\` to call \`src/missing.ts\`.`)).toEqual(
+        refused(planMissingPathsText(["src/missing.ts"])),
+      );
     });
 
     it("does not skip a path because the line says new elsewhere", async () => {

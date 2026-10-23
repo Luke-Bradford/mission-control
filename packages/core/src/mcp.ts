@@ -382,7 +382,10 @@ function planPathMentions(plan: string): { path: string; creates: boolean }[] {
       const before = line.slice(0, m.index);
       out.push({
         path: p,
-        creates: /\b(?:creat(?:e|es|ed|ing)|new files?)\s*:?\s*$/i.test(before),
+        creates:
+          /\b(?:creat(?:e|es|ed|ing)|new files?)[*_]*\s*:?[*_]*\s*(?:`[^`\s]+`\s*(?:,|and|&)?\s*)*$/i.test(
+            before,
+          ),
       });
     }
   }
