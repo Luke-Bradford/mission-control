@@ -201,7 +201,7 @@ describe("Agents panel", () => {
     stub({
       config: flightConfig([{ id: "flight-1" }]),
       rows: [
-        seat({ id: "flight-1", index: 3, role: "FLIGHT", hudState: "error", ticket: null }),
+        seat({ id: "flight-1", index: 3, hudState: "error", ticket: null }),
         seat({ id: "dev-1", index: 0 }),
         seat({ id: "dev-2", index: 1, hudState: "idle" }),
       ],
@@ -218,6 +218,35 @@ describe("Agents panel", () => {
     expect(agentRows(container)).toHaveLength(2);
     expect(screen.queryByText("flight-1")).toBeNull();
     expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
+  });
+
+  it("while the config loads the FLIGHT row says Loading…; a config error keeps not running", async () => {
+    const fn = stub({ rows: [crewRow()] });
+    const answer = fn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    fn.mockImplementation(async (...a: unknown[]) => {
+      if (a[0] === "/api/config") await gate;
+      return answer(...a);
+    });
+    const { container, unmount } = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(within(flight).getByText("Loading…")).toBeTruthy();
+    expect(within(flight).queryByText(FLIGHT_NOT_RUNNING)).toBeNull();
+    release();
+    await within(flight).findByText(FLIGHT_NOT_RUNNING);
+    unmount();
+    hub.clear();
+
+    stub({ rows: [crewRow()], config: () => ({ status: 503, body: { error: "loading" } }) });
+    const failed = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const row = failed.container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(await within(row).findByText(FLIGHT_NOT_RUNNING)).toBeTruthy();
+    expect(within(row).queryByText("Loading…")).toBeNull();
   });
 
   it("the FLIGHT row is not itself a button: its call sign is the button that opens the dock", async () => {
@@ -1392,6 +1421,28 @@ describe("Activity panel", () => {
     expect(
       within(arows[0] as HTMLElement).getByRole("link", { name: "shop-app #3349" }),
     ).toBeTruthy();
+  });
+
+  it("a move into Error reads red; a move out of Error does not", async () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null };
+    const list: ActivityEvent[] = [
+      {
+        ...base,
+        at: NOW - 2 * MIN,
+        who: "shop-app-ta",
+        kind: "state",
+        text: "Running → Error: exit 1",
+      },
+      { ...base, at: NOW - MIN, who: "shop-app-ta", kind: "state", text: "Error → Idle" },
+    ];
+    stub({ rows, activity: list });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await waitFor(() => expect(act_.querySelectorAll(".arow").length).toBe(2));
+    const glyph = (text: string) =>
+      within(act_).getByText(text).closest(".arow")?.querySelector(".g")?.className;
+    expect(glyph("Running → Error: exit 1")).toContain("crit-t");
+    expect(glyph("Error → Idle")).not.toContain("crit-t");
   });
 
   it("a failed board move reads red; a successful one does not", async () => {
