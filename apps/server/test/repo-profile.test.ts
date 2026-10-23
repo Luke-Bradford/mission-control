@@ -107,6 +107,11 @@ describe("repoProfiles", () => {
   it("carries projectUrl: null before a board read, the read's url after", async () => {
     expect(repoProfiles(config(), store).map((r) => r.projectUrl)).toEqual([null, null]);
     const gql: Gql = async (query) => {
+      if (query.includes("OpenIssues")) {
+        return {
+          repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+        };
+      }
       if (!query.includes("projectV2")) throw new Error("not a board read");
       return {
         repositoryOwner: {

@@ -18,6 +18,7 @@ import { PREVIEW_SERVER, type SeatSessionRow, UP_TO_DATE_MAIN } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { RepoRulesError } from "../src/engine/rules.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { CREW_LOCK_FILE, createSupervisor, type SeatBusy } from "../src/runtime/supervisor.ts";
@@ -797,6 +798,8 @@ describe("the crew check against a real supervisor", () => {
       store,
       bus: new ChangeBus(),
       dbPath: join(dir, "db", "mc.sqlite"),
+      rules: async () => new RepoRulesError("not read"),
+      login: () => null,
       fetchTicket: async () => null,
       enabled: true,
       log: () => {},

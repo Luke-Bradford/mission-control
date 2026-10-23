@@ -42,6 +42,7 @@ import {
   crewMcpConfig,
   crewPnpmStoreDir,
   DEFAULT_CREW_NODE,
+  eligibleToStart,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
   guardHookCommand,
@@ -51,10 +52,13 @@ import {
   MCP_PATH,
   modeOfSeat,
   NOT_ASIDE,
+  notOnBoardText,
   notReviewSeatText,
   notWatchSeatText,
   PNPM_STORE_ENV,
   REVIEW_NOT_WANTED,
+  type RepoId,
+  type RepoRules,
   ROLE_PROMPT_DIR,
   type Run,
   type RunLoop,
@@ -62,6 +66,7 @@ import {
   reworkFirstText,
   type SeatSessionRow,
   type SeatState,
+  START_NO_RULES,
   scratchStartRefusedText,
   seatCallSign,
   seatDef,
@@ -84,6 +89,7 @@ import {
   realish,
 } from "../config.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
+import { RepoRulesError } from "../engine/rules.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
@@ -147,7 +153,7 @@ const RUN_SECRET_FILE = /\.(token|mcp\.json)(\.tmp-[0-9a-f-]+)?$/;
 /**
  * What a seat of session `sessionId` may not read beyond the credential folders and the data dir,
  * deduped, in order: the hub's checkout, every loop's worktree, state dir and logs dir, every
- * other crew session's checkout, then `crew.deny_read`. The hub's checkout and each loop's
+ * other crew session's checkout and worktree folder (`<crew.worktrees>/<id>`), then `crew.deny_read`. The hub's checkout and each loop's
  * worktree are followed by their git common dir, which lies elsewhere when they are linked
  * worktrees (a loop's worktree of `~/code/shop-app`). A loop's common dir that is `<repo>/.git` is
  * followed by `<repo>` itself, the repo's main working tree (`~/code/shop-app`), unless that folder is
@@ -176,7 +182,9 @@ export function seatDenyRead(
       l.stateDir,
       ...(l.logsDir ? [l.logsDir] : []),
     ]),
-    ...(config.crew?.sessions ?? []).filter((x) => x.id !== sessionId).map((x) => x.checkout),
+    ...(config.crew?.sessions ?? [])
+      .filter((x) => x.id !== sessionId)
+      .flatMap((x) => [x.checkout, ...(config.crew ? [join(config.crew.worktrees, x.id)] : [])]),
     ...(config.crew?.denyRead ?? []),
     ...extra,
   ];
@@ -221,6 +229,10 @@ export interface SupervisorDeps {
   bus: ChangeBus;
   /** The DB path: transcripts and prompt files live in `{its dir}/crew/`. */
   dbPath: string;
+  /** A repo's board rules (read at origin/HEAD); an error refuses every start in the repo. */
+  rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
+  /** The hub's own `gh` login; null when it could not be read, so any assigned card is another's. */
+  login: () => string | null;
   now?: () => number;
   /** Default `"claude"`; tests pass `process.execPath` and the fake CLI in `commandArgs`. */
   command?: string;
@@ -361,7 +373,8 @@ export interface Supervisor {
     opts: { interrupt: boolean; questions?: "all" | "unpassed" | "none" },
   ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
-  endRun(seatId: string): Promise<void>;
+  /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
+  endRun(seatId: string, opts?: { hold?: boolean }): Promise<void>;
   /** null when the seat has no live session, or it did not answer. */
   contextUsage(seatId: string): Promise<ContextUsage | null>;
   seat(seatId: string): SeatSessionRow | null;
@@ -410,6 +423,8 @@ interface Live {
   ending: Promise<void> | null;
   /** Who is ending the run, while `ending` is set. */
   endedBy: Exclude<EndedBy, "exit"> | null;
+  /** The operator also took the seat out of rotation: it ends stopped, not idle. */
+  hold: boolean;
   /** When the rate limit that parked this turn lifts (ms); null until one comes, and after a line. */
   rateLimitedUntil: number | null;
   lastFoldAt: number;
@@ -635,7 +650,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const worktree = store.seatSession(seatId)?.worktree ?? null;
     if (l.run.reviewId != null) void dropScratch(l.info, l.run.id, l.run.seq, worktree);
     if (l.ending !== null) {
-      setSeat(seatId, { state: "stopped", reason: null, runId: null });
+      setSeat(seatId, { state: l.hold ? "stopped" : "idle", reason: null, runId: null });
     } else {
       // Neither a code nor a signal: the CLI never started (its stderr event says why).
       const how = e.code ?? e.signal;
@@ -956,6 +971,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       parkedTurn: false,
       ending: null,
       endedBy: null,
+      hold: false,
       rateLimitedUntil: null,
       lastFoldAt: 0,
       foldTimer: undefined,
@@ -1021,25 +1037,54 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /**
+   * With more than one session, worktrees still directly in `crew.worktrees` (made before each
+   * session had a folder) are readable by every seat until their runs end: said once at start.
+   */
+  function noteFlatWorktrees(): void {
+    if (!crew || crew.sessions.length < 2) return;
+    const seatIds = crew.sessions.flatMap((s) => s.seats.map((x) => x.id));
+    let names: string[];
+    try {
+      names = readdirSync(crew.worktrees);
+    } catch {
+      return;
+    }
+    const n = names.filter((name) => seatIds.some((id) => name.startsWith(`${id}-`))).length;
+    if (n > 0) {
+      log(
+        `crew: ${n} worktrees of other sessions are in the old flat layout and stay readable until their runs end`,
+      );
+    }
+  }
+
+  /**
    * Review worktrees no active run owns (left by a crash, or by a run that ended while the hub
    * was down) are removed. Never throws.
    */
   async function sweepScratch(): Promise<void> {
     if (!crew) return;
-    let names: string[];
-    try {
-      names = readdirSync(crew.worktrees);
-    } catch (e) {
-      log(`could not list ${crew.worktrees}: ${errText(e)}`);
-      return;
-    }
+    const list = (dir: string): string[] => {
+      try {
+        return readdirSync(dir);
+      } catch (e) {
+        // a session folder not made yet is not worth a line
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT" || dir === crew.worktrees) {
+          log(`could not list ${dir}: ${errText(e)}`);
+        }
+        return [];
+      }
+    };
     for (const session of crew.sessions) {
+      // a review worktree is in its session's folder, or flat if it was made before the folders
+      const found = [crew.worktrees, join(crew.worktrees, session.id)].flatMap((dir) =>
+        list(dir).map((name) => join(dir, name)),
+      );
       for (const seat of [...session.seats]) {
         if (modeOfSeat(seat) !== "scratch") continue;
         const mine = `${seat.id}-review-`;
-        for (const name of names) {
+        for (const path of found) {
+          const name = basename(path);
           if (!name.startsWith(mine) || !/^\d+$/.test(name.slice(mine.length))) continue;
-          const path = join(crew.worktrees, name);
           try {
             await inClone(session.checkout, async () => {
               // read inside the queue: a review being started by now owns its path
@@ -1184,6 +1229,35 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
+      // Every way a run starts ends here: the one eligibility check, before a worktree or a claim.
+      const board = store.board(info.repo.id);
+      const card = board.find((i) => i.issueNumber === issue);
+      if (card === undefined) throw new SupervisorError(422, notOnBoardText(ref));
+      const rules = await deps.rules(info.repo.id);
+      if (rules instanceof RepoRulesError) throw new SupervisorError(502, START_NO_RULES);
+      const refusal = eligibleToStart({
+        repoId: info.repo.id,
+        issue,
+        card: {
+          labels: ticket.labels,
+          assignees: card.assignees ?? [],
+          blockedBy: card.blockedBy,
+          size: card.size,
+        },
+        rules,
+        seat: { call: call(info), area: info.seat.area, loop: def.loop },
+        login: deps.login(),
+        hasRun:
+          store.activeTickets().has(ref) ||
+          store
+            .staleTakes(Number.POSITIVE_INFINITY)
+            .some((r) => r.repoId === info.repo.id && r.issue === issue && r.seatId !== seatId),
+        lane: config.crew?.lane,
+        laneDefault: config.crew?.laneDefault ?? false,
+        body: ticket.body,
+        closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+      });
+      if (refusal !== null) throw new SupervisorError(422, refusal);
       const title = ticket.title;
       // A planner has no branch: a detached checkout of the default branch, for reading only
       const planner = def.loop === "plan";
@@ -1193,6 +1267,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const where = {
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
+          sessionId: info.session.id,
           seatId,
           issue,
         };
@@ -1288,6 +1363,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         branch: checkout.branch,
         area: info.seat.area,
+        commands:
+          def.mode === "writer"
+            ? (info.repo.commands?.writer ?? [])
+            : (info.repo.commands?.review ?? []),
+        fullSuite: info.repo.fullSuite ?? [],
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       if (!session.alive) {
@@ -1320,6 +1400,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const c = await prepareDetachedCheckout({
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
+          sessionId: info.session.id,
           name: watchCheckoutName(seatId),
         });
         return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
@@ -1387,7 +1468,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktree: checkout.path,
       });
       const first = opts?.first;
-      const brief = watchBrief({ call: call(info), repo: info.repo.github });
+      const brief = watchBrief({
+        call: call(info),
+        repo: info.repo.github,
+        seats: info.session.seats
+          .filter((s) => seatDef(s).mode === "writer")
+          .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+      });
       await enqueue(l, () =>
         writeLine(l, first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief),
       ).catch(() => {});
@@ -1449,6 +1536,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const s = await prepareScratch({
           checkout,
           worktreesRoot: crew?.worktrees ?? "",
+          sessionId: info.session.id,
           seatId,
           reviewId,
           sha: review.sha,
@@ -1554,6 +1642,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
+        commands: info.repo.commands?.review ?? [],
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       if (!session.alive) {
@@ -1566,10 +1655,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
-  async function endRun(seatId: string): Promise<void> {
+  async function endRun(seatId: string, opts: { hold?: boolean } = {}): Promise<void> {
     const info = need(seatId);
+    // FLIGHT's seat is never dealt a ticket: ending it always benches it, or the watch restarts it
+    const hold = opts.hold ?? seatDef(info.seat).loop === "watch";
     const l = live.get(seatId);
     if (l) {
+      if (hold) l.hold = true;
       if (l.ending === null) {
         l.endedBy = "operator";
         l.ending = closeLive(l);
@@ -1599,7 +1691,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (facts) persistDigest(store, digests, run.id, facts.digest);
       store.setRunEnded(run.id, at, "ok", "operator");
     }
-    setSeat(seatId, { state: "stopped", reason: null, runId: null });
+    setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
     closeRunItems(info);
     if (open) emit({ kind: "run-ended", seatId, runId: run.id, endedBy: "operator" });
     if (run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
@@ -1868,10 +1960,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       try {
         mkdirSync(crew.worktrees, { recursive: true });
+        for (const s of crew.sessions) {
+          mkdirSync(join(crew.worktrees, s.id), { recursive: true, mode: 0o700 });
+        }
       } catch (e) {
         cannot(e);
         return;
       }
+      noteFlatWorktrees();
       for (let attempt = 0; attempt < 2 && !holdsLock; attempt++) {
         try {
           writeFileSync(lockPath(), `${process.pid}\n`, { flag: "wx", mode: 0o600 });
