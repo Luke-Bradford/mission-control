@@ -68,6 +68,7 @@ import {
   type SeatState,
   START_NO_RULES,
   scratchStartRefusedText,
+  seatBusyText,
   seatCallSign,
   seatDef,
   type TicketView,
@@ -1824,8 +1825,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
     const info = need(run.agentId);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+    // a wake, or another run starting, holds the seat
+    if (starting.has(run.agentId)) throw new SupervisorError(409, seatBusyText(call(info)));
     if (
-      starting.has(run.agentId) ||
       live.get(run.agentId)?.run.id === runId ||
       store.seatSession(run.agentId)?.runId === runId
     ) {
