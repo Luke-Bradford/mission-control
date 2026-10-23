@@ -216,7 +216,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.missioncontrol.serve
 ### Log rotation and retention
 
 Routine requests produce no request log lines. Responses with status 4xx or 5xx and requests
-taking over one second produce a summary. Other hub warnings remain logged.
+taking over one second produce a summary. Every 5xx includes its error message and stack
+through the existing redacting logger. Other hub warnings remain logged.
 
 For a launchd hub, add this entry to `/etc/newsyslog.d/mission-control.conf`, replacing
 `<home>` with the home directory and `<user>:<group>` with the hub's account and group.
@@ -235,9 +236,13 @@ therefore includes a hub restart and the crew's normal shutdown and resume. This
 the launchd job; do not install it for a manually started hub. Check the expanded entry with
 `sudo newsyslog -n -v` before enabling it. No rotation configuration is installed by the app.
 
-The existing hourly maintenance sweep deletes seat lines older than seven days, loop events
-and run evidence older than 30 days, and findings whose review was created more than 30 days
-ago. Rows exactly at the cutoff stay. Runs, reviews and flight decisions remain available to
+The hourly maintenance sweep retains seat lines for seven days after their run ends, and
+loop events and run evidence for 30 days after their run ends. Findings stay for 30 days
+after both their review and author run end. Unfinished reviews, open runs, parked and
+set-aside runs, unanswered questions, pending drafts and open attention notes protect
+their associated rows. Deletions use transactions of at most 500 rows, yield between
+batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
+Rows exactly at the cutoff stay. Runs, reviews and flight decisions remain available to
 Activity and Telemetry. Deletion makes SQLite pages reusable; it does not shrink the database
 file on disk.
 

@@ -494,9 +494,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       : false,
   });
 
+  const requestErrors = new WeakMap<object, Error>();
+  app.addHook("onError", async (req, _reply, error) => {
+    requestErrors.set(req, error);
+  });
+
+  app.addHook("preSerialization", async (req, reply, payload) => {
+    if (
+      reply.statusCode >= 500 &&
+      !requestErrors.has(req) &&
+      payload !== null &&
+      typeof payload === "object" &&
+      "error" in payload &&
+      typeof payload.error === "string"
+    ) {
+      requestErrors.set(req, new Error(payload.error));
+    }
+    return payload;
+  });
+
   app.addHook("onResponse", async (req, reply) => {
     if (reply.statusCode >= 400 || reply.elapsedTime > 1000) {
-      req.log.warn({ res: reply, responseTime: reply.elapsedTime }, "request completed");
+      const fields = { res: reply, responseTime: reply.elapsedTime };
+      if (reply.statusCode >= 500) {
+        req.log.error(
+          { ...fields, err: requestErrors.get(req) ?? new Error(`HTTP ${reply.statusCode}`) },
+          "request completed",
+        );
+      } else {
+        req.log.warn(fields, "request completed");
+      }
     }
   });
 

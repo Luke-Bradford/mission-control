@@ -2058,41 +2058,149 @@ it("retains each reopened attention episode and closes notes by run", () => {
 });
 
 describe("hub retention", () => {
-  it("prunes past each window, keeping boundary and newer rows and review history", () => {
+  it.each(["seat_lines", "loop_events", "run_evidence", "review_findings"])(
+    "protects live owners and measures expiry from completion: %s",
+    async (table) => {
+      const db = new DatabaseSync(join(dir, "mc.sqlite"));
+      const now = 100 * 86_400_000;
+      const owners = [
+        "open",
+        "parked",
+        "aside",
+        "review",
+        "recent",
+        "question",
+        "draft",
+        "attention",
+        "expired",
+      ];
+      if (table === "review_findings") owners.push("recentReview");
+      try {
+        for (const [i, id] of owners.entries()) {
+          store.upsertRun(
+            run({
+              id,
+              ticket: `repo#${i}`,
+              endedAt: id === "open" ? null : id === "recent" ? now - 1 : 1,
+              loop:
+                id === "parked"
+                  ? { ...NEW_LOOP, phase: "parked" }
+                  : id === "aside"
+                    ? { ...NEW_LOOP, aside: { worktree: "x", wake: false } }
+                    : null,
+            }),
+          );
+          db.prepare(`INSERT INTO reviews
+            (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt, round, state, created_at, ended_at)
+            VALUES (?, ?, 'repo', 'seat', 1, ?, 1, 1, 1, ?, 0, ?)`).run(
+            i + 1,
+            id,
+            id,
+            id === "review" ? "running" : "reported",
+            id === "review" ? null : id === "recent" || id === "recentReview" ? now - 1 : 1,
+          );
+          if (table === "seat_lines")
+            db.prepare("INSERT INTO seat_lines VALUES (?, ?, 'seat', 'sys', 'text', 0)").run(
+              id,
+              id,
+            );
+          if (table === "loop_events")
+            db.prepare("INSERT INTO loop_events VALUES (?, ?, 'text', 0)").run(id, id);
+          if (table === "run_evidence")
+            db.prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, 'note', 0)").run(id);
+          if (table === "review_findings")
+            db.prepare(`INSERT INTO review_findings
+            (review_id, author_run_id, pos, severity, file, line, summary, scenario, fix, state)
+            VALUES (?, ?, 0, 'minor', 'f', 1, 's', 's', 'f', 'open')`).run(i + 1, id);
+        }
+        db.exec(
+          "INSERT INTO seat_questions (agent_id, run_id, text, at) VALUES ('a1', 'question', 'q', 0)",
+        );
+        store.addDraft("repo#6", "issue", "pending", 0);
+        db.exec(
+          "INSERT INTO attention_notes (key, kind, run_id, text, at) VALUES ('n', 'test', 'attention', 'note', 0)",
+        );
+        await store.pruneHistory(now);
+        const owner = table === "review_findings" ? "author_run_id" : "run_id";
+        expect(db.prepare(`SELECT ${owner} AS owner FROM ${table} ORDER BY owner`).all()).toEqual(
+          owners
+            .filter((id) => id !== "expired")
+            .sort()
+            .map((owner) => ({ owner })),
+        );
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("bounds batches, yields between them, and caps each sweep", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      store.upsertRun(run({ endedAt: 1 }));
+      const insert = db.prepare("INSERT INTO loop_events VALUES (?, 'r1', 'text', 0)");
+      for (let i = 0; i < 5501; i++) insert.run(String(i));
+      let during = -1;
+      const observe = setImmediate(() => {
+        during = Number(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()?.n);
+      });
+      try {
+        await store.pruneHistory(100 * 86_400_000);
+        expect(during).toBe(5001);
+        expect(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()).toEqual({ n: 501 });
+        await store.pruneHistory(100 * 86_400_000);
+        expect(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()).toEqual({ n: 0 });
+      } finally {
+        clearImmediate(observe);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("prunes past each window, keeping boundary and newer rows and review history", async () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
     const now = 40 * 86_400_000;
     const week = now - 7 * 86_400_000;
     const month = now - 30 * 86_400_000;
     store.upsertRun(run());
     for (const [i, offset] of [-1, 0, 1].entries()) {
-      db.prepare("INSERT INTO seat_lines VALUES (?, 'r1', 'seat', 'sys', 'text', ?)").run(
+      store.upsertRun(run({ id: `seat${i}`, endedAt: week + offset }));
+      store.upsertRun(run({ id: `owner${i}`, endedAt: month + offset }));
+      db.prepare("INSERT INTO seat_lines VALUES (?, ?, 'seat', 'sys', 'text', ?)").run(
         String(i),
+        `seat${i}`,
         week + offset,
       );
-      db.prepare("INSERT INTO loop_events VALUES (?, 'r1', 'text', ?)").run(
+      db.prepare("INSERT INTO loop_events VALUES (?, ?, 'text', ?)").run(
         String(i),
+        `owner${i}`,
         month + offset,
       );
-      db.prepare("INSERT INTO run_evidence (run_id, note, at) VALUES ('r1', 'note', ?)").run(
+      db.prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, 'note', ?)").run(
+        `owner${i}`,
         month + offset,
       );
       db.prepare(`INSERT INTO reviews
-        (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt, round, state, created_at)
-        VALUES (?, 'r1', 'repo', 'seat', 1, ?, 1, 1, 1, 'reported', ?)`).run(
+        (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt, round, state, created_at, ended_at)
+        VALUES (?, ?, 'repo', 'seat', 1, ?, 1, 1, 1, 'reported', ?, ?)`).run(
         i + 1,
+        `owner${i}`,
         String(i),
+        0,
         month + offset,
       );
       db.prepare(`INSERT INTO review_findings
         (review_id, author_run_id, pos, severity, file, line, summary, scenario, fix, state)
-        VALUES (?, 'r1', 0, 'minor', 'file.ts', 1, 'summary', 'scenario', 'fix', 'open')`).run(
+        VALUES (?, ?, 0, 'minor', 'file.ts', 1, 'summary', 'scenario', 'fix', 'open')`).run(
         i + 1,
+        `owner${i}`,
       );
     }
     db.exec(`INSERT INTO flight_decisions (at, kind, about, decision, basis)
       VALUES (0, 'end', 'run', 'ended', 'done')`);
     try {
-      store.pruneHistory(now);
+      await store.pruneHistory(now);
       for (const table of ["seat_lines", "loop_events", "run_evidence", "review_findings"]) {
         expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 2 });
       }

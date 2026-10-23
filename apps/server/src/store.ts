@@ -64,6 +64,9 @@ import {
   type UsageSample,
 } from "@mc/core";
 
+export const HISTORY_BATCH_ROWS = 500;
+export const HISTORY_SWEEP_MAX_ROWS = 5_000;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS drafts (
   id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
@@ -1396,19 +1399,57 @@ export class Store {
     return new Map(rows.map((r) => [r.agent_id as AgentId, r.to_state as HudState]));
   }
 
-  /** The maintenance sweep keeps short-lived detail; run and review history stays. */
-  pruneHistory(now: number): void {
+  /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
+  async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
-    this.transaction(() => {
-      this.db.prepare("DELETE FROM seat_lines WHERE at < ?").run(now - 7 * day);
-      this.db.prepare("DELETE FROM loop_events WHERE at < ?").run(now - 30 * day);
-      this.db.prepare("DELETE FROM run_evidence WHERE at < ?").run(now - 30 * day);
-      this.db
-        .prepare(
-          "DELETE FROM review_findings WHERE review_id IN (SELECT id FROM reviews WHERE created_at < ?)",
-        )
-        .run(now - 30 * day);
-    });
+    const eligibleRun = `SELECT r.id FROM runs r
+      WHERE r.ended_at < ?
+        AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
+        AND json_extract(r.loop, '$.aside') IS NULL
+        AND NOT EXISTS (SELECT 1 FROM reviews v
+          WHERE (v.author_run_id = r.id OR v.run_id = r.id)
+            AND (v.ended_at IS NULL OR v.state IN ('queued', 'starting', 'running')))
+        AND NOT EXISTS (SELECT 1 FROM seat_questions q WHERE q.run_id = r.id AND q.answered_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.state = 'pending'
+          AND (d.target = r.ticket OR EXISTS (SELECT 1 FROM reviews v
+            WHERE (v.author_run_id = r.id OR v.run_id = r.id)
+              AND d.target = v.repo_id || '#' || v.pr_number)))
+        AND NOT EXISTS (SELECT 1 FROM attention_notes n WHERE n.run_id = r.id
+          AND n.cleared_at IS NULL AND n.dismissed_at IS NULL)`;
+    const tables = [
+      ["seat_lines", `run_id IN (${eligibleRun})`, now - 7 * day],
+      ["loop_events", `run_id IN (${eligibleRun})`, now - 30 * day],
+      ["run_evidence", `run_id IN (${eligibleRun})`, now - 30 * day],
+      [
+        "review_findings",
+        `author_run_id IN (${eligibleRun})
+        AND review_id IN (SELECT id FROM reviews WHERE ended_at < ?
+          AND state IN ('reported', 'failed', 'superseded'))
+        AND NOT EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
+          AND v.run_id IS NOT NULL AND v.run_id NOT IN (${eligibleRun}))`,
+        now - 30 * day,
+      ],
+    ] as const;
+    let remaining = HISTORY_SWEEP_MAX_ROWS;
+    for (const [table, condition, cutoff] of tables) {
+      const statement = this.db.prepare(
+        `DELETE FROM ${table} WHERE rowid IN
+          (SELECT rowid FROM ${table} WHERE ${condition} LIMIT ?)`,
+      );
+      while (remaining > 0) {
+        const limit = Math.min(HISTORY_BATCH_ROWS, remaining);
+        const args =
+          table === "review_findings" ? [cutoff, cutoff, cutoff, limit] : [cutoff, limit];
+        let deleted = 0;
+        this.transaction(() => {
+          deleted = Number(statement.run(...args).changes);
+        });
+        remaining -= deleted;
+        if (deleted > 0) await new Promise<void>((resolve) => setImmediate(resolve));
+        if (deleted < limit) break;
+      }
+      if (remaining === 0) break;
+    }
   }
 
   /** Deletes the state changes recorded before `olderThan`. */

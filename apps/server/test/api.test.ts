@@ -4650,6 +4650,10 @@ it("logs one response line for a 500", async () => {
   ).toBe(500);
   expect(logs).toHaveLength(1);
   expect(JSON.parse(logs[0])).toMatchObject({ res: { statusCode: 500 } });
+  expect(JSON.parse(logs[0]).err).toMatchObject({
+    message: "test failure",
+    stack: expect.stringContaining("Error: test failure"),
+  });
 });
 
 it("logs a 4xx response once", async () => {
@@ -4677,4 +4681,16 @@ it("logs a successful request taking over one second", async () => {
   ).toBe(200);
   expect(logs).toHaveLength(1);
   expect(JSON.parse(logs[0]).responseTime).toBeGreaterThan(1000);
+});
+
+it("logs the error message and stack of an explicit 5xx response", async () => {
+  updaterCheckError = new UpdateError(502, "Could not reach origin.");
+  logs.length = 0;
+  const response = await post("/api/version/check");
+  expect(response.statusCode).toBe(502);
+  expect(logs).toHaveLength(1);
+  expect(JSON.parse(logs[0]).err).toMatchObject({
+    message: "Could not reach origin.",
+    stack: expect.stringContaining("Could not reach origin."),
+  });
 });
