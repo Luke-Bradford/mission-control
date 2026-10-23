@@ -60,6 +60,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
   const [picked, setPicked] = useState<string | null>(null);
   const [session] = useSession();
   const { data: crew } = useResource<Crew>(RESOURCES.crew);
+  // The header selects repo IDs; also accept crew session IDs to show their seats.
   const seats = crew?.rows.filter(
     (r) => r.kind === "crew" && (inSession(session, r.repoId) || r.sessionId === session),
   );
@@ -112,6 +113,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
               <div key={s.name} className="pcard">
                 <b>{`${i + 1} · ${s.name}`}</b>
                 <div className="row wrap">
+                  <span className="xs muted">on this step</span>
                   {seats
                     ?.filter(
                       (r) =>

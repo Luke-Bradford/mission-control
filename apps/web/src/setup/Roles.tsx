@@ -5,6 +5,7 @@ import {
   GUARD_RULES,
   type GuardHitsView,
   type GuardRule,
+  LOCK_WAIT_MS,
   ROLES,
 } from "@mc/core";
 import { LockLines, useTestLock } from "../components/LockLines.tsx";
@@ -93,9 +94,10 @@ export function Roles() {
         </div>
         <div className="pb">
           <p className="note">
-            One full suite at a time across the machine; others wait in line, oldest first. An agent
-            that types a full-suite command directly is told to ask Mission Control instead. Max at
-            once: <b>1</b>. Single-file runs go straight through.
+            One full suite at a time across the machine; others wait in line, oldest first. A
+            full-suite command an agent types is held in the same line and runs when it reaches the
+            front; after about {LOCK_WAIT_MS / 60_000} minutes it is told to retry later or run a
+            single file. Max at once: <b>1</b>. Single-file runs go straight through.
           </p>
           <LockLines lock={lock} />
         </div>

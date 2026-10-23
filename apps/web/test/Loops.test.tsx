@@ -131,6 +131,7 @@ describe("Setup › Loops templates", () => {
       "1 running",
     );
     const card = screen.getByText("3 · implement").parentElement as HTMLElement;
+    expect(within(card).getByText("on this step")).toBeTruthy();
     expect(within(card).getByText(unsafeId)).toBeTruthy();
     expect(within(card).getByText("waiting-seat")).toBeTruthy();
     expect(card.querySelector("img")).toBeNull();

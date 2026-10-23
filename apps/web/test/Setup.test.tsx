@@ -11,6 +11,7 @@ import {
   type HealthRow,
   type LimitRow,
   LOCK_FREE_TEXT,
+  LOCK_WAIT_MS,
   PREVIEW_SERVER,
   RETRY_NOTE,
   type RepoPreview,
@@ -573,7 +574,7 @@ describe("Setup tabs", () => {
       "One full suite at a time across the machine; others wait in line, oldest first.",
     );
     expect(lock.textContent).toContain(
-      "An agent that types a full-suite command directly is told to ask Mission Control instead. Max at once: 1.",
+      `A full-suite command an agent types is held in the same line and runs when it reaches the front; after about ${LOCK_WAIT_MS / MIN} minutes it is told to retry later or run a single file. Max at once: 1.`,
     );
     expect(lock.textContent).toContain("Single-file runs go straight through.");
   });
@@ -610,7 +611,7 @@ describe("Setup tabs", () => {
     const gh = await screen.findByRole("region", { name: "GitHub" });
     expect(gh.textContent).toContain("PRs, checks and reviews per ticket.");
     expect(gh.textContent).toContain(
-      "Notifications: assigned, mentioned, review requested, comments and CI on your work feed Needs you.",
+      "Notifications: mentions of you or your team, review requests, and comments on your issues, PRs and threads feed Needs you, for the repos in your config.",
     );
     const teams = screen.getByRole("region", { name: "Microsoft Teams" });
     expect(teams.textContent).toContain("Work only; arrives in phase 5.");
@@ -685,6 +686,7 @@ describe("Setup tabs", () => {
     load();
     at("access");
     const previews = await screen.findByRole("region", { name: "What a notification looks like" });
+    expect(within(previews).getByText("samples")).toBeTruthy();
     expect(within(previews).getAllByText("Mission Control")).toHaveLength(3);
     expect(
       within(previews).getByText("A teammate asked you in Teams: is this change ready to review?"),

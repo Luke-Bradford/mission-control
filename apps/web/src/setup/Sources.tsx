@@ -76,8 +76,8 @@ export function Sources({
           ))}
           <p className="s">PRs, checks and reviews per ticket.</p>
           <p className="s">
-            Notifications: assigned, mentioned, review requested, comments and CI on your work feed{" "}
-            <b>Needs you</b>.
+            Notifications: mentions of you or your team, review requests, and comments on your
+            issues, PRs and threads feed <b>Needs you</b>, for the repos in your config.
           </p>
           <p className="note">
             Writes (comments, labels, board moves, Priority) go through approvals; nothing posts on

@@ -54,7 +54,7 @@ export function Access() {
           <p className="note">Notifications arrive in phase 4.</p>
         </div>
       </Panel>
-      <Panel title="What a notification looks like">
+      <Panel title="What a notification looks like" sub="samples">
         <div className="pb">
           <div className="notif">
             <b>Mission Control</b>
