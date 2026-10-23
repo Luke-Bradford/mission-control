@@ -69,7 +69,9 @@ export function ItemPanel() {
     setBusy(true);
     setErr(null);
     try {
-      await apiPost(ACTIONS.seatMessage(seat.id), { text: `Re: ${about}\n\n${body}` });
+      await apiPost(ACTIONS.seatMessage(seat.id), {
+        text: about === "" ? body : `Re: ${about}\n\n${body}`,
+      });
       setText("");
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
