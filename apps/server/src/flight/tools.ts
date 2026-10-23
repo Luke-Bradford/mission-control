@@ -85,6 +85,7 @@ import {
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
+  FLIGHT_POWERS,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
   FLIGHT_PROMOTES_PER_HOUR,
@@ -496,11 +497,12 @@ const SEAT_SCHEMA = {
 };
 
 /**
- * What a superuser-only FLIGHT tool checks, against the config as it is now: null when the repo has
+ * What a FLIGHT tool checks, against the config as it is now: null when the repo has at least
  * `need`, else the refusal to give. Read per call, so a lowered repo loses its tools at once.
  */
 export function requirePowers(config: CcConfig, repoId: RepoId, need: FlightPowers): Result | null {
-  if (flightPowersOf(config, repoId) === need) return null;
+  if (FLIGHT_POWERS.indexOf(flightPowersOf(config, repoId)) >= FLIGHT_POWERS.indexOf(need))
+    return null;
   const github = config.repos.find((r) => r.id === repoId)?.github;
   return { text: needsSuperuserText(github ?? repoId), isError: true };
 }

@@ -1201,6 +1201,21 @@ describe("auto update", () => {
     expect(pulls(a.calls)).toHaveLength(0);
   });
 
+  it("a later web-only commit waits behind a held range", async () => {
+    upstreamPath("apps/server/src/x.ts");
+    upstreamPath("apps/web/src/y.tsx");
+    const a = auto();
+    await expect(a.tick()).resolves.toBe("waiting");
+    expect(pulls(a.calls)).toHaveLength(0);
+    expect(a.held).toHaveBeenCalledWith({
+      commits: [
+        expect.stringContaining("apps/web/src/y.tsx"),
+        expect.stringContaining("apps/server/src/x.ts"),
+      ],
+      paths: ["apps/server/src/x.ts"],
+    });
+  });
+
   it("applies the page and docs", async () => {
     for (const p of [
       "apps/web/src/a.ts",
@@ -1230,6 +1245,27 @@ describe("auto update", () => {
     expect(e.held?.paths).toEqual(["apps/server/src/x.ts"]);
     expect(pulls(a.calls)).toHaveLength(0);
     expect(readFileSync(logPath, "utf8")).toContain("held for a person");
+  });
+
+  it("update({ auto: true }) refuses if origin/main moves after its range check", async () => {
+    upstreamPath("apps/web/src/ok.ts");
+    const f = fakeExec();
+    let tipReads = 0;
+    const { u } = updater({
+      exec: async (file, args, o) => {
+        const result = await f.exec(file, args, o);
+        if (file === "git" && args.slice(4).join(" ") === "rev-parse origin/main") {
+          tipReads++;
+          if (tipReads === 2) return { stdout: `${"f".repeat(40)}\n`, stderr: "" };
+        }
+        return result;
+      },
+    });
+    const e = (await u.update({ auto: true }).catch((x: unknown) => x)) as UpdateError;
+    expect([e.status, e.message]).toEqual([409, HUB_CODE_NEEDS_PERSON]);
+    expect(tipReads).toBe(2);
+    expect(pulls(f.calls)).toHaveLength(0);
+    expect(readFileSync(logPath, "utf8")).toContain("origin/main moved after the check");
   });
 
   it("raises the item when update() holds a range the tick's own read did not", async () => {

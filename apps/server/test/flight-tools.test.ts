@@ -495,6 +495,13 @@ describe("seat schema", () => {
 });
 
 describe("requirePowers", () => {
+  it.each(["standard", "superuser"] as const)("allows standard powers on a %s repo", (powers) => {
+    const cfg = {
+      repos: [{ id: "r", flightPowers: powers }],
+    } as CcConfig;
+    expect(requirePowers(cfg, "r", "standard")).toBeNull();
+  });
+
   it("refuses a standard repo, passes a superuser one, and reads the config each call", () => {
     const cfg = {
       repos: [{ id: "r", github: "o/r", project: 1, statusMap: {}, autonomy: "draft" }],
