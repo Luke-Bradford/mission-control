@@ -587,6 +587,36 @@ describe("answer_question", () => {
     expect(seen).toContain("flight");
   });
 
+  it("records the answer as FLIGHT to the asker, about its run's ticket", async () => {
+    live("guido-1", "r-guido", { ticket: "mc#7" });
+    const id = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Which lane?",
+      at: NOW,
+    });
+    await call("answer_question", A(id));
+    expect(store.comms(0)).toEqual([
+      { at: NOW, from: "flight-1", to: "guido-1", ticket: "mc#7", text: "Lane 2" },
+    ]);
+    expect(seen).toContain("agents");
+  });
+
+  it("records a question passed on as FLIGHT to CAPCOM, with the question's text", async () => {
+    live("guido-1", "r-guido", { ticket: "mc#7" });
+    const id = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Which lane?",
+      at: NOW,
+    });
+    await call("answer_question", { question_id: id, pass_to_operator: true, basis: "spend" });
+    expect(store.comms(0)).toEqual([
+      { at: NOW, from: "flight-1", to: "CAPCOM", ticket: "mc#7", text: "Which lane?" },
+    ]);
+    expect(seen).toContain("agents");
+  });
+
   it("returns a send failure and records nothing", async () => {
     const id = ask();
     messageImpl = async () => {
@@ -594,6 +624,7 @@ describe("answer_question", () => {
     };
     expect(await call("answer_question", A(id))).toEqual(refused("Not sent: seat is gone"));
     expect(decisions()).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
   });
 
   it("passes a question to the operator without a message", async () => {
@@ -734,6 +765,19 @@ describe("start_seat", () => {
       },
     ]);
     expect(seen).toEqual(expect.arrayContaining(["agents", "flight"]));
+  });
+
+  it("records the assignment as FLIGHT to the seat, about the ticket", async () => {
+    await start();
+    expect(store.comms(0)).toEqual([
+      {
+        at: NOW,
+        from: "flight-1",
+        to: "guido-1",
+        ticket: "mc#7",
+        text: expect.stringMatching(/^Assigned mc#7: /),
+      },
+    ]);
   });
 
   it("starts with no options when the engine is off", async () => {
@@ -1166,6 +1210,20 @@ describe("message_seat", () => {
     expect(seen).toContain("flight");
   });
 
+  it("records the message as FLIGHT to the seat, without the prefix, about its run's ticket", async () => {
+    live("guido-1", "r-guido", { ticket: "mc#7" });
+    await call("message_seat", M());
+    expect(store.comms(0)).toEqual([
+      { at: NOW, from: "flight-1", to: "guido-1", ticket: "mc#7", text: "Please push" },
+    ]);
+    expect(seen).toContain("agents");
+  });
+
+  it("records a message to a seat with no run against no ticket", async () => {
+    await call("message_seat", M());
+    expect(store.comms(0).map((c) => c.ticket)).toEqual([null]);
+  });
+
   it("asks the supervisor to close no questions", async () => {
     await call("message_seat", M());
     expect(messageCalls[0]?.[2]).toEqual({ interrupt: false, questions: "none" });
@@ -1207,6 +1265,7 @@ describe("message_seat", () => {
     };
     expect(await call("message_seat", M())).toEqual(refused("Not sent: no process"));
     expect(decisions()).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
   });
 });
 

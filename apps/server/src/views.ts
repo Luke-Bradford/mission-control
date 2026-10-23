@@ -5,7 +5,7 @@
 import {
   ACTIVITY_LIMIT,
   ACTIVITY_WINDOW_MS,
-  type ActivityEvent,
+  type ActivityRow,
   type AgentId,
   type AgentNumbers,
   BOARD_DONE_MS,
@@ -151,10 +151,10 @@ export function overview(
  * configured agents, escalations opened, collectors currently failing (at their latest status),
  * and board Status moves that finished.
  */
-export function activity(config: CcConfig, store: Store, now: number): ActivityEvent[] {
+export function activity(config: CcConfig, store: Store, now: number): ActivityRow[] {
   const since = now - ACTIVITY_WINDOW_MS;
   const known = new Set<AgentId>(agentIds(config));
-  const events: ActivityEvent[] = [];
+  const events: ActivityRow[] = [];
   const cache: PrCache = new Map();
   const plain = { ref: null, url: null, status: null, prs: [], summary: null };
   for (const r of store.runsOverlapping(since, now)) {
@@ -247,6 +247,18 @@ export function activity(config: CcConfig, store: Store, now: number): ActivityE
   }
   for (const e of store.hubEvents(since)) {
     events.push({ ...plain, at: e.at, who: HUB_EVENT_WHO, kind: "state", text: e.text });
+  }
+  // CAPCOM and MC are not agents, so comms rows are not filtered by `known`.
+  for (const c of store.comms(since)) {
+    events.push({
+      ...plain,
+      at: c.at,
+      who: c.from,
+      to: c.to,
+      kind: "comms",
+      text: c.text,
+      ref: c.ticket,
+    });
   }
   // A PR is the work of the agent whose run published it, else of its repo.
   const publisher = new Map<string, AgentId>();
