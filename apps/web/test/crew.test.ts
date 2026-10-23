@@ -8,8 +8,12 @@ import {
   isFinishedWork,
   isLoopInFlight,
   LOOP_PATH_TITLE,
+  lockSince,
   loopLine,
   loopMarks,
+  loopStepLabel,
+  loopTemplate,
+  loopTryText,
   modelLine,
   needLine,
   needsLamp,
@@ -20,6 +24,8 @@ import {
   sparkValues,
   stopLine,
   tokensPerMinute,
+  WAIT_TEXT,
+  waitText,
 } from "../src/crew.ts";
 import { crewRow, item as fixtureItem, HOUR, item, MIN, NOW, stoppedSeat } from "./fixtures.ts";
 
@@ -565,6 +571,92 @@ describe("loopMarks", () => {
 
   it("the step bar's tooltip is the path", () => {
     expect(LOOP_PATH_TITLE).toBe("Working → CI → In review → Done");
+  });
+});
+
+describe("waitText", () => {
+  const loop = (phase: CrewLoop["phase"], over: Partial<CrewLoop> = {}): CrewLoop => ({
+    phase,
+    text: "x",
+    prNumber: null,
+    parked: null,
+    ...over,
+  });
+  const CALL = "GUIDO-1";
+
+  it.each([
+    ["ci", "ci", "waiting on CI"],
+    ["retro", "review", "waiting on RETRO's review"],
+    ["main", "review", "waiting on main: updating the branch"],
+  ] as const)("%s", (wait, phase, text) => {
+    expect(waitText(loop(phase, { wait }), CALL, null, NOW)).toBe(text);
+  });
+
+  it("operator: a park reason, none, and in review", () => {
+    expect(
+      waitText(loop("parked", { wait: "operator", parked: "CI failed 3 times" }), CALL, null, NOW),
+    ).toBe("waiting on you: CI failed 3 times");
+    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
+    expect(waitText(loop("review", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
+  });
+
+  it("lock: timed from when the run joined the line, else bare", () => {
+    const l = loop("working", { wait: "lock" });
+    expect(waitText(l, CALL, NOW - 65_000, NOW)).toBe("in line for the test lock · 1:05");
+    expect(waitText(l, CALL, null, NOW)).toBe(WAIT_TEXT.lock);
+  });
+
+  it("seat: names the call sign", () => {
+    expect(waitText(loop("review", { wait: "seat" }), CALL, null, NOW)).toBe(
+      "waiting on GUIDO-1 for rework",
+    );
+  });
+
+  it("nothing: wait null or missing", () => {
+    expect(waitText(loop("working", { wait: null }), CALL, null, NOW)).toBeNull();
+    expect(waitText(loop("working"), CALL, null, NOW)).toBeNull();
+  });
+});
+
+describe("lockSince", () => {
+  const lock = {
+    holder: null,
+    waiting: [
+      { runId: "r-1", seatId: "guido-1", since: 5 },
+      { runId: "r-1", seatId: "guido-1", since: 9 },
+    ],
+  };
+  it("is the first entry's since for the run, else null", () => {
+    expect(lockSince(lock, "r-1")).toBe(5);
+    expect(lockSince(lock, "r-2")).toBeNull();
+    expect(lockSince(lock, null)).toBeNull();
+    expect(lockSince(undefined, "r-1")).toBeNull();
+  });
+});
+
+describe("loopTryText", () => {
+  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  it("shows the try from the second on", () => {
+    expect(loopTryText({ ...base, tries: { n: 2, max: 3 } })).toBe(" · try 2 of 3");
+    expect(loopTryText({ ...base, tries: { n: 1, max: 3 } })).toBe("");
+    expect(loopTryText({ ...base, tries: null })).toBe("");
+    expect(loopTryText(base)).toBe("");
+  });
+});
+
+describe("loopStepLabel", () => {
+  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  it("is the profile's step, else the phase label", () => {
+    expect(loopStepLabel({ ...base, step: "verify" })).toBe("verify");
+    expect(loopStepLabel(base)).toBe("CI");
+  });
+});
+
+describe("loopTemplate", () => {
+  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  it("is the run's profile, else the build loop", () => {
+    expect(loopTemplate({ ...base, profile: "hotfix" })).toBe("hotfix");
+    expect(loopTemplate(base)).toBe("build");
   });
 });
 

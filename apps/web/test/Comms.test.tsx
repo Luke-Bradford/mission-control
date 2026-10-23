@@ -10,14 +10,7 @@ import {
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Comms } from "../src/pages/Comms.tsx";
-import {
-  setDockTab,
-  setFlightUnread,
-  toggleDock,
-  useDock,
-  useDockTab,
-  useItem,
-} from "../src/shell/overlays.ts";
+import { setFlightUnread, toggleDock, useDock, useItem } from "../src/shell/overlays.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -823,15 +816,10 @@ describe("Guard drawer", () => {
 describe("Needs you: FLIGHT replied", () => {
   function DockProbe() {
     const dock = useDock();
-    const tab = useDockTab();
-    return (
-      <span data-testid="dock">
-        {dock.visible ? "visible" : "hidden"} {tab}
-      </span>
-    );
+    return <span data-testid="dock">{dock.visible ? "visible" : "hidden"}</span>;
   }
 
-  it("shows while a reply is unread, and opens the dock on Chat", async () => {
+  it("shows while a reply is unread, and opens the dock", async () => {
     stub([]);
     render(
       <>
@@ -842,14 +830,13 @@ describe("Needs you: FLIGHT replied", () => {
     await screen.findByText("Nothing needs you right now.");
     act(() => {
       toggleDock(false);
-      setDockTab("feed");
       setFlightUnread(2);
     });
     const row = (await screen.findByText("FLIGHT replied (2)")).closest(".nrow") as HTMLElement;
     expect(within(row).queryByRole("button", { name: "Ack" })).toBeNull();
-    expect(screen.getByTestId("dock").textContent).toBe("hidden feed");
+    expect(screen.getByTestId("dock").textContent).toBe("hidden");
     fireEvent.click(within(row).getByRole("button", { name: "Open the chat" }));
-    expect(screen.getByTestId("dock").textContent).toBe("visible chat");
+    expect(screen.getByTestId("dock").textContent).toBe("visible");
     act(() => setFlightUnread(0));
     expect(screen.queryByText(/FLIGHT replied/)).toBeNull();
   });

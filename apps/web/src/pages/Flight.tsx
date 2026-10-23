@@ -1,12 +1,15 @@
-import { FLIGHT_NOT_RUNNING } from "@mc/core";
+import { AskedOfYou } from "../flight/AskedOfYou.tsx";
+import { BriefPanel, WatchList } from "../flight/Brief.tsx";
 import { Decided } from "../flight/Decided.tsx";
+import { Incoming } from "../flight/Incoming.tsx";
 import { Situation } from "../flight/Situation.tsx";
 import { WorkInFlight } from "../flight/WorkInFlight.tsx";
+import { WorkingLog } from "../flight/WorkingLog.tsx";
 import { Panel } from "../hud/Panel.tsx";
 
-const Waiting = () => <p className="pb note">{FLIGHT_NOT_RUNNING}</p>;
+export const DRAFTS_NOT_TRACKED = "Drafts are not tracked yet.";
 
-/** FLIGHT (catalogue §2.2): the head agent's picture of the work. Its own panels wait for FLIGHT. */
+/** FLIGHT (catalogue §2.2): the head agent's picture of the work, and its living brief. */
 export function Flight() {
   return (
     <section id="page-flight">
@@ -16,7 +19,7 @@ export function Flight() {
         title="Asked of you"
         sub="people waiting on a reply from you, with FLIGHT's take · first, because a person is waiting"
       >
-        <Waiting />
+        <AskedOfYou />
       </Panel>
       <Panel
         id="wifP"
@@ -27,10 +30,10 @@ export function Flight() {
       </Panel>
       <div className="fgrid">
         <Panel id="incP" title="Incoming" sub="what arrived and what FLIGHT did with it">
-          <Waiting />
+          <Incoming />
         </Panel>
         <Panel id="watchP" title="Watch list" sub="what FLIGHT is keeping an eye on">
-          <Waiting />
+          <WatchList />
         </Panel>
         <div className="col free">
           <Panel
@@ -38,13 +41,15 @@ export function Flight() {
             title="Drafts for you to send"
             sub="Mission Control never messages people itself"
           >
-            <Waiting />
+            <p className="pb note">{DRAFTS_NOT_TRACKED}</p>
           </Panel>
           <Panel id="decidedP" title="Decided without you" sub="today · overturn any">
             <Decided />
           </Panel>
         </div>
       </div>
+      <BriefPanel />
+      <WorkingLog />
     </section>
   );
 }
