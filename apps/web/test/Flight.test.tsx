@@ -1,4 +1,5 @@
 import {
+  type CrewLoop,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
   type FlightBriefSectionKey,
@@ -18,6 +19,7 @@ import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
 import { rel } from "../src/fmt.ts";
 import { type PersonThreadView, whereOf } from "../src/notifications.ts";
 import { Flight } from "../src/pages/Flight.tsx";
+import { agentPath, PAGE_PATHS } from "../src/router.ts";
 import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
@@ -424,6 +426,105 @@ describe("FLIGHT page", () => {
         cls: c.className.replace("wstep", "").trim(),
         title: c.title,
       }));
+
+    const profileLoop: CrewLoop = {
+      phase: "ci",
+      text: "Verifying",
+      prNumber: null,
+      parked: null,
+      profile: "ticket-template",
+      step: "verify",
+      steps: [
+        { name: "plan", phase: null },
+        { name: "implement", phase: "working" },
+        { name: "verify", phase: "ci" },
+        { name: "review", phase: "review" },
+        { name: "draft PR", phase: null },
+      ],
+      planned: true,
+    };
+
+    it("renders the run's five template steps and marks the current step", async () => {
+      stubWith([seatRow({ hudState: "running", loop: profileLoop })]);
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      expect(cells(list)).toEqual([
+        { text: "plan", cls: "d", title: "" },
+        { text: "implement", cls: "d", title: "" },
+        { text: "verify", cls: "c", title: "" },
+        { text: "review", cls: "", title: "" },
+        { text: "draft PR", cls: "", title: "" },
+      ]);
+      expect(list.querySelector('[aria-current="step"]')?.textContent).toBe(profileLoop.step);
+    });
+
+    it.each([false, true])(
+      "counts fixes under their own step when present (%s)",
+      async (ownFix) => {
+        const steps = profileLoop.steps?.map((s) =>
+          ownFix && s.phase === "working" ? { ...s, name: "fix" } : s,
+        );
+        stubWith(
+          [seatRow({ loop: { ...profileLoop, steps, phase: "review", step: "review" } })],
+          runLoop([
+            aTry("working", 1, "pass"),
+            ...(!ownFix ? [aTry("review", 1, "fail")] : []),
+            { ...aTry("review", 1, "pass"), fix: true },
+          ]),
+        );
+        render(<Flight />);
+        const list = await screen.findByRole("list", { name: "Crew runs" });
+        const repeated = ownFix ? "fix" : "review";
+        await waitFor(() => expect(cells(list).some((c) => c.text === `${repeated}×2`)).toBe(true));
+        expect(cells(list)[ownFix ? 1 : 3]?.title).toBe(`${repeated} · 2 tries`);
+        expect(cells(list)[ownFix ? 3 : 1]?.text).toBe(ownFix ? "review" : "implement");
+        expect(cells(list)[ownFix ? 3 : 1]?.title).toBe(ownFix ? "" : "implement · 1 try");
+      },
+    );
+
+    it.each(["click", "Enter"])("opens the run's seat from a row %s", async (action) => {
+      window.history.replaceState(null, "", PAGE_PATHS.flight);
+      stubWith([seatRow({ id: "guido-2", loop: profileLoop })]);
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const link = within(list).getByRole("link", { name: /^guido-2/ });
+      const row = link.closest(".row") as HTMLElement;
+      expect(row.getAttribute("role")).toBeNull();
+      expect(row.getAttribute("aria-label")).toBeNull();
+      expect(row.hasAttribute("tabindex")).toBe(false);
+      expect(
+        within(row)
+          .getAllByRole("link")
+          .every((el) => el.tagName === "A"),
+      ).toBe(true);
+      expect(row.querySelectorAll(`a[href="${agentPath("guido-2")}"]`)).toHaveLength(1);
+      expect(link.tagName).toBe("A");
+      expect(link.getAttribute("href")).toBe(agentPath("guido-2"));
+      expect(link.getAttribute("aria-label")).toBeNull();
+      link.focus();
+      expect(document.activeElement).toBe(link);
+      if (action === "Enter") {
+        expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(true);
+        // jsdom does not synthesize a native anchor's Enter activation click.
+        fireEvent.click(link, { detail: 0 });
+      } else fireEvent.click(link);
+      expect(window.location.pathname).toBe(agentPath("guido-2"));
+      expect(link.tabIndex).toBe(0);
+    });
+
+    it("leaves ticket and PR links to their own destinations", async () => {
+      window.history.replaceState(null, "", PAGE_PATHS.flight);
+      stubWith([seatRow({ loop: { ...profileLoop, prNumber: 9 } })]);
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      const links = list.querySelectorAll<HTMLAnchorElement>('a[href^="https://github.com/"]');
+      expect(links.length).toBeGreaterThanOrEqual(2);
+      for (const link of links) {
+        fireEvent.click(link);
+        fireEvent.keyDown(link, { key: "Enter" });
+        expect(window.location.pathname).toBe(PAGE_PATHS.flight);
+      }
+    });
 
     it("a run in review after two CI tries: Working and CI done, In review current, Done to do", async () => {
       const loop = {

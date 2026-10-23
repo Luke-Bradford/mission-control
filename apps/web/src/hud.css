@@ -1212,6 +1212,24 @@ main > section {
 .stepbar i.w {
   background: var(--warn-mark);
 }
+/* Work in flight: stretch the agent link across the row, keeping ticket and PR links above it. */
+#wifP .row {
+  position: relative;
+  cursor: pointer;
+}
+#wifP .row:hover {
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+#wifP .agent-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+#wifP .row .rref a {
+  position: relative;
+  z-index: 1;
+}
 /* Work in flight: a cell per step, marked as the step bar is (d done, c current, w held) */
 .wsteps {
   display: inline-flex;
