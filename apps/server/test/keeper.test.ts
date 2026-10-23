@@ -15,7 +15,6 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { expectNoLeftovers } from "./leftovers.ts";
 import {
   endKeeper,
   HUB_ABSENT_TEXT,
@@ -30,6 +29,7 @@ import {
   readPidFile,
   runKeeper,
 } from "../src/runtime/keeper.ts";
+import { expectNoLeftovers } from "./leftovers.ts";
 
 let dir: string;
 let transcript: string;

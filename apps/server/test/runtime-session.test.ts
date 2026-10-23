@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { type ControlSubtype, type SessionEvent, STDERR_TEXT_MAX } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { endKeeper } from "../src/runtime/keeper.ts";
-import { expectNoLeftovers } from "./leftovers.ts";
 import { type CrewSession, startSession } from "../src/runtime/session.ts";
+import { expectNoLeftovers } from "./leftovers.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const KEEPER = fileURLToPath(new URL("../src/runtime/keeper-cli.ts", import.meta.url));
