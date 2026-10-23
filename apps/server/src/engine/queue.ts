@@ -32,7 +32,8 @@ import {
 } from "@mc/core";
 import type { CardNow } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
-import { CheckoutError } from "../runtime/checkouts.ts";
+import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
+import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { wakeDueAsideRun } from "./aside.ts";
@@ -71,6 +72,8 @@ export interface TakeDeps {
   rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** The card as GitHub has it now (the issue and its project item); null when it is not there. */
   readCard: (repoId: RepoId, issue: number) => Promise<CardNow | null>;
+  /** Git in the session's clone (default `crewGit` on the clone's own git dir); tests fake it. */
+  git?: (checkout: string, args: string[], timeoutMs: number) => Promise<string>;
   /** false: a preview, crew off, or loop writes disabled; nothing is taken. */
   enabled: boolean;
   now: () => number;
@@ -351,6 +354,33 @@ async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConf
   ]);
 }
 
+/** The first of the ticket's branches on origin that no run of this hub is on, else null. */
+async function foreignBranch(
+  deps: TakeDeps,
+  checkout: string,
+  repoId: RepoId,
+  issue: number,
+): Promise<string | null> {
+  const git =
+    deps.git ??
+    (async (cwd, args, timeoutMs) => {
+      const common = await cloneGitDir(cwd);
+      return crewGit(cwd, args, common, { gitDir: common, timeoutMs });
+    });
+  const out = await git(
+    checkout,
+    ["ls-remote", "--heads", "origin", `feature/${issue}`, `feature/${issue}-*`],
+    CREW_GIT_SLOW_MS,
+  );
+  for (const line of out.split("\n")) {
+    const name = line.split("\t")[1]?.trim();
+    if (name === undefined || !name.startsWith("refs/heads/")) continue;
+    const branch = name.slice("refs/heads/".length);
+    if (!deps.store.hasRunOnBranch(repoId, branch)) return branch;
+  }
+  return null;
+}
+
 /**
  * The seat's next queued ticket, started as a looped run. Nothing happens for a draft repo, a
  * preview, a seat that is not idle or has a run, or an account at its quota stop.
@@ -387,6 +417,40 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (latest === null || hudColumnOf(latest) !== "Ready" || claimedByOther(latest, deps.login)) {
     store.untake(seatId, repoId, issue);
     deps.log?.(`${seatId}: ${ref} is no longer Ready and unclaimed on GitHub`);
+    return;
+  }
+  // GitHub's API can lag behind another hub's claim; origin's refs do not. A branch for the ticket
+  // that no run of this hub made is another hub's work.
+  let foreign: string | null;
+  try {
+    foreign = await foreignBranch(deps, found.session.checkout, repoId, issue);
+  } catch (e) {
+    if (!(e instanceof CheckoutError)) {
+      store.untake(seatId, repoId, issue);
+      deps.log?.(`${seatId}: could not list origin's branches for ${ref}: ${takeReason(e)}`);
+      return;
+    }
+    // a broken clone: startRun refuses it the same way, and counts it toward the take-stuck note
+    foreign = null;
+  }
+  if (foreign !== null) {
+    store.dropQueued(seatId, repoId, issue);
+    deps.log?.(`${seatId}: ${ref} already has a branch on origin (${foreign}); not started`);
+    // without a note the next refill deals the card again and it holds up the rest of the queue
+    store.raiseNote({
+      key: `${TAKE_FAILED_KEY_PREFIX}${ref}`,
+      kind: "question",
+      runId: null,
+      seatId,
+      repoId,
+      text: fillLoopText(TAKE_FAILED_TEXT, {
+        call: seatCallSign(seatId),
+        ref,
+        reason: `it already has a branch on origin (${foreign})`.slice(0, REASON_MAX),
+      }),
+      at: deps.now(),
+    });
+    deps.onNotes?.();
     return;
   }
   try {
