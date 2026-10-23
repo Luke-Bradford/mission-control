@@ -1182,7 +1182,8 @@ function gitReadOnly(sub: string, rest: readonly string[]): boolean {
 /**
  * What a scratch seat may write with git, beyond the reads: put files back in its throwaway copy
  * (`restore <path>`, `checkout -- <path>`). No global options (`-C`, `-c`, `--git-dir` point git
- * elsewhere or set config). Never `stash`: the copy is a worktree of the crew clone, so
+ * elsewhere or set config; so do `GIT_*` environment variables, which the caller checks since
+ * the command line is normalised before this sees it). Never `stash`: the copy is a worktree of the crew clone, so
  * `refs/stash` is shared with the writer seats.
  */
 function gitScratchRestore(args: readonly string[], sub: string, rest: readonly string[]): boolean {
@@ -1326,6 +1327,8 @@ export function guardDecision(e: GuardEvent, ctx: GuardContext): GuardVerdict {
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
   if (e.tool !== "Bash") return { kind: "allow" };
+  // a GIT_* assignment anywhere in the line (prefix, `env`, `export`) is a global option too
+  const gitEnv = /\bGIT_[A-Za-z0-9_]*=/.test(e.input.command ?? "");
   let lock: string | null = null;
   let backgroundSuite = false;
   const walk = newWalk();
@@ -1346,7 +1349,7 @@ export function guardDecision(e: GuardEvent, ctx: GuardContext): GuardVerdict {
       if (
         g !== null &&
         !gitReadOnly(g.sub, g.rest) &&
-        !(ctx.mode === "scratch" && gitScratchRestore(args, g.sub, g.rest))
+        !(ctx.mode === "scratch" && !gitEnv && gitScratchRestore(args, g.sub, g.rest))
       ) {
         return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
       }

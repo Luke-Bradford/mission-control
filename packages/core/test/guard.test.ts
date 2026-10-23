@@ -67,6 +67,7 @@ describe("scratch mode", () => {
       "git log",
       "git show HEAD",
       "git restore a.ts && pnpm -s vitest run a.test.ts",
+      "GIT_DIR=/x git status",
     ]) {
       expect(ruleOf(bash(c), scratch), c).toBe("allow");
     }
@@ -97,6 +98,12 @@ describe("scratch mode", () => {
       "git -C ../other restore a.ts",
       "git -c core.hooksPath=/x restore a.ts",
       "git --git-dir=/x restore a.ts",
+      "GIT_DIR=/x git restore a.ts",
+      "GIT_WORK_TREE=/x git checkout -- a.ts",
+      "GIT_INDEX_FILE=/x git restore --staged a.ts",
+      "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x git checkout -- a.ts",
+      "env GIT_DIR=/x git restore a.ts",
+      "export GIT_DIR=/x; git restore a.ts",
       "git config user.name x",
       "git fetch",
       "git pull",
