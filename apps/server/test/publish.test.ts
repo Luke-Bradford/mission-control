@@ -34,6 +34,7 @@ import {
   createPublisher,
   EARLIER_PR_OPEN,
   EMPTY_LOG,
+  MERGE_CONFLICTING,
   MERGE_PR_NOT_RUNS,
   NO_FAILED_RUN,
   REVIEW_STATUS_FAILED,
@@ -1172,7 +1173,7 @@ describe("merge steps", () => {
           "12",
           "--repo=o/mc",
           "--json",
-          "state,headRefOid,baseRefName,headRefName,isCrossRepository",
+          "state,headRefOid,baseRefName,headRefName,isCrossRepository,mergeable",
         ],
         ["pr", "merge", "12", "--repo=o/mc", "--merge", `--match-head-commit=${SHA}`],
       ]);
@@ -1183,6 +1184,18 @@ describe("merge steps", () => {
       ghAnswers = [view("MERGED")];
       expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
       expect(ghCalls).toHaveLength(1);
+    });
+
+    it("refuses a conflicting PR transiently without attempting to merge", async () => {
+      mainSame();
+      ghAnswers = [view("OPEN", SHA, { mergeable: "CONFLICTING" })];
+      expect(await publisher().merge(R, SHA)).toEqual({
+        ok: false,
+        text: MERGE_CONFLICTING,
+        transient: true,
+      });
+      expect(MERGE_CONFLICTING).toBe("the PR conflicts with main");
+      expect(ghCalls.map((c) => c[1])).toEqual(["view"]);
     });
 
     it("refuses finally when the head is not the sha", async () => {
@@ -1196,12 +1209,20 @@ describe("merge steps", () => {
       expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: false });
     });
 
-    it("sends nothing and refuses transiently when main has moved past the branch", async () => {
+    it("merges when main has moved past the branch without checking ancestry", async () => {
       mainSame();
       gitAnswers[`merge-base --is-ancestor ${MAIN} ${SHA}`] = exit1;
-      ghAnswers = [view("OPEN")];
-      expect(await publisher().merge(R, SHA)).toMatchObject({ ok: false, transient: true });
-      expect(ghCalls).toHaveLength(1);
+      ghAnswers = [view("OPEN"), ok];
+      expect(await publisher().merge(R, SHA)).toEqual({ ok: true });
+      expect(ghCalls).toContainEqual([
+        "pr",
+        "merge",
+        "12",
+        "--repo=o/mc",
+        "--merge",
+        `--match-head-commit=${SHA}`,
+      ]);
+      expect(gitCalls.some((args) => args[0] === "merge-base")).toBe(false);
     });
 
     it("refuses transiently when gh merge fails", async () => {
@@ -1226,6 +1247,43 @@ describe("merge steps", () => {
         expect(ghCalls.filter((c) => c[1] === "merge")).toEqual([]);
         ghCalls = [];
       }
+    });
+
+    it("answers a refused merge with the conflict when GitHub now reports one", async () => {
+      mainSame();
+      ghAnswers = [
+        view("OPEN"),
+        () => ({ code: 1, stdout: "", stderr: "Pull request o/mc#12 is not mergeable" }),
+        view("OPEN", SHA, { mergeable: "CONFLICTING" }),
+      ];
+      expect(await publisher().merge(R, SHA)).toEqual({
+        ok: false,
+        text: MERGE_CONFLICTING,
+        transient: true,
+      });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "merge", "view"]);
+    });
+
+    it.each(["MERGEABLE", "UNKNOWN"])(
+      "keeps gh's own refusal when the PR still reads %s, so the engine counts it",
+      async (mergeable) => {
+        mainSame();
+        ghAnswers = [
+          view("OPEN"),
+          () => ({ code: 1, stdout: "", stderr: "the base branch policy prohibits the merge" }),
+          view("OPEN", SHA, { mergeable }),
+        ];
+        const r = await publisher().merge(R, SHA);
+        expect(r).toMatchObject({ ok: false, transient: true });
+        expect(r.ok === false && r.text).not.toBe(MERGE_CONFLICTING);
+      },
+    );
+
+    it("reports a conflict before the base check", async () => {
+      mainSame();
+      ghAnswers = [view("OPEN", SHA, { baseRefName: "release", mergeable: "CONFLICTING" })];
+      expect(await publisher().merge(R, SHA)).toMatchObject({ text: MERGE_CONFLICTING });
+      expect(gitCalls).toEqual([]);
     });
 
     it("counts a merge whose reply was lost as success when the PR is then merged", async () => {
