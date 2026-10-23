@@ -28,20 +28,22 @@ export function Incoming() {
   if (!data) return <p className="pb note">{DASH}</p>;
   const rows = data.entries
     .map((entry) => {
-      const match = /^(.*)#(\d+)$/.exec(entry.arrivalId);
+      const match = entry.source === "Board" ? /^(.*)#(\d+)$/.exec(entry.arrivalId) : null;
       const thread = [...(notes?.open ?? []), ...(notes?.handledToday ?? [])].find(
         (t) => t.id === entry.arrivalId,
       );
       const repoId = match?.[1] ?? thread?.repoId;
       const repo = repos.find((r) => r.id === repoId);
-      const number = match?.[2] ?? thread?.number;
+      const number = match?.[2];
       const url =
         thread && "url" in thread
           ? thread.url
           : repo && number
             ? githubItemHref(repo.github, "issue", Number(number))
             : undefined;
-      let href = url ? githubHref(url) : null;
+      // Handled notifications have no source URL or issue/PR kind. Only Board
+      // identities are known to name issues; never guess a notification destination.
+      let href = entry.source !== "Teams" && url ? githubHref(url) : null;
       if (entry.source === "Teams" && url) {
         try {
           const source = new URL(url);

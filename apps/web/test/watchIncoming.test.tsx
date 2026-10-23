@@ -235,3 +235,99 @@ it("preserves source destinations and refuses unsafe URLs", async () => {
   expect(screen.getByRole("link", { name: "Source 1" }).getAttribute("href")).toBe(urls[1]);
   expect(screen.queryByRole("link", { name: "Source 2" })).toBeNull();
 });
+
+it.each(["GitHub", "Teams"])(
+  "does not guess an issue URL for a handled %s arrival",
+  async (source) => {
+    stubFetch({
+      "/api/flight/incoming": {
+        entries: [
+          {
+            id: "record",
+            source,
+            arrivalId: "thread",
+            version: "1",
+            arrivedAt: 1,
+            at: 1,
+            outcome: "No action",
+            text: "Handled source",
+            detail: "Recorded reason",
+          },
+        ],
+      },
+      "/api/repos": [{ id: "demo", github: "example/demo" }],
+      "/api/notifications": {
+        open: [],
+        handledToday: [{ id: "thread", repoId: "demo", number: 7 }],
+      },
+    });
+    render(<Incoming />);
+    await screen.findByText("Handled source");
+    expect(screen.queryByRole("link", { name: "Handled source" })).toBeNull();
+  },
+);
+
+it("rejects a GitHub URL for a Teams arrival", async () => {
+  stubFetch({
+    "/api/flight/incoming": {
+      entries: [
+        {
+          id: "record",
+          source: "Teams",
+          arrivalId: "thread",
+          version: "1",
+          arrivedAt: 1,
+          at: 1,
+          outcome: "No action",
+          text: "Teams source",
+          detail: "Recorded reason",
+        },
+      ],
+    },
+    "/api/notifications": {
+      open: [{ id: "thread", repoId: "demo", url: "https://github.com/example/demo/issues/7" }],
+      handledToday: [],
+    },
+  });
+  render(<Incoming />);
+  await screen.findByText("Teams source");
+  expect(screen.queryByRole("link", { name: "Teams source" })).toBeNull();
+});
+
+it.each(["guard", "agents"] as const)(
+  "recovers a server-filtered watch row on %s updates without activating it",
+  async (topic) => {
+    let blocked = false;
+    const fetch = stubFetch({
+      "/api/flight/brief": () => ({
+        status: 200,
+        body: { session: "demo", sections: [], watch: blocked ? [watch] : [] },
+      }),
+      "/api/test-lock": () => ({
+        status: 200,
+        body: {
+          holder: { runId: "run", seatId: "seat", since: 10, command: "suite" },
+          waiting:
+            blocked || topic === "agents"
+              ? [{ runId: "other", seatId: "other", since: 11, command: "suite" }]
+              : [],
+        },
+      }),
+      "/api/crew": () => ({
+        status: 200,
+        body: {
+          rows: [{ id: "seat", hudState: blocked || topic === "guard" ? "stalled" : "working" }],
+        },
+      }),
+    });
+    render(<WatchList />);
+    await screen.findByText("FLIGHT is not watching anything yet.");
+    blocked = true;
+    act(() => hub.refetchTopic(topic));
+    await screen.findByRole("button", { name: "Stop the run" });
+    expect(
+      fetch.mock.calls.filter(([path]) => path === "/api/flight/brief").length,
+    ).toBeGreaterThan(1);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  },
+);
