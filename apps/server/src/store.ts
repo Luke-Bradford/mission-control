@@ -21,6 +21,7 @@ import {
   type HealthRow,
   type HudState,
   inferTicket,
+  type LoopEvent,
   type MachineSample,
   type MoveColumn,
   type PullRequestView,
@@ -334,14 +335,6 @@ export interface SeatLine {
   runId: string;
   seatId: string;
   origin: SeatLineOrigin;
-  text: string;
-  at: number;
-}
-
-/** One Activity `loop` row. */
-export interface LoopEvent {
-  key: string;
-  runId: string;
   text: string;
   at: number;
 }

@@ -3541,15 +3541,40 @@ describe("the first loop's engine", () => {
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
     store.addLoopEvent("k1", "looped", "reported; pushing", NOW);
     store.addLoopEvent("k2", "plain", "other", NOW);
-    expect((await get("/api/runs/looped/loop")).json()).toEqual({
+    if (config.crew) config.crew.runTokenBudget = 100_000;
+    const body = (await get("/api/runs/looped/loop")).json();
+    expect(body).toMatchObject({
       runId: "looped",
       loop,
       events: [{ key: "k1", runId: "looped", text: "reported; pushing", at: NOW }],
+      round: 1,
+      budget: 100_000,
+      review: null,
     });
+    expect(body.tries.map((t: { step: string }) => t.step)).toEqual(["working", "ci"]);
+    store.setRunLoop("looped", { ...loop, budgetExtra: 5000 });
+    expect((await get("/api/runs/looped/loop")).json().budget).toBe(105_000);
+    const claim = (n: number) =>
+      store.claimLine(`fix:looped:${loop.epoch}:${n}`, {
+        runId: "looped",
+        seatId: "guido-1",
+        origin: "engine",
+        text: "fix",
+        at: NOW,
+      });
+    claim(1);
+    claim(2);
+    expect((await get("/api/runs/looped/loop")).json().round).toBe(3);
+    claim(3);
+    expect((await get("/api/runs/looped/loop")).json().round).toBe(3);
     expect((await get("/api/runs/plain/loop")).json()).toEqual({
       runId: "plain",
       loop: null,
       events: [{ key: "k2", runId: "plain", text: "other", at: NOW }],
+      tries: [],
+      round: null,
+      budget: null,
+      review: null,
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
   });
