@@ -6,6 +6,7 @@ import {
   CI_FAILED_TEXT,
   CI_PENDING_MAX_MS,
   CI_TRIES,
+  ciVerdict,
   fillLoopText,
   LOOP_TEXT_CI,
   LOOP_TEXT_CI_REF,
@@ -41,7 +42,7 @@ import {
   reviewFailedParkText,
   reviewParkText,
 } from "../src/review.ts";
-import type { RunLoop } from "../src/types.ts";
+import type { PrCheck, RunLoop } from "../src/types.ts";
 
 const SHA = "aaaaaaa1111";
 const SHA2 = "bbbbbbb2222";
@@ -98,6 +99,7 @@ const pr = (
   ci: "pending",
   mergeable: "MERGEABLE",
   polledAt: NOW,
+  reviewStatus: "passing",
   ...over,
 });
 
@@ -492,6 +494,35 @@ describe("state step", () => {
       expect(r.loop.rerun ?? null).toBeNull();
       expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
     });
+  });
+
+  it("12: the failure names the failing checks", () => {
+    const checks = { failing: ["check"], pending: [], missing: [] };
+    const r = reconcile(inCi({ pr: pr({ ci: "failing", checks }) }, { rerun: reran() }));
+    expect(events(r.actions)).toEqual(["CI failed on aaaaaaa (failing: check)"]);
+    const parked = reconcile(
+      inCi(
+        { pr: pr({ ci: "failing", checks }) },
+        { ciFails: CI_TRIES - 1, ciFailedSha: SHA2, rerun: reran() },
+      ),
+    );
+    expect(parked.loop.parked?.reason).toBe("CI failed 3 times; last on aaaaaaa (failing: check)");
+  });
+
+  it("12: no checks keeps today's CI texts", () => {
+    const checks = { failing: [], pending: [], missing: [] };
+    const r = reconcile(inCi({ pr: pr({ ci: "failing", checks }) }, { rerun: reran() }));
+    expect(events(r.actions)).toEqual(["CI failed on aaaaaaa"]);
+  });
+
+  it("13: the pending park names pending and missing checks", () => {
+    const checks = { failing: [], pending: ["check"], missing: ["e2e"] };
+    const r = reconcile(
+      inCi({ pr: pr({ checks }), pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } }),
+    );
+    expect(r.loop.parked?.reason).toBe(
+      "CI pending for 30 minutes on aaaaaaa (pending: check; missing: e2e)",
+    );
   });
 
   it("13: CI pending for thirty minutes parks", () => {
@@ -2115,6 +2146,12 @@ describe("merge workspace", () => {
     }
   });
 
+  it("mc/review not passing on GitHub: no merge", () => {
+    for (const reviewStatus of ["pending", "failing", null] as const) {
+      noMerge(reconcile(merge({ pr: pr({ ci: "passing", isDraft: true, reviewStatus }) })));
+    }
+  });
+
   it("an unreported head: no merge, no ready note", () => {
     const r = reconcile(merge({ pr: pr({ ci: "passing", headSha: null }) }));
     noMerge(r);
@@ -2546,5 +2583,54 @@ describe("carried review", () => {
     expect(of(r.actions, "request-review")).toEqual([]);
     expect(of(r.actions, "merge")).toEqual([]);
     expect(sends(r.actions)).toContain("fix:r1:0:1");
+  });
+});
+
+describe("ciVerdict", () => {
+  const chk = (name: string, state: PrCheck["state"]): PrCheck => ({
+    name,
+    kind: "check",
+    state,
+    conclusion: state,
+    attempt: null,
+    url: null,
+  });
+
+  it("leaves out a failing mc/review", () => {
+    expect(ciVerdict([chk("mc/review", "failing"), chk("check", "passing")], [])).toEqual({
+      ci: "passing",
+      failing: [],
+      pending: [],
+      missing: [],
+    });
+  });
+
+  it("mc/review alone is no CI", () => {
+    expect(ciVerdict([chk("mc/review", "passing")], [])).toEqual({
+      ci: null,
+      failing: [],
+      pending: [],
+      missing: [],
+    });
+  });
+
+  it("a required check not reported is missing", () => {
+    expect(ciVerdict([chk("check", "passing")], ["check", "e2e"])).toEqual({
+      ci: "pending",
+      failing: [],
+      pending: [],
+      missing: ["e2e"],
+    });
+  });
+
+  it("a failing check outside required does not count", () => {
+    expect(ciVerdict([chk("check", "passing"), chk("lint", "failing")], ["check"]).ci).toBe(
+      "passing",
+    );
+  });
+
+  it("a name listed twice takes its worst state", () => {
+    const v = ciVerdict([chk("check", "passing"), chk("check", "failing")], []);
+    expect(v).toMatchObject({ ci: "failing", failing: ["check"] });
   });
 });

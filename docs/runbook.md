@@ -562,6 +562,14 @@ Setup's board action also creates the board's fields and the repo's type labels,
 
 ### Config
 
+- **`repos[].required_checks`** (default `[]`) names the checks that decide CI on a PR's head, by
+  check run name or status context, e.g. `["check"]`.
+  - Unset, every check decides except `mc/review`, Mission Control's own review status (it is
+    refused in this list). A listed check the PR does not report counts as missing, so CI reads
+    pending.
+  - The merge gate still waits for `mc/review` to pass on GitHub, apart from CI.
+  - A CI failure or a long pending names the checks in the Activity line and the park note. Only
+    the first 50 checks of a head are read. A change needs a hub restart.
 - **`repos[].full_suite`** (default `[]`) lists the commands that run a repo's whole suite, as
   prefixes, e.g. `["pnpm -s test"]`.
   - A seat's Bash call is a full suite when it starts with an entry's words, unless a later word

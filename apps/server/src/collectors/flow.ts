@@ -1,4 +1,5 @@
 import {
+  ciVerdict,
   FLOW_BATCH,
   FLOW_DAYS,
   FLOW_TIMELINE_MAX_PAGES,
@@ -11,7 +12,17 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
-import { CHECKS, call, errMsg, type Gql, GqlError, isObj, ms, path } from "./github.ts";
+import {
+  CHECK_CONTEXTS,
+  call,
+  errMsg,
+  type Gql,
+  GqlError,
+  isObj,
+  ms,
+  parseChecks,
+  path,
+} from "./github.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -23,7 +34,7 @@ const timelineFields = (paged: boolean) => `timelineItems(first: ${FLOW_TIMELINE
   pageInfo { hasNextPage endCursor }
 }`;
 const ISSUE_FIELDS = timelineFields(false);
-const PR_FIELDS = `commits(first: 20) { nodes { commit { statusCheckRollup { state } } } }`;
+const PR_FIELDS = `commits(first: 20) { nodes { commit { ${CHECK_CONTEXTS} } } }`;
 
 type Repo = CcConfig["repos"][number];
 
@@ -176,12 +187,12 @@ function issueFlow(repo: Repo, node: unknown): { startAt: number | null; doneAt:
 }
 
 /** The rollup of the earliest commit that has one; CI runs on pushed heads, so most have none. */
-function firstPushCi(node: unknown): FlowPr["firstPushCi"] {
+function firstPushCi(node: unknown, required: readonly string[]): FlowPr["firstPushCi"] {
   const nodes = path(node, "commits", "nodes");
   if (!Array.isArray(nodes)) return null;
   for (const n of nodes) {
-    const state = path(n, "commit", "statusCheckRollup", "state");
-    if (typeof state === "string" && Object.hasOwn(CHECKS, state)) return CHECKS[state] ?? null;
+    const ci = ciVerdict(parseChecks(path(n, "commit", "statusCheckRollup")), required).ci;
+    if (ci !== null) return ci;
   }
   return null;
 }
@@ -236,7 +247,7 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         repoId: repo.id,
         number: p.number,
         mergedAt: p.mergedAt,
-        firstPushCi: firstPushCi(node),
+        firstPushCi: firstPushCi(node, repo.requiredChecks ?? []),
       });
     }
     store.replaceFlow(repo.id, issues, prs);
