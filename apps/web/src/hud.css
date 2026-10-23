@@ -1006,6 +1006,32 @@ main > section {
   color: var(--warn);
   font-size: var(--fs-s);
 }
+.trow .need .needctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* A seat's set-aside run: its own line across the row, under the cells. */
+.trow .asideline {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: var(--fs-xs);
+}
+.trow .asideline > * {
+  flex: none;
+}
+.trow .asideline > .ellip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.trow .asideline .stepbar {
+  width: 48px;
+  margin: 0;
+}
 /* The doing line takes two lines here, so about 40 characters show in the ticket column at 1440. */
 .trow .doing {
   display: -webkit-box;

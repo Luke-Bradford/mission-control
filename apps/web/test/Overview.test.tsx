@@ -313,6 +313,123 @@ describe("Agents panel", () => {
     expect(bar(agentRows(container)[0])).toEqual(["w", "", "", ""]);
   });
 
+  // The ticket ref the set-aside run carries: the repo, a hash sign, the number.
+  const ASIDE_TICKET = "mission-control#12";
+
+  it("a seat's set-aside run gets its own line with its ticket, step and wait", async () => {
+    stub({
+      rows: [
+        seatRow({
+          hudState: "running",
+          loop: { ...loopOf("working", "Working on the ticket"), wait: null },
+          asideRuns: [
+            {
+              runId: "r-9",
+              ticket: ASIDE_TICKET,
+              ticketTitle: "Aside work",
+              loop: { ...loopOf("review", "In review", 9), wait: "retro" },
+            },
+          ],
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await stepLabel("build › Working");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".loopstep .loopwait")).toBeNull();
+    const lines = row.querySelectorAll(".asideline");
+    expect(lines).toHaveLength(1);
+    const aside = lines[0] as HTMLElement;
+    for (const text of ["Set aside", "#12", "Aside work", "build › In review"]) {
+      expect(aside.textContent).toContain(text);
+    }
+    expect(aside.textContent).toContain("waiting on RETRO's review");
+    expect(aside.querySelector(".loopwait")?.className).toContain("fg2");
+    expect([...aside.querySelectorAll(".stepbar i")].map((i) => i.className)).toEqual([
+      "d",
+      "d",
+      "c",
+      "",
+    ]);
+  });
+
+  it("a free seat still lists its set-aside runs under a dash", async () => {
+    stub({
+      rows: [
+        seatRow({
+          run: null,
+          loop: null,
+          asideRuns: [
+            {
+              runId: "r-9",
+              ticket: ASIDE_TICKET,
+              ticketTitle: "Aside work",
+              loop: { ...loopOf("review", "In review", 9), wait: "seat" },
+            },
+          ],
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("waiting on GUIDO-1 for rework");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".loopstep")?.textContent).toBe("—");
+    expect(row.querySelectorAll(".asideline")).toHaveLength(1);
+  });
+
+  it("the Loop step shows the try from the second one on", async () => {
+    stub({
+      rows: [
+        crewRow({
+          loop: { ...loopOf("ci", "CI on 08a7cfc"), tries: { n: 2, max: 3 } },
+          hudState: "idle",
+        }),
+        crewRow({
+          id: "other",
+          index: 1,
+          loop: { ...loopOf("ci", "CI on 1a2b3c4"), tries: { n: 1, max: 3 } },
+          hudState: "idle",
+        }),
+      ],
+    });
+    render(<Overview />);
+    await stepLabel("build › CI · try 2 of 3");
+    await stepLabel("build › CI");
+  });
+
+  it("the Loop step names the run's template profile, else the build loop", async () => {
+    stub({ rows: [crewRow({ loop: { ...loopOf("ci", "CI on 08a7cfc"), profile: "hotfix" } })] });
+    render(<Overview />);
+    await stepLabel("hotfix › CI");
+  });
+
+  it("a run in line for the test lock says how long, in amber", async () => {
+    stub({
+      rows: [seatRow({ loop: { ...loopOf("working", "Working on the ticket"), wait: "lock" } })],
+      lock: { holder: null, waiting: [{ runId: "r-12", seatId: "guido-1", since: NOW - 65_000 }] },
+    });
+    render(<Overview />);
+    const el = await screen.findByText("in line for the test lock · 1:05");
+    expect(el.className).toContain("warn-t");
+  });
+
+  it("the need line offers Interrupt and End the run next to Answer, for a seat with a live turn", async () => {
+    stub({
+      rows: [seatRow({ hudState: "running" }), crewRow({ id: "other", index: 1 })],
+      items: [
+        item({ key: "k-seat", agentId: "guido-1", kind: "decision" }),
+        item({ key: "k-loop", agentId: "other", kind: "decision" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findAllByRole("button", { name: "Answer" });
+    const [seat, loop] = agentRows(container) as [HTMLElement, HTMLElement];
+    expect(within(seat).getByRole("button", { name: "Interrupt" })).toBeTruthy();
+    expect(within(seat).getByRole("button", { name: "End the run" })).toBeTruthy();
+    expect(within(loop).queryByRole("button", { name: "Interrupt" })).toBeNull();
+    expect(within(loop).queryByRole("button", { name: "End the run" })).toBeNull();
+  });
+
   it("the Loop step column collapses only when the rows are loaded and none has a loop", async () => {
     const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, parked: null };
     stub({ rows: [crewRow({ loop: null }), crewRow({ id: "other", index: 1, loop: null })] });
