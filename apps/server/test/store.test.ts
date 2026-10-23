@@ -1675,6 +1675,26 @@ describe("answerQuestions", () => {
   });
 });
 
+describe("questionsOverlapping", () => {
+  it("returns the seat's questions open in the window", () => {
+    const ask = (agentId: string, at: number) =>
+      store.addQuestion({ agentId, runId: "r1", text: "q?", at });
+    ask("guido-1", 10);
+    store.answerQuestions("guido-1", 50); // answered before the window
+    ask("guido-1", 60);
+    store.answerQuestions("guido-1", 120); // open across `from`, answered inside
+    ask("guido-1", 130);
+    store.answerQuestions("guido-1", 160);
+    ask("guido-1", 200); // at `to`: not in [from, to)
+    ask("guido-2", 120);
+    expect(store.questionsOverlapping("guido-1", 100, 200)).toEqual([
+      { at: 60, answeredAt: 120 },
+      { at: 130, answeredAt: 160 },
+    ]);
+    expect(store.questionsOverlapping("guido-1", 100, 250)).toHaveLength(3);
+  });
+});
+
 describe("flight decisions", () => {
   const dec = (over: Partial<FlightDecision> = {}): Omit<FlightDecision, "id"> => ({
     at: 1000,
