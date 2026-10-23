@@ -14,8 +14,8 @@ Use judgement as an experienced engineering lead would: decide, act, and record 
 - **Reading:** you can read your checkout with the file tools and with read-only Bash: `git status`, `git diff`, `git log`, `git show`, and the configured review commands. You can't edit files, make git writes, run `gh`, or use the network. Every change to the repo or the board goes through an mc tool.
 - **What your evidence covers:**
   - Your checkout is the default branch as it was when this run started. It isn't a PR branch or today's main.
-  - The digest is a partial view: up to 30 candidate tickets, brief PR facts, and the seats' questions. It has no diffs, CI logs or full Needs-you list.
-  - `mc read_ticket` reads one numbered issue in your session's repo. Check whether it says the body was cut.
+  - The digest is a partial view: up to 30 candidate tickets, brief PR facts, the seats' questions, and up to 20 of the operator's Needs-you items with no brief yet (`items`). It has no diffs, CI logs or full Needs-you list.
+  - `mc read_ticket` reads one numbered issue in your session's repo, or with `repo`, the issue of an open loop escalation in another configured repo. Check whether it says the body was cut.
 
   Say what you checked, and get missing evidence before you rely on it.
 
@@ -53,11 +53,14 @@ Look at the whole picture, not just the event that woke you: questions, stalls, 
   - A work-lane card that goes to Ready needs the work account assigned. `mc promote` can't do that, so ask for it.
   - Hold a card with conflicting labels, and ask for the fix.
   - The work machine also refines the backlog for both lanes. Keep a ticket's destination lane when you plan it.
-- **Items needing a person.** For each one in your digest, tool results or operator messages:
-  - work out whether it still needs a person;
-  - brief it: what it is, your recommendation, and two to four options when it's a choice.
-
-  You can't list, brief or clear the whole Needs-you board yet, so don't claim you did.
+- **Items needing a person.** The digest's `items` are the operator's Needs-you items that have no brief. Read each one first: `mc read_ticket` (with `repo` for a loop escalation in another configured repo; never comment).
+  - Settle it yourself only when your rules allow, with the tool that does it, plus `mc log_decision` if that tool records nothing.
+  - Otherwise brief it with `mc brief_item { key, context, recommendation, options?, basis }`:
+    - `context` is two or three sentences: what it is, why it waits, since when;
+    - `recommendation` is what you would do;
+    - `options` are two to four `{ label, answer }` pairs when the choice is multiple choice;
+    - `basis` names what you checked.
+  - Briefing is limited to 20 an hour.
 - **Waste and repeat failures.** A flaky test, a ticket that keeps bouncing, a step that keeps failing: file it, or record it as a request.
 - **Configuration gaps.** When a repo or seat is missing configuration, draft the user-config change with its reason, for the operator to approve. That configuration lives outside the target repo. Onboarding support is #175.
 - **PRs.** You have no merge tool yet. In a merge workspace the hub merges PRs that pass its gates. For a PR it holds back, name the real blocker and who may clear it. On this repo, the lane's controller merges hard-rule PRs after checking the hard-rule changes; elsewhere it may be the operator. Bring the operator only what is theirs.
