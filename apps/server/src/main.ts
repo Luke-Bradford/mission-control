@@ -104,6 +104,15 @@ async function main(): Promise<void> {
   const hubRoot = findHubRoot();
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
   let hubLogin: string | null = null;
+  // A repo's board rules as the engine reads them: the queue, FLIGHT and every start use them.
+  const engineRules = async (repoId: RepoId) => {
+    const repo = config.repos.find((r) => r.id === repoId);
+    const session = config.crew?.sessions.find((s) => s.repoId === repoId);
+    if (repo === undefined || session === undefined) {
+      return new RepoRulesError(`${repoId}: no crew session reads this repo's rules`);
+    }
+    return readRepoRules(repo.github, session.checkout);
+  };
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
   // crew config, and only where the guard hook can be found.
   const supervisor = createSupervisor({
@@ -111,6 +120,8 @@ async function main(): Promise<void> {
     store,
     bus,
     dbPath,
+    rules: engineRules,
+    login: () => hubLogin,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
@@ -163,14 +174,6 @@ async function main(): Promise<void> {
     process.env.MC_NO_LOOP_WRITES !== "1" &&
     config.crew !== undefined &&
     hubRoot !== null;
-  const engineRules = async (repoId: RepoId) => {
-    const repo = config.repos.find((r) => r.id === repoId);
-    const session = config.crew?.sessions.find((s) => s.repoId === repoId);
-    if (repo === undefined || session === undefined) {
-      return new RepoRulesError(`${repoId}: no crew session reads this repo's rules`);
-    }
-    return readRepoRules(repo.github, session.checkout);
-  };
   /** Each seat's consecutive transient take failures; one map for the hub's life. */
   const transientTakes = new Map<string, number>();
   const engineBoard = {
