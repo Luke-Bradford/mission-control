@@ -403,8 +403,11 @@ function planPathMentions(plan: string): { path: string; creates: boolean }[] {
  * line says it creates (`create <path>`, `new file <path>`) and those that leave the checkout.
  */
 export function planPaths(plan: string): string[] {
-  const found = planPathMentions(plan)
-    .filter((m) => !m.creates && !unsafePlanPath(m.path))
+  const mentions = planPathMentions(plan);
+  // a path the plan creates on one line is not checked where a later line names it again
+  const created = new Set(mentions.filter((m) => m.creates).map((m) => m.path));
+  const found = mentions
+    .filter((m) => !created.has(m.path) && !unsafePlanPath(m.path))
     .map((m) => m.path);
   return [...new Set(found)];
 }

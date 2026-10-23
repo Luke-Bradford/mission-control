@@ -3252,6 +3252,12 @@ describe("report_plan", () => {
       expect(await plan(`${TWO}\n\n- **Create** \`src/d.ts\``)).toEqual({ text: MC_PLAN_WRITTEN });
     });
 
+    it("accepts a later mention of a path an earlier line creates", async () => {
+      expect(
+        await plan(`${TWO}\n\n- Create \`src/b.ts\`.\n- Export \`src/b.ts\` from \`src/a.ts\`.`),
+      ).toEqual({ text: MC_PLAN_WRITTEN });
+    });
+
     it("checks a path after a long run of code spans without hanging", async () => {
       expect(
         await plan(`${TWO}\n\nCreate ${"`a` ".repeat(40)}then change \`src/missing.ts\`.`),
