@@ -129,6 +129,8 @@ export const ACTIONS = {
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
   ack: "/api/attention/ack",
+  /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
+  dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
   /** Body: the whole AwaySettings. */
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */

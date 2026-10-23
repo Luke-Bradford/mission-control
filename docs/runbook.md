@@ -713,6 +713,14 @@ the seat does not idle through CI. A CI failure brings the run back first, ahead
 `crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
 hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
+**FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
+that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
+not have moved the card itself). The hold is a row in the `holds` table (ref, the PR, basis, time,
+`released_at`), counts as a move under the hourly cap, and shows in FLIGHT's digest as
+`holds: [{ ref, waitsOn, ageMin, prState, told }]` (`told` once FLIGHT has been woken for the PR's merge or close). When the PR merges or closes, the watch wakes FLIGHT
+(`n hold(s) to release`); a closed-unmerged PR leaves the hold in place for FLIGHT to decide. FLIGHT
+promotes the card to Ready again through `promote` with the usual checks, and that move releases the hold.
+
 ### Loop liveness
 
 A loop that is killed mid-run never writes its end line, so its run would look `running` for
