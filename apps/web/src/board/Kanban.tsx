@@ -36,6 +36,7 @@ interface CardCtx {
   prsByTicket: Map<string, PullRequestView[]>;
   crew: CrewRow[];
   attention: AttentionItem[];
+  unackedAttention: AttentionItem[];
   now: number;
   tz: string | null;
   todayStart: number | null;
@@ -63,11 +64,7 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     reviewer: col === "Done" ? null : cardReviewer(item, pr, ctx.crew),
     pr,
     mine: needsMe(item, ctx.attention, ctx.crew),
-    unacked: needsMe(
-      item,
-      ctx.attention.filter((i) => !i.acked),
-      ctx.crew,
-    ),
+    unacked: needsMe(item, ctx.unackedAttention, ctx.crew),
     outcome: doneOutcome(item, prs),
     when,
     statusOutOfDate: statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,
@@ -85,6 +82,7 @@ export function Kanban({
   prs,
   crew,
   attention,
+  unackedAttention,
   now,
   tz,
   todayStart,
@@ -97,6 +95,7 @@ export function Kanban({
   prs: PullRequestView[];
   crew: CrewRow[];
   attention: AttentionItem[];
+  unackedAttention: AttentionItem[];
   now: number;
   tz: string | null;
   todayStart: number | null;
@@ -116,7 +115,16 @@ export function Kanban({
     }
     return m;
   }, [prs]);
-  const ctx: CardCtx = { showRepo, prsByTicket, crew, attention, now, tz, todayStart };
+  const ctx: CardCtx = {
+    showRepo,
+    prsByTicket,
+    crew,
+    attention,
+    unackedAttention,
+    now,
+    tz,
+    todayStart,
+  };
   const phone = usePhone();
   const uid = useId();
   const [picked, setPicked] = useState<HudColumn | null>(null);

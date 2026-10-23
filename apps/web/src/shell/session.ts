@@ -43,21 +43,27 @@ export function useSessions(config?: ConfigView) {
 export function inCrewSession(
   session: string,
   row: Pick<CrewRow, "sessionId" | "repoId">,
-  repo: string = session,
+  repo: string | null = session,
 ): boolean {
-  return row.sessionId === null ? inSession(repo, row.repoId) : inSession(session, row.sessionId);
+  return row.sessionId === null
+    ? repo !== null && inSession(repo, row.repoId)
+    : inSession(session, row.sessionId);
 }
 
 /** Repo-only data follows the chosen session's repo; agents follow its session id. */
 export function useSessionScope(config?: ConfigView) {
   const [session] = useSession();
   const sessions = useSessions(config);
-  const repo = sessions.find((s) => s.id === session)?.repoId ?? session;
+  // Only the explicit all option spans repos; an unknown/removed session has no repo.
+  const repo =
+    session === SESSION_ALL
+      ? SESSION_ALL
+      : (sessions.find((s) => s.id === session)?.repoId ?? null);
   return {
     session,
     repo,
     inView: (row: Pick<CrewRow, "sessionId" | "repoId">) => inCrewSession(session, row, repo),
-    inRepo: (id: string) => inSession(repo, id),
+    inRepo: (id: string) => repo !== null && inSession(repo, id),
   };
 }
 

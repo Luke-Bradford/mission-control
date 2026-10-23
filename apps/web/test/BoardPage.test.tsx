@@ -209,6 +209,7 @@ describe("at phone width", () => {
       prs: [],
       crew: [],
       attention: [],
+      unackedAttention: [],
       now: NOW,
       tz: "UTC",
       todayStart: 0,
@@ -587,6 +588,7 @@ describe("cards", () => {
         prs={[]}
         crew={[]}
         attention={[]}
+        unackedAttention={[]}
         now={NOW}
         tz={null}
         todayStart={null}

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as markdown from "../src/components/Markdown.tsx";
 import { hub } from "../src/data.ts";
@@ -16,7 +16,7 @@ import {
 } from "../src/shell/overlays.ts";
 import { DOCK_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { brief, CONFIG, crewRow, HOUR, item, NOW } from "./fixtures.ts";
+import { brief, CONFIG, crewRow, HOUR, item, NOW, prView, seatRow } from "./fixtures.ts";
 
 const noop = () => {};
 let off: () => void;
@@ -282,6 +282,57 @@ const bodyOf = (fn: ReturnType<typeof stubFetch>, path: string) => {
 };
 
 describe("live FLIGHT", () => {
+  it("includes the repo PR's title in the doing line while the seat is in review", async () => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/crew": {
+          rows: [
+            seatRow({
+              id: "flight-1",
+              hudState: "idle",
+              review: { prNumber: 77, state: "open" },
+            }),
+          ],
+        },
+        "/api/repos/shop-app/prs?linked=1": [prView({ title: "Cache quotes" })],
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() =>
+      expect(container.querySelector(".meta")?.textContent).toContain("PR #77 · Cache quotes"),
+    );
+  });
+
+  it("colours known agents in waiting asks and leaves unknown ids as plain text", async () => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/crew": { rows: [seatRow({ id: "known", index: 2 })] },
+        "/api/attention": [
+          item({ key: "known", agentId: "known", brief: brief() }),
+          item({ key: "removed", agentId: "removed", brief: brief() }),
+          item({ key: "none", agentId: null, brief: brief() }),
+        ],
+      },
+    );
+    render(<Dock />);
+    await screen.findAllByTestId("waiting-ask");
+    await waitFor(() =>
+      expect(
+        screen.getByText("known").closest<HTMLElement>(".ag")?.style.getPropertyValue("--c"),
+      ).toBe("var(--s3)"),
+    );
+    expect(screen.getByText("removed").closest(".ag")).toBeNull();
+    const asks = screen.getAllByTestId("waiting-ask");
+    expect(asks).toHaveLength(3);
+    expect(
+      asks
+        .filter((ask) => within(ask).queryByText("known") === null)
+        .every((ask) => ask.querySelector(".ag") === null),
+    ).toBe(true);
+  });
+
   it("shows the account, model, turns, context and doing line in its meta line", async () => {
     stubFlight(
       { seat: flightSeat({ turns: { n: 4, max: 41 } }), decisions: [] },

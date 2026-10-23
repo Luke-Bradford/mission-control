@@ -11,7 +11,7 @@ import { apiPost, errorNote } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { contextPct, doingLine } from "../crew.ts";
-import { ACTIONS, RESOURCES, useResource } from "../data.ts";
+import { ACTIONS, RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import {
   chatRows,
   type DockRow,
@@ -218,26 +218,24 @@ export function FlightChat({ where }: { where: ChatPlace }) {
       {seat && asks.length > 0 && (
         <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
           <div className="dwh">Waiting on you · {asks.length}</div>
-          {asks.map((i) => (
-            <div className="dask" key={i.key} data-testid="waiting-ask">
-              <Pill tone={i.kind === "decision" ? "warn" : "plain"}>{ATTENTION_LABEL[i.kind]}</Pill>
-              <span className="min0 ellip" title={i.text}>
-                {i.text}
-              </span>
-              {i.agentId !== null && (
-                <AgentTag
-                  bare
-                  sm
-                  id={i.agentId}
-                  index={crew?.rows.find((r) => r.id === i.agentId)?.index ?? "flight"}
-                />
-              )}
-              <span className="spacer" />
-              <button type="button" className="sm" onClick={() => openItem(i.key)}>
-                Open
-              </button>
-            </div>
-          ))}
+          {asks.map((i) => {
+            const agent = crew?.rows.find((r) => r.id === i.agentId);
+            return (
+              <div className="dask" key={i.key} data-testid="waiting-ask">
+                <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
+                  {ATTENTION_LABEL[i.kind]}
+                </Pill>
+                <span className="min0 ellip" title={i.text}>
+                  {i.text}
+                </span>
+                {agent ? <AgentTag bare sm id={agent.id} index={agent.index} /> : i.agentId}
+                <span className="spacer" />
+                <button type="button" className="sm" onClick={() => openItem(i.key)}>
+                  Open
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
       <div
@@ -278,6 +276,7 @@ export function Dock() {
   const seat = flight?.seat ?? null;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const row = crew?.rows.find((r) => r.id === seat?.id);
+  const repoPrs = useReviewPrs(row);
   const ctx = row ? contextPct(row) : null;
   const now = useNow();
   const tz = useTz();
@@ -369,7 +368,7 @@ export function Dock() {
                       seat.model,
                       seat.turns && flightTurnText(seat.turns.n, seat.turns.max),
                       ctx !== null && `context ${ctx}%`,
-                      row ? doingLine(row, now, tz) : stateWord(seat),
+                      row ? doingLine(row, now, tz, repoPrs) : stateWord(seat),
                     ]
                       .filter(Boolean)
                       .join(" · ")

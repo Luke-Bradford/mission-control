@@ -26,7 +26,7 @@ export function nextAgent(
   session: string,
   current: AgentId | null,
   dir: 1 | -1,
-  repo: string = session,
+  repo: string | null = session,
 ): AgentId | null {
   const order = crewOrder(
     rows.filter((r) => inCrewSession(session, r, repo)),

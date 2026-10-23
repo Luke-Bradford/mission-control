@@ -27,6 +27,7 @@ import {
   NOW,
   prView,
   SEAT_Q,
+  SESSION_CONFIG,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -482,7 +483,12 @@ describe("an item link", () => {
 
 describe("Threads and conversation", () => {
   it("lists FLIGHT then each agent, and filters by session", async () => {
-    stub();
+    stubFetch({
+      "/api/attention": ITEMS,
+      "/api/crew": { rows: ROWS, firstRunToday: null },
+      "/api/config": SESSION_CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+    });
     render(<Comms item={null} />);
     const list = await waitFor(() => {
       const el = document.querySelector<HTMLElement>("#chanList") as HTMLElement;
@@ -494,7 +500,7 @@ describe("Threads and conversation", () => {
     await waitFor(() => expect(buttons[0]?.textContent).toContain(FLIGHT_NO_SEAT));
     expect(within(list).getByText(/Idle since/)).toBeTruthy();
     expect(within(list).getByText(/^run #12/)).toBeTruthy();
-    act(() => setSession("shop-app"));
+    act(() => setSession("shop-app-session"));
     await waitFor(() => expect(within(list).queryByText("studio")).toBeNull());
     expect(within(list).getByText("shop-app-ta")).toBeTruthy();
   });

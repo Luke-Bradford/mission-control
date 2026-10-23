@@ -1,5 +1,13 @@
 import { type ActivityEvent, type ConfigView, DEFAULT_AWAY } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { WorkInFlight } from "../src/flight/WorkInFlight.tsx";
@@ -13,9 +21,9 @@ import { Sessions } from "../src/setup/Sessions.tsx";
 import { Dock } from "../src/shell/Dock.tsx";
 import { Header } from "../src/shell/Header.tsx";
 import { nextAgent } from "../src/shell/selection.ts";
-import { setSession } from "../src/shell/session.ts";
+import { setSession, useSessionScope } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, brief, CREW_CONFIG, item, NOW, REPOS, seatRow } from "./fixtures.ts";
+import { boardItem, brief, CREW_CONFIG, crewRow, item, NOW, REPOS, seatRow } from "./fixtures.ts";
 
 const config: ConfigView = {
   ...CREW_CONFIG,
@@ -71,19 +79,70 @@ afterEach(() => {
 
 describe("HUD chrome", () => {
   it.each([
+    ["Overview Agents", () => <Overview />, "#agentsP"],
     ["Agent picker", () => <Agent id={null} />, "#picker"],
     ["Comms threads", () => <Comms item={null} />, "#chanList"],
-    ["Work in flight", () => <WorkInFlight />, '[aria-label="Crew runs"]'],
   ])("filters %s by the crew session rather than its shared repo", async (_, page, selector) => {
-    stub();
+    const loop = crewRow({ id: "shop-loop", sessionId: null, repoId: "shop-app" });
+    stub({
+      "/api/crew": {
+        rows: [
+          ...rows,
+          loop,
+          seatRow({ id: "other-repo", sessionId: "gamma", repoId: "site-builder" }),
+        ],
+      },
+    });
     const { container } = render(page());
     await waitFor(() => expect(container.querySelector(selector)?.textContent).toContain("inco-1"));
     act(() => setSession("alpha"));
     expect(container.querySelector(selector)?.textContent).toContain("guido-1");
     expect(container.querySelector(selector)?.textContent).not.toContain("inco-1");
+    expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
     act(() => setSession("beta"));
     expect(container.querySelector(selector)?.textContent).not.toContain("guido-1");
     expect(container.querySelector(selector)?.textContent).toContain("inco-1");
+    expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
+    act(() => setSession("gamma"));
+    expect(container.querySelector(selector)?.textContent).toContain("other-repo");
+    expect(container.querySelector(selector)?.textContent).not.toContain("shop-loop");
+    for (const removed of ["removed", "shop-app"]) {
+      act(() => setSession(removed));
+      for (const id of ["guido-1", "inco-1", "retro-1", "shop-loop", "other-repo"])
+        expect(container.querySelector(selector)?.textContent).not.toContain(id);
+    }
+  });
+
+  it("filters Work in flight crew runs by session", async () => {
+    stub();
+    render(<WorkInFlight />);
+    const runs = await screen.findByRole("list", { name: "Crew runs" });
+    await within(runs).findByText("inco-1");
+    act(() => setSession("alpha"));
+    expect(within(runs).getByText("guido-1")).toBeTruthy();
+    expect(within(runs).queryByText("inco-1")).toBeNull();
+    act(() => setSession("beta"));
+    expect(within(runs).queryByText("guido-1")).toBeNull();
+    expect(within(runs).getByText("inco-1")).toBeTruthy();
+  });
+
+  it("keeps a removed session empty for both agents and repo data after config loads", async () => {
+    stub();
+    act(() => setSession("alpha"));
+    const { result } = renderHook(() => useSessionScope());
+    await waitFor(() => expect(result.current.repo).toBe("shop-app"));
+    for (const removed of ["removed", "shop-app"]) {
+      act(() => setSession(removed));
+      expect(result.current.inView(seatRow({ sessionId: "alpha" }))).toBe(false);
+      expect(result.current.inView(crewRow())).toBe(false);
+      expect(result.current.inRepo("shop-app")).toBe(false);
+      expect(result.current.inRepo("site-builder")).toBe(false);
+    }
+    act(() => setSession("all"));
+    expect(result.current.inView(seatRow({ sessionId: "alpha" }))).toBe(true);
+    expect(result.current.inView(crewRow())).toBe(true);
+    expect(result.current.inRepo("shop-app")).toBe(true);
+    expect(result.current.inRepo("site-builder")).toBe(true);
   });
 
   it("filters Activity by its agent's session and keeps collector events from that repo", async () => {

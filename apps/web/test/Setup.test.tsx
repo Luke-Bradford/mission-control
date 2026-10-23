@@ -54,6 +54,7 @@ import {
   MIN,
   NOW,
   REPOS,
+  SESSION_CONFIG,
   seatRow,
 } from "./fixtures.ts";
 
@@ -153,8 +154,8 @@ describe("Setup tabs", () => {
   });
 
   it("Sessions and Loops hide what is outside the selected session", async () => {
-    load();
-    setSession("shop-app");
+    load({ "/api/config": { ...SESSION_CONFIG, loops: CFG.loops } });
+    setSession("shop-app-session");
     at("sessions");
     await screen.findByRole("region", { name: "shop-app · observed loops" });
     expect(screen.queryByRole("region", { name: "site-builder · observed loops" })).toBeNull();

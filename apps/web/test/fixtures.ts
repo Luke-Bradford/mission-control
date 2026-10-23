@@ -275,6 +275,21 @@ export const CONFIG: ConfigView = {
   crew: null,
 };
 
+/** Empty sessions on both repos, with ids distinct from their repo ids. */
+export const SESSION_CONFIG: ConfigView = {
+  ...CONFIG,
+  crew: {
+    worktrees: "/mc/crew",
+    roles: [],
+    sessions: ["shop-app", "site-builder"].map((repoId) => ({
+      id: `${repoId}-session`,
+      repoId,
+      checkout: `/mc/${repoId}`,
+      seats: [],
+    })),
+  },
+};
+
 /** CONFIG plus one crew session on shop-app: GUIDO writes in apps/, RETRO is read-only. */
 export const CREW_CONFIG: ConfigView = {
   ...CONFIG,

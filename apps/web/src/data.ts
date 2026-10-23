@@ -287,9 +287,9 @@ export function useResource<T>(ref: ResourceRef | null): Resource<T> {
  * load gives none, so the line settles on the seat's last words.
  */
 export function useReviewPrs(
-  row: Pick<CrewRow, "kind" | "note" | "repoId" | "review">,
+  row: Pick<CrewRow, "kind" | "note" | "repoId" | "review"> | undefined,
 ): PullRequestView[] | undefined {
-  const wanted = row.kind === "crew" && row.review !== null && !row.note;
+  const wanted = row?.kind === "crew" && row.review !== null && !row.note;
   const prs = useResource<PullRequestView[]>(wanted ? RESOURCES.prs(row.repoId) : null);
   return prs.data ?? (prs.error ? [] : undefined);
 }

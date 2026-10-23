@@ -133,6 +133,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     prs,
     crew: rows,
     attention: items,
+    unackedAttention: items.filter((i) => !i.acked),
     now,
     tz,
     todayStart,

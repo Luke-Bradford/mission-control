@@ -38,6 +38,7 @@ import {
   NOW,
   prView,
   REPOS,
+  SESSION_CONFIG,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -606,19 +607,19 @@ describe("FLIGHT page", () => {
         // no repo: it belongs to no session, so every session still counts it
         item({ key: "e", kind: "stalled", repoId: null }),
       ],
-      "/api/config": CONFIG,
+      "/api/config": SESSION_CONFIG,
     });
     const { container } = render(<Flight />);
     const strip = container.querySelector(".sitstats") as HTMLElement;
     await waitFor(() => expect(strip.textContent).toContain("3 tickets in progress"));
     expect(strip.textContent).toContain("2 decisions for you");
-    act(() => setSession("site-builder"));
+    act(() => setSession("site-builder-session"));
     await waitFor(() => expect(strip.textContent).toContain("1 ticket in progress"));
     expect(strip.textContent).not.toContain("1 tickets");
     expect(strip.textContent).toContain("1 decision for you");
     expect(strip.textContent).toContain("1 routine approval");
     expect(strip.textContent).toContain("2 stalls");
-    act(() => setSession("shop-app"));
+    act(() => setSession("shop-app-session"));
     await waitFor(() => expect(strip.textContent).toContain("2 tickets in progress"));
     expect(strip.textContent).toContain("1 decision for you");
     expect(strip.textContent).toContain("0 routine approvals");

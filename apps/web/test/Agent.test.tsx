@@ -41,6 +41,7 @@ import {
   NOW,
   prView,
   run,
+  SESSION_CONFIG,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -393,7 +394,7 @@ describe("Agent page: what past runs were", () => {
 
 describe("Agent page: picker and selection", () => {
   it("shows one picker button per agent in the session filter; its lamp is the agent's needs", async () => {
-    stub({ items: [item()] });
+    stub({ items: [item()], extra: { "/api/config": SESSION_CONFIG } });
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const picker = screen.getByRole("group", { name: "Pick an agent" });
@@ -409,7 +410,7 @@ describe("Agent page: picker and selection", () => {
     expect($(buttons[0] as HTMLElement, ".lamp")?.className).not.toContain("pulse");
     expect($(container, "#ahead")).toBeTruthy();
 
-    act(() => setSession("site-builder"));
+    act(() => setSession("site-builder-session"));
     expect(
       within(picker)
         .getAllByRole("button")
