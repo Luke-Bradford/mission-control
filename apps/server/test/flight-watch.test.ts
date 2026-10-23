@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type BoardItem,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_NOTE_KEY,
@@ -230,6 +231,41 @@ describe("the FLIGHT watcher", () => {
     seats.push(seat("flight-2", "FLIGHT"));
     byId("flight-1").retiring = true;
     expect(flightSeat(cfg)?.seat.id).toBe("flight-2");
+  });
+
+  it("lists only the tickets of the hub's lane", () => {
+    const cfg = structuredClone(config);
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.lane = "work";
+    const card = (n: number, labels: string[]): BoardItem => ({
+      repoId: "mc",
+      issueNumber: n,
+      title: `Ticket ${n}`,
+      status: "Ready",
+      state: "planned",
+      labels,
+      priority: null,
+      updatedAt: T0,
+      url: "u",
+      stage: null,
+      owner: null,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed: false,
+      prioritySource: null,
+      createdAt: T0 - n,
+      itemId: `I${n}`,
+      projectId: "P1",
+    });
+    store.replaceBoard("mc", [card(1, ["lane:home"]), card(2, ["lane:work"])]);
+    const refs = (c: CcConfig) =>
+      flightState({ config: c, store, busy: [], now: T0 }).tickets.map((t) => t.ref);
+    expect(refs(cfg)).toEqual(["mc#2"]);
+    delete cfg.crew.lane;
+    expect(refs(cfg).sort()).toEqual(["mc#1", "mc#2"]);
   });
 
   it("does not start FLIGHT while its seat has a pending change", async () => {
