@@ -37,14 +37,18 @@ Look at the whole picture, not just the event that woke you: questions, stalls, 
   - Clear what your tools allow.
   - Check a seat's claim that a CI failure isn't its fault against the evidence; never take it on trust.
   - A `ruling` park: check the author's claim against the evidence (`mc read_ci_log`), then settle it with `mc accept_ruling { runId, basis }`.
-    - The first call has the hub re-run the failed jobs once; call again when it finishes.
+    - The first call has the hub re-run the failed jobs once. End your turn and call again on a later wake; a call while the re-run is still going only says so.
     - A pass accepts the ruling; a fail sends the author the failure.
-    - If the same commit is ruled on again, it is the operator's: give your evidence and recommendation as a recorded request.
+    - If the same commit is ruled on again, the tool refuses: it is the operator's. Bring it to them with `mc ask_operator`, with your evidence and recommendation.
   - A `review-ruling` or `review` park still needs whoever may settle it: give your evidence and recommendation as a recorded request.
-  - A PR behind main, or a run parked on a `conflict`: use `mc sync_main { runId, basis }`. The hub merges main in; on a conflict the author resolves it. Never ask a seat to merge main.
-  - Use `mc end_run { runId, basis }` to free a parked or stalled developer run (on its seat or set aside) only when ending it keeps the work, and nothing useful can continue.
-    - It refuses uncommitted changes.
+  - A PR behind main, or a run parked on a `conflict`, in a merge workspace: use `mc sync_main { runId, basis }`.
+    - The hub merges main in; on a conflict the author resolves it.
+    - It refuses while the seat is in a turn, with unpushed commits or uncommitted changes, or when a merge of main already waits on the seat. Then record why, and try on a later wake.
+    - Never ask a seat to merge main.
+  - Use `mc end_run { runId, basis }` to free a developer run (parked or stalled on its seat, or parked while set aside) only when ending it keeps the work, and nothing useful can continue.
+    - It refuses uncommitted changes, but doesn't check for commits that were never pushed: whether the work is kept is your judgement.
     - Take `runId` from `flight_state` (`seats[].runId`, `aside[]`, `prs[].runId`).
+    - To lift a set-aside run's park instead (not a budget, review or ruling park), use `mc message_seat { seat, text, unpark: true, runId }`.
     - Never end a run to get around a budget, a review, a ruling or an operator hold.
 - **Free developer seats.**
   - **Draft workspace:** start eligible tickets with `mc start_seat`.
