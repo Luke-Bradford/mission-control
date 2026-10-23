@@ -28,6 +28,14 @@ function DraftRow({ draft, finish }: { draft: ReplyDraft; finish: (draft: ReplyD
           toast("Copy was blocked here; select the text and copy it.");
           return;
         }
+        try {
+          await apiPost(ACTIONS.copyDraft(String(draft.id)), {});
+        } catch (e) {
+          setError(
+            `Copy worked but couldn't be recorded: ${e instanceof Error ? e.message : String(e)}`,
+          );
+          return;
+        }
         toast("Copied. Paste it into Teams.");
       } else {
         await apiPost(
@@ -36,11 +44,12 @@ function DraftRow({ draft, finish }: { draft: ReplyDraft; finish: (draft: ReplyD
         );
         if (action === "post") toast(postedText(where));
       }
-      finish({
-        ...draft,
-        text,
-        state: action === "post" ? "posted" : action === "copy" ? "copied" : "discarded",
-      });
+      if (action !== "copy")
+        finish({
+          ...draft,
+          text,
+          state: action === "post" ? "posted" : "discarded",
+        });
       hub.refetchTopic("flight");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

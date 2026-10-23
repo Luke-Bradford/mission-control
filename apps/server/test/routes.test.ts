@@ -152,6 +152,7 @@ describe("the route table", () => {
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
     expect(routes).toContain("GET /api/drafts/history");
+    expect(routes).toContain("POST /api/drafts/:id/copied");
     expect(routes).toContain("GET /api/notification-preferences");
     expect(routes).toContain("POST /api/notification-preferences");
     expect(routes).toContain("GET /api/notifications/events");

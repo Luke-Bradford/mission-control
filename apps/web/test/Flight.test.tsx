@@ -1290,20 +1290,46 @@ describe("Draft replies", () => {
         if (blocked) throw new Error("blocked");
       });
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      let recorded = false;
       const fn = stubFetch({
-        "/api/drafts": [
-          {
-            id: 11,
-            target: "garden#11",
-            kind: "issue",
-            text: "Teams reply",
-            state: "pending",
-            createdAt: NOW,
-            to: "Garden team",
-            via: "Teams",
-            where: "Seed channel",
-          },
-        ],
+        "POST /api/drafts/11/copied": () => {
+          recorded = true;
+          return { status: 200, body: { ok: true } };
+        },
+        "/api/drafts": () => ({
+          status: 200,
+          body: recorded
+            ? []
+            : [
+                {
+                  id: 11,
+                  target: "garden#11",
+                  kind: "issue",
+                  text: "Teams reply",
+                  state: "pending",
+                  createdAt: NOW,
+                  to: "Garden team",
+                  via: "Teams",
+                  where: "Seed channel",
+                },
+              ],
+        }),
+        "/api/drafts/history": () => ({
+          status: 200,
+          body: recorded
+            ? [
+                {
+                  id: 11,
+                  target: "garden#11",
+                  kind: "issue",
+                  text: "Teams reply",
+                  state: "copied",
+                  createdAt: NOW,
+                  via: "Teams",
+                },
+              ]
+            : [],
+        }),
       });
       render(
         <>
@@ -1332,7 +1358,63 @@ describe("Draft replies", () => {
         );
         expect(screen.queryByRole("button", { name: "Copy for Teams" })).toBeNull();
       }
-      expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+      expect(
+        fn.mock.calls.filter(([, init]) => init?.method === "POST").map(([path]) => path),
+      ).toEqual(blocked ? [] : ["/api/drafts/11/copied"]);
+    },
+  );
+
+  it.each([false, true])(
+    "records Teams copies and refreshes history and Situation (failure: %s)",
+    async (failed) => {
+      const draft = {
+        id: 21,
+        target: "garden#21",
+        kind: "issue",
+        text: "Copy me",
+        state: "pending",
+        createdAt: NOW,
+        via: "Teams",
+      };
+      let copied = false;
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      const fn = stubFetch({
+        "/api/drafts": () => ({ status: 200, body: copied ? [] : [draft] }),
+        "/api/drafts/history": () => ({
+          status: 200,
+          body: copied
+            ? [{ ...draft, state: "copied", text: "History copy", completedAt: NOW }]
+            : [],
+        }),
+        "POST /api/drafts/21/copied": () => {
+          expect(writeText).toHaveBeenCalledWith("Copy me");
+          copied = !failed;
+          return {
+            status: failed ? 500 : 200,
+            body: failed ? { error: "record failed" } : { ok: true },
+          };
+        },
+      });
+      const { container } = render(<Flight />);
+      fireEvent.click(await screen.findByRole("button", { name: "Copy for Teams" }));
+      if (failed) {
+        expect(await screen.findByRole("alert")).toHaveProperty(
+          "textContent",
+          expect.stringContaining("Copy worked but couldn't be recorded"),
+        );
+        expect(screen.getByRole("button", { name: "Copy for Teams" })).toBeTruthy();
+      } else {
+        expect(await screen.findByText("History copy")).toBeTruthy();
+        expect(container.querySelector(".draft-row.acked")?.textContent).toContain("Copied");
+        await waitFor(() =>
+          expect(container.querySelector(".sitstats")?.textContent).toContain("0 drafts to send"),
+        );
+        expect(screen.queryByRole("button", { name: "Copy for Teams" })).toBeNull();
+      }
+      expect(
+        fn.mock.calls.filter(([, init]) => init?.method === "POST").map(([path]) => path),
+      ).toEqual(["/api/drafts/21/copied"]);
     },
   );
 

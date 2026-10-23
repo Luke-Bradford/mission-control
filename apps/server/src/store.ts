@@ -3076,26 +3076,32 @@ export class Store {
     return this.readDrafts(includeDone ? "all" : "pending");
   }
 
+  draft(id: number): ReplyDraft | undefined {
+    return this.readDrafts(id)[0];
+  }
+
   draftHistory(): ReplyDraft[] {
     return this.readDrafts("history");
   }
 
-  private readDrafts(selection: "pending" | "all" | "history"): ReplyDraft[] {
+  private readDrafts(selection: "pending" | "all" | "history" | number): ReplyDraft[] {
     const rows = this.db
       .prepare(
         `SELECT id, target, kind, text, created_at AS createdAt, state, metadata, completed_at AS completedAt
        FROM drafts ${
-         selection === "history"
-           ? "WHERE state != 'pending' ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 100"
-           : selection === "all"
-             ? `WHERE state = 'pending' OR id IN (
+         typeof selection === "number"
+           ? "WHERE id = ?"
+           : selection === "history"
+             ? "WHERE state != 'pending' ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 100"
+             : selection === "all"
+               ? `WHERE state = 'pending' OR id IN (
                SELECT id FROM drafts WHERE state != 'pending'
                ORDER BY created_at DESC, id DESC LIMIT 100
              ) ORDER BY created_at DESC, id DESC`
-             : "WHERE state = 'pending' ORDER BY created_at, id"
+               : "WHERE state = 'pending' ORDER BY created_at, id"
        }`,
       )
-      .all() as Row[];
+      .all(...(typeof selection === "number" ? [selection] : [])) as Row[];
     return rows.map(({ metadata, completedAt, ...r }) => ({
       ...r,
       to: r.target,

@@ -144,6 +144,7 @@ export const ACTIONS = {
   addAccount: "/api/accounts",
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
+  copyDraft: (id: string) => `/api/drafts/${enc(id)}/copied`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,

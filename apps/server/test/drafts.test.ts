@@ -22,6 +22,7 @@ let dir: string;
 let store: Store;
 let app: FastifyInstance;
 let gh: ReturnType<typeof vi.fn<GhRunner>>;
+let bus: ChangeBus;
 let token: string;
 let bodyFile: string;
 let posted: string;
@@ -38,10 +39,11 @@ beforeEach(() => {
   });
   const tokens = new RunTokens();
   token = tokens.issue("flight-1", "r-flight");
+  bus = new ChangeBus();
   app = buildApp({
     config,
     store,
-    bus: new ChangeBus(),
+    bus,
     gh,
     knownSecrets: async () => ["private-test-secret"],
     tokens,
@@ -360,4 +362,45 @@ it("serves only pending drafts alongside bounded history ordered by completion, 
   const response = await app.inject("/api/drafts/history");
   expect(response.statusCode).toBe(200);
   expect(response.json()).toEqual(finished.reverse().slice(0, 100));
+});
+
+it("records Teams copies, removes them from pending and emits flight without GitHub", async () => {
+  const id = store.addDraft("mc#1", "issue", "Teams reply", 1, { via: "Teams" });
+  const changed = vi.fn();
+  bus.subscribe(changed);
+  expect((await app.inject("/api/drafts")).json()).toHaveLength(1);
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/drafts/${id}/copied`,
+    payload: {},
+  });
+  expect(response.statusCode).toBe(200);
+  expect((await app.inject("/api/drafts")).json()).toEqual([]);
+  expect((await app.inject("/api/drafts/history")).json()).toEqual([
+    expect.objectContaining({ id, state: "copied", completedAt: expect.any(Number) }),
+  ]);
+  expect(changed.mock.calls).toEqual([["flight"]]);
+  expect(gh).not.toHaveBeenCalled();
+});
+
+it("refuses copied for GitHub, unknown and finished drafts without changing them", async () => {
+  const github = store.addDraft("mc#1", "issue", "GitHub reply", 1);
+  const finished = store.addDraft("mc#2", "issue", "Teams reply", 2, { via: "Teams" });
+  store.finishDraft(finished, "copied", undefined, 123);
+  const before = store.drafts(true);
+  const changed = vi.fn();
+  bus.subscribe(changed);
+  for (const [id, status] of [
+    [github, 409],
+    [999, 404],
+    [finished, 409],
+  ]) {
+    expect(
+      (await app.inject({ method: "POST", url: `/api/drafts/${id}/copied`, payload: {} }))
+        .statusCode,
+    ).toBe(status);
+  }
+  expect(store.drafts(true)).toEqual(before);
+  expect(changed).not.toHaveBeenCalled();
+  expect(gh).not.toHaveBeenCalled();
 });
