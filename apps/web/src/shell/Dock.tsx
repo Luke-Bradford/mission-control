@@ -17,7 +17,15 @@ import type { FlightSeat, FlightView } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { BuildChips } from "./buildStatus.tsx";
-import { setFlightUnread, trapTab, useBuildStatus, useDock, useReturnFocus } from "./overlays.ts";
+import {
+  setDockTab,
+  setFlightUnread,
+  trapTab,
+  useBuildStatus,
+  useDock,
+  useDockTab,
+  useReturnFocus,
+} from "./overlays.ts";
 
 const CAPCOM = "@CAPCOM";
 
@@ -75,8 +83,6 @@ const Msg = memo(function Msg({ row, tz }: { row: DockRow; tz: string | null }) 
     </div>
   );
 });
-
-type DockTab = "chat" | "feed";
 
 /** The message box keeps its own text, so a keystroke re-renders this and nothing else in the dock. */
 function Composer({
@@ -156,7 +162,7 @@ export function Dock() {
     [seat, stream, decisions],
   );
   const [pending, setPending] = useState<PendingMsg[]>([]);
-  const [tab, setTab] = useState<DockTab>("chat");
+  const tab = useDockTab();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const sent = useRef(0);
@@ -287,7 +293,7 @@ export function Dock() {
               role="tab"
               aria-selected={tab === "chat"}
               className={tab === "chat" ? "on" : undefined}
-              onClick={() => setTab("chat")}
+              onClick={() => setDockTab("chat")}
             >
               Chat
               {unread > 0 && (
@@ -301,7 +307,7 @@ export function Dock() {
               role="tab"
               aria-selected={tab === "feed"}
               className={tab === "feed" ? "on" : undefined}
-              onClick={() => setTab("feed")}
+              onClick={() => setDockTab("feed")}
             >
               Feed
             </button>

@@ -405,6 +405,31 @@ describe("the conversation", () => {
     expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(1);
   });
 
+  it("settles a pending message once FLIGHT's stream has it", async () => {
+    let events = STREAM.events;
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "POST /api/seats/flight-1/message": {},
+        "/api/agents/flight-1/stream": () => ({ status: 200, body: { ...STREAM, events } }),
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
+    const input = sendText(container, "assign it");
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(1);
+    events = [...STREAM.events, { id: "5:0", at: NOW, kind: "op", text: "assign it" }];
+    await act(async () => {
+      hub.refetch("/api/agents/flight-1/stream");
+    });
+    await waitFor(() => expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(0));
+    const mine = [...container.querySelectorAll(".dmsg.you")].filter(
+      (r) => r.querySelector(".txt")?.textContent === "assign it",
+    );
+    expect(mine).toHaveLength(1);
+  });
+
   it("drops the pending message when the send fails", async () => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },

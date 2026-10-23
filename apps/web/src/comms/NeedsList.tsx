@@ -23,7 +23,7 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { agentPath, navigate } from "../router.ts";
-import { openItem } from "../shell/overlays.ts";
+import { openDockChat, openItem, useFlightUnread } from "../shell/overlays.ts";
 import { GUARD_DRAWER_ID } from "../telemetry/guardCopy.ts";
 
 /** Rows are cut here (catalogue 2.5.1). */
@@ -72,6 +72,7 @@ export function NeedsList({
   rows: CrewRow[];
 }) {
   const now = useSecond();
+  const replies = useFlightUnread();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const list = sortNeeds((items ?? []).filter(isOperatorItem));
@@ -105,10 +106,24 @@ export function NeedsList({
       }
     >
       <div className="scroll" id="cNeeds">
-        {items !== undefined && list.length === 0 && (
+        {items !== undefined && list.length === 0 && replies === 0 && (
           <div className="pb muted">Nothing needs you right now.</div>
         )}
         {error && <div className="pb crit-t s">{error}</div>}
+        {replies > 0 && (
+          // no Ack: it clears when the operator has looked at the Chat tab
+          <div className="nrow" data-kind="message">
+            <div>
+              <span className="kind">{ATTENTION_LABEL.message}</span>{" "}
+              <span>{replies > 1 ? `FLIGHT replied (${replies})` : "FLIGHT replied"}</span>
+            </div>
+            <div className="acts">
+              <button type="button" className="sm" onClick={openDockChat}>
+                Open the chat
+              </button>
+            </div>
+          </div>
+        )}
         {list.map((i) => {
           const lamp = needsLamp([i], !i.acked);
           const agentId = i.agentId;

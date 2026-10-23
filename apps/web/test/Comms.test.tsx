@@ -10,7 +10,14 @@ import {
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Comms } from "../src/pages/Comms.tsx";
-import { toggleDock, useItem } from "../src/shell/overlays.ts";
+import {
+  setDockTab,
+  setFlightUnread,
+  toggleDock,
+  useDock,
+  useDockTab,
+  useItem,
+} from "../src/shell/overlays.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -768,5 +775,40 @@ describe("Guard drawer", () => {
     await screen.findByText(GUARD_NONE_TEXT);
     expect(drawer().tagName).toBe("DETAILS");
     expect(drawer().querySelectorAll(".nrow")).toHaveLength(0);
+  });
+});
+
+describe("Needs you: FLIGHT replied", () => {
+  function DockProbe() {
+    const dock = useDock();
+    const tab = useDockTab();
+    return (
+      <span data-testid="dock">
+        {dock.visible ? "visible" : "hidden"} {tab}
+      </span>
+    );
+  }
+
+  it("shows while a reply is unread, and opens the dock on Chat", async () => {
+    stub([]);
+    render(
+      <>
+        <DockProbe />
+        <Comms item={null} />
+      </>,
+    );
+    await screen.findByText("Nothing needs you right now.");
+    act(() => {
+      toggleDock(false);
+      setDockTab("feed");
+      setFlightUnread(2);
+    });
+    const row = (await screen.findByText("FLIGHT replied (2)")).closest(".nrow") as HTMLElement;
+    expect(within(row).queryByRole("button", { name: "Ack" })).toBeNull();
+    expect(screen.getByTestId("dock").textContent).toBe("hidden feed");
+    fireEvent.click(within(row).getByRole("button", { name: "Open the chat" }));
+    expect(screen.getByTestId("dock").textContent).toBe("visible chat");
+    act(() => setFlightUnread(0));
+    expect(screen.queryByText(/FLIGHT replied/)).toBeNull();
   });
 });
