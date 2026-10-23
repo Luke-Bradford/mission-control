@@ -8,6 +8,7 @@ import type { CcConfig } from "../src/config.ts";
 import {
   createPublisher,
   MC_MERGE_AUTHOR,
+  MERGE_BRANCH_MOVED,
   prDiffKey,
   UPDATE_MERGE_IN_PROGRESS,
   UPDATE_NO_WORKTREE,
@@ -360,6 +361,52 @@ describe("a merged branch (real git)", () => {
       transient: false,
     });
     expect(remoteTip()).not.toBe("");
+  });
+
+  /** Commits as the hub does, so only the part under test differs from a real hub merge. */
+  const asHub = (cwd: string, ...args: string[]): void => {
+    execFileSync("git", args, {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
+        GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
+      },
+    });
+  };
+  const keptAfter = async (): Promise<void> => {
+    git(worktree, "push", "-q", "origin", BRANCH);
+    prMerges(tip);
+    git(clone, "worktree", "remove", "--force", worktree);
+    expect(await publisher().deleteRemoteBranch(merging(tip), tip)).toEqual({
+      ok: false,
+      text: MERGE_BRANCH_MOVED,
+      transient: false,
+    });
+    expect(remoteTip()).not.toBe("");
+  };
+
+  it("keeps a branch whose hub-looking merge has the wrong subject", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    asHub(worktree, "merge", "-q", "--no-ff", "-m", "Merge something else", mainSha);
+    await keptAfter();
+  });
+
+  it("keeps a branch whose hub-looking commit has one parent", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    write(worktree, "apps/late.ts", "late\n");
+    git(worktree, "add", "-A");
+    asHub(worktree, "commit", "-q", "-m", `Merge main into ${BRANCH}`);
+    await keptAfter();
+  });
+
+  it("keeps a branch whose hub-looking merge carries an edit that is not the merge", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    git(worktree, "merge", "-q", "--no-ff", "--no-commit", mainSha);
+    write(worktree, "apps/smuggled.ts", "not on main\n");
+    git(worktree, "add", "-A");
+    asHub(worktree, "commit", "-q", "-m", `Merge main into ${BRANCH}`);
+    await keptAfter();
   });
 
   it("keeps a branch whose extra merge is not the hub's", async () => {
