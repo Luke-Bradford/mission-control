@@ -26,8 +26,8 @@ function stubHeld() {
     [LOCK]: {
       holder: { runId: "inco-1:x", seatId: "inco-1", command: "pnpm -s test", since: NOW - 83_000 },
       waiting: [
-        { runId: "guido-1:y", seatId: "guido-1", since: NOW - 5000 },
-        { runId: "guido-2:z", seatId: "guido-2", since: NOW - 2000 },
+        { runId: "guido-1:y", seatId: "guido-1", command: "pnpm -s test", since: NOW - 5000 },
+        { runId: "guido-2:z", seatId: "guido-2", command: "pnpm -s test", since: NOW - 2000 },
       ],
     },
   });

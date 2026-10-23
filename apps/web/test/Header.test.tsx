@@ -89,6 +89,7 @@ describe("Header machine button", () => {
     waiting: Array.from({ length: waiting }, (_, i) => ({
       runId: `r-${i + 2}`,
       seatId: "guido-2",
+      command: "pnpm -s test",
       since: NOW - MIN,
     })),
   });
@@ -284,7 +285,7 @@ describe("Header", () => {
     routes({
       lock: {
         holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW },
-        waiting: [{ runId: "r-2", seatId: "guido-3", since: NOW }],
+        waiting: [{ runId: "r-2", seatId: "guido-3", command: "pnpm -s test", since: NOW }],
       },
     });
     render(<Header page="flight" />);

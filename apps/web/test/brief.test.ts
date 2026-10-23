@@ -44,7 +44,7 @@ const mk = (n: number, status: string, over = {}) =>
   });
 
 describe("standup", () => {
-  it("golden string: sections in order, no agent id, run number instead of a loop step", () => {
+  it("golden string: sections in order, no agent id, current loop step and held state", () => {
     const items = [
       mk(1, "Done", { updatedAt: NOW - 3600_000 }),
       mk(2, "Done", { updatedAt: NOW - 5 * DAY }),
@@ -61,12 +61,23 @@ describe("standup", () => {
     const c = ctx({
       prs: [pr(50, "shop-app#1", "merged"), pr(51, "shop-app#10", "open")],
       crew: [
-        crewRow({ ticket: "shop-app#4", hudState: "running" }),
+        crewRow({
+          ticket: "shop-app#4",
+          hudState: "running",
+          loop: {
+            phase: "working",
+            step: "implement",
+            text: "Working",
+            prNumber: null,
+            parked: null,
+          },
+        }),
         crewRow({
           id: "shop-app-2",
           ticket: "shop-app#5",
           hudState: "stalled",
           run: { ...RUN, seq: 7 },
+          loop: { phase: "ci", step: null, text: "CI", prNumber: null, parked: null },
         }),
       ],
       attention: [item({ escalationId: "shop-app#11", ticket: "shop-app#11", agentId: null })],
@@ -75,7 +86,7 @@ describe("standup", () => {
       [
         "Standup, Saturday 17 October (shop-app)",
         "Since yesterday\n- shop-app#1 (PR #50): Ticket 1 (merged)\n- shop-app#3: Ticket 3 (merged, with QA)",
-        "Today\n- shop-app#5: Ticket 5 (run #7, held up)\n- shop-app#4: Ticket 4 (run #12)\n- shop-app#7: Ticket 7 (up next)\n- shop-app#8: Ticket 8 (up next)",
+        "Today\n- shop-app#5: Ticket 5 (CI, held up)\n- shop-app#4: Ticket 4 (implement)\n- shop-app#7: Ticket 7 (up next)\n- shop-app#8: Ticket 8 (up next)",
         "Blocked or waiting on me\n- shop-app#9: Ticket 9 (blocked by shop-app#2)\n- shop-app#11: Ticket 11 (waiting on me)",
         "In review\n- shop-app#10 (PR #51): Ticket 10 (PR open)",
       ].join("\n\n"),
@@ -89,6 +100,18 @@ describe("standup", () => {
 });
 
 describe("weekly", () => {
+  it.each([
+    { isDraft: true, review: null, action: "decide on the draft" },
+    { isDraft: false, review: null, action: "review" },
+    { isDraft: false, review: "approved" as const, action: "merge" },
+  ])("names the In review action: $action", ({ isDraft, review, action }) => {
+    const c = ctx({
+      prs: [{ ...pr(51, "shop-app#10", "open"), isDraft, review, updatedAt: NOW - 9 * DAY }],
+    });
+    expect(weekly([mk(10, "In review")], c, 14, NOW, TZ)).toContain(
+      `In review\n- shop-app#10 (PR #51): Ticket 10 (waiting for me to ${action})`,
+    );
+  });
   it("golden string", () => {
     const items = [
       mk(1, "Done", { updatedAt: NOW - 1000 }),
@@ -111,7 +134,7 @@ describe("weekly", () => {
         "Update: shop-app, last 14 days",
         "Done\n- shop-app#1: Ticket 1 (closed today)\n- shop-app#3: Ticket 3 (closed 1 day ago)\n- shop-app#2 (PR #60): Ticket 2 (merged 3 days ago)",
         "Ready for QA\n- shop-app#4: Ticket 4",
-        "In review\n- shop-app#5: Ticket 5 (PR open)\n- shop-app#6: Ticket 6 (waiting on me)",
+        "In review\n- shop-app#5: Ticket 5 (PR open)\n- shop-app#6: Ticket 6 (PR open)",
         "In progress\n- shop-app#7: Ticket 7",
         "Blocked\n- shop-app#8: Ticket 8 (blocked by shop-app#2)",
         "Coming up next\n- shop-app#10: Ticket 10 (P0)\n- shop-app#9: Ticket 9 (P2)",
