@@ -452,11 +452,13 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
+  ["GET", "/api/drafts/history"],
   ["POST", "/api/drafts/guido-1/post"],
   ["POST", "/api/drafts/guido-1/discard"],
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/flight/brief"],
+  ["GET", "/api/flight/incoming"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
@@ -484,6 +486,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/interrupt"],
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
+  ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/example/discussion"],
@@ -943,7 +946,7 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
-      if (url.startsWith("/api/drafts/")) {
+      if (url.startsWith("/api/drafts/") && method === "POST") {
         // the fixture has no such draft: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -3375,6 +3378,93 @@ describe("crew routes", () => {
     expect(supervisorCalls).toEqual([]);
   });
 
+  it("ends only the exact blocked run named by a watch action", async () => {
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("Missing crew fixture");
+    session.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    const since = NOW - 20 * 60_000;
+    const lock = new TestLock({ now: () => since });
+    const key = { runId: "preview-run", toolUseId: "preview-suite" };
+    await lock.acquire(key, "guido-1", "pnpm test", 60_000, new AbortController().signal);
+    const waiting = lock.acquire(
+      { runId: "waiting-preview", toolUseId: "waiting-suite" },
+      "inco-1",
+      "pnpm test",
+      60_000,
+      new AbortController().signal,
+    );
+    store.upsertRun(run({ id: key.runId, agentId: "guido-1", startedAt: since }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: key.runId,
+      cliSessionId: null,
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: since,
+    });
+    store.addLockHold({ ...key, seatId: "guido-1", command: "pnpm test", since });
+    store.setFlightWatch(
+      session.id,
+      {
+        upsert: [
+          {
+            id: "stop-preview",
+            state: "warn",
+            title: "Preview suite is blocking",
+            detail: "A suite is waiting",
+            catchUp: { kind: "old", line: "Holder is silent" },
+            next: "Stop the run",
+            action: { kind: "lock-hold", ...key, since },
+          },
+        ],
+      },
+      NOW,
+    );
+    const preview = buildApp({
+      config,
+      store,
+      bus,
+      lock,
+      supervisor: stubSupervisor(),
+      now: () => NOW,
+    });
+    try {
+      const stop = (expectedSince: number) =>
+        preview.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/end",
+          payload: { watch: { id: "stop-preview", ...key, since: expectedSince } },
+        });
+      expect((await stop(since + 1)).statusCode).toBe(409);
+      expect(supervisorCalls).toEqual([]);
+      expect((await stop(since)).statusCode).toBe(200);
+      expect(supervisorCalls).toEqual([["end", "guido-1", { hold: undefined }]]);
+      lock.releaseRun(key.runId);
+      expect((await stop(since)).statusCode).toBe(409);
+      expect(supervisorCalls).toHaveLength(1);
+    } finally {
+      lock.releaseRun(key.runId);
+      lock.releaseRun("waiting-preview");
+      await waiting;
+      await preview.close();
+    }
+  });
+
+  it("refuses a stale watch stop target before ending any run", async () => {
+    const response = await post5("end", {
+      watch: { id: "stop-preview", runId: "preview-run", toolUseId: "preview-suite", since: NOW },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(supervisorCalls).toEqual([]);
+  });
+
   it("ends a run without a hold by default, and with one when asked", async () => {
     expect((await post5("end", {})).statusCode).toBe(200);
     expect((await post5("end", { hold: true })).statusCode).toBe(200);
@@ -4175,6 +4265,72 @@ describe("the first loop's engine", () => {
     expect((await message(none.a)).statusCode).toBe(200);
     expect(none.told).toEqual([]);
     await none.a.close();
+  });
+
+  it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const { a, told } = engineApp(null);
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(told).toEqual(["aside"]);
+    expect(r.statusCode).toBe(409);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
+        .statusCode,
+    ).toBe(404);
+    await a.close();
+  });
+
+  it.each([
+    ["a body", { x: 1 }, true, "aside", 400],
+    ["no engine", {}, false, "aside", 409],
+    ["an unlooped run", {}, true, "plain-run", 404],
+  ] as const)("refuses %s", async (_what, payload, withEngine, id, code) => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    store.upsertRun(run({ id: "plain-run", agentId: "guido-1" }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      ...(withEngine
+        ? {
+            engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+          }
+        : {}),
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: `/api/runs/${id}/resume`,
+      headers: json,
+      payload,
+    });
+    expect(r.statusCode).toBe(code);
+    await a.close();
+  });
+
+  it("answers ok when the engine lifts the park", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ok: true });
+    await a.close();
   });
 
   it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {

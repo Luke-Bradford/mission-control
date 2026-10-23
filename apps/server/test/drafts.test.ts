@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
@@ -63,7 +64,7 @@ describe("operator draft approval", () => {
     "posts %s once through gh with edited text in a private temporary file",
     async (kind) => {
       const id = store.addDraft("mc#12", kind, "Prepared text", 123);
-      expect((await app.inject("/api/drafts")).json()).toEqual(store.drafts());
+      expect((await app.inject("/api/drafts")).json()).toEqual(store.drafts(true));
       expect((await post(id, "Operator edited text")).statusCode).toBe(200);
       expect(gh).toHaveBeenCalledTimes(1);
       expect(gh.mock.calls[0]?.[0]).toEqual([
@@ -76,6 +77,15 @@ describe("operator draft approval", () => {
       expect(posted).toBe("Operator edited text");
       expect(existsSync(bodyFile)).toBe(false);
       expect(store.drafts()).toEqual([]);
+      expect((await app.inject("/api/drafts")).json()).toEqual([]);
+      expect((await app.inject("/api/drafts/history")).json()).toEqual([
+        expect.objectContaining({
+          id,
+          state: "posted",
+          text: "Operator edited text",
+          completedAt: expect.any(Number),
+        }),
+      ]);
       expect((await post(id)).statusCode).toBe(404);
       expect(gh).toHaveBeenCalledTimes(1);
     },
@@ -188,6 +198,13 @@ describe("operator draft approval", () => {
         .statusCode,
     ).toBe(200);
     expect((await app.inject("/api/drafts")).json()).toEqual([]);
+    expect((await app.inject("/api/drafts/history")).json()).toEqual([
+      expect.objectContaining({ id, state: "discarded", completedAt: expect.any(Number) }),
+    ]);
+    expect(
+      (await app.inject({ method: "POST", url: `/api/drafts/${id}/discard`, payload: {} }))
+        .statusCode,
+    ).toBe(404);
     const next = store.addDraft("mc#2", "pr", "Another reply", 2);
     expect(next).not.toBe(id);
     expect((await post(id)).statusCode).toBe(404);
@@ -219,4 +236,128 @@ describe("operator draft approval", () => {
     expect((await first).statusCode).toBe(200);
     expect(gh).toHaveBeenCalledTimes(1);
   });
+});
+
+it("retains bounded completion history across restart without counting it as pending", async () => {
+  const pending = store.addDraft("mc#1", "issue", "Still waiting", 1);
+  for (let i = 0; i < 105; i++) {
+    const id = store.addDraft("mc#2", "pr", "Earlier reply", i + 2);
+    store.finishDraft(id, i % 2 ? "posted" : "discarded", undefined, i + 200);
+    store.finishDraft(id, "posted", "Must not overwrite", i + 300);
+  }
+  store.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.drafts()).toEqual([expect.objectContaining({ id: pending })]);
+  const history = store.drafts(true);
+  expect(history).toHaveLength(101);
+  expect(history.filter((d) => d.state !== "pending")).toHaveLength(100);
+  expect(history.find((d) => d.id === 2)).toBeUndefined();
+  expect(history.find((d) => d.id === 106)).toMatchObject({
+    state: "discarded",
+    completedAt: 304,
+    text: "Earlier reply",
+  });
+  expect(history.find((d) => d.id === pending)).toMatchObject({
+    to: "mc#1",
+    via: "GitHub",
+    where: "mc#1",
+  });
+  expect(history.find((d) => d.id === pending)?.completedAt).toBeUndefined();
+});
+
+it("migrates legacy pending and posted rows without inventing a completion time", () => {
+  const path = join(dir, "legacy.sqlite");
+  const db = new DatabaseSync(path);
+  db.exec(`CREATE TABLE drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, kind TEXT NOT NULL,
+    text TEXT NOT NULL, created_at INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending'
+  );
+  INSERT INTO drafts (target, kind, text, created_at, state) VALUES
+    ('mc#7', 'issue', 'Pending reply', 1, 'pending'),
+    ('mc#8', 'pr', 'Earlier reply', 2, 'posted');`);
+  db.close();
+  const migrated = new Store(path);
+  try {
+    expect(migrated.drafts()).toHaveLength(1);
+    expect(migrated.drafts(true)).toEqual([
+      {
+        id: 2,
+        target: "mc#8",
+        kind: "pr",
+        text: "Earlier reply",
+        createdAt: 2,
+        state: "posted",
+        to: "mc#8",
+        via: "GitHub",
+        where: "mc#8",
+      },
+      {
+        id: 1,
+        target: "mc#7",
+        kind: "issue",
+        text: "Pending reply",
+        createdAt: 1,
+        state: "pending",
+        to: "mc#7",
+        via: "GitHub",
+        where: "mc#7",
+      },
+    ]);
+  } finally {
+    migrated.close();
+  }
+});
+
+it("never posts a Teams draft on GitHub", async () => {
+  const id = store.addDraft("mc#1", "issue", "Reply to copy", 1, {
+    via: "Teams",
+    to: "Preview team",
+    where: "Preview channel",
+  });
+  expect((await post(id)).statusCode).toBe(400);
+  expect(gh).not.toHaveBeenCalled();
+  expect(store.drafts()).toHaveLength(1);
+});
+
+it("serves only pending drafts alongside bounded history ordered by completion, newest first", async () => {
+  const pending = store.addDraft("mc#1", "issue", "Still waiting", 1000);
+  const finished = [];
+  for (let i = 0; i < 105; i++) {
+    const metadata = {
+      to: `Recipient ${i}`,
+      via: i % 3 === 0 ? ("Teams" as const) : ("GitHub" as const),
+      where: `Place ${i}`,
+      context: `Context ${i}`,
+    };
+    // Creation order deliberately differs from completion order.
+    const id = store.addDraft("mc#2", "pr", `Reply ${i}`, 200 - i, metadata);
+    const state = i % 3 === 0 ? "copied" : i % 3 === 1 ? "posted" : "discarded";
+    store.finishDraft(id, state, undefined, 300 + Math.floor(i / 2));
+    finished.push({
+      id,
+      target: "mc#2",
+      kind: "pr",
+      text: `Reply ${i}`,
+      createdAt: 200 - i,
+      state,
+      ...metadata,
+      completedAt: 300 + Math.floor(i / 2),
+    });
+  }
+  expect((await app.inject("/api/drafts")).json()).toEqual([
+    {
+      id: pending,
+      target: "mc#1",
+      kind: "issue",
+      text: "Still waiting",
+      createdAt: 1000,
+      state: "pending",
+      to: "mc#1",
+      via: "GitHub",
+      where: "mc#1",
+    },
+  ]);
+  const response = await app.inject("/api/drafts/history");
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual(finished.reverse().slice(0, 100));
 });

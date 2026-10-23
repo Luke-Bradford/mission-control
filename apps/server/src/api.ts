@@ -312,7 +312,17 @@ const MessageBody = z.strictObject({
 const NoBody = z.strictObject({});
 
 // Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
-const EndBody = z.strictObject({ hold: z.boolean().optional() });
+const EndBody = z.strictObject({
+  hold: z.boolean().optional(),
+  watch: z
+    .strictObject({
+      id: z.string().min(1).max(100),
+      runId: z.string().min(1).max(200),
+      toolUseId: z.string().min(1).max(200),
+      since: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
 
 /**
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
@@ -1514,6 +1524,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
       seatAction("/seats/:id/end", EndBody, async (sup, id, b) => {
+        if (b.watch) {
+          const action = flightBriefView(
+            config,
+            store,
+            deps.lock?.state() ?? NO_LOCK,
+            now(),
+          ).watch?.find((entry) => entry.id === b.watch?.id)?.action;
+          if (
+            action?.kind !== "lock-hold" ||
+            action.runId !== b.watch.runId ||
+            action.toolUseId !== b.watch.toolUseId ||
+            action.since !== b.watch.since ||
+            store.seatSession(id)?.runId !== action.runId
+          )
+            throw new SupervisorError(
+              409,
+              "Watch target changed; refresh before stopping the run.",
+            );
+        }
         await sup.endRun(id, { hold: b.hold });
         return { ok: true };
       });
@@ -1531,13 +1560,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT ticket 4)
       api.get("/flight", async () => flightView(config, store, Date.now()));
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief, web follow-up of #225)
-      api.get("/flight/brief", async () => flightBriefView(config, store));
+      api.get("/flight/brief", async () =>
+        flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
+      );
+      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes, web follow-up)
+      api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
       api.get("/drafts", async () => store.drafts());
+      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history; web part follows in #415)
+      api.get("/drafts/history", async () => store.draftHistory());
       const postingDrafts = new Set<number>();
       const postingItems = new Set<string>();
       const postDraft = async (id: number, input: unknown, reply: FastifyReply) => {
@@ -1558,6 +1593,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           !repo ||
           !Number.isSafeInteger(n) ||
           n > 2 ** 31 - 1 ||
+          draft.via !== "GitHub" ||
           (draft.kind !== "issue" && draft.kind !== "pr")
         ) {
           return reply.code(400).send({ error: DRAFT_BAD_TARGET });
@@ -1709,6 +1745,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } catch (e) {
           return crewFail(e, reply);
         }
+      });
+      // The operator resumes a parked, looped run, for one whose seat no longer holds it (set aside at
+      // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
+      // review or review-ruling park waives that head's findings, as the message does. The answer
+      // waits for the engine's pass, so "ok" means the park was lifted.
+      // Reader: docs/runbook.md#resume-a-parked-run (by hand; a HUD Resume action is a follow-up web ticket)
+      api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+        if (!crewGate(run.agentId, reply)) return reply;
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (deps.engine?.status().on !== true) {
+          return reply.code(409).send({ error: "the loop engine is off" });
+        }
+        if (!(await deps.engine.onOperatorMessage(run.id))) {
+          return reply.code(409).send({
+            error: "nothing to resume: the run is not parked, or its park is not lifted this way",
+          });
+        }
+        return { ok: true };
       });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view; it reads this once Plan 7a Task 8 lands)

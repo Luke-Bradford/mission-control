@@ -1,10 +1,11 @@
-import { type GuardHitsView, seatCallSign, type Telemetry, type TestLockHistory } from "@mc/core";
+import type { GuardHitsView, Telemetry, TestLockHistory } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { cost, dur, kTokens, mss } from "../fmt.ts";
 import { followLink } from "../router.ts";
+import { useSeatName } from "../seatName.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE } from "./common.ts";
 import {
   GUARD_DRAWER_HREF,
@@ -75,6 +76,7 @@ function Kpi({ tile: k }: { tile: Tile }) {
 
 /** Today's KPI row (catalogue 2.6.2). */
 export function Kpis({ t }: { t: Telemetry | undefined }) {
+  const nameOf = useSeatName();
   const d = t?.today;
   const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
   const lock = useTestLock();
@@ -168,7 +170,7 @@ export function Kpis({ t }: { t: Telemetry | undefined }) {
     {
       key: "testlock",
       label: LOCK_TILE_LABEL,
-      value: lock === undefined ? DASH : holder ? seatCallSign(holder.seatId) : LOCK_TILE_FREE,
+      value: lock === undefined ? DASH : holder ? nameOf(holder.seatId) : LOCK_TILE_FREE,
       detail:
         lock === undefined
           ? ""

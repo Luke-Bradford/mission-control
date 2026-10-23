@@ -11,7 +11,6 @@ import {
   HUD_STATE_TONE,
   type ReloadResult,
   type SeatInput,
-  seatCallSign,
 } from "@mc/core";
 import { Fragment, useEffect, useId, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
@@ -24,6 +23,7 @@ import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { addAgentParam, agentPath, navigate, withoutAddAgentParam } from "../router.ts";
+import { useSeatName } from "../seatName.ts";
 import { inSession, useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
@@ -323,6 +323,7 @@ function CrewSession({
   error: string | null;
   save: SaveSeats;
 }) {
+  const nameOf = useSeatName();
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const tz = useTz();
   // This session's stray files, from the item's own path (no parsing of its text).
@@ -492,7 +493,7 @@ function CrewSession({
                                   session,
                                   base,
                                   base.filter((x) => x.id !== s.id),
-                                  (b) => removedText(seatCallSign(s.id), session.id, b),
+                                  (b) => removedText(nameOf(s.id), session.id, b),
                                 );
                               }}
                             >
@@ -538,8 +539,8 @@ function CrewSession({
                   : base.map((x) => (x.id === mine.editId ? seat : x)),
                 (b) =>
                   mine.editId === null
-                    ? addedText(seatCallSign(seat.id), session.id, b)
-                    : savedText(seatCallSign(seat.id), b),
+                    ? addedText(nameOf(seat.id), session.id, b)
+                    : savedText(nameOf(seat.id), b),
               )
             }
           />
