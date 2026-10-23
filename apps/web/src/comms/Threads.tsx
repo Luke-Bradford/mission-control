@@ -16,6 +16,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { useSeatName } from "../seatName.ts";
 import { stateWord } from "../shell/Dock.tsx";
 import { agentComms, commsLine } from "./messages.tsx";
 
@@ -134,6 +135,7 @@ function Thread({
   now: number;
   tz: string | null;
 }) {
+  const nameOf = useSeatName();
   const mine = items.filter((i) => i.agentId === r.id);
   const tagged = mine.some((i) => i.kind === "tag");
   const lamp = needsLamp(
@@ -142,7 +144,7 @@ function Thread({
   );
   // text only: the row is a button, and a link inside one is invalid
   const doing = doingLine(r, now, tz, useReviewPrs(r));
-  const line = last ? commsLine(last, r.id) : doing;
+  const line = last ? commsLine(last, r.id, nameOf) : doing;
   return (
     <button
       type="button"

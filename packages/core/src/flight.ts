@@ -1,7 +1,8 @@
 import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
-import { pathsText } from "./loop.ts";
+import { pathsText, RULING_PARK } from "./loop.ts";
+import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
-import type { LoopPhase } from "./types.ts";
+import type { AttentionBrief, LoopPhase } from "./types.ts";
 
 // The FLIGHT seat: the head agent that runs the crew. It is the one `watch` seat, started with no
 // ticket, and it keeps a log of what it decided (`flight_decisions`).
@@ -135,6 +136,9 @@ export interface FlightBriefSection {
 export interface FlightBriefView {
   session: string | null;
   sections: FlightBriefSection[];
+  watch?: FlightWatchEntry[];
+  planned?: FlightPlannedWork[];
+  drafts?: ReplyDraft[];
 }
 export const briefTooLongText = (title: string, n: number): string =>
   `Not saved: the ${title} section would be ${n} characters; the most is ${FLIGHT_BRIEF_SECTION_MAX}. Shorten it: keep what is still true, drop what is done or wrong.`;
@@ -146,7 +150,7 @@ export const briefAboutText = (title: string): string => `Brief: ${title}`;
 export const BRIEF_CLEARED_DECISION = "Cleared";
 /** A saved section in the decision log: its size, not its text (the brief itself holds that). */
 export const briefSavedDecision = (chars: number): string => `Saved (${chars} characters)`;
-export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, which comes back in every wake (brief in mc flight_state). Sections: ${FLIGHT_BRIEF_SECTIONS.join(", ")}. text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
+export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, which comes back in every wake (brief in mc flight_state). Sections: ${FLIGHT_BRIEF_SECTIONS.join(", ")}. text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. Optional watch upsert/remove maintains at most 100 structured entries with stable ids; actions reference an exact lock hold or draft, never prose commands. Optional arrival records No action with a reason, or Queued only for an already queued Board arrival; copy its source identity/version (Board version is createdAt, person version is source.revision). At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
 
 export const READ_OTHER_REPO =
   "Not read: you read only your session's repo, or the issue of an open loop escalation in another configured repo.";
@@ -480,6 +484,25 @@ export interface FlightPrRead {
   review: { decision: string | null; reviews: { author: string; state: string }[] };
 }
 
+/** A park as FLIGHT reads it; `report` is the seat's last report, on a ruling park only. */
+export interface FlightPark {
+  kind: string;
+  reason: string;
+  report?: string;
+}
+
+/** RETRO's verdicts on a PR, its blocking findings, and the sha it read. */
+export interface FlightPrReview {
+  spec: Verdict;
+  quality: Verdict;
+  blocking: number;
+  sha: string;
+}
+
+/** The park kinds whose digest entry carries the seat's last report, and the most of it carried. */
+export const FLIGHT_REPORT_PARKS: readonly string[] = [RULING_PARK, "review-ruling"];
+export const FLIGHT_REPORT_MAX = 1500;
+
 export interface FlightSeatState {
   id: string;
   /** The seat's unended run; null when it has none. */
@@ -493,7 +516,7 @@ export interface FlightSeatState {
   ticket: string | null;
   title: string | null;
   phase: LoopPhase | null;
-  parked: { kind: string; reason: string } | null;
+  parked: FlightPark | null;
   stalled: boolean;
   idleMin: number | null;
   openQuestion: boolean;
@@ -515,13 +538,14 @@ export interface FlightState {
     seat: string;
     ticket: string | null;
     phase: LoopPhase;
-    parked: { kind: string; reason: string } | null;
+    parked: FlightPark | null;
   }[];
   questions: { id: number; seat: string; ticket: string | null; text: string; ageMin: number }[];
   tickets: {
     ref: string;
     title: string;
     column: HudColumn;
+    arrival?: FlightArrivalIdentity;
     priority: string | null;
     labels: string[];
     ready: boolean;
@@ -545,6 +569,10 @@ export interface FlightState {
     headSha: string | null;
     readAt: string;
     stale: boolean;
+    /** RETRO's latest reported review of the PR, with the sha it read; null when none has reported. */
+    review: FlightPrReview | null;
+    /** The names of the checks failing on the stored head. */
+    failingChecks: string[];
   }[];
   /** The operator's Needs-you items that have no brief yet, oldest first. */
   items: {
@@ -582,6 +610,12 @@ export const FLIGHT_ANSWER_WAIT_MS = 20 * 60_000;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
 export const FLIGHT_REWAKE_MS = 60 * 60_000;
+/**
+ * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn
+ * raised (a reply, an item) would wake it again straight away: on 2026-10-23 that was a wake every
+ * second or two. A wake due sooner waits for the gap.
+ */
+export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** Starts of FLIGHT itself per hour, rotations not counted. */
@@ -631,10 +665,105 @@ export interface ReplyDraft {
   kind: "issue" | "pr";
   text: string;
   createdAt: number;
-  state: "pending" | "posted";
+  state: "pending" | "posted" | "copied" | "discarded";
+  to?: string;
+  via?: "GitHub" | "Teams";
+  where?: string;
+  context?: string;
+  completedAt?: number;
 }
 export const DRAFT_REPLY_DESCRIPTION =
   "Prepare a reply or comment for the operator to edit and approve. Only stores a draft; never posts. Target is a configured repo id followed by #number; kind is issue or pr.";
 export const DRAFT_BAD_TARGET = "Target must be a configured repo#number.";
 export const draftedReplyText = (id: number): string =>
   `Draft ${id} saved for the operator to approve.`;
+
+export const FLIGHT_WATCH_LIMIT = 100;
+export const FLIGHT_INCOMING_LIMIT = 100;
+export const FLIGHT_PLANNED_LIMIT = 100;
+export const FLIGHT_ARRIVAL_OUTCOMES = [
+  "Asked of you",
+  "Assigned",
+  "Raised to you",
+  "Reply drafted",
+  "Queued",
+  "Watching",
+  "No action",
+] as const;
+export type FlightArrivalOutcome = (typeof FLIGHT_ARRIVAL_OUTCOMES)[number];
+
+export type FlightWatchAction =
+  | { kind: "lock-hold"; runId: string; toolUseId: string; since: number }
+  | { kind: "draft"; draftId: number; target: string };
+
+export interface FlightWatchEntry {
+  id: string;
+  state: "warn" | "info" | "ok";
+  title: string;
+  detail: string;
+  catchUp: { kind: "new" | "follow-up" | "old"; line: string };
+  next: string;
+  action?: FlightWatchAction;
+  updatedAt?: number;
+}
+
+export interface FlightPlannedWork {
+  id: string;
+  title: string;
+  at: number;
+  createdAt: number;
+  detail?: string;
+}
+
+export interface FlightArrivalIdentity {
+  source: "GitHub" | "Teams" | "Board";
+  arrivalId: string;
+  version: string;
+  arrivedAt: number;
+}
+export interface FlightArrivalDisposition extends FlightArrivalIdentity {
+  id: string;
+  repoId: string | null;
+  sourceRef: { kind: "github-issue" | "github-pr" | "teams"; url: string } | null;
+  at: number;
+  text: string;
+  outcome: FlightArrivalOutcome;
+  detail: string;
+}
+export interface FlightIncomingView {
+  entries: FlightArrivalDisposition[];
+}
+
+export interface FlightWatchOperation {
+  upsert?: FlightWatchEntry[];
+  remove?: string[];
+}
+export interface FlightArrivalOperation {
+  source: FlightArrivalDisposition["source"];
+  arrivalId: string;
+  version: string;
+  outcome: "No action" | "Queued";
+  detail: string;
+}
+/** Additive fields on update_brief; actions are recorded only after their existing tools succeed. */
+export interface FlightBriefOperation {
+  section: FlightBriefSectionKey;
+  text: string;
+  basis: string;
+  watch?: FlightWatchOperation;
+  arrival?: FlightArrivalOperation;
+}
+
+/** Structured evidence accepted by brief_item in addition to its legacy context and options. */
+export type FlightBriefItemOperation = Pick<
+  AttentionBrief,
+  "catchUp" | "checked" | "person" | "recommendedOptionId"
+>;
+
+/** Optional guard on the existing seat end action when invoked from a watch item. */
+export interface FlightWatchStopOperation {
+  id: string;
+  runId: string;
+  toolUseId: string;
+  since: number;
+}

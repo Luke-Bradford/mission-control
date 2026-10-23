@@ -399,6 +399,9 @@ export interface RunDigest {
   tasks?: LiveTask[];
   /** Timestamped message usage, retained for attempt attribution (not run totals). */
   attemptUsage?: { id: string; at: number | null; tokens: number }[];
+  /** Committed lines; missing or null means unmeasured, including binary counts. */
+  additions?: number | null;
+  deletions?: number | null;
   toolCalls: number;
   turns: number;
   /** Newest timestamp on any frame, subagents included. */
@@ -419,7 +422,16 @@ export interface RunDigest {
    */
   lastText?: string | null;
   /** Every frame's tool calls by name; `durationsMs` keeps the last 50. */
-  tools: Record<string, { calls: number; failed: number; durationsMs: number[] }>;
+  tools: Record<
+    string,
+    {
+      calls: number;
+      failed: number;
+      durationsMs: number[];
+      /** Maximum timed call, retained independently of the bounded duration samples. */
+      slowest?: { detail: string | null; durationMs: number } | null;
+    }
+  >;
   subagents: SubagentInfo[];
   /** `[minute start (epoch ms), input + output tokens]` for the hour up to lastEventAt. */
   minuteTokens: [number, number][];
@@ -768,14 +780,90 @@ export interface Crew {
   firstRunToday: number | null;
 }
 
+/** Catch-up text is evidence to display, never instructions to execute. */
+export interface BriefCatchUp {
+  kind: "new" | "follow-up" | "old";
+  line: string;
+  story: string[];
+  aware: string[];
+}
+
+export interface BriefCheck {
+  source: string;
+  finding: string;
+}
+
+export interface BriefReference {
+  label: string;
+  /** Read-only navigation, never a posting target. */
+  url?: string;
+}
+
+export interface PersonSource {
+  kind: "github" | "teams";
+  messageId: string;
+  /** Opaque identity of the exact source content that was assessed. */
+  revision: string;
+}
+
+export interface PersonMessage {
+  source: PersonSource;
+  author: string | null;
+  at: number;
+  text: string;
+  url: string;
+}
+
+export interface SuggestedReply {
+  id: string;
+  label: string;
+  text: string;
+  /** Assigned by the server; generation never approves this draft. */
+  draftId?: number;
+}
+
+export interface PersonBrief {
+  source: PersonSource;
+  history?: PersonMessage[];
+  assessment?: string[];
+  take?: string;
+  related?: BriefReference[];
+  decisionKey?: string;
+  replies?: SuggestedReply[];
+}
+
+/** Correlates item chat without changing how messages are delivered or executed. */
+export interface ItemDiscussion {
+  id: string;
+  itemKey: string;
+  version: string;
+  messages: ItemChatMessage[];
+}
+
+export interface ItemChatMessage {
+  id: string;
+  itemKey: string;
+  correlationId: string;
+  replyTo?: string;
+  role: "operator" | "flight";
+  text: string;
+  at: number;
+}
+
 /** One answer FLIGHT suggests for an item that is a choice. */
 export interface BriefOption {
+  id?: string;
+  description?: string;
   label: string;
   answer: string;
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
 export interface AttentionBrief {
+  catchUp?: BriefCatchUp;
+  checked?: BriefCheck[];
+  recommendedOptionId?: string;
+  person?: PersonBrief;
   context: string;
   recommendation: string;
   options: BriefOption[];
@@ -893,4 +981,49 @@ export interface VersionInfo {
   canUpdate: boolean;
   /** Why Update is refused; null when it may run. */
   reason: string | null;
+}
+
+/** Provider CLI status in the same machine binding used by usage collection. */
+export interface CliAccountStatus {
+  accountId: AccountId;
+  provider: "claude" | "codex";
+  binding: "machine";
+  identity: string | null;
+  plan: string | null;
+  status: "logged-in" | "not-logged-in" | "unknown";
+  checkedAt: number;
+  /** Fixed safe failure text, never CLI output. */
+  detail: string | null;
+}
+
+export type NotificationCategory =
+  | "people"
+  | "decisions"
+  | "stalls"
+  | "prs"
+  | "capcom"
+  | "awayDigest"
+  | "quota"
+  | "agentMessages";
+
+/** Notify me about, on every signed-in device (catalogue §2.7.6). */
+export interface NotificationPreferences {
+  enabled?: boolean;
+  categories: Record<NotificationCategory, boolean>;
+  quietHours: {
+    start: string;
+    end: string;
+    timezone: string;
+    stallsBypass: boolean;
+  };
+  softChime: boolean;
+}
+
+export interface NotificationEvent {
+  test?: boolean;
+  softChime?: boolean;
+  id: string;
+  category: NotificationCategory;
+  at: number;
+  text: string;
 }

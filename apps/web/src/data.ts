@@ -44,6 +44,10 @@ export const RESOURCES = {
   crewStatus: { path: "/api/crew/status", topic: "agents" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
+  discussion: (key: string, id = ""): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
+    topic: "attention",
+  }),
   attention: { path: "/api/attention", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
@@ -52,12 +56,13 @@ export const RESOURCES = {
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
-  /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account is all. */
-  telemetry: (range: string, agent = "", account = ""): ResourceRef => ({
+  /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
+  telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
     path:
       `/api/telemetry?range=${enc(range)}` +
       (agent === "" ? "" : `&agent=${enc(agent)}`) +
-      (account === "" ? "" : `&account=${enc(account)}`),
+      (account === "" ? "" : `&account=${enc(account)}`) +
+      (ticket === "" ? "" : `&ticket=${enc(ticket)}`),
     topic: "agents",
   }),
   comms: (agentId: string): ResourceRef => ({
@@ -88,6 +93,7 @@ export const RESOURCES = {
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
+  accountStatus: { path: "/api/accounts/status", topic: "config" },
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
@@ -134,6 +140,8 @@ export const RESOURCES = {
 /** POST endpoints. */
 export const ACTIONS = {
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
+  addAccount: "/api/accounts",
+  checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,

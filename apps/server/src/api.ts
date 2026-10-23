@@ -7,6 +7,7 @@ import {
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
+  type CliAccountStatus,
   COMMS_CAPCOM,
   type ContextUsage,
   CREW_DISABLED,
@@ -70,13 +71,19 @@ import {
 } from "@mc/core";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { readAccountStatus } from "./accounts.ts";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
+  makeRest,
   NO_OPEN_THREAD,
   type NotificationsView,
+  notificationOpen,
   notificationsView,
   parsePersonKey,
+  type Rest,
+  sourceMessage,
+  sourceReadUrl,
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
@@ -91,9 +98,12 @@ import {
   DEFAULT_MAX_SEATS,
 } from "./config.ts";
 import {
+  accountDuplicateReason,
+  addAccount,
   addRepo,
   ConfigWriteError,
   duplicateReason,
+  NewAccountBody,
   NewRepoBody,
   RepoLocation,
   SeatsBody,
@@ -101,11 +111,26 @@ import {
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
-import { changedFiles, fileDiff, type GitExec, GitFailed, NO_WORKTREE_NOTE } from "./files.ts";
-import { flightBriefView, flightView } from "./flight/state.ts";
+import {
+  changedFiles,
+  committedLines,
+  fileDiff,
+  type GitExec,
+  GitFailed,
+  NO_WORKTREE_NOTE,
+} from "./files.ts";
+import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
-import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
+import {
+  attentionItems,
+  attentionVersion,
+  CREW_ERROR_KEY,
+  crew,
+  NO_LOCK,
+  NOTE_KEY,
+} from "./hud.ts";
+import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -116,13 +141,16 @@ import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
+import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "./runview.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
-import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
+import { lockView, median, telemetry, usualLockMs } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
+
+export const TELEMETRY_COMMIT_READ_LIMIT = 32;
+const TELEMETRY_COMMIT_CONCURRENCY = 4;
 
 /** The only Host names (and Origin hosts) the server answers: loopback, any port. */
 /** GitHub issue numbers are 32-bit; anything larger cannot exist. */
@@ -191,6 +219,8 @@ export interface AppDeps {
   profilesPath?: string;
   /** The GitHub client for board setup; default: a token from `gh auth token`, read on each use. */
   githubGql?: () => Promise<Gql>;
+  /** Read-only source revalidation before approving a person reply. */
+  notificationRest?: Rest;
   /** Asked to refresh the boards after a setup that changed GitHub; default: a "boards" change. */
   refreshBoards?: () => void;
   /** The built web app (apps/web/dist), served for unmatched GET/HEAD outside /api; absent: none. */
@@ -281,7 +311,17 @@ const MessageBody = z.strictObject({
 const NoBody = z.strictObject({});
 
 // Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
-const EndBody = z.strictObject({ hold: z.boolean().optional() });
+const EndBody = z.strictObject({
+  hold: z.boolean().optional(),
+  watch: z
+    .strictObject({
+      id: z.string().min(1).max(100),
+      runId: z.string().min(1).max(200),
+      toolUseId: z.string().min(1).max(200),
+      since: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
 
 /**
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
@@ -381,9 +421,31 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
   return Number(raw);
 }
 
+export const ACCOUNT_STATUS_CACHE_MS = 60_000;
+
+const NOTIFICATION_RECONCILE_MS = 1000;
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const accountReads = new Map<string, Promise<CliAccountStatus>>();
+  const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
+    const key = `${account.vendor}:${account.id}`;
+    const pending = accountReads.get(key);
+    if (pending) return pending;
+    const cached = accountStatuses.get(key);
+    if (!refresh && cached && now() < cached.expiresAt) return Promise.resolve(cached.status);
+    const read = readAccountStatus(account, now())
+      .then((status) => {
+        accountStatuses.set(key, { status, expiresAt: now() + ACCOUNT_STATUS_CACHE_MS });
+        return status;
+      })
+      .finally(() => accountReads.delete(key));
+    accountReads.set(key, read);
+    return read;
+  };
+
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
   const githubGql = deps.githubGql ?? (async () => makeGql(await githubToken()));
   // The login the hub acts as: kept once read; null when it cannot be, and not tried again for
@@ -479,8 +541,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  const notifications = new LocalNotifications(store, config, bus, now);
+  const reconcileNotifications = () =>
+    notifications.reconcile(
+      attentionItems(
+        config,
+        store,
+        now(),
+        deps.lock?.state() ?? NO_LOCK,
+        undefined,
+        deps.hubLogin?.() ?? null,
+      ),
+    );
+  let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconcilingNotifications = false;
+  const scheduleNotifications = () => {
+    if (notificationTimer !== undefined || reconcilingNotifications) return;
+    notificationTimer = setTimeout(() => {
+      notificationTimer = undefined;
+      reconcilingNotifications = true;
+      try {
+        reconcileNotifications();
+      } finally {
+        reconcilingNotifications = false;
+      }
+    }, NOTIFICATION_RECONCILE_MS);
+    notificationTimer.unref();
+  };
+  const unsubscribeNotifications = bus.subscribe((topic) => {
+    if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
+      scheduleNotifications();
+  });
+  app.addHook("onReady", async () => {
+    scheduleNotifications();
+  });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
+    unsubscribeNotifications();
+    clearTimeout(notificationTimer);
     for (const end of [...streams]) end();
   });
 
@@ -904,6 +1002,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
+      // Reader: apps/web/src/setup/Accounts.tsx (account status; UI integration follows)
+      api.get("/accounts/status", async () =>
+        Promise.all(config.accounts.map((account) => accountStatus(account))),
+      );
+      // Reader: apps/web/src/setup/Accounts.tsx (Check; UI integration follows)
+      api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        return accountStatus(account, true);
+      });
+      // Reader: apps/web/src/setup/Accounts.tsx (Add account; UI integration follows)
+      api.post("/accounts", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = NewAccountBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const duplicate = accountDuplicateReason(config.accounts, body.data);
+        if (duplicate) return reply.code(409).send({ error: duplicate });
+        try {
+          const result = await addAccount(deps.configPath, body.data, now());
+          const added = result.config.accounts.find((a) => a.id === body.data.name);
+          if (added) config.accounts.push(added);
+          bus.emit("config");
+          return { account: added };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
+              .send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
       api.get("/limits", async () => limitRows(config, store, now()));
       // Reader: apps/web/src/data.ts#RESOURCES (the Limits view's GitHub row)
       api.get("/limits/github", async () => githubRate(store));
@@ -1171,37 +1302,107 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
       });
 
-      api.get<{ Querystring: { range?: unknown; agent?: unknown; account?: unknown } }>(
-        "/telemetry",
-        async (req, reply): Promise<Telemetry | FastifyReply> => {
-          const range = req.query.range ?? DEFAULT_TELEMETRY_RANGE;
-          if (typeof range !== "string" || !Object.hasOwn(TELEMETRY_RANGES, range)) {
-            return reply
-              .code(400)
-              .send({ error: `range must be one of ${Object.keys(TELEMETRY_RANGES).join(", ")}` });
-          }
-          // Each scope is optional; an empty value means all, anything else must be configured.
-          const { agent, account } = req.query;
-          if (
-            agent !== undefined &&
-            agent !== "" &&
-            (typeof agent !== "string" || !agentIds(config).includes(agent))
-          ) {
-            return reply.code(400).send({ error: "agent must be a configured agent id" });
-          }
-          if (
-            account !== undefined &&
-            account !== "" &&
-            (typeof account !== "string" || !config.accounts.some((a) => a.id === account))
-          ) {
-            return reply.code(400).send({ error: "account must be a configured account id" });
-          }
-          return telemetry(config, store, range as TelemetryRange, now(), {
-            agent: agent === undefined || agent === "" ? null : (agent as string),
-            account: account === undefined || account === "" ? null : (account as string),
+      // Reader: apps/web/src/pages/Telemetry.tsx
+      api.get<{
+        Querystring: { range?: unknown; agent?: unknown; account?: unknown; ticket?: unknown };
+      }>("/telemetry", async (req, reply): Promise<Telemetry | FastifyReply> => {
+        const range = req.query.range ?? DEFAULT_TELEMETRY_RANGE;
+        if (typeof range !== "string" || !Object.hasOwn(TELEMETRY_RANGES, range)) {
+          return reply
+            .code(400)
+            .send({ error: `range must be one of ${Object.keys(TELEMETRY_RANGES).join(", ")}` });
+        }
+        // Each scope is optional; an empty value means all, anything else must be configured.
+        const { agent, account, ticket } = req.query;
+        if (
+          ticket !== undefined &&
+          ticket !== "" &&
+          (typeof ticket !== "string" ||
+            !config.repos.some(
+              (r) =>
+                ticket.startsWith(`${r.id}#`) &&
+                /^[1-9]\d*$/.test(ticket.slice(r.id.length + 1)) &&
+                Number.isSafeInteger(Number(ticket.slice(r.id.length + 1))),
+            ))
+        ) {
+          return reply.code(400).send({
+            error: "ticket must be a configured repo id and positive issue number (repo#issue)",
           });
-        },
-      );
+        }
+        if (
+          agent !== undefined &&
+          agent !== "" &&
+          (typeof agent !== "string" || !agentIds(config).includes(agent))
+        ) {
+          return reply.code(400).send({ error: "agent must be a configured agent id" });
+        }
+        if (
+          account !== undefined &&
+          account !== "" &&
+          (typeof account !== "string" || !config.accounts.some((a) => a.id === account))
+        ) {
+          return reply.code(400).send({ error: "account must be a configured account id" });
+        }
+        const at = now();
+        const scope = {
+          ticket: ticket === undefined || ticket === "" ? null : (ticket as string),
+          agent: agent === undefined || agent === "" ? null : (agent as string),
+          account: account === undefined || account === "" ? null : (account as string),
+        };
+        const counts = new Map<string, { additions: number | null; deletions: number | null }>();
+        const scopedCommits: { key: string; sha: string }[] = [];
+        const pending = new Map<string, { key: string; worktree: string }>();
+        const agents = configuredAgents(config);
+        for (const c of store.telemetryCommits(
+          at - TELEMETRY_RANGES[range as TelemetryRange] * 60_000,
+          at,
+        )) {
+          const key = `${c.repoId}#${c.sha}`;
+          if (counts.has(key)) continue;
+          const run = store.run(c.runId);
+          if (!run) continue;
+          const agent = agents.find((a) => a.id === run.agentId);
+          if (
+            !agent ||
+            (scope.agent !== null && scope.agent !== agent.id) ||
+            (scope.account !== null && scope.account !== agent.accountId) ||
+            (scope.ticket !== null && runTicket(run, runPrs(config, store, run)) !== scope.ticket)
+          )
+            continue;
+          scopedCommits.push({ key, sha: c.sha });
+          const cached = store.commitLines(c.sha);
+          if (cached) {
+            counts.set(key, cached);
+            continue;
+          }
+          const worktree =
+            agent?.kind === "crew"
+              ? config.crew?.sessions.find((s) => s.id === agent.sessionId)?.checkout
+              : agent?.loop.worktree;
+          if (worktree && pending.size < TELEMETRY_COMMIT_READ_LIMIT && !pending.has(c.sha))
+            pending.set(c.sha, { key, worktree });
+        }
+        const jobs = [...pending];
+        let next = 0;
+        await Promise.all(
+          Array.from({ length: TELEMETRY_COMMIT_CONCURRENCY }, async () => {
+            while (next < jobs.length) {
+              const job = jobs[next++];
+              if (!job) break;
+              const [sha, { key, worktree }] = job;
+              const lines = await committedLines(worktree, sha);
+              store.setCommitLines(sha, lines);
+              counts.set(key, lines);
+            }
+          }),
+        );
+        // A sha can occur in more than one repository.
+        for (const { key, sha } of scopedCommits) {
+          const lines = store.commitLines(sha);
+          if (lines) counts.set(key, lines);
+        }
+        return telemetry(config, store, range as TelemetryRange, at, scope, counts);
+      });
 
       const setPaused = async (id: string, paused: boolean, reply: FastifyReply) => {
         const loop = loopById(id);
@@ -1315,6 +1516,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
       seatAction("/seats/:id/end", EndBody, async (sup, id, b) => {
+        if (b.watch) {
+          const action = flightBriefView(
+            config,
+            store,
+            deps.lock?.state() ?? NO_LOCK,
+            now(),
+          ).watch?.find((entry) => entry.id === b.watch?.id)?.action;
+          if (
+            action?.kind !== "lock-hold" ||
+            action.runId !== b.watch.runId ||
+            action.toolUseId !== b.watch.toolUseId ||
+            action.since !== b.watch.since ||
+            store.seatSession(id)?.runId !== action.runId
+          )
+            throw new SupervisorError(
+              409,
+              "Watch target changed; refresh before stopping the run.",
+            );
+        }
         await sup.endRun(id, { hold: b.hold });
         return { ok: true };
       });
@@ -1332,23 +1552,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT ticket 4)
       api.get("/flight", async () => flightView(config, store, Date.now()));
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief, web follow-up of #225)
-      api.get("/flight/brief", async () => flightBriefView(config, store));
+      api.get("/flight/brief", async () =>
+        flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
+      );
+      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes, web follow-up)
+      api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
         ...(deps.engine === undefined ? {} : { engine: deps.engine.status() }),
       }));
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
       api.get("/drafts", async () => store.drafts());
+      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history; web part follows in #415)
+      api.get("/drafts/history", async () => store.draftHistory());
       const postingDrafts = new Set<number>();
-      // Reader: apps/web/src/flight/Drafts.tsx (operator approval only)
-      api.post<{ Params: { id: string } }>("/drafts/:id/post", async (req, reply) => {
-        const id = Number(req.params.id);
+      const postingItems = new Set<string>();
+      const postDraft = async (id: number, input: unknown, reply: FastifyReply) => {
+        const source = store.draftSource(id);
+        if (source?.state === "posted") return { ok: true };
         const draft = store.drafts().find((d) => d.id === id);
         if (!draft) return reply.code(404).send({ error: "No pending draft." });
-        if (postingDrafts.has(id)) return reply.code(409).send({ error: "Draft is being posted." });
+        if (postingDrafts.has(id) || (source && postingItems.has(source.itemKey)))
+          return reply.code(409).send({ error: "Draft is being posted." });
         const parsed = z
           .strictObject({ text: z.string().trim().min(1).max(MC_TEXT_MAX).optional() })
-          .safeParse(req.body);
+          .safeParse(input);
         if (!parsed.success) return reply.code(400).send({ error: "Invalid draft text." });
         const match = /^([^#]+)#([1-9][0-9]*)$/.exec(draft.target);
         const repo = config.repos.find((r) => r.id === match?.[1]);
@@ -1357,14 +1585,79 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           !repo ||
           !Number.isSafeInteger(n) ||
           n > 2 ** 31 - 1 ||
+          draft.via !== "GitHub" ||
           (draft.kind !== "issue" && draft.kind !== "pr")
         ) {
           return reply.code(400).send({ error: DRAFT_BAD_TARGET });
         }
+        const thread = source ? parsePersonKey(source.itemKey) : null;
+        if (source) {
+          const n = thread ? store.notification(thread.id) : null;
+          if (
+            !n ||
+            !notificationOpen(n) ||
+            n.updatedAt !== thread?.updatedAt ||
+            source.source.kind !== "github" ||
+            !n.message ||
+            JSON.stringify(source.source) !== JSON.stringify(n.message.source) ||
+            draft.target !== `${n.repoId}#${n.number}` ||
+            draft.kind !== (n.subjectType === "PullRequest" ? "pr" : "issue")
+          )
+            return reply
+              .code(409)
+              .send({ error: "Source changed; refresh the item before posting." });
+        }
         const body = parsed.data.text ?? draft.text;
         postingDrafts.add(id);
+        if (source) postingItems.add(source.itemKey);
         const file = crewPrBodyPath(store.path);
+        let wroteBody = false;
         try {
+          if (source && thread) {
+            try {
+              const rest = deps.notificationRest ?? makeRest(await githubToken());
+              const { body: current } = await rest(
+                `https://api.github.com/notifications/threads/${thread.id}`,
+              );
+              const parsedThread = z
+                .object({
+                  updated_at: z.string(),
+                  subject: z.object({ url: z.string(), latest_comment_url: z.string().nullable() }),
+                })
+                .safeParse(current);
+              const expected = `https://api.github.com/repos/${repo.github}/${draft.kind === "pr" ? "pulls" : "issues"}/${n}`;
+              if (
+                !parsedThread.success ||
+                Date.parse(parsedThread.data.updated_at) !== thread.updatedAt ||
+                !sourceReadUrl(repo.github, parsedThread.data.subject.url) ||
+                parsedThread.data.subject.url.split("/").slice(6).join("/") !==
+                  expected.split("/").slice(6).join("/")
+              )
+                return reply
+                  .code(409)
+                  .send({ error: "Source changed; refresh the item before posting." });
+              const url = parsedThread.data.subject.latest_comment_url ?? expected;
+              if (!sourceReadUrl(repo.github, url))
+                return reply.code(409).send({ error: "Invalid source target." });
+              const currentMessage = sourceMessage((await rest(url)).body, "", thread.updatedAt);
+              if (
+                !currentMessage ||
+                JSON.stringify(currentMessage.source) !== JSON.stringify(source.source)
+              )
+                return reply
+                  .code(409)
+                  .send({ error: "Source changed; refresh the item before posting." });
+              const latest = store.notification(thread.id);
+              if (!latest || !notificationOpen(latest) || latest.updatedAt !== thread.updatedAt)
+                return reply
+                  .code(409)
+                  .send({ error: "Source changed; refresh the item before posting." });
+            } catch {
+              return reply
+                .code(502)
+                .send({ error: "Could not verify the source. Nothing was posted." });
+            }
+          }
           const known = await readKnown(
             { knownSecrets: deps.knownSecrets ?? (async () => [await githubToken()]) },
             "post_draft",
@@ -1379,6 +1672,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
           await writeFile(file, body, { mode: 0o600, flag: "wx" });
+          wroteBody = true;
           const result = await (deps.gh ?? createGh())(
             [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
             { cwd: crewDir(store.path) },
@@ -1386,13 +1680,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (result.code !== 0)
             return reply.code(502).send({ error: "GitHub refused the comment." });
           store.finishDraft(id, "posted", body);
+          if (thread) {
+            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
+            bus.emit("attention");
+          }
           bus.emit("flight");
           return { ok: true };
         } finally {
           postingDrafts.delete(id);
-          await rm(file, { force: true });
+          if (source) postingItems.delete(source.itemKey);
+          if (wroteBody) await rm(file, { force: true });
         }
-      });
+      };
+      // Reader: apps/web/src/flight/Drafts.tsx (operator approval only)
+      api.post<{ Params: { id: string } }>("/drafts/:id/post", async (req, reply) =>
+        postDraft(Number(req.params.id), req.body, reply),
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx (explicit Post on GitHub approval)
+      api.post<{ Params: { key: string; replyId: string } }>(
+        "/attention/:key/replies/:replyId/post",
+        async (req, reply) => {
+          const draft = store
+            .briefs()
+            .get(req.params.key)
+            ?.person?.replies?.find((r) => r.id === req.params.replyId);
+          if (!draft?.draftId) return reply.code(404).send({ error: "No suggested GitHub reply." });
+          const source = store.draftSource(draft.draftId);
+          if (source?.itemKey !== req.params.key || source.replyId !== req.params.replyId)
+            return reply.code(409).send({ error: "Reply target changed." });
+          return postDraft(draft.draftId, req.body, reply);
+        },
+      );
       // Reader: apps/web/src/flight/Drafts.tsx
       api.post<{ Params: { id: string } }>("/drafts/:id/discard", async (req, reply) => {
         const id = Number(req.params.id);
@@ -1419,6 +1737,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } catch (e) {
           return crewFail(e, reply);
         }
+      });
+      // The operator resumes a parked, looped run, for one whose seat no longer holds it (set aside at
+      // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
+      // review or review-ruling park waives that head's findings, as the message does. The answer
+      // waits for the engine's pass, so "ok" means the park was lifted.
+      // Reader: docs/runbook.md#resume-a-parked-run (by hand; a HUD Resume action is a follow-up web ticket)
+      api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+        if (!crewGate(run.agentId, reply)) return reply;
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (deps.engine?.status().on !== true) {
+          return reply.code(409).send({ error: "the loop engine is off" });
+        }
+        if (!(await deps.engine.onOperatorMessage(run.id))) {
+          return reply.code(409).send({
+            error: "nothing to resume: the run is not parked, or its park is not lifted this way",
+          });
+        }
+        return { ok: true };
       });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view; it reads this once Plan 7a Task 8 lands)
@@ -1555,6 +1895,94 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
       );
 
+      const discussionSends = new Set<string>();
+      const currentDiscussionItem = (key: string) => {
+        const item = attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          undefined,
+          deps.hubLogin?.() ?? null,
+        ).find((item) => item.key === key && !item.acked);
+        return item ? { ...item, version: attentionVersion(item) } : undefined;
+      };
+      const openDiscussion = (item: AttentionItem & { version: string }) => {
+        const brief = item.brief;
+        const recommended = brief?.recommendedOptionId
+          ? brief.options.find((o) => o.id === brief.recommendedOptionId)
+          : undefined;
+        const text = recommended?.description
+          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description}. What would help you decide? I can pull the Teams thread or the code.`
+          : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
+        return store.ensureDiscussion(item.key, item.version, { text, at: now() });
+      };
+      // Reader: apps/web/src/shell/ItemPanel.tsx
+      api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
+        "/attention/:key/discussion",
+        async (req, reply) => {
+          const { key } = req.params;
+          if (req.query.id) {
+            const thread = store.discussion(key, req.query.id);
+            return thread ?? reply.code(404).send({ error: "Unknown discussion." });
+          }
+          const item = currentDiscussionItem(key);
+          if (!item?.version) return reply.code(404).send({ error: "No current item." });
+          return openDiscussion({ ...item, version: item.version });
+        },
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/discussion", async (req, reply) => {
+        const body = z
+          .strictObject({
+            version: z.string().min(1).max(100),
+            messageId: z.string().regex(/^[a-zA-Z0-9:_-]{1,100}$/),
+            text: z.string().trim().min(1).max(4000),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const item = currentDiscussionItem(req.params.key);
+        if (!item || item.version !== body.data.version)
+          return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
+        const thread = openDiscussion({ ...item, version: body.data.version });
+        const { messageId, text } = body.data;
+        try {
+          store.askDiscussion(thread.id, messageId, text, now());
+        } catch {
+          return reply.code(409).send({ error: "Message id already used." });
+        }
+        if (store.discussionSent(thread.id, messageId))
+          return store.discussion(item.key, thread.id);
+        const flight = flightSeat(config);
+        if (!flight || !supervisor || !crewGate(flight.seat.id, reply))
+          return reply.sent ? reply : reply.code(503).send({ error: "FLIGHT is unavailable." });
+        const sendKey = `${thread.id}:${messageId}`;
+        if (discussionSends.has(sendKey))
+          return reply.code(409).send({ error: "Message is being sent." });
+        discussionSends.add(sendKey);
+        try {
+          await supervisor.message(
+            flight.seat.id,
+            JSON.stringify({
+              kind: "item-discussion",
+              discussion: { id: thread.id, replyTo: messageId },
+              item,
+              question: text,
+              instruction:
+                "Reply using log_decision with discussion.id, discussion.replyTo and a stable discussion.messageId. Discussion is chat only; do not execute a choice.",
+            }),
+            { interrupt: false, questions: "none" },
+          );
+          store.markDiscussionSent(thread.id, messageId);
+          bus.emit("attention");
+          return store.discussion(item.key, thread.id);
+        } catch {
+          return reply.code(503).send({ error: "Could not send to FLIGHT. Retry this message." });
+        } finally {
+          discussionSends.delete(sendKey);
+        }
+      });
+
       api.post("/attention/ack", async (req, reply) => {
         const body = AckBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -1583,6 +2011,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { dismissed: key };
       });
 
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.get("/notification-preferences", async () => notifications.preferences());
+
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.post("/notification-preferences", async (req, reply) => {
+        const body = NotificationPreferencesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        notifications.setPreferences(body.data);
+        return notifications.preferences();
+      });
+
+      // Reader: apps/web/src/notifications.ts (local notification feed; web wiring is a separate ticket)
+      api.get("/notifications/events", async () => {
+        return notifications.events();
+      });
+
+      // Reader: apps/web/src/notifications.ts (Send a test notification; web wiring is a separate ticket)
+      api.post("/notifications/test", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        return notifications.test();
+      });
+
       // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)
       api.get(
         "/notifications",
@@ -1591,19 +2042,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled; the web side is its own ticket)
       api.post<{ Params: { key: string } }>("/attention/:key/handled", async (req, reply) => {
-        const body = NoBody.safeParse(req.body);
+        const body = z
+          .strictObject({
+            how: z.enum(["marked", "copied", "flight"]).optional(),
+            replyId: z.string().max(100).optional(),
+          })
+          .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
+        const how = body.data.how ?? "marked";
+        const person = store.briefs().get(key)?.person;
+        if (
+          how === "copied" &&
+          (person?.source.kind !== "teams" ||
+            !person.replies?.some((r) => r.id === body.data.replyId))
+        )
+          return reply.code(400).send({ error: "No suggested Teams reply." });
         const thread = key.length > 200 ? null : parsePersonKey(key);
         // Local only: the thread stays unread on GitHub.
         if (
           thread === null ||
-          !store.markNotificationHandled(thread.id, thread.updatedAt, "marked", now())
+          !store.markNotificationHandled(thread.id, thread.updatedAt, how, now())
         ) {
           return reply.code(404).send({ error: NO_OPEN_THREAD });
         }
         bus.emit("attention");
-        return { handled: key };
+        return {
+          handled: key,
+          ...(how === "flight"
+            ? {
+                message: `I will handle ${store.notification(thread.id)?.author ?? "Someone"}'s message: I will check what is needed, draft a reply and bring it back to you before anything is sent.`,
+              }
+            : {}),
+        };
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => {

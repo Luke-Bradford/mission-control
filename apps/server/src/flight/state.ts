@@ -14,18 +14,24 @@ import {
   FLIGHT_MAX_WAKES,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_RECENT_LISTED,
+  FLIGHT_REPORT_MAX,
+  FLIGHT_REPORT_PARKS,
   FLIGHT_STARTABLE,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_TICKETS_LISTED,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
+  type FlightArrivalDisposition,
+  type FlightArrivalOperation,
   type FlightBriefSection,
   type FlightBriefView,
+  type FlightPark,
   type FlightSeatState,
   type FlightState,
   type FlightView,
   hudColumnOf,
+  type ItemDiscussion,
   inLane,
   LANE_LABEL_PREFIX,
   OWNER_OPERATOR,
@@ -35,6 +41,7 @@ import {
   type Run,
   seatCallSign,
   seatDef,
+  type TestLockState,
   wakeKeyPrefix,
 } from "@mc/core";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
@@ -89,6 +96,19 @@ export function stalledSeats(
 ): Set<string> {
   return new Set(rows.filter((r) => r.hudState === "stalled").map((r) => r.id));
 }
+
+/**
+ * A reply or `@CAPCOM` tag FLIGHT itself wrote: the operator's to read (Needs you still shows it),
+ * not work for FLIGHT. Listing it in the digest woke FLIGHT with every reply it wrote. Assumes one
+ * live FLIGHT seat (`flightSeat`).
+ */
+export const ownReply = (
+  item: Pick<AttentionItem, "kind" | "agentId">,
+  flightId: string | null,
+): boolean =>
+  (item.kind === "message" || item.kind === "tag") &&
+  flightId !== null &&
+  item.agentId === flightId;
 
 /** The ids FLIGHT can answer for: its own session's seats other than FLIGHT itself. */
 export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
@@ -151,9 +171,81 @@ export function flightBriefSections(store: Store, sessionId: string | null): Fli
   });
 }
 
-export function flightBriefView(config: CcConfig, store: Store): FlightBriefView {
+export function flightBriefView(
+  config: CcConfig,
+  store: Store,
+  lock: TestLockState = NO_LOCK,
+  now = Date.now(),
+): FlightBriefView {
   const session = flightSeat(config)?.session.id ?? null;
-  return { session, sections: flightBriefSections(store, session) };
+  const drafts = store.drafts(true);
+  const rows = crew(config, store, now, lock, () => null).rows;
+  const watch = (session === null ? [] : store.flightWatch(session)).filter((entry) => {
+    const action = entry.action;
+    if (!action) return true;
+    if (action.kind === "draft") {
+      const draft = store.drafts().find((d) => d.id === action.draftId);
+      if (draft?.state !== "pending" || draft.target !== action.target) return false;
+      const source = store.draftSource(draft.id);
+      if (!source) return true;
+      const match = /^person:(\d+):(\d+)$/.exec(source.itemKey);
+      const n = match ? store.notification(match[1] as string) : null;
+      return (
+        !!n &&
+        n.unread &&
+        n.updatedAt === Number(match?.[2]) &&
+        (n.handledThrough === null || n.updatedAt > n.handledThrough) &&
+        JSON.stringify(n.message?.source) === JSON.stringify(source.source)
+      );
+    }
+    const h = lock.holder;
+    return (
+      h !== null &&
+      h.runId === action.runId &&
+      h.since === action.since &&
+      store
+        .lockHolds()
+        .some(
+          (r) =>
+            r.runId === action.runId &&
+            r.toolUseId === action.toolUseId &&
+            r.since === action.since,
+        ) &&
+      store.run(action.runId)?.endedAt === null &&
+      store.seatSession(h.seatId)?.runId === action.runId &&
+      rows.some((r) => r.id === h.seatId && r.hudState === "stalled") &&
+      lock.waiting.length > 0
+    );
+  });
+  return { session, sections: flightBriefSections(store, session), watch, drafts };
+}
+
+/** Source records supply identity and text; a notification alone never implies an action. */
+export function flightArrivalSource(
+  config: CcConfig,
+  store: Store,
+  operation: FlightArrivalOperation,
+): Pick<FlightArrivalDisposition, "text" | "arrivedAt"> | null {
+  if (operation.source === "Board") {
+    const repo = flightSeat(config)?.session.repoId;
+    const card =
+      repo === undefined
+        ? undefined
+        : store.board(repo).find((c) => `${repo}#${c.issueNumber}` === operation.arrivalId);
+    return card && String(card.createdAt) === operation.version
+      ? { text: card.title, arrivedAt: card.createdAt }
+      : null;
+  }
+  const n = store.notification(operation.arrivalId);
+  const source = n?.message?.source;
+  if (
+    !n ||
+    n.repoId !== flightSeat(config)?.session.repoId ||
+    (operation.source === "Teams" ? source?.kind !== "teams" : source?.kind === "teams") ||
+    operation.version !== (source?.revision ?? String(n.updatedAt))
+  )
+    return null;
+  return { text: n.title, arrivedAt: n.updatedAt };
 }
 
 const priorityRank = (p: string | null): number => {
@@ -197,8 +289,9 @@ export function flightState(i: {
   busy: readonly SeatBusy[];
   now: number;
   hubLogin?: string | null;
-}): FlightState {
+}): FlightState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
+  const discussions = store.pendingDiscussions();
   const tz = config.operator.timezone;
   const found = flightSeat(config);
   const since = now - FLIGHT_HOUR_MS;
@@ -232,6 +325,7 @@ export function flightState(i: {
   }));
   if (found === null) {
     return {
+      discussions,
       time: clockHm(now, tz),
       repo: "",
       lane: config.crew?.lane ?? null,
@@ -278,10 +372,7 @@ export function flightState(i: {
       ticket: run?.ticket ?? null,
       title: t === null ? null : (board.find((b) => b.issueNumber === t.number)?.title ?? null),
       phase: loop?.phase ?? null,
-      parked:
-        loop?.phase === "parked"
-          ? { kind: loop.parked?.kind ?? "", reason: loop.parked?.reason ?? "" }
-          : null,
+      parked: run === null ? null : parkOf(store, run),
       stalled: stalled.has(s.id),
       idleMin:
         run !== null && row?.state === "idle" && last !== null
@@ -329,6 +420,12 @@ export function flightState(i: {
       const column = hudColumnOf(b);
       return {
         ref: `${b.repoId}#${b.issueNumber}`,
+        arrival: {
+          source: "Board" as const,
+          arrivalId: `${b.repoId}#${b.issueNumber}`,
+          version: String(b.createdAt),
+          arrivedAt: b.createdAt,
+        },
         title: b.title,
         column,
         priority: b.priority,
@@ -362,6 +459,7 @@ export function flightState(i: {
     .sort((a, b) => a.number - b.number)
     .map((p) => {
       const holder = holders.find((r) => r.loop?.prNumber === p.number);
+      const reviewed = store.latestReportedReview(session.repoId, p.number);
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
@@ -372,6 +470,11 @@ export function flightState(i: {
         headSha: p.headSha,
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
+        review:
+          reviewed?.verdict == null
+            ? null
+            : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
+        failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
       };
     });
 
@@ -389,7 +492,7 @@ export function flightState(i: {
       seat: r.agentId,
       ticket: r.ticket ?? null,
       phase: r.loop?.phase ?? "working",
-      parked: asideParked(r),
+      parked: parkOf(store, r),
     }));
 
   const prStates = new Map<number, FlightState["prs"][number]["state"]>(
@@ -425,8 +528,9 @@ export function flightState(i: {
   });
 
   const briefed = store.briefs();
+  const flightId = flightSeat(config)?.seat.id ?? null;
   const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
-    .filter((x) => !briefed.has(x.key))
+    .filter((x) => !briefed.has(x.key) && !ownReply(x, flightId))
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -438,6 +542,7 @@ export function flightState(i: {
     }));
 
   return {
+    discussions,
     time: clockHm(now, tz),
     repo: session.repoId,
     lane: config.crew?.lane ?? null,
@@ -455,20 +560,27 @@ export function flightState(i: {
   };
 }
 
-/** A set-aside run's park, as FLIGHT reads it; null when it is not parked. */
-const asideParked = (run: Run): { kind: string; reason: string } | null =>
-  run.loop?.phase === "parked"
-    ? { kind: run.loop.parked?.kind ?? "", reason: run.loop.parked?.reason ?? "" }
-    : null;
+/** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */
+const parkOf = (store: Store, run: Run): FlightPark | null => {
+  if (run.loop?.phase !== "parked") return null;
+  const kind = run.loop.parked?.kind ?? "";
+  const park: FlightPark = { kind, reason: run.loop.parked?.reason ?? "" };
+  if (FLIGHT_REPORT_PARKS.includes(kind)) {
+    const report = store.latestEvidence(run.id)?.note;
+    if (report !== undefined) park.report = cut(report, FLIGHT_REPORT_MAX);
+  }
+  return park;
+};
 
 /** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
-export function wakeFacts(s: FlightState): string {
+export function wakeFacts(s: FlightState & { discussions?: ItemDiscussion[] }): string {
   const startable = s.tickets.filter((t) => t.ready);
   const free =
     startable.length > 0
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
   return JSON.stringify({
+    discussions: s.discussions?.map((t) => [t.id, t.messages.map((m) => m.id)]),
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: free.length > 0 ? startable.map((t) => t.ref) : [],
@@ -506,8 +618,9 @@ const flightParkKind = (kind: string): boolean =>
   kind === RULING_PARK || (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
-export function pending(s: FlightState): boolean {
+export function pending(s: FlightState & { discussions?: ItemDiscussion[] }): boolean {
   return (
+    (s.discussions?.length ?? 0) > 0 ||
     s.questions.length > 0 ||
     s.items.length > 0 ||
     releasable(s).length > 0 ||

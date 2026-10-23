@@ -149,18 +149,9 @@ async function pageTimelines(
   return truncated;
 }
 
-/**
- * A status counts as the start of work when it is literally "Ready" or sits in In progress, In
- * review or Ready for QA. An empty or unmapped status never starts; a status that only maps to
- * Ready through `planned` (shop-app's Todo, a backlog) does not either.
- */
-function startsWork(repo: Repo, status: string): boolean {
-  if (status.trim() === "") return false;
-  if (status.trim().toLowerCase() === "ready") return true;
-  // An unmapped status is judged by its name alone: "planned" can only ever give Ready here.
-  const state = Object.hasOwn(repo.statusMap, status) ? repo.statusMap[status] : "planned";
-  const column = hudColumnOf({ status, state: state ?? "planned", closed: false });
-  return column === "In progress" || column === "In review" || column === "Ready for QA";
+/** Only an observed Ready entry starts the board journey; planned alone may be a backlog. */
+function startsWork(status: string): boolean {
+  return status.trim().toLowerCase() === "ready";
 }
 
 function isDone(repo: Repo, status: string): boolean {
@@ -180,7 +171,7 @@ function issueFlow(repo: Repo, node: unknown): { startAt: number | null; doneAt:
   let startAt: number | null = null;
   let doneAt: number | null = null;
   for (const e of events) {
-    if (startAt === null && startsWork(repo, e.status)) startAt = e.at;
+    if (startAt === null && startsWork(e.status)) startAt = e.at;
     if (isDone(repo, e.status)) doneAt = e.at;
   }
   return { startAt, doneAt };

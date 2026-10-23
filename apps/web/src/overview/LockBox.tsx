@@ -1,4 +1,4 @@
-import { type CrewRow, LOCK_FREE_TEXT, LOCK_NOBODY_WAITING, seatCallSign } from "@mc/core";
+import { type CrewRow, LOCK_FREE_TEXT, LOCK_NOBODY_WAITING } from "@mc/core";
 import { useState } from "react";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useSecond } from "../clock.ts";
@@ -9,6 +9,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, navigate } from "../router.ts";
+import { useSeatName } from "../seatName.ts";
 
 const LOCK_FREE_NEXT = "The next verify step takes it straight away.";
 
@@ -21,6 +22,7 @@ const TicketChip = ({ row }: { row: CrewRow | undefined }) =>
  * seats in line; or that it is free. A stalled holder gives the box an amber border and a pulse.
  */
 export function LockBox() {
+  const nameOf = useSeatName();
   const lock = useTestLock();
   const crew = useResource<{ rows: CrewRow[] }>(RESOURCES.crew).data;
   const now = useSecond();
@@ -53,7 +55,7 @@ export function LockBox() {
   const holder = rowOf(h.seatId);
   const stalled = holder?.hudState === "stalled";
   const quiet = holder?.lastOutputAt ?? null;
-  const call = seatCallSign(h.seatId);
+  const call = nameOf(h.seatId);
   const stop = async () => {
     setBusy(true);
     setError(null);

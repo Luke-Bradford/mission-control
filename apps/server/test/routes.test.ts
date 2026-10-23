@@ -151,7 +151,18 @@ describe("the route table", () => {
     const routes = await registeredRoutes();
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
+    expect(routes).toContain("GET /api/drafts/history");
+    expect(routes).toContain("GET /api/notification-preferences");
+    expect(routes).toContain("POST /api/notification-preferences");
+    expect(routes).toContain("GET /api/notifications/events");
+    expect(routes).toContain("POST /api/notifications/test");
+    expect(routes).toContain("GET /api/accounts/status");
+    expect(routes).toContain("POST /api/accounts/:id/check");
+    expect(routes).toContain("POST /api/accounts");
+    expect(routes).toContain("GET /api/flight/incoming");
     expect(routes).toContain("POST /api/seats/:id/start");
+    expect(routes).toContain("GET /api/attention/:key/discussion");
+    expect(routes).toContain("POST /api/attention/:key/discussion");
     expect(routes).toContain("GET /api/comms/:id");
     expect(routes).toContain("POST /api/comms/:id/read");
     expect(orphans(routes, webReads(), readerComments())).toEqual([]);
