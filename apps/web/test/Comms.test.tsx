@@ -500,9 +500,12 @@ describe("Threads and conversation", () => {
     await waitFor(() => expect(buttons[0]?.textContent).toContain(FLIGHT_NO_SEAT));
     expect(within(list).getByText(/Idle since/)).toBeTruthy();
     expect(within(list).getByText(/^run #12/)).toBeTruthy();
+    fireEvent.click(within(list).getByRole("button", { name: /^studio/ }));
+    expect(document.querySelector("#chatP")?.textContent).toContain("Thread · studio");
     act(() => setSession("shop-app-session"));
     await waitFor(() => expect(within(list).queryByText("studio")).toBeNull());
     expect(within(list).getByText("shop-app-ta")).toBeTruthy();
+    expect(document.querySelector("#chatP")?.textContent).toContain(FLIGHT_NO_SEAT);
   });
 
   it("a thread shows its doing text before the timezone has loaded", async () => {
@@ -647,6 +650,27 @@ describe("Threads and conversation", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       ...(activity ? { "/api/activity": activity } : {}),
+      ...Object.fromEntries(
+        ["guido-1", "retro-1"].map((id) => [
+          `/api/comms/${id}`,
+          {
+            messages: (activity ?? [])
+              .filter((m): m is CommsEvent => m.kind === "comms" && (m.who === id || m.to === id))
+              .sort((a, b) => a.at - b.at)
+              .map((m, i) => ({
+                id: String(i),
+                at: m.at,
+                from: m.who,
+                to: m.to,
+                ticket: null,
+                text: m.text,
+                tagged: m.text.includes(TAG),
+                direct: false,
+                seen: true,
+              })),
+          },
+        ]),
+      ),
       ...extra,
     });
   const MESSAGES = [

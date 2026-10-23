@@ -19,7 +19,7 @@ export function Comms({ item }: { item: string | null }) {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const { inView: matchesSession } = useSessionScope();
-  const [selected, setSelected] = useState(FLIGHT_THREAD);
+  const [selected, setSelected] = useState({ id: FLIGHT_THREAD, fromNeeds: false });
 
   // A link to one item opens its panel once the list is known; a key that has gone opens nothing.
   const handled = useRef<string | null>(null);
@@ -37,8 +37,8 @@ export function Comms({ item }: { item: string | null }) {
   }, [item, items]);
 
   // Below 1000 px the conversation stacks under the list: bring it into view.
-  const select = (id: string) => {
-    setSelected(id);
+  const select = (id: string, fromNeeds = false) => {
+    setSelected({ id, fromNeeds });
     if (window.matchMedia?.(STACKED_QUERY).matches) {
       document.getElementById("chatP")?.scrollIntoView?.({ block: "start" });
     }
@@ -46,13 +46,19 @@ export function Comms({ item }: { item: string | null }) {
 
   const rows = crew?.rows ?? [];
   const inView = rows.filter((r) => matchesSession(r));
-  const row = inView.find((r) => r.id === selected) ?? null;
+  // Needs you spans sessions: an explicit Read can open a thread outside the filtered list.
+  const row = (selected.fromNeeds ? rows : inView).find((r) => r.id === selected.id) ?? null;
 
   return (
     <section id="page-comms">
       <div className="cgrid">
         <div className="col">
-          <NeedsList items={items} rows={rows} onAskFlight={() => select(FLIGHT_THREAD)} />
+          <NeedsList
+            items={items}
+            rows={rows}
+            onAskFlight={() => select(FLIGHT_THREAD)}
+            onRead={(id) => select(id, true)}
+          />
           <Threads
             rows={inView}
             items={items ?? []}

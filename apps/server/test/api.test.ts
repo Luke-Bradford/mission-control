@@ -430,6 +430,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
   ["GET", "/api/agents/shop-app-ta/stream"],
+  ["GET", "/api/comms/guido-1"],
+  ["POST", "/api/comms/guido-1/read", { messageIds: [] }],
   ["GET", "/api/agents/shop-app-ta/files"],
   ["GET", "/api/agents/shop-app-ta/files/diff?path=a.ts"],
   ["GET", "/api/agents/guido-1/stream"],
@@ -1039,6 +1041,7 @@ describe("local access", () => {
             .split("?")[0]
             ?.replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
+            .replace(/\/guido-1$/, "/:id")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
