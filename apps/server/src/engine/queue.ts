@@ -23,8 +23,8 @@ import {
   fillLoopText,
   hudColumnOf,
   NEW_LOOP,
-  PRIORITIES,
   type Profile,
+  priorityRank,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
   type RepoId,
@@ -104,12 +104,6 @@ const bodyCache = new Map<string, { updatedAt: number; body: string }>();
 
 /** Empties the body cache (for tests). */
 export const clearBodyCache = (): void => bodyCache.clear();
-
-/** Priorities in the order they are picked; a card with none, or any other, comes after. */
-const priorityRank = (p: string | null): number => {
-  const i = p === null ? -1 : (PRIORITIES as readonly string[]).indexOf(p);
-  return i === -1 ? PRIORITIES.length : i;
-};
 
 /** The writer seats of crew sessions, with their session. */
 function writerSeats(config: CcConfig): { session: CrewSessionConfig; seat: CrewSeatConfig }[] {
