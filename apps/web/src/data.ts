@@ -53,6 +53,7 @@ export const RESOURCES = {
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
   drafts: { path: "/api/drafts", topic: "flight" },
+  draftHistory: { path: "/api/drafts/history", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
