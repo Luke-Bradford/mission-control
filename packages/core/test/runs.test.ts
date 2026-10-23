@@ -92,10 +92,34 @@ describe("agentState", () => {
     ).toEqual({ state: "idle", since: 7 });
     expect(agentState({ ...base, runs: [] })).toEqual({ state: "idle", since: 0 });
   });
+  it("a paused loop with a run in flight is still working", () => {
+    expect(
+      agentState({
+        ...base,
+        paused: true,
+        runs: [
+          run({ status: "running", startedAt: 30, endedAt: null }),
+          run({ startedAt: 1, endedAt: 7 }),
+        ],
+      }),
+    ).toEqual({ state: "working", since: 30 });
+  });
+  it("an older blocked run behind a newer finished one is idle", () => {
+    const runs = [
+      run({ status: "blocked", startedAt: 5, endedAt: 9 }),
+      run({ status: "ok", startedAt: 20, endedAt: 25 }),
+    ];
+    expect(agentState({ ...base, runs })).toEqual({ state: "idle", since: 25 });
+  });
   it("does not mutate input", () => {
-    const runs = [run({ startedAt: 1 }), run({ startedAt: 9 })];
+    const runs = [
+      run({ startedAt: 9 }),
+      run({ startedAt: 1 }),
+      run({ status: "running", startedAt: 5, endedAt: null }),
+    ];
+    const before = structuredClone(runs);
     agentState({ ...base, runs });
-    expect(runs.map((r) => r.startedAt)).toEqual([1, 9]);
+    expect(runs).toEqual(before);
   });
 });
 
