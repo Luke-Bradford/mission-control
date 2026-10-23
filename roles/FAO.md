@@ -10,7 +10,7 @@ Under these headings, in this order:
 - **### Files**: every file to modify or create, and the tests.
 - **### Interfaces**: exact signatures, types, constants and user-visible texts, word for word.
 - **### Behaviour**: the rules in order, and every edge case with what happens in it.
-- **### Tests**: the tests to write first, one entry per `## Done when` item: each test's name, its inputs and the exact expectation. Use this heading exactly; the tool looks for `### Tests`.
+- **### Tests**: the tests to write first, one top-level bullet per `## Done when` item (the tool counts bullets, not nested ones): each test's name, the file it goes in, its inputs and the exact expectation. Use this heading exactly; the tool looks for `### Tests`.
 - **### Checks**: lint, typecheck and only the touched test files; no full suite, no mutation testing.
 
 ## How you work
