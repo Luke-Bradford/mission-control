@@ -269,6 +269,8 @@ describe("crew", () => {
     node?: string;
     denyRead?: string[];
     budget?: string;
+    lane?: string;
+    laneDefault?: string;
     /** `crew.roles` entries, one `NAME: {…}` per line. */
     roles?: string[];
   }): string {
@@ -283,6 +285,8 @@ crew:
   ${opts.maxSeats === undefined ? "" : `max_seats: ${opts.maxSeats}`}
   ${opts.denyRead === undefined ? "" : `deny_read: ${JSON.stringify(opts.denyRead)}`}
   ${opts.budget === undefined ? "" : `run_token_budget: ${opts.budget}`}
+  ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
+  ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
     - id: shop-app
@@ -324,6 +328,19 @@ ${seats.join("\n")}
     for (const bad of ["0", "-5", "1.5", '"lots"']) {
       expect(fails(crewText({ budget: bad })).path).toBe("crew.runTokenBudget");
     }
+  });
+
+  it("takes lane home or work only, and defaults lane_default to false", () => {
+    const none = load(crewText({})).crew;
+    expect(none?.lane).toBeUndefined();
+    expect(none?.laneDefault).toBe(false);
+    expect(load(crewText({ lane: "home" })).crew?.lane).toBe("home");
+    expect(load(crewText({ lane: "work", laneDefault: "true" })).crew).toMatchObject({
+      lane: "work",
+      laneDefault: true,
+    });
+    expect(fails(crewText({ lane: "other" })).path).toBe("crew.lane");
+    expect(fails(crewText({ laneDefault: '"yes"' })).path).toBe("crew.laneDefault");
   });
 
   it("rejects overlapping writer areas", () => {

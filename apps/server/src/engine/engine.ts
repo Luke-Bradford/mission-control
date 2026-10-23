@@ -200,6 +200,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const hardRulesSet = new Map<RepoId, boolean>();
   /** When each run last had a transient refusal counted: one counts per tick, however often it is tried. */
   const lastTransient = new Map<string, number>();
+  /** Transient refusals of each run's local branch delete, and when the last was counted (in memory: a restart tries afresh). */
+  const localTries = new Map<string, { n: number; at: number }>();
   /** A CI failure's excerpt, kept until its line is claimed, so a busy seat costs one gh read. */
   const excerpts = new Map<string, string>();
   /** Transient refusals of each review's PR-body edit (in memory: a restart tries afresh). */
@@ -772,9 +774,18 @@ export function createEngine(deps: EngineDeps): Engine {
         const branch = run.branch ?? "";
         const r = await publisher.deleteLocalBranch(live());
         if (r.ok) {
+          localTries.delete(run.id);
           stepDone("delete-local", mergedSha(), deletedLocalText(branch));
           return;
         }
+        if (r.transient) {
+          // one counted per tick, as for a refused merge step; the step is tried again next tick
+          const prev = localTries.get(run.id);
+          const n = prev === undefined ? 1 : prev.n + (at - prev.at >= ENGINE_TICK_MS / 2 ? 1 : 0);
+          localTries.set(run.id, { n, at: prev !== undefined && n === prev.n ? prev.at : at });
+          if (n < REFUSAL_TRIES) return;
+        }
+        localTries.delete(run.id);
         // the run is over and merged: this is housekeeping, left to the operator
         stepDone("delete-local", mergedSha(), localNotDeletedText(branch, r.text));
         store.raiseNote({
