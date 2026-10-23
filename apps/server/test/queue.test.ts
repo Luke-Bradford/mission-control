@@ -7,6 +7,7 @@ import {
   freezeRules,
   NEW_LOOP,
   QUEUE_DEPTH,
+  REFUSAL_TRIES,
   type RepoRules,
   type Run,
   type SeatState,
@@ -23,6 +24,7 @@ import {
   type QueueDeps,
   refillQueues,
   seatMayTake,
+  TAKE_FAILED_KEY_PREFIX,
   TAKE_FAILED_TEXT,
   type TakeDeps,
   takeNext,
@@ -72,6 +74,11 @@ let readFails: boolean;
 /** The body a ticket read finds; null: GitHub has no such ticket. */
 let bodyOf: (issue: number) => string | null;
 let myLogin: string | null;
+/** The branches the fake `git ls-remote` finds on origin, and whether it fails. */
+let heads: string[];
+let lsRemoteFails: boolean;
+/** An error the fake `git` throws as is (a broken clone); takes precedence over `lsRemoteFails`. */
+let lsRemoteError: Error | null;
 
 function makeConfig(autonomy: "merge" | "draft" = "merge"): CcConfig {
   return {
@@ -176,6 +183,16 @@ const takeDeps = (): TakeDeps => ({
     if (readFails) throw new Error("GitHub is down");
     return fresh(issue);
   },
+  git: async (_checkout, args) => {
+    if (lsRemoteError !== null) throw lsRemoteError;
+    if (lsRemoteFails) throw new Error("origin is down");
+    // like ls-remote, only the heads the patterns match
+    const [exact = "", glob = ""] = args.slice(-2);
+    return heads
+      .filter((h) => h === exact || h.startsWith(glob.slice(0, -1)))
+      .map((h) => `${"a".repeat(40)}\trefs/heads/${h}\n`)
+      .join("");
+  },
   transientTakes,
   now: () => NOW,
   log: (l) => logs.push(l),
@@ -238,6 +255,9 @@ beforeEach(() => {
   readFails = false;
   clearBodyCache();
   bodyOf = () => "## Done when\n- x\n## Plan\n- y\n";
+  heads = [];
+  lsRemoteFails = false;
+  lsRemoteError = null;
   myLogin = ME;
   fresh = (issue) => {
     const c = store.board(REPO).find((x) => x.issueNumber === issue);
@@ -674,6 +694,67 @@ describe("takeNext", () => {
     fresh = () => ({ status: "Ready", state: "planned", closed: false, assignees: [ME] });
     await take();
     expect(started).toHaveLength(1);
+  });
+
+  it("starts nothing and drops the row when origin has a branch for the ticket from no run of this hub", async () => {
+    await queued(card(59));
+    heads = ["feature/59-x"];
+    await take();
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([]);
+    expect(logs).toContain(
+      `${SERVER}: ${REPO}#59 already has a branch on origin (feature/59-x); not started`,
+    );
+  });
+
+  it("raises a take-failed note for a card with a foreign branch, so the next card starts", async () => {
+    await queued(card(59), card(60));
+    heads = ["feature/59-x"];
+    await take();
+    await refill();
+    await take();
+    expect(started.map((s) => s.issue)).toEqual([60]);
+    expect(store.notes().map((n) => n.key)).toContain(`${TAKE_FAILED_KEY_PREFIX}${REPO}#59`);
+  });
+
+  it("starts a card origin has no branch for", async () => {
+    await queued(card(59));
+    await take();
+    expect(started).toHaveLength(1);
+  });
+
+  it("starts a card whose branch on origin is from this hub's own earlier run", async () => {
+    await queued(card(59));
+    heads = ["feature/59-x"];
+    store.upsertRun(
+      run({
+        id: "r-old",
+        agentId: SERVER,
+        ticket: `${REPO}#59`,
+        branch: "feature/59-x",
+        endedAt: NOW,
+      }),
+    );
+    await take();
+    expect(started).toHaveLength(1);
+  });
+
+  it("untakes the row when origin's branches cannot be listed", async () => {
+    await queued(card(59));
+    lsRemoteFails = true;
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER).map((q) => [q.issue, q.takenAt])).toEqual([[59, null]]);
+    expect(logs.some((l) => l.includes("could not list origin's branches"))).toBe(true);
+  });
+
+  it("leaves a broken clone to startRun, so the take-stuck note is raised", async () => {
+    await queued(card(59));
+    lsRemoteError = new CheckoutError("checkout", "x");
+    startFails = () => new CheckoutError("checkout", "x");
+    for (let i = 0; i < REFUSAL_TRIES; i++) await take();
+    expect(started).toEqual([]);
+    expect(store.notes().map((n) => n.key)).toEqual([`question:take-stuck:${SERVER}`]);
   });
 
   it("starts nothing when the hub does not know its own login", async () => {
