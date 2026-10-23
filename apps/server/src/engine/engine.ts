@@ -161,12 +161,17 @@ const REVIEWS_CHAIN = "\0reviews";
 
 /**
  * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
- * that is not retiring; null when there is none (the operator reviews).
+ * that is not retiring; null when there is none (the operator reviews). With a `role` (the run's
+ * profile names one), the first such seat of that role is preferred.
  */
-export function reviewerOf(config: CcConfig, seatId: string): CrewSeatConfig | null {
+export function reviewerOf(config: CcConfig, seatId: string, role?: string): CrewSeatConfig | null {
   const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
-  return session?.seats.find((x) => !x.retiring && seatDef(x).loop === "review") ?? null;
+  const seats = (session?.seats ?? []).filter((x) => !x.retiring && seatDef(x).loop === "review");
+  return seats.find((x) => x.role === role) ?? seats[0] ?? null;
 }
+
+/** The review seat's role the run's profile asks for, if it has a profile. */
+const reviewRoleOf = (run: Run): string | undefined => run.profile?.profile.reviewer.role;
 
 const reviewFact = (r: ReviewRow): ReviewFact => ({
   id: r.id,
@@ -326,7 +331,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const item = store.board(run.repoId).find((b) => b.issueNumber === issue);
     const pushed = store.runPush(run.id);
     const turnEnded = row?.lastTurnEndedAt ?? null;
-    const reviewer = reviewerOf(config, run.agentId);
+    const reviewer = reviewerOf(config, run.agentId, reviewRoleOf(run));
     let review: LoopReviewFacts | null = null;
     if (reviewer !== null) {
       const rows = store.reviewsOfRun(run.id).map(reviewFact);
@@ -411,6 +416,9 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      ...(run.profile
+        ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
+        : {}),
     };
   }
 
@@ -600,7 +608,7 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         return;
       case "request-review": {
-        const reviewer = reviewerOf(config, run.agentId);
+        const reviewer = reviewerOf(config, run.agentId, reviewRoleOf(run));
         if (reviewer === null) return;
         if (cur.prNumber === null) {
           log(`${run.id}: no PR number to review`);
@@ -827,7 +835,7 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "pr-body": {
         const row = store.review(a.reviewId);
-        const reviewer = reviewerOf(config, run.agentId);
+        const reviewer = reviewerOf(config, run.agentId, reviewRoleOf(run));
         if (row === null || reviewer === null) return;
         const r = await publisher.postMinorFindings(run, {
           id: row.id,
@@ -884,7 +892,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (run === null || loop === undefined || loop === null) return;
     // an ended run's status is final: no more writes for it (its ended passes would repeat one)
     if (run.endedAt != null) return;
-    if (reviewerOf(config, run.agentId) === null) return;
+    if (reviewerOf(config, run.agentId, reviewRoleOf(run)) === null) return;
     if (!config.repos.some((r) => r.id === run.repoId)) return;
     const sha = store.runPush(run.id)?.sha;
     if (sha === undefined) return;
@@ -947,7 +955,7 @@ export function createEngine(deps: EngineDeps): Engine {
       pr?.state === "open" &&
       pr.headSha === pushed.sha &&
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
-      (conflicting || reviewerOf(config, run.agentId) !== null)
+      (conflicting || reviewerOf(config, run.agentId, reviewRoleOf(run)) !== null)
     ) {
       // origin's tip is read every pass; the other reads only when the sha or the tip changed
       const known = input.gate?.sha === pushed.sha ? input.gate : null;
@@ -1232,7 +1240,11 @@ export function createEngine(deps: EngineDeps): Engine {
     // next pass requests it again for the current one
     for (const row of store.reviewsIn(["queued"])) {
       const author = store.run(row.authorRunId);
-      if (author === null || row.seatId === reviewerOf(config, author.agentId)?.id) continue;
+      if (
+        author === null ||
+        row.seatId === reviewerOf(config, author.agentId, reviewRoleOf(author))?.id
+      )
+        continue;
       const at = now();
       if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
         store.addLoopEvent(

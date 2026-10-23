@@ -10,6 +10,7 @@ import {
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
+  type ChosenProfile,
   type Escalation,
   type FlightDecision,
   type FlightDecisionKind,
@@ -25,6 +26,7 @@ import {
   inferTicket,
   type MachineSample,
   type MoveColumn,
+  type ProfileOverride,
   type PullRequestView,
   type RepoId,
   type ReviewFinding,
@@ -200,6 +202,11 @@ CREATE TABLE IF NOT EXISTS briefs (
 );
 CREATE INDEX IF NOT EXISTS briefs_key ON briefs(key);
 CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
+-- The template profile FLIGHT or the planner chose for a ticket, with the reason; the latest wins.
+CREATE TABLE IF NOT EXISTS profile_overrides (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
+  by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
+);
 `;
 
 type Row = Record<string, SQLInputValue>;
@@ -425,6 +432,15 @@ const toRun = (r: Row): Run => ({
   ...(r.loop === null || r.loop === undefined
     ? {}
     : { loop: JSON.parse(r.loop as string) as RunLoop }),
+  // Absent, not null, on a run that started without a profile.
+  ...(r.profile === null || r.profile === undefined
+    ? {}
+    : {
+        profile: {
+          ...(JSON.parse(r.profile as string) as ChosenProfile),
+          hash: r.profile_hash as string,
+        },
+      }),
   ...(r.ended_by === null || r.ended_by === undefined
     ? {}
     : { endedBy: r.ended_by as NonNullable<Run["endedBy"]> }),
@@ -612,6 +628,10 @@ export class Store {
       ["review_id", "INTEGER"],
       // The `claude` CLI version the run started on; null on rows from before it was recorded.
       ["cli_version", "TEXT"],
+      // The template profile the run started with (JSON of profile and route) and its hash;
+      // `upsertRun` writes them on a new row only.
+      ["profile", "TEXT"],
+      ["profile_hash", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
@@ -719,8 +739,8 @@ export class Store {
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ticket_title, review_id, cli_version, profile, profile_hash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -753,7 +773,31 @@ export class Store {
         r.ticketTitle ?? null,
         r.reviewId ?? null,
         r.cliVersion ?? null,
+        r.profile ? JSON.stringify({ profile: r.profile.profile, route: r.profile.route }) : null,
+        r.profile?.hash ?? null,
       );
+  }
+
+  /** Records the template profile chosen for a ticket; a later choice replaces it. */
+  setProfileOverride(repoId: RepoId, issue: number, o: ProfileOverride, at: number): void {
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO profile_overrides (repo_id, issue, profile, reason, by, at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(repoId, issue, o.profile, o.reason, o.by, at);
+  }
+
+  profileOverride(repoId: RepoId, issue: number): ProfileOverride | null {
+    const r = this.db
+      .prepare("SELECT profile, reason, by FROM profile_overrides WHERE repo_id = ? AND issue = ?")
+      .get(repoId, issue) as Row | undefined;
+    return r
+      ? {
+          profile: r.profile as string,
+          reason: r.reason as string,
+          by: r.by as ProfileOverride["by"],
+        }
+      : null;
   }
 
   run(id: string): Run | null {

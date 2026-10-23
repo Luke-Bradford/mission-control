@@ -5,9 +5,11 @@ import { join } from "node:path";
 import {
   ATTENTION_LABEL,
   type BoardItem,
+  DEFAULT_PROFILES,
   driverStopKey,
   type Escalation,
   NEW_LOOP,
+  type Profile,
   type PullRequestView,
   type Run,
   type RunDigest,
@@ -886,6 +888,31 @@ describe("crew seats in the rows", () => {
       hudState: "idle",
     });
     expect(rows[4]?.run).toBeNull();
+  });
+
+  it("a crew row's loop names the run's profile and the step for its phase", () => {
+    const c = withCrew();
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+    store.upsertRun(
+      crewRun({
+        ticket: "shop-app#5",
+        loop: { ...NEW_LOOP, phase: "working" },
+        profile: { profile: feature, route: { by: "size", size: "M" }, hash: "h" },
+      }),
+    );
+    store.setSeatSession(seat({}));
+    expect(rowOf(c, "GUIDO-1")?.loop).toMatchObject({ profile: "feature", step: "implement" });
+    store.setRunLoop("c1", { ...NEW_LOOP, phase: "ci" });
+    expect(rowOf(c, "GUIDO-1")?.loop).toMatchObject({ profile: "feature", step: "verify" });
+    store.setRunLoop("c1", { ...NEW_LOOP, phase: "parked" });
+    expect(rowOf(c, "GUIDO-1")?.loop).toMatchObject({ profile: "feature", step: null });
+  });
+
+  it("a run without a profile has no profile or step on its loop", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun({ ticket: "shop-app#5", loop: NEW_LOOP }));
+    store.setSeatSession(seat({}));
+    expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("profile");
   });
 
   it("a scratch seat's crew row says scratch", () => {

@@ -44,6 +44,7 @@ import { lockChanged, TestLock } from "./guard/lock.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
+import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
@@ -115,6 +116,9 @@ async function main(): Promise<void> {
   };
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
   // crew config, and only where the guard hook can be found.
+  // The template profiles sit beside config.yaml; read afresh for each start, never cached.
+  const profilesPath = join(dirname(configPath), PROFILES_FILE);
+  const profiles = () => loadProfiles(profilesPath);
   const supervisor = createSupervisor({
     config,
     store,
@@ -122,6 +126,7 @@ async function main(): Promise<void> {
     dbPath,
     rules: engineRules,
     login: () => hubLogin,
+    profiles,
     fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
@@ -149,6 +154,7 @@ async function main(): Promise<void> {
     store,
     bus,
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+    profiles,
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
@@ -239,6 +245,7 @@ async function main(): Promise<void> {
     bus,
     supervisor,
     login: hubLogin,
+    profiles,
     gh,
     dbPath,
     knownSecrets: mcDeps.knownSecrets,

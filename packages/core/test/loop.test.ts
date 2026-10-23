@@ -386,6 +386,17 @@ describe("state step", () => {
     expect(reconcile(s).loop.phase).toBe("working");
   });
 
+  it("a profile's try limit parks CI on the first failure at tries 1", () => {
+    const r = reconcile({
+      ...inCi({ pr: pr({ ci: "failing" }) }),
+      limits: { tries: 1, rounds: 3 },
+    });
+    expect(r.loop.parked).toMatchObject({
+      kind: "ci",
+      reason: "CI failed 1 times; last on aaaaaaa",
+    });
+  });
+
   it("13: CI pending for thirty minutes parks", () => {
     const old = { pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } };
     const r = reconcile(inCi(old));
@@ -1578,6 +1589,13 @@ describe("review decisions", () => {
     });
     const r = reconcile(s);
     expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA) });
+    expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a profile's round limit parks review after one blocking review at rounds 1", () => {
+    const s = inReview(withReview([fact({ id: 1, blocking: 1 })], [finding]));
+    const r = reconcile({ ...s, limits: { tries: 3, rounds: 1 } });
+    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
     expect(sends(r.actions)).toEqual([]);
   });
 

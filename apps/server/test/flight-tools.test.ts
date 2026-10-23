@@ -17,6 +17,7 @@ import {
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
+  PROFILE_PAIR_TEXT,
   READ_OTHER_REPO,
   type RepoRules,
   type Run,
@@ -719,6 +720,50 @@ describe("start_seat", () => {
   it("starts with no options when the engine is off", async () => {
     await start();
     expect(startCalls).toEqual([["guido-1", 7, undefined]]);
+  });
+
+  it("refuses a profile without its reason, or a reason without its profile", async () => {
+    for (const over of [{ profile: "bugfix" }, { profile_reason: "it is a bug" }]) {
+      expect(await start(over)).toEqual({
+        text: `${MC_BAD_ARGS}${PROFILE_PAIR_TEXT}`,
+        isError: true,
+      });
+    }
+    expect(startCalls).toEqual([]);
+  });
+
+  it("passes a profile and its reason on as an override by FLIGHT", async () => {
+    const override = { profile: "bugfix", reason: "it is a bug", by: "FLIGHT" };
+    await start({ profile: "bugfix", profile_reason: "it is a bug" });
+    expect(startCalls).toEqual([["guido-1", 7, { override }]]);
+  });
+
+  it("passes the override and the loop together when the engine is on", async () => {
+    engineOn = true;
+    await start({ profile: "bugfix", profile_reason: "it is a bug" });
+    expect(startCalls).toEqual([
+      [
+        "guido-1",
+        7,
+        { loop: NEW_LOOP, override: { profile: "bugfix", reason: "it is a bug", by: "FLIGHT" } },
+      ],
+    ]);
+  });
+
+  it("refuses an unknown profile before starting", async () => {
+    const r = await start({ profile: "zzz", profile_reason: "r" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('Not started: no template profile is named "zzz"');
+    expect(startCalls).toEqual([]);
+  });
+
+  it("refuses a Size M card without a plan when its template needs one, and starts it when not", async () => {
+    board(sc(7, { size: "M" }));
+    fetchImpl = async (n) => ticket(n, { body: DONE });
+    expect((await start()).text).toBe(startNeedsPlanText("mc#7", "M"));
+    expect(
+      (await start({ profile: "research", profile_reason: "no code" })).isError,
+    ).toBeUndefined();
   });
 
   it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {

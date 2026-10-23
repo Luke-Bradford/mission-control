@@ -8,6 +8,7 @@ import type {
   FlightDecision,
   GuardHit,
   MachineSample,
+  Profile,
   ReviewFinding,
   ReviewRequest,
   Run,
@@ -15,7 +16,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
-import { NEW_LOOP } from "@mc/core";
+import { DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -1477,6 +1478,32 @@ describe("reviews", () => {
     expect(store.run("rev-run")).toMatchObject({ reviewId: 1, summary: "later" });
     store.upsertRun(run({ id: "plain" }));
     expect(store.run("plain")?.reviewId).toBeNull();
+  });
+
+  it("upsertRun stores a new row's profile and hash and never rewrites them", () => {
+    const profile = { ...DEFAULT_PROFILES[0], tries: 3 } as Profile;
+    const chosen = { profile, route: { by: "size", size: "M" } as const, hash: "h1" };
+    store.upsertRun(run({ id: "p1", profile: chosen }));
+    store.upsertRun(run({ id: "p1", summary: "later", profile: { ...chosen, hash: "h2" } }));
+    store.upsertRun(run({ id: "p1", summary: "again" }));
+    const got = store.run("p1");
+    expect(got?.profile).toEqual(chosen);
+    expect(got?.summary).toBe("again");
+    store.upsertRun(run({ id: "p2" }));
+    expect(store.run("p2")).not.toHaveProperty("profile");
+  });
+
+  it("keeps one override per ticket, the latest winning", () => {
+    expect(store.profileOverride("r", 7)).toBeNull();
+    store.setProfileOverride("r", 7, { profile: "feature", reason: "a", by: "planner" }, 10);
+    store.setProfileOverride("r", 7, { profile: "bugfix", reason: "b", by: "FLIGHT" }, 20);
+    store.setProfileOverride("r", 8, { profile: "research", reason: "c", by: "FLIGHT" }, 30);
+    expect(store.profileOverride("r", 7)).toEqual({
+      profile: "bugfix",
+      reason: "b",
+      by: "FLIGHT",
+    });
+    expect(store.profileOverride("r", 8)?.profile).toBe("research");
   });
 
   it("evidenceNotes lists a run's notes in order", () => {

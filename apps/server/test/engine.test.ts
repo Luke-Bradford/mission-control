@@ -53,6 +53,7 @@ import {
   reviewQueuedText,
   reviewStartedText,
   type SeatSessionRow,
+  seatDef,
   wakeFailedText,
   wokenEventText,
 } from "@mc/core";
@@ -1894,6 +1895,14 @@ describe("the engine runs reviews", () => {
     expect(reviewerOf(config, "guido-1")?.id).toBe("retro-2");
     need(seats().find((s) => s.id === "retro-2")).retiring = true;
     expect(reviewerOf(config, "guido-1")).toBeNull();
+  });
+
+  it("reviewerOf prefers the review seat with the profile's role, else the first", () => {
+    seats().push({ ...retroSeat(), id: "other-1", role: "AUDIT", def: seatDef(retroSeat()) });
+    expect(reviewerOf(config, "guido-1", "AUDIT")?.id).toBe("other-1");
+    expect(reviewerOf(config, "guido-1", "RETRO")?.id).toBe(RETRO);
+    expect(reviewerOf(config, "guido-1", "NOBODY")?.id).toBe(RETRO);
+    expect(reviewerOf(config, "guido-1")?.id).toBe(RETRO);
   });
 
   it("a queued review for a removed reviewer is re-requested for the new one", async () => {

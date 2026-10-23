@@ -33,6 +33,7 @@ import {
   createFailedText,
   createLabelsText,
   createTextText,
+  DEFAULT_PROFILES,
   dependsOn,
   duplicateLabelText,
   duplicateTitleText,
@@ -106,9 +107,14 @@ import {
   PASSED_DECISION,
   PASSED_TEXT,
   PLAN_SIZES,
+  PROFILE_NAME,
+  PROFILE_PAIR_TEXT,
+  PROFILE_REASON_MAX,
   PROMOTE_ENGINE_OFF,
   PROMOTE_NO_GITHUB,
   PROMOTE_NO_RULES,
+  type Profile,
+  type ProfileOverride,
   parkNotYoursText,
   planAlreadyText,
   plannerStartedDecision,
@@ -165,6 +171,7 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
+import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
@@ -178,6 +185,8 @@ export interface FlightToolsDeps {
   supervisor: Pick<Supervisor, "message" | "busy" | "startRun" | "endRun">;
   /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
   login: string | null;
+  /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
+  profiles?: () => readonly Profile[] | ProfilesError;
   engine: Pick<Engine, "onOperatorMessage" | "status"> | null;
   /** The repo's rules (the area labels), as the engine reads them. */
   rules: (repoId: string) => Promise<RepoRules | RepoRulesError>;
@@ -234,11 +243,17 @@ const AnswerArgs = z
     basis: basisArg,
   })
   .refine((a) => (a.answer === undefined) !== (a.pass_to_operator === undefined), ANSWER_ONE_OF);
-const StartSeatArgs = z.strictObject({
-  seat: z.string().regex(SEAT_ID),
-  issue: issueNumber,
-  basis: basisArg,
-});
+const StartSeatArgs = z
+  .strictObject({
+    seat: z.string().regex(SEAT_ID),
+    issue: issueNumber,
+    profile: z.string().regex(PROFILE_NAME).optional(),
+    profile_reason: text(PROFILE_REASON_MAX).optional(),
+    basis: basisArg,
+  })
+  .refine((a) => (a.profile === undefined) === (a.profile_reason === undefined), {
+    message: PROFILE_PAIR_TEXT,
+  });
 const EndRunArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
 const MessageSeatArgs = z.strictObject({
   seat: z.string().regex(SEAT_ID),
@@ -510,6 +525,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const c = flightCall(deps, ctx, StartSeatArgs, args);
     if (!c.ok) return c.result;
     const { seat, issue, basis } = c.args;
+    const override: ProfileOverride | undefined =
+      c.args.profile !== undefined && c.args.profile_reason !== undefined
+        ? { profile: c.args.profile, reason: c.args.profile_reason, by: "FLIGHT" }
+        : undefined;
     const cfg = seatCfg(seat);
     const repo = repoOf();
     if (cfg === undefined || repo === undefined) return fail(notInSessionText(seat));
@@ -546,13 +565,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
     let body: string;
+    let labels: string[];
     try {
-      body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+      const ticket = await deps.fetchTicket(repo, issue);
+      body = ticket?.body ?? "";
+      labels = ticket?.labels ?? card.labels;
     } catch {
       return fail(START_NO_GITHUB);
     }
+    const chosen = chooseRunProfile(
+      deps.profiles?.() ?? DEFAULT_PROFILES,
+      labels,
+      card.size,
+      override ?? store.profileOverride(repo.id, issue),
+    );
+    if ("refusal" in chosen) return fail(chosen.refusal);
     const board = store.board(repo.id);
     const refusal = eligibleToStart({
+      planRequired: chosen.profile.planRequired,
       repoId: repo.id,
       issue,
       card,
@@ -582,12 +612,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     try {
       // a planner starts with no loop: the engine never reconciles it or moves its card
-      if (planner) await deps.supervisor.startRun(seat, issue);
-      else {
+      if (planner) {
+        if (override) await deps.supervisor.startRun(seat, issue, { override });
+        else await deps.supervisor.startRun(seat, issue);
+      } else {
+        const loop = deps.engine?.status().on === true ? { loop: NEW_LOOP } : {};
         await deps.supervisor.startRun(
           seat,
           issue,
-          deps.engine?.status().on === true ? { loop: NEW_LOOP } : undefined,
+          override || loop.loop ? { ...loop, ...(override ? { override } : {}) } : undefined,
         );
       }
     } catch (e) {
@@ -1077,11 +1110,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.startSeat,
       description: START_SEAT_DESCRIPTION,
-      inputSchema: objectSchema({ seat: SEAT_SCHEMA, issue: ISSUE_SCHEMA, basis: BASIS_SCHEMA }, [
-        "seat",
-        "issue",
-        "basis",
-      ]),
+      inputSchema: objectSchema(
+        {
+          seat: SEAT_SCHEMA,
+          issue: ISSUE_SCHEMA,
+          profile: { type: "string", pattern: PROFILE_NAME.source },
+          profile_reason: { type: "string", minLength: 1, maxLength: PROFILE_REASON_MAX },
+          basis: BASIS_SCHEMA,
+        },
+        ["seat", "issue", "basis"],
+      ),
       modes: [],
       grantable: ["read-only"],
       call: startSeat,
