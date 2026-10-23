@@ -42,6 +42,7 @@ import {
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
   NOT_ON_BOARD,
+  PROFILE_PAIR_TEXT,
   READ_NO_GITHUB,
   READ_NO_PR,
   READ_OTHER_REPO,
@@ -58,6 +59,7 @@ import {
   WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
   wrongAreaText,
+  wrongColumnText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
@@ -829,6 +831,50 @@ describe("start_seat", () => {
     expect(startCalls).toEqual([["guido-1", 7, undefined]]);
   });
 
+  it("refuses a profile without its reason, or a reason without its profile", async () => {
+    for (const over of [{ profile: "bugfix" }, { profile_reason: "it is a bug" }]) {
+      expect(await start(over)).toEqual({
+        text: `${MC_BAD_ARGS}${PROFILE_PAIR_TEXT}`,
+        isError: true,
+      });
+    }
+    expect(startCalls).toEqual([]);
+  });
+
+  it("passes a profile and its reason on as an override by FLIGHT", async () => {
+    const override = { profile: "bugfix", reason: "it is a bug", by: "FLIGHT" };
+    await start({ profile: "bugfix", profile_reason: "it is a bug" });
+    expect(startCalls).toEqual([["guido-1", 7, { override }]]);
+  });
+
+  it("passes the override and the loop together when the engine is on", async () => {
+    engineOn = true;
+    await start({ profile: "bugfix", profile_reason: "it is a bug" });
+    expect(startCalls).toEqual([
+      [
+        "guido-1",
+        7,
+        { loop: NEW_LOOP, override: { profile: "bugfix", reason: "it is a bug", by: "FLIGHT" } },
+      ],
+    ]);
+  });
+
+  it("refuses an unknown profile before starting", async () => {
+    const r = await start({ profile: "zzz", profile_reason: "r" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('Not started: no template profile is named "zzz"');
+    expect(startCalls).toEqual([]);
+  });
+
+  it("refuses a Size M card without a plan when its template needs one, and starts it when not", async () => {
+    board(sc(7, { size: "M" }));
+    fetchImpl = async (n) => ticket(n, { body: DONE });
+    expect((await start()).text).toBe(startNeedsPlanText("mc#7", "M"));
+    expect(
+      (await start({ profile: "research", profile_reason: "no code" })).isError,
+    ).toBeUndefined();
+  });
+
   it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {
     board(sc(7, { assignees: ["other"] }));
     expect(await start()).toEqual(
@@ -1068,6 +1114,14 @@ describe("start_seat", () => {
         refused(wrongAreaText("INCO-1", "mc#7", ["area:server"])),
       );
       expect(startCalls).toEqual([]);
+    });
+
+    // start_seat's column check names Done first, so a closed card never reaches the rule's text
+    it("0: a closed card, or one in Done", async () => {
+      board(sc(7, { labels: ["area:server"], closed: true }));
+      await nothingStarted(wrongColumnText("mc#7", "Done"));
+      board(sc(7, { labels: ["area:server"], status: "Done", state: "done" }));
+      await nothingStarted(wrongColumnText("mc#7", "Done"));
     });
 
     it("5: a ticket with a run", async () => {

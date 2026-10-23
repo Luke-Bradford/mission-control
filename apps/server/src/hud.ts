@@ -34,6 +34,7 @@ import {
   OWNER_OPERATOR,
   type PullRequestView,
   pathInArea,
+  profileStep,
   prYouAction,
   questionText,
   type Run,
@@ -333,6 +334,12 @@ export function crew(
                 prNumber: latest.loop.prNumber,
                 parked:
                   latest.loop.phase === "parked" ? (latest.loop.parked?.reason ?? null) : null,
+                ...(latest.profile
+                  ? {
+                      profile: latest.profile.profile.name,
+                      step: profileStep(latest.profile.profile, latest.loop.phase),
+                    }
+                  : {}),
               }
             : null,
         run: latest

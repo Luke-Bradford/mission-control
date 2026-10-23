@@ -1045,6 +1045,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         } catch (e) {
           // --porcelain prints a refused ref on stdout, not in the error message
           const out = (e as { stdout?: unknown } | null)?.stdout;
+          // a branch deleted since the check (delete-on-merge, the merger) is done, not moved
+          const gone = await originNow(g, branch).then(
+            (now) => now.branchSha === null,
+            () => false,
+          );
+          if (gone) return { ok: true };
           return typeof out === "string" && /^!\t[^\t]*\t\[rejected\]/m.test(out)
             ? final(MERGE_BRANCH_MOVED)
             : transient(errText(e));
