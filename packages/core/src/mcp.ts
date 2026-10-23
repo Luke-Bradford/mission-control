@@ -365,23 +365,51 @@ export function planTestCount(plan: string): number | null {
   return lines === null ? null : lines.filter((l) => LIST_ITEM.test(l)).length;
 }
 
-/**
- * The repo-relative paths a plan names in inline code (a `/` and a file ending), but those on a
- * line that says `new` or `create`.
- */
-export function planPaths(plan: string): string[] {
-  const found = new Set<string>();
+/** A plan path that leaves the checkout: absolute, `~`, or with a `..` segment (the `protected` glob rule). */
+const unsafePlanPath = (p: string): boolean =>
+  p.startsWith("/") || p.startsWith("~") || p.split("/").includes("..");
+
+/** The inline-code paths of a plan outside fenced blocks, each with whether its line creates it. */
+function planPathMentions(plan: string): { path: string; creates: boolean }[] {
+  const out: { path: string; creates: boolean }[] = [];
   let fenced = false;
   for (const line of plan.split("\n")) {
     if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    if (fenced || /\b(new|creat(?:e|es|ed|ing))\b/i.test(line)) continue;
+    if (fenced) continue;
     for (const m of line.matchAll(/`([^`\s]+)`/g)) {
       const p = (m[1] ?? "").replace(/^\.\//, "").replace(/:\d+(?:-\d+)?$/, "");
-      if (/^[\w.@-][\w.@/-]*\/[\w.@-]*\.[A-Za-z0-9]+$/.test(p) && !p.includes("..")) found.add(p);
+      if (!/^[\w.@/~-]*\/[\w.@-]*\.[A-Za-z0-9]+$/.test(p)) continue;
+      const before = line.slice(0, m.index);
+      out.push({
+        path: p,
+        creates: /\b(?:creat(?:e|es|ed|ing)|new files?)\s*:?\s*$/i.test(before),
+      });
     }
   }
-  return [...found];
+  return out;
 }
+
+/**
+ * The repo-relative paths a plan names in inline code (a `/` and a file ending), but those the same
+ * line says it creates (`create <path>`, `new file <path>`) and those that leave the checkout.
+ */
+export function planPaths(plan: string): string[] {
+  const found = planPathMentions(plan)
+    .filter((m) => !m.creates && !unsafePlanPath(m.path))
+    .map((m) => m.path);
+  return [...new Set(found)];
+}
+
+/** The paths a plan names that leave the checkout: absolute, starting `~`, or with a `..` segment. */
+export function planUnsafePaths(plan: string): string[] {
+  const found = planPathMentions(plan)
+    .map((m) => m.path)
+    .filter(unsafePlanPath);
+  return [...new Set(found)];
+}
+
+export const planUnsafePathsText = (paths: readonly string[]): string =>
+  `Not added: ${paths.slice(0, PLAN_PATHS_LISTED).join(", ")}${paths.length > PLAN_PATHS_LISTED ? ` (and ${paths.length - PLAN_PATHS_LISTED} more)` : ""} ${isAre(paths)} outside the checkout (absolute, starting ~, or with ..). Name paths relative to the repo root.`;
 
 export const MC_PR_BODY_REFUSED =
   "Not edited: the new PR body would notify someone, reference another item, hold a secret or end inside an open block.";
