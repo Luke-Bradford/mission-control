@@ -218,7 +218,8 @@ CREATE TABLE IF NOT EXISTS profile_overrides (
 -- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
 CREATE TABLE IF NOT EXISTS holds (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
-  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0
+  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0,
+  told_state TEXT
 );
 CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 -- FLIGHT's living brief: one row per crew session and section.
@@ -248,6 +249,8 @@ export interface Hold {
   releasedAt: number | null;
   /** The stored board has shown the card in Backlog since the hold; until then a Ready card is just stale. */
   seen: boolean;
+  /** The PR state FLIGHT was last woken for on this hold, or null. */
+  toldState: string | null;
 }
 
 /** One path a refused commit had outside the seat's area. */
@@ -694,6 +697,7 @@ export class Store {
     this.addColumn("attention_notes", "dismissed_at", "INTEGER");
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
+    this.addColumn("holds", "told_state", "TEXT");
     this.addColumn("pull_requests", "head_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
     // Who opened the PR and who is assigned: a PR run by another hub's login is that lane's.
@@ -2554,12 +2558,20 @@ export class Store {
       at: r.at as number,
       releasedAt: r.released_at as number | null,
       seen: r.seen === 1,
+      toldState: (r.told_state as string | null) ?? null,
     }));
   }
 
   /** The board has shown the card's open hold in Backlog. */
   markHoldSeen(ref: string): void {
     this.db.prepare("UPDATE holds SET seen = 1 WHERE ref = ? AND released_at IS NULL").run(ref);
+  }
+
+  /** FLIGHT has been told the card's open hold waits on a PR in `state`. */
+  markHoldTold(ref: string, state: string): void {
+    this.db
+      .prepare("UPDATE holds SET told_state = ? WHERE ref = ? AND released_at IS NULL")
+      .run(state, ref);
   }
 
   /** How many briefs were written at or after `since`. */

@@ -548,14 +548,16 @@ export interface FlightState {
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
-   * the PR waited on: once it is not "open", the hold is ready to release. `told` is set once
+   * the PR waited on: once it is not "open", the hold is ready to release. "unknown" means the PR
+   * is not in the stored read (it may have merged or closed, or fallen past the poll's limit): check
+   * the PR yourself before you keep or release the hold. `told` is set once
    * FLIGHT has been woken for that, so a hold it keeps does not wake it again.
    */
   holds: {
     ref: string;
     waitsOn: number;
     ageMin: number;
-    prState: "open" | "merged" | "closed";
+    prState: "open" | "merged" | "closed" | "unknown";
     told: boolean;
   }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
