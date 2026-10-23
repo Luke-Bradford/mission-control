@@ -757,6 +757,25 @@ describe("CI and review", () => {
     ]);
   });
 
+  it("a PR that shows up seconds after its push is not parked as missing ten minutes later", async () => {
+    await inCi();
+    expect(loopOf()).toMatchObject({ phase: "ci", prNumber: 12 });
+    // the poll reads the PR, with the pushed sha as head, two seconds on
+    clock += 2000;
+    setPr({ ci: "pending" });
+    await h.engine.reconcileRun(RUN);
+    // and the minute polls and ticks go on while CI is still running
+    for (let i = 0; i < 11; i++) {
+      clock += MIN;
+      setPr({ ci: "pending" });
+      await h.engine.tick();
+    }
+    expect(loopOf().parked).toBeNull();
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("review");
+  });
+
   it("a failing check is named in the CI failed event", async () => {
     await inCi();
     const failing = {

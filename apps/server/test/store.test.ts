@@ -16,7 +16,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
-import { COMMS_TEXT_MAX, DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
+import { COMMS_CAPCOM, COMMS_TEXT_MAX, DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -1789,5 +1789,123 @@ describe("comms", () => {
       ticket: "mc#1",
       text: "late",
     });
+  });
+});
+
+describe("test lock history", () => {
+  it("keeps one row per hold, closes the last call with the supplied clock, and frees runs", () => {
+    store.upsertRun(run({ ticket: "MC-1" }));
+    const h = { runId: "r1", seatId: "a1", command: "pnpm test", toolUseId: "one", since: 1000 };
+    store.addLockHold(h);
+    store.addLockHold({ ...h, toolUseId: "two", since: 2000 });
+    expect(store.lockRuns(0)).toEqual([
+      {
+        runId: "r1",
+        seatId: "a1",
+        command: "pnpm test",
+        queuedAt: 1000,
+        startedAt: 1000,
+        endedAt: null,
+        outcome: null,
+        ticket: "MC-1",
+      },
+    ]);
+    store.deleteLockHold("r1", "one", 3000);
+    expect(store.lockRuns(0)[0]?.endedAt).toBeNull();
+    store.deleteLockHold("r1", "two", 4000);
+    expect(store.lockRuns(0)[0]).toMatchObject({ endedAt: 4000, outcome: "done" });
+    store.addLockHold({ ...h, since: 5000, queuedAt: 4500 });
+    store.deleteLockHolds("r1", 6000);
+    expect(store.lockRuns(0)[0]).toMatchObject({ queuedAt: 4500, endedAt: 6000, outcome: "freed" });
+  });
+
+  it("prunes history strictly older than eight days on the next insert", () => {
+    const h = { runId: "old", seatId: "a1", command: "test", toolUseId: "one", since: 1000 };
+    store.addLockHold(h);
+    store.deleteLockHolds("old", 2000);
+    store.addLockHold({ ...h, runId: "edge", since: 1001 });
+    store.addLockHold({ ...h, runId: "new", since: 1001 + 8 * 86400000 });
+    expect(store.lockRuns(0).map((r) => r.runId)).toEqual(["new", "edge"]);
+  });
+});
+
+describe("telemetry store aggregates", () => {
+  it("counts commits since the boundary joined to their run's agent", () => {
+    store.upsertRun(run());
+    store.upsertRun(run({ id: "r2", agentId: "a2" }));
+    for (const [runId, sha, at] of [
+      ["r1", "old", 99],
+      ["r1", "one", 100],
+      ["r1", "two", 101],
+      ["r2", "three", 102],
+      ["missing", "orphan", 103],
+    ] as const) {
+      store.addRunCommit({ runId, sha, at, repoId: "repo", branch: "b" });
+    }
+    expect(store.commitsSince(100)).toEqual([
+      { agentId: "a1", n: 2 },
+      { agentId: "a2", n: 1 },
+    ]);
+  });
+
+  it("returns cleared note waits for the requested kinds raised since the boundary", () => {
+    for (const [key, kind, at, cleared] of [
+      ["old", "ready", 99, 200],
+      ["ready", "ready", 100, 200],
+      ["review", "review", 110, 400],
+      ["open", "ready", 120, null],
+      ["blocked", "blocked", 130, 500],
+    ] as const) {
+      store.raiseNote({ key, kind, at, text: key, runId: null, seatId: null, repoId: null });
+      if (cleared !== null) store.clearNote(key, cleared);
+    }
+    expect(store.noteWaits(["ready", "review"], 100)).toEqual([100, 290]);
+    expect(store.noteWaits([], 0)).toEqual([]);
+  });
+
+  it("counts only answers accompanied by CAPCOM to that seat within five seconds", () => {
+    for (const [agentId, answeredAt, from, delay] of [
+      ["a", 100, COMMS_CAPCOM, 1000],
+      ["b", 110, "flight", 0],
+      ["c", 120, null, 0],
+      ["d", 130, COMMS_CAPCOM, 5001],
+      ["e", 140, COMMS_CAPCOM, -1],
+      ["f", 99, COMMS_CAPCOM, 0],
+      ["g", 150, COMMS_CAPCOM, 5000],
+    ] as const) {
+      store.addQuestion({ agentId, runId: "r", text: "?", at: 10 });
+      store.answerQuestions(agentId, answeredAt);
+      if (from)
+        store.addComms({ from, to: agentId, at: answeredAt + delay, text: "answer", ticket: null });
+    }
+    store.addComms({ from: COMMS_CAPCOM, to: "a", at: 1101, text: "duplicate", ticket: null });
+    expect(store.operatorAnswers(100)).toEqual([
+      { agentId: "a", at: 10, answeredAt: 100 },
+      { agentId: "g", at: 10, answeredAt: 150 },
+    ]);
+  });
+
+  it("counts operator stops since the boundary, excluding FLIGHT end decisions", () => {
+    for (const [id, endedAt, endedBy] of [
+      ["one", 100, "operator"],
+      ["flight", 101, "operator"],
+      ["old", 99, "operator"],
+      ["agent", 102, "exit"],
+    ] as const) {
+      store.upsertRun(run({ id }));
+      store.setRunEnded(id, endedAt, "ok", endedBy);
+    }
+    store.addFlightDecision({
+      at: 101,
+      kind: "end",
+      seatId: null,
+      targetRunId: "flight",
+      ref: null,
+      questionId: null,
+      about: "stop",
+      decision: "stop",
+      basis: "test",
+    });
+    expect(store.operatorStops(100)).toBe(1);
   });
 });

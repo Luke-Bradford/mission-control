@@ -11,7 +11,7 @@ import type {
   RunDigest,
   SubagentInfo,
 } from "@mc/core";
-import { NEW_LOOP } from "@mc/core";
+import { COMMS_CAPCOM, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
@@ -185,6 +185,7 @@ describe("today, in the operator's timezone", () => {
       working: 0,
       agents: 2,
       merged7d: 0,
+      commits: 0,
     });
   });
 
@@ -365,6 +366,9 @@ describe("flow of work", () => {
       firstPassReviewPct: null,
       reviewedPrs: 0,
       commitsPerRun: null,
+      retroFindingsPerPr: null,
+      sentBackPrs: 0,
+      humanReviewWaitMs: null,
     });
   });
 });
@@ -714,6 +718,7 @@ describe("empty store", () => {
       working: 0,
       agents: 2,
       merged7d: 0,
+      commits: 0,
     });
     expect(t.throughput).toHaveLength(14);
     expect(t.throughput.every((d) => d.merged === 0)).toBe(true);
@@ -732,7 +737,21 @@ describe("empty store", () => {
       firstPassReviewPct: null,
       reviewedPrs: 0,
       commitsPerRun: null,
+      retroFindingsPerPr: null,
+      sentBackPrs: 0,
+      humanReviewWaitMs: null,
     });
+    expect(t.capcom).toEqual({
+      answered: 0,
+      medianMs: null,
+      p90Ms: null,
+      stopped: 0,
+      longest: null,
+      agentWaitMs: 0,
+    });
+    expect(t.tokensByStep).toEqual(
+      ["plan", "build", "review"].map((step) => ({ step, tokens: 0, costUsd: null, runs: 0 })),
+    );
     // Per-agent series are one per configured agent, all zero / idle.
     expect(t.tokensPerMinute.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
     expect(t.liveMinutes.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
@@ -901,6 +920,123 @@ describe("crew seats", () => {
     };
   });
 
+  it("counts scoped commits and crew-wide loop steps pro rata, excluding observed and other loops", () => {
+    const seats = config.crew?.sessions[0]?.seats;
+    seats?.push(
+      { id: "FAO-1", role: "FAO", accountId: "claude-main", model: "sonnet", area: [] },
+      { id: "RETRO-1", role: "RETRO", accountId: "claude-main", model: "sonnet", area: [] },
+      { id: "FLIGHT-1", role: "FLIGHT", accountId: "claude-main", model: "sonnet", area: [] },
+    );
+    for (const [id, agentId, reviewId, costUsd] of [
+      ["build", "GUIDO-1", null, 4],
+      ["plan", "FAO-1", null, 2],
+      ["review", "RETRO-1", 1, null],
+      ["none", "RETRO-1", null, 10],
+      ["watch", "FLIGHT-1", null, 10],
+      ["observed", "shop-app-ta", null, 10],
+    ] as const) {
+      store.upsertRun(
+        run({
+          id,
+          agentId,
+          reviewId,
+          costUsd,
+          startedAt: NOW - 2 * HOUR,
+          endedAt: NOW,
+          tokens: tok(100, 100),
+        }),
+      );
+      store.addRunCommit({ runId: id, repoId: "shop-app", branch: "b", sha: id, at: NOW - MIN });
+    }
+    store.addRunCommit({
+      runId: "build",
+      repoId: "shop-app",
+      branch: "b",
+      sha: "old",
+      at: NOW - DAY,
+    });
+    const t = tel("1h", NOW, { agent: "GUIDO-1", account: null });
+    expect(t.today.commits).toBe(1);
+    expect(tel().today.commits).toBe(6);
+    expect(t.tokensByStep).toEqual([
+      { step: "plan", tokens: 100, costUsd: 1, runs: 1 },
+      { step: "build", tokens: 100, costUsd: 2, runs: 1 },
+      { step: "review", tokens: 100, costUsd: null, runs: 1 },
+    ]);
+  });
+
+  it("reports every CAPCOM figure today, including pre-midnight questions and open wait time", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const question = (
+      agentId: string,
+      raised: number,
+      answered: number | null,
+      from: string | null,
+    ) => {
+      store.addQuestion({ agentId, runId: "c", text: "?", at: raised });
+      if (answered !== null) {
+        store.answerQuestions(agentId, answered);
+        if (from)
+          store.addComms({ from, to: agentId, at: answered + 1000, text: "answer", ticket: null });
+      }
+    };
+    question("GUIDO-1", midnight - MIN, midnight + MIN, COMMS_CAPCOM);
+    question("GUIDO-1", NOW - 20 * MIN, NOW - 10 * MIN, COMMS_CAPCOM);
+    question("GUIDO-1", NOW - 8 * MIN, NOW - 5 * MIN, "flight");
+    question("GUIDO-1", NOW - 4 * MIN, NOW - 3 * MIN, null);
+    question("GUIDO-1", NOW - 2 * MIN, null, null);
+    for (const [id, endedAt, endedBy] of [
+      ["stop", midnight, "operator"],
+      ["flight", NOW - MIN, "operator"],
+      ["old", midnight - 1, "operator"],
+      ["exit", NOW - MIN, "exit"],
+    ] as const) {
+      store.upsertRun(run({ id }));
+      store.setRunEnded(id, endedAt, "ok", endedBy);
+    }
+    store.addFlightDecision({
+      at: NOW - MIN,
+      kind: "end",
+      seatId: null,
+      targetRunId: "flight",
+      ref: null,
+      questionId: null,
+      about: "end",
+      decision: "end",
+      basis: "test",
+    });
+    expect(tel("1h", NOW, { agent: "shop-app-ta", account: null }).capcom).toEqual({
+      answered: 2,
+      medianMs: 6 * MIN,
+      p90Ms: 10 * MIN,
+      stopped: 1,
+      longest: { agentId: "GUIDO-1", ms: 10 * MIN },
+      agentWaitMs: 17 * MIN,
+    });
+  });
+
+  it("takes human review waits from cleared ready/review notes raised within fourteen days", () => {
+    for (const [key, kind, raised, cleared] of [
+      ["ready", "ready", NOW - DAY, NOW - DAY + HOUR],
+      ["review", "review", NOW - 2 * DAY, NOW - 2 * DAY + 3 * HOUR],
+      ["old", "ready", NOW - 15 * DAY, NOW],
+      ["open", "review", NOW - DAY, null],
+      ["blocked", "blocked", NOW - DAY, NOW],
+    ] as const) {
+      store.raiseNote({
+        key,
+        kind,
+        at: raised,
+        text: key,
+        runId: null,
+        seatId: null,
+        repoId: null,
+      });
+      if (cleared !== null) store.clearNote(key, cleared);
+    }
+    expect(tel().quality.humanReviewWaitMs).toBe(2 * HOUR);
+  });
+
   it("totals, series and utilisation include a crew run", () => {
     store.upsertRun(
       run({
@@ -933,7 +1069,13 @@ describe("crew seats", () => {
   });
 
   /** A reported review of `prNumber` at `round`, with `blocking` Important findings. */
-  const reported = (authorRunId: string, prNumber: number, round: number, blocking: number) => {
+  const reported = (
+    authorRunId: string,
+    prNumber: number,
+    round: number,
+    blocking: number,
+    minor = 0,
+  ) => {
     const id = store.requestReview({
       authorRunId,
       repoId: "shop-app",
@@ -949,8 +1091,8 @@ describe("crew seats", () => {
     store.recordFindings(id, `rv-${id}`, {
       verdict: { spec: "pass", quality: "pass" },
       summary: "s",
-      findings: Array.from({ length: blocking }, () => ({
-        severity: "Important" as const,
+      findings: Array.from({ length: blocking + minor }, (_, i) => ({
+        severity: i < blocking ? ("Important" as const) : ("Minor" as const),
         file: "a.ts",
         line: 1,
         summary: "x",
@@ -967,7 +1109,7 @@ describe("crew seats", () => {
       [pr(7, NOW - DAY), pr(8, NOW - 2 * DAY), pr(9, NOW - 20 * DAY), pr(10, null)],
       0,
     );
-    reported("a7", 7, 1, 1);
+    reported("a7", 7, 1, 1, 2);
     reported("b7", 7, 2, 0);
     reported("a8", 8, 1, 0);
     reported("a9", 9, 1, 1);
@@ -994,6 +1136,8 @@ describe("crew seats", () => {
     for (const sha of ["1", "2", "3"]) commit("c1", sha.repeat(40));
     commit("c2", "4".repeat(40));
     expect(tel().quality).toMatchObject({
+      retroFindingsPerPr: 1.5,
+      sentBackPrs: 1,
       reviewRoundsPerPr: 1.5,
       firstPassReviewPct: 50,
       reviewedPrs: 2,
@@ -1007,6 +1151,9 @@ describe("crew seats", () => {
       firstPassReviewPct: null,
       reviewedPrs: 0,
       commitsPerRun: null,
+      retroFindingsPerPr: null,
+      sentBackPrs: 0,
+      humanReviewWaitMs: null,
     });
   });
 
