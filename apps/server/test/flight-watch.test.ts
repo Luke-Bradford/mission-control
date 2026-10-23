@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type BoardItem,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_NOTE_KEY,
@@ -11,6 +12,8 @@ import {
   type FlightSeatState,
   type FlightState,
   flightStartFailedText,
+  NEW_LOOP,
+  type PullRequestView,
   type Run,
   type SeatSessionRow,
   wakeSummary,
@@ -23,6 +26,7 @@ import {
   flightSeat,
   flightStartCap,
   flightState,
+  markPrsShown,
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
@@ -76,6 +80,7 @@ let sendCalls: { runId: string; key: string; text: string }[];
 let endCalls: string[];
 let statusCalls: number;
 let startFails: string | null;
+let sendFails = false;
 let facts: SeatFacts | null;
 let enabled: boolean;
 let started = 0;
@@ -142,6 +147,7 @@ beforeEach(() => {
   endCalls = [];
   statusCalls = 0;
   startFails = null;
+  sendFails = false;
   facts = null;
   enabled = true;
   started = 0;
@@ -175,6 +181,7 @@ beforeEach(() => {
       },
       send: async (runId, key, text): Promise<SendResult> => {
         sendCalls.push({ runId, key, text });
+        if (sendFails) return "busy";
         const ok = store.claimLine(key, {
           runId,
           seatId: "flight-1",
@@ -196,6 +203,261 @@ afterEach(() => {
   watch.stop();
   vi.useRealTimers();
   rmSync(dir, { recursive: true, force: true });
+});
+
+const stored = (number: number, over: Partial<PullRequestView> = {}): PullRequestView => ({
+  repoId: "mc",
+  number,
+  title: `PR ${number}`,
+  url: "u",
+  branch: `feature/${number}-x`,
+  ticket: `mc#${number}`,
+  state: "open",
+  isDraft: true,
+  review: null,
+  ci: null,
+  createdAt: T0,
+  updatedAt: T0,
+  mergedAt: null,
+  headSha: `sha${number}`,
+  mergeable: null,
+  author: null,
+  assignees: [],
+  ...over,
+});
+const listed = () => flightState({ config, store, busy: [], now: nowMs }).prs;
+
+describe("FLIGHT's PR list", () => {
+  it("keeps a PR listed, marked stale with its last good read, when a poll could not read it", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    expect(listed()).toEqual([
+      {
+        ref: "mc#7",
+        pr: 7,
+        seat: "",
+        ready: false,
+        state: "open",
+        headSha: "sha7",
+        readAt: "13:00",
+        stale: false,
+      },
+    ]);
+    store.markPullRequestsStale("mc");
+    expect(listed()).toMatchObject([{ pr: 7, state: "open", readAt: "13:00", stale: true }]);
+    store.upsertPullRequests("mc", [stored(7)], T0 + MIN);
+    expect(listed()[0]?.stale).toBe(false);
+  });
+
+  it("FLIGHT's first digest lists a merged PR once, and no second wake follows", async () => {
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    const first = JSON.parse(startCalls[0]?.first?.split("\n").at(-1) ?? "") as FlightState;
+    expect(first.prs.map((p) => [p.pr, p.state])).toEqual([
+      [7, "merged"],
+      [8, "open"],
+    ]);
+    expect(listed().map((p) => p.pr)).toEqual([8]);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+  });
+
+  it("lists a merged PR once, then drops it", () => {
+    store.upsertPullRequests("mc", [stored(7), stored(8)], T0);
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    expect(listed().map((p) => [p.pr, p.state])).toEqual([
+      [7, "merged"],
+      [8, "open"],
+    ]);
+    // reading is not delivering: it stays listed until FLIGHT has received it
+    expect(listed().map((p) => p.pr)).toEqual([7, 8]);
+    markPrsShown(store, flightState({ config, store, busy: [], now: nowMs }));
+    expect(listed().map((p) => p.pr)).toEqual([8]);
+  });
+
+  it("a wake that failed to send still lists the merged PR at the next one", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0);
+    sendFails = true;
+    await watch.check();
+    sendFails = false;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const last = JSON.parse(sendCalls[1]?.text.split("\n").at(-1) ?? "") as FlightState;
+    expect(last.prs.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("does not wake again when a merged PR leaves the list after its wake", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("still lists the PR of a parked run, with its seat", () => {
+    live("guido-1", "r-guido");
+    store.upsertRun(run("r-guido", "guido-1", { ticket: "mc#7" }));
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: "silent", reason: "x", ended: false },
+      prNumber: 7,
+    });
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    expect(listed()).toMatchObject([{ pr: 7, seat: "guido-1", state: "open" }]);
+  });
+});
+
+describe("FLIGHT's holds", () => {
+  const heldCard = (status: string) =>
+    store.replaceBoard("mc", [
+      {
+        repoId: "mc",
+        issueNumber: 9,
+        title: "Ticket 9",
+        status,
+        state: "planned",
+        labels: [],
+        priority: null,
+        updatedAt: T0,
+        url: "u",
+        stage: null,
+        owner: null,
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: T0,
+        itemId: "I9",
+        projectId: "P1",
+      },
+    ]);
+  beforeEach(() => heldCard("Backlog"));
+  const hold = () => store.addHold({ ref: "mc#9", waitsOn: 7, basis: "same files", at: T0 });
+
+  it("lists a hold in the digest with its age", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    nowMs = T0 + 5 * MIN;
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([
+      { ref: "mc#9", waitsOn: 7, ageMin: 5, prState: "open", told: false },
+    ]);
+  });
+
+  it("wakes once when the waited-on PR merges, with the hold listed", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    await watch.check();
+    expect(sendCalls[0]?.text).not.toContain("to release");
+    sendCalls = [];
+    // updatedAt is over an hour old, so the PR is not listed and only the hold can cause the wake
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
+      T0 + MIN,
+    );
+    nowMs = T0 + MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("1 hold to release");
+    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightState;
+    expect(sent.holds).toMatchObject([{ ref: "mc#9", waitsOn: 7, prState: "merged" }]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("wakes when the PR closes unmerged, and a released hold wakes nothing", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { state: "closed", updatedAt: T0 - 120 * MIN })],
+      T0 + MIN,
+    );
+    sendCalls = [];
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("1 hold to release");
+    // FLIGHT keeps the hold: it is told once, not at every re-wake
+    nowMs = T0 + 3 * 60 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
+      { ref: "mc#9", prState: "closed", told: true },
+    ]);
+    store.releaseHold("mc#9", nowMs);
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
+  });
+
+  it("drops a hold whose card the board has moved past, and does not wake for it", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    await watch.check();
+    sendCalls = [];
+    heldCard("Ready");
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
+      T0 + MIN,
+    );
+    nowMs = T0 + MIN;
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    expect(store.activeHolds()).toEqual([]);
+  });
+});
+
+const raiseBlocked = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
+  store.raiseNote({
+    key,
+    kind: "blocked",
+    runId: null,
+    seatId: "guido-1",
+    repoId: "mc",
+    text: "mc#7 parked",
+    at: T0,
+    ...over,
+  });
+
+describe("FLIGHT's items to brief", () => {
+  const items = () => flightState({ config, store, busy: [], now: T0 + 5 * MIN }).items;
+
+  it("lists the operator's items with no brief, not a briefed or controller one", () => {
+    live("flight-1", "r-flight");
+    raiseBlocked();
+    raiseBlocked("cleanup-branch:x");
+    expect(items()).toEqual([
+      { key: "note:blocked:r1:0", kind: "blocked", ticket: null, text: "mc#7 parked", ageMin: 5 },
+    ]);
+    store.addBrief({
+      key: "note:blocked:r1:0",
+      context: "c",
+      recommendation: "r",
+      options: [],
+      basis: "b",
+      at: T0,
+    });
+    expect(items()).toEqual([]);
+  });
+
+  it("lists nothing without a FLIGHT seat", () => {
+    raiseBlocked();
+    const cfg = structuredClone(config);
+    for (const s of cfg.crew?.sessions[0]?.seats ?? []) if (s.id === "flight-1") s.retiring = true;
+    expect(flightState({ config: cfg, store, busy: [], now: T0 }).items).toEqual([]);
+  });
 });
 
 describe("the FLIGHT watcher", () => {
@@ -230,6 +492,41 @@ describe("the FLIGHT watcher", () => {
     seats.push(seat("flight-2", "FLIGHT"));
     byId("flight-1").retiring = true;
     expect(flightSeat(cfg)?.seat.id).toBe("flight-2");
+  });
+
+  it("lists only the tickets of the hub's lane", () => {
+    const cfg = structuredClone(config);
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.lane = "work";
+    const card = (n: number, labels: string[]): BoardItem => ({
+      repoId: "mc",
+      issueNumber: n,
+      title: `Ticket ${n}`,
+      status: "Ready",
+      state: "planned",
+      labels,
+      priority: null,
+      updatedAt: T0,
+      url: "u",
+      stage: null,
+      owner: null,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed: false,
+      prioritySource: null,
+      createdAt: T0 - n,
+      itemId: `I${n}`,
+      projectId: "P1",
+    });
+    store.replaceBoard("mc", [card(1, ["lane:home"]), card(2, ["lane:work"])]);
+    const refs = (c: CcConfig) =>
+      flightState({ config: c, store, busy: [], now: T0 }).tickets.map((t) => t.ref);
+    expect(refs(cfg)).toEqual(["mc#2"]);
+    delete cfg.crew.lane;
+    expect(refs(cfg).sort()).toEqual(["mc#1", "mc#2"]);
   });
 
   it("does not start FLIGHT while its seat has a pending change", async () => {
@@ -355,6 +652,39 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("wakes on a new Needs-you item, once", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 1 item to brief`)).toBe(true);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("a second Needs-you item wakes again", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 2 items to brief`)).toBe(true);
+  });
+
+  it("an unbriefed item re-wakes hourly", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + 59 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + 61 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
   it("a question that goes away and comes back wakes again", async () => {
     liveCrew();
     ask();
@@ -383,6 +713,15 @@ describe("the FLIGHT watcher", () => {
   it("re-wakes hourly while something waits, and not otherwise", async () => {
     liveCrew();
     ask();
+    // the question is the operator's item after the 20-minute hold; briefed, it wakes nothing new
+    store.addBrief({
+      key: "ask:1",
+      context: "c",
+      recommendation: "r",
+      options: [],
+      basis: "b",
+      at: T0,
+    });
     await watch.check();
     nowMs = T0 + 59 * MIN;
     await watch.check();
@@ -535,7 +874,16 @@ describe("wakeSummary", () => {
   });
   const park = { kind: "silent", reason: "x" };
   const q = { id: 1, seat: "guido-1", ticket: null, text: "t", ageMin: 0 };
-  const pr = { ref: "mc#1", pr: 1, seat: "guido-1", ready: false };
+  const pr = {
+    ref: "mc#1",
+    pr: 1,
+    seat: "guido-1",
+    ready: false,
+    state: "open" as const,
+    headSha: null,
+    readAt: "12:00",
+    stale: false,
+  };
   const state = (over: Partial<FlightState>): FlightState => ({
     time: "12:00",
     repo: "mc",
@@ -543,13 +891,24 @@ describe("wakeSummary", () => {
     questions: [],
     tickets: [],
     prs: [],
+    items: [],
+    holds: [],
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
     ...over,
   });
 
+  it("counts the items to brief", () => {
+    const item = { key: "a", kind: "blocked" as const, ticket: null, text: "t", ageMin: 0 };
+    expect(wakeSummary(state({ items: [item] }))).toBe("1 item to brief");
+    expect(wakeSummary(state({ items: [item, { ...item, key: "b" }] }))).toBe("2 items to brief");
+  });
+
   it("says nothing new, then each part with its singular", () => {
     expect(wakeSummary(state({}))).toBe("nothing new");
+    expect(wakeSummary(state({ prs: [pr, { ...pr, pr: 2, state: "merged" }] }))).toBe(
+      "1 PR in review",
+    );
     expect(
       wakeSummary(
         state({
@@ -601,6 +960,9 @@ describe("wakeSummary", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
       expect(wakeSummary(stopped)).toBe("1 free seat · 1 stopped");
+      expect(wakeFacts(state({ prs: [{ ...pr, state: "merged" }] }))).not.toBe(
+        wakeFacts(state({ prs: [pr] })),
+      );
       expect(wakeFacts(stopped)).not.toBe(wakeFacts(state({ seats: [s({ free: true })] })));
     });
 

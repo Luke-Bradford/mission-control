@@ -248,6 +248,9 @@ const MessageBody = z.strictObject({
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
 const NoBody = z.strictObject({});
 
+// Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
+const EndBody = z.strictObject({ hold: z.boolean().optional() });
+
 /**
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
  * event carries no input.
@@ -388,6 +391,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const origin = req.headers.origin;
     if (req.method === "POST" && origin !== undefined && !isLocalOrigin(origin)) {
       return reply.code(403).send({ error: "cross-origin request refused" });
+    }
+  });
+
+  // The Origin hook covers POST only, and a cross-site no-cors GET (an <img>, fetch with
+  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
+  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
+  // callers that send no header (the guard hook, curl) are unaffected. The matched route is
+  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
+  app.addHook("onRequest", async (req, reply) => {
+    const path = req.routeOptions.url ?? req.url;
+    if (path.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site") {
+      return reply.code(403).send({ error: "cross-site request refused" });
     }
   });
 
@@ -743,7 +758,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           result = await addRepo(configPath, repo, now());
         } catch (e) {
-          if (e instanceof ConfigWriteError && e.kind === "duplicate") {
+          if (e instanceof ConfigWriteError && (e.kind === "duplicate" || e.kind === "current")) {
             return reply.code(409).send({ error: e.message });
           }
           // ConfigWriteError messages never carry file contents; anything else is logged by name only.
@@ -1075,8 +1090,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         await sup.interrupt(id);
         return { ok: true };
       });
-      seatAction("/seats/:id/end", NoBody, async (sup, id) => {
-        await sup.endRun(id);
+      seatAction("/seats/:id/end", EndBody, async (sup, id, b) => {
+        await sup.endRun(id, { hold: b.hold });
         return { ok: true };
       });
       api.get<{ Params: { id: string } }>(

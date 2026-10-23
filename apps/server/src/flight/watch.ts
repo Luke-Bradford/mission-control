@@ -23,10 +23,12 @@ import { accountAtStop } from "../engine/queue.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import {
+  deliveredFacts,
   flightLive,
   flightOwnSeatIds,
   flightSeat,
   flightState,
+  markPrsShown,
   pending,
   wakeFacts,
 } from "./state.ts";
@@ -41,6 +43,8 @@ export interface FlightWatchDeps {
   >;
   /** main.ts passes engineOn: off in a preview, with MC_NO_LOOP_WRITES=1, or with no crew. */
   enabled: boolean;
+  /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
+  login?: string | null;
   /** True while the seat has a pending change; FLIGHT is not started until it settles. */
   blocked?: (seatId: string) => boolean;
   now?: () => number;
@@ -119,12 +123,19 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         return;
       }
       if (deps.blocked?.(id) === true) return;
-      const state = flightState({ config, store, busy: supervisor.busy(), now: t });
+      const state = flightState({
+        config,
+        store,
+        busy: supervisor.busy(),
+        now: t,
+        hubLogin: deps.login ?? null,
+      });
       if (!rotating) starts.push(t);
       rotating = false;
       try {
         await supervisor.startWatch(id, { first: wakeLine(state) });
-        lastFacts = wakeFacts(state);
+        markPrsShown(store, state);
+        lastFacts = deliveredFacts(state);
         lastWakeAt = t;
       } catch (e) {
         lastFailure = (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -149,14 +160,21 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       await supervisor.endRunByEngine(runId);
       return;
     }
-    const state = flightState({ config, store, busy: supervisor.busy(), now: t });
+    const state = flightState({
+      config,
+      store,
+      busy: supervisor.busy(),
+      now: t,
+      hubLogin: deps.login ?? null,
+    });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
     const due =
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     if (due) {
       if ((await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state))) === "sent") {
-        lastFacts = wake;
+        markPrsShown(store, state);
+        lastFacts = deliveredFacts(state);
         lastWakeAt = t;
       }
     } else if (!listed) {

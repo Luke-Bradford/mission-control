@@ -110,10 +110,22 @@ export type GateResult =
  * changes, so nothing was merged).
  */
 export type UpdateBranchResult =
-  | { ok: true; kind: "merged"; sha: string }
+  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean }
   | { ok: true; kind: "conflict"; files: string[] }
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
+
+/**
+ * A PR diff without its index lines and hunk numbers, which a merge of main changes and the
+ * change does not.
+ */
+export function prDiffKey(diff: string): string {
+  return diff
+    .split("\n")
+    .filter((l) => !l.startsWith("index "))
+    .map((l) => (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(l) ? "@@" : l))
+    .join("\n");
+}
 
 export interface Publisher {
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
@@ -134,6 +146,11 @@ export interface Publisher {
   ): Promise<PublishResult>;
   /** The tail of the failed Actions logs for `sha`, as one line-safe text. */
   ciExcerpt(repo: string, sha: string): Promise<string>;
+  /**
+   * Re-runs the failed jobs of every failed Actions run on `sha`; the runs re-run (none: nothing
+   * failed to re-run), or null when gh could not be read or refused.
+   */
+  rerunFailed(repo: string, sha: string): Promise<{ id: number; name: string }[] | null>;
   /** The paths changed between origin's default branch and `sha` that match `hardRules`. */
   hardRuleTouches(run: Run, sha: string, hardRules: readonly string[]): Promise<string[]>;
   /**
@@ -550,6 +567,38 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       }
     },
 
+    async rerunFailed(repo, sha) {
+      if (!SHA.test(sha)) return null;
+      try {
+        const listed = await deps.gh(
+          ["run", "list", `--repo=${repo}`, `--commit=${sha}`, "--json=databaseId,name,conclusion"],
+          { cwd: cwd() },
+        );
+        if (listed.code !== 0) return null;
+        const runs: unknown = JSON.parse(listed.stdout);
+        if (!Array.isArray(runs)) return null;
+        const failed = runs.flatMap((r: unknown) => {
+          const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
+          return x?.conclusion === "failure" &&
+            typeof x.databaseId === "number" &&
+            Number.isSafeInteger(x.databaseId)
+            ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX) }]
+            : [];
+        });
+        const done: { id: number; name: string }[] = [];
+        for (const f of failed) {
+          const r = await deps.gh(["run", "rerun", `--repo=${repo}`, String(f.id), "--failed"], {
+            cwd: cwd(),
+          });
+          if (r.code !== 0) return done.length === 0 ? null : done;
+          done.push(f);
+        }
+        return done;
+      } catch {
+        return null;
+      }
+    },
+
     async hardRuleTouches(run, sha, hardRules) {
       const place = seatPlace(deps.config, run.agentId);
       if (place === null || !SHA.test(sha) || hardRules.length === 0) return [];
@@ -682,7 +731,30 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             sha,
             at: (deps.now ?? Date.now)(),
           });
-          return { ok: true, kind: "merged", sha };
+          // the PR's own change, before and after: the same when the merge only brought main in
+          let prSame = false;
+          try {
+            const b1 = (await g(["merge-base", mainSha, before])).trim();
+            const diffOf = (base: string, tip: string): Promise<string> =>
+              g([
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                "--full-index",
+                "--binary",
+                base,
+                tip,
+                "--",
+              ]);
+            prSame =
+              SHA.test(b1) &&
+              prDiffKey(await diffOf(b1, before)) === prDiffKey(await diffOf(mainSha, sha));
+          } catch {
+            prSame = false;
+          }
+          return { ok: true, kind: "merged", sha, parent: before, prSame };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);

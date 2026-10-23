@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -91,6 +91,16 @@ describe("foldPath", () => {
     expect(foldPath(state, path, 2048)).toEqual(first);
     // The empty fold still runs: the mtime stamps the facts even when no line is new.
     expect(foldCalls.bytes).toEqual([0]);
+  });
+
+  it("stamps a whole-millisecond mtime on the rate limits", () => {
+    utimesSync(path, 1_792_548_000.1234, 1_792_548_000.1234);
+    const facts = foldPath(new Map(), path);
+    expect(facts?.rateLimits.length).toBeGreaterThan(0);
+    for (const r of facts?.rateLimits ?? []) {
+      expect(r.at).toBe(1_792_548_000_123);
+      expect(Number.isInteger(r.at)).toBe(true);
+    }
   });
 
   it("gives an empty file empty facts rather than none", () => {

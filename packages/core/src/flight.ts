@@ -1,4 +1,4 @@
-import { type HudColumn, TICKET_SIZES } from "./hud.ts";
+import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
 
@@ -29,6 +29,8 @@ export const FLIGHT_DECISION_KINDS = [
   "note",
   "promote",
   "end",
+  "ticket",
+  "comment",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -68,6 +70,20 @@ export const notInSessionText = (seat: string): string =>
   `Not done: ${seat} is not a seat in your session.`;
 export const capText = (what: string, n: number): string =>
   `Not done: you ${what} ${n} times in the last hour, the most allowed. Wait, or ask the operator.`;
+/** The briefs FLIGHT may write in an hour, and the shape of one. */
+export const FLIGHT_BRIEFS_PER_HOUR = 20;
+export const BRIEF_OPTIONS_MIN = 2;
+export const BRIEF_OPTIONS_MAX = 4;
+export const BRIEF_LABEL_MAX = 80;
+/** The longest text `brief_item` takes; it is stored cut to MC_TEXT_MAX (a label to BRIEF_LABEL_MAX). */
+export const BRIEF_INPUT_MAX = 8000;
+export const BRIEF_KEY_MAX = 500;
+export const briefNoItemText = (key: string): string =>
+  `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
+export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
+export const BRIEF_ITEM_DESCRIPTION = `Brief one of the operator's Needs-you items (its key from your digest's items): two or three sentences of context (what it is, why it waits, since when), your recommendation, and two to four options when it is a choice. A new brief on a key replaces the old one. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
+export const READ_OTHER_REPO =
+  "Not read: you read only your session's repo, or the issue of an open loop escalation in another configured repo.";
 export const FLIGHT_NOTED = "Noted in Decided without you.";
 
 export const READY_LABEL = "ready";
@@ -157,6 +173,13 @@ export const claimedText = (ref: string, logins: readonly string[]): string =>
   `Not started: ${ref} is assigned to ${logins.join(", ")}; another hub or person has it.`;
 export const waitsOnText = (ref: string, open: readonly string[]): string =>
   `Not started: ${ref} waits on ${open.join(", ")}.`;
+export const otherLaneText = (ref: string, laneLabels: readonly string[], lane: string): string =>
+  `Not started: ${ref} has ${laneLabels.length === 0 ? "no lane label" : laneLabels.join(", ")}; this hub starts only lane:${lane} cards.`;
+export const noAreaText = (ref: string): string => `Not started: ${ref} has no area label.`;
+export const researchText = (ref: string): string =>
+  `Not started: ${ref} is a research ticket; developer seats do not start those.`;
+export const startNeedsPlanText = (ref: string, size: string): string =>
+  `Not started: ${ref} is Size ${size} and has no ## Plan; a planner writes one first.`;
 export const START_NO_GITHUB = "Not started: GitHub could not be reached.";
 export const notReadyText = (ref: string): string =>
   `Not started: ${ref} has no ## Plan section, no ready label, and is not in Ready.`;
@@ -204,6 +227,10 @@ export const needsPlanText = (ref: string, size: string): string =>
   `Not moved: ${ref} is Size ${size} and has no ## Plan; start the planner on it with mc start_seat first.`;
 export const moveFailedText = (reason: string): string => `Not moved: ${reason}`;
 export const movedDecision = (to: string): string => `Moved to ${to}`;
+export const heldDecision = (pr: number): string => `Held in Backlog behind PR #${pr}`;
+export const holdNotOpenPrText = (repoId: string, pr: number): string =>
+  `Not moved: PR #${pr} is not an open PR in ${repoId}.`;
+export const WAITS_ON_ONLY_BACKLOG = "Not moved: waits_on is only for a move to Backlog.";
 export const movedText = (ref: string, to: string): string =>
   `Moved ${ref} to ${to}. Recorded in Decided without you.`;
 
@@ -234,6 +261,54 @@ export const messageAboutText = (call: string): string => `Message to ${call}`;
 export const sentText = (call: string): string => `Sent to ${call}.`;
 export const sentUnparkedText = (call: string): string =>
   `Sent to ${call}, and its run is un-parked.`;
+
+/** The tickets FLIGHT may file, and the comments it may post, in an hour. */
+export const FLIGHT_TICKETS_PER_HOUR = 10;
+export const FLIGHT_COMMENTS_PER_HOUR = 20;
+export const FLIGHT_TICKET_TITLE_MAX = 200;
+export const AREA_LABEL_PREFIX = "area:";
+export const LANE_LABEL_PREFIX = "lane:";
+/** The labels a filed ticket may carry besides its one area and one lane. */
+export const FLIGHT_TICKET_TYPE_LABELS: readonly string[] = [
+  "type:feature",
+  "bug",
+  "chore",
+  "test",
+  "docs",
+];
+export const hasOutcomeSection = (body: string): boolean => /^## Outcome[ \t]*$/m.test(body);
+
+export const GITHUB_WRITES_OFF =
+  "Not done: the loop engine is off on this server, so nothing is written to GitHub.";
+export const CREATE_NO_REPO = "Not filed: your session's repo is not configured.";
+export const createLabelsText = (why: string): string => `Not filed: ${why}.`;
+export const labelCountText = (prefix: string, found: readonly string[]): string =>
+  `labels must include exactly one ${prefix}* label (found ${found.length === 0 ? "none" : found.join(", ")})`;
+export const unknownLabelText = (label: string): string =>
+  `${label} is not a label you may set (${AREA_LABEL_PREFIX}*, ${LANE_LABEL_PREFIX}*, ${FLIGHT_TICKET_TYPE_LABELS.join(", ")})`;
+export const duplicateLabelText = (label: string): string => `${label} is given twice`;
+export const createBodyText = (missing: readonly string[]): string =>
+  `Not filed: the body needs ${missing.join(" and ")} as a heading line.`;
+export const duplicateTitleText = (n: number): string =>
+  `Not filed: an open issue with that title exists: #${n}. Comment on it with mc comment_ticket.`;
+export const createTextText = (what: string): string =>
+  `Not filed: ${what}. The ticket is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.`;
+export const createFailedText = (step: string): string =>
+  `Not filed: GitHub refused ${step}; see the server log.`;
+export const createdDecision = (n: number): string => `Filed #${n}`;
+export const createdText = (ref: string, inBacklog: boolean): string =>
+  `Filed ${ref}, on the project${inBacklog ? " in Backlog" : ", but not confirmed in Backlog"}. Recorded in Decided without you.`;
+export const createdDraftText = (ref: string, repoId: string): string =>
+  `Filed ${ref}, on the project; ${repoId} is a draft workspace, so its Status is not set. Recorded in Decided without you.`;
+export const notOnProjectText = (ref: string): string =>
+  `Filed ${ref}, but GitHub refused adding it to the project; tell the operator with mc ask_operator.`;
+export const COMMENTED_DECISION = "Commented";
+export const commentedText = (issue: number): string =>
+  `Commented on #${issue}. Recorded in Decided without you.`;
+export const commentTextText = (what: string): string =>
+  `Not commented: ${what}. The comment is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.`;
+export const commentFailedText = (issue: number): string =>
+  `Not commented: GitHub refused the comment on #${issue}; see the server log.`;
 
 export interface FlightSeatState {
   id: string;
@@ -268,12 +343,47 @@ export interface FlightState {
     ready: boolean;
     blockedBy: string[];
   }[];
-  prs: { ref: string; pr: number; seat: string; ready: boolean }[];
+  /**
+   * The repo's open PRs from the stored read, plus a PR that merged or closed since FLIGHT last
+   * read the list (listed once, with its state). `seat` is "" when no crew run holds the PR;
+   * `readAt` is the time of its last good read, and `stale` says the latest poll could not read it.
+   */
+  prs: {
+    ref: string;
+    pr: number;
+    seat: string;
+    ready: boolean;
+    state: "open" | "merged" | "closed";
+    headSha: string | null;
+    readAt: string;
+    stale: boolean;
+  }[];
+  /** The operator's Needs-you items that have no brief yet, oldest first. */
+  items: {
+    key: string;
+    kind: AttentionKind;
+    ticket: string | null;
+    text: string;
+    ageMin: number;
+  }[];
+  /**
+   * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
+   * the PR waited on: once it is not "open", the hold is ready to release. `told` is set once
+   * FLIGHT has been woken for that, so a hold it keeps does not wake it again.
+   */
+  holds: {
+    ref: string;
+    waitsOn: number;
+    ageMin: number;
+    prState: "open" | "merged" | "closed";
+    told: boolean;
+  }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
 }
 
 export const FLIGHT_TICKETS_LISTED = 30;
+export const FLIGHT_ITEMS_LISTED = 20;
 export const FLIGHT_RECENT_LISTED = 10;
 /** How long Needs you holds a seat's question back while FLIGHT runs. */
 export const FLIGHT_ANSWER_WAIT_MS = 20 * 60_000;
@@ -299,12 +409,16 @@ export function wakeSummary(s: FlightState): string {
   const free = s.seats.filter((x) => x.loop === "build" && x.free).length;
   const parked = s.seats.filter((x) => x.parked !== null).length;
   const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
+  const inReview = s.prs.filter((p) => p.state === "open").length;
+  const toRelease = s.holds.filter((h) => h.prState !== "open" && !h.told).length;
   const parts = [
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
     stopped > 0 ? `${stopped} stopped` : "",
     parked > 0 ? `${parked} parked` : "",
-    s.prs.length > 0 ? counted(s.prs.length, "PR in review", "PRs in review") : "",
+    inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
+    s.items.length > 0 ? `${counted(s.items.length, "item", "items")} to brief` : "",
+    toRelease > 0 ? `${counted(toRelease, "hold", "holds")} to release` : "",
   ].filter((p) => p !== "");
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }

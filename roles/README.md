@@ -8,7 +8,7 @@ Each seat runs one role. A role is a prompt (this folder), plus defaults for its
 |---|---|---|---|---|---|---|
 | **FLIGHT** | Flight Director: controller | Keeps the work moving. Answers seats' questions, promotes and plans tickets, clears stalls, files gaps, briefs the operator on what is theirs. One per hub. | read-only | Opus | watch | none |
 | **GUIDO** | Backend developer | Builds server and core tickets test-first, in its area, and reports for review. | writer | Sonnet | build | `apps/server/**`, `packages/core/**`, `docs/**` |
-| **INCO** | Frontend developer | Builds HUD and web tickets test-first, in its area, and reports for review. | writer | Sonnet | build | `apps/web/**`, `docs/**` |
+| **INCO** | Frontend developer | Builds HUD and web tickets test-first, in its area, and reports for review. | writer | Sonnet | build | `apps/web/**` |
 | **FAO** | Planner | Reads a ticket and the code, and writes the `## Plan` a developer builds from. | read-only | Opus | plan | none |
 | **RETRO** | Reviewer (QA) | Reviews each PR in a throwaway copy, and sends blocking findings, each with its exact fix, back to the author. Posts `mc/review`. | scratch | Opus | review | none |
 

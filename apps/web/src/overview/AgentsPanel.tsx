@@ -1,5 +1,6 @@
 import {
   type AttentionItem,
+  type ConfigView,
   type Crew,
   ENGINE_NOT_RUNNING,
   FLIGHT_NOT_RUNNING,
@@ -43,8 +44,14 @@ import { LoopStep } from "./LoopStep.tsx";
 
 const DASH = "—";
 
-/** The role of the one crew seat that is FLIGHT. */
-const FLIGHT_ROLE = "FLIGHT";
+/** The seat the server treats as FLIGHT: the first, in session then seat order, that is not retiring and runs the watch loop. */
+function flightSeatId(config: ConfigView | undefined): string | null {
+  for (const session of config?.crew?.sessions ?? []) {
+    const seat = session.seats.find((s) => !s.retiring && s.loop === "watch");
+    if (seat) return seat.id;
+  }
+  return null;
+}
 
 /** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
 function FlightRow({
@@ -262,8 +269,10 @@ export function AgentsPanel() {
   const now = useSecond();
   const [session] = useSession();
   const [selected] = useSelectedAgent();
-  // The config allows one watch seat, so at most one row is FLIGHT; it has its own row above.
-  const flight = crew.data?.rows.find((r) => r.role === FLIGHT_ROLE) ?? null;
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  // The seat the server treats as FLIGHT has its own row above; any other lists as an agent.
+  const flightId = flightSeatId(config);
+  const flight = crew.data?.rows.find((r) => r.id === flightId) ?? null;
   const rows = crew.data
     ? crewOrder(
         crew.data.rows.filter((r) => r !== flight && inSession(session, r.repoId)),

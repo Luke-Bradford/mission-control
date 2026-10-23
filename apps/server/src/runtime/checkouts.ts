@@ -90,6 +90,8 @@ export interface CheckoutInput {
   checkout: string;
   /** `crew.worktrees`. */
   worktreesRoot: string;
+  /** The session's id: its worktrees are made in `{worktreesRoot}/{sessionId}`. */
+  sessionId: string;
   seatId: string;
   issue: number;
   title: string;
@@ -97,7 +99,7 @@ export interface CheckoutInput {
 
 export interface Checkout {
   branch: string;
-  /** `{worktreesRoot}/{seatId}-{issue}`. */
+  /** `{worktreesRoot}/{sessionId}/{seatId}-{issue}`; an older run's is the flat `{worktreesRoot}/{seatId}-{issue}`. */
   path: string;
   /** false: this ticket's worktree already existed and is reused as it is. */
   created: boolean;
@@ -121,7 +123,7 @@ const succeeds = (p: Promise<unknown>) =>
   );
 
 /** The clone's `.git` (real path), once the checkout is a clean git top level. */
-async function cloneGitDir(checkout: string): Promise<string> {
+export async function cloneGitDir(checkout: string): Promise<string> {
   try {
     const common = await realpath(join(checkout, ".git"));
     const o = { gitDir: common };
@@ -426,16 +428,22 @@ async function fetchBase(i: Omit<CheckoutInput, "title">) {
 }
 
 /** `fetchBase` for a checkout named `name` (already checked); the root must be absolute. */
-async function fetchBaseAs(i: { checkout: string; worktreesRoot: string }, name: string) {
+async function fetchBaseAs(
+  i: { checkout: string; worktreesRoot: string; sessionId: string },
+  name: string,
+) {
   if (!isAbsolute(i.worktreesRoot)) {
     throw new CheckoutError("path", `${i.worktreesRoot} is not an absolute path`);
   }
-  const path = join(i.worktreesRoot, name);
+  if (!SEAT_ID.test(i.sessionId)) {
+    throw new CheckoutError("path", `${i.sessionId} is not a session id`);
+  }
+  const path = join(i.worktreesRoot, i.sessionId, name);
   const common = await cloneGitDir(i.checkout);
   const inClone = (args: string[], timeoutMs?: number) =>
     crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
   const baseSha = await fetchOriginBase(inClone);
-  return { name, path, common, inClone, baseSha };
+  return { name, path, flat: join(i.worktreesRoot, name), common, inClone, baseSha };
 }
 
 /** Origin's default tip, read from origin and fetched (see `fetchBase`). */
@@ -468,7 +476,12 @@ export async function preparePlanCheckout(i: Omit<CheckoutInput, "title">): Prom
   if (!SEAT_ID.test(i.seatId) || !Number.isSafeInteger(i.issue) || i.issue < 1) {
     throw new CheckoutError("path", `${name} is not a seat checkout name`);
   }
-  return prepareDetachedCheckout({ checkout: i.checkout, worktreesRoot: i.worktreesRoot, name });
+  return prepareDetachedCheckout({
+    checkout: i.checkout,
+    worktreesRoot: i.worktreesRoot,
+    sessionId: i.sessionId,
+    name,
+  });
 }
 
 /** What a seat checkout's folder name looks like (`flight-1-watch`, `guido-1-232`). */
@@ -481,6 +494,7 @@ const CHECKOUT_NAME = /^[a-z][a-z0-9-]{0,47}$/;
 export async function prepareDetachedCheckout(i: {
   checkout: string;
   worktreesRoot: string;
+  sessionId: string;
   name: string;
 }): Promise<Checkout> {
   if (!CHECKOUT_NAME.test(i.name)) {
@@ -531,7 +545,10 @@ export async function prepareDetachedCheckout(i: {
  */
 export async function prepareCheckout(i: CheckoutInput): Promise<Checkout> {
   const branch = branchFor(i.issue, i.title);
-  const { name, path, common, inClone, baseSha } = await fetchBase(i);
+  const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
+  // a worktree made before sessions had folders is reused where it is
+  const path =
+    (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
 
@@ -681,6 +698,7 @@ export async function removeCheckout(
 export interface ScratchInput {
   checkout: string;
   worktreesRoot: string;
+  sessionId: string;
   seatId: string;
   reviewId: number;
   sha: string;
@@ -709,12 +727,13 @@ export async function prepareScratch(i: ScratchInput): Promise<Scratch> {
     !Number.isSafeInteger(i.reviewId) ||
     i.reviewId < 1 ||
     !COMMIT_SHA.test(i.sha) ||
+    !SEAT_ID.test(i.sessionId) ||
     !isAbsolute(i.worktreesRoot)
   ) {
     throw new CheckoutError("path", `${name} is not a review checkout name`);
   }
   const subject = `the PR head ${i.sha.slice(0, 7)}`;
-  const path = join(i.worktreesRoot, name);
+  const path = join(i.worktreesRoot, i.sessionId, name);
   const common = await cloneGitDir(i.checkout);
   const inClone = (args: string[], timeoutMs?: number) =>
     crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });

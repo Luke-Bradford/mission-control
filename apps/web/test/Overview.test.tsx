@@ -154,10 +154,52 @@ describe("Agents panel", () => {
     expect(flight.textContent).toContain("—");
   });
 
+  const flightConfig = (seats: { id: string; retiring?: boolean }[]) => ({
+    ...CONFIG,
+    crew: {
+      worktrees: "/mc/crew",
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: "/mc/clone",
+          seats: seats.map((s) => ({
+            role: "FLIGHT",
+            mode: "read-only",
+            loop: "watch",
+            accountId: "claude-main",
+            model: "opus",
+            area: [],
+            ...s,
+          })),
+        },
+      ],
+    },
+  });
+
+  it("the FLIGHT row is the seat the server treats as FLIGHT: a retiring one lists as an agent", async () => {
+    const seat = (over: Partial<CrewRow>) =>
+      crewRow({ kind: "crew", role: "FLIGHT", mode: "read-only", loopKind: "crew", ...over });
+    stub({
+      rows: [
+        seat({ id: "flight-1", index: 3, hudState: "idle" }),
+        seat({ id: "flight-2", index: 4, hudState: "error", ticket: null }),
+      ],
+      config: flightConfig([{ id: "flight-1", retiring: true }, { id: "flight-2" }]),
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("flight-1");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(within(flight).getByText("Error")).toBeTruthy();
+    expect(agentRows(container)).toHaveLength(1);
+    expect(within(agentRows(container)[0] as HTMLElement).getByText("flight-1")).toBeTruthy();
+  });
+
   it("the FLIGHT row shows the live seat, once, and the subtitle leaves it out", async () => {
     const seat = (over: Partial<CrewRow>) =>
       crewRow({ kind: "crew", role: "Developer", mode: "writer", loopKind: "crew", ...over });
     stub({
+      config: flightConfig([{ id: "flight-1" }]),
       rows: [
         seat({ id: "flight-1", index: 3, role: "FLIGHT", hudState: "error", ticket: null }),
         seat({ id: "dev-1", index: 0 }),

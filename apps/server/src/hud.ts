@@ -22,6 +22,7 @@ import {
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
+  isFlakeNoteKey,
   isHardRulesFlagKey,
   LOCK_WAITING_TEXT,
   laneOwner,
@@ -406,6 +407,7 @@ export function attentionItems(
   hubLogin: string | null = null,
 ): AttentionItem[] {
   const acks = store.acks();
+  const briefs = store.briefs();
   const status = new Map(store.status().map((s) => [s.collector, s]));
   const items: OwnedItem[] = [];
 
@@ -470,10 +472,12 @@ export function attentionItems(
   }
 
   // A PR waits on you when it is linked to a ticket on a configured board and no agent is running
-  // on that ticket (the loops merge their own PRs; see PR_WAIT_MS).
+  // on that ticket (the loops merge their own PRs; see PR_WAIT_MS). A ticket whose run is still
+  // open is the crew's, whether or not a seat is running on it (set aside, queued, held).
   const working = new Set(
     rows.filter((r) => r.run?.status === "running" && r.ticket !== null).map((r) => r.ticket),
   );
+  for (const ticket of store.activeTickets()) working.add(ticket);
   for (const repo of config.repos) {
     const onBoard = new Set(store.board(repo.id).map((b) => `${repo.id}#${b.issueNumber}`));
     for (const pr of store.pullRequests(repo.id)) {
@@ -502,7 +506,10 @@ export function attentionItems(
 
   return items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
-    .map((i) => ({ ...i, acked: acks.has(i.key) }));
+    .map((i) => {
+      const brief = briefs.get(i.key);
+      return { ...i, ...(brief === undefined ? {} : { brief }), acked: acks.has(i.key) };
+    });
 }
 
 /**
@@ -542,7 +549,7 @@ function endedParkGone(
  * operator's, unless the repo's rules say the controller merges hard-rule PRs.
  */
 function noteOwner(store: Store, n: Pick<AttentionNote, "key" | "repoId">): AttentionOwner {
-  if (isCleanupNoteKey(n.key)) return OWNER_CONTROLLER;
+  if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key)) return OWNER_CONTROLLER;
   if (
     isHardRulesFlagKey(n.key) &&
     n.repoId !== null &&

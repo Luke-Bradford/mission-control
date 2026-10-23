@@ -120,11 +120,13 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 | What | Path |
 |---|---|
 | Config | `~/.config/mission-control/config.yaml` (override with `MC_CONFIG`) |
-| Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every add from Setup › Repos, the newest 10 kept, mode 0600 |
+| Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every write the server makes to `config.yaml` (a repo added from Setup › Repos, or a session's seats replaced), the newest 10 kept, mode 0600 |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
 | Update log | `update.log` beside the database: the last update's commands and output, mode 0600 |
 | launchd logs | `~/Library/Logs/mission-control/server.log`, `server.err.log` |
+
+The server never writes a `config.yaml` that is a symbolic link: it refuses the write and says so, so keep the real file at the config path (`~/.config/mission-control/config.yaml`, or `MC_CONFIG`), not a link to it.
 
 ## Run
 
@@ -706,6 +708,14 @@ repo-relative with `**` only as a trailing `/**`. Nothing uses the rules yet (th
 and a refused block stops new tickets for that repo). This repo's own block is at the end of its
 `CLAUDE.md`. `crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
 run may use; the engine parks a run that goes over.
+
+**FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
+that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
+not have moved the card itself). The hold is a row in the `holds` table (ref, the PR, basis, time,
+`released_at`), counts as a move under the hourly cap, and shows in FLIGHT's digest as
+`holds: [{ ref, waitsOn, ageMin, prState, told }]` (`told` once FLIGHT has been woken for the PR's merge or close). When the PR merges or closes, the watch wakes FLIGHT
+(`n hold(s) to release`); a closed-unmerged PR leaves the hold in place for FLIGHT to decide. FLIGHT
+promotes the card to Ready again through `promote` with the usual checks, and that move releases the hold.
 
 ### Loop liveness
 

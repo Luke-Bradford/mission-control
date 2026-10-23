@@ -333,6 +333,38 @@ describe("cleanLog", () => {
   });
 });
 
+describe("rerunFailed", () => {
+  const listed =
+    (...r: { databaseId: number; name: string; conclusion: string }[]) =>
+    () => ({
+      code: 0,
+      stdout: JSON.stringify(r),
+    });
+
+  it("re-runs the failed jobs of each failed run, argv only", async () => {
+    ghAnswers = [
+      listed(
+        { databaseId: 11, name: "test", conclusion: "failure" },
+        { databaseId: 12, name: "lint", conclusion: "success" },
+      ),
+      () => ({ code: 0, stdout: "" }),
+    ];
+    const out = await createPublisher(deps()).rerunFailed("o/mc", SHA);
+    expect(out).toEqual([{ id: 11, name: "test" }]);
+    expect(ghCalls[1]).toEqual(["run", "rerun", "--repo=o/mc", "11", "--failed"]);
+    expect(ghCalls).toHaveLength(2);
+  });
+
+  it("answers null when gh refuses and nothing was re-run, or the sha is not a commit", async () => {
+    ghAnswers = [
+      listed({ databaseId: 11, name: "test", conclusion: "failure" }),
+      () => ({ code: 1, stdout: "" }),
+    ];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toBeNull();
+    expect(await createPublisher(deps()).rerunFailed("o/mc", "--bad")).toBeNull();
+  });
+});
+
 describe("ciExcerpt", () => {
   const runs =
     (...r: { databaseId: number; name: string; conclusion: string }[]) =>
@@ -1176,6 +1208,42 @@ describe("merge steps", () => {
       };
       expect(await publisher().deleteLocalBranch(MERGED_RUN)).toEqual({ ok: true });
       expect(gitCalls).toContainEqual(["merge-base", "--is-ancestor", OTHER, MAIN]);
+    });
+
+    it("fetches main when the clone lacks the merge commit, then deletes", async () => {
+      let fetched = false;
+      gitAnswers = {
+        "rev-parse": (args) => {
+          if (args.includes(`${MAIN}^{commit}`) && !fetched) throw exit1;
+          return `${OTHER}\n`;
+        },
+        "ls-remote": lsRemote(),
+        fetch: () => {
+          fetched = true;
+          return "";
+        },
+        "merge-base": "",
+        branch: "",
+      };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toEqual({ ok: true });
+      expect(pushed("fetch")).toBe(true);
+      expect(gitCalls).toContainEqual(["branch", "-D", BRANCH]);
+    });
+
+    it("refuses transiently when the fetch fails", async () => {
+      gitAnswers = {
+        "rev-parse": (args) => {
+          if (args.includes(`${MAIN}^{commit}`)) throw exit1;
+          return `${OTHER}\n`;
+        },
+        "ls-remote": lsRemote(),
+        fetch: new Error("network"),
+      };
+      expect(await publisher().deleteLocalBranch(MERGED_RUN)).toMatchObject({
+        ok: false,
+        transient: true,
+      });
+      expect(pushed("branch")).toBe(false);
     });
 
     it("keeps a branch with commits that were not merged", async () => {

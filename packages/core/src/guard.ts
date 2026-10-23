@@ -80,6 +80,15 @@ export const LOCK_WAIT_MS = Math.min(HOOK_TIMEOUT_SEEN_MS - 60_000, 10 * 60_000)
 export const GUARD_HOOK_TIMEOUT_S = LOCK_WAIT_MS / 1000 + 30;
 /** The hook's own deadline, inside the CLI's timeout (which would run the tool): then it denies. */
 export const HOOK_DEADLINE_MS = GUARD_HOOK_TIMEOUT_S * 1000 - 10_000;
+/**
+ * How long the hook keeps retrying a refused or reset connection (a hub restarting), from its first
+ * try, before it denies as unreachable. Kept well inside `HOOK_DEADLINE_MS`.
+ */
+export const HOOK_RETRY_MS = 60_000;
+/** An env var that shortens the retry window (ms; tests that run the hook against no hub). */
+export const HOOK_RETRY_ENV = "MC_HOOK_RETRY_MS";
+/** The pause between the hook's tries while the hub is down. */
+export const HOOK_RETRY_EVERY_MS = 1000;
 /** The route the guard hook asks, on the hub's loopback port. */
 export const GUARD_CHECK_PATH = "/api/guard/check";
 /** `POST /api/guard/check`'s body limit; the hook checks its body against it before posting. */
@@ -203,11 +212,68 @@ const WRAPPERS: Readonly<Record<string, { valued: readonly string[]; operands: n
 /** `env -S <string>`: the string is a command line of its own. */
 const ENV_SPLIT = /^(?:-S|--split-string)(?:=?)(.*)$/;
 const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
-const SHELL_KEYWORDS = new Set(["!", "if", "then", "else", "elif", "do", "while", "until", "{"]);
+const SHELL_KEYWORDS = new Set([
+  "!",
+  "if",
+  "then",
+  "else",
+  "elif",
+  "do",
+  "while",
+  "until",
+  "{",
+  "always",
+]);
 /** Wrappers that start their command in the background: `coproc cmd`, `setsid cmd`. */
 const BACKGROUND_WRAPPERS = new Set(["coproc", "setsid"]);
 /** Terminal multiplexers: any command they are given runs detached, in the background. */
 const MULTIPLEXERS = new Set(["screen", "tmux"]);
+/** Runners whose options are not modelled (`watch`, `flock -c`, `script -c`, `parallel`, `npx -c` take a command line as one word): judged like a multiplexer, in the foreground. */
+const RUNNERS = new Set([
+  "watch",
+  "caffeinate",
+  "script",
+  "flock",
+  "parallel",
+  "doas",
+  "ionice",
+  "taskset",
+  "chronic",
+  "unbuffer",
+  "npx",
+  "bunx",
+  "uvx",
+]);
+/** `pnpm exec`, `npm x`, `yarn dlx`: a package manager running a command (the verb may follow options: `pnpm -s exec`). */
+const PACKAGE_MANAGERS = new Set(["pnpm", "npm", "yarn"]);
+const PACKAGE_RUN_VERBS = new Set(["exec", "dlx", "x"]);
+
+/** Where the words a runner runs start in `rest` (the words after its program), or -1: not a runner. */
+function runnerStart(name: string, rest: readonly string[]): number {
+  if (RUNNERS.has(name)) return 0;
+  if (PACKAGE_MANAGERS.has(name)) {
+    const i = rest.findIndex((w) => PACKAGE_RUN_VERBS.has(w));
+    return i === -1 ? -1 : i + 1;
+  }
+  return -1;
+}
+
+/**
+ * A short-option cluster (`-iu`, `-0n`, `-vS`): the first letter whose `-<letter>` is in `valued`
+ * takes the rest of the word as its value, or the next word when nothing follows it (`inline` "").
+ * Null when none does, or a character before one is not a letter or digit.
+ */
+function clusterValue(
+  w: string,
+  valued: readonly string[],
+): { letter: string; inline: string } | null {
+  for (let i = 1; i < w.length; i++) {
+    const c = w.charAt(i);
+    if (valued.includes(`-${c}`)) return { letter: c, inline: w.slice(i + 1) };
+    if (!/[A-Za-z0-9]/.test(c)) return null;
+  }
+  return null;
+}
 /** What may follow `coproc NAME`: a compound command (with NAME, coproc takes nothing else). */
 const COMPOUND_START = new Set(["{", "while", "until", "if", "for", "case", "select", "[[", "(("]);
 /**
@@ -263,6 +329,8 @@ interface Cmd {
   argv: string[];
   /** Under coproc, setsid, screen or tmux (a lone `&` is the line's: `Walk.lineBackground`). */
   background: boolean;
+  /** A word after its program brace-expands (an unquoted `{a,b}`). */
+  braces?: boolean;
 }
 
 /** One decision's walk over a command line. */
@@ -622,8 +690,11 @@ class Reader {
         plain(c);
       } else if (c === "}" && open === 0 && (i + 1 === s.length || WORD_END.includes(next))) {
         // zsh: an unquoted `}` that closes no `{` of its word ends a group (`{git push}`); it is
-        // never a command or an argument. A quoted `}` is literal and took the branches above.
-        endWord();
+        // never a command or an argument, and it ends the simple command (`{ a } always { b }`
+        // judges `b`); right after a word holding `${…}` it only ends the word. A quoted `}` is
+        // literal and took the branches above.
+        if (word === null || !mask.includes("${")) endSegment();
+        else endWord();
       } else {
         const top = closers[closers.length - 1];
         if (c === "{") open++;
@@ -799,10 +870,17 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   for (;;) {
     const head = words[at];
     if (head === undefined) break;
+    if (ASSIGNMENT.test(head)) {
+      at++;
+      continue;
+    }
     if (braces[at] === true) return [{ argv: [BRACE_WORD], background: bg }];
     const base = baseName(head);
-    if (ASSIGNMENT.test(head) || SHELL_KEYWORDS.has(head)) {
+    if (SHELL_KEYWORDS.has(head)) {
       at++;
+    } else if (head === "function") {
+      // zsh: `function NAME { … }` or `function NAME () { … }`: the keyword, the name, the `()`
+      at += words[at + 2] === "()" ? 3 : 2;
     } else if (head.startsWith("{")) {
       // zsh: `{git push; }` is a group running `git push` (all the braces at once: one pass)
       words[at] = head.replace(/^\{+/, "");
@@ -821,8 +899,15 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
         if (spec.valued.includes(opt)) {
           if (split !== null && words[at] !== undefined) scripts.push(words[at] ?? "");
           at++;
-        } else if (split !== null && split[1] !== undefined && split[1] !== "") {
-          scripts.push(split[1]);
+        } else if (split !== null) {
+          if (split[1] !== undefined && split[1] !== "") scripts.push(split[1]);
+        } else if (!opt.startsWith("--")) {
+          const v = clusterValue(opt, spec.valued);
+          if (v !== null) {
+            const value = v.inline !== "" ? v.inline : words[at];
+            if (v.inline === "") at++;
+            if (base === "env" && v.letter === "S" && value !== undefined) scripts.push(value);
+          }
         }
       }
       at += spec.operands;
@@ -836,22 +921,30 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   const name = baseName(program);
   const rest = words.slice(at + 1);
   const restBraces = braces.slice(at + 1);
-  const out: Cmd[] = [{ argv: [name, ...rest], background: bg }, ...extra];
-  if (MULTIPLEXERS.has(name)) {
+  const braced = restBraces.includes(true);
+  const out: Cmd[] = [{ argv: [name, ...rest], background: bg, braces: braced }, ...extra];
+  const multiplexer = MULTIPLEXERS.has(name);
+  const from = multiplexer ? 0 : runnerStart(name, rest);
+  if (multiplexer || from !== -1) {
     // `tmux new -d 'pnpm -s test'`, `screen -dmS s pnpm -s test`: which word starts the command is
     // not modelled, so every suffix of its words is judged as a command, in the background, and a
     // word holding a command line is split. A multiplexer that is one of those suffixes is not
     // looked into again (its suffixes are among them). One inside a command line it runs would
-    // need its own look, which is not taken: the line is denied as too long to judge.
+    // need its own look, which is not taken: the line is denied as too long to judge. Runners
+    // (`watch`, `flock -c`, `npx`, `pnpm exec`…) are judged the same way, but in the foreground.
     if (mux === "suffix") return out;
     if (mux === "script") throw new TooLong();
-    out[0] = { argv: [name, ...rest], background: true };
-    for (let i = 0; i < rest.length; i++) {
-      const suffix = wordsOnly(rest.slice(i), restBraces.slice(i));
-      out.push(...normalise(suffix, walk, depth + 1, true, "suffix"));
+    const run = rest.slice(from);
+    const runBraces = restBraces.slice(from);
+    // a multiplexer among a runner's words returns early as a suffix: its command is background
+    const runBg = multiplexer || bg || run.some((w) => MULTIPLEXERS.has(baseName(w)));
+    if (multiplexer) out[0] = { argv: [name, ...rest], background: true, braces: braced };
+    for (let i = 0; i < run.length; i++) {
+      const suffix = wordsOnly(run.slice(i), runBraces.slice(i));
+      out.push(...normalise(suffix, walk, depth + 1, runBg, "suffix"));
     }
-    for (const w of rest) {
-      if (/[\s;&|]/.test(w)) out.push(...commands(w, walk, depth + 1, true, "script"));
+    for (const w of run) {
+      if (/[\s;&|]/.test(w)) out.push(...commands(w, walk, depth + 1, runBg, "script"));
     }
     return out;
   }
@@ -917,7 +1010,8 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
  * substitutions are judged). Drops leading `NAME=value` words, shell keywords and `{ }` (zsh's
  * `{git push}` too), and looks through the wrappers in `WRAPPERS` (their options and option values, a
  * `timeout` duration, a `repeat` count); an absolute program path becomes its basename. `sh -c`,
- * `eval` and `env -S` scripts are split too, and under `screen`/`tmux` every suffix is.
+ * `eval` and `env -S` scripts are split too, and under `screen`/`tmux`, the `RUNNERS` and
+ * `pnpm/npm/yarn exec|dlx|x` every suffix is.
  */
 export function splitCommands(cmd: string): string[][] {
   return lineCommands(cmd, newWalk()).map((c) => c.argv);
@@ -964,6 +1058,15 @@ const TEST_FILE = /\.(?:ts|tsx|mts|cts|js|mjs|cjs|jsx|py)$/;
  */
 export function isFullSuite(argv: readonly string[], fullSuite: readonly string[]): boolean {
   return matchedSuite(argv, fullSuite) !== null;
+}
+
+/** The first full-suite entry whose program is `program` (a brace word after it may spell that suite). */
+function suiteOfProgram(program: string, fullSuite: readonly string[]): string | null {
+  return (
+    fullSuite.find(
+      (entry) => (entry.split(/\s+/).find((w) => w !== "") ?? "").toLowerCase() === program,
+    ) ?? null
+  );
 }
 
 function matchedSuite(argv: readonly string[], fullSuite: readonly string[]): string | null {
@@ -1034,6 +1137,12 @@ const GIT_KNOWN = new Set([
   ),
 ]);
 
+/** `git tag` options that make or delete a tag: alone, in a short cluster, or with `=value`. */
+const TAG_WRITE =
+  /^-[A-Za-z]*[dasufmFe]|^--(?:delete|annotate|sign|local-user|force|message|file|edit)(?:=|$)/;
+/** `git branch` options that make it list (each implies `--list`), alone or with `=value`. */
+const BRANCH_LIST = /^(?:-l|--(?:list|contains|no-contains|merged|no-merged|points-at)(?:=.*)?)$/;
+
 /** Subcommands that read only with these arguments (or none). */
 function gitReadOnly(sub: string, rest: readonly string[]): boolean {
   const flags = rest.every((a) => a.startsWith("-"));
@@ -1046,10 +1155,14 @@ function gitReadOnly(sub: string, rest: readonly string[]): boolean {
           a,
         ),
       );
-      return !writes && (flags || rest.some((a) => a === "--list" || a === "-l"));
+      return !writes && (flags || rest.some((a) => BRANCH_LIST.test(a)));
     }
     case "tag":
-      return rest.length === 0 || rest.every((a) => ["-l", "--list", "-n"].includes(a));
+      return (
+        rest.length === 0 ||
+        rest.every((a) => ["-l", "--list", "-n"].includes(a)) ||
+        (rest.some((a) => a === "-l" || a === "--list") && !rest.some((a) => TAG_WRITE.test(a)))
+      );
     case "stash":
       return rest[0] === "list" || rest[0] === "show";
     case "worktree":
@@ -1203,7 +1316,7 @@ export function guardDecision(e: GuardEvent, ctx: GuardContext): GuardVerdict {
   let lock: string | null = null;
   let backgroundSuite = false;
   const walk = newWalk();
-  for (const { argv, background } of lineCommands(e.input.command ?? "", walk)) {
+  for (const { argv, background, braces } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
     if (program === undefined) continue;
     if (program === TOO_LONG) {
@@ -1227,7 +1340,9 @@ export function guardDecision(e: GuardEvent, ctx: GuardContext): GuardVerdict {
     } else if (program === "curl" || program === "wget") {
       return deny("network", program);
     }
-    const suite = matchedSuite(argv, ctx.fullSuite);
+    const suite =
+      matchedSuite(argv, ctx.fullSuite) ??
+      (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
     if (suite !== null) {
       if (ctx.mode !== "writer") return deny("full-suite", suite);
       if (e.input.run_in_background === true) {
@@ -1330,16 +1445,37 @@ const HEADER_LINE =
   /^(--- |\+\+\+ |index |new file mode|deleted file mode|old mode|new mode|similarity index|dissimilarity index|rename |copy |remerge CONFLICT |Binary files|GIT binary patch)/;
 const HUNK = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
+/** A commit header: `\0commit ` then a full id (or the commit tool's `staged`) and a newline. */
+const COMMIT_HEADER = /\0commit (?=(?:[0-9a-f]{40}|staged)\n)/;
+
+/** The new path of a `diff --git a/old b/new` line (the part after `diff --git `). */
+function diffGitNewPath(rest: string): string {
+  if (rest.endsWith('"')) {
+    const open = rest.lastIndexOf(' "', rest.length - 2);
+    return stripPrefix(unquotePath(open < 0 ? rest : rest.slice(open + 1)));
+  }
+  // With --no-renames both halves are one path, which may itself hold " b/".
+  const half = (rest.length - 1) / 2;
+  if (rest.startsWith("a/") && rest.slice(half, half + 3) === " b/") {
+    if (rest.slice(2, half) === rest.slice(half + 3)) return rest.slice(half + 3);
+  }
+  return rest;
+}
+
 /**
  * Scan `git log -p --text --no-textconv --no-ext-diff --format=%x00commit %H%n%B` output: every
- * added line (the file and its new line number) and every commit message (`commit <sha7>`).
+ * added line (the file and its new line number), the path of every file the change adds or
+ * modifies (line 0, name withheld) and every commit message (`commit <sha7>`).
  * Findings carry the place and the kind, never the match.
  */
 export function scanSecrets(text: string, known: readonly string[]): SecretFinding[] {
   const out: SecretFinding[] = [];
-  for (const chunk of text.split("\0commit ").slice(1)) {
+  for (const chunk of text.split(COMMIT_HEADER).slice(1)) {
     const lines = chunk.split("\n");
-    const sha7 = (lines.shift() ?? "").trim().slice(0, 7);
+    const id = (lines.shift() ?? "").trim();
+    // a file line can fake a header whose id is a known credential: scan the id too
+    for (const kind of kindsIn(id, known)) out.push({ where: "(name withheld)", line: 0, kind });
+    const sha7 = id.slice(0, 7);
     const commitWhere = `commit ${sha7}`;
     let messageLine = 0;
     const message = (l: string) => {
@@ -1354,6 +1490,19 @@ export function scanSecrets(text: string, known: readonly string[]): SecretFindi
     let newLine = 0;
     let oldLeft = 0;
     let newLeft = 0;
+    // The current file's new path, until it has been scanned (once per file).
+    let pendingPath: string | null = null;
+    let deleted = false;
+    const scanPath = (p: string) => {
+      pendingPath = null;
+      for (const kind of kindsIn(p, known)) {
+        out.push({ where: "(name withheld)", line: 0, kind });
+      }
+    };
+    const flushPath = () => {
+      if (pendingPath !== null && !deleted) scanPath(pendingPath);
+      pendingPath = null;
+    };
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i] ?? "";
       if (state === "hunk" && oldLeft <= 0 && newLeft <= 0) state = "header";
@@ -1375,14 +1524,18 @@ export function scanSecrets(text: string, known: readonly string[]): SecretFindi
         continue;
       }
       if (l.startsWith("diff --git ")) {
+        flushPath();
         state = "header";
         oldPath = "";
         file = "";
+        deleted = false;
+        pendingPath = diffGitNewPath(l.slice("diff --git ".length));
         continue;
       }
       if (state === "header") {
         const hunk = HUNK.exec(l);
         if (hunk) {
+          flushPath();
           oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
           newLine = Number(hunk[2]);
           newLeft = hunk[3] === undefined ? 1 : Number(hunk[3]);
@@ -1396,13 +1549,18 @@ export function scanSecrets(text: string, known: readonly string[]): SecretFindi
         if (l.startsWith("+++ ")) {
           const p = unquotePath(l.slice(4));
           file = p === "/dev/null" ? oldPath : stripPrefix(p);
+          if (p === "/dev/null") pendingPath = null;
+          else scanPath(file);
           continue;
         }
+        if (l.startsWith("deleted file mode")) deleted = true;
         if (HEADER_LINE.test(l)) continue;
+        flushPath();
         state = "message";
       }
       message(l);
     }
+    flushPath();
   }
   return out;
 }
@@ -1653,10 +1811,16 @@ export function closesIssue(md: string, { repo, issue }: { repo: string; issue: 
  * closing keyword for anything but that issue, and a github.com URL with a `%` or a port. A match
  * from decoded text is named with its written form too. `repo` is the run's own `owner/name`.
  * Named references outside `NAMED_REFS` are the caller's to refuse first (`firstNamedRef`).
+ * With `allowOwnRepoRefs`, a bare `#n` or `GH-n` (an issue of `repo` itself) passes too; mentions,
+ * `owner/repo#n`, links, and closing keywords for another issue are still found.
  */
 export function firstPrNotifier(
   text: string,
-  { repo, issue }: { repo: string; issue: number | null },
+  {
+    repo,
+    issue,
+    allowOwnRepoRefs = false,
+  }: { repo: string; issue: number | null; allowOwnRepoRefs?: boolean },
 ): string | null {
   const d = decode(text);
   const t = d.text;
@@ -1665,8 +1829,8 @@ export function firstPrNotifier(
   const otherItem = (m: RegExpExecArray) => `${m[1]}/${m[2]}`.toLowerCase() !== own || notOwn(m[3]);
   const hit = earliest([
     ...allMatches(MENTION, t),
-    ...allMatches(ISSUE_REF, t, (m) => notOwn(m[1])),
-    ...allMatches(GH_REF, t, (m) => notOwn(m[1])),
+    ...allMatches(ISSUE_REF, t, (m) => !allowOwnRepoRefs && notOwn(m[1])),
+    ...allMatches(GH_REF, t, (m) => !allowOwnRepoRefs && notOwn(m[1])),
     ...allMatches(REPO_REF, t, otherItem),
     ...allMatches(ISSUE_URL, t, otherItem),
     ...allMatches(CLOSING_REF, t, (m) => !closesOwn(m, own, issue)),

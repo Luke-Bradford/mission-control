@@ -3,7 +3,7 @@ import { clockHm } from "./hud.ts";
 import { COMMIT_PATHS_NAMED, REFERENCE_ADVICE } from "./mcp.ts";
 import type { MoveColumn } from "./repos.ts";
 import {
-  currentReview,
+  carriedFrom,
   failedAttempts,
   fixesSent,
   fixKey,
@@ -20,6 +20,7 @@ import {
   readyText,
   readyWaivedText,
   reviewFailedParkText,
+  reviewFor,
   reviewParkText,
   reviewRulingParkText,
 } from "./review.ts";
@@ -100,6 +101,14 @@ export const isCleanupNoteKey = (key: string): boolean =>
 export const hardRulesFlagKey = (runId: string, sha: string): string =>
   `flag:${runId}:hard-rules:${sha}`;
 export const isHardRulesFlagKey = (key: string): boolean => /^flag:[^:]+:hard-rules:/.test(key);
+/** The flag note for a CI failure that passed on its one re-run, per sha. */
+export const flakeNoteKey = (runId: string, sha: string): string => `flake:${runId}:${sha}`;
+/** A flake record is the controller's to follow up. */
+export const isFlakeNoteKey = (key: string): boolean => key.startsWith("flake:");
+export const flakeText = (ref: string, sha: string, runs: { id: number; name: string }[]): string =>
+  `${ref}: CI failed on ${sha.slice(0, 7)} and passed on re-run (a flake): ${
+    runs.length === 0 ? "run not read" : runs.map((r) => `${r.name} run ${r.id}`).join(", ")
+  }`;
 /** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
 export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
 export const noShaDeleteText = (ref: string): string =>
@@ -130,6 +139,8 @@ export const conflictText = (files: readonly string[]): string =>
 /** The Activity rows for merging main into a run's branch. */
 export const mergedMainText = (mainSha: string): string =>
   `merged main ${mainSha.slice(0, 7)} into the branch`;
+export const reviewCarriedText = (from: string, to: string): string =>
+  `review of ${from.slice(0, 7)} carried to ${to.slice(0, 7)} (main merged, PR diff unchanged)`;
 export const mainConflictText = (mainSha: string, n: number): string =>
   `merging main ${mainSha.slice(0, 7)} conflicted in ${n} ${n === 1 ? "file" : "files"}`;
 /** The Activity row for a park. */
@@ -213,6 +224,8 @@ export const reworkFirstText = (call: string, ref: string): string =>
 export const ticketInReviewText = (ref: string): string =>
   `${ref} is in review; it comes back to its seat when it needs rework`;
 export const NOT_ASIDE = "the run is not waiting on its review";
+export const seatBusyText = (call: string): string =>
+  `${call} is busy (waking a run or starting one); try again in a moment`;
 
 /** One run's facts, read by the caller; `reconcile` reads no clock and does no I/O. */
 export interface LoopSnapshot {
@@ -282,6 +295,7 @@ export type LoopAction =
   | { kind: "open-pr" }
   | { kind: "send"; key: string; text: string }
   | { kind: "ci-excerpt"; key: string; sha: string }
+  | { kind: "rerun-ci"; sha: string }
   | { kind: "move-card"; column: MoveColumn }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
   | { kind: "clear-note"; key: string }
@@ -351,7 +365,8 @@ const owesReport = (s: LoopSnapshot): boolean => {
 function reviewView(s: LoopSnapshot, loop: RunLoop) {
   const R = s.review ?? null;
   const P = s.pushed?.sha ?? null;
-  const cur = R !== null && P !== null ? currentReview(R.rows, loop.epoch, P) : null;
+  const from = P !== null ? carriedFrom(loop.carry, loop.reviewWaivedSha, P) : null;
+  const cur = R !== null && P !== null ? reviewFor(R.rows, loop.epoch, P, from) : null;
   const waived = P !== null && (loop.reviewWaivedSha ?? null) === P;
   const on =
     R !== null &&
@@ -362,7 +377,7 @@ function reviewView(s: LoopSnapshot, loop: RunLoop) {
     s.pr.headSha === P &&
     !waived;
   const blocked = cur !== null && cur.state === "reported" && cur.blocking > 0;
-  return { R, P, cur, waived, on, blocked };
+  return { R, P, from, cur, waived, on, blocked };
 }
 
 /**
@@ -596,13 +611,30 @@ function stateStep(s: LoopSnapshot): Step {
       return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
     }
     if (pr.ci === "passing") {
+      const flaked = loop.rerun?.sha === pushed.sha;
+      const actions: LoopAction[] = [{ kind: "event", text: `CI passed on ${short}` }];
+      if (flaked) actions.push({ kind: "event", text: `CI flaked on ${short}: passed on re-run` });
       return {
-        loop: { ...loop, phase: "review", ciFails: 0 },
-        actions: [{ kind: "event", text: `CI passed on ${short}` }],
+        loop: {
+          ...loop,
+          phase: "review",
+          ciFails: 0,
+          rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun,
+        },
+        actions,
       };
     }
     if (pr.ci === "failing") {
       if (loop.ciFailedSha === pushed.sha) return unchanged({ ...loop, phase: "working" });
+      if (loop.rerun?.sha !== pushed.sha) {
+        // the first failure on a sha is re-run once before the seat hears of it
+        return {
+          loop: { ...loop, rerun: { sha: pushed.sha, at: now, runs: [] } },
+          actions: [{ kind: "rerun-ci", sha: pushed.sha }],
+        };
+      }
+      // a poll from before the re-run still shows the old failure
+      if (pr.polledAt <= loop.rerun.at) return unchanged(loop);
       const failed = { ...loop, ciFails: loop.ciFails + 1, ciFailedSha: pushed.sha };
       if (failed.ciFails >= CI_TRIES) {
         return park(failed, "ci", `CI failed ${failed.ciFails} times; last on ${short}`);
@@ -612,8 +644,13 @@ function stateStep(s: LoopSnapshot): Step {
         actions: [{ kind: "event", text: `CI failed on ${short}` }],
       };
     }
-    // a run the operator un-parked is judged from the un-park, not from a push made before it
-    const since = Math.max(pushed.at, loop.unparkedAt ?? 0);
+    // a run the operator un-parked is judged from the un-park, not from a push made before it;
+    // a re-run is also judged from when it was asked for
+    const since = Math.max(
+      pushed.at,
+      loop.unparkedAt ?? 0,
+      loop.rerun?.sha === pushed.sha ? loop.rerun.at : 0,
+    );
     if (pr.ci === "pending" && now - since > CI_PENDING_MAX_MS) {
       return park(
         loop,
@@ -652,6 +689,12 @@ type DesiredNote = { noteKind: LoopNoteKind; text: string };
 function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> {
   const notes = new Map<string, DesiredNote>();
   const { ticket, runId, pushed, seat } = s;
+  if (loop.rerun?.flaked === true) {
+    notes.set(flakeNoteKey(runId, loop.rerun.sha), {
+      noteKind: "flag",
+      text: flakeText(ticket.ref, loop.rerun.sha, loop.rerun.runs),
+    });
+  }
   if (loop.phase === "parked") {
     notes.set(blockedNoteKey(runId, loop.epoch), {
       noteKind: "blocked",
@@ -935,9 +978,9 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         s.ended === null &&
         (loop.phase === "review" || loop.phase === "ci") &&
         row.epoch === loop.epoch &&
-        row.sha === rv.P &&
+        (row.sha === rv.P || (rv.from !== null && row.sha === rv.from)) &&
         s.pr?.state === "open" &&
-        (s.pr.headSha === null || s.pr.headSha === row.sha) &&
+        (s.pr.headSha === null || s.pr.headSha === row.sha || s.pr.headSha === rv.P) &&
         (loop.reviewWaivedSha ?? null) !== row.sha;
       if (!wanted) actions.push({ kind: "supersede-review", reviewId: row.id });
     }
@@ -961,6 +1004,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     ) {
       continue;
     }
+    // a flake record stays for the controller to dismiss
+    if (isFlakeNoteKey(key)) continue;
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {
@@ -1011,7 +1056,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside, gate, merging, mainMerge } = step.loop;
+  const { parked, touches, aside, gate, merging, mainMerge, carry } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
@@ -1020,6 +1065,7 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
     ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
     ...(mainMerge ? { mainMerge: { ...mainMerge, files: [...mainMerge.files] } } : {}),
+    ...(carry ? { carry: { ...carry } } : {}),
   };
   if (loop.aside) {
     if (s.seat.holdsRun) {

@@ -1,6 +1,7 @@
 import {
   ATTENTION_LABEL,
   type AttentionItem,
+  type BriefOption,
   type Crew,
   type Escalation,
   FLIGHT_NOT_RUNNING,
@@ -8,11 +9,12 @@ import {
   type TicketView,
 } from "@mc/core";
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { apiPost, errorNote } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
+import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answer.ts";
+import { BriefOptions, ItemBrief } from "../comms/ItemBrief.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
-import { ACTIONS, RESOURCES, useResource } from "../data.ts";
+import { RESOURCES, useResource } from "../data.ts";
 import { dayMonth, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -60,24 +62,48 @@ export function ItemPanel() {
   const agentId = item?.agentId ?? null;
   const agentIndex = crew?.rows.find((r) => r.id === agentId)?.index ?? 0;
   const live = seat?.live === true;
-  const send = async (ev: FormEvent) => {
-    ev.preventDefault();
-    const body = text.trim();
-    if (!seat?.live || body === "") return;
-    // Led by the item's title, so FLIGHT knows what the question is about.
-    const about = esc?.title ?? item?.text ?? "";
+  // Led by the item's title, so the answer reads in context.
+  const about = esc?.title ?? item?.text ?? "";
+  const target = item ? answerTarget(item, crew?.rows, seat) : null;
+  const replyOk = target?.to === "seat" || (target?.to === "flight" && live);
+  const act = async (run: () => Promise<string | null>, done?: () => void) => {
     setBusy(true);
     setErr(null);
-    try {
-      await apiPost(ACTIONS.seatMessage(seat.id), { text: `Re: ${about}\n\n${body}` });
-      setText("");
-    } catch (e) {
-      const error = e instanceof Error ? e : new Error(String(e));
-      setErr(errorNote(error) ?? error.message);
-    } finally {
-      setBusy(false);
-    }
+    const failed = await run();
+    setBusy(false);
+    if (failed === null) done?.();
+    else setErr(failed);
   };
+  const submit = (ev: FormEvent) => {
+    ev.preventDefault();
+    const body = text.trim();
+    if (!item || !target || body === "" || !replyOk) return;
+    void act(
+      () => sendAnswer(target, seat, item, about, body),
+      () => setText(""),
+    );
+  };
+  const ask = () => {
+    const body = text.trim();
+    if (!item || body === "") return;
+    void act(
+      () => askFlight(seat, item, about, body),
+      () => setText(""),
+    );
+  };
+  const pick = (o: BriefOption) => {
+    if (!item || !target) return;
+    void act(() => sendAnswer(target, seat, item, about, o.answer));
+  };
+  const dismiss = () => {
+    if (!item) return;
+    void act(
+      () => dismissItem(item.key),
+      () => closeItem(),
+    );
+  };
+  const flightTitle = live ? undefined : FLIGHT_NOT_RUNNING;
+  const options = item?.brief?.options ?? [];
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
   return (
@@ -91,6 +117,11 @@ export function ItemPanel() {
           )}
           <BuildChips panel="discuss" />
           <span className="act">
+            {item && (
+              <button type="button" className="sm ghost" disabled={busy} onClick={dismiss}>
+                Dismiss
+              </button>
+            )}
             <button type="button" className="sm" ref={close} onClick={() => closeItem()}>
               Close
             </button>
@@ -101,27 +132,48 @@ export function ItemPanel() {
             <p className="note">
               {items === undefined || item ? "Loading…" : "This item is no longer open."}
             </p>
-          ) : esc ? (
-            <EscalationBrief esc={esc} tz={tz} now={now} />
           ) : (
-            <div className="brief">
-              <div className="s qtext">
-                <Markdown text={item.text} />
-              </div>
-              <div className="row">
-                {agentId !== null && (
-                  <a href={agentPath(agentId)} onClick={(e) => followLink(e, agentPath(agentId))}>
-                    Open {agentId}
-                  </a>
-                )}
-                {item.url && <ExternalLink url={item.url}>Open on GitHub ↗</ExternalLink>}
-              </div>
-            </div>
+            <>
+              {item.brief && <ItemBrief brief={item.brief} />}
+              {esc ? (
+                <EscalationBrief esc={esc} tz={tz} now={now} />
+              ) : (
+                <div className="brief">
+                  <div className="s qtext">
+                    <Markdown text={item.text} />
+                  </div>
+                  <div className="row">
+                    {agentId !== null && (
+                      <a
+                        href={agentPath(agentId)}
+                        onClick={(e) => followLink(e, agentPath(agentId))}
+                      >
+                        Open {agentId}
+                      </a>
+                    )}
+                    {item.url && <ExternalLink url={item.url}>Open on GitHub ↗</ExternalLink>}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
-        {esc && (
+        {item && !holding && (esc || options.length > 0) && (
           <div className="composer" id="dsOpts">
-            {esc.question && (
+            {options.length > 0 && (
+              <>
+                <div className="bsec">Options</div>
+                <BriefOptions
+                  options={options}
+                  live={target?.to !== "github"}
+                  disabled={busy || !replyOk}
+                  title={target?.to === "flight" ? flightTitle : undefined}
+                  variant="panel"
+                  onPick={pick}
+                />
+              </>
+            )}
+            {esc?.question && (
               <div className="optlist">
                 {esc.question.answers.map((a, i) => (
                   <div
@@ -140,29 +192,36 @@ export function ItemPanel() {
                 ))}
               </div>
             )}
-            <div className="row">
-              <ExternalLink url={esc.url}>Answer on GitHub ↗</ExternalLink>
-            </div>
+            {esc && (
+              <div className="row">
+                <ExternalLink url={esc.url}>Reply on GitHub ↗</ExternalLink>
+              </div>
+            )}
           </div>
         )}
-        <form className="composer" id="dsForm" onSubmit={(e) => void send(e)}>
+        <form className="composer" id="dsForm" onSubmit={submit}>
           <input
             id="dsInput"
             autoComplete="off"
-            aria-label="Ask FLIGHT about this"
-            placeholder="Ask FLIGHT about this…"
-            title={live ? undefined : FLIGHT_NOT_RUNNING}
+            aria-label="Reply, or ask FLIGHT about this"
+            placeholder="Reply, or ask FLIGHT about this…"
+            title={!replyOk && !live ? FLIGHT_NOT_RUNNING : undefined}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            disabled={!live}
+            disabled={!replyOk && !live}
           />
-          <button
-            type="submit"
-            className="primary"
-            title={live ? undefined : FLIGHT_NOT_RUNNING}
-            disabled={!live || busy}
-          >
-            Send
+          {target?.to !== "github" && (
+            <button
+              type="submit"
+              className="primary"
+              title={target?.to === "flight" ? flightTitle : undefined}
+              disabled={!replyOk || busy}
+            >
+              Reply
+            </button>
+          )}
+          <button type="button" title={flightTitle} disabled={!live || busy} onClick={ask}>
+            Ask FLIGHT
           </button>
           {err !== null && (
             <p className="note err" role="alert">

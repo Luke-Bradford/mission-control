@@ -228,6 +228,29 @@ export function currentReview(
   return null;
 }
 
+/** The sha whose review `sha` carries, else null; a waived `from` is not carried. */
+export function carriedFrom(
+  carry: { from: string; to: string } | null | undefined,
+  waivedSha: string | null | undefined,
+  sha: string,
+): string | null {
+  if (!carry || carry.to !== sha || carry.from === sha) return null;
+  return (waivedSha ?? null) === carry.from ? null : carry.from;
+}
+
+/** `sha`'s own current review, else `from`'s current review unless it failed; else null. */
+export function reviewFor(
+  rows: readonly ReviewFact[],
+  epoch: number,
+  sha: string,
+  from: string | null,
+): ReviewFact | null {
+  const own = currentReview(rows, epoch, sha);
+  if (own !== null || from === null) return own;
+  const c = currentReview(rows, epoch, from);
+  return c === null || c.state === "failed" ? null : c;
+}
+
 /** The commit status context the QA review sets (branch protection requires it). */
 export const REVIEW_STATUS_CONTEXT = "mc/review";
 export const REVIEW_STATUS_QUEUED = "QA review queued";
@@ -235,6 +258,9 @@ export const REVIEW_STATUS_RUNNING = "QA review running";
 export const REVIEW_STATUS_PASSED = "QA review passed";
 export const REVIEW_STATUS_BLOCKED = "QA review found blocking issues";
 export const REVIEW_STATUS_WAIVED = "QA review waived by the operator";
+
+export const carriedStatusText = (description: string, from: string): string =>
+  `${description} (carried from ${from.slice(0, 7)}, main merged)`;
 
 export type ReviewStatusState = "pending" | "success" | "failure";
 
@@ -249,22 +275,27 @@ export function reviewStatusOf(
   epoch: number,
   sha: string,
   waivedSha: string | null,
+  from: string | null = null,
 ): ReviewStatus | null {
   if (waivedSha !== null && waivedSha === sha) {
     return { state: "success", description: REVIEW_STATUS_WAIVED };
   }
-  const cur = currentReview(rows, epoch, sha);
+  const cur = reviewFor(rows, epoch, sha, from);
   if (cur === null) return null;
+  const say = (state: ReviewStatusState, description: string): ReviewStatus => ({
+    state,
+    description: cur.sha !== sha ? carriedStatusText(description, cur.sha) : description,
+  });
   switch (cur.state) {
     case "queued":
     case "starting":
-      return { state: "pending", description: REVIEW_STATUS_QUEUED };
+      return say("pending", REVIEW_STATUS_QUEUED);
     case "running":
-      return { state: "pending", description: REVIEW_STATUS_RUNNING };
+      return say("pending", REVIEW_STATUS_RUNNING);
     case "reported":
       return cur.blocking > 0
-        ? { state: "failure", description: REVIEW_STATUS_BLOCKED }
-        : { state: "success", description: REVIEW_STATUS_PASSED };
+        ? say("failure", REVIEW_STATUS_BLOCKED)
+        : say("success", REVIEW_STATUS_PASSED);
     default:
       return null;
   }
