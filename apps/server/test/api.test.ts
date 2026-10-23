@@ -3247,6 +3247,26 @@ describe("crew routes", () => {
     expect(logs.join("")).toContain("spawn git EAGAIN");
   });
 
+  it("checks that the crew is enabled before the seat, and the seat before the body", async () => {
+    supervisorStatus = { enabled: false, note: null };
+    const disabled = await postBody("/api/seats/nobody/start", { issue: 5 });
+    expect(disabled.statusCode).toBe(409);
+    expect(disabled.json()).toEqual({ error: "crew is disabled on this server" });
+    supervisorStatus = { enabled: true, note: null };
+    const unknown = await postBody("/api/seats/nobody/start", { issue: "not a number" });
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.json()).toEqual({ error: "unknown seat" });
+    expect(supervisorCalls).toEqual([]);
+  });
+
+  it("GET context hides a supervisor failure behind fixed text", async () => {
+    supervisorFail = new Error("ENOENT /Users/someone/secret/path");
+    const r = await get("/api/seats/guido-1/context");
+    expect(r.statusCode).toBe(500);
+    expect(r.json()).toEqual({ error: "crew action failed" });
+    expect(r.body).not.toContain("secret");
+  });
+
   it("GET context answers the usage, or null", async () => {
     const r = await get("/api/seats/guido-1/context");
     expect(r.statusCode).toBe(200);
@@ -3546,6 +3566,32 @@ describe("seat ids in the agent routes", () => {
 
   it("GET /api/telemetry?agent=<seat id> is accepted", async () => {
     expect((await get("/api/telemetry?agent=guido-1")).statusCode).toBe(200);
+  });
+
+  it("GET /api/telemetry?agent=guido-1 returns only that seat's series", async () => {
+    for (const [id, agentId] of [
+      ["c1", "guido-1"],
+      ["c2", "shop-app-ta"],
+    ] as const) {
+      store.upsertRun(
+        run({
+          id,
+          agentId,
+          startedAt: NOW - 3 * HOUR,
+          endedAt: NOW - 2 * HOUR,
+          status: "ok",
+          tokens: { input: 600, output: 0, cacheRead: 0, cacheCreate: 0 },
+        }),
+      );
+    }
+    // the scope narrows today and totals; the per-agent series stay crew-wide (telemetry.ts)
+    const all = (await get("/api/telemetry")).json<Telemetry>();
+    expect(all.totals.map((t) => t.agentId).sort()).toEqual(["guido-1", "shop-app-ta"]);
+    const one = (await get("/api/telemetry?agent=guido-1")).json<Telemetry>();
+    expect(one.totals.map((t) => t.agentId)).toEqual(["guido-1"]);
+    expect(one.today.agents).toBe(1);
+    expect(one.today.tokens).toBeGreaterThan(0);
+    expect(one.today.tokens).toBeLessThan(all.today.tokens);
   });
 
   it("refuses an unknown agent with the configured-id text", async () => {
