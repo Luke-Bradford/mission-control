@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  BRIEFED_TEXT,
   claimedText,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
@@ -13,8 +14,10 @@ import {
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
+  MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
+  READ_OTHER_REPO,
   type RepoRules,
   type Run,
   type RunLoop,
@@ -25,6 +28,7 @@ import {
   type TicketView,
   ticketHasRunText,
   twoAreasText,
+  WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
   wrongAreaText,
 } from "@mc/core";
@@ -393,6 +397,7 @@ describe("tool list", () => {
       "end_run",
       "create_ticket",
       "comment_ticket",
+      "brief_item",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -1648,6 +1653,8 @@ describe("flight_state", () => {
           stale: false,
         },
       ],
+      items: [{ key: "note:ready:r-pr", kind: "ready", ticket: "mc#7", text: "ready", ageMin: 0 }],
+      holds: [],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
     });
@@ -1897,6 +1904,114 @@ describe("promote", () => {
     moveImpl = async () => ({ ok: false, reason: "card not on the project" });
     expect(await call("promote", P())).toEqual(refused("Not moved: card not on the project"));
     expect(decisions()).toEqual([]);
+  });
+
+  describe("holds", () => {
+    const pr = (number: number, state: "open" | "merged" | "closed" = "open") => ({
+      repoId: "mc",
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch: `feature/${number}-x`,
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: "abc",
+      mergeable: null,
+      author: null,
+      assignees: [],
+    });
+    const H = (over: Record<string, unknown> = {}) => P({ to: "Backlog", waits_on: 246, ...over });
+
+    beforeEach(() => {
+      board(backlog({ status: "Ready" }));
+      store.upsertPullRequests("mc", [pr(246), pr(247, "merged"), pr(248, "closed")], NOW);
+    });
+
+    it("holds a Ready card FLIGHT did not move, behind an open PR", async () => {
+      expect((await call("promote", H())).isError).toBeUndefined();
+      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Backlog" }]);
+      expect(store.activeHolds()).toMatchObject([
+        { ref: "mc#7", waitsOn: 246, basis: "it is complete", releasedAt: null },
+      ]);
+      expect(decisions()).toMatchObject([
+        { kind: "promote", ref: "mc#7", decision: "Held in Backlog behind PR #246" },
+      ]);
+    });
+
+    it("holds a Refinement card too, and counts under the promote cap", async () => {
+      board(backlog({ status: "Refinement" }));
+      expect((await call("promote", H())).isError).toBeUndefined();
+      for (let i = 0; i < 9; i++) addDecision({ kind: "promote" });
+      expect((await call("promote", H())).text).toContain("moved tickets 10 times");
+    });
+
+    it("refuses a hold on a card with a run", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      expect(await call("promote", H())).toEqual(refused("Not moved: mc#7 has a run."));
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("refuses a hold behind a merged, closed or unknown PR", async () => {
+      for (const n of [247, 248, 999]) {
+        expect(await call("promote", H({ waits_on: n }))).toEqual(
+          refused(`Not moved: PR #${n} is not an open PR in mc.`),
+        );
+      }
+      expect(moveCalls).toEqual([]);
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("refuses waits_on on a move that is not to Backlog, and a hold from Backlog", async () => {
+      board(backlog());
+      expect(await call("promote", P({ waits_on: 246 }))).toEqual(refused(WAITS_ON_ONLY_BACKLOG));
+      expect(await call("promote", P({ to: "Refinement", waits_on: 246 }))).toEqual(
+        refused(WAITS_ON_ONLY_BACKLOG),
+      );
+      expect((await call("promote", H())).isError).toBe(true);
+      expect(moveCalls).toEqual([]);
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("keeps a new hold while the stored board still shows the card in Ready", async () => {
+      await call("promote", H());
+      await call("flight_state", {});
+      expect(store.activeHolds()).toHaveLength(1);
+      board(backlog());
+      await call("flight_state", {});
+      board(backlog({ status: "Ready" }));
+      await call("flight_state", {});
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("releases a hold whose card a run has taken, though the board never showed it in Backlog", async () => {
+      await call("promote", H());
+      board(backlog({ status: "Ready" }));
+      await call("flight_state", {});
+      expect(store.activeHolds()).toHaveLength(1);
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      await call("flight_state", {});
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("releases the hold when the card is promoted again", async () => {
+      await call("promote", H());
+      board(backlog());
+      expect((await call("promote", P())).isError).toBeUndefined();
+      expect(store.activeHolds()).toEqual([]);
+    });
+
+    it("keeps the hold when the promote again is refused", async () => {
+      await call("promote", H());
+      board(backlog({ labels: [] }));
+      expect((await call("promote", P())).isError).toBe(true);
+      expect(store.activeHolds()).toHaveLength(1);
+    });
   });
 });
 
@@ -2273,5 +2388,139 @@ describe("comment_ticket", () => {
     );
     expect(logs).toHaveLength(1);
     expect(decisions()).toEqual([]);
+  });
+});
+
+describe("brief_item", () => {
+  const KEY = "note:blocked:r1:0";
+  const raise = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
+    store.raiseNote({
+      key,
+      kind: "blocked",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "mc",
+      text: "mc#7 parked",
+      at: NOW,
+      ...over,
+    });
+  const B = (over: Record<string, unknown> = {}) => ({
+    key: KEY,
+    context: "mc#7 is parked since 11:00.",
+    recommendation: "Un-park it.",
+    options: [
+      { label: "Un-park", answer: "go" },
+      { label: "Leave", answer: "wait" },
+    ],
+    basis: "read the park",
+    ...over,
+  });
+  beforeEach(() => {
+    raise();
+    seen.length = 0;
+  });
+
+  it("stores a brief on an operator item and emits attention", async () => {
+    expect(await call("brief_item", B())).toEqual({ text: BRIEFED_TEXT });
+    expect(store.briefs().get(KEY)).toEqual({
+      context: "mc#7 is parked since 11:00.",
+      recommendation: "Un-park it.",
+      options: [
+        { label: "Un-park", answer: "go" },
+        { label: "Leave", answer: "wait" },
+      ],
+      basis: "read the park",
+      at: NOW,
+    });
+    expect(seen).toEqual(["attention"]);
+    expect(decisions()).toEqual([]);
+  });
+
+  it("takes no options, and cuts long texts at MC_TEXT_MAX", async () => {
+    const long = "x".repeat(MC_TEXT_MAX + 50);
+    await call("brief_item", B({ context: long, options: undefined }));
+    const b = store.briefs().get(KEY);
+    expect(b?.context).toHaveLength(MC_TEXT_MAX);
+    expect(b?.context.endsWith("…")).toBe(true);
+    expect(b?.options).toEqual([]);
+  });
+
+  it("keeps the newest brief on a key", async () => {
+    await call("brief_item", B());
+    nowMs = NOW + 1000;
+    await call("brief_item", B({ recommendation: "Leave it." }));
+    expect(store.briefs().get(KEY)?.recommendation).toBe("Leave it.");
+  });
+
+  it("allows 20 briefs an hour, then refuses the 21st", async () => {
+    for (let i = 0; i < 20; i++) expect((await call("brief_item", B())).isError).toBeUndefined();
+    expect(await call("brief_item", B())).toEqual(
+      refused(
+        "Not done: you briefed items 20 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    nowMs = NOW + 61 * 60_000;
+    raise("blocked:r1:0", { at: nowMs });
+    expect((await call("brief_item", B())).isError).toBeUndefined();
+  });
+
+  it("refuses a key that is not the operator's item", async () => {
+    expect(await call("brief_item", B({ key: "note:nope" }))).toEqual(
+      refused("Not briefed: note:nope is not an item in the operator's Needs-you list."),
+    );
+    raise("cleanup-branch:x");
+    expect((await call("brief_item", B({ key: "note:cleanup-branch:x" }))).isError).toBe(true);
+    expect(store.briefs().size).toBe(0);
+  });
+
+  it("refuses one or five options, and a seat that is not FLIGHT", async () => {
+    const opt = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ label: `L${i}`, answer: `A${i}` }));
+    for (const n of [1, 5]) {
+      const r = await call("brief_item", B({ options: opt(n) }));
+      expect(r.isError).toBe(true);
+      expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+    }
+    live("guido-1", "r-guido");
+    expect(await call("brief_item", B(), ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+    expect(store.briefs().size).toBe(0);
+  });
+});
+
+describe("read_ticket of a loop escalation", () => {
+  const esc = (n: number, repoId: string) => ({
+    id: `${repoId}#${n}`,
+    repoId,
+    issueNumber: n,
+    title: "[loop-blocked] x",
+    kind: "loop-blocked" as const,
+    source: "title" as const,
+    openedAt: NOW,
+    url: "u",
+    question: null,
+  });
+
+  it("reads an open loop escalation's issue in another configured repo, and nothing else there", async () => {
+    store.replaceEscalations("other", [esc(4, "other")]);
+    fetchImpl = async (n) => ticket(n, { title: "Esc", body: "Body" });
+    expect((await call("read_ticket", { issue: 4, repo: "other" })).isError).toBeUndefined();
+    expect(fetchRepos).toEqual(["other"]);
+    expect(await call("read_ticket", { issue: 5, repo: "other" })).toEqual(
+      refused(READ_OTHER_REPO),
+    );
+    expect(await call("read_ticket", { issue: 4, repo: "nope" })).toEqual(refused(READ_OTHER_REPO));
+    live("fao-1", "r-fao");
+    expect(await call("read_ticket", { issue: 4, repo: "other" }, ctx("fao-1", "r-fao"))).toEqual(
+      refused(READ_OTHER_REPO),
+    );
+    expect(fetchRepos).toEqual(["other"]);
+  });
+
+  it("still reads the session repo when repo names it", async () => {
+    fetchImpl = async (n) => ticket(n);
+    expect((await call("read_ticket", { issue: 3, repo: "mc" })).isError).toBeUndefined();
+    expect(fetchRepos).toEqual(["mc"]);
   });
 });

@@ -5,9 +5,11 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import {
   type AccountId,
   type AgentId,
+  type AttentionBrief,
   type AttentionKind,
   BLOCKING_SEVERITIES,
   type BoardItem,
+  type BriefOption,
   COMMS_TEXT_MAX,
   type Escalation,
   type FlightDecision,
@@ -25,7 +27,6 @@ import {
   type MachineSample,
   type MoveColumn,
   type PullRequestView,
-  type RepoGoal,
   type RepoId,
   type ReviewFinding,
   type ReviewRequest,
@@ -89,10 +90,6 @@ CREATE TABLE IF NOT EXISTS flow_issues (
 CREATE TABLE IF NOT EXISTS flow_prs (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, first_push_ci TEXT,
   PRIMARY KEY (repo_id, number)
-);
-CREATE TABLE IF NOT EXISTS goals (
-  repo_id TEXT PRIMARY KEY, title TEXT NOT NULL, due_on INTEGER, open INTEGER NOT NULL,
-  closed INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS file_offsets (path TEXT PRIMARY KEY, offset INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS collector_status (
@@ -203,9 +200,33 @@ CREATE TABLE IF NOT EXISTS flight_decisions (
   basis TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS flight_decisions_at ON flight_decisions(at);
+-- FLIGHT's briefs on Needs-you items (the newest row per key shows); options is JSON.
+CREATE TABLE IF NOT EXISTS briefs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, context TEXT NOT NULL,
+  recommendation TEXT NOT NULL, options TEXT NOT NULL, basis TEXT NOT NULL, at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS briefs_key ON briefs(key);
+CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
+-- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
+CREATE TABLE IF NOT EXISTS holds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
+  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 `;
 
 type Row = Record<string, SQLInputValue>;
+
+/** A card FLIGHT holds in Backlog behind an open PR. */
+export interface Hold {
+  ref: string;
+  waitsOn: number;
+  basis: string;
+  at: number;
+  releasedAt: number | null;
+  /** The stored board has shown the card in Backlog since the hold; until then a Ready card is just stale. */
+  seen: boolean;
+}
 
 /** One path a refused commit had outside the seat's area. */
 export interface Stray {
@@ -315,7 +336,6 @@ const REPO_TABLES = {
   board_items: "issue_number",
   escalations: "id",
   pull_requests: "number",
-  goals: "repo_id",
 } as const;
 type RepoTable = keyof typeof REPO_TABLES;
 
@@ -834,6 +854,17 @@ export class Store {
     return new Set(rows.map((r) => r.ticket as string));
   }
 
+  /** Whether this hub has a run (ended or not) on `branch`. */
+  hasRunOnBranch(repoId: RepoId, branch: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM runs WHERE repo_id = ? AND branch = ? AND review_id IS NULL LIMIT 1",
+        )
+        .get(repoId, branch) !== undefined
+    );
+  }
+
   /** Whether another run on the same ticket started after this one. */
   hasNewerRunOnTicket(run: Run): boolean {
     if (run.ticket === null) return false;
@@ -1213,38 +1244,6 @@ export class Store {
         );
       }
     });
-  }
-
-  /** True when the stored row changed. */
-  replaceGoal(repoId: RepoId, goal: RepoGoal | null): boolean {
-    return this.changed("goals", repoId, () => {
-      if (goal === null) {
-        this.db.prepare("DELETE FROM goals WHERE repo_id = ?").run(repoId);
-        return;
-      }
-      this.db
-        .prepare(
-          `INSERT INTO goals (repo_id, title, due_on, open, closed) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(repo_id) DO UPDATE SET title = excluded.title, due_on = excluded.due_on,
-             open = excluded.open, closed = excluded.closed`,
-        )
-        .run(repoId, goal.title, goal.dueOn, goal.open, goal.closed);
-    });
-  }
-
-  goal(repoId: RepoId): RepoGoal | null {
-    const r = this.db.prepare("SELECT * FROM goals WHERE repo_id = ?").get(repoId) as
-      | Row
-      | undefined;
-    return r
-      ? {
-          repoId: r.repo_id as string,
-          title: r.title as string,
-          dueOn: r.due_on as number | null,
-          open: r.open as number,
-          closed: r.closed as number,
-        }
-      : null;
   }
 
   board(repoId: RepoId): BoardItem[] {
@@ -2411,6 +2410,79 @@ export class Store {
       decision: r.decision as string,
       basis: r.basis as string,
     }));
+  }
+
+  /** Stores FLIGHT's brief on an attention key; returns its id. */
+  addBrief(b: AttentionBrief & { key: string }): number {
+    const r = this.db
+      .prepare(
+        `INSERT INTO briefs (key, context, recommendation, options, basis, at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(b.key, b.context, b.recommendation, JSON.stringify(b.options), b.basis, b.at);
+    return Number(r.lastInsertRowid);
+  }
+
+  /** The newest brief on each attention key. */
+  briefs(): Map<string, AttentionBrief> {
+    const rows = this.db
+      .prepare("SELECT * FROM briefs WHERE id IN (SELECT MAX(id) FROM briefs GROUP BY key)")
+      .all() as Row[];
+    return new Map(
+      rows.map((r) => [
+        r.key as string,
+        {
+          context: r.context as string,
+          recommendation: r.recommendation as string,
+          options: JSON.parse(r.options as string) as BriefOption[],
+          basis: r.basis as string,
+          at: r.at as number,
+        },
+      ]),
+    );
+  }
+
+  /** Holds a card in Backlog behind PR `waitsOn`; an earlier open hold on the card is replaced. */
+  addHold(h: { ref: string; waitsOn: number; basis: string; at: number }): void {
+    this.releaseHold(h.ref, h.at);
+    this.db
+      .prepare("INSERT INTO holds (ref, waits_on, basis, at) VALUES (?, ?, ?, ?)")
+      .run(h.ref, h.waitsOn, h.basis, h.at);
+  }
+
+  /** Releases the card's open hold, if it has one. */
+  releaseHold(ref: string, at: number): void {
+    this.db
+      .prepare("UPDATE holds SET released_at = ? WHERE ref = ? AND released_at IS NULL")
+      .run(at, ref);
+  }
+
+  /** The holds not yet released, oldest first. */
+  activeHolds(): Hold[] {
+    const rows = this.db
+      .prepare("SELECT * FROM holds WHERE released_at IS NULL ORDER BY at, id")
+      .all() as Row[];
+    return rows.map((r) => ({
+      ref: r.ref as string,
+      waitsOn: r.waits_on as number,
+      basis: r.basis as string,
+      at: r.at as number,
+      releasedAt: r.released_at as number | null,
+      seen: r.seen === 1,
+    }));
+  }
+
+  /** The board has shown the card's open hold in Backlog. */
+  markHoldSeen(ref: string): void {
+    this.db.prepare("UPDATE holds SET seen = 1 WHERE ref = ? AND released_at IS NULL").run(ref);
+  }
+
+  /** How many briefs were written at or after `since`. */
+  countBriefs(since: number): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM briefs WHERE at >= ?").get(since) as {
+      n: number;
+    };
+    return row.n;
   }
 
   /** How many decisions of these kinds since `since`, optionally for one seat, ref or run. */

@@ -18,7 +18,6 @@ import {
   type PullRequestView,
   prSweepCollector,
   RATE_LIMIT_SELECTION,
-  type RepoGoal,
   type RepoId,
   SEARCH_MAX_PAGES,
   SEARCH_PAGE_SIZE,
@@ -115,19 +114,6 @@ const OPEN_ISSUES_QUERY = `query OpenIssues($owner: String!, $name: String!, $af
             ${ITEM_FIELDS}
           }
         }
-      }
-    }
-  }
-}`;
-
-const MILESTONES_QUERY = `query Milestones($owner: String!, $name: String!) {
-  ${RATE_LIMIT_SELECTION}
-  repository(owner: $owner, name: $name) {
-    milestones(first: 10, states: OPEN, orderBy: {field: DUE_DATE, direction: ASC}) {
-      nodes {
-        title dueOn
-        openIssues: issues(states: OPEN) { totalCount }
-        closedIssues: issues(states: CLOSED) { totalCount }
       }
     }
   }
@@ -711,27 +697,6 @@ export async function fetchCardNow(
   };
 }
 
-/** The repo's goal: the first open milestone with a due date, else the one with the most issues. */
-async function fetchGoal(repo: CcConfig["repos"][number], gql: Gql): Promise<RepoGoal | null> {
-  const [owner = "", name = ""] = repo.github.split("/");
-  const data = await call(gql, MILESTONES_QUERY, { owner, name });
-  const nodes = path(data, "repository", "milestones", "nodes");
-  if (!Array.isArray(nodes)) throw new Error("unexpected milestones response");
-  const all = nodes.filter(isObj).map((n) => ({
-    title: str(n.title),
-    dueOn: typeof n.dueOn === "string" ? ms(n.dueOn) : null,
-    open: num(path(n, "openIssues", "totalCount")),
-    closed: num(path(n, "closedIssues", "totalCount")),
-  }));
-  let best = all.find((m) => m.dueOn !== null);
-  if (!best) {
-    for (const m of all) {
-      if (!best || m.open + m.closed > best.open + best.closed) best = m;
-    }
-  }
-  return best ? { repoId: repo.id, ...best } : null;
-}
-
 const quote = (s: string) => `"${s.replace(/["\\]/g, "")}"`;
 
 type RawComment = { body: string; createdAt: string };
@@ -1029,11 +994,6 @@ export async function collectGithub(
     truncated = found.truncated;
   } catch (e) {
     failures.push(`escalations: ${errMsg(e)}`);
-  }
-  try {
-    if (store.replaceGoal(repo.id, await fetchGoal(repo, gql))) changes.boards = true;
-  } catch (e) {
-    failures.push(`goal: ${errMsg(e)}`);
   }
   try {
     // Page 1 only, merged into what the sweep stored; the sweep does the paging and the pruning.

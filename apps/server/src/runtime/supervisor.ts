@@ -36,6 +36,7 @@ import {
   type ContextUsage,
   CREW_CLI_ENV,
   CREW_DISABLED,
+  carriedFrom,
   clockHm,
   compactUtc,
   crewCliArgs,
@@ -68,6 +69,7 @@ import {
   type SeatState,
   START_NO_RULES,
   scratchStartRefusedText,
+  seatBusyText,
   seatCallSign,
   seatDef,
   type TicketView,
@@ -1508,10 +1510,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw notWanted;
       }
       const issue = issueOf(author);
+      const head = store.runPush(author.id)?.sha ?? null;
       if (
         author.repoId !== info.repo.id ||
         issue === null ||
-        store.runPush(author.id)?.sha !== review.sha
+        (head !== review.sha &&
+          (head === null ||
+            carriedFrom(author.loop?.carry, author.loop?.reviewWaivedSha, head) !== review.sha))
       ) {
         throw notWanted;
       }
@@ -1824,8 +1829,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
     const info = need(run.agentId);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+    // a wake, or another run starting, holds the seat
+    if (starting.has(run.agentId)) throw new SupervisorError(409, seatBusyText(call(info)));
     if (
-      starting.has(run.agentId) ||
       live.get(run.agentId)?.run.id === runId ||
       store.seatSession(run.agentId)?.runId === runId
     ) {

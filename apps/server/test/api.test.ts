@@ -2,12 +2,16 @@ import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -623,19 +627,46 @@ describe("add a repo (POST /api/repos)", () => {
     await a.close();
   });
 
-  it("500 when the current file does not load; logs the reason, never the contents", async () => {
+  it("500 when the write fails; logs the reason", async () => {
+    chmodSync(dir, 0o500);
+    try {
+      const r = await postBody("/api/repos", NEW_REPO);
+      expect(r.statusCode).toBe(500);
+      expect(r.json()).toEqual({ error: "could not write config.yaml" });
+      expect(logs.join("")).toContain("config write failed");
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+    unchanged();
+  });
+
+  it("409 when the current file does not load; says so, never the contents", async () => {
     writeFileSync(configPath, "operator: [ghp_LEAKED_TOKEN\n");
     const events: string[] = [];
     bus.subscribe((t) => events.push(t));
     const r = await postBody("/api/repos", NEW_REPO);
-    expect(r.statusCode).toBe(500);
-    expect(r.json()).toEqual({ error: "could not write config.yaml" });
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toEqual({ error: "the current config.yaml does not load" });
     expect(readFileSync(configPath, "utf8")).toBe("operator: [ghp_LEAKED_TOKEN\n");
     expect(config.repos).toHaveLength(2);
     expect(events).toEqual([]);
-    const text = logs.join("");
-    expect(text).toContain("config write failed");
-    expect(text).not.toContain("ghp_LEAKED_TOKEN");
+    expect(r.body).not.toContain("ghp_LEAKED_TOKEN");
+    expect(logs.join("")).not.toContain("ghp_LEAKED_TOKEN");
+  });
+
+  it("409 when config.yaml is a symbolic link; the link and its target are unchanged", async () => {
+    const target = join(dir, "real.yaml");
+    writeFileSync(target, exampleText());
+    rmSync(configPath);
+    symlinkSync(target, configPath);
+    const r = await postBody("/api/repos", NEW_REPO);
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toEqual({ error: "config.yaml is a symbolic link" });
+    expect(lstatSync(configPath).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(configPath)).toBe(target);
+    expect(readFileSync(target, "utf8")).toBe(exampleText());
+    expect(readdirSync(dir).some((f) => f.startsWith("config.yaml.bak-"))).toBe(false);
+    expect(config.repos).toHaveLength(2);
   });
 });
 
@@ -1697,6 +1728,25 @@ describe("crew and attention", () => {
       ["esc:shop-app#9", "decision", false],
     ]);
     expect(store.acks().has("esc:gone")).toBe(true);
+  });
+
+  it("GET /api/attention includes an item's brief, and no brief field without one", async () => {
+    store.replaceEscalations("shop-app", [escalation({})]);
+    const first = (await get("/api/attention")).json() as AttentionItem[];
+    expect(first[0]).not.toHaveProperty("brief");
+    const brief = {
+      context: "Waiting since yesterday.",
+      recommendation: "Pick A.",
+      options: [
+        { label: "A", answer: "a" },
+        { label: "B", answer: "b" },
+      ],
+      basis: "read the issue",
+      at: NOW,
+    };
+    store.addBrief({ key: "esc:shop-app#9", ...brief });
+    const items = (await get("/api/attention")).json() as AttentionItem[];
+    expect(items[0]?.brief).toEqual(brief);
   });
 
   it("POST /api/attention/ack acks the keys, emits attention, and the next GET shows them acked", async () => {

@@ -759,7 +759,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           result = await addRepo(configPath, repo, now());
         } catch (e) {
-          if (e instanceof ConfigWriteError && e.kind === "duplicate") {
+          if (e instanceof ConfigWriteError && (e.kind === "duplicate" || e.kind === "current")) {
             return reply.code(409).send({ error: e.message });
           }
           // ConfigWriteError messages never carry file contents; anything else is logged by name only.
