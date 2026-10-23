@@ -5,25 +5,32 @@ import {
   ENGINE_NOT_RUNNING,
   FLIGHT_NOT_RUNNING,
   type LimitRow,
+  type TestLockState,
 } from "@mc/core";
 import type { MouseEvent } from "react";
+import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
+import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import {
+  callSign,
   contextPct,
   crewOrder,
   doingLine,
   isFinishedWork,
   isLoopInFlight,
   isSeatFree,
+  lockSince,
   modelLine,
   needLine,
   needsLamp,
   SEAT_LAST_TICKET,
+  SET_ASIDE_LABEL,
   seatItems,
   seatStatus,
   sparkValues,
   tokensPerMinute,
+  waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { cost, kTokens } from "../fmt.ts";
@@ -128,6 +135,7 @@ function AgentRow({
   now,
   tz,
   selected,
+  lock,
 }: {
   row: Crew["rows"][number];
   items: AttentionItem[];
@@ -135,6 +143,7 @@ function AgentRow({
   now: number;
   tz: string | null;
   selected: boolean;
+  lock: TestLockState | undefined;
 }) {
   const mine = seatItems(row, items);
   const repoPrs = useReviewPrs(row);
@@ -208,7 +217,11 @@ function AgentRow({
       </span>
       <span className="min0 loopstep">
         {row.loop && (row.kind !== "crew" || isLoopInFlight(row)) ? (
-          <LoopStep loop={row.loop} hudState={row.hudState} />
+          <LoopStep
+            loop={row.loop}
+            hudState={row.hudState}
+            wait={waitText(row.loop, callSign(row), lockSince(lock, row.run?.id), now)}
+          />
         ) : (
           <span className="xs fg2" title={row.loop ? undefined : ENGINE_NOT_RUNNING}>
             {DASH}
@@ -254,8 +267,31 @@ function AgentRow({
               )}
             </span>
           ))}
+          {row.kind === "crew" && (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: the buttons inside are the keyboard route
+            // biome-ignore lint/a11y/noStaticElementInteractions: a click on them must not open the Agent page
+            <span className="needctl" onClick={(e) => e.stopPropagation()}>
+              <SeatControls row={row} />
+            </span>
+          )}
         </div>
       )}
+      {(row.asideRuns ?? []).map((a) => (
+        <div key={a.runId} className="asideline">
+          <span className="muted">{SET_ASIDE_LABEL}</span>
+          {a.ticket && <TicketRef ticket={a.ticket} />}
+          {a.ticketTitle && (
+            <span className="ellip" title={a.ticketTitle}>
+              {a.ticketTitle}
+            </span>
+          )}
+          <LoopStep
+            loop={a.loop}
+            hudState="idle"
+            wait={waitText(a.loop, callSign(row), lockSince(lock, a.runId), now)}
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -265,6 +301,7 @@ export function AgentsPanel() {
   const crew = useResource<Crew>(RESOURCES.crew);
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const limits = useResource<LimitRow[]>(RESOURCES.limits).data ?? [];
+  const lock = useTestLock();
   const tz = useTz();
   const now = useSecond();
   const [session] = useSession();
@@ -310,6 +347,7 @@ export function AgentsPanel() {
             now={now}
             tz={tz}
             selected={row.id === selected}
+            lock={lock}
           />
         ))}
         {crew.error && !rows && <div className="pb crit-t">Could not load the crew.</div>}

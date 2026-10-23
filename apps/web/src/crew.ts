@@ -16,6 +16,7 @@ import {
   LAST_TEXT_MAX,
   LIVE_DETAIL_MAX,
   type LoopPhase,
+  type LoopWait,
   type PullRequestView,
   ROLES,
   type RunDigest,
@@ -24,6 +25,7 @@ import {
   type RunView,
   STALL_MS,
   seatCallSign,
+  type TestLockState,
 } from "@mc/core";
 import { cutText, hhmm, mss, prLabel, wkdTime } from "./fmt.ts";
 
@@ -458,6 +460,70 @@ export const LOOP_PHASE_LABEL: Record<LoopPhase, string> = {
 
 /** The build loop's name on screen: the 7a loop is one implicit loop per run, with no template file. */
 export const BUILD_LOOP_TEMPLATE = "build";
+/** The template on screen: the run's profile, else the build loop. */
+export const loopTemplate = (loop: CrewLoop): string => loop.profile ?? BUILD_LOOP_TEMPLATE;
+
+/** The step on screen: the profile's step for the phase, else the build loop's phase label. */
+export const loopStepLabel = (loop: CrewLoop): string => loop.step ?? LOOP_PHASE_LABEL[loop.phase];
+
+/** What a looped run waits on, as Overview words it (the server decides `wait`). */
+export const WAIT_TEXT = {
+  ci: "waiting on CI",
+  retro: "waiting on RETRO's review",
+  main: "waiting on main: updating the branch",
+  operator: "waiting on you",
+  lock: "in line for the test lock",
+} as const;
+/** A set-aside run whose rework or park is due back on its seat. */
+export const seatWaitText = (call: string): string => `waiting on ${call} for rework`;
+/** Waits shown amber, as the mockup's lock line. */
+export const WAIT_WARN: readonly LoopWait[] = ["lock", "operator"];
+/** The lead of a set-aside run's line under its seat's row. */
+export const SET_ASIDE_LABEL = "Set aside";
+
+/** " · try n of max" from the second try on, else "". */
+export function loopTryText(loop: CrewLoop): string {
+  const tries = loop.tries ?? null;
+  return tries !== null && tries.n > 1 ? `${DOING_SEP}try ${tries.n} of ${tries.max}` : "";
+}
+
+/** When `runId` joined the test lock's line (its first `waiting` entry, the oldest); null when it is not listed. */
+export function lockSince(
+  lock: TestLockState | undefined,
+  runId: string | null | undefined,
+): number | null {
+  if (!lock || runId === null || runId === undefined) return null;
+  return lock.waiting.find((w) => w.runId === runId)?.since ?? null;
+}
+
+/** The line under a Loop step saying what the run waits on; null when it waits on nothing. */
+export function waitText(
+  loop: CrewLoop,
+  call: string,
+  lockSince: number | null,
+  now: number,
+): string | null {
+  const wait = loop.wait ?? null;
+  switch (wait) {
+    case null:
+      return null;
+    case "ci":
+    case "retro":
+    case "main":
+      return WAIT_TEXT[wait];
+    case "operator":
+      return loop.phase === "parked" && loop.parked
+        ? `${WAIT_TEXT.operator}: ${loop.parked}`
+        : WAIT_TEXT.operator;
+    case "lock":
+      return lockSince === null
+        ? WAIT_TEXT.lock
+        : `${WAIT_TEXT.lock}${DOING_SEP}${mss(now - lockSince)}`;
+    case "seat":
+      return seatWaitText(call);
+  }
+}
+
 /** The build loop's path, in order (catalogue §2.4.5's stepper); `parked` is a held state, not a step. */
 export const LOOP_PATH = [
   "working",
