@@ -11,6 +11,7 @@ import {
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { ackKeys } from "../ack.ts";
+import { isOperatorItem, itemOwner, ownerLabel } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -73,7 +74,8 @@ export function NeedsList({
   const now = useSecond();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const list = sortNeeds(items ?? []);
+  const list = sortNeeds((items ?? []).filter(isOperatorItem));
+  const handled = sortNeeds((items ?? []).filter((i) => !isOperatorItem(i)));
   const unacked = list.filter((i) => !i.acked).map((i) => i.key);
 
   const ack = async (keys: string[]) => {
@@ -157,6 +159,20 @@ export function NeedsList({
           );
         })}
       </div>
+      {handled.length > 0 && (
+        <details id="cHandled" className="guard">
+          <summary>Being handled · {handled.length}</summary>
+          {handled.map((i) => (
+            <div key={i.key} className="nrow" data-kind={i.kind}>
+              <div>
+                <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
+                <span className="xs muted">{ownerLabel(itemOwner(i))}</span>{" "}
+                <NeedText item={i} now={now} />
+              </div>
+            </div>
+          ))}
+        </details>
+      )}
       <GuardDrawer rows={rows} busy={busy} ack={ack} />
     </Panel>
   );
