@@ -1,7 +1,6 @@
 import {
   type ConfigView,
   ENGINE_NOT_RUNNING,
-  FLIGHT_NOT_RUNNING,
   LIVE_MINUTES,
   NO_REVIEWS,
   TELEMETRY_POINTS,
@@ -11,6 +10,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { setSelectedAgent } from "../src/shell/selection.ts";
+import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, HOUR, MIN, NOW } from "./fixtures.ts";
 
@@ -308,7 +308,68 @@ describe("scoped telemetry", () => {
   });
 });
 
+const Q = {
+  ciGreenFirstPushPct: 93.75,
+  prs: 16,
+  reviewRoundsPerPr: 1.5,
+  firstPassReviewPct: 50,
+  reviewedPrs: 2,
+  commitsPerRun: 2,
+};
+
+const kpi = (container: HTMLElement, label: string) => {
+  const k = [...container.querySelectorAll(".kpi")].find(
+    (x) => x.querySelector(".lbl")?.textContent === label,
+  ) as Element;
+  return {
+    value: k.querySelector(".v")?.textContent,
+    detail: k.querySelector(".d")?.textContent,
+    title: k.querySelector(".v")?.getAttribute("title") ?? null,
+    nt: k.querySelector(".v")?.classList.contains("nt"),
+  };
+};
+
+const quality = () =>
+  [...panel("tQual").querySelectorAll(".stat2")].map((s) => [
+    s.querySelector("span")?.textContent,
+    s.querySelector("b")?.textContent,
+    s.querySelector("b")?.getAttribute("title"),
+  ]);
+
 describe("KPI tiles", () => {
+  it("Commits shows commits per run when the hub stores it", async () => {
+    const a = await loaded(tel({ quality: Q }));
+    expect(kpi(a.container, "Commits")).toEqual({
+      value: "2.0",
+      detail: "per run, last 14 days",
+      title: null,
+      nt: false,
+    });
+    a.unmount();
+    const b = await loaded(tel({ quality: { ...Q, commitsPerRun: null } }));
+    expect(kpi(b.container, "Commits")).toMatchObject({
+      value: "—",
+      title: "No finished crew runs in the last 14 days.",
+    });
+  });
+
+  it("a tile with no data source says not tracked yet", async () => {
+    const { container } = await loaded();
+    for (const label of ["Commits", "Lock wait", "Your response"]) {
+      expect(kpi(container, label)).toMatchObject({
+        value: NOT_TRACKED,
+        title: NOT_TRACKED_TITLE,
+        nt: true,
+      });
+    }
+    const notTracked = [
+      ...panel("tQual").querySelectorAll(".stat2 b"),
+      ...panel("tCapcom").querySelectorAll(".stat2 b"),
+    ].filter((b) => b.textContent === NOT_TRACKED);
+    expect(notTracked).toHaveLength(9);
+    for (const b of notTracked) expect(b.classList.contains("nt")).toBe(true);
+  });
+
   it("computed tiles show today's numbers; the others show — with the phase that brings them", async () => {
     const { container } = await loaded();
     const tiles = [...container.querySelectorAll(".kpi")].map((k) => ({
@@ -326,11 +387,16 @@ describe("KPI tiles", () => {
       },
       { label: "~Cost", value: "~$3.50", detail: "today, API-equivalent", title: null },
       { label: "Tool calls", value: "812", detail: "today · 64 turns", title: null },
-      { label: "Commits", value: "—", detail: "today", title: ENGINE_NOT_RUNNING },
+      { label: "Commits", value: NOT_TRACKED, detail: "today", title: NOT_TRACKED_TITLE },
       { label: "Working", value: "2", detail: "now, of 3 agents", title: null },
       { label: "Merged", value: "5", detail: "PRs, last 7 days", title: null },
-      { label: "Lock wait", value: "—", detail: "today", title: ENGINE_NOT_RUNNING },
-      { label: "Your response", value: "—", detail: "median, today", title: FLIGHT_NOT_RUNNING },
+      { label: "Lock wait", value: NOT_TRACKED, detail: "today", title: NOT_TRACKED_TITLE },
+      {
+        label: "Your response",
+        value: NOT_TRACKED,
+        detail: "median, today",
+        title: NOT_TRACKED_TITLE,
+      },
       // the stub serves no guard routes: both read — until the hub answers
       { label: "Guard", value: "—", detail: "", title: null },
       { label: "Test lock", value: "—", detail: "", title: null },
@@ -394,13 +460,32 @@ describe("Flow of work", () => {
       s.querySelector("b")?.getAttribute("title"),
     ]);
     expect(stats).toEqual([
-      ["verify passed first try", "—", ENGINE_NOT_RUNNING],
-      ["fix rounds per ticket", "—", ENGINE_NOT_RUNNING],
-      ["median wait for a human review", "—", NO_REVIEWS],
-      ["RETRO findings per PR", "—", ENGINE_NOT_RUNNING],
-      ["PRs sent back by reviewers", "—", NO_REVIEWS],
+      ["verify passed first try", NOT_TRACKED, NOT_TRACKED_TITLE],
+      ["review rounds per PR", NOT_TRACKED, NOT_TRACKED_TITLE],
+      ["passed the first review round", NOT_TRACKED, NOT_TRACKED_TITLE],
+      ["median wait for a human review", NOT_TRACKED, NO_REVIEWS],
+      ["PRs sent back by reviewers", NOT_TRACKED, NO_REVIEWS],
       ["CI green on first push", "94%", "16 merged PRs with a known first-push CI result"],
     ]);
+  });
+
+  it("quality: review rounds and first-pass rate show the hub's numbers", async () => {
+    const a = await loaded(tel({ quality: Q }));
+    expect(quality()).toEqual(
+      expect.arrayContaining([
+        ["review rounds per PR", "1.5", "2 merged PRs with a review"],
+        ["passed the first review round", "50%", "2 merged PRs with a review"],
+      ]),
+    );
+    a.unmount();
+    await loaded(tel({ quality: { ...Q, reviewRoundsPerPr: null, firstPassReviewPct: null } }));
+    const none = "No merged PRs with a review in the last 14 days.";
+    expect(quality()).toEqual(
+      expect.arrayContaining([
+        ["review rounds per PR", "—", none],
+        ["passed the first review round", "—", none],
+      ]),
+    );
   });
 
   it("You as CAPCOM: four — tiles, phase 3", async () => {
@@ -413,8 +498,8 @@ describe("Flow of work", () => {
       "runs you stopped or interrupted",
     ]);
     for (const s of stats) {
-      expect(s.querySelector("b")?.textContent).toBe("—");
-      expect(s.querySelector("b")?.getAttribute("title")).toBe(FLIGHT_NOT_RUNNING);
+      expect(s.querySelector("b")?.textContent).toBe(NOT_TRACKED);
+      expect(s.querySelector("b")?.getAttribute("title")).toBe(NOT_TRACKED_TITLE);
     }
   });
 });
