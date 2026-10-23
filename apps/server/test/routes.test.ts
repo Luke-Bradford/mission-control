@@ -96,8 +96,8 @@ function readerComments(): Map<RouteKey, string> {
     const text = /^\s*\/\/ Reader: (.*\S)\s*$/.exec(line)?.[1];
     if (text === undefined) return;
     const rest = lines.slice(i + 1, i + 9).join("\n");
-    const literal = /\bapi\.(get|post)\b[^"]*"(\/[^"]*)"/.exec(rest);
-    const named = /\bapi\.(get|post)\(\s*([A-Z][A-Z0-9_]*)\s*,/.exec(rest);
+    const literal = /\bapi\.(get|post|put)\b[^"]*"(\/[^"]*)"/.exec(rest);
+    const named = /\bapi\.(get|post|put)\(\s*([A-Z][A-Z0-9_]*)\s*,/.exec(rest);
     const constPath = named ? exported[named[2] as string] : undefined;
     // the nearer route statement wins: a named path ahead of a later literal is the route
     if (named && typeof constPath === "string" && (!literal || named.index < literal.index)) {
@@ -151,6 +151,10 @@ describe("the route table", () => {
     const routes = await registeredRoutes();
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
+    expect(routes).toContain("GET /api/notification-preferences");
+    expect(routes).toContain("PUT /api/notification-preferences");
+    expect(routes).toContain("GET /api/notifications/events");
+    expect(routes).toContain("POST /api/notifications/test");
     expect(routes).toContain("GET /api/accounts/status");
     expect(routes).toContain("POST /api/accounts/:id/check");
     expect(routes).toContain("POST /api/accounts");

@@ -492,6 +492,27 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
   ["GET", "/api/notifications"],
   ["POST", "/api/attention/person:101:1/handled", {}],
+  ["GET", "/api/notification-preferences"],
+  [
+    "PUT",
+    "/api/notification-preferences",
+    {
+      categories: {
+        people: true,
+        decisions: true,
+        stalls: true,
+        prs: true,
+        capcom: true,
+        awayDigest: true,
+        quota: false,
+        agentMessages: false,
+      },
+      quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
+      softChime: true,
+    },
+  ],
+  ["GET", "/api/notifications/events"],
+  ["POST", "/api/notifications/test", {}],
   ["GET", "/api/settings/away"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
@@ -911,7 +932,12 @@ describe("local access", () => {
         expect((await post(url, json, body)).statusCode).toBe(401);
         continue;
       }
-      const r = method === "GET" ? await get(url) : await post(url, json, body);
+      const r =
+        method === "GET"
+          ? await get(url)
+          : method === "PUT"
+            ? await app.inject({ method: "PUT", url, headers: json, payload: body })
+            : await post(url, json, body);
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);
@@ -3163,7 +3189,7 @@ describe("SSE stream", () => {
     expect(s.res.headers["content-type"]).toContain("text/event-stream");
     expect(s.res.headers["cache-control"]).toContain("no-cache");
     await s.until(": connected");
-    expect(bus.size).toBe(1);
+    expect(bus.size).toBe(2); // notification transitions and the SSE client
     bus.emit("boards");
     await s.until('event: changed\ndata: {"topic":"boards"}\n\n');
     bus.emit("limits");
@@ -3171,6 +3197,8 @@ describe("SSE stream", () => {
     await s.until(": heartbeat");
     // stands in for Node's `close` on a client disconnect
     s.res.raw.res.emit("close");
+    expect(bus.size).toBe(1); // the notification subscriber lives until app.close()
+    await app.close();
     expect(bus.size).toBe(0);
   });
 

@@ -130,6 +130,7 @@ import {
   NO_LOCK,
   NOTE_KEY,
 } from "./hud.ts";
+import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -488,19 +489,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // CSRF defence (there is no login, so these are the only cross-site guard): a cross-site form
   // cannot send application/json, and a cross-site fetch carries a foreign Origin.
   app.addHook("onRequest", async (req, reply) => {
-    if (req.method === "POST" && mediaType(req.headers["content-type"]) !== "application/json") {
-      return reply.code(415).send({ error: "POST requires Content-Type: application/json" });
+    if (
+      (req.method === "POST" || req.method === "PUT") &&
+      mediaType(req.headers["content-type"]) !== "application/json"
+    ) {
+      return reply
+        .code(415)
+        .send({ error: `${req.method} requires Content-Type: application/json` });
     }
   });
 
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
-    if (req.method === "POST" && origin !== undefined && !isLocalOrigin(origin)) {
+    if (
+      (req.method === "POST" || req.method === "PUT") &&
+      origin !== undefined &&
+      !isLocalOrigin(origin)
+    ) {
       return reply.code(403).send({ error: "cross-origin request refused" });
     }
   });
 
-  // The Origin hook covers POST only, and a cross-site no-cors GET (an <img>, fetch with
+  // The Origin hook covers POST and PUT only, and a cross-site no-cors GET (an <img>, fetch with
   // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
   // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
   // callers that send no header (the guard hook, curl) are unaffected. The matched route is
@@ -529,8 +539,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  const notifications = new LocalNotifications(store, config, bus, now);
+  const reconcileNotifications = () =>
+    notifications.reconcile(
+      attentionItems(
+        config,
+        store,
+        now(),
+        deps.lock?.state() ?? NO_LOCK,
+        undefined,
+        deps.hubLogin?.() ?? null,
+      ),
+    );
+  const unsubscribeNotifications = bus.subscribe((topic) => {
+    if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
+      reconcileNotifications();
+  });
+  app.addHook("onReady", async () => {
+    reconcileNotifications();
+  });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
+    unsubscribeNotifications();
     for (const end of [...streams]) end();
   });
 
@@ -1920,6 +1950,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         bus.emit("attention");
         return { dismissed: key };
+      });
+
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.get("/notification-preferences", async () => notifications.preferences());
+
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.put("/notification-preferences", async (req, reply) => {
+        const body = NotificationPreferencesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        notifications.setPreferences(body.data);
+        return notifications.preferences();
+      });
+
+      // Reader: apps/web/src/notifications.ts (local notification feed; web wiring is a separate ticket)
+      api.get("/notifications/events", async () => {
+        reconcileNotifications();
+        return notifications.events();
+      });
+
+      // Reader: apps/web/src/notifications.ts (Send a test notification; web wiring is a separate ticket)
+      api.post("/notifications/test", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        return notifications.test();
       });
 
       // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)
