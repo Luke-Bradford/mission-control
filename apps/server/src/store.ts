@@ -5,9 +5,11 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import {
   type AccountId,
   type AgentId,
+  type AttentionBrief,
   type AttentionKind,
   BLOCKING_SEVERITIES,
   type BoardItem,
+  type BriefOption,
   type Escalation,
   type FlightDecision,
   type FlightDecisionKind,
@@ -196,6 +198,13 @@ CREATE TABLE IF NOT EXISTS flight_decisions (
   basis TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS flight_decisions_at ON flight_decisions(at);
+-- FLIGHT's briefs on Needs-you items (the newest row per key shows); options is JSON.
+CREATE TABLE IF NOT EXISTS briefs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, context TEXT NOT NULL,
+  recommendation TEXT NOT NULL, options TEXT NOT NULL, basis TEXT NOT NULL, at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS briefs_key ON briefs(key);
+CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
 `;
 
 type Row = Record<string, SQLInputValue>;
@@ -2369,6 +2378,44 @@ export class Store {
       decision: r.decision as string,
       basis: r.basis as string,
     }));
+  }
+
+  /** Stores FLIGHT's brief on an attention key; returns its id. */
+  addBrief(b: AttentionBrief & { key: string }): number {
+    const r = this.db
+      .prepare(
+        `INSERT INTO briefs (key, context, recommendation, options, basis, at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(b.key, b.context, b.recommendation, JSON.stringify(b.options), b.basis, b.at);
+    return Number(r.lastInsertRowid);
+  }
+
+  /** The newest brief on each attention key. */
+  briefs(): Map<string, AttentionBrief> {
+    const rows = this.db
+      .prepare("SELECT * FROM briefs WHERE id IN (SELECT MAX(id) FROM briefs GROUP BY key)")
+      .all() as Row[];
+    return new Map(
+      rows.map((r) => [
+        r.key as string,
+        {
+          context: r.context as string,
+          recommendation: r.recommendation as string,
+          options: JSON.parse(r.options as string) as BriefOption[],
+          basis: r.basis as string,
+          at: r.at as number,
+        },
+      ]),
+    );
+  }
+
+  /** How many briefs were written at or after `since`. */
+  countBriefs(since: number): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM briefs WHERE at >= ?").get(since) as {
+      n: number;
+    };
+    return row.n;
   }
 
   /** How many decisions of these kinds since `since`, optionally for one seat, ref or run. */
