@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   addAgentParam,
-  withoutAddAgentParam,
   agentPath,
   boardPath,
   isPopout,
@@ -12,6 +11,7 @@ import {
   SETUP_TABS,
   setupPath,
   ticketPath,
+  withoutAddAgentParam,
 } from "../src/router.ts";
 
 describe("route()", () => {
