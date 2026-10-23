@@ -6,14 +6,19 @@ import {
   CREW_FILES_NOTE,
   type CrewLoop,
   type CrewRow,
+  DEFAULT_PROFILES,
   ENGINE_NOT_RUNNING,
   type FileDiff,
   type LimitRow,
+  type LoopTry,
   METER_FULL_PCT,
   METER_WARN_PCT,
+  type ReviewStatus,
   type RunDigest,
   type RunLoop,
+  type RunLoopView,
   type RunView,
+  type TicketView,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +30,7 @@ import { setSession } from "../src/shell/session.ts";
 import { Toast, toast } from "../src/shell/Toast.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
 import {
+  boardItem,
   CONFIG,
   crewRow,
   HOUR,
@@ -1623,6 +1629,191 @@ describe("Agent page: loop steps", () => {
     expect(withPr[0]).toBe(withText[0]);
   });
 
+  describe("from the run's loop view", () => {
+    const LOOP_ROUTE = "/api/runs/r-12/loop";
+    const PRS_ROUTE = "/api/repos/shop-app/prs?linked=1";
+    const PUSH = "abc1234def5678";
+    const triesAt = (
+      step: LoopTry["step"],
+      n: number,
+      outcome: LoopTry["outcome"],
+      over: Partial<LoopTry> = {},
+    ): LoopTry => ({
+      step,
+      fix: false,
+      n,
+      startedAt: NOW - 20 * MIN,
+      endedAt: NOW - 10 * MIN,
+      outcome,
+      reason: null,
+      ...over,
+    });
+    const viewOf = (
+      phase: RunLoop["phase"],
+      tries: LoopTry[],
+      over: Partial<RunLoopView> = {},
+    ): RunLoopView => ({
+      runId: "r-12",
+      loop: { phase, prNumber: 77, pushFor: PUSH, epoch: 1, budgetExtra: 0 } as RunLoop,
+      events: [],
+      tries,
+      round: 1,
+      budget: null,
+      review: null,
+      ...over,
+    });
+    const pr77 = (over = {}) => prView({ number: 77, headSha: PUSH, ...over });
+    const openLoop = async (
+      loop: CrewLoop,
+      view: RunLoopView | null,
+      more: { prs?: unknown[]; runs?: RunView[]; run?: Partial<NonNullable<CrewRow["run"]>> } = {},
+    ) => {
+      const base = seat(loop);
+      const row = more.run ? { ...base, run: { ...(base.run as object), ...more.run } } : base;
+      stub({
+        rows: [row as CrewRow],
+        runs: more.runs ?? [],
+        extra: {
+          ...(view ? { [LOOP_ROUTE]: view } : {}),
+          [PRS_ROUTE]: more.prs ?? [],
+        },
+      });
+      const { container } = render(<Agent id="shop-app-ta" />);
+      await loaded();
+      return $(container, "#loopP") as HTMLElement;
+    };
+    const marks = (panel: HTMLElement) =>
+      dots(panel)
+        .map((d) => d[1])
+        .join(" ");
+    const checks = (panel: HTMLElement) =>
+      [...panel.querySelectorAll<HTMLElement>(".check")].map((c) => c.textContent);
+
+    it("a run in CI", async () => {
+      const ci = loopOf({ phase: "ci", text: "CI is running", prNumber: 77 });
+      const tries = [triesAt("working", 1, "pass"), triesAt("ci", 1, "running", { endedAt: null })];
+      const panel = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: "pending" })] });
+      await waitFor(() => expect(checks(panel)).toEqual(["◌ runningCI on abc1234"]));
+      expect(marks(panel)).toBe("✓ ● 3 4");
+      cleanup();
+      const quiet = await openLoop(ci, viewOf("ci", tries), { prs: [pr77({ ci: null })] });
+      await waitFor(() =>
+        expect(checks(quiet)).toEqual(["· waitingCI on abc1234: no CI reported yet"]),
+      );
+    });
+
+    it("review round 2 of 3", async () => {
+      const reason = "RETRO-1 reviewed abc1234: 2 blocking, 0 minor";
+      const tries = [
+        triesAt("working", 1, "pass"),
+        triesAt("review", 1, "fail", { reason }),
+        triesAt("review", 1, "pass", { fix: true }),
+        triesAt("ci", 2, "pass"),
+        triesAt("review", 2, "running", { endedAt: null }),
+      ];
+      const review: ReviewStatus = { state: "pending", description: "QA review running" };
+      const panel = await openLoop(
+        loopOf({ phase: "review", text: "In review", prNumber: 77 }),
+        viewOf("review", tries, { round: 2, review }),
+      );
+      await waitFor(() => expect(panel.textContent).toContain("Round 2 of 3"));
+      const step = [...panel.querySelectorAll<HTMLElement>(".vstep")][2] as HTMLElement;
+      expect($(step, ".titer")?.textContent).toBe("×2");
+      expect($(step, ".vfail")?.textContent).toBe(`Last failure: ${reason}`);
+      expect([...step.querySelectorAll(".att")].map((a) => a.firstChild?.textContent)).toEqual([
+        "try 1",
+        "fix",
+        "try 2",
+      ]);
+      expect(checks(step)).toEqual(["◌ runningQA review running", "· waitingPR #77 merged"]);
+      expect(panel.textContent).not.toContain("—");
+    });
+
+    it("parked", async () => {
+      const why = "CI failed 3 times; last on abc1234";
+      const tries = [
+        triesAt("working", 1, "pass"),
+        triesAt("ci", 1, "fail"),
+        triesAt("ci", 2, "fail"),
+        triesAt("ci", 3, "parked", { reason: why }),
+      ];
+      const panel = await openLoop(
+        loopOf({ phase: "parked", text: `Blocked: ${why}`, parked: why, prNumber: 77 }),
+        viewOf("parked", tries),
+      );
+      await waitFor(() => expect(marks(panel)).toBe("✓ ! 3 4"));
+      const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
+      expect(ci.textContent).toContain(`Blocked: ${why}`);
+      expect(ci.textContent).toContain(`parked: ${why}`);
+      expect(panel.querySelector(".vhold")).toBeNull();
+    });
+
+    it("the run's limits", async () => {
+      const profile = DEFAULT_PROFILES.find((p) => p.name === "small-change");
+      expect(profile).toBeDefined();
+      const panel = await openLoop(
+        loopOf({ phase: "ci", text: "CI is running", prNumber: 77 }),
+        viewOf("ci", [
+          triesAt("working", 1, "pass"),
+          triesAt("ci", 1, "running", { endedAt: null }),
+        ]),
+        {
+          runs: [
+            rv({
+              profile: {
+                profile: profile as never,
+                route: { by: "label", label: "chore" },
+                hash: "h",
+              },
+            }),
+          ],
+        },
+      );
+      await waitFor(() => expect(panel.textContent).toContain("Round 1 of 2"));
+      const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
+      expect($(ci, ".vrule")?.textContent).toBe(
+        "↻ fail → back to Working · parks after 2 failures",
+      );
+    });
+
+    it("the loop's own counter", async () => {
+      const panel = await open(loopOf({ phase: "ci", tries: { n: 2, max: 3 } }));
+      const ci = [...panel.querySelectorAll<HTMLElement>(".vstep")][1] as HTMLElement;
+      expect($(ci, ".titer")?.textContent).toBe("×2");
+    });
+
+    it("timeline", async () => {
+      const s = NOW - 40 * MIN;
+      const tries = [
+        triesAt("working", 1, "pass", { startedAt: s, endedAt: s + 10 * MIN }),
+        triesAt("ci", 1, "fail", {
+          startedAt: s + 10 * MIN,
+          endedAt: s + 19 * MIN,
+          reason: "CI failed on abc1234",
+        }),
+        triesAt("ci", 2, "pass", { startedAt: s + 20 * MIN, endedAt: s + 30 * MIN }),
+        triesAt("review", 1, "running", { startedAt: s + 30 * MIN, endedAt: null }),
+      ];
+      const panel = await openLoop(
+        loopOf({ phase: "review", text: "In review", prNumber: 77 }),
+        viewOf("review", tries),
+        { run: { startedAt: s } },
+      );
+      fireEvent.click(within(panel).getByRole("button", { name: "Timeline" }));
+      await waitFor(() => expect(panel.querySelectorAll(".tlrow")).toHaveLength(4));
+      const rows = [...panel.querySelectorAll<HTMLElement>(".tlrow")];
+      const bars = [...(rows[1] as HTMLElement).querySelectorAll<HTMLElement>(".tlbars i")];
+      expect(bars).toHaveLength(2);
+      const first = bars[0] as HTMLElement;
+      expect(first.style.left).toBe("25%");
+      expect(first.style.width).toBe("22.5%");
+      expect(first.className).toBe("tl-fail");
+      expect(first.title).toBe("CI try 1 · fail: CI failed on abc1234 · 9 min");
+      expect(panel.textContent).toContain("(40 min)");
+      expect(panel.textContent).toContain("Round 1 of 3");
+    });
+  });
+
   describe("End run on a set-aside run", () => {
     const LOOP_PATH = "/api/runs/r-12/loop";
     const END_PATH = "/api/runs/r-12/end";
@@ -1906,16 +2097,92 @@ describe("Agent page: side tabs", () => {
     ...over,
   });
 
-  it("Plan shows the runtime placeholder; Queue waits on the engine", async () => {
-    stub();
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    expect($(side, "#sideBody")?.textContent).toBe(
-      "The loops' CLI has no task-list tool; the Plan tab fills when the agent runtime reports one (phase 2).",
+  const ticketOf = (body: string, over: Partial<TicketView> = {}): TicketView => ({
+    number: 3349,
+    title: "Quote cache",
+    url: "https://github.com/octo-org/shop-app/issues/3349",
+    state: "open",
+    body,
+    bodyTruncated: false,
+    labels: [],
+    milestone: null,
+    subIssues: [],
+    pullRequests: [],
+    ...over,
+  });
+  const TICKET_ROUTE = "/api/boards/shop-app/items/3349";
+  const sideOf = async (row: CrewRow, extra: Record<string, unknown> = {}) => {
+    stub({ rows: [row], extra });
+    const { container } = render(<Agent id={row.id} />);
+    await (row.kind === "crew" ? seatLoaded() : loaded());
+    return $(container, "#sideP") as HTMLElement;
+  };
+
+  it("Plan shows the ticket's ## Plan, and says when there is none or no ticket", async () => {
+    const body = "## Outcome\nOutcome words\n## Plan\n1. cache the quotes\n## Notes\nNotes words";
+    const side = await sideOf(crewRow({ digest: digest() }), {
+      [TICKET_ROUTE]: ticketOf(body, { bodyTruncated: true }),
+    });
+    expect(await within(side).findByText("cache the quotes")).toBeTruthy();
+    const text = $(side, "#sideBody")?.textContent ?? "";
+    expect(text).not.toContain("Outcome words");
+    expect(text).not.toContain("Notes words");
+    expect(text).toContain("From the ## Plan section of shop-app#3349.");
+    expect(within(side).getByText("Continue on GitHub ↗")).toBeTruthy();
+    cleanup();
+    const bare = await sideOf(crewRow({ digest: digest() }), {
+      [TICKET_ROUTE]: ticketOf("## Outcome\nx"),
+    });
+    expect(await within(bare).findByText("shop-app#3349 has no ## Plan yet.")).toBeTruthy();
+    cleanup();
+    const none = await sideOf(crewRow({ digest: digest(), ticket: null }));
+    expect($(none, "#sideBody")?.textContent).toBe("No ticket on this run.");
+  });
+
+  it("Plan says why a ticket did not load", async () => {
+    const side = await sideOf(crewRow({ digest: digest() }));
+    expect(await within(side).findByText(/^Could not load the ticket: /)).toBeTruthy();
+  });
+
+  it("Queue shows what the seat holds and what comes next", async () => {
+    const loop: CrewLoop = { phase: "ci", text: "CI is running", prNumber: 77, parked: null };
+    const side = await sideOf(
+      seatRow({
+        loop,
+        queue: [
+          { ref: "shop-app#3", issue: 3, pos: 1 },
+          { ref: "shop-app#8", issue: 8, pos: 2 },
+        ],
+      }),
+      SEAT_ROUTES({
+        "/api/boards/shop-app": [
+          boardItem({ issueNumber: 3, title: "Retry the fetch", priority: "P1" }),
+          boardItem({ issueNumber: 8, title: "Fix the typo", priority: "P2" }),
+        ],
+      }),
     );
     fireEvent.click(within(side).getByRole("button", { name: "Queue" }));
-    expect($(side, "#sideBody")?.textContent).toBe(ENGINE_NOT_RUNNING);
+    expect(await within(side).findByText("Retry the fetch")).toBeTruthy();
+    const heads = [...side.querySelectorAll(".qsec")].map((h) => h.textContent);
+    expect(heads).toEqual(["Now", "Next · from Ready, by priority"]);
+    const rows = [...side.querySelectorAll<HTMLElement>(".qi")].map((r) => r.textContent);
+    expect(rows).toEqual(["▸#3349 Quote cacheCI", "1#3 Retry the fetchP1", "2#8 Fix the typoP2"]);
+    expect(side.textContent).toContain(
+      "Each ticket starts as a fresh run on its own branch. Earlier tickets' conversations aren't carried over.",
+    );
+  });
+
+  it("Queue says when it is empty, nothing is held, or the row is no writer seat", async () => {
+    const empty = await sideOf(seatRow({ queue: [], run: null, ticket: null }), SEAT_ROUTES());
+    fireEvent.click(within(empty).getByRole("button", { name: "Queue" }));
+    expect(empty.textContent).toContain("Nothing assigned.");
+    expect(empty.textContent).toContain(
+      "Empty: the engine queues Ready cards in this seat's area, in merge repos only.",
+    );
+    cleanup();
+    const loopRow = await sideOf(crewRow({ digest: digest() }));
+    fireEvent.click(within(loopRow).getByRole("button", { name: "Queue" }));
+    expect($(loopRow, "#sideBody")?.textContent).toBe("Only a writer seat has a queue.");
   });
 
   it("Subagents {n}: rows with type, task, pill, tokens, tool calls and duration", async () => {

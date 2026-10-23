@@ -1,6 +1,7 @@
 import {
   type CrewRow,
   type PullRequestView,
+  type RunLoopView,
   type RunView,
   runPill,
   startOfLocalDay,
@@ -16,14 +17,52 @@ import { PrChip } from "../hud/PrChip.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { EndAsideButton, LoopSteps } from "./LoopSteps.tsx";
+import { LoopTimeline } from "./LoopTimeline.tsx";
+import { type LoopLimits, runLimits } from "./loopView.ts";
 
 const DASH = "—";
 
-type View = "steps" | "runs";
+type View = "steps" | "timeline" | "runs";
 const VIEWS: readonly { value: View; label: string }[] = [
   { value: "steps", label: "Steps" },
+  { value: "timeline", label: "Timeline" },
   { value: "runs", label: "Runs" },
 ];
+
+const clampPct = (n: number): number => Math.min(100, Math.max(0, n));
+
+const Bar = ({ pct }: { pct: number }) => (
+  <span className="mbar">
+    <i style={{ width: `${clampPct(pct)}%` }} />
+  </span>
+);
+
+/** The run's budgets above Steps and Timeline: tokens used of the run's budget, review rounds of its limit. */
+function Budget({
+  view,
+  tokens,
+  limits,
+}: {
+  view: RunLoopView;
+  tokens: { input: number; output: number } | null | undefined;
+  limits: LoopLimits;
+}) {
+  const used = tokens ? tokens.input + tokens.output : 0;
+  const round = Math.min(view.round ?? 1, limits.rounds);
+  return (
+    <div className="budget s">
+      <span>
+        Tokens <b>{kTokens(used)}</b>
+        {view.budget !== null && ` of ${kTokens(view.budget)}`}
+      </span>
+      {view.budget === null ? <span /> : <Bar pct={(used * 100) / view.budget} />}
+      <span>
+        Round <b>{round}</b> of {limits.rounds}
+      </span>
+      <Bar pct={(round * 100) / limits.rounds} />
+    </div>
+  );
+}
 
 /**
  * `14:05` today, `17 Oct` on another day (operator timezone), so the column stays narrow enough
@@ -81,13 +120,34 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
   const runs = useResource<RunView[]>(RESOURCES.runs(row.id));
   const list = runs.data ?? [];
   // A crew run never records its PRs (a seat opens them through mc): they are found by branch.
+  // The loop's CI check reads them too, so a looped observed loop fetches them as well.
   const repoPrs = useResource<PullRequestView[]>(
-    row.kind === "crew" ? RESOURCES.prs(row.repoId) : null,
+    row.kind === "crew" || row.loop !== null ? RESOURCES.prs(row.repoId) : null,
   ).data;
+  const loopView = useResource<RunLoopView>(
+    row.loop && row.run ? RESOURCES.runLoop(row.run.id) : null,
+  );
+  const limits = runLimits(list.find((r) => r.id === row.run?.id));
+  const budget = loopView.data?.loop && loopView.data.round != null && (
+    <Budget view={loopView.data} tokens={row.run?.tokens} limits={limits} />
+  );
 
   let body: ReactNode;
-  if (view === "steps") body = <LoopSteps row={row} />;
-  else if (runs.error && !runs.data) {
+  if (view === "steps") {
+    body = (
+      <>
+        {budget}
+        <LoopSteps row={row} view={loopView.data} prs={repoPrs} limits={limits} now={now} />
+      </>
+    );
+  } else if (view === "timeline") {
+    body = (
+      <>
+        {budget}
+        <LoopTimeline row={row} loopView={loopView} now={now} />
+      </>
+    );
+  } else if (runs.error && !runs.data) {
     body = <p className="s crit-t">Could not load the runs: {runs.error.message}</p>;
   } else if (!runs.data) body = <p className="s muted">Loading…</p>;
   else if (list.length === 0) body = <p className="s muted">No runs yet.</p>;
@@ -105,7 +165,7 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
         {list.map((r) => {
           const pill = runPill(r, row);
           const tokens = r.tokens ? kTokens(r.tokens.input + r.tokens.output) : DASH;
-          const prs = runPrs(r, repoPrs);
+          const prs = runPrs(r, row.kind === "crew" ? repoPrs : undefined);
           return (
             // biome-ignore lint/a11y/useKeyWithClickEvents: the summary is the keyboard route
             // biome-ignore lint/a11y/noStaticElementInteractions: as above; the row is a container
@@ -177,7 +237,7 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
   return (
     <Panel
       id="loopP"
-      title={view === "steps" ? "Loop" : "Runs"}
+      title={view === "runs" ? "Runs" : "Loop"}
       sub={
         view === "runs"
           ? runs.data
@@ -185,8 +245,8 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
             : undefined
           : row.loop
             ? row.run?.tokens
-              ? `${BUILD_LOOP_TEMPLATE} · ${kTokens(row.run.tokens.input + row.run.tokens.output)} tokens so far`
-              : BUILD_LOOP_TEMPLATE
+              ? `${row.loop.profile ?? BUILD_LOOP_TEMPLATE} · ${kTokens(row.run.tokens.input + row.run.tokens.output)} tokens so far`
+              : (row.loop.profile ?? BUILD_LOOP_TEMPLATE)
             : undefined
       }
       actions={

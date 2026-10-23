@@ -539,11 +539,16 @@ export type StepMark = "done" | "cur" | "held" | "todo";
 
 /**
  * One mark per LOOP_PATH step. Parked: every step held, since CrewLoop does not say which step it
- * held at. Done: every step done. Otherwise, steps before the phase are done, the phase is current
- * (held while the seat's state holds it) and later steps are to do.
+ * held at, unless `heldAt` names it (from the run's tries): steps before it are done, it is held
+ * and later steps are to do. Done: every step done. Otherwise, steps before the phase are done,
+ * the phase is current (held while the seat's state holds it) and later steps are to do.
  */
-export function loopMarks(loop: CrewLoop, hudState: HudState): StepMark[] {
-  if (loop.phase === "parked") return LOOP_PATH.map(() => "held");
+export function loopMarks(loop: CrewLoop, hudState: HudState, heldAt?: LoopPhase): StepMark[] {
+  if (loop.phase === "parked") {
+    const held = heldAt === undefined ? -1 : (LOOP_PATH as readonly LoopPhase[]).indexOf(heldAt);
+    if (held < 0) return LOOP_PATH.map(() => "held");
+    return LOOP_PATH.map((_, i) => (i < held ? "done" : i === held ? "held" : "todo"));
+  }
   if (loop.phase === "done") return LOOP_PATH.map(() => "done");
   const at = (LOOP_PATH as readonly LoopPhase[]).indexOf(loop.phase);
   const held = LOOP_HELD_STATES.includes(hudState);
