@@ -20,7 +20,7 @@ let store: Store;
 let bus: ChangeBus;
 let app: ReturnType<typeof buildApp>;
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
   const original = hud.attentionItems;
   vi.spyOn(hud, "attentionItems").mockImplementation((...args) =>
     original(...args).map((item) =>
@@ -41,7 +41,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 const preferences = async () => (await app.inject("/api/notification-preferences")).json();
-const events = async () => (await app.inject("/api/notifications/events")).json();
+const events = async () => {
+  await app.ready();
+  await vi.advanceTimersByTimeAsync(1000);
+  return (await app.inject("/api/notifications/events")).json();
+};
 const note = (key: string) => {
   store.raiseNote({
     key,
@@ -181,13 +185,14 @@ it("notifies only above 90 percent and only once per quota crossing", async () =
   const p = await preferences();
   p.categories.quota = true;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
+  const resetAt = Date.now() + 100000;
   for (const [index, pct] of [90, 91, 95, 89, 92].entries()) {
     store.addUsage({
       accountId: "demo",
       window: "5h",
       at: Date.now() + index,
       pct,
-      resetAt: Date.now() + 100000,
+      resetAt,
       source: "demo",
     });
     bus.emit("limits");
@@ -195,7 +200,7 @@ it("notifies only above 90 percent and only once per quota crossing", async () =
   }
 });
 
-it("includes every agent message when opted in, even without a direct ask", async () => {
+it("includes direct-line replies when opted in", async () => {
   await app.close();
   const crewConfig: CcConfig = {
     ...config,
@@ -217,6 +222,13 @@ it("includes every agent message when opted in, even without a direct ask", asyn
   p.categories.agentMessages = true;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   store.addComms({
+    at: Date.now() - 1,
+    from: "CAPCOM",
+    to: "demo-seat",
+    ticket: null,
+    text: "Status?",
+  });
+  store.addComms({
     at: Date.now(),
     from: "demo-seat",
     to: "CAPCOM",
@@ -225,10 +237,35 @@ it("includes every agent message when opted in, even without a direct ask", asyn
   });
   bus.emit("agents");
   expect(await events()).toMatchObject([
-    { category: "agentMessages", text: "Demo checks are complete" },
+    { category: "agentMessages", text: "1 new on your direct line" },
   ]);
   bus.emit("agents");
   expect(await events()).toHaveLength(1);
+  store.addComms({
+    at: Date.now(),
+    from: "demo-seat",
+    to: "peer",
+    ticket: null,
+    text: "@CAPCOM review this",
+  });
+  bus.emit("agents");
+  expect(await events()).toMatchObject([
+    { category: "agentMessages", text: "1 new on your direct line" },
+    { category: "capcom", text: "@CAPCOM review this" },
+  ]);
+  bus.emit("agents");
+  expect(await events()).toHaveLength(2);
+  p.categories.capcom = false;
+  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
+  store.addComms({
+    at: Date.now(),
+    from: "demo-seat",
+    to: "peer",
+    ticket: null,
+    text: "@CAPCOM suppressed",
+  });
+  bus.emit("agents");
+  expect(await events()).toHaveLength(2);
 });
 
 it("emits one away digest on return through settings invalidations", async () => {
@@ -290,4 +327,37 @@ it("notifies again when a cleared stall reopens between reconciliations", async 
   expect(await events()).toHaveLength(2);
   bus.emit("attention");
   expect(await events()).toHaveLength(2);
+});
+
+it("coalesces all notification topics off requests, runs at startup and keeps the trailing change", async () => {
+  await app.ready();
+  const attention = vi.mocked(hud.attentionItems);
+  expect(attention).not.toHaveBeenCalled();
+  await app.inject("/api/notifications/events");
+  expect(attention).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(attention).toHaveBeenCalledTimes(1);
+  for (const topic of [
+    "attention",
+    "agents",
+    "limits",
+    "boards",
+    "escalations",
+    "settings",
+  ] as const)
+    bus.emit(topic);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(attention).toHaveBeenCalledTimes(1);
+  note("last");
+  await vi.advanceTimersByTimeAsync(1);
+  expect(attention).toHaveBeenCalledTimes(2);
+  expect((await app.inject("/api/notifications/events")).json()).toMatchObject([
+    { category: "decisions", text: "Choose the demo lane" },
+  ]);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(attention).toHaveBeenCalledTimes(2);
+  bus.emit("agents");
+  await app.close();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(attention).toHaveBeenCalledTimes(2);
 });

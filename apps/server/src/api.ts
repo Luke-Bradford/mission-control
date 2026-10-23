@@ -414,6 +414,8 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
 
 export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
+const NOTIFICATION_RECONCILE_MS = 1000;
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
@@ -542,16 +544,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         deps.hubLogin?.() ?? null,
       ),
     );
+  let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconcilingNotifications = false;
+  const scheduleNotifications = () => {
+    if (notificationTimer !== undefined || reconcilingNotifications) return;
+    notificationTimer = setTimeout(() => {
+      notificationTimer = undefined;
+      reconcilingNotifications = true;
+      try {
+        reconcileNotifications();
+      } finally {
+        reconcilingNotifications = false;
+      }
+    }, NOTIFICATION_RECONCILE_MS);
+    notificationTimer.unref();
+  };
   const unsubscribeNotifications = bus.subscribe((topic) => {
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
-      reconcileNotifications();
+      scheduleNotifications();
   });
   app.addHook("onReady", async () => {
-    reconcileNotifications();
+    scheduleNotifications();
   });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
+    clearTimeout(notificationTimer);
     for (const end of [...streams]) end();
   });
 
@@ -1956,7 +1974,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Reader: apps/web/src/notifications.ts (local notification feed; web wiring is a separate ticket)
       api.get("/notifications/events", async () => {
-        reconcileNotifications();
         return notifications.events();
       });
 

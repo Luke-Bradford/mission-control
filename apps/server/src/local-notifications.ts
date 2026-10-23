@@ -7,8 +7,7 @@ import type {
 } from "@mc/core";
 import { z } from "zod";
 import type { ChangeBus } from "./bus.ts";
-import { threadMessages } from "./comms.ts";
-import { type CcConfig, configuredAgents } from "./config.ts";
+import type { CcConfig } from "./config.ts";
 import type { Store } from "./store.ts";
 
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -61,6 +60,10 @@ const defaultNotificationPreferences = (timezone: string): NotificationPreferenc
 
 const categoryOf = (item: AttentionItem): NotificationCategory | null => {
   switch (item.kind) {
+    case "tag":
+      return "capcom";
+    case "message":
+      return "agentMessages";
     case "person":
       return "people";
     case "decision":
@@ -185,24 +188,6 @@ export class LocalNotifications {
           : JSON.stringify([item.kind, item.text, item.at]);
       seen[item.key] = version;
       if (this.state.seen[item.key] !== version && !item.acked) this.emit(category, item.text);
-    }
-    for (const agent of configuredAgents(this.config)) {
-      for (const message of threadMessages(
-        this.store,
-        agent.id,
-        agent.kind === "crew",
-        "attention",
-      )) {
-        if (message.from !== agent.id) continue;
-        const key = `message:${agent.id}:${message.id}`;
-        seen[key] = message.id;
-        if (this.state.seen[key] !== message.id && !message.seen) {
-          this.emit(
-            message.tagged && this.preferences().categories.capcom ? "capcom" : "agentMessages",
-            message.text,
-          );
-        }
-      }
     }
     for (const account of this.config.accounts) {
       for (const window of ["5h", "7d"] as const) {
