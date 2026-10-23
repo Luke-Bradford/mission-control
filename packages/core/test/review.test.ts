@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fillLoopText, RATE_LIMIT_RETRY_MS } from "../src/loop.ts";
 import {
+  carriedFrom,
   currentReview,
   FIX_TEXT_MAX,
   failedAttempts,
@@ -16,6 +17,7 @@ import {
   type ReviewFact,
   type ReviewFinding,
   type ReviewRunSnapshot,
+  reviewFor,
   reviewRunStep,
   reviewStatusOf,
 } from "../src/review.ts";
@@ -286,6 +288,33 @@ describe("reviewStatusOf", () => {
     expect(reviewStatusOf(rows, 0, A, B)).toEqual({
       state: "failure",
       description: "QA review found blocking issues",
+    });
+  });
+
+  it("carriedFrom needs the carry to end at sha, and a from that is not waived", () => {
+    expect(carriedFrom({ from: A, to: B }, null, B)).toBe(A);
+    expect(carriedFrom({ from: A, to: B }, undefined, B)).toBe(A);
+    expect(carriedFrom({ from: A, to: B }, A, B)).toBeNull();
+    expect(carriedFrom({ from: A, to: B }, null, A)).toBeNull();
+    expect(carriedFrom({ from: A, to: A }, null, A)).toBeNull();
+    expect(carriedFrom(null, null, B)).toBeNull();
+  });
+
+  it("reviewFor prefers its own row and does not carry a failed one", () => {
+    expect(reviewFor([fact({ state: "reported" })], 0, B, A)?.sha).toBe(A);
+    expect(reviewFor([fact({ state: "reported" }), fact({ id: 2, sha: B })], 0, B, A)?.id).toBe(2);
+    expect(reviewFor([fact({ state: "failed" })], 0, B, A)).toBeNull();
+    expect(reviewFor([fact({ state: "reported" })], 0, B, null)).toBeNull();
+  });
+
+  it("a carried review keeps its verdict and names the reviewed sha", () => {
+    expect(reviewStatusOf([fact({ state: "reported" })], 0, B, null, A)).toEqual({
+      state: "success",
+      description: "QA review passed (carried from aaaaaaa, main merged)",
+    });
+    expect(reviewStatusOf([fact({ state: "reported", blocking: 1 })], 0, B, null, A)).toEqual({
+      state: "failure",
+      description: "QA review found blocking issues (carried from aaaaaaa, main merged)",
     });
   });
 });

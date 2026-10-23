@@ -1,4 +1,4 @@
-import { currentReview, fixKey, type Run } from "@mc/core";
+import { carriedFrom, fixKey, type Run, reviewFor } from "@mc/core";
 import type { Store } from "../store.ts";
 
 /**
@@ -13,7 +13,12 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   if (aside.wake) return true;
   const pushed = store.runPush(run.id);
   if (pushed === null || run.loop === null || run.loop === undefined) return false;
-  const cur = currentReview(store.reviewsOfRun(run.id), run.loop.epoch, pushed.sha);
+  const cur = reviewFor(
+    store.reviewsOfRun(run.id),
+    run.loop.epoch,
+    pushed.sha,
+    carriedFrom(run.loop.carry, run.loop.reviewWaivedSha, pushed.sha),
+  );
   return (
     cur !== null &&
     cur.state === "reported" &&

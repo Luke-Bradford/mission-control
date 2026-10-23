@@ -36,6 +36,7 @@ import {
   type ContextUsage,
   CREW_CLI_ENV,
   CREW_DISABLED,
+  carriedFrom,
   clockHm,
   compactUtc,
   crewCliArgs,
@@ -1509,10 +1510,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw notWanted;
       }
       const issue = issueOf(author);
+      const head = store.runPush(author.id)?.sha ?? null;
       if (
         author.repoId !== info.repo.id ||
         issue === null ||
-        store.runPush(author.id)?.sha !== review.sha
+        (head !== review.sha &&
+          (head === null ||
+            carriedFrom(author.loop?.carry, author.loop?.reviewWaivedSha, head) !== review.sha))
       ) {
         throw notWanted;
       }
