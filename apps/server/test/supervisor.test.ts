@@ -210,6 +210,8 @@ function make(
     nodeNote?: string;
     scratchRetro?: boolean;
     extraSeat?: CrewSeatConfig;
+    /** A second, seatless session "other". */
+    secondSession?: boolean;
     autonomy?: "merge" | "draft";
     claim?: SupervisorDeps["claim"];
     repo?: Partial<CcConfig["repos"][number]>;
@@ -230,6 +232,14 @@ function make(
     if (retro) retro.mode = "scratch";
   }
   if (over.extraSeat) cfg.crew?.sessions[0]?.seats.push(over.extraSeat);
+  if (over.secondSession) {
+    cfg.crew?.sessions.push({
+      id: "other",
+      repoId: "mc",
+      checkout: join(dir, "clone2"),
+      seats: [],
+    });
+  }
   const tokens = over.tokens ?? new RunTokens();
   const lock = over.lock ?? new TestLock();
   const sup = createSupervisor({
@@ -1472,6 +1482,33 @@ describe("the crew lock", () => {
     expect(readFileSync(join(root, CREW_LOCK_FILE), "utf8").trim()).toBe(String(process.pid));
     await sup.stopAll();
     expect(existsSync(join(root, CREW_LOCK_FILE))).toBe(false);
+  });
+
+  it("crew start makes each session's worktree folder, private", () => {
+    const { sup } = make({ secondSession: true });
+    sup.start();
+    for (const id of ["mc-crew", "other"]) {
+      const st = statSync(join(root, id));
+      expect(st.isDirectory()).toBe(true);
+      expect(st.mode & 0o777).toBe(0o700);
+    }
+  });
+
+  const FLAT_NOTE =
+    "crew: 1 worktrees of other sessions are in the old flat layout and stay readable until their runs end";
+
+  it("crew start says once that flat worktrees stay readable, with two sessions", () => {
+    mkdirSync(join(root, "guido-1-42"), { recursive: true });
+    const { sup, log } = make({ secondSession: true });
+    sup.start();
+    expect(log.mock.calls.filter(([m]) => m === FLAT_NOTE)).toHaveLength(1);
+  });
+
+  it("crew start says nothing about flat worktrees with one session", () => {
+    mkdirSync(join(root, "guido-1-42"), { recursive: true });
+    const { sup, log } = make();
+    sup.start();
+    expect(log.mock.calls.some(([m]) => m.includes("old flat layout"))).toBe(false);
   });
 
   it("stays off when another live process holds the lock", async () => {
