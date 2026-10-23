@@ -1,6 +1,7 @@
 import { FLIGHT_NOT_RUNNING } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as markdown from "../src/components/Markdown.tsx";
 import { hub } from "../src/data.ts";
 import * as conversation from "../src/flight/conversation.ts";
 import type { FlightView } from "../src/flight/flightTypes.ts";
@@ -486,13 +487,18 @@ describe("the conversation", () => {
   it("does not rebuild the conversation while the operator types", async () => {
     stubFlight({ seat: flightSeat(), decisions: [] });
     const spy = vi.spyOn(conversation, "dockRows");
+    const md = vi.spyOn(markdown, "Markdown");
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
     const before = spy.mock.calls.length;
+    const mdBefore = md.mock.calls.length;
+    expect(mdBefore).toBeGreaterThan(0); // the spy sees renders at all
     const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
     for (const v of ["a", "ab", "abc"]) fireEvent.change(input, { target: { value: v } });
     expect(input.value).toBe("abc");
     expect(spy.mock.calls.length).toBe(before);
+    expect(md.mock.calls.length).toBe(mdBefore);
+    md.mockRestore();
     spy.mockRestore();
   });
 });
