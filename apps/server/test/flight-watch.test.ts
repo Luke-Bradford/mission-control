@@ -390,7 +390,7 @@ describe("FLIGHT's evidence", () => {
     store.upsertPullRequests("mc", [stored(7, {})], T0);
     review("sha6", "fail", 2, T0, "r-retro", 1);
     review("sha7", "pass", 0, T0 + 1, "r-retro-2", 2);
-    store.requestReview({
+    const failed = store.requestReview({
       authorRunId: "r-guido",
       repoId: "mc",
       seatId: "guido-1",
@@ -401,6 +401,8 @@ describe("FLIGHT's evidence", () => {
       round: 3,
       at: T0 + 2,
     });
+    if (failed === null) throw new Error("review not queued");
+    store.setReviewState(failed, ["queued"], "failed", { at: T0 + 2, failure: "crashed" });
     expect(listed()[0]?.review).toEqual({
       spec: "pass",
       quality: "pass",
