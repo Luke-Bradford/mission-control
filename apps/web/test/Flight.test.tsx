@@ -467,7 +467,7 @@ describe("FLIGHT page", () => {
           [seatRow({ loop: { ...profileLoop, steps, phase: "review", step: "review" } })],
           runLoop([
             aTry("working", 1, "pass"),
-            aTry("review", 1, "fail"),
+            ...(!ownFix ? [aTry("review", 1, "fail")] : []),
             { ...aTry("review", 1, "pass"), fix: true },
           ]),
         );
@@ -477,6 +477,7 @@ describe("FLIGHT page", () => {
         await waitFor(() => expect(cells(list).some((c) => c.text === `${repeated}×2`)).toBe(true));
         expect(cells(list)[ownFix ? 1 : 3]?.title).toBe(`${repeated} · 2 tries`);
         expect(cells(list)[ownFix ? 3 : 1]?.text).toBe(ownFix ? "review" : "implement");
+        expect(cells(list)[ownFix ? 3 : 1]?.title).toBe(ownFix ? "" : "implement · 1 try");
       },
     );
 
@@ -485,11 +486,29 @@ describe("FLIGHT page", () => {
       stubWith([seatRow({ id: "guido-2", loop: profileLoop })]);
       render(<Flight />);
       const list = await screen.findByRole("list", { name: "Crew runs" });
-      const row = within(list).getByRole("link", { name: "Open agent guido-2" });
-      if (action === "click") fireEvent.click(row.querySelector(".num") as HTMLElement);
-      else fireEvent.keyDown(row, { key: "Enter" });
+      const link = within(list).getByRole("link", { name: /^guido-2/ });
+      const row = link.closest(".row") as HTMLElement;
+      expect(row.getAttribute("role")).toBeNull();
+      expect(row.getAttribute("aria-label")).toBeNull();
+      expect(row.hasAttribute("tabindex")).toBe(false);
+      expect(
+        within(row)
+          .getAllByRole("link")
+          .every((el) => el.tagName === "A"),
+      ).toBe(true);
+      expect(row.querySelectorAll(`a[href="${agentPath("guido-2")}"]`)).toHaveLength(1);
+      expect(link.tagName).toBe("A");
+      expect(link.getAttribute("href")).toBe(agentPath("guido-2"));
+      expect(link.getAttribute("aria-label")).toBeNull();
+      link.focus();
+      expect(document.activeElement).toBe(link);
+      if (action === "Enter") {
+        expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(true);
+        // jsdom does not synthesize a native anchor's Enter activation click.
+        fireEvent.click(link, { detail: 0 });
+      } else fireEvent.click(link);
       expect(window.location.pathname).toBe(agentPath("guido-2"));
-      expect(row.tabIndex).toBe(0);
+      expect(link.tabIndex).toBe(0);
     });
 
     it("leaves ticket and PR links to their own destinations", async () => {

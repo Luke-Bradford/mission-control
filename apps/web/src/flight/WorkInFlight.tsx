@@ -1,6 +1,7 @@
 import {
   type Crew,
   type CrewRow,
+  FIX_STEP,
   HUD_STATE_LABEL,
   HUD_STATE_TONE,
   type RunLoopView,
@@ -22,7 +23,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
-import { agentPath, followLink, navigate } from "../router.ts";
+import { agentPath, followLink } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
 
 const DASH = "—";
@@ -45,7 +46,7 @@ function StepCells({ r }: { r: CrewRow }) {
   const loop = r.loop;
   if (!loop) return null;
   const steps = loopSteps(loop);
-  const fixStep = steps.findIndex((s) => s.name === "fix");
+  const fixStep = steps.findIndex((s) => s.name === FIX_STEP);
   const marks = stepMarks(
     loop,
     r.hudState,
@@ -57,6 +58,7 @@ function StepCells({ r }: { r: CrewRow }) {
         const mark = marks[i] as StepMark;
         const label = step.name;
         // Fix tries carry their preceding phase unless the template has a dedicated fix step.
+        // Catalogue §2.2, L218 counts fix tries in ×N; the Agent page doesn't yet.
         const n =
           tries?.filter((t) => (t.fix && fixStep >= 0 ? i === fixStep : t.step === step.phase))
             .length ?? 0;
@@ -85,23 +87,8 @@ function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null })
   const doing = doingLine(r, now, tz, repoPrs);
   return (
     <li>
-      {/* biome-ignore lint/a11y/useSemanticElements: A native anchor cannot contain the ticket and PR links. */}
-      <div
-        className="row"
-        role="link"
-        aria-label={`Open agent ${r.id}`}
-        tabIndex={0}
-        onClick={(e) => {
-          if (!(e.target as Element).closest("a")) followLink(e, to);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && e.target === e.currentTarget) {
-            e.preventDefault();
-            navigate(to);
-          }
-        }}
-      >
-        <a href={to} onClick={(e) => followLink(e, to)}>
+      <div className="row">
+        <a className="agent-link" href={to} onClick={(e) => followLink(e, to)}>
           <AgentTag id={r.id} index={r.index} />
         </a>
         <Pill tone={HUD_STATE_TONE[r.hudState]}>{HUD_STATE_LABEL[r.hudState]}</Pill>
