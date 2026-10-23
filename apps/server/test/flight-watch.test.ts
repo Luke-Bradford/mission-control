@@ -325,7 +325,14 @@ describe("FLIGHT's evidence", () => {
     attempt: 1,
     url: null,
   });
-  const review = (sha: string, spec: "pass" | "fail", findings: number) => {
+  const review = (
+    sha: string,
+    spec: "pass" | "fail",
+    findings: number,
+    at = T0,
+    runId = "r-retro",
+    round = 1,
+  ) => {
     const id = store.requestReview({
       authorRunId: "r-guido",
       repoId: "mc",
@@ -334,12 +341,12 @@ describe("FLIGHT's evidence", () => {
       sha,
       epoch: 0,
       attempt: 1,
-      round: 1,
-      at: T0,
+      round,
+      at,
     });
     if (id === null) throw new Error("review not queued");
-    store.setReviewState(id, ["queued"], "running", { runId: "r-retro", at: T0 });
-    store.recordFindings(id, "r-retro", {
+    store.setReviewState(id, ["queued"], "running", { runId, at });
+    store.recordFindings(id, runId, {
       verdict: { spec, quality: "pass" },
       summary: "s",
       findings: Array.from({ length: findings }, () => ({
@@ -350,7 +357,7 @@ describe("FLIGHT's evidence", () => {
         scenario: "y",
         fix: "z",
       })),
-      at: T0,
+      at,
     });
   };
   const parkedOf = () =>
@@ -376,6 +383,29 @@ describe("FLIGHT's evidence", () => {
       headSha: "sha7",
       failingChecks: ["lint"],
       review: { spec: "fail", quality: "pass", blocking: 2, sha: "sha7" },
+    });
+  });
+
+  it("carries the latest reported review, not an earlier or unreported one", () => {
+    store.upsertPullRequests("mc", [stored(7, {})], T0);
+    review("sha6", "fail", 2, T0, "r-retro", 1);
+    review("sha7", "pass", 0, T0 + 1, "r-retro-2", 2);
+    store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "guido-1",
+      prNumber: 7,
+      sha: "sha8",
+      epoch: 0,
+      attempt: 1,
+      round: 3,
+      at: T0 + 2,
+    });
+    expect(listed()[0]?.review).toEqual({
+      spec: "pass",
+      quality: "pass",
+      blocking: 0,
+      sha: "sha7",
     });
   });
 
