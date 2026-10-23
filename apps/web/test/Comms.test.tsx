@@ -631,7 +631,7 @@ describe("Threads and conversation", () => {
     summary: null,
     ...over,
   });
-  const stubMessages = (activity?: ActivityRow[]) =>
+  const stubMessages = (activity?: ActivityRow[], extra: Record<string, unknown> = {}) =>
     stubFetch({
       "/api/attention": [],
       "/api/crew": {
@@ -641,6 +641,7 @@ describe("Threads and conversation", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       ...(activity ? { "/api/activity": activity } : {}),
+      ...extra,
     });
   const MESSAGES = [
     comms({ at: NOW - MIN, who: "guido-1", to: "retro-1", text: `Draft PR is up ${TAG}` }),
@@ -652,7 +653,7 @@ describe("Threads and conversation", () => {
   it("FLIGHT shows its placeholder; an agent's thread opens its messages", async () => {
     stubMessages(MESSAGES);
     render(<Comms item={null} />);
-    expect((await screen.findAllByText(FLIGHT_NO_SEAT)).length).toBe(1); // the thread row
+    await waitFor(() => expect(screen.getAllByText(FLIGHT_NO_SEAT)).toHaveLength(2));
     expect(document.querySelector("#chatP #chatMsgs")).toBeNull(); // no seat: no chat
     const list = document.querySelector("#chanList") as HTMLElement;
     fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
@@ -680,6 +681,32 @@ describe("Threads and conversation", () => {
     const head = screen.getByRole("heading", { name: /^Thread ·/ });
     expect(head.textContent?.startsWith("Thread · guido-1")).toBe(true);
     screen.getByText("everything guido-1 sent or received: you, FLIGHT and other agents");
+  });
+
+  it("clears the draft when switching agent threads and sends to the selected seat", async () => {
+    const fetch = stubMessages([], { "POST /api/seats/retro-1/message": { ok: true } });
+    render(<Comms item={null} />);
+    const list = document.querySelector("#chanList") as HTMLElement;
+    fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
+    const input = screen.getByLabelText("Message this agent") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Draft for guido" } });
+    expect(input.value).toBe("Draft for guido");
+
+    fireEvent.click(within(list).getByRole("button", { name: /^retro-1/ }));
+    const next = screen.getByLabelText("Message this agent") as HTMLInputElement;
+    expect(next.value).toBe("");
+    fireEvent.change(next, { target: { value: "Message for retro" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/seats/retro-1/message",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ text: "Message for retro" }),
+        }),
+      ),
+    );
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
   it("a thread shows its last message instead of its doing line", async () => {

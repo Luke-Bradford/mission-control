@@ -106,6 +106,7 @@ export function Conversation({ row }: { row: CrewRow | null }) {
       )}
       {row.kind === "crew" && (
         <SeatComposer
+          key={row.id}
           row={row}
           placeholder={
             seatTurn(row) === "running"

@@ -1212,6 +1212,36 @@ main > section {
 .stepbar i.w {
   background: var(--warn-mark);
 }
+/* Work in flight: a cell per step, marked as the step bar is (d done, c current, w held) */
+.wsteps {
+  display: inline-flex;
+  gap: 2px;
+}
+.wstep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--line-2);
+  white-space: nowrap;
+}
+.wstep.d {
+  color: var(--fg-2);
+  border-bottom-color: var(--fg-2);
+}
+.wstep.c {
+  color: var(--fg);
+  border-bottom-color: var(--ok);
+}
+.wstep.w {
+  color: var(--fg);
+  border-bottom-color: var(--warn-mark);
+  background: var(--warn-soft);
+}
 /* Where the ticket column is short (about 1600 and under) the repo chip gives way to the number. */
 @media (min-width: 761px) and (max-width: 1599px) {
   .trow .rchip {
