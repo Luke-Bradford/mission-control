@@ -28,6 +28,7 @@ import {
   flightOwnSeatIds,
   flightSeat,
   flightState,
+  flightWakes,
   markPrsShown,
   pending,
   wakeFacts,
@@ -153,8 +154,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const facts = supervisor.seatFacts(id);
     if (runId == null || facts === null || facts.inTurn) return;
     if (facts.rateLimitedUntil !== null && facts.rateLimitedUntil > t) return;
-    const prefix = `flight:wake:${runId}:`;
-    const n = Object.keys(store.claimedKeys(runId)).filter((k) => k.startsWith(prefix)).length;
+    const n = flightWakes(store, runId);
     if (n >= FLIGHT_MAX_WAKES) {
       rotating = true;
       await supervisor.endRunByEngine(runId);

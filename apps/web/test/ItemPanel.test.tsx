@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { FLIGHT_NO_SEAT, FLIGHT_STOPPED } from "../src/flight/flightTypes.ts";
+import type { PersonThreadView } from "../src/notifications.ts";
 import { navigate } from "../src/router.ts";
 import { Dock } from "../src/shell/Dock.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
@@ -10,6 +11,37 @@ import { installKeys } from "../src/shell/keys.ts";
 import { closeItem, openItem, syncItem, toggleDock, useItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, CONFIG, crewRow, escalation, HOUR, item, NOW, SEAT_Q } from "./fixtures.ts";
+
+const KEY = `person:101:${NOW - HOUR}`;
+const N = 12;
+const URL = `${"https://github.com"}/octo-org/shop-app/issues/${N}`;
+const thread = (over: Partial<PersonThreadView> = {}): PersonThreadView => ({
+  key: KEY,
+  id: "101",
+  repoId: "shop-app",
+  github: "octo-org/shop-app",
+  subjectType: "Issue",
+  number: N,
+  title: "Fix the stop race",
+  reason: "mention",
+  reasonText: "mentioned you",
+  author: "alice",
+  snippet: "can you look?",
+  url: URL,
+  updatedAt: NOW - HOUR,
+  firstSeenAt: NOW - HOUR,
+  catchUp: "new",
+  ...over,
+});
+const personItem = item({
+  key: KEY,
+  kind: "person",
+  agentId: null,
+  escalationId: null,
+  ticket: null,
+  url: URL,
+  text: "alice mentioned you: Fix the stop race",
+});
 
 const QUESTION: AutonomyQuestion = {
   question: "Which eviction policy should the quote cache use?",
@@ -804,5 +836,47 @@ describe("the item URL", () => {
       });
       await waitFor(() => expect(document.querySelector("#discuss")).toBeTruthy());
     });
+  });
+});
+
+describe("ItemPanel, person variant", () => {
+  const openPerson = (post: unknown) => {
+    const fn = stubFetch({
+      "/api/attention": [personItem],
+      "/api/escalations": [],
+      "/api/crew": { rows: [crewRow({ id: "shop-app-ta", index: 2 })], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/notifications": { open: [thread()], handledToday: [] },
+      [`POST /api/attention/${encodeURIComponent(KEY)}/handled`]: post,
+    });
+    render(<ItemPanel />);
+    act(() => openItem(KEY));
+    return fn;
+  };
+
+  it("Mark handled posts to the handled route and closes the panel", async () => {
+    const fn = openPerson({ handled: KEY });
+    await screen.findByText("The message");
+    expect(screen.getByText("Asked of you")).toBeTruthy();
+    expect(screen.getByText("alice")).toBeTruthy();
+    expect(screen.getByText("Catch-up")).toBeTruthy();
+    expect(screen.getByText("can you look?")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open in GitHub ↗" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Mark handled" }));
+    await waitFor(() =>
+      expect(fn).toHaveBeenCalledWith(
+        `/api/attention/${encodeURIComponent(KEY)}/handled`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(document.querySelector("#discuss")).toBeNull());
+  });
+
+  it("a refused Mark handled shows the server's error in the panel", async () => {
+    openPerson(() => ({ status: 404, body: { error: "no such open thread" } }));
+    await screen.findByText("The message");
+    fireEvent.click(screen.getByRole("button", { name: "Mark handled" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("no such open thread");
+    expect(document.querySelector("#discuss")).not.toBeNull();
   });
 });

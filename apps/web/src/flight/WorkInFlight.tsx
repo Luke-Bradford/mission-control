@@ -1,6 +1,22 @@
-import { type Crew, type CrewRow, HUD_STATE_LABEL, HUD_STATE_TONE } from "@mc/core";
+import {
+  type Crew,
+  type CrewRow,
+  HUD_STATE_LABEL,
+  HUD_STATE_TONE,
+  type RunLoopView,
+} from "@mc/core";
+import { heldStep, stepTries } from "../agent/loopView.ts";
 import { useSecond, useTz } from "../clock.ts";
-import { doingLine, hasActiveRun, isLoopInFlight, LOOP_PHASE_LABEL, runElapsed } from "../crew.ts";
+import {
+  doingLine,
+  hasActiveRun,
+  isLoopInFlight,
+  LOOP_PATH,
+  LOOP_PHASE_LABEL,
+  loopMarks,
+  runElapsed,
+  type StepMark,
+} from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { dur } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -12,6 +28,49 @@ import { inSession, useSession } from "../shell/session.ts";
 
 const DASH = "—";
 export const NO_CREW_RUNS = "No crew runs. Start a seat from a ticket on the Board.";
+
+/** The step bar's classes (hud.css): done, current and held. */
+const MARK_CLASS: Record<StepMark, string | undefined> = {
+  done: "d",
+  cur: "c",
+  held: "w",
+  todo: undefined,
+};
+
+/**
+ * A run's loop step by step, as the Agent page's stepper has it: a cell per step with its name,
+ * "×N" from the second try. The counts come from the run's tries and wait until they load.
+ */
+function StepCells({ r }: { r: CrewRow }) {
+  const tries = useResource<RunLoopView>(r.run ? RESOURCES.runLoop(r.run.id) : null).data?.tries;
+  const loop = r.loop;
+  if (!loop) return null;
+  const marks = loopMarks(
+    loop,
+    r.hudState,
+    loop.phase === "parked" ? (heldStep(tries ?? []) ?? undefined) : undefined,
+  );
+  return (
+    <span className="wsteps">
+      {LOOP_PATH.map((step, i) => {
+        const mark = marks[i] as StepMark;
+        const label = LOOP_PHASE_LABEL[step];
+        const n = tries ? stepTries(tries, step).filter((t) => !t.fix).length : 0;
+        return (
+          <span
+            key={step}
+            className={["wstep", MARK_CLASS[mark]].filter(Boolean).join(" ")}
+            title={n > 0 ? `${label} · ${n} ${n === 1 ? "try" : "tries"}` : undefined}
+            aria-current={mark === "cur" || mark === "held" ? "step" : undefined}
+          >
+            {label}
+            {n > 1 && <span className="titer">×{n}</span>}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 /** One row of Work in flight; its doing line is the Overview's, with the whole line as hover text. */
 function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null }) {
@@ -26,15 +85,12 @@ function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null })
       </a>
       <Pill tone={HUD_STATE_TONE[r.hudState]}>{HUD_STATE_LABEL[r.hudState]}</Pill>
       {r.ticket && <TicketRef ticket={r.ticket} />}
-      {r.loop && (
-        <span
-          className={["s", "loopphase", r.loop.phase === "parked" ? "crit-t" : ""]
-            .filter(Boolean)
-            .join(" ")}
-        >
-          {LOOP_PHASE_LABEL[r.loop.phase]}
+      {r.ticketTitle && (
+        <span className="s min0 ellip" title={r.ticketTitle}>
+          {r.ticketTitle}
         </span>
       )}
+      <StepCells r={r} />
       {r.loop?.prNumber != null && (
         <RepoRef repoId={r.repoId} number={r.loop.prNumber} kind="pr" bare />
       )}
@@ -48,8 +104,9 @@ function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null })
 }
 
 /**
- * Work in flight (catalogue §2.2): one row per crew seat with an active run, and one per run in a
- * loop that is not done (its phase and PR beside the ticket). Observed loops are not listed here.
+ * Work in flight (catalogue §2.2): one row per crew seat with an active run and a ticket, and one
+ * per run in a loop that is not done (its steps and PR beside the ticket). Observed loops are not
+ * listed here.
  */
 export function WorkInFlight() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -58,7 +115,10 @@ export function WorkInFlight() {
   const [session] = useSession();
   const active = (crew?.rows ?? []).filter(
     (r) =>
-      r.kind === "crew" && (hasActiveRun(r) || isLoopInFlight(r)) && inSession(session, r.repoId),
+      r.kind === "crew" &&
+      r.ticket !== null &&
+      (hasActiveRun(r) || isLoopInFlight(r)) &&
+      inSession(session, r.repoId),
   );
   if (active.length === 0) return <p className="pb note">{crew ? NO_CREW_RUNS : DASH}</p>;
   return (

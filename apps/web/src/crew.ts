@@ -343,8 +343,11 @@ export function contextPct(row: CrewRow): number | null {
 
 export interface NeedPart {
   text: string;
-  /** The button the line carries: Answer or Open (both open the Item panel), or none. */
-  action: "answer" | "open" | null;
+  /**
+   * The button the line carries: Answer or Open (both open the Item panel), Interrupt or Stop the
+   * run (both stop the seat's turn), or none.
+   */
+  action: "answer" | "open" | "interrupt" | "stop" | null;
   key: string;
 }
 
@@ -352,16 +355,28 @@ const ASKS = ["decision", "approval", "question"] as const;
 
 /**
  * The need line under an agent row (catalogue 2.1.2, the parts that exist): its stall (age from
- * the item's `at`), a parked escalation, asks for an answer, and the loop's own error.
+ * the item's `at`; a crew seat's carries Interrupt, or Stop the run while it holds the test lock),
+ * a parked escalation, asks for an answer, and the loop's own error.
  */
-export function needLine(row: CrewRow, items: AttentionItem[], now: number): NeedPart[] {
+export function needLine(
+  row: CrewRow,
+  items: AttentionItem[],
+  now: number,
+  lock?: TestLockState,
+): NeedPart[] {
   const mine = seatItems(row, items);
   const parts: NeedPart[] = [];
   const stall = mine.find((i) => i.kind === "stalled");
   if (stall) {
+    const age = mss(now - stall.at);
+    const holding = lock?.holder?.seatId === row.id;
+    const waiting = new Set((lock?.waiting ?? []).map((w) => w.seatId)).size;
     parts.push({
-      text: `Stalled ${mss(now - stall.at)}${stall.tool ? ` in ${stall.tool}` : ""}`,
-      action: null,
+      text: holding
+        ? `Stalled ${age} and holding the test lock${waiting > 0 ? `; ${waiting} waiting` : ""}`
+        : `Stalled ${age}${stall.tool ? ` in ${stall.tool}` : ""}`,
+      // an observed loop is not ours to stop
+      action: row.kind !== "crew" ? null : holding ? "stop" : "interrupt",
       key: stall.key,
     });
   }
@@ -557,6 +572,46 @@ export function loopMarks(loop: CrewLoop, hudState: HudState, heldAt?: LoopPhase
   const held = LOOP_HELD_STATES.includes(hudState);
   return LOOP_PATH.map((_, i) => (i < at ? "done" : i === at ? (held ? "held" : "cur") : "todo"));
 }
+
+/** A profile step on screen, or a build-loop phase standing as one. */
+export interface ShownStep {
+  name: string;
+  phase: Exclude<LoopPhase, "parked"> | null;
+}
+/** The profile step that a landed plan marks done. */
+export const PLAN_STEP = "plan";
+/** The profile step that an open PR marks done. */
+export const DRAFT_PR_STEP = "draft PR";
+
+/** The run's profile steps, else the build loop's path labelled by phase. */
+export function loopSteps(loop: CrewLoop): ShownStep[] {
+  return loop.steps?.length
+    ? loop.steps.map(({ name, phase }) => ({ name, phase }))
+    : LOOP_PATH.map((phase) => ({ name: LOOP_PHASE_LABEL[phase], phase }));
+}
+
+/** One mark per shown step, using phase progress and evidence for steps without a phase. */
+export function stepMarks(loop: CrewLoop, hudState: HudState, heldAt?: LoopPhase): StepMark[] {
+  const base = loopMarks(loop, hudState, heldAt);
+  const phaseMark = (phase: Exclude<LoopPhase, "parked">): StepMark | undefined =>
+    base[LOOP_PATH.indexOf(phase)];
+  const steps = loopSteps(loop);
+  return steps.map((step) => {
+    const mark = step.phase === null ? undefined : phaseMark(step.phase);
+    if (mark !== undefined) return mark;
+    if (step.name === PLAN_STEP) return loop.planned === true ? "done" : "todo";
+    if (step.name === DRAFT_PR_STEP) {
+      return loop.prNumber !== null ? "done" : "todo";
+    }
+    return "todo";
+  });
+}
+
+/** The step bar's tooltip: the shown step names joined by " → ". */
+export const loopPathTitle = (loop: CrewLoop): string =>
+  loopSteps(loop)
+    .map((s) => s.name)
+    .join(" → ");
 
 /** A row whose run is in a loop that has not finished: it belongs in Work in flight. */
 export const isLoopInFlight = (row: Pick<CrewRow, "loop" | "run">): boolean =>

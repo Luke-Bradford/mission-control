@@ -1,9 +1,10 @@
 import type { AttentionItem, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { ackKeys } from "../ack.ts";
+import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
+import { NeedButton } from "../components/NeedButton.tsx";
 import { needLine, seatItems } from "../crew.ts";
-import { openItem } from "../shell/overlays.ts";
 
 /**
  * When the agent has needs (catalogue 2.4.2): `{id} needs you.`, the Overview's need line, and Ack
@@ -20,7 +21,7 @@ export function NeedBanner({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const parts = needLine(row, items, now);
+  const parts = needLine(row, items, now, useTestLock());
   const unacked = seatItems(row, items)
     .filter((i) => !i.acked)
     .map((i) => i.key);
@@ -43,18 +44,7 @@ export function NeedBanner({
               <span>
                 <MarkdownInline text={p.text} />
               </span>
-              {p.action !== null && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    className={p.action === "answer" ? "sm primary" : "sm"}
-                    onClick={() => openItem(p.key)}
-                  >
-                    {p.action === "answer" ? "Answer" : "Open"}
-                  </button>
-                </>
-              )}
+              <NeedButton part={p} row={row} />
             </span>
           ))}
           {unacked.length > 0 && (

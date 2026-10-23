@@ -16,7 +16,7 @@ import {
 } from "../src/shell/overlays.ts";
 import { DOCK_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { brief, CONFIG, HOUR, item, NOW } from "./fixtures.ts";
+import { brief, CONFIG, crewRow, HOUR, item, NOW } from "./fixtures.ts";
 
 const noop = () => {};
 let off: () => void;
@@ -234,6 +234,7 @@ const flightSeat = (over: Partial<NonNullable<FlightView["seat"]>> = {}) => ({
   model: "opus",
   state: "idle" as const,
   live: true,
+  turns: null,
   ...over,
 });
 const STREAM = {
@@ -281,6 +282,53 @@ const bodyOf = (fn: ReturnType<typeof stubFetch>, path: string) => {
 };
 
 describe("live FLIGHT", () => {
+  it("shows the account, model, turns, context and state in its meta line", async () => {
+    stubFlight(
+      { seat: flightSeat({ turns: { n: 4, max: 41 } }), decisions: [] },
+      {
+        "/api/crew": {
+          rows: [
+            crewRow({ id: "other", accountId: "other-account" }),
+            crewRow({
+              id: "flight-1",
+              accountId: "claude-main",
+              contextWindow: 200_000,
+              digest: {
+                toolCalls: 0,
+                turns: 4,
+                lastEventAt: NOW,
+                model: null,
+                contextTokens: 50_000,
+                contextWindow: null,
+                liveTool: null,
+                tools: {},
+                subagents: [],
+                minuteTokens: [],
+                turnUsage: [],
+                background: [],
+                compactions: 0,
+              },
+            }),
+          ],
+        },
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() =>
+      expect(container.querySelector(".meta")?.textContent).toBe(
+        "claude-main · opus · turn 4 of 41, then a fresh session · context 25% · waiting for a wake",
+      ),
+    );
+  });
+
+  it("omits missing turns, account and context without empty separators", async () => {
+    stubFlight({ seat: flightSeat(), decisions: [] });
+    const { container } = render(<Dock />);
+    await waitFor(() =>
+      expect(container.querySelector(".meta")?.textContent).toBe("opus · waiting for a wake"),
+    );
+  });
+
   it("the dock shows no decisions and no wake lines, and has no tabs", async () => {
     stubFlight({ seat: flightSeat(), decisions: [DECISION as FlightView["decisions"][number]] });
     const { container } = render(<Dock />);
@@ -297,9 +345,7 @@ describe("live FLIGHT", () => {
     );
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
-    expect(container.querySelector(".meta")?.textContent).toBe(
-      "FLIGHT-1 · opus · waiting for a wake",
-    );
+    expect(container.querySelector(".meta")?.textContent).toBe("opus · waiting for a wake");
     const rows = [...container.querySelectorAll(".dmsg")];
     expect(rows.map((r) => r.className)).toEqual(["dmsg you", "dmsg flight", "dmsg flight"]);
     expect(rows[0]?.querySelector(".txt")?.textContent).toBe("<b>hi</b> FLIGHT");
@@ -400,7 +446,7 @@ describe("stopped FLIGHT", () => {
     const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
     await waitFor(() => expect(input.placeholder).toBe("FLIGHT is stopped"));
     expect(input.disabled).toBe(true);
-    expect(container.querySelector(".meta")?.textContent).toBe("FLIGHT-1 · opus · stopped");
+    expect(container.querySelector(".meta")?.textContent).toBe("opus · stopped");
     fireEvent.click(screen.getByRole("button", { name: "Start FLIGHT" }));
     await waitFor(() => expect(bodyOf(fn, "/api/seats/flight-1/start")).toEqual({}));
   });

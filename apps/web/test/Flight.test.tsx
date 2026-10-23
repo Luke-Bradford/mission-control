@@ -11,9 +11,11 @@ import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
-import { incomingCards, NO_INCOMING } from "../src/flight/Incoming.tsx";
+import { incomingCards, incomingThreads, NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
+import { rel } from "../src/fmt.ts";
+import { type PersonThreadView, whereOf } from "../src/notifications.ts";
 import { DRAFTS_NOT_TRACKED, Flight } from "../src/pages/Flight.tsx";
 import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
@@ -33,6 +35,37 @@ import {
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
+
+const KEY = `person:101:${NOW - HOUR}`;
+const N = 12;
+const URL = `${"https://github.com"}/octo-org/shop-app/issues/${N}`;
+const thread = (over: Partial<PersonThreadView> = {}): PersonThreadView => ({
+  key: KEY,
+  id: "101",
+  repoId: "shop-app",
+  github: "octo-org/shop-app",
+  subjectType: "Issue",
+  number: N,
+  title: "Fix the stop race",
+  reason: "mention",
+  reasonText: "mentioned you",
+  author: "alice",
+  snippet: "can you look?",
+  url: URL,
+  updatedAt: NOW - HOUR,
+  firstSeenAt: NOW - HOUR,
+  catchUp: "new",
+  ...over,
+});
+const personItem = item({
+  key: KEY,
+  kind: "person",
+  agentId: null,
+  escalationId: null,
+  ticket: null,
+  url: URL,
+  text: "alice mentioned you: Fix the stop race",
+});
 
 const board = [
   boardItem({ issueNumber: 1, status: "In progress", state: "in progress" }),
@@ -263,7 +296,8 @@ describe("FLIGHT page", () => {
     });
     render(<Flight />);
     const list = await screen.findByRole("list", { name: "Crew runs" });
-    const doing = list.querySelector("li .ellip") as HTMLElement;
+    // the ticket's title is an ellipsised span too: the doing line is the grey one
+    const doing = list.querySelector("li .ellip.fg2") as HTMLElement;
     const line = "Draft PR #166 · Backfill the quote cache";
     await waitFor(() => expect(doing.textContent).toBe(line));
     expect(doing.title).toBe(line);
@@ -334,7 +368,7 @@ describe("FLIGHT page", () => {
     expect(list.querySelectorAll("li")).toHaveLength(1);
     expect(list.textContent).toContain("Blocked");
     expect(list.textContent).not.toContain("PR #");
-    expect(list.querySelector(".crit-t")).not.toBeNull();
+    expect(list.querySelector(".wsteps .w")).not.toBeNull();
   });
 
   it("Work in flight leaves out a looped run whose loop is done", async () => {
@@ -350,21 +384,105 @@ describe("FLIGHT page", () => {
     expect(await screen.findByText(NO_CREW_RUNS)).toBeTruthy();
   });
 
-  it("Work in flight names the phase on its own span, apart from the state pill", async () => {
-    const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
-    stubFetch({
-      "/api/crew": {
-        rows: [seatRow({ hudState: "blocked", ticket: "shop-app#5", loop })],
-        firstRunToday: null,
-      },
-      "/api/config": CONFIG,
+  describe("Work in flight's step cells", () => {
+    const aTry = (step: "working" | "ci" | "review", n: number, outcome: "pass" | "fail") => ({
+      step,
+      fix: false,
+      n,
+      startedAt: NOW - 30 * MIN,
+      endedAt: NOW - 20 * MIN,
+      outcome,
+      reason: outcome === "fail" ? "lint" : null,
     });
-    render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
-    const phase = list.querySelector(".loopphase") as HTMLElement;
-    expect(phase.textContent).toBe("CI");
-    expect(phase.className).not.toContain("crit-t");
-    expect(phase.className).toBe(phase.className.trim());
+    const runLoop = (tries: unknown[]) => ({
+      "/api/runs/r-12/loop": {
+        runId: "r-12",
+        loop: null,
+        events: [],
+        tries,
+        round: null,
+        budget: null,
+        review: null,
+      },
+    });
+    const stubWith = (rows: unknown[], extra: Record<string, unknown> = {}) =>
+      stubFetch({
+        "/api/crew": { rows, firstRunToday: null },
+        "/api/config": CONFIG,
+        ...extra,
+      });
+    const cells = (list: HTMLElement) =>
+      [...list.querySelectorAll<HTMLElement>(".wsteps .wstep")].map((c) => ({
+        text: c.textContent,
+        cls: c.className.replace("wstep", "").trim(),
+        title: c.title,
+      }));
+
+    it("a run in review after two CI tries: Working and CI done, In review current, Done to do", async () => {
+      const loop = {
+        phase: "review" as const,
+        text: "In review · PR #9",
+        prNumber: 9,
+        parked: null,
+      };
+      stubWith(
+        [seatRow({ hudState: "idle", ticket: "shop-app#5", ticketTitle: "Stop the race", loop })],
+        runLoop([aTry("working", 1, "pass"), aTry("ci", 1, "fail"), aTry("ci", 2, "pass")]),
+      );
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      await waitFor(() => expect(cells(list)[1]?.text).toBe("CI×2"));
+      expect(cells(list)).toEqual([
+        { text: "Working", cls: "d", title: "Working · 1 try" },
+        { text: "CI×2", cls: "d", title: "CI · 2 tries" },
+        { text: "In review", cls: "c", title: "" },
+        { text: "Done", cls: "", title: "" },
+      ]);
+      expect(list.textContent).toContain("Stop the race");
+      expect(list.querySelector('a[href$="/pull/9"]')).not.toBeNull();
+    });
+
+    it("shows the marks without counts until the run's tries load", async () => {
+      const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
+      stubWith([seatRow({ hudState: "running", ticket: "shop-app#5", loop })]);
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      expect(cells(list)).toEqual([
+        { text: "Working", cls: "d", title: "" },
+        { text: "CI", cls: "c", title: "" },
+        { text: "In review", cls: "", title: "" },
+        { text: "Done", cls: "", title: "" },
+      ]);
+    });
+
+    it("a parked run marks the step it was held at amber", async () => {
+      const parked = {
+        phase: "parked" as const,
+        text: "Blocked: CI failed 3 times",
+        prNumber: null,
+        parked: "CI failed 3 times",
+      };
+      stubWith(
+        [seatRow({ hudState: "blocked", ticket: "shop-app#5", loop: parked })],
+        runLoop([aTry("working", 1, "pass"), aTry("ci", 1, "fail")]),
+      );
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      await waitFor(() => expect(cells(list)[1]?.cls).toBe("w"));
+      expect(cells(list).map((c) => c.cls)).toEqual(["d", "w", "", ""]);
+    });
+
+    it("leaves out a row with no ticket, such as FLIGHT's seat", async () => {
+      const loop = { phase: "working" as const, text: "Working", prNumber: null, parked: null };
+      stubWith([
+        seatRow({ id: "flight-1", ticket: null, ticketTitle: null, hudState: "running", loop }),
+        seatRow({ hudState: "running", ticket: "shop-app#5", loop }),
+      ]);
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      expect(list.querySelectorAll("li")).toHaveLength(1);
+      expect(list.textContent).not.toContain("flight-1");
+    });
   });
 
   it("Work in flight lists a seat with an active run and a loop once; a done loop with an active run stays", async () => {
@@ -740,6 +858,111 @@ describe("FLIGHT's brief", () => {
     expect(rows[1]?.textContent).not.toContain("FLIGHT's take:");
     fireEvent.click(within(rows[0] as HTMLElement).getByRole("button", { name: "Open" }));
     expect(screen.getByTestId("item").textContent).toBe("a");
+  });
+
+  it("Asked of you shows a person card for each open GitHub thread, with FLIGHT's take when briefed", async () => {
+    function Probe() {
+      return <span data-testid="item">{useItem() ?? "none"}</span>;
+    }
+    const t2 = thread({
+      key: "person:202:1",
+      id: "202",
+      author: null,
+      number: 7,
+      catchUp: "follow-up",
+    });
+    stubFetch({
+      "/api/attention": [
+        { ...personItem, brief: brief({ recommendation: "Reply that the fix is in review." }) },
+      ],
+      "/api/notifications": { open: [thread(), t2], handledToday: [] },
+      "/api/config": CONFIG,
+    });
+    render(
+      <>
+        <Probe />
+        <Flight />
+      </>,
+    );
+    const cards = await screen.findAllByTestId("person-card");
+    expect(cards).toHaveLength(2);
+    const first = cards[0]?.textContent ?? "";
+    for (const part of [
+      "alice",
+      whereOf(thread()),
+      rel(NOW - HOUR, NOW, "Europe/London"),
+      "New",
+      "mentioned you: Fix the stop race",
+      "can you look?",
+      "FLIGHT'S TAKE",
+      "Reply that the fix is in review.",
+    ])
+      expect(first).toContain(part);
+    expect(
+      within(cards[0] as HTMLElement)
+        .getByRole("link", { name: "Open in GitHub ↗" })
+        .getAttribute("href"),
+    ).toBe(URL);
+    const second = cards[1]?.textContent ?? "";
+    expect(second).toContain("Someone");
+    expect(second).toContain(whereOf(t2));
+    expect(second).toContain("Follow-up");
+    expect(second).not.toContain("FLIGHT'S TAKE");
+    expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
+    fireEvent.click(
+      within(cards[0] as HTMLElement).getByRole("button", { name: "Read the brief and reply" }),
+    );
+    expect(screen.getByTestId("item").textContent).toBe(KEY);
+  });
+
+  it("the Handled today footer lists each handled thread with its how", async () => {
+    const h = {
+      id: "9",
+      repoId: "shop-app",
+      number: 3,
+      title: "t",
+      author: "bob",
+      how: "marked handled",
+      at: NOW - MIN,
+      firstSeenAt: NOW - HOUR,
+    };
+    stubFetch({
+      "/api/attention": [],
+      "/api/config": CONFIG,
+      "/api/notifications": {
+        open: [],
+        handledToday: [h, { ...h, id: "8", author: null, how: "read on GitHub" }],
+      },
+    });
+    const { container } = render(<Flight />);
+    expect((await screen.findByTestId("handled-today")).textContent).toBe(
+      "Handled today: bob (marked handled) · Someone (read on GitHub)",
+    );
+    expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING);
+  });
+
+  it("Incoming lists a GitHub thread as Asked of you, merged newest first with the board", async () => {
+    const old = thread({ key: "person:303:1", id: "303", updatedAt: NOW - 30 * HOUR });
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": [
+        boardItem({ issueNumber: 10, status: "Backlog", createdAt: NOW - 2 * HOUR }),
+      ],
+      "/api/boards/site-builder": [],
+      "/api/flight/brief": briefView(),
+      "/api/config": CONFIG,
+      "/api/notifications": { open: [thread(), old], handledToday: [] },
+    });
+    render(<Flight />);
+    const rows = await screen.findAllByTestId("incoming-row");
+    expect(rows).toHaveLength(2);
+    const first = rows[0]?.textContent ?? "";
+    expect(first).toContain("GitHub");
+    expect(first).toContain("Asked of you");
+    expect(first).toContain(`#${N}`);
+    expect(first).toContain("alice mentioned you: Fix the stop race");
+    expect(rows[1]?.textContent).toContain("#10");
+    expect(incomingThreads([thread(), old], NOW).map((t) => t.id)).toEqual(["101"]);
   });
 
   it("Asked of you says nobody is waiting with no items", async () => {

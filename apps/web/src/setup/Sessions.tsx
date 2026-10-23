@@ -371,11 +371,11 @@ function CrewSession({
         </div>
         {folders?.readable === false && <p className="muted s">{FOLDERS_UNREADABLE}</p>}
         {folders && folders.folders.length > 0 && (
-          <ul className="tiles" aria-label={`Folders of s/${session.id}`}>
+          <ul className="tiles wrap" aria-label={`Folders of s/${session.id}`}>
             {folders.folders.map((f) => {
               const inner = (
                 <>
-                  <span className="tile-vis" aria-hidden="true">
+                  <span className="tile-vis wrap" aria-hidden="true">
                     {f.owners.length > 0 ? (
                       f.owners.map((id, i) => (
                         <Fragment key={id}>

@@ -1,4 +1,5 @@
 import type { AttentionItem, CrewLoop, CrewRow, DriverStop, HudState } from "@mc/core";
+import { DEFAULT_PROFILES, profileStep } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   contextPct,
@@ -12,6 +13,7 @@ import {
   loopLine,
   loopMarks,
   loopStepLabel,
+  loopSteps,
   loopTemplate,
   loopTryText,
   modelLine,
@@ -22,12 +24,22 @@ import {
   seatItems,
   seatStatus,
   sparkValues,
+  stepMarks,
   stopLine,
   tokensPerMinute,
   WAIT_TEXT,
   waitText,
 } from "../src/crew.ts";
-import { crewRow, item as fixtureItem, HOUR, item, MIN, NOW, stoppedSeat } from "./fixtures.ts";
+import {
+  crewRow,
+  item as fixtureItem,
+  HOUR,
+  item,
+  MIN,
+  NOW,
+  seatRow,
+  stoppedSeat,
+} from "./fixtures.ts";
 
 const ids = (rows: CrewRow[]) => rows.map((r) => r.id);
 
@@ -402,6 +414,48 @@ describe("needLine", () => {
     expect(needLine(row, [{ ...i, tool: null }], NOW)[0]?.text).toBe("Stalled 2:05");
   });
 
+  describe("a stalled crew seat", () => {
+    const seat = seatRow({ id: "guido-1", hudState: "stalled" });
+    const stall = fixtureItem({
+      key: "stall:guido-1:r",
+      agentId: "guido-1",
+      kind: "stalled",
+      ticket: seat.ticket,
+      at: NOW - 11 * MIN,
+      tool: "Bash",
+    });
+    const lock = (holder: string, waiting: string[]) => ({
+      holder: { runId: "r-1", seatId: holder, command: "pnpm -s test", since: NOW - 12 * MIN },
+      waiting: waiting.map((seatId, i) => ({ runId: `w-${i}`, seatId, since: NOW - MIN })),
+    });
+
+    it("holding the test lock reads Stop the run, with the seats waiting", () => {
+      const l = lock("guido-1", ["inco-1", "retro-1", "inco-1"]);
+      expect(needLine(seat, [stall], NOW, l)).toEqual([
+        {
+          text: "Stalled 11:00 and holding the test lock; 2 waiting",
+          action: "stop",
+          key: "stall:guido-1:r",
+        },
+      ]);
+    });
+
+    it("drops the waiting count when nobody waits", () => {
+      expect(needLine(seat, [stall], NOW, lock("guido-1", []))[0]?.text).toBe(
+        "Stalled 11:00 and holding the test lock",
+      );
+    });
+
+    it("holding nothing reads the tool, with Interrupt", () => {
+      const other = lock("retro-1", ["guido-1"]);
+      for (const l of [other, undefined]) {
+        expect(needLine(seat, [stall], NOW, l)).toEqual([
+          { text: "Stalled 11:00 in Bash", action: "interrupt", key: "stall:guido-1:r" },
+        ]);
+      }
+    });
+  });
+
   it("parked opens the item; asks answer it", () => {
     const p = item({ key: "p", agentId: "a", kind: "parked", text: "Blocked on a rebase" });
     const d = item({ key: "d", agentId: "a", kind: "decision" });
@@ -576,6 +630,99 @@ describe("loopMarks", () => {
 
   it("the step bar's tooltip is the path", () => {
     expect(LOOP_PATH_TITLE).toBe("Working → CI → In review → Done");
+  });
+});
+
+describe("stepMarks", () => {
+  const feature = DEFAULT_PROFILES.find((p) => p.name === "feature");
+  const loop: CrewLoop = {
+    phase: "working",
+    text: "Working",
+    prNumber: null,
+    parked: null,
+    steps: feature?.steps,
+  };
+
+  it("a run with a plan event shows plan done", () => {
+    expect(stepMarks({ ...loop, planned: true }, "running")).toEqual([
+      "done",
+      "todo",
+      "cur",
+      "todo",
+      "todo",
+      "todo",
+    ]);
+    expect(stepMarks({ ...loop, planned: false }, "running")).toEqual([
+      "todo",
+      "todo",
+      "cur",
+      "todo",
+      "todo",
+      "todo",
+    ]);
+  });
+
+  it("parked without a known held phase completes unphased steps only from run evidence", () => {
+    const parked: CrewLoop = { ...loop, phase: "parked" };
+    expect(stepMarks(parked, "parked")).toEqual(["todo", "todo", "held", "held", "held", "todo"]);
+    expect(stepMarks({ ...parked, planned: true, prNumber: 9 }, "parked")).toEqual([
+      "done",
+      "todo",
+      "held",
+      "held",
+      "held",
+      "done",
+    ]);
+    expect(stepMarks({ ...parked, phase: "done" }, "idle")).toEqual([
+      "todo",
+      "todo",
+      "done",
+      "done",
+      "done",
+      "todo",
+    ]);
+  });
+
+  it("unknown profile phases use run evidence or todo without completing earlier steps", () => {
+    const unknown = "unknown" as NonNullable<CrewLoop["steps"]>[number]["phase"];
+    const current: CrewLoop = {
+      ...loop,
+      steps: [
+        { name: "go/no-go", phase: null },
+        { name: "custom", phase: unknown },
+        { name: "plan", phase: unknown },
+        { name: "draft PR", phase: unknown },
+      ],
+    };
+    expect(stepMarks(current, "running")).toEqual(["todo", "todo", "todo", "todo"]);
+    expect(stepMarks({ ...current, planned: true, prNumber: 9 }, "running")).toEqual([
+      "todo",
+      "todo",
+      "done",
+      "done",
+    ]);
+  });
+
+  it("without profile steps it is loopMarks", () => {
+    const fallback = { ...loop, phase: "ci" as const, steps: undefined };
+    expect(stepMarks(fallback, "idle")).toEqual(["done", "cur", "todo", "todo"]);
+    expect(loopSteps(fallback).map((s) => s.name)).toEqual(["Working", "CI", "In review", "Done"]);
+  });
+
+  it("draft PR is done once a PR is open", () => {
+    expect(stepMarks({ ...loop, phase: "review", prNumber: 9 }, "running").at(-1)).toBe("done");
+  });
+
+  it("Overview and the Agent page name the same current step", () => {
+    for (const profile of DEFAULT_PROFILES) {
+      for (const phase of ["working", "ci", "review"] as const) {
+        const step = profileStep(profile, phase);
+        if (step === null) continue;
+        const current = { ...loop, phase, steps: profile.steps, step };
+        const index = stepMarks(current, "running").indexOf("cur");
+        expect(loopSteps(current)[index]?.name).toBe(loopStepLabel(current));
+      }
+    }
   });
 });
 

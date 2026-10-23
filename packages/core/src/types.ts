@@ -1,6 +1,6 @@
 import type { Owner, Stage } from "./board.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
-import type { RunProfile } from "./profiles.ts";
+import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { ReviewStatus } from "./review.ts";
 import type { CrewMode, CrewRole, SeatState } from "./runtime.ts";
 
@@ -421,6 +421,17 @@ export interface RunDigest {
   background: { taskId: string; description: string; type: string }[];
   /** Top-level `compact_boundary` lines seen; a digest persisted before this field reads 0. */
   compactions: number;
+  /**
+   * The run's input + output + cacheRead + cacheCreate tokens at its latest `result` line that had
+   * a numeric `total_cost_usd`; null before one. Absent on a digest stored before it existed.
+   */
+  costTokens?: number | null;
+  /**
+   * Reply speed over the top-level messages whose ask and last frame are both known: output tokens
+   * per second, and the mean ask-to-last-frame time; null when there are none. Absent on a digest
+   * stored before it existed.
+   */
+  speed?: { tokensPerSec: number | null; turnMs: number | null };
 }
 
 export type StreamKind = "op" | "msg" | "think" | "tool" | "sys";
@@ -597,6 +608,10 @@ export interface CrewLoop {
   profile?: string;
   /** The profile's step for the phase; null when parked, done or no step has the phase. */
   step?: string | null;
+  /** The run's profile steps in order, as Setup › Loops lists them; absent on a run without one. */
+  steps?: { name: string; phase: ProfileStepPhase | null }[];
+  /** A planner's plan landed for the run's ticket (a `{runId}:plan` loop event); absent without a profile. */
+  planned?: boolean;
   /** The current step's try and its limit (ci: CI tries; review: review rounds), else null. */
   tries?: { n: number; max: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
@@ -681,7 +696,14 @@ export interface CrewRow {
     branch: string | null;
     tokens: TokenUsage | null;
     costUsd: number | null;
+    /**
+     * Crew rows, while the run is running: `costUsd` carried over the tokens since its last
+     * `result` line, else priced at an earlier run's rate; null when no rate is known.
+     */
+    costEstimateUsd?: number | null;
   } | null;
+  /** The latest run's commits and guard refusals (crew rows); null for a loop or without a run. */
+  work?: { commits: number; denials: number } | null;
   /** The latest run's PRs; empty without a run. */
   prs: RunPr[];
   /** The latest run's summary, else null. */

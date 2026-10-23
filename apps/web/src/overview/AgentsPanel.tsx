@@ -1,9 +1,16 @@
-import type { AttentionItem, ConfigView, Crew, LimitRow, TestLockState } from "@mc/core";
-import type { MouseEvent } from "react";
+import {
+  type AttentionItem,
+  type ConfigView,
+  type Crew,
+  flightTurnShort,
+  type LimitRow,
+  type TestLockState,
+} from "@mc/core";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
+import { NeedButton } from "../components/NeedButton.tsx";
 import {
   callSign,
   contextPct,
@@ -14,6 +21,7 @@ import {
   isSeatFree,
   lockSince,
   modelLine,
+  type NeedPart,
   NO_LOOP,
   needLine,
   needsLamp,
@@ -27,7 +35,7 @@ import {
   waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
-import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
+import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
 import { cost, kTokens } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
@@ -39,7 +47,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Sparkline } from "../hud/Sparkline.tsx";
 import { agentPath, followLink, navigate } from "../router.ts";
-import { openItem, toggleDock } from "../shell/overlays.ts";
+import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { inSession, useSession } from "../shell/session.ts";
 import { LoopStep } from "./LoopStep.tsx";
@@ -70,6 +78,8 @@ function FlightRow({
   now: number;
   tz: string | null;
 }) {
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const turns = flight?.seat?.turns ?? null;
   const go = () => toggleDock(true);
   const status = row ? seatStatus(row) : null;
   const five = row ? limits.find((l) => l.accountId === row.accountId && l.window === "5h") : null;
@@ -108,8 +118,9 @@ function FlightRow({
         ) : (
           <span className="ellip s">{FLIGHT_NO_SEAT}</span>
         )}
+        <span className="xs muted block">coordinates the crew and brings you decisions</span>
       </span>
-      <span className="xs fg2">{DASH}</span>
+      <span className="xs fg2">{turns ? flightTurnShort(turns.n, turns.max) : DASH}</span>
       <span className="tok">
         <span className="num s">{tokens === null ? DASH : kTokens(tokens)}</span>
         {tpm !== null && <span className="xs muted num">{kTokens(tpm)}/min</span>}
@@ -127,6 +138,9 @@ function FlightRow({
     </div>
   );
 }
+
+/** A need part whose button stops the seat's turn, so the row needs no second Interrupt. */
+const stopsTheTurn = (p: NeedPart): boolean => p.action === "interrupt" || p.action === "stop";
 
 function AgentRow({
   row,
@@ -151,7 +165,7 @@ function AgentRow({
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const roleTitle = seatRoleTitle(row.id, crew?.rows, config?.crew?.roles);
   const doing = doingLine(row, now, tz, repoPrs);
-  const parts = needLine(row, items, now);
+  const parts = needLine(row, items, now, lock);
   const lamp = needsLamp(mine, true);
   const running = row.hudState === "running";
   const go = () => navigate(agentPath(row.id));
@@ -159,15 +173,13 @@ function AgentRow({
   const tpm = tokensPerMinute(row.digest, now);
   const spark = sparkValues(row.digest);
   const tokens = row.run?.tokens ? row.run.tokens.input + row.run.tokens.output : null;
+  const runCost =
+    row.run?.status === "running" ? (row.run.costEstimateUsd ?? row.run.costUsd) : row.run?.costUsd;
   const rate = [
     tpm === null ? null : `${kTokens(tpm)}/min`,
-    row.run?.costUsd == null ? null : cost(row.run.costUsd),
+    runCost == null ? null : cost(runCost),
   ].filter((x) => x !== null);
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
-  const click = (fn: () => void) => (e: MouseEvent) => {
-    e.stopPropagation();
-    fn();
-  };
 
   const to = agentPath(row.id);
   return (
@@ -258,25 +270,14 @@ function AgentRow({
                 mine.some((m) => m.key === p.key && m.kind === "stalled") && (
                   <span className="xs muted"> observed loop</span>
                 )}
-              {p.action !== null && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    className={p.action === "answer" ? "sm primary" : "sm"}
-                    onClick={click(() => openItem(p.key))}
-                  >
-                    {p.action === "answer" ? "Answer" : "Open"}
-                  </button>
-                </>
-              )}
+              <NeedButton part={p} row={row} />
             </span>
           ))}
           {row.kind === "crew" && (
             // biome-ignore lint/a11y/useKeyWithClickEvents: the buttons inside are the keyboard route
             // biome-ignore lint/a11y/noStaticElementInteractions: a click on them must not open the Agent page
             <span className="needctl" onClick={(e) => e.stopPropagation()}>
-              <SeatControls row={row} />
+              <SeatControls row={row} interrupt={!parts.some(stopsTheTurn)} />
             </span>
           )}
         </div>

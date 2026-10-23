@@ -1212,6 +1212,36 @@ main > section {
 .stepbar i.w {
   background: var(--warn-mark);
 }
+/* Work in flight: a cell per step, marked as the step bar is (d done, c current, w held) */
+.wsteps {
+  display: inline-flex;
+  gap: 2px;
+}
+.wstep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--line-2);
+  white-space: nowrap;
+}
+.wstep.d {
+  color: var(--fg-2);
+  border-bottom-color: var(--fg-2);
+}
+.wstep.c {
+  color: var(--fg);
+  border-bottom-color: var(--ok);
+}
+.wstep.w {
+  color: var(--fg);
+  border-bottom-color: var(--warn-mark);
+  background: var(--warn-soft);
+}
 /* Where the ticket column is short (about 1600 and under) the repo chip gives way to the number. */
 @media (min-width: 761px) and (max-width: 1599px) {
   .trow .rchip {
@@ -1341,6 +1371,17 @@ main > section {
   padding: 10px 12px;
   display: grid;
   gap: 8px;
+}
+.lock.hot {
+  border-color: var(--warn-mark);
+  background: var(--warn-soft);
+}
+.lockq {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--fs-s);
 }
 .quotarow {
   display: grid;
@@ -2493,8 +2534,14 @@ td.wrap {
   flex-wrap: wrap;
   gap: 6px;
 }
+.tiles.wrap {
+  min-width: 0;
+  max-width: 100%;
+}
 .tiles .tile {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2504,6 +2551,7 @@ td.wrap {
 }
 .tiles .tile-vis {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -2985,6 +3033,25 @@ kbd {
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   padding: 6px 8px;
+}
+.askcards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 8px;
+  padding: 8px 14px 12px;
+}
+.askcard {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--warn-mark);
+  border-radius: var(--r-s);
+  padding: 6px 8px;
+}
+.askcard blockquote,
+#dsBrief blockquote {
+  margin: 0;
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
 }
 /* a tile whose figure is not stored */
 .kpi .v.nt,
