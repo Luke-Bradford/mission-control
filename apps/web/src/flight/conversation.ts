@@ -55,13 +55,17 @@ export interface PendingMsg {
   seen: number;
 }
 
+/** The stream's copy of a sent message: the hub cuts long text to end in "…", so a cut copy matches too. */
+export const sameMessage = (streamed: string, sent: string): boolean =>
+  streamed === sent || (streamed.endsWith("…") && sent.startsWith(streamed.slice(0, -1)));
+
 export function withPending(
   rows: readonly DockRow[],
   pending: readonly PendingMsg[],
 ): { rows: DockRow[]; open: PendingMsg[] } {
-  const have = new Map<string, number>();
-  for (const r of rows) if (r.kind === "you") have.set(r.text, (have.get(r.text) ?? 0) + 1);
-  const open = pending.filter((p) => (have.get(p.text) ?? 0) <= p.seen);
+  const open = pending.filter(
+    (p) => rows.filter((r) => r.kind === "you" && sameMessage(r.text, p.text)).length <= p.seen,
+  );
   return {
     rows: [
       ...rows,

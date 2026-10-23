@@ -123,6 +123,12 @@ describe("withPending", () => {
     expect(second.rows).toHaveLength(2);
   });
 
+  it("settles a long message on the hub's cut copy of it", () => {
+    const cut = you("a", `${"x".repeat(1999)}…`);
+    expect(withPending([cut], [sent("x".repeat(2100), 0)]).open).toEqual([]);
+    expect(withPending([cut], [sent("y".repeat(2100), 0)]).open).toHaveLength(1);
+  });
+
   it("drops a settled message and keeps one still waiting", () => {
     const { open, rows } = withPending(
       [you("a", "done")],
