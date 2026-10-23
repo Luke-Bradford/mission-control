@@ -831,7 +831,12 @@ describe("board setup", () => {
 
 describe("GET /api/machine", () => {
   it("answers { latest: null } before the first sample, then the scheduler's latest", async () => {
-    expect((await get("/api/machine")).json()).toEqual({ latest: null });
+    expect((await get("/api/machine")).json()).toEqual({
+      latest: null,
+      maxSeats: 8,
+      seats: 0,
+      perSessionMax: 0,
+    });
     const latest: MachineSample = {
       at: NOW,
       cpuPct: null,
@@ -845,8 +850,33 @@ describe("GET /api/machine", () => {
     const a = buildApp({ config, store, bus, machine: () => latest });
     const r = await a.inject({ method: "GET", url: "/api/machine" });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toEqual({ latest });
+    expect(r.json()).toEqual({ latest, maxSeats: 8, seats: 0, perSessionMax: 0 });
     await a.close();
+  });
+
+  it("carries the crew's seat cap, configured seats and largest session", async () => {
+    const seat = (id: string) => ({
+      id,
+      role: "GUIDO",
+      accountId: "claude-main",
+      model: "sonnet",
+      area: [],
+    });
+    config.crew = {
+      worktrees: join(dir, "crew"),
+      maxSeats: 8,
+      sessions: [
+        {
+          id: "s1",
+          repoId: "shop-app",
+          checkout: join(dir, "clone"),
+          seats: [seat("a-1"), seat("a-2"), seat("a-3")],
+        },
+        { id: "s2", repoId: "shop-app", checkout: join(dir, "clone2"), seats: [seat("b-1")] },
+      ],
+    };
+    const r = await get("/api/machine");
+    expect(r.json()).toMatchObject({ maxSeats: 8, seats: 4, perSessionMax: 3 });
   });
 });
 
