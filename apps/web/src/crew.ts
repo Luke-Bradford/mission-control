@@ -17,6 +17,7 @@ import {
   LIVE_DETAIL_MAX,
   type LoopPhase,
   type PullRequestView,
+  ROLES,
   type RunDigest,
   type RunPr,
   type RunStatus,
@@ -397,6 +398,29 @@ export function tokensPerMinute(digest: RunDigest | null, now: number): number |
 /** The name on screen: a crew seat's id upper-cased (`GUIDO-1`), a loop's id as it is. */
 export const callSign = (row: Pick<CrewRow, "id" | "kind">): string =>
   row.kind === "crew" ? seatCallSign(row.id) : row.id;
+
+/** A role's title: its `here` text up to the first colon or comma, first letter up (`frontend developer` is `Frontend developer`). */
+export function roleTitle(here: string): string {
+  const head = (here.split(/[:,]/)[0] ?? "").trim();
+  return head.charAt(0).toUpperCase() + head.slice(1);
+}
+
+/**
+ * The title of the role a seat holds, from the config's roles (`crew.roles`, which carry custom
+ * ones) else the built-in `ROLES`; null for an observed loop or a role with no text.
+ */
+export function seatRoleTitle(
+  id: string,
+  rows: readonly Pick<CrewRow, "id" | "kind" | "role">[] | undefined,
+  roles: readonly { name: string; here: string }[] | undefined,
+): string | null {
+  const row = rows?.find((r) => r.id.toLowerCase() === id.toLowerCase());
+  if (row?.kind === "loop") return null;
+  const role = row?.role ?? id;
+  const here =
+    roles?.find((r) => r.name === role)?.here ?? ROLES.find((r) => r.callSign === role)?.here;
+  return here ? roleTitle(here) || null : null;
+}
 
 /**
  * `model · effort · CLI version`: the run's model id (else the config alias), a seat's effort

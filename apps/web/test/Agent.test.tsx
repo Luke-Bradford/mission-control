@@ -409,6 +409,22 @@ describe("Agent page: picker and selection", () => {
     expect($(again.container, "#ahead .big")?.textContent).toBe("shop-app-ta");
   });
 
+  it.each([
+    [false, "GUIDO-1 · Backend developer", null],
+    [true, "GUIDO-1", "Backend developer"],
+  ])("the header names a crew seat's role: narrow %s", async (narrow, text, title) => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: narrow,
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    stub({ rows: [seatRow({ hudState: "idle" })] });
+    const { container } = render(<Agent id="guido-1" />);
+    await vi.waitFor(() => expect($(container, "#ahead .idrow .big")?.textContent).toBe(text));
+    expect($(container, "#ahead .idrow .big")?.getAttribute("title")).toBe(title);
+  });
+
   it("picking an agent navigates to its page", async () => {
     stub();
     render(<Agent id="shop-app-ta" />);
