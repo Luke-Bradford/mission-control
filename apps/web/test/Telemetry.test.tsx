@@ -489,7 +489,7 @@ describe("Flow of work", () => {
   it("cycle time: a row per size, — where none, and the measurement note", async () => {
     await loaded();
     const p = panel("tCycle");
-    screen.getByText("Ready (or In progress) to Done, median days by size");
+    screen.getByText("Ready to Done, median days by size");
     expect([...p.querySelectorAll(".hrow")].map((r) => r.textContent)).toEqual([
       "XS0.6 d4 tickets",
       "S1.4 d11 tickets",
@@ -499,7 +499,7 @@ describe("Flow of work", () => {
       "no size3.0 d2 tickets",
     ]);
     within(p).getByText(
-      "Measured from the board: from the first move into Ready, In progress, In review or Ready for QA to when the ticket reached Done. 7 done tickets went straight to Done.",
+      "Measured from the board: when a ticket entered Ready to when it reached Done. 7 done tickets left out because they have no Ready entry or their timestamps are out of order.",
     );
   });
 

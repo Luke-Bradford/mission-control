@@ -94,12 +94,8 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
           </div>
         )}
       </Panel>
-      {/* Decision (Task 6): work starts at Ready or, when a ticket skipped it, In progress. */}
-      <Panel
-        id="tCycle"
-        title="Cycle time"
-        sub="Ready (or In progress) to Done, median days by size"
-      >
+      {/* Cycle time starts at the ticket's first move into Ready. */}
+      <Panel id="tCycle" title="Cycle time" sub="Ready to Done, median days by size">
         {!t ? (
           wait
         ) : (
@@ -117,9 +113,9 @@ export function FlowOfWork({ t, scope }: { t: Telemetry | undefined; scope: Scop
               );
             })}
             <p className="note xs tnote">
-              Measured from the board: from the first move into Ready, In progress, In review or
-              Ready for QA to when the ticket reached Done. {t.cycleTime.excluded} done tickets went
-              straight to Done.
+              Measured from the board: when a ticket entered Ready to when it reached Done.{" "}
+              {t.cycleTime.excluded} done tickets left out because they have no Ready entry or their
+              timestamps are out of order.
             </p>
           </div>
         )}
