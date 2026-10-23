@@ -1,7 +1,7 @@
-import { LOCK_HISTORY_NOTE, type MachineSample } from "@mc/core";
-import { LockLines, useTestLock } from "../components/LockLines.tsx";
+import type { MachineSample } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { LockBox } from "./LockBox.tsx";
 
 const GIB = 2 ** 30;
 const DASH = "—";
@@ -52,11 +52,10 @@ function usage(m: MachineSample | null) {
   return { cores, cpu, agentsCpu, memTotal, memUsed, agentsMem, memPct, diskFree, diskPct };
 }
 
-/** This Mac's CPU, memory and disk (catalogue 2.1.4). Slots arrive with the engine; lock history with run records (2c). */
+/** This Mac's CPU, memory and disk, and the test lock (catalogue 2.1.4). Slots arrive with the engine; lock history with run records (2c). */
 export function MachinePanel() {
   const machine = useResource<{ latest: MachineSample | null }>(RESOURCES.machine).data;
   const m = machine?.latest ?? null;
-  const lock = useTestLock();
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
 
@@ -133,12 +132,7 @@ export function MachinePanel() {
               other apps
             </span>
           </div>
-          <div className="lock">
-            <div className="row">
-              <h3 title={LOCK_HISTORY_NOTE}>Full test suite · one at a time</h3>
-            </div>
-            <LockLines lock={lock} nobodyWaiting />
-          </div>
+          <LockBox />
         </div>
       </div>
     </Panel>

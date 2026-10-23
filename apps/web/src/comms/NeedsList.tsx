@@ -2,6 +2,7 @@ import {
   ATTENTION_KINDS,
   ATTENTION_LABEL,
   type AttentionItem,
+  type AttentionKind,
   type CrewRow,
   clockHm,
   type FlightView,
@@ -9,15 +10,19 @@ import {
   type GuardHitsView,
   guardAckKey,
   guardSummary,
+  type TestLockState,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { ackKeys } from "../ack.ts";
+import { interruptSeat, seatError } from "../agent/seat.ts";
+import { apiPost } from "../api.ts";
 import { isOperatorItem, itemOwner, ownerLabel } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { needsLamp } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { flightOffText } from "../flight/flightTypes.ts";
 import { mss } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -67,17 +72,35 @@ export function sortNeeds(items: AttentionItem[]): AttentionItem[] {
   return [...items].sort((a, b) => rank(a) - rank(b));
 }
 
-/** Comms › Needs you (catalogue 2.5.1): the attention list, with Ack and Acknowledge all. */
+/** The kinds the row's Answer button opens, when no escalation on GitHub carries the question. */
+const ANSWERED_HERE: readonly AttentionKind[] = ["approval", "question"];
+
+/** The server raises a `lock` item for a stalled holder with a seat waiting, and a stall alone can be the holder's. */
+function holdsLock(i: AttentionItem, lock: TestLockState | undefined): boolean {
+  if (i.kind === "lock") return true;
+  return i.kind === "stalled" && i.agentId !== null && i.agentId === lock?.holder?.seatId;
+}
+
+/** The text FLIGHT is asked about a stray file (the mockup's "… outside every area. Whose is it?"). */
+const strayQuestion = (text: string): string => `${text.replace(/[.\s]+$/, "")}. Whose is it?`;
+
+/**
+ * Comms › Needs you (catalogue 2.5.1): the attention list, with its row actions, Ack and
+ * Acknowledge all. `onAskFlight` runs once a stray file's question is sent to FLIGHT.
+ */
 export function NeedsList({
   items,
   rows,
+  onAskFlight,
 }: {
   items: AttentionItem[] | undefined;
   rows: CrewRow[];
+  onAskFlight: () => void;
 }) {
   const now = useSecond();
   const replies = useFlightUnread();
   const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
+  const lock = useTestLock();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const list = sortNeeds((items ?? []).filter(isOperatorItem));
@@ -90,6 +113,24 @@ export function NeedsList({
     setError(await ackKeys(keys));
     setBusy(false);
   };
+  /** Run a row's control; a refusal shows in the panel's error line. */
+  const act = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(seatError(e));
+    }
+    setBusy(false);
+  };
+  const stop = (seatId: string) => act(() => interruptSeat({ id: seatId }));
+  const askFlight = (i: AttentionItem) =>
+    act(async () => {
+      if (flightSeat?.live !== true) return;
+      await apiPost(ACTIONS.seatMessage(flightSeat.id), { text: strayQuestion(i.text) });
+      onAskFlight();
+    });
   const answer = async (target: AnswerTarget, i: AttentionItem, body: string) => {
     setBusy(true);
     setError(null);
@@ -173,7 +214,42 @@ export function NeedsList({
               <div className="acts">
                 {i.escalationId === null && (
                   <button type="button" className="sm primary" onClick={() => openItem(i.key)}>
-                    {i.brief ? "Read the brief" : "Discuss"}
+                    {ANSWERED_HERE.includes(i.kind)
+                      ? "Answer"
+                      : i.brief
+                        ? "Read the brief"
+                        : "Discuss"}
+                  </button>
+                )}
+                {agentId !== null && holdsLock(i, lock) && (
+                  <button
+                    type="button"
+                    className="sm warn"
+                    disabled={busy}
+                    onClick={() => stop(agentId)}
+                  >
+                    Stop the run
+                  </button>
+                )}
+                {agentId !== null && i.kind === "stalled" && !holdsLock(i, lock) && (
+                  <button
+                    type="button"
+                    className="sm"
+                    disabled={busy}
+                    onClick={() => stop(agentId)}
+                  >
+                    Interrupt
+                  </button>
+                )}
+                {i.kind === "stray" && (
+                  <button
+                    type="button"
+                    className="sm"
+                    disabled={busy || flightSeat?.live !== true}
+                    title={flightSeat?.live === true ? undefined : flightOffText(flightSeat)}
+                    onClick={() => askFlight(i)}
+                  >
+                    Ask FLIGHT
                   </button>
                 )}
                 {i.escalationId !== null ? (

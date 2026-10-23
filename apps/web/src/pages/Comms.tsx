@@ -52,7 +52,7 @@ export function Comms({ item }: { item: string | null }) {
     <section id="page-comms">
       <div className="cgrid">
         <div className="col">
-          <NeedsList items={items} rows={rows} />
+          <NeedsList items={items} rows={rows} onAskFlight={() => select(FLIGHT_THREAD)} />
           <Threads
             rows={inView}
             items={items ?? []}

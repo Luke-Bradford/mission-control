@@ -10,7 +10,6 @@ import {
   type HealthRow,
   type LimitRow,
   LOCK_FREE_TEXT,
-  LOCK_HISTORY_NOTE,
   LOCK_NOBODY_WAITING,
   type MachineSample,
   type PullRequestView,
@@ -72,10 +71,13 @@ interface Data {
   crewStatus?: { enabled: boolean; note: string | null };
   /** The seats' repo's PRs. */
   prs?: PullRequestView[];
+  /** More routes, by "METHOD path". */
+  extra?: Record<string, unknown>;
 }
 
 function stub(d: Data = {}) {
   return stubFetch({
+    ...d.extra,
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
     "/api/machine": { latest: d.machine === undefined ? sample() : d.machine },
@@ -464,6 +466,69 @@ describe("Agents panel", () => {
     expect(within(seat).getByRole("button", { name: "End the run" })).toBeTruthy();
     expect(within(loop).queryByRole("button", { name: "Interrupt" })).toBeNull();
     expect(within(loop).queryByRole("button", { name: "End the run" })).toBeNull();
+  });
+
+  describe("the need line of a stalled seat", () => {
+    const stall = item({
+      key: "stall:guido-1:r-12",
+      agentId: "guido-1",
+      kind: "stalled",
+      at: NOW - 11 * MIN,
+      tool: "Bash",
+      ticket: null,
+      escalationId: null,
+    });
+    const stalled = () => seatRow({ hudState: "stalled", lastOutputAt: NOW - 11 * MIN });
+    const interrupts = () => ({
+      "POST /api/seats/guido-1/interrupt": { ok: true },
+    });
+    const posted = (fn: ReturnType<typeof stub>) =>
+      fn.mock.calls.filter(([u]) => u === "/api/seats/guido-1/interrupt");
+
+    it("holding the test lock reads Stop the run, and the row has no second Interrupt", async () => {
+      const fn = stub({
+        rows: [stalled()],
+        items: [stall],
+        lock: {
+          holder: {
+            runId: "r-12",
+            seatId: "guido-1",
+            command: "pnpm -s test",
+            since: NOW - 12 * MIN,
+          },
+          waiting: [
+            { runId: "r-2", seatId: "guido-2", since: NOW - MIN },
+            { runId: "r-3", seatId: "guido-3", since: NOW - MIN },
+          ],
+        },
+        extra: interrupts(),
+      });
+      const { container } = render(<Overview />);
+      const need = await waitFor(() => {
+        const el = container.querySelector(".need") as HTMLElement;
+        expect(el.textContent).toContain("Stalled 11:00 and holding the test lock; 2 waiting");
+        return el;
+      });
+      expect(within(need).queryByRole("button", { name: "Interrupt" })).toBeNull();
+      fireEvent.click(within(need).getByRole("button", { name: "Stop the run" }));
+      await waitFor(() => expect(posted(fn)).toHaveLength(1));
+      expect(JSON.parse(String(posted(fn)[0]?.[1]?.body))).toEqual({});
+    });
+
+    it("holding nothing reads the tool, with one Interrupt that stops the turn", async () => {
+      const fn = stub({ rows: [stalled()], items: [stall], extra: interrupts() });
+      const { container } = render(<Overview />);
+      const need = await waitFor(() => {
+        const el = container.querySelector(".need") as HTMLElement;
+        expect(el.textContent).toContain("Stalled 11:00 in Bash");
+        return el;
+      });
+      expect(within(need).queryByRole("button", { name: "Stop the run" })).toBeNull();
+      const buttons = within(need).getAllByRole("button", { name: "Interrupt" });
+      expect(buttons).toHaveLength(1);
+      fireEvent.click(buttons[0] as HTMLElement);
+      await waitFor(() => expect(posted(fn)).toHaveLength(1));
+    });
   });
 
   it("the Loop step column collapses only when the rows are loaded and none has a loop", async () => {
@@ -1084,37 +1149,69 @@ describe("Machine panel: the test lock box", () => {
     return container.querySelector("#machP .lock") as HTMLElement;
   };
 
-  it("free: says so, and nobody waits; the title says history waits for 2c", async () => {
+  it("free: says so, with the next step taking it, no tooltip and no waiting list", async () => {
     stub();
     const b = await box();
-    await within(b).findByText(LOCK_FREE_TEXT);
-    expect(within(b).getByText("Full test suite · one at a time").title).toBe(LOCK_HISTORY_NOTE);
+    await within(b).findByText("Free");
+    expect(b.textContent).toContain(
+      `${LOCK_FREE_TEXT} The next verify step takes it straight away.`,
+    );
+    expect(within(b).getByText("Full test suite · one at a time").title).toBe("");
     expect(within(b).queryByText(LOCK_NOBODY_WAITING)).toBeNull();
+    expect(b.className).not.toContain("pulse-warn");
   });
 
-  it("held: the holder, its command and time, then the seats in line", async () => {
-    stub({
-      lock: {
-        holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW - 83_000 },
-        waiting: [{ runId: "r-2", seatId: "guido-3", since: NOW - 12_000 }],
-      },
-    });
+  const HELD = {
+    holder: { runId: "r-1", seatId: "guido-2", command: "pnpm -s test", since: NOW - 83_000 },
+    waiting: [{ runId: "r-2", seatId: "guido-3", since: NOW - 12_000 }],
+  };
+  const holder = (over: Partial<CrewRow> = {}) =>
+    seatRow({ id: "guido-2", index: 1, ticket: "shop-app#3349", ...over });
+  const waiter = () =>
+    seatRow({ id: "guido-3", index: 2, ticket: "shop-app#3350", hudState: "idle" });
+
+  it("held and running: the holder, its command, ticket and time, then the seats in line", async () => {
+    stub({ rows: [holder({ hudState: "running" }), waiter()], lock: HELD });
     const b = await box();
-    await within(b).findByText("GUIDO-2 holds it: pnpm test · 1:23");
-    expect(within(b).getByText("GUIDO-3 waiting · 0:12")).toBeTruthy();
+    await within(b).findByText("Running");
+    expect(within(b).getByText("pnpm -s test").className).toContain("chipref");
+    expect(b.textContent).toContain("1:23 elapsed");
+    expect(b.textContent).not.toContain("nothing printed");
+    expect(b.className).not.toContain("pulse-warn");
+    const [first] = b.querySelectorAll<HTMLElement>(".lockq");
+    expect(first?.textContent).toContain("1");
+    expect(first?.textContent).toContain("guido-3");
+    expect(first?.textContent).toContain("3350");
+    expect(first?.textContent).toContain("0:12");
     expect(b.textContent).not.toContain(LOCK_FREE_TEXT);
   });
 
-  it("held with nobody in line says so", async () => {
-    stub({
-      lock: {
-        holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW - 5_000 },
-        waiting: [],
-      },
+  it("held by a stalled seat: No output, the quiet time, and Stop the run and Open", async () => {
+    const fn = stub({
+      rows: [holder({ hudState: "stalled", lastOutputAt: NOW - 5 * MIN }), waiter()],
+      lock: HELD,
+      extra: { "POST /api/seats/guido-2/interrupt": { ok: true } },
     });
     const b = await box();
-    await within(b).findByText("GUIDO-2 holds it: pnpm test · 0:05");
-    expect(within(b).getByText(LOCK_NOBODY_WAITING)).toBeTruthy();
+    await within(b).findByText("No output");
+    expect(b.textContent).toContain("1:23 elapsed · nothing printed for 5:00");
+    expect(b.className).toContain("pulse-warn");
+    fireEvent.click(within(b).getByRole("button", { name: "Stop the run" }));
+    await waitFor(() =>
+      expect(fn).toHaveBeenCalledWith(
+        "/api/seats/guido-2/interrupt",
+        expect.objectContaining({ method: "POST", body: "{}" }),
+      ),
+    );
+    fireEvent.click(within(b).getByRole("button", { name: "Open GUIDO-2" }));
+    expect(window.location.pathname).toBe("/agent/guido-2");
+  });
+
+  it("held with nobody in line says so", async () => {
+    stub({ rows: [holder()], lock: { ...HELD, waiting: [] } });
+    const b = await box();
+    await within(b).findByText(LOCK_NOBODY_WAITING);
+    expect(within(b).queryByText("Waiting")).toBeNull();
   });
 });
 
@@ -1787,8 +1884,12 @@ describe("Overview: what a seat is doing", () => {
       ],
     });
     const { container } = render(<Overview />);
-    await screen.findByText("Free");
-    const row = agentRows(container)[0] as HTMLElement;
+    // the lock box says "Free" too, so look in the seat's row
+    const row = await waitFor(() => {
+      const el = agentRows(container)[0] as HTMLElement;
+      expect(within(el).getByText("Free")).toBeTruthy();
+      return el;
+    });
     expect(row.textContent).toContain("No ticket");
     expect(row.textContent).not.toContain("Quote cache");
     expect(row.querySelector(".doing")?.textContent).toBe("Free for work");

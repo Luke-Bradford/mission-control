@@ -263,7 +263,8 @@ describe("FLIGHT page", () => {
     });
     render(<Flight />);
     const list = await screen.findByRole("list", { name: "Crew runs" });
-    const doing = list.querySelector("li .ellip") as HTMLElement;
+    // the ticket's title is an ellipsised span too: the doing line is the grey one
+    const doing = list.querySelector("li .ellip.fg2") as HTMLElement;
     const line = "Draft PR #166 · Backfill the quote cache";
     await waitFor(() => expect(doing.textContent).toBe(line));
     expect(doing.title).toBe(line);
@@ -334,7 +335,7 @@ describe("FLIGHT page", () => {
     expect(list.querySelectorAll("li")).toHaveLength(1);
     expect(list.textContent).toContain("Blocked");
     expect(list.textContent).not.toContain("PR #");
-    expect(list.querySelector(".crit-t")).not.toBeNull();
+    expect(list.querySelector(".wsteps .w")).not.toBeNull();
   });
 
   it("Work in flight leaves out a looped run whose loop is done", async () => {
@@ -350,21 +351,105 @@ describe("FLIGHT page", () => {
     expect(await screen.findByText(NO_CREW_RUNS)).toBeTruthy();
   });
 
-  it("Work in flight names the phase on its own span, apart from the state pill", async () => {
-    const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
-    stubFetch({
-      "/api/crew": {
-        rows: [seatRow({ hudState: "blocked", ticket: "shop-app#5", loop })],
-        firstRunToday: null,
-      },
-      "/api/config": CONFIG,
+  describe("Work in flight's step cells", () => {
+    const aTry = (step: "working" | "ci" | "review", n: number, outcome: "pass" | "fail") => ({
+      step,
+      fix: false,
+      n,
+      startedAt: NOW - 30 * MIN,
+      endedAt: NOW - 20 * MIN,
+      outcome,
+      reason: outcome === "fail" ? "lint" : null,
     });
-    render(<Flight />);
-    const list = await screen.findByRole("list", { name: "Crew runs" });
-    const phase = list.querySelector(".loopphase") as HTMLElement;
-    expect(phase.textContent).toBe("CI");
-    expect(phase.className).not.toContain("crit-t");
-    expect(phase.className).toBe(phase.className.trim());
+    const runLoop = (tries: unknown[]) => ({
+      "/api/runs/r-12/loop": {
+        runId: "r-12",
+        loop: null,
+        events: [],
+        tries,
+        round: null,
+        budget: null,
+        review: null,
+      },
+    });
+    const stubWith = (rows: unknown[], extra: Record<string, unknown> = {}) =>
+      stubFetch({
+        "/api/crew": { rows, firstRunToday: null },
+        "/api/config": CONFIG,
+        ...extra,
+      });
+    const cells = (list: HTMLElement) =>
+      [...list.querySelectorAll<HTMLElement>(".wsteps .wstep")].map((c) => ({
+        text: c.textContent,
+        cls: c.className.replace("wstep", "").trim(),
+        title: c.title,
+      }));
+
+    it("a run in review after two CI tries: Working and CI done, In review current, Done to do", async () => {
+      const loop = {
+        phase: "review" as const,
+        text: "In review · PR #9",
+        prNumber: 9,
+        parked: null,
+      };
+      stubWith(
+        [seatRow({ hudState: "idle", ticket: "shop-app#5", ticketTitle: "Stop the race", loop })],
+        runLoop([aTry("working", 1, "pass"), aTry("ci", 1, "fail"), aTry("ci", 2, "pass")]),
+      );
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      await waitFor(() => expect(cells(list)[1]?.text).toBe("CI×2"));
+      expect(cells(list)).toEqual([
+        { text: "Working", cls: "d", title: "Working · 1 try" },
+        { text: "CI×2", cls: "d", title: "CI · 2 tries" },
+        { text: "In review", cls: "c", title: "" },
+        { text: "Done", cls: "", title: "" },
+      ]);
+      expect(list.textContent).toContain("Stop the race");
+      expect(list.querySelector('a[href$="/pull/9"]')).not.toBeNull();
+    });
+
+    it("shows the marks without counts until the run's tries load", async () => {
+      const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
+      stubWith([seatRow({ hudState: "running", ticket: "shop-app#5", loop })]);
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      expect(cells(list)).toEqual([
+        { text: "Working", cls: "d", title: "" },
+        { text: "CI", cls: "c", title: "" },
+        { text: "In review", cls: "", title: "" },
+        { text: "Done", cls: "", title: "" },
+      ]);
+    });
+
+    it("a parked run marks the step it was held at amber", async () => {
+      const parked = {
+        phase: "parked" as const,
+        text: "Blocked: CI failed 3 times",
+        prNumber: null,
+        parked: "CI failed 3 times",
+      };
+      stubWith(
+        [seatRow({ hudState: "blocked", ticket: "shop-app#5", loop: parked })],
+        runLoop([aTry("working", 1, "pass"), aTry("ci", 1, "fail")]),
+      );
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      await waitFor(() => expect(cells(list)[1]?.cls).toBe("w"));
+      expect(cells(list).map((c) => c.cls)).toEqual(["d", "w", "", ""]);
+    });
+
+    it("leaves out a row with no ticket, such as FLIGHT's seat", async () => {
+      const loop = { phase: "working" as const, text: "Working", prNumber: null, parked: null };
+      stubWith([
+        seatRow({ id: "flight-1", ticket: null, ticketTitle: null, hudState: "running", loop }),
+        seatRow({ hudState: "running", ticket: "shop-app#5", loop }),
+      ]);
+      render(<Flight />);
+      const list = await screen.findByRole("list", { name: "Crew runs" });
+      expect(list.querySelectorAll("li")).toHaveLength(1);
+      expect(list.textContent).not.toContain("flight-1");
+    });
   });
 
   it("Work in flight lists a seat with an active run and a loop once; a done loop with an active run stays", async () => {
