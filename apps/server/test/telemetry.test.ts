@@ -146,6 +146,10 @@ const pr = (n: number, mergedAt: number | null, repoId = "shop-app"): PullReques
   mergeable: null,
 });
 
+/** Explicit recorded state evidence, independent of run wall time. */
+const state = (agentId: string, when: number, to: "running" | "waiting" | "blocked" | "idle") =>
+  store.addAgentEvent({ agentId, at: when, from: "idle", to, text: "recorded state" });
+
 const ALL: TelemetryScope = { agent: null, account: null };
 const tel = (range: "1h" | "6h" | "24h" | "7d" = "6h", now = NOW, scope = ALL) =>
   telemetry(config, store, range, now, scope);
@@ -213,10 +217,20 @@ describe("today, in the operator's timezone", () => {
         tokens: tok(300, 0),
       }),
     );
+    state("shop-app-ta", at("2026-10-24T23:00:00Z"), "idle");
+    state("shop-app-ta", at("2026-10-24T23:30:00Z"), "running");
+    state("shop-app-ta", at("2026-10-25T02:30:00Z"), "idle");
     const t = tel("6h", now);
     expect(t.today.tokens).toBe(300);
     const u = t.utilisation.find((x) => x.agentId === "shop-app-ta");
-    expect(u).toEqual({ agentId: "shop-app-ta", working: 12.5, waiting: 0, idle: 87.5 });
+    expect(u).toEqual({
+      agentId: "shop-app-ta",
+      working: 12.5,
+      waiting: 0,
+      blocked: 0,
+      idle: 87.5,
+      unknown: 0,
+    });
   });
 
   it("merged7d counts PRs merged in the last 7 days only", () => {
@@ -251,15 +265,20 @@ describe("utilisation", () => {
         openedAt: at("2026-10-16T23:00:00Z"),
       }),
     ]);
+    state("shop-app-ta", at("2026-10-16T23:00:00Z"), "idle");
+    state("studio-builder", at("2026-10-16T23:00:00Z"), "idle");
+    state("shop-app-ta", at("2026-10-17T07:00:00Z"), "waiting");
+    state("shop-app-ta", at("2026-10-17T08:00:00Z"), "running");
+    state("shop-app-ta", at("2026-10-17T10:00:00Z"), "waiting");
     const u = tel("6h", now).utilisation;
     expect(u).toEqual([
-      { agentId: "shop-app-ta", working: 12.5, waiting: 37.5, idle: 50 },
-      { agentId: "studio-builder", working: 0, waiting: 0, idle: 100 },
+      { agentId: "shop-app-ta", working: 12.5, waiting: 37.5, blocked: 0, idle: 50, unknown: 0 },
+      { agentId: "studio-builder", working: 0, waiting: 0, blocked: 0, idle: 100, unknown: 0 },
     ]);
     for (const row of u) expect(row.working + row.waiting + row.idle).toBeCloseTo(100, 9);
   });
 
-  it("an escalation opened yesterday counts from midnight; overlapping runs are not double-counted", () => {
+  it("recorded waiting since yesterday clips to midnight; overlapping runs are not double-counted", () => {
     const now = at("2026-10-17T15:00:00Z"); // 16 h since midnight
     store.upsertRun(
       run({ id: "a", startedAt: at("2026-10-17T07:00:00Z"), endedAt: at("2026-10-17T09:00:00Z") }),
@@ -273,9 +292,19 @@ describe("utilisation", () => {
       }),
     );
     store.replaceEscalations("shop-app", [escalation({ openedAt: at("2026-10-16T12:00:00Z") })]);
+    state("shop-app-ta", at("2026-10-16T12:00:00Z"), "waiting");
+    state("shop-app-ta", at("2026-10-17T07:00:00Z"), "running");
+    state("shop-app-ta", at("2026-10-17T11:00:00Z"), "waiting");
     const u = tel("6h", now).utilisation[0];
     // working 07:00–11:00 = 4 h (25%); waiting = 16 h − 4 h = 12 h (75%)
-    expect(u).toEqual({ agentId: "shop-app-ta", working: 25, waiting: 75, idle: 0 });
+    expect(u).toEqual({
+      agentId: "shop-app-ta",
+      working: 25,
+      waiting: 75,
+      blocked: 0,
+      idle: 0,
+      unknown: 0,
+    });
   });
 });
 
@@ -441,8 +470,8 @@ describe("agents", () => {
       digest({ tools: { Bash: { calls: 99, failed: 9, durationsMs: [999_999] } } }),
     );
     expect(tel().toolLatency).toEqual([
-      { tool: "Bash", calls: 22, p50Ms: 1000, p95Ms: 1900, failed: 3 },
-      { tool: "Read", calls: 3, p50Ms: null, p95Ms: null, failed: 0 },
+      { tool: "Bash", calls: 22, p50Ms: 1000, p95Ms: 1900, failed: 3, slowest: null },
+      { tool: "Read", calls: 3, p50Ms: null, p95Ms: null, failed: 0, slowest: null },
     ]);
   });
 
@@ -641,6 +670,8 @@ describe("cost", () => {
         output: 100,
         cacheRead: 400,
         cacheHitPct: 50,
+        additions: null,
+        deletions: null,
         turns: 5,
         toolCalls: 10,
         costUsd: 3,
@@ -653,6 +684,8 @@ describe("cost", () => {
         output: 10,
         cacheRead: 0,
         cacheHitPct: null,
+        additions: null,
+        deletions: null,
         turns: 0,
         toolCalls: 0,
         costUsd: null,
@@ -755,9 +788,9 @@ describe("empty store", () => {
     // Per-agent series are one per configured agent, all zero / idle.
     expect(t.tokensPerMinute.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
     expect(t.liveMinutes.map((s) => s.points.every((p) => p === 0))).toEqual([true, true]);
-    expect(t.utilisation.map((u) => [u.working, u.waiting, u.idle])).toEqual([
-      [0, 0, 100],
-      [0, 0, 100],
+    expect(t.utilisation.map((u) => [u.working, u.waiting, u.blocked, u.idle, u.unknown])).toEqual([
+      [0, 0, 0, 0, 100],
+      [0, 0, 0, 0, 100],
     ]);
     expect(t.turnUsage.map((u) => u.turns)).toEqual([[], []]);
     expect(t.toolLatency).toEqual([]);
@@ -1047,6 +1080,8 @@ describe("crew seats", () => {
         tokens: tok(600, 400),
       }),
     );
+    state("GUIDO-1", NOW - 30 * MIN, "running");
+    state("GUIDO-1", NOW - 20 * MIN, "idle");
     const t = tel("1h");
     expect(t.today.tokens).toBe(1000);
     expect(t.today.agents).toBe(3);
@@ -1161,7 +1196,10 @@ describe("crew seats", () => {
     const NOON = at("2026-10-17T15:00:00Z");
     // local midnight 2026-10-16T23:00Z: 16h elapsed at NOON
     const seatShare = () => tel("6h", NOON).utilisation.find((u) => u.agentId === "GUIDO-1");
-    const ran = () =>
+    const ran = () => {
+      state("GUIDO-1", at("2026-10-16T23:00:00Z"), "idle");
+      state("GUIDO-1", at("2026-10-17T07:00:00Z"), "running");
+      state("GUIDO-1", at("2026-10-17T11:00:00Z"), "idle");
       store.upsertRun(
         run({
           id: "c1",
@@ -1170,32 +1208,51 @@ describe("crew seats", () => {
           endedAt: at("2026-10-17T11:00:00Z"),
         }),
       );
+    };
     const ask = (agentId: string, when: string) =>
       store.addQuestion({ agentId, runId: "c1", text: "q?", at: at(when) });
 
-    it("is its own questions' open time, not also working; another seat's question does not count", () => {
+    it("blocks on its own questions without counting work or another seat's questions", () => {
       ran();
       ask("GUIDO-1", "2026-10-17T08:00:00Z");
       store.answerQuestions("GUIDO-1", at("2026-10-17T10:00:00Z"));
       ask("FLIGHT", "2026-10-17T12:00:00Z");
-      expect(seatShare()).toEqual({ agentId: "GUIDO-1", working: 12.5, waiting: 12.5, idle: 75 });
+      expect(seatShare()).toEqual({
+        agentId: "GUIDO-1",
+        working: 12.5,
+        waiting: 0,
+        blocked: 12.5,
+        idle: 75,
+        unknown: 0,
+      });
     });
 
     it("an open title escalation on the seat's repo leaves its waiting at 0; the loop's share is unchanged", () => {
       ran();
       store.replaceEscalations("shop-app", [escalation({ openedAt: at("2026-10-17T07:00:00Z") })]);
-      expect(seatShare()).toEqual({ agentId: "GUIDO-1", working: 25, waiting: 0, idle: 75 });
+      expect(seatShare()).toEqual({
+        agentId: "GUIDO-1",
+        working: 25,
+        waiting: 0,
+        blocked: 0,
+        idle: 75,
+        unknown: 0,
+      });
+      state("shop-app-ta", at("2026-10-16T23:00:00Z"), "idle");
+      state("shop-app-ta", at("2026-10-17T07:00:00Z"), "waiting");
       expect(tel("6h", NOON).utilisation.find((u) => u.agentId === "shop-app-ta")).toEqual({
         agentId: "shop-app-ta",
         working: 0,
         waiting: 50,
+        blocked: 0,
+        unknown: 0,
         idle: 50,
       });
     });
 
-    it("an unanswered question waits until now", () => {
+    it("an unanswered question blocks until now", () => {
       ask("GUIDO-1", "2026-10-17T13:00:00Z");
-      expect(seatShare()).toMatchObject({ working: 0, waiting: 12.5 });
+      expect(seatShare()).toMatchObject({ working: 0, waiting: 0, blocked: 12.5, unknown: 87.5 });
     });
   });
 
@@ -1211,5 +1268,192 @@ describe("crew seats", () => {
     );
     expect(tel("1h", NOW, { agent: "GUIDO-1", account: null }).today.agents).toBe(1);
     expect(tel("1h", NOW, { agent: null, account: "claude-main" }).today.agents).toBe(2);
+  });
+});
+
+describe("recorded state intervals", () => {
+  it("clips midnight and separates overlapping waits, stalled, parked and idle", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 8 * HOUR;
+    for (const [offset, from, to] of [
+      [-1, "idle", "running"],
+      [2, "running", "waiting"],
+      [3, "waiting", "stalled"],
+      [4, "stalled", "parked"],
+      [6, "parked", "idle"],
+    ] as const) {
+      store.addAgentEvent({
+        agentId: "shop-app-ta",
+        at: midnight + offset * HOUR,
+        from,
+        to,
+        text: "state",
+      });
+    }
+    const row = tel("6h", now).utilisation[0];
+    expect(row).toEqual({
+      agentId: "shop-app-ta",
+      working: 25,
+      waiting: 12.5,
+      blocked: 37.5,
+      idle: 25,
+      unknown: 0,
+    });
+    expect((row?.working ?? 0) + (row?.waiting ?? 0) + (row?.blocked ?? 0) + (row?.idle ?? 0)).toBe(
+      100,
+    );
+  });
+  it("discloses unavailable history instead of calling a whole run working", () => {
+    store.upsertRun(run({ id: "legacy" }));
+    expect(tel().utilisation[0]).toMatchObject({
+      working: 0,
+      waiting: 0,
+      blocked: 0,
+      idle: 0,
+      unknown: 100,
+    });
+  });
+});
+
+it("counts committed lines once across retries and preserves unknown commit counts", () => {
+  for (const id of ["retry", "first"]) {
+    store.upsertRun(run({ id, tokens: tok(1, 0) }));
+    store.addRunCommit({
+      runId: id,
+      repoId: "shop-app",
+      branch: "b",
+      sha: "a".repeat(40),
+      at: NOW - MIN,
+    });
+  }
+  const measured = new Map([[`shop-app#${"a".repeat(40)}`, { additions: 12, deletions: 3 }]]);
+  const totals = telemetry(config, store, "6h", NOW, ALL, measured).totals;
+  expect(totals[0]).toMatchObject({ input: 2, additions: 12, deletions: 3 });
+  store.addRunCommit({
+    runId: "retry",
+    repoId: "shop-app",
+    branch: "b",
+    sha: "b".repeat(40),
+    at: NOW - MIN,
+  });
+  expect(telemetry(config, store, "6h", NOW, ALL, measured).totals[0]).toMatchObject({
+    additions: null,
+    deletions: null,
+  });
+});
+
+it("unions overlapping lock and cleared review waits without counting them as work", () => {
+  const midnight = at("2026-10-16T23:00:00Z");
+  state("shop-app-ta", midnight, "running");
+  store.addLockHold({
+    runId: "lock",
+    toolUseId: "tool",
+    seatId: "shop-app-ta",
+    command: "just test",
+    queuedAt: midnight - HOUR,
+    since: midnight + 2 * HOUR,
+  });
+  store.raiseNote({
+    key: "review",
+    kind: "review",
+    at: midnight + HOUR,
+    text: "review",
+    runId: null,
+    seatId: "shop-app-ta",
+    repoId: "shop-app",
+  });
+  store.clearNote("review", midnight + 3 * HOUR);
+  expect(tel("6h", midnight + 4 * HOUR).utilisation[0]).toEqual({
+    agentId: "shop-app-ta",
+    working: 25,
+    waiting: 75,
+    blocked: 0,
+    idle: 0,
+    unknown: 0,
+  });
+});
+
+it("round-trips legacy, missing and measured digest fields without inventing measurements", () => {
+  for (const [id, value] of [
+    ["legacy", digest()],
+    [
+      "unknown",
+      digest({
+        additions: null,
+        deletions: null,
+        tools: { Bash: { calls: 1, failed: 0, durationsMs: [], slowest: null } },
+      }),
+    ],
+    [
+      "measured",
+      digest({
+        additions: 0,
+        deletions: 3,
+        tools: {
+          Bash: {
+            calls: 1,
+            failed: 0,
+            durationsMs: [12],
+            slowest: { detail: "just test", durationMs: 12 },
+          },
+        },
+      }),
+    ],
+  ] as const) {
+    store.setDigest(id, value);
+    expect(store.digest(id)).toEqual({ lastText: null, ...value });
+    expect(store.digests([id]).get(id)).toEqual({ lastText: null, ...value });
+  }
+});
+
+it("aggregates the maximum timed call with its owning agent without guessing legacy detail", () => {
+  store.upsertRun(run({ id: "a" }));
+  store.upsertRun(run({ id: "b", agentId: "studio-builder", repoId: "site-builder" }));
+  store.setDigest(
+    "a",
+    digest({
+      tools: {
+        Bash: {
+          calls: 1,
+          failed: 0,
+          durationsMs: [2000],
+          slowest: { detail: "just test", durationMs: 2000 },
+        },
+      },
+    }),
+  );
+  store.setDigest(
+    "b",
+    digest({
+      tools: {
+        Bash: {
+          calls: 1,
+          failed: 0,
+          durationsMs: [1000],
+          slowest: { detail: null, durationMs: 1000 },
+        },
+        Read: { calls: 1, failed: 0, durationsMs: [5] },
+      },
+    }),
+  );
+  expect(tel().toolLatency[0]?.slowest).toEqual({
+    detail: "just test",
+    durationMs: 2000,
+    agentId: "shop-app-ta",
+  });
+  expect(tel().toolLatency[1]?.slowest).toBeNull();
+});
+
+it("does not recount an old commit when a retry records it in a newer range", () => {
+  for (const id of ["old", "retry"]) store.upsertRun(run({ id, tokens: tok(1, 0) }));
+  for (const [runId, when] of [
+    ["old", NOW - DAY],
+    ["retry", NOW - MIN],
+  ] as const)
+    store.addRunCommit({ runId, repoId: "shop-app", branch: "b", sha: "a".repeat(40), at: when });
+  const measured = new Map([[`shop-app#${"a".repeat(40)}`, { additions: 12, deletions: 3 }]]);
+  expect(telemetry(config, store, "1h", NOW, ALL, measured).totals[0]).toMatchObject({
+    additions: null,
+    deletions: null,
   });
 });

@@ -111,7 +111,14 @@ import {
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
-import { changedFiles, fileDiff, type GitExec, GitFailed, NO_WORKTREE_NOTE } from "./files.ts";
+import {
+  changedFiles,
+  committedLines,
+  fileDiff,
+  type GitExec,
+  GitFailed,
+  NO_WORKTREE_NOTE,
+} from "./files.ts";
 import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -1250,37 +1257,80 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
       });
 
-      api.get<{ Querystring: { range?: unknown; agent?: unknown; account?: unknown } }>(
-        "/telemetry",
-        async (req, reply): Promise<Telemetry | FastifyReply> => {
-          const range = req.query.range ?? DEFAULT_TELEMETRY_RANGE;
-          if (typeof range !== "string" || !Object.hasOwn(TELEMETRY_RANGES, range)) {
-            return reply
-              .code(400)
-              .send({ error: `range must be one of ${Object.keys(TELEMETRY_RANGES).join(", ")}` });
-          }
-          // Each scope is optional; an empty value means all, anything else must be configured.
-          const { agent, account } = req.query;
-          if (
-            agent !== undefined &&
-            agent !== "" &&
-            (typeof agent !== "string" || !agentIds(config).includes(agent))
-          ) {
-            return reply.code(400).send({ error: "agent must be a configured agent id" });
-          }
-          if (
-            account !== undefined &&
-            account !== "" &&
-            (typeof account !== "string" || !config.accounts.some((a) => a.id === account))
-          ) {
-            return reply.code(400).send({ error: "account must be a configured account id" });
-          }
-          return telemetry(config, store, range as TelemetryRange, now(), {
+      // Reader: apps/web/src/pages/Telemetry.tsx
+      api.get<{
+        Querystring: { range?: unknown; agent?: unknown; account?: unknown; ticket?: unknown };
+      }>("/telemetry", async (req, reply): Promise<Telemetry | FastifyReply> => {
+        const range = req.query.range ?? DEFAULT_TELEMETRY_RANGE;
+        if (typeof range !== "string" || !Object.hasOwn(TELEMETRY_RANGES, range)) {
+          return reply
+            .code(400)
+            .send({ error: `range must be one of ${Object.keys(TELEMETRY_RANGES).join(", ")}` });
+        }
+        // Each scope is optional; an empty value means all, anything else must be configured.
+        const { agent, account, ticket } = req.query;
+        if (
+          ticket !== undefined &&
+          ticket !== "" &&
+          (typeof ticket !== "string" ||
+            !config.repos.some(
+              (r) =>
+                ticket.startsWith(`${r.id}#`) &&
+                /^[1-9]\d*$/.test(ticket.slice(r.id.length + 1)) &&
+                Number.isSafeInteger(Number(ticket.slice(r.id.length + 1))),
+            ))
+        ) {
+          return reply.code(400).send({
+            error: "ticket must be a configured repo id and positive issue number (repo#issue)",
+          });
+        }
+        if (
+          agent !== undefined &&
+          agent !== "" &&
+          (typeof agent !== "string" || !agentIds(config).includes(agent))
+        ) {
+          return reply.code(400).send({ error: "agent must be a configured agent id" });
+        }
+        if (
+          account !== undefined &&
+          account !== "" &&
+          (typeof account !== "string" || !config.accounts.some((a) => a.id === account))
+        ) {
+          return reply.code(400).send({ error: "account must be a configured account id" });
+        }
+        const at = now();
+        const counts = new Map<string, { additions: number | null; deletions: number | null }>();
+        for (const c of store.telemetryCommits(
+          at - TELEMETRY_RANGES[range as TelemetryRange] * 60_000,
+          at,
+        )) {
+          const key = `${c.repoId}#${c.sha}`;
+          if (counts.has(key)) continue;
+          const run = store.run(c.runId);
+          if (!run) continue;
+          const agent = configuredAgents(config).find((a) => a.id === run.agentId);
+          const worktree =
+            agent?.kind === "crew"
+              ? config.crew?.sessions.find((s) => s.id === agent.sessionId)?.checkout
+              : agent?.loop.worktree;
+          counts.set(
+            key,
+            worktree ? await committedLines(worktree, c.sha) : { additions: null, deletions: null },
+          );
+        }
+        return telemetry(
+          config,
+          store,
+          range as TelemetryRange,
+          at,
+          {
+            ticket: ticket === undefined || ticket === "" ? null : (ticket as string),
             agent: agent === undefined || agent === "" ? null : (agent as string),
             account: account === undefined || account === "" ? null : (account as string),
-          });
-        },
-      );
+          },
+          counts,
+        );
+      });
 
       const setPaused = async (id: string, paused: boolean, reply: FastifyReply) => {
         const loop = loopById(id);

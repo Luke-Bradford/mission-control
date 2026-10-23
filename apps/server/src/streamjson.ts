@@ -84,7 +84,7 @@ interface DigestState {
    * call made since the latest `result` line, so it can be the live tool.
    */
   pending: Map<string, { name: string; at: number | null; live: boolean; detail: string | null }>;
-  tools: Record<string, { calls: number; failed: number; durationsMs: number[] }>;
+  tools: RunDigest["tools"];
   /** Top-level message id → usage, in first-seen order. */
   turns: Map<string, { input: number; output: number; cacheRead: number }>;
   /** Every frame's message id → its minute bucket and tokens (input + output). */
@@ -229,6 +229,8 @@ function toolDetail(name: string, input: unknown, cwd: string | null): string | 
     const root = cwd === null ? null : `${cwd.replace(/\/+$/, "")}/`;
     detail =
       path !== null && root !== null && path.startsWith(root) ? path.slice(root.length) : path;
+  } else if (name === "Agent" || name === "Task") {
+    detail = cleanStr(input.subagent_type) ?? cleanStr(input.description);
   } else if (name === "Grep" || name === "Glob") {
     detail = cleanStr(input.pattern);
   }
@@ -412,7 +414,11 @@ function digestFrame(d: DigestState, ev: Json): void {
       const t = toolStats(d, use.name);
       if (block.is_error === true) t.failed += 1;
       if (at !== null && use.at !== null) {
-        t.durationsMs.push(Math.max(0, at - use.at));
+        const durationMs = Math.max(0, at - use.at);
+        if (t.slowest == null || durationMs > t.slowest.durationMs) {
+          t.slowest = { detail: use.detail, durationMs };
+        }
+        t.durationsMs.push(durationMs);
         if (t.durationsMs.length > DURATIONS_KEEP) t.durationsMs.shift();
       }
     }

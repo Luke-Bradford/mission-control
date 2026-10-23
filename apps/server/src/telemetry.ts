@@ -81,10 +81,11 @@ const ioTokens = (r: Run): number => (r.tokens ? r.tokens.input + r.tokens.outpu
 export interface TelemetryScope {
   agent: string | null;
   account: string | null;
+  ticket?: string | null;
 }
 
 /**
- * `scope` restricts `today`, `toolLatency`, `subagents` and `totals` to the loops it names;
+ * `scope` intersects ticket, agent and account for today, ticket bars, tools and totals;
  * `merged7d`, the flow of work, quota, machine and the per-agent series stay crew-wide.
  */
 export function telemetry(
@@ -93,6 +94,10 @@ export function telemetry(
   range: TelemetryRange,
   now: number,
   scope: TelemetryScope,
+  commitLines: ReadonlyMap<
+    string,
+    { additions: number | null; deletions: number | null }
+  > = new Map(),
 ): Telemetry {
   const tz = config.operator.timezone;
   const agents = configuredAgents(config);
@@ -120,6 +125,15 @@ export function telemetry(
   const digests: Map<string, RunDigest> = store.digests([
     ...new Set([...runs.map((r) => r.id), ...[...latestRuns.values()].map((r) => r.id)]),
   ]);
+  const prsByRepo = config.repos.map((repo) => [repo.id, store.pullRequests(repo.id)] as const);
+  const prs = prsByRepo.flatMap(([, p]) => p);
+  // The same rows resolve a run's ticket through its PRs (tokensByTicket).
+  const prCache: PrCache = new Map(
+    prsByRepo.map(([id, p]) => [id, new Map(p.map((x) => [x.number, x]))]),
+  );
+  const matches = (r: Run): boolean =>
+    scopedIds.has(r.agentId) &&
+    (scope.ticket == null || runTicket(r, runPrs(config, store, r, prCache)) === scope.ticket);
   const inToday = runs.filter((r) => share(r, dayStart, now) > 0);
   const inRange = runs.filter((r) => share(r, since, now) > 0);
 
@@ -130,7 +144,7 @@ export function telemetry(
   let turns = 0;
   let costUsd: number | null = null;
   for (const r of inToday) {
-    if (!scopedIds.has(r.agentId)) continue;
+    if (!matches(r)) continue;
     const f = share(r, dayStart, now);
     const d = digests.get(r.id);
     tokens += ioTokens(r) * f;
@@ -139,25 +153,28 @@ export function telemetry(
     turns += (d?.turns ?? 0) * f;
     costUsd = addCost(costUsd, r.costUsd, f);
   }
-  const prsByRepo = config.repos.map((repo) => [repo.id, store.pullRequests(repo.id)] as const);
-  const prs = prsByRepo.flatMap(([, p]) => p);
-  // The same rows resolve a run's ticket through its PRs (tokensByTicket).
-  const prCache: PrCache = new Map(
-    prsByRepo.map(([id, p]) => [id, new Map(p.map((x) => [x.number, x]))]),
-  );
   const merged = prs.flatMap((p) => (p.mergedAt === null ? [] : [p.mergedAt]));
   const today: Telemetry["today"] = {
-    commits: store
-      .commitsSince(dayStart)
-      .filter((r) => scopedIds.has(r.agentId))
-      .reduce((sum, r) => sum + r.n, 0),
+    commits: new Set(
+      store
+        .telemetryCommits(dayStart, now)
+        .filter((c) => {
+          const r = store.run(c.runId);
+          return r !== null && matches(r);
+        })
+        .map((c) => `${c.repoId}#${c.sha}`),
+    ).size,
     tokens: Math.round(tokens),
     cacheRead: Math.round(cacheRead),
     costUsd,
     toolCalls: Math.round(toolCalls),
     turns: Math.round(turns),
     working: crew(config, store, now).rows.filter(
-      (r) => r.hudState === "running" && scopedIds.has(r.id),
+      (r) =>
+        r.hudState === "running" &&
+        scopedIds.has(r.id) &&
+        (scope.ticket == null ||
+          inToday.some((run) => run.agentId === r.id && run.endedAt === null && matches(run))),
     ).length,
     agents: scoped.length,
     merged7d: merged.filter((m) => m > now - MERGED_DAYS * DAY_MS && m <= now).length,
@@ -292,29 +309,71 @@ export function telemetry(
   });
 
   const elapsed = now - dayStart;
-  const escalations = store.escalations().filter((e) => e.source === "title");
+  const stateEvents = store.agentEvents(0).filter((e) => e.at <= now);
+  const lockRuns = store.lockRuns(0);
   let agentWaitMs = 0;
-  const utilisation: Telemetry["utilisation"] = agents.map((loop) => {
-    if (elapsed <= 0) return { agentId: loop.id, working: 0, waiting: 0, idle: 100 };
-    const clip = (a: number, b: number): Interval => [Math.max(a, dayStart), Math.min(b, now)];
-    const work = inToday
-      .filter((r) => r.agentId === loop.id)
-      .map((r) => clip(r.startedAt, endOf(r, now)));
-    // A loop waits on the operator's open title escalations; a crew seat on its own open questions.
-    const wait =
-      loop.kind === "crew"
+  const utilisation: Telemetry["utilisation"] = agents.map((agent) => {
+    const questions =
+      agent.kind === "crew"
         ? store
-            .questionsOverlapping(loop.id, dayStart, now)
-            .map((q) => clip(q.at, q.answeredAt ?? now))
-        : escalations.filter((e) => e.repoId === loop.repoId).map((e) => clip(e.openedAt, now));
-    // A loop's wait counts only where it does not overlap its work; a seat's wait is subtracted from it.
-    const waitMs =
-      loop.kind === "crew" ? unionMs(wait) : unionMs([...work, ...wait]) - unionMs(work);
-    if (loop.kind === "crew") agentWaitMs += waitMs;
-    const workMs = loop.kind === "crew" ? unionMs([...work, ...wait]) - waitMs : unionMs(work);
-    const working = (workMs / elapsed) * 100;
-    const waiting = (waitMs / elapsed) * 100;
-    return { agentId: loop.id, working, waiting, idle: Math.max(0, 100 - working - waiting) };
+            .questionsOverlapping(agent.id, dayStart, now)
+            .map((q): Interval => [Math.max(dayStart, q.at), Math.min(now, q.answeredAt ?? now)])
+        : [];
+    agentWaitMs += unionMs(questions);
+    const events = stateEvents.filter((e) => e.agentId === agent.id);
+    const lockWaits = lockRuns
+      .filter((l) => l.seatId === agent.id)
+      .map((l): Interval => [Math.max(dayStart, l.queuedAt), Math.min(now, l.startedAt)]);
+    const waits = [
+      ...lockWaits,
+      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["ready", "review"]),
+    ];
+    const blocked = [
+      ...questions,
+      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["blocked"]),
+    ];
+    const boundaries = [
+      ...new Set([dayStart, now, ...events.map((e) => e.at), ...[...waits, ...blocked].flat()]),
+    ]
+      .filter((at) => at >= dayStart && at <= now)
+      .sort((a, b) => a - b);
+    const ms = { working: 0, waiting: 0, blocked: 0, idle: 0, unknown: 0 };
+    let eventIndex = 0;
+    let state: (typeof events)[number]["to"] | null = null;
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      const a = boundaries[i] as number;
+      const b = boundaries[i + 1] as number;
+      while (events[eventIndex] && (events[eventIndex]?.at ?? Infinity) <= a) {
+        state = events[eventIndex]?.to ?? null;
+        eventIndex++;
+      }
+      const overlaps = (intervals: Interval[]) =>
+        intervals.some(([start, end]) => start < b && end > a);
+      const category =
+        overlaps(blocked) ||
+        state === "blocked" ||
+        state === "parked" ||
+        state === "stalled" ||
+        state === "error"
+          ? "blocked"
+          : overlaps(waits) || state === "waiting"
+            ? "waiting"
+            : state === "running"
+              ? "working"
+              : state === null
+                ? "unknown"
+                : "idle";
+      ms[category] += b - a;
+    }
+    const pct = (value: number) => (elapsed <= 0 ? 0 : (value / elapsed) * 100);
+    return {
+      agentId: agent.id,
+      working: pct(ms.working),
+      waiting: pct(ms.waiting),
+      blocked: pct(ms.blocked),
+      idle: pct(ms.idle),
+      unknown: elapsed <= 0 ? 100 : pct(ms.unknown),
+    };
   });
 
   const answers = store.operatorAnswers(dayStart);
@@ -337,11 +396,22 @@ export function telemetry(
     return { agentId, turns: (latest && digests.get(latest.id)?.turnUsage) || [] };
   });
 
-  const tools = new Map<string, { calls: number; failed: number; durations: number[] }>();
+  const tools = new Map<
+    string,
+    {
+      calls: number;
+      failed: number;
+      durations: number[];
+      slowest: NonNullable<Telemetry["toolLatency"][number]["slowest"]> | null;
+    }
+  >();
   for (const r of runs) {
-    if (r.startedAt < since || !scopedIds.has(r.agentId)) continue;
+    if (!matches(r) || r.startedAt < since) continue;
     for (const [tool, t] of Object.entries(digests.get(r.id)?.tools ?? {})) {
-      const acc = tools.get(tool) ?? { calls: 0, failed: 0, durations: [] };
+      const acc = tools.get(tool) ?? { calls: 0, failed: 0, durations: [], slowest: null };
+      if (t.slowest && (acc.slowest === null || t.slowest.durationMs > acc.slowest.durationMs)) {
+        acc.slowest = { ...t.slowest, agentId: r.agentId };
+      }
       acc.calls += t.calls;
       acc.failed += t.failed;
       acc.durations.push(...t.durationsMs);
@@ -357,12 +427,13 @@ export function telemetry(
         p50Ms: percentile(sorted, 50),
         p95Ms: percentile(sorted, 95),
         failed: t.failed,
+        slowest: t.slowest,
       };
     })
     .sort((a, b) => b.calls - a.calls || a.tool.localeCompare(b.tool));
 
   const subagents: Telemetry["subagents"] = inToday
-    .filter((r) => scopedIds.has(r.agentId))
+    .filter(matches)
     .sort((a, b) => a.startedAt - b.startedAt || a.seq - b.seq)
     .flatMap((r) =>
       (digests.get(r.id)?.subagents ?? []).map((s) => ({ ...s, agentId: r.agentId })),
@@ -401,6 +472,7 @@ export function telemetry(
       stepRow.costUsd = addCost(stepRow.costUsd, r.costUsd, f);
       stepRow.runs += 1;
     }
+    if (!matches(r)) continue;
     const ticket = runTicket(r, runPrs(config, store, r, prCache));
     if (ticket !== null) {
       const t = byTicket.get(ticket) ?? { tokens: 0, costUsd: null };
@@ -408,7 +480,6 @@ export function telemetry(
       t.costUsd = addCost(t.costUsd, r.costUsd, f);
       byTicket.set(ticket, t);
     }
-    if (!scopedIds.has(r.agentId)) continue;
     // An empty model name is no model: "" and null are one row, shown as null.
     const model = r.model || d?.model || null;
     const key = `${r.agentId}\n${model ?? ""}`;
@@ -423,6 +494,8 @@ export function telemetry(
       turns: 0,
       toolCalls: 0,
       costUsd: null,
+      additions: null,
+      deletions: null,
     };
     row.input += (r.tokens?.input ?? 0) * f;
     row.output += (r.tokens?.output ?? 0) * f;
@@ -432,6 +505,29 @@ export function telemetry(
     row.toolCalls += (d?.toolCalls ?? 0) * f;
     row.costUsd = addCost(row.costUsd, r.costUsd, f);
     totals.set(key, row);
+  }
+  const seenCommits = new Set<string>();
+  const measuredRows = new Set<string>();
+  for (const c of store.telemetryCommits(since, now)) {
+    const r = store.run(c.runId);
+    if (r === null || !matches(r)) continue;
+    const commitKey = `${c.repoId}#${c.sha}`;
+    if (seenCommits.has(commitKey)) continue;
+    const model = r.model || digests.get(r.id)?.model || null;
+    const key = `${r.agentId}\n${model ?? ""}`;
+    const row = totals.get(key);
+    if (!row) continue;
+    seenCommits.add(commitKey);
+    const counts = commitLines.get(commitKey);
+    if (!measuredRows.has(key)) {
+      row.additions = 0;
+      row.deletions = 0;
+      measuredRows.add(key);
+    }
+    row.additions =
+      row.additions == null || counts?.additions == null ? null : row.additions + counts.additions;
+    row.deletions =
+      row.deletions == null || counts?.deletions == null ? null : row.deletions + counts.deletions;
   }
   const tokensByTicket: Telemetry["tokensByTicket"] = [...byTicket]
     .map(([ticket, t]) => ({ ticket, tokens: Math.round(t.tokens), costUsd: t.costUsd }))
@@ -451,7 +547,17 @@ export function telemetry(
       };
     })
     // A row that rounds to nothing everywhere is a run with no usage, not a figure.
-    .filter((r) => r.input + r.output + r.cacheRead + r.turns + r.toolCalls > 0)
+    .filter(
+      (r) =>
+        r.input +
+          r.output +
+          r.cacheRead +
+          r.turns +
+          r.toolCalls +
+          (r.additions ?? 0) +
+          (r.deletions ?? 0) >
+        0,
+    )
     .sort(
       (a, b) =>
         ids.indexOf(a.agentId) - ids.indexOf(b.agentId) ||

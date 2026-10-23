@@ -2675,6 +2675,52 @@ describe("activity", () => {
 });
 
 describe("telemetry", () => {
+  it("intersects repo-qualified tickets, agent, account and range and clears scope", async () => {
+    for (const [id, ticket, input] of [
+      ["a", "shop-app#7", 10],
+      ["b", "shop-app#8", 20],
+      ["c", "site-builder#7", 40],
+    ] as const) {
+      store.upsertRun(
+        run({
+          id,
+          ticket,
+          tokens: { input, output: 0, cacheRead: 0, cacheCreate: 0 },
+          startedAt: NOW - HOUR,
+          endedAt: NOW - HOUR / 2,
+        }),
+      );
+    }
+    const read = async (q: string) => (await get(`/api/telemetry?${q}`)).json<Telemetry>();
+    expect((await read("ticket=shop-app%237")).totals[0]?.input).toBe(10);
+    expect((await read("ticket=site-builder%237")).totals[0]?.input).toBe(40);
+    expect(
+      (await read("ticket=shop-app%237&agent=shop-app-ta&account=claude-main")).tokensByTicket,
+    ).toEqual([{ ticket: "shop-app#7", tokens: 10, costUsd: null }]);
+    expect((await read("ticket=shop-app%237&account=codex-main")).totals).toEqual([]);
+    expect((await read("ticket=&agent=&account=")).totals[0]?.input).toBe(70);
+    store.upsertRun(
+      run({
+        id: "older",
+        ticket: "shop-app#7",
+        startedAt: NOW - 8 * HOUR,
+        endedAt: NOW - 7 * HOUR,
+        tokens: { input: 100, output: 0, cacheRead: 0, cacheCreate: 0 },
+      }),
+    );
+    expect((await read("range=6h&ticket=shop-app%237")).totals[0]?.input).toBe(10);
+    expect((await read("range=24h&ticket=shop-app%237")).totals[0]?.input).toBe(110);
+    for (const q of [
+      "ticket=7",
+      "ticket=unknown%237",
+      "ticket=shop-app%230",
+      "ticket=shop-app%231.5",
+      "ticket=a&ticket=b",
+    ]) {
+      expect((await get(`/api/telemetry?${q}`)).statusCode, q).toBe(400);
+    }
+  });
+
   it("defaults to 6h, accepts each range and refuses an unknown one with 400", async () => {
     store.upsertRun(
       run({

@@ -2464,6 +2464,26 @@ export class Store {
     }));
   }
 
+  /** Historical waits, including cleared notes; only the named seat's evidence counts. */
+  telemetryNoteIntervals(
+    seatId: string,
+    since: number,
+    now: number,
+    kinds: string[],
+  ): [number, number][] {
+    const rows = this.db
+      .prepare(
+        "SELECT at, cleared_at, kind FROM attention_notes WHERE seat_id = ? AND at < ? AND (cleared_at IS NULL OR cleared_at > ?)",
+      )
+      .all(seatId, now, since) as Row[];
+    return rows
+      .filter((r) => kinds.includes(r.kind as string))
+      .map((r) => [
+        Math.max(since, r.at as number),
+        Math.min(now, (r.cleared_at as number | null) ?? now),
+      ]);
+  }
+
   openNoteKeys(runId: string): string[] {
     const rows = this.db
       .prepare(
@@ -2728,6 +2748,28 @@ export class Store {
          ON CONFLICT(run_id, sha) DO NOTHING`,
       )
       .run(c.runId, c.repoId, c.branch, c.sha, c.at);
+  }
+
+  /** First record of each repo/commit in the window; a later retry never recounts it. */
+  telemetryCommits(
+    since: number,
+    now: number,
+  ): { runId: string; repoId: string; sha: string; at: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.run_id, c.repo_id, c.sha, c.at FROM run_commits c
+         WHERE c.at >= ? AND c.at <= ? AND c.id = (
+           SELECT first.id FROM run_commits first
+           WHERE first.repo_id = c.repo_id AND first.sha = c.sha ORDER BY first.at, first.id LIMIT 1
+         ) ORDER BY c.at, c.id`,
+      )
+      .all(since, now) as Row[];
+    return rows.map((r) => ({
+      runId: r.run_id as string,
+      repoId: r.repo_id as string,
+      sha: r.sha as string,
+      at: r.at as number,
+    }));
   }
 
   /** The commits the commit tool made for a run, in the order it made them. */
