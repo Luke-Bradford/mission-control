@@ -2327,6 +2327,14 @@ export class Store {
     return rows.map(toGuardHit);
   }
 
+  /** How many refusals a run has had. */
+  guardHitCount(runId: string): number {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM guard_hits WHERE run_id = ?")
+      .get(runId) as { n: number };
+    return r.n;
+  }
+
   /** Hits at or after `sinceMs` per rule; every rule is present, 0 when it has none. */
   guardHitCounts(sinceMs: number): Record<GuardRule, number> {
     const counts = Object.fromEntries(Object.keys(GUARD_RULES).map((k) => [k, 0])) as Record<
