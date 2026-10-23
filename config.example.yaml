@@ -89,8 +89,8 @@ crew:
   # node: /opt/homebrew/bin/node
   # Folders code the seats run may not read, on top of the credential folders, the hub's checkout,
   # every loop's folders and the other sessions' checkouts, which are always denied. List your own
-  # working folders. Absolute paths (~ allowed); none may be or hold `worktrees`, a `checkout` or
-  # a temp dir (the hub's, or /tmp).
+  # working folders. Absolute paths (~ allowed); none may be, hold or lie inside `worktrees`, a
+  # `checkout` or a temp dir (the hub's, or /tmp).
   # deny_read: [~/code/work, ~/Documents]
   # Input + output tokens one build-loop run may use (the engine will park a run that goes over).
   # Default 400000.
