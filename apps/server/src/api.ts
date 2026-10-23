@@ -248,6 +248,9 @@ const MessageBody = z.strictObject({
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
 const NoBody = z.strictObject({});
 
+// Ending a run frees the seat for its next ticket; `hold` also takes it out of rotation.
+const EndBody = z.strictObject({ hold: z.boolean().optional() });
+
 /**
  * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
  * event carries no input.
@@ -1075,8 +1078,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         await sup.interrupt(id);
         return { ok: true };
       });
-      seatAction("/seats/:id/end", NoBody, async (sup, id) => {
-        await sup.endRun(id);
+      seatAction("/seats/:id/end", EndBody, async (sup, id, b) => {
+        await sup.endRun(id, { hold: b.hold });
         return { ok: true };
       });
       api.get<{ Params: { id: string } }>(

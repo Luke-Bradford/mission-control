@@ -65,6 +65,11 @@ function searching(
     }
     if (q.includes("comments(last")) return comments?.(v);
     if (q.includes("milestones")) return { repository: { milestones: { nodes: [] } } };
+    if (q.includes("OpenIssues")) {
+      return {
+        repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+      };
+    }
     if (q.includes("pullRequests")) {
       return {
         repository: {

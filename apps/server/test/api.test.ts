@@ -2255,6 +2255,11 @@ describe("boards, escalations, health", () => {
       ["site-builder", null],
     ]);
     const boardGql: Gql = async (query) => {
+      if (query.includes("OpenIssues")) {
+        return {
+          repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+        };
+      }
       if (!query.includes("projectV2")) throw new Error("not a board read");
       return {
         repositoryOwner: {
@@ -2876,7 +2881,7 @@ describe("crew routes", () => {
       ["message", "guido-1", "hi", { interrupt: false }],
       ["message", "guido-1", "now", { interrupt: true }],
       ["interrupt", "guido-1"],
-      ["end", "guido-1"],
+      ["end", "guido-1", { hold: undefined }],
     ]);
     expect(seen.filter((t) => t === "agents")).toHaveLength(4);
   });
@@ -2919,6 +2924,8 @@ describe("crew routes", () => {
       ["message", { text: "hi", interrupt: "yes" }],
       ["interrupt", { extra: 1 }],
       ["end", { extra: 1 }],
+      ["end", { hold: "yes" }],
+      ["end", { hold: true, extra: 1 }],
     ];
     for (const [action, body] of bad) {
       const r = await post5(action, body);
@@ -2926,6 +2933,15 @@ describe("crew routes", () => {
       expect(r.json<{ error: string }>().error).toEqual(expect.any(String));
     }
     expect(supervisorCalls).toEqual([]);
+  });
+
+  it("ends a run without a hold by default, and with one when asked", async () => {
+    expect((await post5("end", {})).statusCode).toBe(200);
+    expect((await post5("end", { hold: true })).statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([
+      ["end", "guido-1", { hold: undefined }],
+      ["end", "guido-1", { hold: true }],
+    ]);
   });
 
   it("names the blank-text refusal", async () => {
