@@ -581,6 +581,50 @@ describe("Store", () => {
     expect(migrated.board("r")[0]?.size).toBe("L");
   });
 
+  it("pull request checks round-trip; a row without them reads []", () => {
+    const base = {
+      repoId: "r1",
+      number: 1,
+      title: "t",
+      url: "u",
+      branch: "fix/1-x",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: "failing" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: null,
+      headSha: null,
+      mergeable: null,
+    };
+    const checks = [
+      {
+        name: "check",
+        kind: "check" as const,
+        state: "failing" as const,
+        conclusion: "FAILURE",
+        attempt: 2,
+        url: "https://example.test/job/2",
+      },
+    ];
+    store.upsertPullRequests(
+      "r1",
+      [
+        { ...base, checks },
+        { ...base, number: 2 },
+      ],
+      0,
+    );
+    const by = new Map(store.pullRequests("r1").map((p) => [p.number, p.checks]));
+    expect(by.get(1)).toEqual(checks);
+    expect(by.get(2)).toEqual([]);
+    const passed = [{ ...checks[0], state: "passing" as const, conclusion: "SUCCESS" }];
+    store.upsertPullRequests("r1", [{ ...base, checks: passed }], 0);
+    expect(store.pullRequests("r1").find((p) => p.number === 1)?.checks).toEqual(passed);
+  });
+
   it("pull requests upsert, replace, scope to the repo and round-trip every field", () => {
     const pr = (repoId: string, number: number, over: object = {}) => ({
       repoId,
@@ -600,6 +644,7 @@ describe("Store", () => {
       mergeable: "MERGEABLE" as const,
       author: "octo",
       assignees: ["a", "b"],
+      checks: [],
       ...over,
     });
     store.upsertPullRequests(
@@ -1627,6 +1672,26 @@ describe("answerQuestions", () => {
     expect(store.question(open)?.answeredAt).toBe(5);
     store.answerQuestions("guido-1", 6);
     expect(store.question(passed)?.answeredAt).toBe(6);
+  });
+});
+
+describe("questionsOverlapping", () => {
+  it("returns the seat's questions open in the window", () => {
+    const ask = (agentId: string, at: number) =>
+      store.addQuestion({ agentId, runId: "r1", text: "q?", at });
+    ask("guido-1", 10);
+    store.answerQuestions("guido-1", 50); // answered before the window
+    ask("guido-1", 60);
+    store.answerQuestions("guido-1", 120); // open across `from`, answered inside
+    ask("guido-1", 130);
+    store.answerQuestions("guido-1", 160);
+    ask("guido-1", 200); // at `to`: not in [from, to)
+    ask("guido-2", 120);
+    expect(store.questionsOverlapping("guido-1", 100, 200)).toEqual([
+      { at: 60, answeredAt: 120 },
+      { at: 130, answeredAt: 160 },
+    ]);
+    expect(store.questionsOverlapping("guido-1", 100, 250)).toHaveLength(3);
   });
 });
 

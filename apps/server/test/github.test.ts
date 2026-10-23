@@ -190,6 +190,31 @@ function issue(n: number, title: string, labels: string[], comments: unknown[] =
   };
 }
 
+function checkRun(name: string, conclusion: string | null, attempt = 1) {
+  return {
+    __typename: "CheckRun",
+    name,
+    status: conclusion === null ? "IN_PROGRESS" : "COMPLETED",
+    conclusion,
+    detailsUrl: `https://github.com/octo-org/shop-app/actions/runs/1/job/${attempt}`,
+    checkSuite: { workflowRun: { runAttempt: attempt } },
+  };
+}
+
+function statusContext(context: string, state: string) {
+  return {
+    __typename: "StatusContext",
+    context,
+    state,
+    targetUrl: `https://ci.example/${context}`,
+  };
+}
+
+/** One commit whose rollup holds these contexts. */
+function heads(state: string, ...contexts: unknown[]) {
+  return { nodes: [{ commit: { statusCheckRollup: { state, contexts: { nodes: contexts } } } }] };
+}
+
 function pull(n: number, o: Record<string, unknown> = {}) {
   return {
     number: n,
@@ -205,7 +230,17 @@ function pull(n: number, o: Record<string, unknown> = {}) {
     closingIssuesReferences: { nodes: [] },
     mergeable: "MERGEABLE",
     commits: {
-      nodes: [{ commit: { oid: `${n}`.repeat(40), statusCheckRollup: { state: "SUCCESS" } } }],
+      nodes: [
+        {
+          commit: {
+            oid: `${n}`.repeat(40),
+            statusCheckRollup: {
+              state: "SUCCESS",
+              contexts: { nodes: [checkRun("check", "SUCCESS")] },
+            },
+          },
+        },
+      ],
     },
     ...o,
   };
@@ -1212,12 +1247,12 @@ describe("collectGithub pull requests", () => {
           pull(11, {
             isDraft: true,
             reviewDecision: "CHANGES_REQUESTED",
-            commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+            commits: heads("FAILURE", checkRun("check", "FAILURE")),
           }),
           pull(12, {
             state: "CLOSED",
             reviewDecision: "REVIEW_REQUIRED",
-            commits: { nodes: [{ commit: { statusCheckRollup: { state: "EXPECTED" } } }] },
+            commits: heads("EXPECTED", statusContext("ci/legacy", "EXPECTED")),
           }),
         ]),
       ],
@@ -1272,6 +1307,85 @@ describe("collectGithub pull requests", () => {
     const q = calls.find((c) => c.q.includes("pullRequests("))?.q ?? "";
     expect(q).toMatch(/\bmergeable\b/);
     expect(q).toMatch(/commit \{ oid statusCheckRollup/);
+  });
+
+  it("CI is the failing check, not mc/review, and the check is stored whole", async () => {
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(1, {
+            commits: heads(
+              "FAILURE",
+              checkRun("check", "FAILURE", 2),
+              statusContext("mc/review", "SUCCESS"),
+            ),
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(prs()[0]?.ci).toBe("failing");
+    expect(prs()[0]?.checks).toEqual([
+      {
+        name: "check",
+        kind: "check",
+        state: "failing",
+        conclusion: "FAILURE",
+        attempt: 2,
+        url: "https://github.com/octo-org/shop-app/actions/runs/1/job/2",
+      },
+      {
+        name: "mc/review",
+        kind: "status",
+        state: "passing",
+        conclusion: "SUCCESS",
+        attempt: null,
+        url: "https://ci.example/mc/review",
+      },
+    ]);
+  });
+
+  it("a failing or pending mc/review leaves CI passing", async () => {
+    for (const state of ["FAILURE", "PENDING"]) {
+      const { gql } = stub({
+        prPages: [
+          prPage([
+            pull(1, {
+              commits: heads(
+                state,
+                checkRun("check", "SUCCESS"),
+                statusContext("mc/review", state),
+              ),
+            }),
+          ]),
+        ],
+      });
+      await collectGithub(repo, store, gql, NOW);
+      expect(prs()[0]?.ci, state).toBe("passing");
+    }
+  });
+
+  it("with required_checks, an unreported required check is pending", async () => {
+    const { gql } = stub({ prPages: [prPage([pull(1)])] });
+    await collectGithub({ ...repo, requiredChecks: ["check", "e2e"] }, store, gql, NOW);
+    expect(prs()[0]?.ci).toBe("pending");
+  });
+
+  it("an in-progress check run is pending with its status as conclusion", async () => {
+    const { gql } = stub({
+      prPages: [prPage([pull(1, { commits: heads("PENDING", checkRun("check", null)) })])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(prs()[0]?.ci).toBe("pending");
+    expect(prs()[0]?.checks?.[0]).toMatchObject({ state: "pending", conclusion: "IN_PROGRESS" });
+  });
+
+  it("asks GitHub for up to 50 checks with their run attempt", async () => {
+    const { gql, calls } = stub({ prPages: [prPage([])] });
+    await collectGithub(repo, store, gql, NOW);
+    const q = calls.find((c) => c.q.includes("pullRequests("))?.q ?? "";
+    expect(q).toContain("contexts(first: 50)");
+    expect(q).toContain("runAttempt");
   });
 
   it("a PR with no commits or rollup has ci null, no reviewDecision has review null, no ticket is null", async () => {
@@ -1402,10 +1516,15 @@ describe("sweepPullRequests", () => {
   // GitHub does not bump a PR's updatedAt when its CI finishes: the sweep read `pending`, the
   // poll then read `passing`, and both carry the same updatedAt.
   const ciRevert = async (pollStartedAt: number, readPrsAt: () => number) => {
-    const rollup = (state: string) => ({ nodes: [{ commit: { statusCheckRollup: { state } } }] });
     const same = "2026-10-16T01:00:00Z";
-    const swept = pull(1, { updatedAt: same, commits: rollup("PENDING") });
-    const polled = pull(1, { updatedAt: same, commits: rollup("SUCCESS") });
+    const swept = pull(1, {
+      updatedAt: same,
+      commits: heads("PENDING", checkRun("check", null)),
+    });
+    const polled = pull(1, {
+      updatedAt: same,
+      commits: heads("SUCCESS", checkRun("check", "SUCCESS")),
+    });
     const opened = pull(2, { title: "opened" });
     const inner = stub({ prPages: [prPage([swept, recent(3)])] }).gql;
     const gql: Gql = async (q, v) => {

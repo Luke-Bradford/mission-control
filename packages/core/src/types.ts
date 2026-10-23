@@ -266,6 +266,16 @@ export interface BoardItem {
   projectId: string | null;
 }
 
+/** A check run or a commit status on a PR's head commit. */
+export interface PrCheck {
+  name: string; // a check run's name, or a status's context
+  kind: "check" | "status";
+  state: "passing" | "failing" | "pending";
+  conclusion: string; // a check run's conclusion (its status until done); a status's state
+  attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
+  url: string | null;
+}
+
 export interface PullRequestView {
   repoId: RepoId;
   number: number;
@@ -289,6 +299,8 @@ export interface PullRequestView {
   author?: string | null;
   /** Logins assigned to the PR; absent means none. */
   assignees?: string[];
+  /** The head commit's checks by name; absent on a row stored before them. */
+  checks?: PrCheck[];
 }
 
 /** One issue that reached Done: when work started (see collectors/flow.ts) and when it finished. */
@@ -594,6 +606,15 @@ export interface CrewLoop {
 /** What a looped run waits on; null: nothing (its seat is on it, or it is done). */
 export type LoopWait = "ci" | "retro" | "main" | "operator" | "lock" | "seat";
 
+/** One ticket in a writer seat's queue. */
+export interface CrewQueueItem {
+  /** `repo#number`. */
+  ref: string;
+  issue: number;
+  /** 1 is the next the seat takes. */
+  pos: number;
+}
+
 /** A run its seat has set aside (in review, off the seat). */
 export interface CrewAsideRun {
   runId: string;
@@ -627,7 +648,12 @@ export interface CrewRow {
   /** Crew: the `claude --version` read at the server and the seat's configured effort; null for a loop. */
   cli: { version: string | null; effort: string | null };
   /** The open PR on the latest run's branch (in the seat's repo), else null. */
-  review: { prNumber: number; state: "draft" | "open" | "changes" | "approved" } | null;
+  review: {
+    prNumber: number;
+    state: "draft" | "open" | "changes" | "approved";
+    /** The review seat reviewing this PR now (queued, starting or running), else null. */
+    reviewing?: AgentId | null;
+  } | null;
   /** A scratch seat's live review, else null. */
   reviewing?: { prNumber: number; sha: string; ref: string | null } | null;
   paused: boolean;
@@ -642,6 +668,8 @@ export interface CrewRow {
   loop: CrewLoop | null;
   /** Crew: the seat's set-aside runs other than `run`, oldest first; [] for a loop row. */
   asideRuns?: CrewAsideRun[];
+  /** A writer seat's queued tickets, without the one it holds; [] for other rows. */
+  queue?: CrewQueueItem[];
   /** The latest run. */
   run: {
     id: string;

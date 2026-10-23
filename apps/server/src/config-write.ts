@@ -300,6 +300,7 @@ async function add(
     statusMap: repo.statusMap,
     ...(repo.needsYouLabels === undefined ? {} : { needsYouLabels: repo.needsYouLabels }),
     fullSuite: [],
+    requiredChecks: [],
     commands: defaultSeatCommands(),
     protectedFiles: [],
     autonomy: "draft",

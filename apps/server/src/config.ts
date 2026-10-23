@@ -27,6 +27,7 @@ import {
   MODE_LOOPS,
   oneWatchSeatText,
   protectedGlobShapeProblem,
+  REVIEW_STATUS_CONTEXT,
   type RepoId,
   ROLE_NAME,
   ROLE_PROMPT,
@@ -132,6 +133,8 @@ export interface CcConfig {
     needsYouLabels?: string[];
     /** Commands that run a whole suite (the guard serialises them): each is one of the repo's commands.writer entries or a word-extension of one. */
     fullSuite?: string[];
+    /** The checks that decide CI on a PR head, by name. [] = every check but mc/review. Loaded: always set. */
+    requiredChecks?: string[];
     /** What the repo's seats may run: `writer` for writers, `review` for read-only and scratch seats. Loaded: always set. */
     commands?: SeatCommands;
     /** Globs seats may not edit or commit, on top of core's PROTECTED_FILES. Loaded: always set (default []). */
@@ -362,6 +365,14 @@ const fileSchema = z
         status_map: z.record(z.string(), ticketState),
         needs_you_labels: z.array(nonEmpty).optional(),
         full_suite: z.array(nonEmpty).default([]),
+        required_checks: z
+          .array(
+            nonEmpty.refine(
+              (c) => c !== REVIEW_STATUS_CONTEXT,
+              "mc/review is Mission Control's review status, not a CI check",
+            ),
+          )
+          .default([]),
         commands: z
           .strictObject({ writer: z.array(seatCommand), review: z.array(seatCommand) })
           .optional(),
@@ -443,6 +454,7 @@ const fileSchema = z
         statusMap: r.status_map,
         ...(r.needs_you_labels === undefined ? {} : { needsYouLabels: r.needs_you_labels }),
         fullSuite: r.full_suite,
+        requiredChecks: r.required_checks,
         commands: r.commands ?? defaultSeatCommands(),
         protectedFiles: r.protected,
         autonomy: r.autonomy,
@@ -857,12 +869,19 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
   });
   // A denial over the crew's own folders would leave a seat unable to read its worktree, its clone's
   // git dir, or the temp dirs the CLI works in.
-  const ownFolders = crewOwnFolders(crew);
+  // Compared lowercased: on a case-insensitive disk a folder that doesn't exist yet keeps whatever
+  // case it was written in, and resolves to the crew's own folder once it does.
+  const lower = (p: string) => realish(p).toLowerCase();
+  const ownFolders = crewOwnFolders(crew).map(lower);
+  const crewDirs = [crew.worktrees, ...crew.sessions.map((s) => s.checkout)].map(lower);
   for (const p of crew.denyRead ?? []) {
     if (!isAbsolute(p)) throw new ConfigError("crew.deny_read", `${p} is not an absolute path`);
-    const real = realish(p);
+    const real = lower(p);
     if (ownFolders.some((own) => isInside(own, real))) {
       throw new ConfigError("crew.deny_read", `${p} holds the crew's own folders`);
+    }
+    if (crewDirs.some((dir) => isInside(real, dir))) {
+      throw new ConfigError("crew.deny_read", `${p} is inside the crew's own folders`);
     }
   }
   if (seatCount > crew.maxSeats) {

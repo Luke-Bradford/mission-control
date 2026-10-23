@@ -544,6 +544,13 @@ textarea {
 .ag.sm {
   font-size: 13px;
 }
+.ag .rt,
+.idrow .big .rt {
+  font-family: var(--sans, inherit);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--fg-2);
+}
 .rref {
   font-family: var(--mono);
   font-size: var(--fs-xs);
@@ -998,6 +1005,32 @@ main > section {
   flex-wrap: wrap;
   color: var(--warn);
   font-size: var(--fs-s);
+}
+.trow .need .needctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* A seat's set-aside run: its own line across the row, under the cells. */
+.trow .asideline {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: var(--fs-xs);
+}
+.trow .asideline > * {
+  flex: none;
+}
+.trow .asideline > .ellip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.trow .asideline .stepbar {
+  width: 48px;
+  margin: 0;
 }
 /* The doing line takes two lines here, so about 40 characters show in the ticket column at 1440. */
 .trow .doing {
@@ -2003,26 +2036,37 @@ pre.diff .h {
 .dmsg.flight .md-txt .md strong {
   color: var(--accent);
 }
-.dtabs {
-  display: flex;
-  gap: 2px;
-  padding: 6px 14px 0;
+.dwait {
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
+  background: var(--warn-soft);
+  display: grid;
+  gap: 4px;
 }
-.dtabs button {
-  display: inline-flex;
+.dwait .dwh {
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.dask {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  border: 0;
-  background: none;
-  color: var(--fg-2);
-  padding: 4px 10px;
-  border-radius: 6px 6px 0 0;
-  font-weight: 500;
+  gap: 8px;
+  min-width: 0;
 }
-.dtabs button.on {
-  color: var(--fg);
-  background: var(--surface-2);
+.briefgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.briefsec {
+  display: grid;
+  gap: 4px;
+}
+.briefsec h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
 .dock-unread {
   background: var(--accent);
@@ -2727,6 +2771,41 @@ kbd {
 .pb.tlist {
   padding: 2px 14px 12px;
 }
+/* a template profile (setup/Loops.tsx): the step track, then a card per step */
+.ptrack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 2px 14px;
+}
+.ptrack li {
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+  padding: 2px 8px;
+  font-size: var(--fs-s);
+}
+.pcards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  padding: 8px 14px 12px;
+}
+.pcard {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  padding: 6px 8px;
+}
+/* a tile whose figure is not stored */
+.kpi .v.nt,
+.stat2 b.nt {
+  font-size: var(--fs-s);
+  color: var(--muted);
+  font-weight: 400;
+}
 
 /* read-only config (components/config/ConfigYaml.tsx): a sticky, scrolling code block */
 .yaml {
@@ -2742,6 +2821,10 @@ kbd {
   border-radius: var(--r-s);
   background: var(--bg);
   font: var(--fs-s) / 1.6 var(--mono);
+}
+/* a row is transparent to the grid: every number shares one column, each beside its own line */
+.yaml .yrow {
+  display: contents;
 }
 .yaml .yln {
   color: var(--muted);

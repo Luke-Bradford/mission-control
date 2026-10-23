@@ -96,6 +96,7 @@ import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.t
 import { loopTries } from "./loophistory.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
+import { profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { CheckoutError } from "./runtime/checkouts.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
@@ -165,6 +166,8 @@ export interface AppDeps {
   /** true: log to stdout; an object: log to that stream; false/absent: no logging. */
   logger?: boolean | { stream: { write(msg: string): void } };
   heartbeatMs?: number;
+  /** profiles.yaml beside config.yaml, shown by /api/config; absent: no profiles in the view. */
+  profilesPath?: string;
   /** The GitHub client for board setup; default: a token from `gh auth token`, read on each use. */
   githubGql?: () => Promise<Gql>;
   /** Asked to refresh the boards after a setup that changed GitHub; default: a "boards" change. */
@@ -897,7 +900,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/activity", async () => activity(config, store, now()));
 
-      api.get("/config", async () => configView(config));
+      api.get("/config", async () =>
+        configView(
+          config,
+          deps.profilesPath === undefined ? undefined : profilesView(deps.profilesPath),
+        ),
+      );
 
       // Re-reads the config.yaml the server started with now (no request names a path); a file that
       // does not load changes nothing.

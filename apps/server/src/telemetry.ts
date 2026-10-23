@@ -8,6 +8,7 @@ import {
   FLOW_DAYS,
   LIVE_MINUTES,
   NO_SIZE,
+  type ReviewRow,
   type Run,
   type RunDigest,
   startOfLocalDay,
@@ -197,9 +198,47 @@ export function telemetry(
   // Ruling R14: a first push whose CI never finished (`pending`) counts as known but not green.
   const ciKnown = store.flowPrs(flowSince).filter((p) => p.firstPushCi !== null);
   const green = ciKnown.filter((p) => p.firstPushCi === "passing").length;
+  // Review figures cover PRs merged in the window that have a reported review.
+  const mergedKeys = new Set(
+    prs
+      .filter((p) => p.mergedAt !== null && p.mergedAt > flowSince && p.mergedAt <= now)
+      .map((p) => `${p.repoId}#${p.number}`),
+  );
+  const reviewsByPr = new Map<string, ReviewRow[]>();
+  for (const rv of store.reviewsIn(["reported"])) {
+    const key = `${rv.repoId}#${rv.prNumber}`;
+    if (!mergedKeys.has(key)) continue;
+    reviewsByPr.set(key, [...(reviewsByPr.get(key) ?? []), rv]);
+  }
+  const reviewed = [...reviewsByPr.values()];
+  const firstPass = reviewed.filter(
+    (rvs) => rvs.filter((r) => r.round === 1).sort((a, b) => a.id - b.id)[0]?.blocking === 0,
+  );
+  const crewIds = new Set(agents.filter((a) => a.kind === "crew").map((a) => a.id));
+  const commitRuns = store
+    .runsOverlapping(flowSince, now + 1)
+    .filter(
+      (r) =>
+        crewIds.has(r.agentId) &&
+        r.startedAt >= flowSince &&
+        r.endedAt !== null &&
+        r.loop != null &&
+        r.reviewId == null,
+    );
   const quality: Telemetry["quality"] = {
     ciGreenFirstPushPct: ciKnown.length === 0 ? null : (green / ciKnown.length) * 100,
     prs: ciKnown.length,
+    reviewRoundsPerPr:
+      reviewed.length === 0
+        ? null
+        : reviewed.reduce((sum, rvs) => sum + Math.max(...rvs.map((r) => r.round)), 0) /
+          reviewed.length,
+    firstPassReviewPct: reviewed.length === 0 ? null : (firstPass.length / reviewed.length) * 100,
+    reviewedPrs: reviewed.length,
+    commitsPerRun:
+      commitRuns.length === 0
+        ? null
+        : commitRuns.reduce((sum, r) => sum + store.runCommits(r.id).length, 0) / commitRuns.length,
   };
 
   // ── agents ──
@@ -247,11 +286,17 @@ export function telemetry(
     const work = inToday
       .filter((r) => r.agentId === loop.id)
       .map((r) => clip(r.startedAt, endOf(r, now)));
-    const wait = escalations
-      .filter((e) => e.repoId === loop.repoId)
-      .map((e) => clip(e.openedAt, now));
-    const workMs = unionMs(work);
-    const waitMs = unionMs([...work, ...wait]) - workMs;
+    // A loop waits on the operator's open title escalations; a crew seat on its own open questions.
+    const wait =
+      loop.kind === "crew"
+        ? store
+            .questionsOverlapping(loop.id, dayStart, now)
+            .map((q) => clip(q.at, q.answeredAt ?? now))
+        : escalations.filter((e) => e.repoId === loop.repoId).map((e) => clip(e.openedAt, now));
+    // A loop's wait counts only where it does not overlap its work; a seat's wait is subtracted from it.
+    const waitMs =
+      loop.kind === "crew" ? unionMs(wait) : unionMs([...work, ...wait]) - unionMs(work);
+    const workMs = loop.kind === "crew" ? unionMs([...work, ...wait]) - waitMs : unionMs(work);
     const working = (workMs / elapsed) * 100;
     const waiting = (waitMs / elapsed) * 100;
     return { agentId: loop.id, working, waiting, idle: Math.max(0, 100 - working - waiting) };

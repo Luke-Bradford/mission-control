@@ -4,10 +4,14 @@ import { ConfigYaml, scalar } from "../src/components/config/ConfigYaml.tsx";
 import { GLOSSARY_ID, Glossary } from "../src/components/config/Glossary.tsx";
 import { CONFIG } from "./fixtures.ts";
 
+/** The YAML a view shows: each row's text cell, one per line (the numbers are not part of it). */
+const yamlOf = (root: HTMLElement) =>
+  [...root.querySelectorAll(".ytx")].map((c) => c.textContent).join("\n");
+
 describe("ConfigYaml", () => {
   it("renders the config as YAML with the file's snake_case keys", () => {
     render(<ConfigYaml config={CONFIG} />);
-    const yaml = screen.getByTestId("config-yaml").textContent ?? "";
+    const yaml = yamlOf(screen.getByTestId("config-yaml"));
     for (const line of [
       "operator:\n  id: operator\n  timezone: Europe/London",
       "  - id: claude-main\n    vendor: claude\n    alert_at: 85",
@@ -35,9 +39,28 @@ describe("ConfigYaml", () => {
     expect(container.querySelector(".yk")?.textContent).toBe("operator:");
     expect(container.querySelector(".yv")?.textContent).toBe("operator");
     expect(container.querySelector(".yc")?.textContent).toMatch(/^# /);
-    const count = (yaml.textContent ?? "").split("\n").length;
-    expect(container.querySelector(".yaml .yln")?.textContent?.split("\n")).toHaveLength(count);
+    const count = yamlOf(yaml).split("\n").length;
+    expect(container.querySelectorAll(".yaml .yln")).toHaveLength(count);
     expect(screen.getByRole("region", { name: "config.yaml, read-only" })).toBeTruthy();
+  });
+
+  it("keeps one line number beside its own line when a line is far longer than the view", () => {
+    const long = `/Users/someone/${"deeply/nested/".repeat(40)}worktree`;
+    const config = {
+      ...CONFIG,
+      loops: CONFIG.loops.map((l, i) => (i === 0 ? { ...l, worktree: long } : l)),
+    };
+    const { container } = render(<ConfigYaml config={config} />);
+    const rows = [...container.querySelectorAll(".yaml .yrow")];
+    expect(rows.length).toBeGreaterThan(5);
+    rows.forEach((row, i) => {
+      expect(row.querySelectorAll(".yln")).toHaveLength(1);
+      expect(row.querySelectorAll(".ytx")).toHaveLength(1);
+      expect(row.querySelector(".yln")?.textContent).toBe(String(i + 1));
+      expect(row.querySelector(".yln")?.getAttribute("aria-hidden")).toBe("true");
+      expect(row.querySelector(".ytx")?.textContent).not.toContain("\n");
+    });
+    expect(rows.some((r) => r.querySelector(".ytx")?.textContent?.includes(long))).toBe(true);
   });
 
   it("never shows a password or its hash", () => {

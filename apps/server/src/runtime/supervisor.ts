@@ -198,7 +198,8 @@ export function seatDenyRead(
     const common = gitCommonDir(dir);
     if (common === null) return [dir];
     const repo = dirname(common);
-    const denyRepo = mainTree && basename(common) === ".git" && !own.some((f) => isInside(f, repo));
+    const denyRepo =
+      mainTree && basename(common) === ".git" && ownFolderIn(own, repo) === undefined;
     return denyRepo ? [dir, common, repo] : [dir, common];
   };
   const paths = [
@@ -215,6 +216,29 @@ export function seatDenyRead(
     ...extra,
   ];
   return [...new Set(paths.map(realish))];
+}
+
+/** The first of the crew's own folders that `repo` is or holds, if any. */
+function ownFolderIn(own: readonly string[], repo: string): string | undefined {
+  return own.find((f) => isInside(f, repo));
+}
+
+/**
+ * The loops whose repo's main working tree `seatDenyRead` leaves readable because it holds one of
+ * the crew's own folders, with that folder.
+ */
+export function keptLoopRepos(
+  config: CcConfig,
+): { loopId: string; repo: string; folder: string }[] {
+  if (!config.crew) return [];
+  const own = crewOwnFolders(config.crew);
+  return config.loops.flatMap((l) => {
+    const common = gitCommonDir(l.worktree);
+    if (common === null || basename(common) !== ".git") return [];
+    const repo = realish(dirname(common));
+    const folder = ownFolderIn(own, repo);
+    return folder === undefined ? [] : [{ loopId: l.id, repo, folder }];
+  });
 }
 
 /** The folders whose git repository a crew clone must not share: the hub's checkout and each loop's worktree. */
@@ -2309,6 +2333,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         return;
       }
       noteFlatWorktrees();
+      for (const k of keptLoopRepos(deps.config)) {
+        log(
+          `crew: loop ${k.loopId}'s repo ${k.repo} stays readable to seats: it holds ${k.folder}`,
+        );
+      }
       for (let attempt = 0; attempt < 2 && !holdsLock; attempt++) {
         try {
           writeFileSync(lockPath(), `${process.pid}\n`, { flag: "wx", mode: 0o600 });

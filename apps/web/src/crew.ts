@@ -16,22 +16,39 @@ import {
   LAST_TEXT_MAX,
   LIVE_DETAIL_MAX,
   type LoopPhase,
+  type LoopWait,
   type PullRequestView,
+  ROLES,
   type RunDigest,
   type RunPr,
   type RunStatus,
   type RunView,
   STALL_MS,
   seatCallSign,
+  type TestLockState,
 } from "@mc/core";
 import { cutText, hhmm, mss, prLabel, wkdTime } from "./fmt.ts";
+
+/**
+ * The attention items a seat's row shows: the seat's own, about the run it is working now. Run
+ * items carry the ticket, not the run, so one about another ticket belongs to a run the seat has
+ * set aside (in review, ready to merge, parked) and shows under that ticket in Needs you instead.
+ * An escalation is the repo's, not a run's, and always stays.
+ */
+export function seatItems(row: CrewRow, items: AttentionItem[]): AttentionItem[] {
+  return items.filter(
+    (i) =>
+      i.agentId === row.id &&
+      (i.escalationId !== null || i.ticket === null || i.ticket === row.ticket),
+  );
+}
 
 /**
  * The order the Overview table and j/k share: agents with an attention item first, then by state
  * (broken and stalled first), then config order.
  */
 export function crewOrder(rows: CrewRow[], items: AttentionItem[]): CrewRow[] {
-  const needs = new Set(items.map((i) => i.agentId).filter((id) => id !== null));
+  const needs = new Set(rows.filter((r) => seatItems(r, items).length > 0).map((r) => r.id));
   return [...rows].sort(
     (a, b) =>
       Number(needs.has(b.id)) - Number(needs.has(a.id)) ||
@@ -338,7 +355,7 @@ const ASKS = ["decision", "approval", "question"] as const;
  * the item's `at`), a parked escalation, asks for an answer, and the loop's own error.
  */
 export function needLine(row: CrewRow, items: AttentionItem[], now: number): NeedPart[] {
-  const mine = items.filter((i) => i.agentId === row.id);
+  const mine = seatItems(row, items);
   const parts: NeedPart[] = [];
   const stall = mine.find((i) => i.kind === "stalled");
   if (stall) {
@@ -398,6 +415,29 @@ export function tokensPerMinute(digest: RunDigest | null, now: number): number |
 export const callSign = (row: Pick<CrewRow, "id" | "kind">): string =>
   row.kind === "crew" ? seatCallSign(row.id) : row.id;
 
+/** A role's title: its `here` text up to the first colon or comma, first letter up (`frontend developer` is `Frontend developer`). */
+export function roleTitle(here: string): string {
+  const head = (here.split(/[:,]/)[0] ?? "").trim();
+  return head.charAt(0).toUpperCase() + head.slice(1);
+}
+
+/**
+ * The title of the role a seat holds, from the config's roles (`crew.roles`, which carry custom
+ * ones) else the built-in `ROLES`; null for an observed loop or a role with no text.
+ */
+export function seatRoleTitle(
+  id: string,
+  rows: readonly Pick<CrewRow, "id" | "kind" | "role">[] | undefined,
+  roles: readonly { name: string; here: string }[] | undefined,
+): string | null {
+  const row = rows?.find((r) => r.id.toLowerCase() === id.toLowerCase());
+  if (row?.kind === "loop") return null;
+  const role = row?.role ?? id;
+  const here =
+    roles?.find((r) => r.name === role)?.here ?? ROLES.find((r) => r.callSign === role)?.here;
+  return here ? roleTitle(here) || null : null;
+}
+
 /**
  * `model · effort · CLI version`: the run's model id (else the config alias), a seat's effort
  * (`default` when unset; a loop has none), and the CLI version when it is known.
@@ -420,6 +460,70 @@ export const LOOP_PHASE_LABEL: Record<LoopPhase, string> = {
 
 /** The build loop's name on screen: the 7a loop is one implicit loop per run, with no template file. */
 export const BUILD_LOOP_TEMPLATE = "build";
+/** The template on screen: the run's profile, else the build loop. */
+export const loopTemplate = (loop: CrewLoop): string => loop.profile ?? BUILD_LOOP_TEMPLATE;
+
+/** The step on screen: the profile's step for the phase, else the build loop's phase label. */
+export const loopStepLabel = (loop: CrewLoop): string => loop.step ?? LOOP_PHASE_LABEL[loop.phase];
+
+/** What a looped run waits on, as Overview words it (the server decides `wait`). */
+export const WAIT_TEXT = {
+  ci: "waiting on CI",
+  retro: "waiting on RETRO's review",
+  main: "waiting on main: updating the branch",
+  operator: "waiting on you",
+  lock: "in line for the test lock",
+} as const;
+/** A set-aside run whose rework or park is due back on its seat. */
+export const seatWaitText = (call: string): string => `waiting on ${call} for rework`;
+/** Waits shown amber, as the mockup's lock line. */
+export const WAIT_WARN: readonly LoopWait[] = ["lock", "operator"];
+/** The lead of a set-aside run's line under its seat's row. */
+export const SET_ASIDE_LABEL = "Set aside";
+
+/** " · try n of max" from the second try on, else "". */
+export function loopTryText(loop: CrewLoop): string {
+  const tries = loop.tries ?? null;
+  return tries !== null && tries.n > 1 ? `${DOING_SEP}try ${tries.n} of ${tries.max}` : "";
+}
+
+/** When `runId` joined the test lock's line (its first `waiting` entry, the oldest); null when it is not listed. */
+export function lockSince(
+  lock: TestLockState | undefined,
+  runId: string | null | undefined,
+): number | null {
+  if (!lock || runId === null || runId === undefined) return null;
+  return lock.waiting.find((w) => w.runId === runId)?.since ?? null;
+}
+
+/** The line under a Loop step saying what the run waits on; null when it waits on nothing. */
+export function waitText(
+  loop: CrewLoop,
+  call: string,
+  lockSince: number | null,
+  now: number,
+): string | null {
+  const wait = loop.wait ?? null;
+  switch (wait) {
+    case null:
+      return null;
+    case "ci":
+    case "retro":
+    case "main":
+      return WAIT_TEXT[wait];
+    case "operator":
+      return loop.phase === "parked" && loop.parked
+        ? `${WAIT_TEXT.operator}: ${loop.parked}`
+        : WAIT_TEXT.operator;
+    case "lock":
+      return lockSince === null
+        ? WAIT_TEXT.lock
+        : `${WAIT_TEXT.lock}${DOING_SEP}${mss(now - lockSince)}`;
+    case "seat":
+      return seatWaitText(call);
+  }
+}
+
 /** The build loop's path, in order (catalogue §2.4.5's stepper); `parked` is a held state, not a step. */
 export const LOOP_PATH = [
   "working",

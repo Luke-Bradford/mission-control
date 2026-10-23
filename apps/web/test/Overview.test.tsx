@@ -201,7 +201,7 @@ describe("Agents panel", () => {
     stub({
       config: flightConfig([{ id: "flight-1" }]),
       rows: [
-        seat({ id: "flight-1", index: 3, role: "FLIGHT", hudState: "error", ticket: null }),
+        seat({ id: "flight-1", index: 3, hudState: "error", ticket: null }),
         seat({ id: "dev-1", index: 0 }),
         seat({ id: "dev-2", index: 1, hudState: "idle" }),
       ],
@@ -220,6 +220,35 @@ describe("Agents panel", () => {
     expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
   });
 
+  it("while the config loads the FLIGHT row says Loading…; a config error keeps not running", async () => {
+    const fn = stub({ rows: [crewRow()] });
+    const answer = fn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    fn.mockImplementation(async (...a: unknown[]) => {
+      if (a[0] === "/api/config") await gate;
+      return answer(...a);
+    });
+    const { container, unmount } = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(within(flight).getByText("Loading…")).toBeTruthy();
+    expect(within(flight).queryByText(FLIGHT_NOT_RUNNING)).toBeNull();
+    release();
+    await within(flight).findByText(FLIGHT_NOT_RUNNING);
+    unmount();
+    hub.clear();
+
+    stub({ rows: [crewRow()], config: () => ({ status: 503, body: { error: "loading" } }) });
+    const failed = render(<Overview />);
+    await screen.findByText("shop-app-ta");
+    const row = failed.container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
+    expect(await within(row).findByText(FLIGHT_NOT_RUNNING)).toBeTruthy();
+    expect(within(row).queryByText("Loading…")).toBeNull();
+  });
+
   it("the FLIGHT row is not itself a button: its call sign is the button that opens the dock", async () => {
     stub({ rows: [crewRow()] });
     const { container } = render(<Overview />);
@@ -228,8 +257,8 @@ describe("Agents panel", () => {
     expect(flight.getAttribute("role")).toBeNull();
     expect(flight.hasAttribute("tabindex")).toBe(false);
     const btn = within(flight).getByRole("button", { name: "FLIGHT, open the dock" });
-    // the accessible name starts with the visible text (WCAG 2.5.3)
-    expect(btn.textContent).toBe("FLIGHT");
+    // the accessible name starts with the call sign, the visible text's first words (WCAG 2.5.3)
+    expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
   it("subtitle counts the working agents and says FLIGHT is not counted; no Add agent", async () => {
@@ -311,6 +340,129 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await stepLabel("build › Working");
     expect(bar(agentRows(container)[0])).toEqual(["w", "", "", ""]);
+  });
+
+  // The ticket ref the set-aside run carries: the repo, a hash sign, the number.
+  const ASIDE_TICKET = "mission-control#12";
+
+  it("a seat's set-aside run gets its own line with its ticket, step and wait", async () => {
+    stub({
+      rows: [
+        seatRow({
+          hudState: "running",
+          loop: { ...loopOf("working", "Working on the ticket"), wait: null },
+          asideRuns: [
+            {
+              runId: "r-9",
+              ticket: ASIDE_TICKET,
+              ticketTitle: "Aside work",
+              loop: { ...loopOf("review", "In review", 9), wait: "retro" },
+            },
+          ],
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await stepLabel("build › Working");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".loopstep .loopwait")).toBeNull();
+    const lines = row.querySelectorAll(".asideline");
+    expect(lines).toHaveLength(1);
+    const aside = lines[0] as HTMLElement;
+    for (const text of ["Set aside", "#12", "Aside work", "build › In review"]) {
+      expect(aside.textContent).toContain(text);
+    }
+    expect(aside.textContent).toContain("waiting on RETRO's review");
+    expect(aside.querySelector(".loopwait")?.className).toContain("fg2");
+    expect([...aside.querySelectorAll(".stepbar i")].map((i) => i.className)).toEqual([
+      "d",
+      "d",
+      "c",
+      "",
+    ]);
+  });
+
+  it("a free seat still lists its set-aside runs under a dash", async () => {
+    stub({
+      rows: [
+        seatRow({
+          run: null,
+          loop: null,
+          asideRuns: [
+            {
+              runId: "r-9",
+              ticket: ASIDE_TICKET,
+              ticketTitle: "Aside work",
+              loop: { ...loopOf("review", "In review", 9), wait: "seat" },
+            },
+          ],
+        }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("waiting on GUIDO-1 for rework");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".loopstep")?.textContent).toBe("—");
+    expect(row.querySelectorAll(".asideline")).toHaveLength(1);
+  });
+
+  it("the Loop step shows the try from the second one on", async () => {
+    stub({
+      rows: [
+        crewRow({
+          loop: { ...loopOf("ci", "CI on 08a7cfc"), tries: { n: 2, max: 3 } },
+          hudState: "idle",
+        }),
+        crewRow({
+          id: "other",
+          index: 1,
+          loop: { ...loopOf("ci", "CI on 1a2b3c4"), tries: { n: 1, max: 3 } },
+          hudState: "idle",
+        }),
+      ],
+    });
+    render(<Overview />);
+    await stepLabel("build › CI · try 2 of 3");
+    await stepLabel("build › CI");
+  });
+
+  it("the Loop step names the run's template profile, else the build loop", async () => {
+    stub({
+      rows: [
+        crewRow({
+          loop: { ...loopOf("ci", "CI on 08a7cfc"), profile: "feature", step: "verify" },
+        }),
+      ],
+    });
+    render(<Overview />);
+    await stepLabel("feature › verify");
+  });
+
+  it("a run in line for the test lock says how long, in amber", async () => {
+    stub({
+      rows: [seatRow({ loop: { ...loopOf("working", "Working on the ticket"), wait: "lock" } })],
+      lock: { holder: null, waiting: [{ runId: "r-12", seatId: "guido-1", since: NOW - 65_000 }] },
+    });
+    render(<Overview />);
+    const el = await screen.findByText("in line for the test lock · 1:05");
+    expect(el.className).toContain("warn-t");
+  });
+
+  it("the need line offers Interrupt and End the run next to Answer, for a seat with a live turn", async () => {
+    stub({
+      rows: [seatRow({ hudState: "running" }), crewRow({ id: "other", index: 1 })],
+      items: [
+        item({ key: "k-seat", agentId: "guido-1", kind: "decision" }),
+        item({ key: "k-loop", agentId: "other", kind: "decision" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findAllByRole("button", { name: "Answer" });
+    const [seat, loop] = agentRows(container) as [HTMLElement, HTMLElement];
+    expect(within(seat).getByRole("button", { name: "Interrupt" })).toBeTruthy();
+    expect(within(seat).getByRole("button", { name: "End the run" })).toBeTruthy();
+    expect(within(loop).queryByRole("button", { name: "Interrupt" })).toBeNull();
+    expect(within(loop).queryByRole("button", { name: "End the run" })).toBeNull();
   });
 
   it("the Loop step column collapses only when the rows are loaded and none has a loop", async () => {
@@ -719,7 +871,9 @@ describe("Agents panel", () => {
     vi.setSystemTime(NOW);
     stub({
       rows: [crewRow({ hudState: "stalled", lastOutputAt: NOW - 11 * MIN })],
-      items: [item({ key: "stall:1", kind: "stalled", at: NOW - 125_000, tool: "Bash" })],
+      items: [
+        item({ key: "stall:1", kind: "stalled", at: NOW - 125_000, tool: "Bash", ticket: null }),
+      ],
     });
     const { container } = render(<Overview />);
     const need = async () => (await screen.findByText(/^Stalled \d+:\d\d/)).textContent;
@@ -736,7 +890,7 @@ describe("Agents panel", () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
       items: [
-        item({ key: "p:1", kind: "parked", text: "Needs a rebase decision" }),
+        item({ key: "p:1", kind: "parked", text: "Needs a rebase decision", ticket: null }),
         item({ key: "esc:shop-app#4001", kind: "decision" }),
       ],
     });
@@ -753,7 +907,22 @@ describe("Agents panel", () => {
     expect(window.location.pathname).toBe("/"); // the row click did not also navigate
   });
 
-  it("a row is not a button around buttons: its call sign is the link to the Agent page", async () => {
+  it("a set-aside run's ready note shows in Needs you, not as a lamp or need line on the seat's row", async () => {
+    const ready = {
+      ...item({ key: "ready:old", kind: "decision", ticket: "shop-app#3000", escalationId: null }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    stub({ rows: [crewRow({ ticket: "shop-app#3349" })], items: [ready] });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.classList.contains("needs")).toBe(false);
+    expect(row.querySelector(".need")).toBeNull();
+    expect(screen.queryByText("Ready to merge")).toBeNull();
+    expect(container.querySelector("#nbanner .nbanner b.num")?.textContent).toBe("1");
+  });
+
+  it("a row is not a button around buttons:its call sign is the link to the Agent page", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
       items: [item({ key: "esc:shop-app#4001", kind: "decision" })],
@@ -1254,6 +1423,28 @@ describe("Activity panel", () => {
     ).toBeTruthy();
   });
 
+  it("a move into Error reads red; a move out of Error does not", async () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null };
+    const list: ActivityEvent[] = [
+      {
+        ...base,
+        at: NOW - 2 * MIN,
+        who: "shop-app-ta",
+        kind: "state",
+        text: "Running → Error: exit 1",
+      },
+      { ...base, at: NOW - MIN, who: "shop-app-ta", kind: "state", text: "Error → Idle" },
+    ];
+    stub({ rows, activity: list });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await waitFor(() => expect(act_.querySelectorAll(".arow").length).toBe(2));
+    const glyph = (text: string) =>
+      within(act_).getByText(text).closest(".arow")?.querySelector(".g")?.className;
+    expect(glyph("Running → Error: exit 1")).toContain("crit-t");
+    expect(glyph("Error → Idle")).not.toContain("crit-t");
+  });
+
   it("a failed board move reads red; a successful one does not", async () => {
     const base = { ref: null, url: null, status: null, prs: [], summary: null, kind: "board" };
     const list = [
@@ -1440,7 +1631,9 @@ describe("Overview: agent text is formatted", () => {
   it("an Activity row and a Parked need part render Markdown", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "p:1", kind: "parked", text: "wait for **the operator**" })],
+      items: [
+        item({ key: "p:1", kind: "parked", text: "wait for **the operator**", ticket: null }),
+      ],
       activity: [ev("ran `pnpm test` on **main**")],
     });
     const { container } = render(<Overview />);
@@ -1457,7 +1650,7 @@ describe("Overview: agent text is formatted", () => {
   it.each(["__init__.py", "a*b", "1.", "-"])("plain prose %j is unchanged", async (text) => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "p:1", kind: "parked", text })],
+      items: [item({ key: "p:1", kind: "parked", text, ticket: null })],
       activity: [ev(text)],
     });
     const { container } = render(<Overview />);
@@ -1471,7 +1664,7 @@ describe("Overview: agent text is formatted", () => {
   it("keeps an Activity row and a need part to one line: a list marker is not a list", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
-      items: [item({ key: "p:1", kind: "parked", text: "1. retry" })],
+      items: [item({ key: "p:1", kind: "parked", text: "1. retry", ticket: null })],
       activity: [ev("1. retry")],
     });
     const { container } = render(<Overview />);

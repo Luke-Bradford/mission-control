@@ -25,7 +25,7 @@ export function answerTarget(
 
 /** The line that tells FLIGHT which item a message is about. */
 export function itemLead(key: string, about: string): string {
-  return about === "" ? `Re: ${key}` : `Re: ${key} · ${about}`;
+  return about.trim() === "" ? `Re: ${key}` : `Re: ${key} · ${about}`;
 }
 
 export function flightText(key: string, about: string, body: string): string {

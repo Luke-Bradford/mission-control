@@ -31,6 +31,7 @@ import {
   type CrewChanges,
   type CrewSessionFolders,
   DEFAULT_AWAY,
+  DEFAULT_PROFILES,
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
@@ -40,6 +41,7 @@ import {
   type MachineSample,
   NEW_LOOP,
   otherLaneText,
+  type PrCheck,
   projectAtReset,
   type ReloadResult,
   type Run,
@@ -576,6 +578,7 @@ describe("add a repo (POST /api/repos)", () => {
       statusMap: { Todo: "planned", Done: "done" },
       needsYouLabels: ["needs-human"],
       fullSuite: [],
+      requiredChecks: [],
       commands: DEFAULT_SEAT_COMMANDS,
       protectedFiles: [],
       autonomy: "draft",
@@ -2272,6 +2275,7 @@ describe("boards, escalations, health", () => {
       mergeable: null,
       author: null,
       assignees: [] as string[],
+      checks: [] as PrCheck[],
     } as const;
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
@@ -2300,6 +2304,7 @@ describe("boards, escalations, health", () => {
       mergeable: null,
       author: null,
       assignees: [],
+      checks: [],
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
     expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([pr(4, "shop-app#9")]);
@@ -2599,6 +2604,35 @@ describe("config", () => {
       crew: null,
     } satisfies ConfigView);
     expect(r.body.toLowerCase()).not.toContain("password");
+  });
+
+  it("carries the template profiles: built-in without a file, the error when it cannot load", async () => {
+    const profilesPath = join(dir, "profiles.yaml");
+    const a = buildApp({ config, store, bus, profilesPath });
+    const view = async () => (await a.inject({ method: "GET", url: "/api/config" })).json();
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature");
+    const builtIn = (await view()).profiles;
+    expect(builtIn.source).toBe("built-in");
+    expect(builtIn.error).toBeNull();
+    expect(builtIn.list.map((p: { name: string }) => p.name)).toEqual(
+      DEFAULT_PROFILES.map((p) => p.name),
+    );
+    expect(builtIn.list[0]).toEqual({
+      name: "feature",
+      labels: ["type:feature"],
+      steps: feature?.steps,
+      planRequired: true,
+      reviewer: { role: "RETRO", depth: "full" },
+      tries: 3,
+      rounds: 3,
+    });
+    writeFileSync(profilesPath, "profiles: [");
+    const bad = (await view()).profiles;
+    expect(bad.source).toBe(profilesPath);
+    expect(bad.error).not.toBe("");
+    expect(bad.error).not.toBeNull();
+    expect(bad.list).toEqual([]);
+    await a.close();
   });
 
   it("marks a retiring seat", async () => {

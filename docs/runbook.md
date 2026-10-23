@@ -262,8 +262,11 @@ working checkout or a loop's. To set up the first one, a GUIDO seat on this repo
 
    Absolute paths (`~` allowed). An entry that is or holds `crew.worktrees`, a session checkout or
    a temp dir (the hub's, or `/tmp`) is refused at start-up
-   (`crew.deny_read: <path> holds the crew's own folders`), so list the folders beside
-   `~/code/mc-crew`, not `~/code` itself.
+   (`crew.deny_read: <path> holds the crew's own folders`), and so is one inside `crew.worktrees`
+   or a session checkout (`… is inside the crew's own folders`). Letter case is ignored, and the
+   folders need not exist yet. List the folders beside `~/code/mc-crew`, not `~/code` itself.
+   A loop repo whose main working tree holds a crew folder stays readable to seats; the hub logs
+   `crew: loop <id>'s repo <repo> stays readable to seats` at crew start.
 
 5. Restart the hub: it reads the config, the `crew` section included, only at startup, and Update
    restarts it only when `main` has moved.
@@ -559,6 +562,14 @@ Setup's board action also creates the board's fields and the repo's type labels,
 
 ### Config
 
+- **`repos[].required_checks`** (default `[]`) names the checks that decide CI on a PR's head, by
+  check run name or status context, e.g. `["check"]`.
+  - Unset, every check decides except `mc/review`, Mission Control's own review status (it is
+    refused in this list). A listed check the PR does not report counts as missing, so CI reads
+    pending.
+  - The merge gate still waits for `mc/review` to pass on GitHub, apart from CI.
+  - A CI failure or a long pending names the checks in the Activity line and the park note. Only
+    the first 50 checks of a head are read. A change needs a hub restart.
 - **`repos[].full_suite`** (default `[]`) lists the commands that run a repo's whole suite, as
   prefixes, e.g. `["pnpm -s test"]`.
   - A seat's Bash call is a full suite when it starts with an entry's words, unless a later word

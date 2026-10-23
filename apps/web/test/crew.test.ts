@@ -8,19 +8,26 @@ import {
   isFinishedWork,
   isLoopInFlight,
   LOOP_PATH_TITLE,
+  lockSince,
   loopLine,
   loopMarks,
+  loopStepLabel,
+  loopTemplate,
+  loopTryText,
   modelLine,
   needLine,
   needsLamp,
   SEAT_STATUS_LABEL,
   seatAreaText,
+  seatItems,
   seatStatus,
   sparkValues,
   stopLine,
   tokensPerMinute,
+  WAIT_TEXT,
+  waitText,
 } from "../src/crew.ts";
-import { crewRow, HOUR, item, MIN, NOW, stoppedSeat } from "./fixtures.ts";
+import { crewRow, item as fixtureItem, HOUR, item, MIN, NOW, stoppedSeat } from "./fixtures.ts";
 
 const ids = (rows: CrewRow[]) => rows.map((r) => r.id);
 
@@ -36,7 +43,7 @@ describe("crewOrder", () => {
       crewRow({ id: "e", index: 4, hudState: "stopped" }),
       crewRow({ id: "f", index: 5, hudState: "stalled" }),
     ];
-    const items: AttentionItem[] = [item({ key: "esc:x", agentId: "d" })];
+    const items: AttentionItem[] = [item({ key: "esc:x", agentId: "d", ticket: null })];
     expect(ids(crewOrder(rows, items))).toEqual(["d", "c", "f", "b", "a", "e"]);
   });
 
@@ -44,6 +51,19 @@ describe("crewOrder", () => {
     const rows = [crewRow({ id: "b", index: 1 }), crewRow({ id: "a", index: 0 })];
     expect(ids(crewOrder(rows, []))).toEqual(["a", "b"]);
     expect(ids(rows)).toEqual(["b", "a"]);
+  });
+
+  it("does not put a seat first for a set-aside run's item", () => {
+    const rows = [
+      crewRow({ id: "a", index: 0, hudState: "running", ticket: "shop-app#3349" }),
+      crewRow({ id: "b", index: 1, hudState: "running", ticket: "shop-app#3349" }),
+    ];
+    const old = {
+      ...item({ key: "ready:old", agentId: "b", ticket: "shop-app#3000", escalationId: null }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    expect(ids(crewOrder(rows, [old]))).toEqual(["a", "b"]);
+    expect(ids(crewOrder(rows, [{ ...old, ticket: "shop-app#3349" }]))).toEqual(["b", "a"]);
   });
 
   it("ignores items with no agent", () => {
@@ -361,6 +381,8 @@ describe("contextPct", () => {
 
 describe("needLine", () => {
   const row = crewRow({ id: "a" });
+  // Items here are about the row's current run unless a test says otherwise.
+  const item = (over: Partial<AttentionItem> = {}) => fixtureItem({ ticket: row.ticket, ...over });
   it("is empty without items", () => {
     expect(needLine(row, [], NOW)).toEqual([]);
     expect(needLine(row, [item({ agentId: "b", kind: "stalled" })], NOW)).toEqual([]);
@@ -413,6 +435,17 @@ describe("needLine", () => {
     });
     expect(needLine(row, [], NOW).some((p) => p.text === "Ready to merge")).toBe(false);
     expect(needLine(crewRow({ id: "b" }), [ready], NOW)).toEqual([]);
+  });
+
+  it("leaves out a set-aside run's items: another ticket's ready note is not the row's", () => {
+    const old = {
+      ...item({ key: "ready:old", agentId: "a", ticket: "shop-app#3000", escalationId: null }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    const seatLevel = item({ key: "stall:a", agentId: "a", kind: "stalled", ticket: null });
+    expect(needLine(row, [old], NOW)).toEqual([]);
+    expect(needLine(row, [old, seatLevel], NOW).map((p) => p.key)).toEqual(["stall:a"]);
+    expect(seatItems(row, [old, seatLevel])).toEqual([seatLevel]);
   });
 });
 
@@ -538,6 +571,92 @@ describe("loopMarks", () => {
 
   it("the step bar's tooltip is the path", () => {
     expect(LOOP_PATH_TITLE).toBe("Working → CI → In review → Done");
+  });
+});
+
+describe("waitText", () => {
+  const loop = (phase: CrewLoop["phase"], over: Partial<CrewLoop> = {}): CrewLoop => ({
+    phase,
+    text: "x",
+    prNumber: null,
+    parked: null,
+    ...over,
+  });
+  const CALL = "GUIDO-1";
+
+  it.each([
+    ["ci", "ci", "waiting on CI"],
+    ["retro", "review", "waiting on RETRO's review"],
+    ["main", "review", "waiting on main: updating the branch"],
+  ] as const)("%s", (wait, phase, text) => {
+    expect(waitText(loop(phase, { wait }), CALL, null, NOW)).toBe(text);
+  });
+
+  it("operator: a park reason, none, and in review", () => {
+    expect(
+      waitText(loop("parked", { wait: "operator", parked: "CI failed 3 times" }), CALL, null, NOW),
+    ).toBe("waiting on you: CI failed 3 times");
+    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
+    expect(waitText(loop("review", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
+  });
+
+  it("lock: timed from when the run joined the line, else bare", () => {
+    const l = loop("working", { wait: "lock" });
+    expect(waitText(l, CALL, NOW - 65_000, NOW)).toBe("in line for the test lock · 1:05");
+    expect(waitText(l, CALL, null, NOW)).toBe(WAIT_TEXT.lock);
+  });
+
+  it("seat: names the call sign", () => {
+    expect(waitText(loop("review", { wait: "seat" }), CALL, null, NOW)).toBe(
+      "waiting on GUIDO-1 for rework",
+    );
+  });
+
+  it("nothing: wait null or missing", () => {
+    expect(waitText(loop("working", { wait: null }), CALL, null, NOW)).toBeNull();
+    expect(waitText(loop("working"), CALL, null, NOW)).toBeNull();
+  });
+});
+
+describe("lockSince", () => {
+  const lock = {
+    holder: null,
+    waiting: [
+      { runId: "r-1", seatId: "guido-1", since: 5 },
+      { runId: "r-1", seatId: "guido-1", since: 9 },
+    ],
+  };
+  it("is the first entry's since for the run, else null", () => {
+    expect(lockSince(lock, "r-1")).toBe(5);
+    expect(lockSince(lock, "r-2")).toBeNull();
+    expect(lockSince(lock, null)).toBeNull();
+    expect(lockSince(undefined, "r-1")).toBeNull();
+  });
+});
+
+describe("loopTryText", () => {
+  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  it("shows the try from the second on", () => {
+    expect(loopTryText({ ...base, tries: { n: 2, max: 3 } })).toBe(" · try 2 of 3");
+    expect(loopTryText({ ...base, tries: { n: 1, max: 3 } })).toBe("");
+    expect(loopTryText({ ...base, tries: null })).toBe("");
+    expect(loopTryText(base)).toBe("");
+  });
+});
+
+describe("loopStepLabel", () => {
+  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  it("is the profile's step, else the phase label", () => {
+    expect(loopStepLabel({ ...base, step: "verify" })).toBe("verify");
+    expect(loopStepLabel(base)).toBe("CI");
+  });
+});
+
+describe("loopTemplate", () => {
+  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  it("is the run's profile, else the build loop", () => {
+    expect(loopTemplate({ ...base, profile: "hotfix" })).toBe("hotfix");
+    expect(loopTemplate(base)).toBe("build");
   });
 });
 

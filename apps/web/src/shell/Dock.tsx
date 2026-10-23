@@ -1,4 +1,10 @@
-import { type AgentStream, clockHm, FLIGHT_NOT_RUNNING } from "@mc/core";
+import {
+  type AgentStream,
+  ATTENTION_LABEL,
+  type AttentionItem,
+  clockHm,
+  FLIGHT_NOT_RUNNING,
+} from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useTz } from "../clock.ts";
@@ -8,27 +14,29 @@ import {
   chatRows,
   type DockRow,
   dockRows,
-  feedRows,
   kindLabel,
   type PendingMsg,
   sameMessage,
+  waitingAsks,
   withPending,
 } from "../flight/conversation.ts";
-import type { FlightSeat, FlightView } from "../flight/flightTypes.ts";
+import type { FlightDecision, FlightSeat, FlightView } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { BuildChips } from "./buildStatus.tsx";
 import {
-  setDockTab,
+  openItem,
   setFlightUnread,
   trapTab,
   useBuildStatus,
   useDock,
-  useDockTab,
   useReturnFocus,
 } from "./overlays.ts";
 
 const CAPCOM = "@CAPCOM";
+
+/** The dock shows no decisions: they are in the working log on the FLIGHT page. */
+const NO_DECISIONS: FlightDecision[] = [];
 
 /** The seat's state in words. */
 function stateWord(seat: FlightSeat): string {
@@ -157,32 +165,30 @@ export function Dock() {
   const seat = flight?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const tz = useTz();
+  const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const decisions = flight?.decisions;
-  const all = useMemo(
-    () => (seat ? dockRows(stream, decisions ?? []) : []),
-    [seat, stream, decisions],
-  );
+  const asks = useMemo(() => waitingAsks(attention ?? [], decisions ?? []), [attention, decisions]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
-  const tab = useDockTab();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const sent = useRef(0);
   const stick = useRef(true);
   const { rows, open } = useMemo(() => withPending(all, pending), [all, pending]);
-  const shown = useMemo(() => (tab === "chat" ? chatRows(rows) : feedRows(rows)), [rows, tab]);
+  const shown = useMemo(() => chatRows(rows), [rows]);
   // Settled messages leave the list, so it does not grow for ever.
   useEffect(() => {
     if (open.length !== pending.length) setPending(open);
   }, [open, pending]);
 
-  // The reply last seen on Chat; undefined until the stream first loads, so history is not "new".
+  // The reply last seen with the dock shown; undefined until the stream first loads, so history is not "new".
   const replyIds = useMemo(
     () => chatRows(all).flatMap((r) => (r.kind === "flight" ? [r.id] : [])),
     [all],
   );
   const lastReply = replyIds.at(-1) ?? null;
   const [seenReply, setSeenReply] = useState<string | null | undefined>(undefined);
-  const looking = visible && tab === "chat";
+  const looking = visible;
   useEffect(() => {
     if (stream === undefined) return;
     if (seenReply === undefined || looking) setSeenReply(lastReply);
@@ -199,11 +205,11 @@ export function Dock() {
   }, [unread]);
 
   const count = shown.length;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows, and a tab change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows
   useEffect(() => {
     const el = msgs.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [count, tab]);
+  }, [count]);
   const onScroll = () => {
     const el = msgs.current;
     if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
@@ -288,31 +294,25 @@ export function Dock() {
               {seat ? `${seat.call} · ${seat.model} · ${stateWord(seat)}` : FLIGHT_NOT_RUNNING}
             </div>
           </div>
-          <div className="dtabs" role="tablist" aria-label="FLIGHT dock">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "chat"}
-              className={tab === "chat" ? "on" : undefined}
-              onClick={() => setDockTab("chat")}
-            >
-              Chat
-              {unread > 0 && (
-                <span className="dock-unread" data-testid="chat-unread">
-                  {unread}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "feed"}
-              className={tab === "feed" ? "on" : undefined}
-              onClick={() => setDockTab("feed")}
-            >
-              Feed
-            </button>
-          </div>
+          {seat && asks.length > 0 && (
+            <div className="dwait" id="dockWaiting">
+              <div className="dwh">Waiting on you · {asks.length}</div>
+              {asks.map((i) => (
+                <div className="dask" key={i.key} data-testid="waiting-ask">
+                  <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
+                    {ATTENTION_LABEL[i.kind]}
+                  </Pill>
+                  <span className="min0 ellip" title={i.text}>
+                    {i.text}
+                  </span>
+                  <span className="spacer" />
+                  <button type="button" className="sm" onClick={() => openItem(i.key)}>
+                    Open
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div
             className="dmsgs"
             id="dockMsgs"

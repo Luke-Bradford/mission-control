@@ -5,6 +5,7 @@ import {
   type BoardItem,
   COMMENTS_MAX_PAGES,
   COMMENTS_PAGE_SIZE,
+  ciVerdict,
   type Escalation,
   type GithubRateLimit,
   githubCollector,
@@ -15,6 +16,7 @@ import {
   type Owner,
   PR_KEEP_MS,
   PR_MAX_PAGES,
+  type PrCheck,
   type PullRequestView,
   prSweepCollector,
   RATE_LIMIT_SELECTION,
@@ -151,6 +153,11 @@ const CARD_NOW_QUERY = `query CardNow($owner: String!, $name: String!, $number: 
 /** A longer issue body is cut here; the pane links to GitHub for the rest. */
 export const TICKET_BODY_MAX = 20_000;
 
+/** A PR head's checks read per poll; a required check past them reads as missing. */
+export const PR_CHECKS_MAX = 50;
+/** The head commit's rollup: its state and each check run or commit status by name. */
+export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl checkSuite { workflowRun { runAttempt } } } ... on StatusContext { context state targetUrl } } } }`;
+
 const PRS_QUERY = `query PullRequests($owner: String!, $name: String!, $after: String) {
   ${RATE_LIMIT_SELECTION}
   repository(owner: $owner, name: $name) {
@@ -161,7 +168,7 @@ const PRS_QUERY = `query PullRequests($owner: String!, $name: String!, $after: S
         author { login }
         assignees(first: 10) { nodes { login } }
         closingIssuesReferences(first: 3) { nodes { number } }
-        commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
+        commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
       }
     }
   }
@@ -831,6 +838,48 @@ const MERGEABLE: Record<string, NonNullable<PullRequestView["mergeable"]>> = {
 const lookup = <T>(table: Record<string, T>, key: unknown): T | null =>
   typeof key === "string" && Object.hasOwn(table, key) ? (table[key] as T) : null;
 
+const PASSING_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
+
+/** A PR head's checks by name, from its `statusCheckRollup`: check runs and commit statuses. */
+export function parseChecks(rollup: unknown): PrCheck[] {
+  const nodes = path(rollup, "contexts", "nodes");
+  if (!Array.isArray(nodes)) return [];
+  const out: PrCheck[] = [];
+  for (const n of nodes) {
+    if (!isObj(n)) continue;
+    if (n.__typename === "CheckRun") {
+      const name = str(n.name);
+      if (name === "") continue;
+      const attempt = path(n, "checkSuite", "workflowRun", "runAttempt");
+      out.push({
+        name,
+        kind: "check",
+        state:
+          n.status !== "COMPLETED"
+            ? "pending"
+            : PASSING_CONCLUSIONS.has(str(n.conclusion))
+              ? "passing"
+              : "failing",
+        conclusion: str(n.conclusion) || str(n.status),
+        attempt: typeof attempt === "number" ? attempt : null,
+        url: str(n.detailsUrl) || null,
+      });
+    } else if (n.__typename === "StatusContext") {
+      const name = str(n.context);
+      if (name === "") continue;
+      out.push({
+        name,
+        kind: "status",
+        state: lookup(CHECKS, n.state) ?? "pending",
+        conclusion: str(n.state),
+        attempt: null,
+        url: str(n.targetUrl) || null,
+      });
+    }
+  }
+  return out;
+}
+
 function mapPr(
   repo: CcConfig["repos"][number],
   n: Record<string, unknown>,
@@ -842,6 +891,7 @@ function mapPr(
   const rollup = path(n, "commits", "nodes");
   const last = Array.isArray(rollup) ? rollup[0] : undefined;
   const headOid = path(last, "commit", "oid");
+  const checks = parseChecks(path(last, "commit", "statusCheckRollup"));
   return {
     repoId: repo.id,
     number: n.number,
@@ -854,7 +904,8 @@ function mapPr(
     state: lookup(PR_STATES, n.state) ?? "closed",
     isDraft: n.isDraft === true,
     review: lookup(REVIEWS, n.reviewDecision),
-    ci: lookup(CHECKS, path(last, "commit", "statusCheckRollup", "state")),
+    ci: ciVerdict(checks, repo.requiredChecks ?? []).ci,
+    checks,
     createdAt: ms(n.createdAt),
     updatedAt: ms(n.updatedAt),
     mergedAt: typeof n.mergedAt === "string" ? ms(n.mergedAt) : null,

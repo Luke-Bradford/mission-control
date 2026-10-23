@@ -409,6 +409,22 @@ describe("Agent page: picker and selection", () => {
     expect($(again.container, "#ahead .big")?.textContent).toBe("shop-app-ta");
   });
 
+  it.each([
+    [false, "GUIDO-1 · Backend developer", null],
+    [true, "GUIDO-1", "Backend developer"],
+  ])("the header names a crew seat's role: narrow %s", async (narrow, text, title) => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: narrow,
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    stub({ rows: [seatRow({ hudState: "idle" })] });
+    const { container } = render(<Agent id="guido-1" />);
+    await vi.waitFor(() => expect($(container, "#ahead .idrow .big")?.textContent).toBe(text));
+    expect($(container, "#ahead .idrow .big")?.getAttribute("title")).toBe(title);
+  });
+
   it("picking an agent navigates to its page", async () => {
     stub();
     render(<Agent id="shop-app-ta" />);
@@ -461,6 +477,42 @@ describe("Agent page: need banner", () => {
     expect(ACK_BATCH_MAX).toBe(50);
     expect(sent.map((k) => k.length)).toEqual([50, 1]);
     expect(new Set(sent.flat()).size).toBe(51);
+  });
+
+  it("Ack leaves a set-aside run's unacked note alone: the banner does not show it", async () => {
+    const ready = {
+      ...item({ key: "note:ready:old", ticket: "shop-app#3000", escalationId: null }),
+      kind: "ready",
+    } as unknown as AttentionItem;
+    const fetch = stub({
+      items: [
+        item({
+          key: "stall:shop-app-ta:r-12",
+          kind: "stalled",
+          at: NOW - 12 * MIN,
+          tool: "Bash",
+          ticket: null,
+          escalationId: null,
+        }),
+        ready,
+      ],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const banner = $(container, "#needBanner .banner") as HTMLElement;
+    expect(banner.textContent).toContain("Stalled 12:00 in Bash");
+    expect(banner.textContent).not.toContain("Ready to merge");
+    fireEvent.click(within(banner).getByRole("button", { name: "Ack" }));
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/attention/ack",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const body = JSON.parse(
+      (fetch.mock.calls.find(([u]) => u === "/api/attention/ack")?.[1]?.body as string) ?? "{}",
+    );
+    expect(body.keys).toEqual(["stall:shop-app-ta:r-12"]);
   });
 
   it("has no banner without needs, and no Ack when everything is acknowledged", async () => {
@@ -1345,6 +1397,29 @@ describe("Agent page: runs", () => {
     const s = $(container, "#loopP .rsummary") as HTMLElement;
     expect($(s, "strong")?.textContent).toBe("quotes");
     expect($(s, "code")?.textContent).toBe("refresh()");
+  });
+
+  it("a closed run PR shows a Closed pill; an open one shows none", async () => {
+    const pull = (number: number, state: "closed" | "open") => ({
+      repoId: "shop-app",
+      number,
+      title: null,
+      url: `https://github.com/octo-org/shop-app/pull/${number}`,
+      state,
+      ticket: "shop-app#3227",
+    });
+    stub({
+      runs: [rv({ ticket: "shop-app#3227", prs: [pull(3240, "closed"), pull(3241, "open")] })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const cell = $(container, "#loopP .runrow:not(.head) .rticket") as HTMLElement;
+    const closed = within(cell).getByRole("link", { name: "shop-app PR #3240" }).closest(".rpr");
+    const pill = closed?.querySelector(".pill");
+    expect(pill?.textContent).toBe("Closed");
+    expect(pill?.className).toBe("pill plain");
+    const open = within(cell).getByRole("link", { name: "shop-app PR #3241" }).closest(".rpr");
+    expect(open?.querySelector(".pill")).toBeNull();
   });
 
   it("a row shows its ticket, PR chips and the summary, with the full text in its title", async () => {
@@ -2331,7 +2406,9 @@ describe("Agent page: agent text is formatted", () => {
   it("the Now tile's summary and the banner's Parked reason render Markdown on one line", async () => {
     stub({
       rows: [idle("Cached **quotes** via `refresh()`")],
-      items: [item({ key: "p:1", kind: "parked", text: "wait for **the operator**" })],
+      items: [
+        item({ key: "p:1", kind: "parked", text: "wait for **the operator**", ticket: null }),
+      ],
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await screen.findByText("the operator");
@@ -2347,7 +2424,7 @@ describe("Agent page: agent text is formatted", () => {
   it("keeps the Now tile and the banner to one line: a list marker is not a list", async () => {
     stub({
       rows: [idle("1. retry")],
-      items: [item({ key: "p:1", kind: "parked", text: "1. retry" })],
+      items: [item({ key: "p:1", kind: "parked", text: "1. retry", ticket: null })],
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await screen.findByText("Parked: 1. retry");
@@ -2361,7 +2438,7 @@ describe("Agent page: agent text is formatted", () => {
   it.each(["__init__.py", "a*b", "1.", "-"])("plain prose %j is unchanged", async (text) => {
     stub({
       rows: [idle(text)],
-      items: [item({ key: "p:1", kind: "parked", text })],
+      items: [item({ key: "p:1", kind: "parked", text, ticket: null })],
     });
     const { container } = render(<Agent id="shop-app-ta" />);
     await screen.findByText(`Parked: ${text}`);

@@ -14,6 +14,9 @@ import {
   cardAgent,
   cardColumn,
   cardPr,
+  cardQueue,
+  cardReviewer,
+  cardStep,
   cardYouWait,
   daysAgo,
   doneOutcome,
@@ -49,11 +52,16 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     when =
       ctx.tz === null ? "—" : agoDays(daysAgo(item.updatedAt, ctx.now, ctx.tz, ctx.todayStart));
   }
+  const agent = cardAgent(item, ctx.crew);
+  const pr = cardPr(item, prs);
   return {
     item,
     showRepo: ctx.showRepo,
-    agent: cardAgent(item, ctx.crew),
-    pr: cardPr(item, prs),
+    agent,
+    step: agent ? cardStep(agent) : null,
+    queued: agent ? null : cardQueue(item, ctx.crew),
+    reviewer: col === "Done" ? null : cardReviewer(item, pr, ctx.crew),
+    pr,
     mine: needsMe(item, ctx.attention, ctx.crew),
     outcome: doneOutcome(item, prs),
     when,
