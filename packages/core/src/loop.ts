@@ -101,6 +101,14 @@ export const isCleanupNoteKey = (key: string): boolean =>
 export const hardRulesFlagKey = (runId: string, sha: string): string =>
   `flag:${runId}:hard-rules:${sha}`;
 export const isHardRulesFlagKey = (key: string): boolean => /^flag:[^:]+:hard-rules:/.test(key);
+/** The flag note for a CI failure that passed on its one re-run, per sha. */
+export const flakeNoteKey = (runId: string, sha: string): string => `flake:${runId}:${sha}`;
+/** A flake record is the controller's to follow up. */
+export const isFlakeNoteKey = (key: string): boolean => key.startsWith("flake:");
+export const flakeText = (ref: string, sha: string, runs: { id: number; name: string }[]): string =>
+  `${ref}: CI failed on ${sha.slice(0, 7)} and passed on re-run (a flake): ${
+    runs.length === 0 ? "run not read" : runs.map((r) => `${r.name} run ${r.id}`).join(", ")
+  }`;
 /** The flag note when a merged PR's remote branch cannot be deleted for want of a sha to lease on. */
 export const noShaDeleteNoteKey = (runId: string): string => `flag:${runId}:no-sha-delete`;
 export const noShaDeleteText = (ref: string): string =>
@@ -287,6 +295,7 @@ export type LoopAction =
   | { kind: "open-pr" }
   | { kind: "send"; key: string; text: string }
   | { kind: "ci-excerpt"; key: string; sha: string }
+  | { kind: "rerun-ci"; sha: string }
   | { kind: "move-card"; column: MoveColumn }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
   | { kind: "clear-note"; key: string }
@@ -602,13 +611,30 @@ function stateStep(s: LoopSnapshot): Step {
       return park(loop, "conflict", `PR #${pr.number} conflicts with main`);
     }
     if (pr.ci === "passing") {
+      const flaked = loop.rerun?.sha === pushed.sha;
+      const actions: LoopAction[] = [{ kind: "event", text: `CI passed on ${short}` }];
+      if (flaked) actions.push({ kind: "event", text: `CI flaked on ${short}: passed on re-run` });
       return {
-        loop: { ...loop, phase: "review", ciFails: 0 },
-        actions: [{ kind: "event", text: `CI passed on ${short}` }],
+        loop: {
+          ...loop,
+          phase: "review",
+          ciFails: 0,
+          rerun: loop.rerun && flaked ? { ...loop.rerun, flaked: true } : loop.rerun,
+        },
+        actions,
       };
     }
     if (pr.ci === "failing") {
       if (loop.ciFailedSha === pushed.sha) return unchanged({ ...loop, phase: "working" });
+      if (loop.rerun?.sha !== pushed.sha) {
+        // the first failure on a sha is re-run once before the seat hears of it
+        return {
+          loop: { ...loop, rerun: { sha: pushed.sha, at: now, runs: [] } },
+          actions: [{ kind: "rerun-ci", sha: pushed.sha }],
+        };
+      }
+      // a poll from before the re-run still shows the old failure
+      if (pr.polledAt <= loop.rerun.at) return unchanged(loop);
       const failed = { ...loop, ciFails: loop.ciFails + 1, ciFailedSha: pushed.sha };
       if (failed.ciFails >= CI_TRIES) {
         return park(failed, "ci", `CI failed ${failed.ciFails} times; last on ${short}`);
@@ -618,8 +644,13 @@ function stateStep(s: LoopSnapshot): Step {
         actions: [{ kind: "event", text: `CI failed on ${short}` }],
       };
     }
-    // a run the operator un-parked is judged from the un-park, not from a push made before it
-    const since = Math.max(pushed.at, loop.unparkedAt ?? 0);
+    // a run the operator un-parked is judged from the un-park, not from a push made before it;
+    // a re-run is also judged from when it was asked for
+    const since = Math.max(
+      pushed.at,
+      loop.unparkedAt ?? 0,
+      loop.rerun?.sha === pushed.sha ? loop.rerun.at : 0,
+    );
     if (pr.ci === "pending" && now - since > CI_PENDING_MAX_MS) {
       return park(
         loop,
@@ -658,6 +689,12 @@ type DesiredNote = { noteKind: LoopNoteKind; text: string };
 function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> {
   const notes = new Map<string, DesiredNote>();
   const { ticket, runId, pushed, seat } = s;
+  if (loop.rerun?.flaked === true) {
+    notes.set(flakeNoteKey(runId, loop.rerun.sha), {
+      noteKind: "flag",
+      text: flakeText(ticket.ref, loop.rerun.sha, loop.rerun.runs),
+    });
+  }
   if (loop.phase === "parked") {
     notes.set(blockedNoteKey(runId, loop.epoch), {
       noteKind: "blocked",
@@ -967,6 +1004,8 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     ) {
       continue;
     }
+    // a flake record stays for the controller to dismiss
+    if (isFlakeNoteKey(key)) continue;
     if (!notes.has(key)) actions.push({ kind: "clear-note", key });
   }
   if (loop.phase === "ci") {

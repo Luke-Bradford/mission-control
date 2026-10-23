@@ -709,6 +709,14 @@ and a refused block stops new tickets for that repo). This repo's own block is a
 `CLAUDE.md`. `crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
 run may use; the engine parks a run that goes over.
 
+**FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
+that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
+not have moved the card itself). The hold is a row in the `holds` table (ref, the PR, basis, time,
+`released_at`), counts as a move under the hourly cap, and shows in FLIGHT's digest as
+`holds: [{ ref, waitsOn, ageMin, prState, told }]` (`told` once FLIGHT has been woken for the PR's merge or close). When the PR merges or closes, the watch wakes FLIGHT
+(`n hold(s) to release`); a closed-unmerged PR leaves the hold in place for FLIGHT to decide. FLIGHT
+promotes the card to Ready again through `promote` with the usual checks, and that move releases the hold.
+
 ### Loop liveness
 
 A loop that is killed mid-run never writes its end line, so its run would look `running` for
