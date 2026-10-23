@@ -4,11 +4,24 @@ import { join } from "node:path";
 import {
   type BoardItem,
   BRIEFED_TEXT,
+  CI_LOG_EMPTY,
+  capText,
+  ciLogText,
+  ciNoCheckText,
+  ciNoFailedText,
+  ciNotActionsText,
+  ciNotFailedText,
   claimedText,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
+  FLIGHT_CI_LOG_LINES,
+  FLIGHT_CI_LOG_MAX,
+  FLIGHT_GH_READS_PER_HOUR,
+  FLIGHT_LIST_PAGES,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
+  FLIGHT_PR_CHECKS_LISTED,
+  FLIGHT_PR_FILES_LISTED,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   MC_BAD_ARGS,
@@ -17,7 +30,10 @@ import {
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
+  NOT_ON_BOARD,
   PROFILE_PAIR_TEXT,
+  READ_NO_GITHUB,
+  READ_NO_PR,
   READ_OTHER_REPO,
   type RepoRules,
   type Run,
@@ -399,6 +415,9 @@ describe("tool list", () => {
       "create_ticket",
       "comment_ticket",
       "brief_item",
+      "read_pr",
+      "read_ci_log",
+      "list_tickets",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -1611,6 +1630,8 @@ describe("flight_state", () => {
     expect(await state()).toEqual({
       time: "13:00",
       repo: "mc",
+      lane: null,
+      hubLogin: "me",
       seats: [
         {
           ...bare,
@@ -1666,6 +1687,8 @@ describe("flight_state", () => {
           labels: ["ready"],
           ready: true,
           blockedBy: [],
+          laneLabel: null,
+          assignees: [],
         },
         {
           ref: "mc#6",
@@ -1675,6 +1698,8 @@ describe("flight_state", () => {
           labels: [],
           ready: true,
           blockedBy: [],
+          laneLabel: null,
+          assignees: [],
         },
         {
           ref: "mc#1",
@@ -1684,6 +1709,8 @@ describe("flight_state", () => {
           labels: [],
           ready: true,
           blockedBy: ["mc#8"],
+          laneLabel: null,
+          assignees: [],
         },
       ],
       prs: [
@@ -1703,6 +1730,20 @@ describe("flight_state", () => {
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
     });
+  });
+
+  it("carries the hub's lane and login, and each ticket's lane label and assignees", async () => {
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.lane = "home";
+    board(card(1, { labels: ["lane:home", "area:server"], assignees: ["me"] }));
+    const s = (await state()) as {
+      lane: string;
+      hubLogin: string;
+      tickets: { laneLabel: string; assignees: string[] }[];
+    };
+    expect(s.lane).toBe("home");
+    expect(s.hubLogin).toBe("me");
+    expect(s.tickets).toMatchObject([{ laneLabel: "lane:home", assignees: ["me"] }]);
   });
 
   it("counts starts left against the per-developer-seat cap", async () => {
@@ -2567,5 +2608,353 @@ describe("read_ticket of a loop escalation", () => {
     fetchImpl = async (n) => ticket(n);
     expect((await call("read_ticket", { issue: 3, repo: "mc" })).isError).toBeUndefined();
     expect(fetchRepos).toEqual(["mc"]);
+  });
+});
+
+const ok = (stdout: string): GhResult => ({ code: 0, stdout, stderr: "" });
+const json = (v: unknown): GhResult => ok(JSON.stringify(v));
+const failed = (stderr: string): GhResult => ({ code: 1, stdout: "", stderr });
+const TOKEN = `ghp_${"a".repeat(30)}`;
+const actionsUrl = (job: number) => `https://github.com/o/mc/actions/runs/11/job/${job}`;
+const checkRun = (name: string, conclusion: string, job = 22, status = "COMPLETED") => ({
+  __typename: "CheckRun",
+  name,
+  status,
+  conclusion,
+  detailsUrl: actionsUrl(job),
+});
+const prView = (over: Record<string, unknown> = {}) => ({
+  number: 9,
+  title: "Add x",
+  state: "OPEN",
+  isDraft: false,
+  author: { login: "guido" },
+  headRefName: "feature/9-x",
+  headRefOid: "abc123",
+  additions: 12,
+  deletions: 3,
+  changedFiles: 2,
+  files: [
+    { path: "a.ts", additions: 10, deletions: 1 },
+    { path: "b.ts", additions: 2, deletions: 2 },
+  ],
+  reviewDecision: "",
+  latestReviews: [{ author: { login: "retro" }, state: "APPROVED", body: "secret body" }],
+  statusCheckRollup: [],
+  ...over,
+});
+
+describe("read_pr", () => {
+  it("answers the diff summary, checks by name and review state", async () => {
+    ghImpl = async () =>
+      json(
+        prView({
+          reviewDecision: "APPROVED",
+          statusCheckRollup: [
+            checkRun("test", "FAILURE"),
+            { __typename: "StatusContext", context: "ci/lint", state: "SUCCESS", targetUrl: "u" },
+            checkRun("build", "", 23, "IN_PROGRESS"),
+          ],
+        }),
+      );
+    const r = await call("read_pr", { pr: 9 });
+    expect(ghCalls).toEqual([
+      [
+        "pr",
+        "view",
+        "9",
+        "--repo=o/mc",
+        "--json=number,title,state,isDraft,author,headRefName,headRefOid,additions,deletions,changedFiles,files,reviewDecision,latestReviews,statusCheckRollup",
+      ],
+    ]);
+    expect(JSON.parse(r.text)).toEqual({
+      pr: 9,
+      title: "Add x",
+      state: "OPEN",
+      draft: false,
+      author: "guido",
+      head: "feature/9-x",
+      headSha: "abc123",
+      diff: {
+        files: 2,
+        additions: 12,
+        deletions: 3,
+        listed: [
+          { path: "a.ts", additions: 10, deletions: 1 },
+          { path: "b.ts", additions: 2, deletions: 2 },
+        ],
+      },
+      checks: [
+        { name: "test", state: "FAILURE" },
+        { name: "ci/lint", state: "SUCCESS" },
+        { name: "build", state: "IN_PROGRESS" },
+      ],
+      review: { decision: "APPROVED", reviews: [{ author: "retro", state: "APPROVED" }] },
+    });
+    expect(r.text).not.toContain("secret body");
+  });
+
+  it("caps files and checks and cleans text", async () => {
+    ghImpl = async () =>
+      json(
+        prView({
+          title: `Leak ${TOKEN}`,
+          files: Array.from({ length: 60 }, (_, i) => ({
+            path: `f${i}`,
+            additions: 1,
+            deletions: 0,
+          })),
+          statusCheckRollup: Array.from({ length: 55 }, (_, i) => checkRun(`c${i}`, "SUCCESS")),
+        }),
+      );
+    const out = JSON.parse((await call("read_pr", { pr: 9 })).text) as {
+      title: string;
+      diff: { files: number; listed: unknown[] };
+      checks: unknown[];
+    };
+    expect(out.title).toBe("Leak [redacted]");
+    expect(out.diff.listed).toHaveLength(FLIGHT_PR_FILES_LISTED);
+    expect(out.diff.files).toBe(2);
+    expect(out.checks).toHaveLength(FLIGHT_PR_CHECKS_LISTED);
+  });
+
+  it("refuses another seat, a missing PR and GitHub down", async () => {
+    live("guido-1", "r-guido");
+    expect(await call("read_pr", { pr: 9 }, ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+    ghImpl = async () =>
+      failed("GraphQL: Could not resolve to a PullRequest with the number of 9.");
+    expect(await call("read_pr", { pr: 9 })).toEqual(refused(READ_NO_PR));
+    ghImpl = async () => failed("HTTP 502");
+    expect(await call("read_pr", { pr: 9 })).toEqual(refused(READ_NO_GITHUB));
+    expect(logs.join("\n")).not.toContain("HTTP 502");
+    ghImpl = async () => ok("not json");
+    expect(await call("read_pr", { pr: 9 })).toEqual(refused(READ_NO_GITHUB));
+  });
+
+  it("shares the hourly cap with the other two", async () => {
+    ghImpl = async () => json(prView());
+    for (let i = 0; i < FLIGHT_GH_READS_PER_HOUR; i++) {
+      expect((await call(i % 2 === 0 ? "read_pr" : "read_ci_log", { pr: 9 })).text).not.toContain(
+        "most allowed",
+      );
+    }
+    const text = capText("read GitHub", FLIGHT_GH_READS_PER_HOUR);
+    expect(await call("read_pr", { pr: 9 })).toEqual(refused(text));
+    expect(await call("list_tickets", { limit: 5 })).toEqual(refused(text));
+    nowMs += 61 * 60_000;
+    expect((await call("read_pr", { pr: 9 })).isError).toBeUndefined();
+  });
+});
+
+describe("read_ci_log", () => {
+  const rollup = (...checks: unknown[]) => json({ statusCheckRollup: checks });
+  const logOf = (n: number) =>
+    Array.from({ length: n }, (_, i) => `job\tstep\tline ${i + 1}`).join("\n");
+
+  it("reads the cleaned tail of the first failed Actions job", async () => {
+    ghImpl = async (a) =>
+      a[0] === "pr"
+        ? rollup(
+            checkRun("lint", "SUCCESS", 21),
+            checkRun("test", "FAILURE", 22),
+            checkRun("e2e", "TIMED_OUT", 23),
+          )
+        : ok(`${logOf(300)}\nleak ${TOKEN}\r\n`);
+    const r = await call("read_ci_log", { pr: 9 });
+    expect(ghCalls[0]).toEqual(["pr", "view", "9", "--repo=o/mc", "--json=statusCheckRollup"]);
+    expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "--job=22", "--log-failed"]);
+    expect(r.isError).toBeUndefined();
+    expect(r.text.startsWith("test (job 22):\nAlso failed: e2e\n\n")).toBe(true);
+    const body = r.text.split("\n\n").slice(1).join("\n\n");
+    expect(body.split("\n")).toHaveLength(FLIGHT_CI_LOG_LINES);
+    expect(body).toContain("leak [redacted]");
+    expect(body).not.toContain(TOKEN);
+    expect(body).not.toContain("line 100\n");
+  });
+
+  it("cuts the tail at FLIGHT_CI_LOG_MAX on a whole line", async () => {
+    const long = Array.from({ length: 150 }, (_, i) => `${i}:${"x".repeat(197)}`).join("\n");
+    ghImpl = async (a) => (a[0] === "pr" ? rollup(checkRun("test", "FAILURE")) : ok(long));
+    const r = await call("read_ci_log", { pr: 9 });
+    const body = r.text.split("\n\n").slice(1).join("\n\n");
+    expect(body.length).toBeLessThanOrEqual(FLIGHT_CI_LOG_MAX);
+    expect(body.endsWith(`149:${"x".repeat(197)}`)).toBe(true);
+    expect(body.split("\n").every((l) => /^\d+:x{197}$/.test(l))).toBe(true);
+    expect(body.split("\n").length).toBeLessThan(150);
+  });
+
+  it("reads a named check and refuses unknown, passing or non-Actions ones", async () => {
+    ghImpl = async (a) =>
+      a[0] === "pr"
+        ? rollup(
+            checkRun("lint", "SUCCESS", 21),
+            checkRun("test", "FAILURE", 22),
+            checkRun("build", "", 23, "IN_PROGRESS"),
+            {
+              __typename: "StatusContext",
+              context: "ci/ext",
+              state: "FAILURE",
+              targetUrl: "https://ci.example/1",
+            },
+          )
+        : ok("boom");
+    expect((await call("read_ci_log", { pr: 9, check: "test" })).text).toBe(
+      ciLogText("test", "22", ["ci/ext"], "boom"),
+    );
+    expect(await call("read_ci_log", { pr: 9, check: "nope" })).toEqual(
+      refused(ciNoCheckText(9, "nope")),
+    );
+    expect(await call("read_ci_log", { pr: 9, check: "lint" })).toEqual(
+      refused(ciNotFailedText("lint", "SUCCESS")),
+    );
+    expect(await call("read_ci_log", { pr: 9, check: "build" })).toEqual(
+      refused(ciNotFailedText("build", "IN_PROGRESS")),
+    );
+    expect(await call("read_ci_log", { pr: 9, check: "ci/ext" })).toEqual(
+      refused(ciNotActionsText("ci/ext")),
+    );
+  });
+
+  it("skips a failed non-Actions check for a later failed Actions job", async () => {
+    const ext = {
+      __typename: "StatusContext",
+      context: "ci/ext",
+      state: "FAILURE",
+      targetUrl: "https://ci.example/1",
+    };
+    ghImpl = async (a) =>
+      a[0] === "pr" ? rollup(ext, checkRun("test", "FAILURE", 22)) : ok("boom");
+    expect((await call("read_ci_log", { pr: 9 })).text).toBe(
+      ciLogText("test", "22", ["ci/ext"], "boom"),
+    );
+    expect(ghCalls[1]).toContain("--job=22");
+    ghImpl = async () => rollup(ext);
+    expect(await call("read_ci_log", { pr: 9 })).toEqual(refused(ciNotActionsText("ci/ext")));
+  });
+
+  it("says when nothing failed or the log is empty", async () => {
+    ghImpl = async () => rollup(checkRun("lint", "SUCCESS"));
+    expect(await call("read_ci_log", { pr: 9 })).toEqual(refused(ciNoFailedText(9)));
+    ghImpl = async (a) => (a[0] === "pr" ? rollup(checkRun("test", "FAILURE")) : ok("  \n\n"));
+    expect(await call("read_ci_log", { pr: 9 })).toEqual({ text: CI_LOG_EMPTY });
+    ghImpl = async (a) => (a[0] === "pr" ? rollup(checkRun("test", "FAILURE")) : failed("boom"));
+    expect(await call("read_ci_log", { pr: 9 })).toEqual(refused(READ_NO_GITHUB));
+  });
+});
+
+describe("list_tickets", () => {
+  const item = (project: number, status: string | null) => ({
+    project: { number: project },
+    status: status === null ? null : { name: status },
+  });
+  const issue = (n: number, over: Record<string, unknown> = {}) => ({
+    number: n,
+    title: `Ticket ${n}`,
+    labels: { nodes: [{ name: "area:server" }, { name: "lane:home" }] },
+    assignees: { nodes: [{ login: "me" }] },
+    projectItems: { nodes: [item(1, "Ready")] },
+    ...over,
+  });
+  const page = (nodes: unknown[], next: string | null = null) =>
+    json({
+      data: {
+        repository: {
+          issues: { pageInfo: { hasNextPage: next !== null, endCursor: next }, nodes },
+        },
+      },
+    });
+  const items = (project: number, status: string | null) => ({ nodes: [item(project, status)] });
+  const list = async (a: Record<string, unknown>) =>
+    JSON.parse((await call("list_tickets", a)).text) as {
+      repo: string;
+      tickets: {
+        number: number;
+        column: string;
+        laneLabel: string | null;
+        assignees: string[];
+        labels: string[];
+      }[];
+      more: boolean;
+    };
+
+  it("lists from project items with column, lane label and assignees, though the board is empty", async () => {
+    const repo = cfg.repos[0];
+    if (repo === undefined) throw new Error("no repo");
+    repo.statusMap = { Doing: "in progress" };
+    ghImpl = async () =>
+      page([
+        issue(1),
+        issue(2, {
+          labels: { nodes: [] },
+          assignees: { nodes: [] },
+          projectItems: items(7, "Ready"),
+        }),
+        issue(3, { projectItems: items(1, "Weird") }),
+        issue(4, { projectItems: items(1, "Doing") }),
+        issue(5, { projectItems: items(1, null) }),
+      ]);
+    const all = await list({ limit: 10 });
+    expect(all.repo).toBe("mc");
+    expect(all.tickets.map((t) => [t.number, t.column])).toEqual([
+      [1, "Ready"],
+      [2, NOT_ON_BOARD],
+      [3, "Weird"],
+      [4, "In progress"],
+      [5, "Backlog"],
+    ]);
+    expect(all.tickets[0]).toMatchObject({
+      laneLabel: "lane:home",
+      assignees: ["me"],
+      labels: ["area:server", "lane:home"],
+    });
+    expect(all.tickets[1]).toMatchObject({ laneLabel: null, assignees: [] });
+    const none = await list({ limit: 10, column: NOT_ON_BOARD });
+    expect(none.tickets.map((t) => t.number)).toEqual([2]);
+    const ready = await list({ limit: 10, column: "Ready" });
+    expect(ready.tickets.map((t) => t.number)).toEqual([1]);
+    expect(store.board("mc")).toEqual([]);
+  });
+
+  it("passes label and assignee to GitHub", async () => {
+    ghImpl = async () => page([]);
+    await list({ limit: 5, label: "area:server", assignee: "me" });
+    const a = ghCalls[0] ?? [];
+    expect(a.slice(0, 2)).toEqual(["api", "graphql"]);
+    expect(a).toContain("owner=o");
+    expect(a).toContain("name=mc");
+    expect(a).toContain("label=area:server");
+    expect(a).toContain("assignee=me");
+    expect(a.some((x) => x.startsWith("after="))).toBe(false);
+    await list({ limit: 5 });
+    const b = ghCalls[1] ?? [];
+    expect(b.some((x) => x.startsWith("label=") || x.startsWith("assignee="))).toBe(false);
+    for (const bad of [
+      { limit: 5, assignee: "a b" },
+      { limit: 0 },
+      { limit: 101 },
+      {},
+      { limit: 5, column: "Nope" },
+    ]) {
+      expect((await call("list_tickets", bad)).isError).toBe(true);
+    }
+  });
+
+  it("caps at limit and at FLIGHT_LIST_PAGES pages", async () => {
+    ghImpl = async () => page([issue(1), issue(2), issue(3)]);
+    const few = await list({ limit: 2 });
+    expect(few.tickets.map((t) => t.number)).toEqual([1, 2]);
+    expect(few.more).toBe(true);
+    expect((await list({ limit: 3 })).more).toBe(false);
+    ghCalls = [];
+    let n = 0;
+    ghImpl = async () => page([], `c${++n}`);
+    const paged = await list({ limit: 5 });
+    expect(ghCalls).toHaveLength(FLIGHT_LIST_PAGES);
+    expect(ghCalls[1]).toContain("after=c1");
+    expect(paged.more).toBe(true);
+    ghImpl = async () => failed("x");
+    expect(await call("list_tickets", { limit: 5 })).toEqual(refused(READ_NO_GITHUB));
   });
 });
