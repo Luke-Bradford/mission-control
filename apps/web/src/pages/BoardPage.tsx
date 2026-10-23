@@ -80,7 +80,11 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   // Under a session the lane is the session's; say so when the route or stored lane names another.
   const named = repoId ?? stored;
   const otherRepo =
-    session !== SESSION_ALL && named !== null && named !== ALL_LANE && named !== session
+    session !== SESSION_ALL &&
+    named !== null &&
+    named !== ALL_LANE &&
+    named !== session &&
+    repos.some((r) => r.id === named)
       ? named
       : null;
   // The layout applies only to All repos with two or more repos (never under a session).

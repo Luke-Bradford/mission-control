@@ -2750,6 +2750,10 @@ kbd {
   background: var(--bg);
   font: var(--fs-s) / 1.6 var(--mono);
 }
+/* a row is transparent to the grid: every number shares one column, each beside its own line */
+.yaml .yrow {
+  display: contents;
+}
 .yaml .yln {
   color: var(--muted);
   text-align: right;
