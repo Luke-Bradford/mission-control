@@ -1973,6 +1973,17 @@ export class Store {
     return rows.map(toReview);
   }
 
+  /** The latest review of a PR that has reported, else null. */
+  latestReportedReview(repoId: string, prNumber: number): ReviewRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? AND state = 'reported'
+         ORDER BY ended_at DESC, id DESC LIMIT 1`,
+      )
+      .get(repoId, prNumber) as Row | undefined;
+    return row ? toReview(row) : null;
+  }
+
   /** The review the run (a review run) performs, else null. */
   reviewOfRun(reviewRunId: string): ReviewRow | null {
     const row = this.db.prepare("SELECT * FROM reviews WHERE run_id = ?").get(reviewRunId) as

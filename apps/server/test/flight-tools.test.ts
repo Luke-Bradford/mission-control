@@ -2130,6 +2130,8 @@ describe("flight_state", () => {
           headSha: "abc",
           readAt: "13:00",
           stale: false,
+          review: null,
+          failingChecks: [],
         },
       ],
       items: [{ key: "note:ready:r-pr", kind: "ready", ticket: "mc#7", text: "ready", ageMin: 0 }],

@@ -14,6 +14,8 @@ import {
   FLIGHT_MAX_WAKES,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_RECENT_LISTED,
+  FLIGHT_REPORT_MAX,
+  FLIGHT_REPORT_PARKS,
   FLIGHT_STARTABLE,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_TICKETS_LISTED,
@@ -22,6 +24,7 @@ import {
   FLIGHT_VIEW_MS,
   type FlightBriefSection,
   type FlightBriefView,
+  type FlightPark,
   type FlightSeatState,
   type FlightState,
   type FlightView,
@@ -278,10 +281,7 @@ export function flightState(i: {
       ticket: run?.ticket ?? null,
       title: t === null ? null : (board.find((b) => b.issueNumber === t.number)?.title ?? null),
       phase: loop?.phase ?? null,
-      parked:
-        loop?.phase === "parked"
-          ? { kind: loop.parked?.kind ?? "", reason: loop.parked?.reason ?? "" }
-          : null,
+      parked: run === null ? null : parkOf(store, run),
       stalled: stalled.has(s.id),
       idleMin:
         run !== null && row?.state === "idle" && last !== null
@@ -362,6 +362,7 @@ export function flightState(i: {
     .sort((a, b) => a.number - b.number)
     .map((p) => {
       const holder = holders.find((r) => r.loop?.prNumber === p.number);
+      const reviewed = store.latestReportedReview(session.repoId, p.number);
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
@@ -372,6 +373,11 @@ export function flightState(i: {
         headSha: p.headSha,
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
+        review:
+          reviewed?.verdict == null
+            ? null
+            : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
+        failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
       };
     });
 
@@ -389,7 +395,7 @@ export function flightState(i: {
       seat: r.agentId,
       ticket: r.ticket ?? null,
       phase: r.loop?.phase ?? "working",
-      parked: asideParked(r),
+      parked: parkOf(store, r),
     }));
 
   const prStates = new Map<number, FlightState["prs"][number]["state"]>(
@@ -455,11 +461,17 @@ export function flightState(i: {
   };
 }
 
-/** A set-aside run's park, as FLIGHT reads it; null when it is not parked. */
-const asideParked = (run: Run): { kind: string; reason: string } | null =>
-  run.loop?.phase === "parked"
-    ? { kind: run.loop.parked?.kind ?? "", reason: run.loop.parked?.reason ?? "" }
-    : null;
+/** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */
+const parkOf = (store: Store, run: Run): FlightPark | null => {
+  if (run.loop?.phase !== "parked") return null;
+  const kind = run.loop.parked?.kind ?? "";
+  const park: FlightPark = { kind, reason: run.loop.parked?.reason ?? "" };
+  if (FLIGHT_REPORT_PARKS.includes(kind)) {
+    const report = store.latestEvidence(run.id)?.note;
+    if (report !== undefined) park.report = cut(report, FLIGHT_REPORT_MAX);
+  }
+  return park;
+};
 
 /** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
 export function wakeFacts(s: FlightState): string {

@@ -1,5 +1,6 @@
 import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
-import { pathsText } from "./loop.ts";
+import { pathsText, RULING_PARK } from "./loop.ts";
+import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
 
@@ -480,6 +481,25 @@ export interface FlightPrRead {
   review: { decision: string | null; reviews: { author: string; state: string }[] };
 }
 
+/** A park as FLIGHT reads it; `report` is the seat's last report, on a ruling park only. */
+export interface FlightPark {
+  kind: string;
+  reason: string;
+  report?: string;
+}
+
+/** RETRO's verdicts on a PR, its blocking findings, and the sha it read. */
+export interface FlightPrReview {
+  spec: Verdict;
+  quality: Verdict;
+  blocking: number;
+  sha: string;
+}
+
+/** The park kinds whose digest entry carries the seat's last report, and the most of it carried. */
+export const FLIGHT_REPORT_PARKS: readonly string[] = [RULING_PARK, "review-ruling"];
+export const FLIGHT_REPORT_MAX = 1500;
+
 export interface FlightSeatState {
   id: string;
   /** The seat's unended run; null when it has none. */
@@ -493,7 +513,7 @@ export interface FlightSeatState {
   ticket: string | null;
   title: string | null;
   phase: LoopPhase | null;
-  parked: { kind: string; reason: string } | null;
+  parked: FlightPark | null;
   stalled: boolean;
   idleMin: number | null;
   openQuestion: boolean;
@@ -515,7 +535,7 @@ export interface FlightState {
     seat: string;
     ticket: string | null;
     phase: LoopPhase;
-    parked: { kind: string; reason: string } | null;
+    parked: FlightPark | null;
   }[];
   questions: { id: number; seat: string; ticket: string | null; text: string; ageMin: number }[];
   tickets: {
@@ -545,6 +565,10 @@ export interface FlightState {
     headSha: string | null;
     readAt: string;
     stale: boolean;
+    /** RETRO's latest reported review of the PR, with the sha it read; null when none has reported. */
+    review: FlightPrReview | null;
+    /** The names of the checks failing on the stored head. */
+    failingChecks: string[];
   }[];
   /** The operator's Needs-you items that have no brief yet, oldest first. */
   items: {
