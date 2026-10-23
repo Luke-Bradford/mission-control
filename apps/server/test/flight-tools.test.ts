@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  BRIEF_CLEARED_DECISION,
   BRIEFED_TEXT,
+  briefClearedText,
+  briefSavedDecision,
+  briefSavedText,
+  briefTooLongText,
   CI_LOG_EMPTY,
   capText,
   ciLogText,
@@ -14,6 +19,11 @@ import {
   claimedText,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_MAX,
+  FLIGHT_BRIEF_EDITS_PER_HOUR,
+  FLIGHT_BRIEF_INPUT_MAX,
+  FLIGHT_BRIEF_SECTION_MAX,
+  FLIGHT_BRIEF_SECTIONS,
+  FLIGHT_BRIEF_TITLES,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
   FLIGHT_GH_READS_PER_HOUR,
@@ -24,6 +34,7 @@ import {
   FLIGHT_PR_FILES_LISTED,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
+  GITHUB_WRITES_OFF,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
@@ -31,6 +42,7 @@ import {
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
   NOT_ON_BOARD,
+  PROFILE_PAIR_TEXT,
   READ_NO_GITHUB,
   READ_NO_PR,
   READ_OTHER_REPO,
@@ -47,10 +59,12 @@ import {
   WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
   wrongAreaText,
+  wrongColumnText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { type CcConfig, type CrewSeatConfig, SEAT_ID } from "../src/config.ts";
+import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
 import { createFlightTools, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
@@ -59,6 +73,9 @@ import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
+const SHA = "a".repeat(40);
+const SHA_B = "b".repeat(40);
+const MAIN = "d".repeat(40);
 const seat = (id: string, role: string, extra: Partial<CrewSeatConfig> = {}): CrewSeatConfig => ({
   id,
   role,
@@ -123,6 +140,12 @@ let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
 let endImpl: (seatId: string) => Promise<void>;
+let asideEnds: string[];
+let rulingImpl: (mayRerun: boolean) => Promise<AcceptRulingResult>;
+let rulingCalls: { runId: string; mayRerun: boolean }[];
+let syncImpl: () => Promise<SyncMainResult>;
+let syncCalls: string[];
+let dirty: string[] | null;
 let fetchImpl: (n: number) => Promise<TicketView | null>;
 let moveCalls: Move[];
 let moveImpl: () => Promise<MoveResult>;
@@ -198,6 +221,12 @@ beforeEach(() => {
     if (r !== null) store.upsertRun({ ...r, endedAt: nowMs, status: "ok" });
     store.setSeatSession({ ...row(seatId, ""), runId: null, state: "stopped" });
   };
+  asideEnds = [];
+  rulingImpl = async () => ({ kind: "rerun", sha: SHA });
+  rulingCalls = [];
+  syncImpl = async () => ({ kind: "merged", sha: SHA_B, mainSha: MAIN });
+  syncCalls = [];
+  dirty = [];
   fetchImpl = async () => null;
   moveCalls = [];
   moveImpl = async () => ({ ok: true, changed: true });
@@ -227,6 +256,11 @@ beforeEach(() => {
         endCalls.push(seatId);
         await endImpl(seatId);
       },
+      endAsideRun: async (runId) => {
+        asideEnds.push(runId);
+        const r = store.run(runId);
+        if (r !== null) store.upsertRun({ ...r, endedAt: nowMs, status: "ok" });
+      },
       startRun: async (...a) => {
         startCalls.push(a);
         return startImpl();
@@ -238,6 +272,15 @@ beforeEach(() => {
         return lifts;
       },
       status: () => ({ on: engineOn, note: null }),
+      acceptRuling: async (runId, opts) => {
+        rulingCalls.push({ runId, mayRerun: opts.mayRerun });
+        return rulingImpl(opts.mayRerun);
+      },
+      syncMain: async (runId) => {
+        syncCalls.push(runId);
+        return syncImpl();
+      },
+      uncommitted: async () => dirty,
     },
     rules: async () => rulesNow,
     board: {
@@ -411,12 +454,15 @@ describe("tool list", () => {
       "flight_state",
       "promote",
       "end_run",
+      "accept_ruling",
+      "sync_main",
       "create_ticket",
       "comment_ticket",
       "brief_item",
       "read_pr",
       "read_ci_log",
       "list_tickets",
+      "update_brief",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -785,6 +831,50 @@ describe("start_seat", () => {
     expect(startCalls).toEqual([["guido-1", 7, undefined]]);
   });
 
+  it("refuses a profile without its reason, or a reason without its profile", async () => {
+    for (const over of [{ profile: "bugfix" }, { profile_reason: "it is a bug" }]) {
+      expect(await start(over)).toEqual({
+        text: `${MC_BAD_ARGS}${PROFILE_PAIR_TEXT}`,
+        isError: true,
+      });
+    }
+    expect(startCalls).toEqual([]);
+  });
+
+  it("passes a profile and its reason on as an override by FLIGHT", async () => {
+    const override = { profile: "bugfix", reason: "it is a bug", by: "FLIGHT" };
+    await start({ profile: "bugfix", profile_reason: "it is a bug" });
+    expect(startCalls).toEqual([["guido-1", 7, { override }]]);
+  });
+
+  it("passes the override and the loop together when the engine is on", async () => {
+    engineOn = true;
+    await start({ profile: "bugfix", profile_reason: "it is a bug" });
+    expect(startCalls).toEqual([
+      [
+        "guido-1",
+        7,
+        { loop: NEW_LOOP, override: { profile: "bugfix", reason: "it is a bug", by: "FLIGHT" } },
+      ],
+    ]);
+  });
+
+  it("refuses an unknown profile before starting", async () => {
+    const r = await start({ profile: "zzz", profile_reason: "r" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('Not started: no template profile is named "zzz"');
+    expect(startCalls).toEqual([]);
+  });
+
+  it("refuses a Size M card without a plan when its template needs one, and starts it when not", async () => {
+    board(sc(7, { size: "M" }));
+    fetchImpl = async (n) => ticket(n, { body: DONE });
+    expect((await start()).text).toBe(startNeedsPlanText("mc#7", "M"));
+    expect(
+      (await start({ profile: "research", profile_reason: "no code" })).isError,
+    ).toBeUndefined();
+  });
+
   it("refuses a card assigned to another login, and starts one assigned to the hub", async () => {
     board(sc(7, { assignees: ["other"] }));
     expect(await start()).toEqual(
@@ -1024,6 +1114,14 @@ describe("start_seat", () => {
         refused(wrongAreaText("INCO-1", "mc#7", ["area:server"])),
       );
       expect(startCalls).toEqual([]);
+    });
+
+    // start_seat's column check names Done first, so a closed card never reaches the rule's text
+    it("0: a closed card, or one in Done", async () => {
+      board(sc(7, { labels: ["area:server"], closed: true }));
+      await nothingStarted(wrongColumnText("mc#7", "Done"));
+      board(sc(7, { labels: ["area:server"], status: "Done", state: "done" }));
+      await nothingStarted(wrongColumnText("mc#7", "Done"));
     });
 
     it("5: a ticket with a run", async () => {
@@ -1318,6 +1416,51 @@ describe("message_seat unpark", () => {
     expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1" }]);
   });
 
+  describe("a set-aside run, by runId", () => {
+    const aside = (id = "r-g") =>
+      store.upsertRun(
+        run(id, "guido-1", {
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            parked: { kind: "ci", reason: "CI failed", ended: false },
+            aside: { worktree: "/tmp/none/wt", wake: false },
+          },
+        }),
+      );
+
+    it("un-parks it without a word to the seat, which is on another run", async () => {
+      aside();
+      expect(await call("message_seat", U({ runId: "r-g" }))).toEqual({
+        text: "Sent to GUIDO-1, and its run is un-parked.",
+      });
+      expect(messageCalls).toEqual([]);
+      expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
+      expect(decisions()).toMatchObject([
+        { kind: "unpark", seatId: "guido-1", targetRunId: "r-g", about: "GUIDO-1: CI failed" },
+      ]);
+    });
+
+    it("still sends to the seat when the run is the one it holds", async () => {
+      parked("silent");
+      expect((await call("message_seat", U({ runId: "r-g" }))).isError).toBeUndefined();
+      expect(messageCalls).toHaveLength(1);
+    });
+
+    it("refuses another seat's run, an ended run, and a runId without unpark", async () => {
+      aside("r-x");
+      expect(await call("message_seat", U({ runId: "r-x", seat: "inco-1" }))).toEqual(
+        refused("Not sent: r-x is not an unended run of INCO-1."),
+      );
+      store.upsertRun(run("r-y", "guido-1", { endedAt: NOW, status: "ok" }));
+      expect((await call("message_seat", U({ runId: "r-y" }))).isError).toBe(true);
+      expect(await call("message_seat", U({ runId: "r-x", unpark: false }))).toEqual(
+        refused("Not sent: runId goes with unpark: true."),
+      );
+      expect(engineCalls).toEqual([]);
+    });
+  });
+
   it("leaves a budget park to the operator", async () => {
     parked("budget");
     expect(await call("message_seat", U())).toEqual(
@@ -1390,7 +1533,7 @@ describe("message_seat unpark", () => {
 
 describe("end_run", () => {
   const E = (over: Record<string, unknown> = {}) => ({
-    seat: "guido-1",
+    runId: "r-g",
     basis: "its ticket needs a docs note the planning lane wrote",
     ...over,
   });
@@ -1401,6 +1544,20 @@ describe("end_run", () => {
       phase: "parked",
       parked: { kind, reason: "nothing to push", ended: false },
     });
+  };
+  /** The run is off its seat, in review, parked. */
+  const setAside = () => {
+    store.upsertRun(
+      run("r-g", "guido-1", {
+        ticket: "mc#7",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "ci", reason: "CI failed", ended: false },
+          aside: { worktree: "/tmp/none/wt", wake: false },
+        },
+      }),
+    );
   };
 
   it("ends a parked run and leaves the seat idle, with its basis recorded", async () => {
@@ -1421,32 +1578,114 @@ describe("end_run", () => {
     expect(seen).toEqual(expect.arrayContaining(["agents", "flight"]));
   });
 
-  it("refuses a run that is still working, and a seat with no run", async () => {
+  it("refuses a run that is still working, and a run that has ended", async () => {
     live("guido-1", "r-g");
     store.setRunLoop("r-g", NEW_LOOP);
-    expect((await call("end_run", E())).isError).toBe(true);
+    expect(await call("end_run", E())).toEqual(
+      refused("Not ended: GUIDO-1's run is not parked or stalled."),
+    );
     store.upsertRun(run("r-g", "guido-1", { endedAt: NOW, status: "ok" }));
-    expect((await call("end_run", E())).isError).toBe(true);
+    expect(await call("end_run", E())).toEqual(refused("Not done: r-g is not an unended run."));
     expect(endCalls).toEqual([]);
     expect(decisions()).toEqual([]);
   });
 
-  it("refuses FLIGHT's own seat, a seat outside the session and a non-developer seat", async () => {
-    expect((await call("end_run", E({ seat: "flight-1" }))).isError).toBe(true);
-    expect(await call("end_run", E({ seat: "nobody-9" }))).toEqual(
-      refused("Not done: nobody-9 is not a seat in your session."),
+  it("ends a stalled run: its seat running with no output for ten minutes", async () => {
+    live("guido-1", "r-g", { ticket: "mc#7" });
+    store.setRunLoop("r-g", NEW_LOOP);
+    store.setSeatSession({
+      ...row("guido-1", "r-g"),
+      state: "running",
+      updatedAt: NOW - 11 * 60_000,
+    });
+    expect((await call("end_run", E())).isError).toBeUndefined();
+    expect(endCalls).toEqual(["guido-1"]);
+    // a seat that wrote just now is not stalled
+    live("inco-1", "r-i", { ticket: "mc#8" });
+    store.setRunLoop("r-i", NEW_LOOP);
+    store.setSeatSession({ ...row("inco-1", "r-i"), state: "running", updatedAt: NOW });
+    expect((await call("end_run", E({ runId: "r-i" }))).isError).toBe(true);
+  });
+
+  it("refuses FLIGHT's own run, a run outside the session and a non-developer seat's run", async () => {
+    expect(await call("end_run", E({ runId: "r-flight" }))).toEqual(
+      refused("Not done: FLIGHT-1 is not a developer seat."),
     );
-    expect(await call("end_run", E({ seat: "retro-1" }))).toEqual(
-      refused("Not ended: RETRO-1 is not a developer seat."),
+    expect(await call("end_run", E({ runId: "nobody-9" }))).toEqual(
+      refused("Not done: nobody-9 is not an unended run."),
+    );
+    live("retro-1", "r-retro");
+    expect(await call("end_run", E({ runId: "r-retro" }))).toEqual(
+      refused("Not done: RETRO-1 is not a developer seat."),
+    );
+    store.upsertRun(run("r-other", "fao-2", { repoId: "other" }));
+    expect((await call("end_run", E({ runId: "r-other" }))).isError).toBe(true);
+    expect(endCalls).toEqual([]);
+  });
+
+  it("caps ends at 4 an hour", async () => {
+    parked();
+    for (let i = 0; i < 4; i++) addDecision({ at: NOW - 1000, kind: "end", seatId: "guido-1" });
+    expect(await call("end_run", E())).toEqual(
+      refused(
+        "Not done: you ended runs 4 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
     );
     expect(endCalls).toEqual([]);
   });
 
-  it("caps ends an hour", async () => {
+  it("does not count an end older than the hour", async () => {
     parked();
-    for (let i = 0; i < 6; i++) addDecision({ at: NOW - 1000, kind: "end", seatId: "guido-1" });
-    expect((await call("end_run", E())).isError).toBe(true);
+    for (let i = 0; i < 4; i++) addDecision({ at: NOW - 61 * 60_000, kind: "end" });
+    expect((await call("end_run", E())).isError).toBeUndefined();
+  });
+
+  it("refuses a run with uncommitted work, naming the paths, and ends nothing", async () => {
+    parked();
+    dirty = ["apps/a.ts", "apps/b.ts"];
+    expect(await call("end_run", E())).toEqual(
+      refused("Not ended: GUIDO-1 has uncommitted changes in apps/a.ts, apps/b.ts."),
+    );
     expect(endCalls).toEqual([]);
+    expect(store.run("r-g")?.endedAt).toBeNull();
+    expect(decisions()).toEqual([]);
+  });
+
+  it("refuses when the worktree cannot be read", async () => {
+    parked();
+    dirty = null;
+    expect(await call("end_run", E())).toEqual(
+      refused("Not ended: the run's worktree could not be read."),
+    );
+    expect(endCalls).toEqual([]);
+  });
+
+  it("ends a parked run that is set aside, through endAsideRun", async () => {
+    setAside();
+    expect(await call("end_run", E())).toEqual({
+      text: "Ended GUIDO-1's set-aside run. Recorded in Decided without you.",
+    });
+    expect(asideEnds).toEqual(["r-g"]);
+    expect(endCalls).toEqual([]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "end",
+        seatId: "guido-1",
+        targetRunId: "r-g",
+        decision: "Ended GUIDO-1's set-aside run.",
+      },
+    ]);
+  });
+
+  it("refuses a set-aside run that is not parked, and a set-aside run with uncommitted work", async () => {
+    setAside();
+    const r = store.run("r-g");
+    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    expect((await call("end_run", E())).isError).toBe(true);
+    if (r?.loop) store.setRunLoop("r-g", r.loop);
+    dirty = ["apps/a.ts"];
+    expect((await call("end_run", E())).isError).toBe(true);
+    expect(asideEnds).toEqual([]);
   });
 
   it("reports a failed end and records nothing", async () => {
@@ -1456,6 +1695,176 @@ describe("end_run", () => {
     };
     expect(await call("end_run", E())).toEqual(refused("Not ended: boom"));
     expect(decisions()).toEqual([]);
+  });
+});
+
+describe("accept_ruling", () => {
+  const A = (over: Record<string, unknown> = {}) => ({
+    runId: "r-g",
+    basis: "the failing test is a known flake",
+    ...over,
+  });
+  beforeEach(() => {
+    engineOn = true;
+    live("guido-1", "r-g", { ticket: "mc#7" });
+    store.setRunLoop("r-g", {
+      ...NEW_LOOP,
+      phase: "parked",
+      ciFailedSha: SHA,
+      parked: { kind: "ruling", reason: "ruled", ended: false },
+    });
+  });
+
+  it("starts the re-run, and records it with its basis", async () => {
+    expect(await call("accept_ruling", A())).toEqual({
+      text: "Re-running failed CI on aaaaaaa for GUIDO-1; call accept_ruling again when it finishes. Recorded in Decided without you.",
+    });
+    expect(rulingCalls).toEqual([{ runId: "r-g", mayRerun: true }]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "rerun",
+        seatId: "guido-1",
+        targetRunId: "r-g",
+        decision:
+          "Re-running failed CI on aaaaaaa for GUIDO-1; call accept_ruling again when it finishes.",
+        basis: "the failing test is a known flake",
+      },
+    ]);
+    expect(seen).toContain("flight");
+  });
+
+  it("accepts the ruling when the re-run passed", async () => {
+    rulingImpl = async () => ({ kind: "accepted", sha: SHA });
+    expect(await call("accept_ruling", A())).toEqual({
+      text: "Re-run passed on aaaaaaa: GUIDO-1's ruling is accepted. Recorded in Decided without you.",
+    });
+    expect(decisions()).toMatchObject([{ kind: "ruling", targetRunId: "r-g" }]);
+  });
+
+  it("refuses the ruling when the re-run failed, and sends the failure back", async () => {
+    rulingImpl = async () => ({ kind: "refused", sha: SHA });
+    const r = await call("accept_ruling", A());
+    expect(r).toEqual({
+      text: "Re-run failed on aaaaaaa: GUIDO-1 gets the failure to fix. Recorded in Decided without you.",
+    });
+    expect(decisions()).toMatchObject([{ kind: "ruling" }]);
+  });
+
+  it("says the re-run is still going, recording nothing", async () => {
+    rulingImpl = async () => ({ kind: "pending", sha: SHA });
+    expect(await call("accept_ruling", A())).toEqual({
+      text: "The re-run on aaaaaaa is still going.",
+    });
+    expect(decisions()).toEqual([]);
+  });
+
+  it("passes the engine's refusals on", async () => {
+    rulingImpl = async () => ({ kind: "not", text: "the run is not parked on a CI ruling" });
+    expect(await call("accept_ruling", A())).toEqual(
+      refused("Not accepted: the run is not parked on a CI ruling."),
+    );
+    expect(decisions()).toEqual([]);
+  });
+
+  it("re-runs at most 4 times an hour: the engine is told when the cap is used", async () => {
+    for (let i = 0; i < 3; i++) addDecision({ at: NOW - 1000, kind: "rerun" });
+    await call("accept_ruling", A());
+    expect(rulingCalls.at(-1)?.mayRerun).toBe(true);
+    // (the call above filed the 4th)
+    rulingImpl = async (mayRerun) => (mayRerun ? { kind: "rerun", sha: SHA } : { kind: "capped" });
+    expect(await call("accept_ruling", A())).toEqual(
+      refused(
+        "Not done: you re-ran CI 4 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    expect(rulingCalls.at(-1)?.mayRerun).toBe(false);
+  });
+
+  it("refuses with the engine off, a run that is not a developer's, and another seat's token", async () => {
+    engineOn = false;
+    expect(await call("accept_ruling", A())).toEqual({ text: GITHUB_WRITES_OFF, isError: true });
+    engineOn = true;
+    expect(await call("accept_ruling", A({ runId: "r-flight" }))).toEqual(
+      refused("Not done: FLIGHT-1 is not a developer seat."),
+    );
+    expect(await call("accept_ruling", A({ runId: "nope" }))).toEqual(
+      refused("Not done: nope is not an unended run."),
+    );
+    expect(await call("accept_ruling", A(), ctx("guido-1", "r-g"))).toEqual({
+      text: MC_FLIGHT_ONLY,
+      isError: true,
+    });
+    expect(rulingCalls).toEqual([]);
+  });
+
+  it("takes no extra arguments", async () => {
+    expect((await call("accept_ruling", A({ seat: "guido-1" }))).isError).toBe(true);
+  });
+});
+
+describe("sync_main", () => {
+  const S = (over: Record<string, unknown> = {}) => ({
+    runId: "r-g",
+    basis: "the PR conflicts with main and the author is not needed",
+    ...over,
+  });
+  beforeEach(() => {
+    engineOn = true;
+    live("guido-1", "r-g", { ticket: "mc#7" });
+  });
+
+  it("merges main through the engine, and records it", async () => {
+    expect(await call("sync_main", S())).toEqual({
+      text: "Merged main ddddddd into GUIDO-1's branch as bbbbbbb. Recorded in Decided without you.",
+    });
+    expect(syncCalls).toEqual(["r-g"]);
+    expect(decisions()).toMatchObject([
+      {
+        kind: "sync",
+        seatId: "guido-1",
+        targetRunId: "r-g",
+        decision: "Merged main ddddddd into GUIDO-1's branch as bbbbbbb.",
+        basis: "the PR conflicts with main and the author is not needed",
+      },
+    ]);
+  });
+
+  it("names a conflict the author resolves", async () => {
+    syncImpl = async () => ({ kind: "conflict", files: ["apps/a.ts"] });
+    expect(await call("sync_main", S())).toEqual({
+      text: "Main conflicts in apps/a.ts; GUIDO-1 resolves it. Recorded in Decided without you.",
+    });
+    expect(decisions()).toMatchObject([{ kind: "sync" }]);
+  });
+
+  it("says a branch that has main already is current, recording nothing", async () => {
+    syncImpl = async () => ({ kind: "current", mainSha: MAIN });
+    expect(await call("sync_main", S())).toEqual({
+      text: "GUIDO-1's branch already has main ddddddd.",
+    });
+    expect(decisions()).toEqual([]);
+  });
+
+  it("passes the engine's refusals on", async () => {
+    syncImpl = async () => ({ kind: "refused", text: "its seat is in a turn" });
+    expect(await call("sync_main", S())).toEqual(refused("Not merged: its seat is in a turn."));
+    expect(decisions()).toEqual([]);
+  });
+
+  it("merges at most 6 times an hour", async () => {
+    for (let i = 0; i < 6; i++) addDecision({ at: NOW - 1000, kind: "sync" });
+    expect(await call("sync_main", S())).toEqual(
+      refused(
+        "Not done: you merged main 6 times in the last hour, the most allowed. Wait, or ask the operator.",
+      ),
+    );
+    expect(syncCalls).toEqual([]);
+  });
+
+  it("refuses a run that is not a developer's, and with the engine off", async () => {
+    expect((await call("sync_main", S({ runId: "r-flight" }))).isError).toBe(true);
+    engineOn = false;
+    expect(await call("sync_main", S())).toEqual({ text: GITHUB_WRITES_OFF, isError: true });
   });
 });
 
@@ -1508,6 +1917,36 @@ describe("flight_state", () => {
     const seats = ((await state()) as { seats: { id: string; state: string; free: boolean }[] })
       .seats;
     expect(seats.find((x) => x.id === "guido-1")).toMatchObject({ state: "stopped", free: true });
+  });
+
+  it("lists a run set aside in review, with its park, and the seat's run ids", async () => {
+    store.upsertRun(
+      run("r-aside", "guido-1", {
+        ticket: "mc#7",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "ci", reason: "CI failed", ended: false },
+          aside: { worktree: "/tmp/none/wt", wake: false },
+        },
+      }),
+    );
+    live("inco-1", "r-inco");
+    const s = (await state()) as {
+      aside: unknown[];
+      seats: { id: string; runId: string | null }[];
+    };
+    expect(s.aside).toEqual([
+      {
+        runId: "r-aside",
+        seat: "guido-1",
+        ticket: "mc#7",
+        phase: "parked",
+        parked: { kind: "ci", reason: "CI failed" },
+      },
+    ]);
+    expect(s.seats.find((x) => x.id === "inco-1")?.runId).toBe("r-inco");
+    expect(s.seats.find((x) => x.id === "guido-1")?.runId).toBeNull();
   });
 
   it("answers the crew now", async () => {
@@ -1572,6 +2011,7 @@ describe("flight_state", () => {
     );
     addDecision({ kind: "message", about: "Message to GUIDO-1", decision: "go on" });
     const bare = {
+      runId: null,
       state: null,
       ticket: null,
       title: null,
@@ -1615,6 +2055,7 @@ describe("flight_state", () => {
           loop: "build",
           area: ["apps/web/**"],
           free: false,
+          runId: "r-inco",
           state: "idle",
           idleMin: 7,
           ticket: "mc#5",
@@ -1632,6 +2073,7 @@ describe("flight_state", () => {
           free: true,
         },
       ],
+      aside: [],
       questions: [{ id: 1, seat: "inco-1", ticket: "mc#5", text: "Which lane?", ageMin: 5 }],
       tickets: [
         {
@@ -1673,6 +2115,7 @@ describe("flight_state", () => {
           ref: "mc#7",
           pr: 9,
           seat: "guido-1",
+          runId: "r-pr",
           ready: true,
           state: "open",
           headSha: "abc",
@@ -1684,6 +2127,12 @@ describe("flight_state", () => {
       holds: [],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
+      brief: FLIGHT_BRIEF_SECTIONS.map((section) => ({
+        section,
+        title: FLIGHT_BRIEF_TITLES[section],
+        text: "",
+        ageMin: null,
+      })),
     });
   });
 
@@ -2527,6 +2976,107 @@ describe("brief_item", () => {
       refused(MC_FLIGHT_ONLY),
     );
     expect(store.briefs().size).toBe(0);
+  });
+});
+
+describe("update_brief", () => {
+  const GOALS = "Goals and priorities";
+  const save = (section: string, text: string, c = ctx()) =>
+    call("update_brief", { section, text, basis: "a wake" }, c);
+  const briefDecisions = () => decisions().filter((d) => d.kind === "brief");
+
+  it("replaces one section and leaves the others", async () => {
+    await save("goals", "Ship the brief.");
+    await save("risks", "Flaky api test.");
+    nowMs = NOW + 1000;
+    expect(await save("goals", "Ship the merge step.")).toEqual({
+      text: briefSavedText(GOALS, 20),
+    });
+    expect(store.flightBrief("s1")).toEqual([
+      {
+        sessionId: "s1",
+        section: "goals",
+        text: "Ship the merge step.",
+        updatedAt: NOW + 1000,
+        updatedBy: "flight-1",
+      },
+      {
+        sessionId: "s1",
+        section: "risks",
+        text: "Flaky api test.",
+        updatedAt: NOW,
+        updatedBy: "flight-1",
+      },
+    ]);
+    expect(briefDecisions()).toHaveLength(3);
+    expect(briefDecisions()[0]).toMatchObject({
+      about: "Brief: Goals and priorities",
+      decision: briefSavedDecision(20),
+    });
+    expect(seen).toContain("flight");
+    // the log keeps the size, not the text; flight_state's recent leaves brief edits out
+    expect(briefDecisions().map((d) => d.decision)).not.toContain("Ship the merge step.");
+    const state = JSON.parse((await call("flight_state", {}, ctx())).text) as {
+      recent: { kind: string }[];
+    };
+    expect(state.recent.filter((d) => d.kind === "brief")).toEqual([]);
+  });
+
+  it("clears a section with an empty text", async () => {
+    await save("goals", "x");
+    expect(await save("goals", "")).toEqual({ text: briefClearedText(GOALS) });
+    expect(store.flightBrief("s1")[0]?.text).toBe("");
+    expect(briefDecisions()[0]?.decision).toBe(BRIEF_CLEARED_DECISION);
+  });
+
+  it("holds the 4000-character cap", async () => {
+    const full = "x".repeat(FLIGHT_BRIEF_SECTION_MAX);
+    expect(await save("goals", full)).toEqual({ text: briefSavedText(GOALS, 4000) });
+    expect(await save("goals", "y".repeat(FLIGHT_BRIEF_SECTION_MAX + 1))).toEqual(
+      refused(briefTooLongText(GOALS, 4001)),
+    );
+    expect(store.flightBrief("s1")[0]?.text).toBe(full);
+    expect(briefDecisions()).toHaveLength(1);
+    const r = await save("goals", "z".repeat(FLIGHT_BRIEF_INPUT_MAX + 1));
+    expect(r).toMatchObject({ isError: true });
+    expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+  });
+
+  it("refuses an unknown section and a non-FLIGHT seat", async () => {
+    const r = await save("notes", "x");
+    expect(r.isError).toBe(true);
+    expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
+    live("guido-1", "r-guido");
+    expect(await save("goals", "x", ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(store.flightBrief("s1")).toEqual([]);
+    expect(briefDecisions()).toEqual([]);
+  });
+
+  it("allows 30 edits an hour", async () => {
+    for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++) {
+      expect(await save("goals", `v${i}`)).not.toHaveProperty("isError");
+    }
+    expect(await save("goals", "one more")).toEqual(
+      refused(capText("updated your brief", FLIGHT_BRIEF_EDITS_PER_HOUR)),
+    );
+    nowMs = NOW + 61 * 60_000;
+    expect(await save("goals", "later")).not.toHaveProperty("isError");
+  });
+
+  it("is carried by flight_state", async () => {
+    await save("goals", "G");
+    nowMs = NOW + 5 * 60_000;
+    const s = JSON.parse((await call("flight_state", {})).text) as {
+      brief: { section: string; title: string; text: string; ageMin: number | null }[];
+    };
+    expect(s.brief).toHaveLength(9);
+    expect(s.brief[0]).toEqual({
+      section: "goals",
+      title: GOALS,
+      text: "G",
+      ageMin: 5,
+    });
+    expect(s.brief[8]).toMatchObject({ text: "", ageMin: null });
   });
 });
 

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import {
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
+  type CiRerun,
   globMatches,
   isProtectedPath,
   MC_PR_BODY_MAX,
@@ -49,6 +50,8 @@ import { crewDir } from "../store.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
 export const NO_FAILED_RUN = "(no failed Actions run to read)";
+/** What `rerunState` says when a run it was told of is not in the list gh gave. */
+const RERUN_RUN_MISSING = "a re-run Actions run was not in the list gh gave";
 /** What a ciExcerpt says when gh could not be read. */
 export const CI_LOG_UNREADABLE = "(the CI log could not be read)";
 /** What a ciExcerpt says when the failed runs printed nothing to read. */
@@ -115,6 +118,15 @@ export type UpdateBranchResult =
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
 
+export type RerunResult =
+  | { ok: true; runs: CiRerun["runs"] }
+  | { ok: false; text: string; transient: boolean };
+export type RerunStateResult =
+  | { ok: true; outcome: CiRerun["outcome"] }
+  | { ok: false; text: string; transient: boolean };
+/** A completed run with one of these conclusions did not fail. */
+const NOT_FAILED_CONCLUSIONS = ["success", "skipped", "neutral"];
+
 /**
  * A PR diff without its index lines and hunk numbers, which a merge of main changes and the
  * change does not.
@@ -155,6 +167,14 @@ export interface Publisher {
     repo: string,
     sha: string,
   ): Promise<{ id: number; name: string }[] | null | "running">;
+  /**
+   * FLIGHT's re-run of a ruled sha: like `rerunFailed` (failed or timed-out runs only), but it
+   * returns each run's attempt from before, so `rerunState` can tell the re-run from the first
+   * run. NO_FAILED_RUN when none failed.
+   */
+  rerunRuling(repo: string, sha: string): Promise<RerunResult>;
+  /** What those re-runs came to: pending until each run is on a later attempt and completed. */
+  rerunState(repo: string, sha: string, runs: CiRerun["runs"]): Promise<RerunStateResult>;
   /** The paths changed between origin's default branch and `sha` that match `hardRules`. */
   hardRuleTouches(run: Run, sha: string, hardRules: readonly string[]): Promise<string[]>;
   /**
@@ -171,6 +191,11 @@ export interface Publisher {
    * moving the ref: a checked-out worktree's index would go stale.
    */
   updateBranch(run: Run, mainSha: string, worktree: string): Promise<UpdateBranchResult>;
+  /**
+   * The paths in `worktree` that a commit would take but has not (what `updateBranch` waits on);
+   * a refusal when the worktree cannot be read.
+   */
+  worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run): Promise<PublishResult>;
   /** Merges the run's PR with a merge commit, only if its head is `sha` and it contains main. */
@@ -326,6 +351,41 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   const isRefusal = (x: object): x is Refusal => "ok" in x && x.ok === false;
+
+  /** The Actions runs on `sha`, with `fields` read from `gh run list`; a transient refusal when gh gives none. */
+  async function actionsRuns(
+    repo: string,
+    sha: string,
+    fields: string,
+  ): Promise<{ id: number; status: string; conclusion: string; attempt: number }[] | Refusal> {
+    const listed = await deps.gh(
+      ["run", "list", `--repo=${repo}`, `--commit=${sha}`, `--json=${fields}`],
+      { cwd: cwd() },
+    );
+    if (listed.code !== 0) return ghFailed("run list", listed.stderr);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(listed.stdout);
+    } catch {
+      return transient("gh run list gave no JSON");
+    }
+    if (!Array.isArray(parsed)) return transient("gh run list gave no JSON");
+    return parsed.flatMap((r: unknown) => {
+      const x = r as Record<string, unknown> | null;
+      return typeof x?.databaseId === "number" &&
+        Number.isSafeInteger(x.databaseId) &&
+        typeof x.attempt === "number"
+        ? [
+            {
+              id: x.databaseId,
+              status: typeof x.status === "string" ? x.status : "",
+              conclusion: typeof x.conclusion === "string" ? x.conclusion : "",
+              attempt: x.attempt,
+            },
+          ]
+        : [];
+    });
+  }
 
   /** git's exit code 1 is an answer ("no"), anything else is a failure. */
   async function yes(g: G, args: string[]): Promise<boolean> {
@@ -642,6 +702,50 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       }
     },
 
+    async rerunRuling(repo, sha) {
+      if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
+      const listed = await actionsRuns(repo, sha, "databaseId,conclusion,attempt");
+      if (isRefusal(listed)) return listed;
+      const failed = listed.filter(
+        (r) => r.conclusion === "failure" || r.conclusion === "timed_out",
+      );
+      if (failed.length === 0) return final(NO_FAILED_RUN);
+      const done: CiRerun["runs"] = [];
+      for (const r of failed) {
+        const rerun = await deps.gh(["run", "rerun", `--repo=${repo}`, String(r.id), "--failed"], {
+          cwd: cwd(),
+        });
+        // the runs already re-run are returned, so the caller records the re-run and never repeats
+        // it; a failure before any run was re-run is a refusal
+        if (rerun.code !== 0) {
+          return done.length > 0 ? { ok: true, runs: done } : ghFailed("run rerun", rerun.stderr);
+        }
+        done.push({ id: r.id, attempt: r.attempt });
+      }
+      return { ok: true, runs: done };
+    },
+
+    async rerunState(repo, sha, saved) {
+      if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
+      const listed = await actionsRuns(repo, sha, "databaseId,status,conclusion,attempt");
+      if (isRefusal(listed)) return listed;
+      const now = saved.map((s) => ({ s, r: listed.find((r) => r.id === s.id) }));
+      if (now.some((x) => x.r === undefined)) return transient(RERUN_RUN_MISSING);
+      const runs = now.flatMap((x) => (x.r === undefined ? [] : [{ ...x.r, was: x.s.attempt }]));
+      if (runs.some((r) => r.attempt <= r.was || r.status !== "completed")) {
+        return { ok: true, outcome: "pending" };
+      }
+      // a failed run that was not re-run (its re-run was refused) means CI still fails
+      const failed =
+        runs.some((r) => !NOT_FAILED_CONCLUSIONS.includes(r.conclusion)) ||
+        listed.some(
+          (r) =>
+            !saved.some((s) => s.id === r.id) &&
+            (r.conclusion === "failure" || r.conclusion === "timed_out"),
+        );
+      return { ok: true, outcome: failed ? "failed" : "passed" };
+    },
+
     async hardRuleTouches(run, sha, hardRules) {
       const place = seatPlace(deps.config, run.agentId);
       if (place === null || !SHA.test(sha) || hardRules.length === 0) return [];
@@ -808,6 +912,38 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       }
     },
 
+    async worktreeChanges(run, worktree) {
+      const place = seatPlace(deps.config, run.agentId);
+      if (place === null) return final(MERGE_NO_SEAT);
+      const git = deps.git ?? crewGit;
+      const checkout = place.session.checkout;
+      try {
+        return await deps.inClone(checkout, async (): Promise<string[] | Refusal> => {
+          const common = await realpath(join(checkout, ".git"));
+          const gitDir = await adminDirOf(common, worktree);
+          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+          const status = await git(
+            worktree,
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all", ...COMMIT_ADD_PATHSPEC],
+            common,
+            { gitDir, timeoutMs: CREW_GIT_SLOW_MS },
+          );
+          const paths: string[] = [];
+          const entries = status.split("\0");
+          for (let i = 0; i < entries.length; i++) {
+            const e = entries[i] ?? "";
+            if (e === "") continue;
+            paths.push(e.slice(3));
+            // a rename or copy is followed by the path it came from
+            if (e[0] === "R" || e[0] === "C") i++;
+          }
+          return paths;
+        });
+      } catch (e) {
+        return transient(`git failed: ${errText(e)}`);
+      }
+    },
+
     async markReady(run) {
       const repo = repoOf(run);
       const n = run.loop?.prNumber ?? null;
@@ -909,6 +1045,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         } catch (e) {
           // --porcelain prints a refused ref on stdout, not in the error message
           const out = (e as { stdout?: unknown } | null)?.stdout;
+          // a branch deleted since the check (delete-on-merge, the merger) is done, not moved
+          const gone = await originNow(g, branch).then(
+            (now) => now.branchSha === null,
+            () => false,
+          );
+          if (gone) return { ok: true };
           return typeof out === "string" && /^!\t[^\t]*\t\[rejected\]/m.test(out)
             ? final(MERGE_BRANCH_MOVED)
             : transient(errText(e));

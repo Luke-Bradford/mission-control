@@ -95,6 +95,33 @@ The config is rejected at start-up if an id repeats within `accounts`, `repos` o
 two accounts share a vendor: the usage readers use this Mac's single Claude login (Keychain
 OAuth) and single Codex login, so a second account would report the first one's usage.
 
+## Template profiles
+
+A profile is one template (feature, bugfix, small-change, research, review) kept in your user config, not in the repo. Each sets the steps shown, a checklist that goes into the brief, whether a plan is required at Size M or larger, the reviewer role and depth, the CI checks to name, and the CI try and review round limits. With no `profiles.yaml` the five built-ins apply. A file replaces them whole (no merge), and must keep profiles named `small-change` and `feature`, the Size fallbacks.
+
+```yaml
+profiles:
+  - name: small-change          # lowercase, up to 32 letters, digits and -
+    labels: [chore, test, docs] # card labels that pick it; the first profile in file order wins
+    steps:                      # shown on the run; phase ties a step to working, ci or review
+      - { name: implement, phase: working }
+      - { name: verify, phase: ci }
+      - { name: review, phase: review }
+    checklist: |                # briefed as "Before you report, check:" (at most 4000 characters)
+      - Only the paths this ticket type allows changed
+    plan_required: false
+    reviewer: { role: RETRO, depth: light }   # full runs the review on opus
+    checks: []                  # CI checks named in the brief
+    tries: 2                    # CI failures before the run parks (1 to 10)
+    rounds: 2                   # blocking reviews before the run parks (1 to 10)
+```
+
+- **Routing.** The first profile with a label the ticket has wins. With none, Size XS or S takes `small-change`; anything else, or no Size, takes `feature`. FLIGHT (`start_seat`) and the planner (`report_plan`) may name another profile with `profile` and `profile_reason`; the choice is kept per ticket with its reason, and the profile keeps every check the routed one required.
+- **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
+- **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
+- **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.
+- **Seen.** The crew row's loop carries the profile name and the step for the run's phase.
+
 ## Moving from Control Centre
 
 The project was renamed Mission Control on 2026-10-18. An install made under the old name moves
@@ -121,6 +148,7 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 |---|---|
 | Config | `~/.config/mission-control/config.yaml` (override with `MC_CONFIG`) |
 | Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every write the server makes to `config.yaml` (a repo added from Setup › Repos, or a session's seats replaced), the newest 10 kept, mode 0600 |
+| Template profiles | `profiles.yaml` beside `config.yaml` (optional; you create it, the hub never writes it); see [Template profiles](#template-profiles) |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
 | Update log | `update.log` beside the database: the last update's commands and output, mode 0600 |
