@@ -556,6 +556,29 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("a second Needs-you item wakes again", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 2 items to brief`)).toBe(true);
+  });
+
+  it("an unbriefed item re-wakes hourly", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + 59 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + 61 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
   it("a question that goes away and comes back wakes again", async () => {
     liveCrew();
     ask();
