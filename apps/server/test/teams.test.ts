@@ -456,3 +456,95 @@ it("splits asks from digest signals and preserves legacy person items", async ()
   expect(attentionItems(config, store, 3_000).filter((x) => x.kind === "person")).toHaveLength(4);
   store.close();
 });
+
+it("classifies replies using participation from later pages and later polls", async () => {
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(1);
+  let page = 0;
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async (_url, options) => {
+      expect(options?.method).toBe("GET");
+      return ++page === 1
+        ? response([message("reply", "See #42", { replyToId: "root" })], {
+            "@odata.nextLink": "https://graph.microsoft.com/v1.0/chats/chat-a/messages?$skip=50",
+          })
+        : response([
+            message("own", "Checking", { replyToId: "root", from: { user: { id: "Operator" } } }),
+          ]);
+    },
+  });
+  expect(page).toBe(2);
+  expect(store.notifications()[0]?.message?.disposition).toBe("needs-you");
+  await collectTeams(config, store, 2_000, {
+    token: async () => "secret",
+    fetch: async () => response([message("older-reply", "See #42", { replyToId: "later-root" })]),
+  });
+  const old = store.notifications().find((n) => n.message?.teams?.messageId === "older-reply");
+  expect(old?.message?.disposition).toBe("digest");
+  if (!old) throw new Error("Missing stored digest reply");
+  // Matches written by #490 predate thread metadata.
+  if (!old.message?.teams) throw new Error("Missing Teams metadata");
+  delete old.message.teams.threadId;
+  store.upsertNotifications([old], false, 2_000);
+  await collectTeams(config, store, 3_000, {
+    token: async () => "secret",
+    fetch: async () =>
+      response([
+        message("later-own", "Checking", {
+          replyToId: "later-root",
+          from: { user: { id: "Operator" } },
+        }),
+      ]),
+  });
+  expect(store.notification(old.id)?.message?.disposition).toBe("needs-you");
+  expect(store.notification(old.id)?.message?.source.revision).not.toBe(
+    old?.message?.source.revision,
+  );
+  store.close();
+});
+
+it("keeps a digest match triaged after arrival outcomes are evicted", async () => {
+  const { flightState, flightArrivalSource } = await import("../src/flight/state.ts");
+  const { FLIGHT_INCOMING_LIMIT } = await import("@mc/core");
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(1);
+  config.crew = {
+    worktrees: "/tmp/teams-test",
+    maxSeats: 1,
+    sessions: [
+      {
+        id: "work",
+        repoId: "work",
+        checkout: "/tmp/teams-test",
+        seats: [{ id: "flight-1", role: "FLIGHT", accountId: "test", model: "opus", area: [] }],
+      },
+    ],
+  };
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async () => response([message("signal", "See #42")]),
+  });
+  const readState = () => flightState({ config, store, busy: [], now: 2_000 });
+  const arrival = readState().teamsDigest?.matches[0]?.arrival;
+  if (!arrival) throw new Error("Missing digest arrival");
+  const operation = { ...arrival, outcome: "No action" as const, detail: "Checked" };
+  const source = flightArrivalSource(config, store, operation);
+  expect(source).not.toBeNull();
+  if (!source) throw new Error("Missing arrival source");
+  store.recordFlightArrival({ ...operation, ...source, at: 2_000 });
+  // Evict before reading state again: suppression must survive without the outcome log.
+  for (let i = 0; i < FLIGHT_INCOMING_LIMIT; i++) {
+    store.recordFlightArrival({
+      ...operation,
+      arrivalId: `other-${i}`,
+      text: "Other",
+      at: 3_000 + i,
+    });
+  }
+  expect(store.flightIncoming()).toHaveLength(FLIGHT_INCOMING_LIMIT);
+  expect(store.flightIncoming().some((o) => o.arrivalId === arrival.arrivalId)).toBe(false);
+  expect(store.notification(arrival.arrivalId)?.unread).toBe(true);
+  expect(readState().teamsDigest).toBeUndefined();
+  store.close();
+});

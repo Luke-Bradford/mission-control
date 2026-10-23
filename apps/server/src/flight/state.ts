@@ -283,6 +283,23 @@ export function flightArrivalSource(
     operation.version !== (source?.revision ?? String(n.updatedAt))
   )
     return null;
+  // Keep Teams triage with the source revision, independent of the capped outcome log.
+  if (
+    operation.source === "Teams" &&
+    n.message?.disposition === "digest" &&
+    operation.outcome !== "Queued"
+  ) {
+    store.upsertNotifications(
+      [
+        {
+          ...n,
+          message: { ...n.message, triagedVersion: operation.version },
+        },
+      ],
+      false,
+      n.firstSeenAt,
+    );
+  }
   return { text: n.title, arrivedAt: n.updatedAt };
 }
 
@@ -572,14 +589,30 @@ export function flightState(i: {
       n.repoId !== session.repoId ||
       message?.source.kind !== "teams" ||
       message.disposition !== "digest" ||
+      message.triagedVersion === message.source.revision ||
       !n.unread ||
-      (n.handledThrough !== null && n.updatedAt <= n.handledThrough) ||
+      (n.handledThrough !== null && n.updatedAt <= n.handledThrough)
+    )
+      return [];
+    // Backfill matches triaged before the durable marker was introduced.
+    if (
       outcomes.some(
         (o) =>
           o.source === "Teams" && o.arrivalId === n.id && o.version === message.source.revision,
       )
-    )
+    ) {
+      store.upsertNotifications(
+        [
+          {
+            ...n,
+            message: { ...message, triagedVersion: message.source.revision },
+          },
+        ],
+        false,
+        n.firstSeenAt,
+      );
       return [];
+    }
     return [
       {
         text: cut(message.text, FLIGHT_ABOUT_MAX),

@@ -804,6 +804,7 @@ export interface PersonSource {
 
 export interface PersonMessage {
   disposition?: "needs-you" | "digest";
+  triagedVersion?: string;
   source: PersonSource;
   teams?: {
     kind: "chat" | "channel";
@@ -811,6 +812,7 @@ export interface PersonMessage {
     teamId?: string;
     name: string;
     messageId: string;
+    threadId?: string;
   };
   author: string | null;
   at: number;
