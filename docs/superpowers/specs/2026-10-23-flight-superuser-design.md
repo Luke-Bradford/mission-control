@@ -80,21 +80,22 @@ For each PR in review, the digest carries RETRO's verdict, the blocking-finding 
 - **The role and repo rules.** Rewrite `roles/FLIGHT.md` around the principle. Change `CLAUDE.md`'s hard-rule merge line to "on a `superuser` repo, FLIGHT merges by its judgement". The operator merges these, since they are hard-rule files.
 - **The hard-rule merger setting.** Reconcile `hard_rules_by` (`engine/rules.ts`): on a `superuser` repo the merger is FLIGHT.
 
-### #449: the merge queue (M; replan after this spec merges)
+### #449: the merge queue (L; replan after this spec merges; no dependency)
 
 - **What joins.** Run PRs only, per hub. Run PRs join once their review is clean (or carried, or accepted) and CI is green.
-- **Hard-rule PRs.** On a `superuser` repo they join as well. At the front they are brought up to date and then held as `awaiting-flight` until FLIGHT's `merge_pr` (same timeout). On other repos they keep today's path to the operator or delegate.
+- **Merge order.** A "queue front" fact is required in `gateView.passes`, so nothing merges out of order. `sync_main` is refused for queued PRs that aren't at the front. A PR that left the queue rejoins only on a new head, or when FLIGHT re-adds it.
 - **Bringing the front up to date.** Only the front PR is brought up to date, by the engine's worktree merge of main. `branchUpdateDue` returns null for queued PRs behind the front.
 - **Leaving the queue.** A PR leaves on a conflict, on red CI, or after 45 minutes at the front without merging. The queue then moves on.
 - **Lanes.** It refuses other-lane PRs. A merge to main by another hub or a person just moves main.
 
 ### FLIGHT merges and settles (new; depends on #198 and #449)
 
-- **`merge_pr { pr, basis }`.** It clears a run PR in FLIGHT's lane at the front of the queue, hard-rule included, within the floor. The hub posts the basis on the PR, after `scanSecrets` and the notifier check. "Urgent" means FLIGHT moves the PR to the front.
+- **The hard-rule join.** On a `superuser` repo, hard-rule run PRs join the queue and wait `awaiting-flight` at the front, and `hard_rules_by` resolves to FLIGHT. This ticket brings that in, so nothing is stranded before `merge_pr` exists.
+- **`merge_pr { pr, urgent?, basis }`.** It clears a run PR in FLIGHT's lane at the front of the queue, hard-rule included, within the floor. Its clearance carries across a main merge when the PR's own diff is unchanged. The hub posts the basis on the PR, after `scanSecrets` and the notifier check. "Urgent" means FLIGHT moves the PR to the front.
 - **`settle_park { runId, action, basis }`.** The actions are:
   - `lift`: a stuck park whose head descends from the push;
   - `rereview`: a fresh RETRO review;
-  - `accept`: accepts a ruling or a review by FLIGHT's judgement;
+  - `accept`: accepts a ruling or a review by FLIGHT's judgement, through the existing waiver path (`mc/review` is set to "waived"). It is refused for a blocked RETRO review of floor-enforcing code, so RETRO stays the independent check on FLIGHT's own powers;
   - `rework`: sends the findings back to the seat.
 - **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, 4 an hour.
 
