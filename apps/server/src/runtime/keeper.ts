@@ -233,8 +233,11 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * wait of up to 2 s for that. Resolves whether they are all dead. Never throws. A pid is signalled
  * only when `ps` says it is this run's own process: the keeper's command names `keeper-cli` and the
  * folder, the CLI's names the spec's `cliSessionId`, and each started no later than its pid file
- * was written (a pid reused since is none of these). Any other pid is logged and left alone, as is
- * one `ps` cannot read. The CLI is signalled as its process group, so its children go with it.
+ * was written (a pid reused since is none of these). Any other pid is logged and left alone. A live
+ * pid that cannot be identified (`ps` cannot read it, or the spec has no `cliSessionId` to know
+ * the CLI by) is left alone too, and makes the result false: it may be the run's own process, so
+ * the caller must not treat the run as ended. The CLI is signalled as its process group, so its
+ * children go with it.
  */
 export async function endKeeper(
   dir: string,
@@ -257,9 +260,15 @@ export async function endKeeper(
     const id = cliSessionId();
     return id !== null && command.includes(id);
   };
-  /** The live pids that are this run's own, as `ps` says now. */
-  const targets = (quiet: boolean): Target[] => {
+  /**
+   * The live pids of the pid files, as `ps` says now: `found` are this run's own; `unknown` are
+   * ones that could not be identified (ps said nothing, or the CLI's session id is not in the
+   * spec), which might be this run's and are left alone. A pid ps read and that does not fit is
+   * neither: it belongs to someone else.
+   */
+  const targets = (quiet: boolean): { found: Target[]; unknown: Target[] } => {
     const found: Target[] = [];
+    const unknown: Target[] = [];
     for (const [name, role] of [
       [KEEPER_PID_FILE, "keeper"],
       [CLI_PID_FILE, "CLI"],
@@ -269,13 +278,18 @@ export async function endKeeper(
       const info = processInfo(stamp.pid);
       if (info !== null && info.startedAt <= stamp.mtimeMs && fits(role, info.command)) {
         found.push({ pid: stamp.pid, role });
-      } else if (!quiet) {
+        continue;
+      }
+      if (info === null || (role === "CLI" && cliSessionId() === null)) {
+        unknown.push({ pid: stamp.pid, role });
+      }
+      if (!quiet) {
         log(
           `${dir}: pid ${stamp.pid} in ${name} is not the run's ${role}, or ps could not say; not signalled`,
         );
       }
     }
-    return found;
+    return { found, unknown };
   };
   const signal = (list: Target[], sig: NodeJS.Signals) => {
     for (const { pid, role } of list) {
@@ -299,16 +313,18 @@ export async function endKeeper(
       await sleep(100);
     }
   };
-  const first = targets(false);
-  if (first.length === 0) return true;
+  const { found: first, unknown } = targets(false);
+  // a live pid that could not be identified may still be this run's CLI: not ended, so not "true"
+  const allEnded = unknown.length === 0;
+  if (first.length === 0) return allEnded;
   signal(first, "SIGTERM");
   await waitDead(first, waitMs);
   // checked again: a pid that went and was reused during the wait is not ours to kill
-  const left = targets(true).filter((t) => first.some((f) => f.pid === t.pid));
-  if (left.length === 0) return true;
+  const left = targets(true).found.filter((t) => first.some((f) => f.pid === t.pid));
+  if (left.length === 0) return allEnded;
   signal(left, "SIGKILL");
   await waitDead(left, 2000);
-  return !left.some((t) => pidAlive(t.pid));
+  return allEnded && !left.some((t) => pidAlive(t.pid));
 }
 
 type Json = Record<string, unknown>;

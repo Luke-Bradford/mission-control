@@ -514,6 +514,26 @@ describe("endKeeper", () => {
     }
   });
 
+  it("is false, and signals nothing, for a live pid it cannot identify (a spec with no cliSessionId)", async () => {
+    const folder = folderFor(`setInterval(() => {}, 1000);`);
+    // a keeper of before the session id was in the spec
+    const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+    delete spec.cliSessionId;
+    writeFileSync(join(folder, KEEPER_SPEC_FILE), JSON.stringify(spec));
+    const sleeper = spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      writeFileSync(join(folder, "cli.pid"), `${sleeper.pid}\n`);
+      const said: string[] = [];
+      expect(await endKeeper(folder, 200, (m) => said.push(m))).toBe(false);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(() => process.kill(sleeper.pid as number, 0)).not.toThrow();
+      expect(sleeper.exitCode).toBeNull();
+      expect(said).toHaveLength(1);
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+  });
+
   it("does not signal a process that started after its pid file was written", async () => {
     const folder = folderFor(`setInterval(() => {}, 1000);`);
     const k = keep(folder);
