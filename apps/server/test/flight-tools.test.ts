@@ -1397,6 +1397,31 @@ describe("flight_state", () => {
     store.addQuestion({ agentId: "guido-1", runId: "r-old", text: "Old?", at: NOW - 9 * 60_000 });
     store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#7" }));
     store.setRunLoop("r-pr", { ...NEW_LOOP, phase: "review", prNumber: 9 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR 9",
+          url: "u",
+          branch: "feature/7-x",
+          ticket: "mc#7",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: "abc",
+          mergeable: null,
+          author: null,
+          assignees: [],
+        },
+      ],
+      NOW,
+    );
     store.raiseNote({
       key: "ready:r-pr",
       kind: "ready",
@@ -1503,7 +1528,18 @@ describe("flight_state", () => {
           blockedBy: ["mc#8"],
         },
       ],
-      prs: [{ ref: "mc#7", pr: 9, seat: "guido-1", ready: true }],
+      prs: [
+        {
+          ref: "mc#7",
+          pr: 9,
+          seat: "guido-1",
+          ready: true,
+          state: "open",
+          headSha: "abc",
+          readAt: "13:00",
+          stale: false,
+        },
+      ],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
     });

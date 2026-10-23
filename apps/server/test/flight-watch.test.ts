@@ -12,6 +12,8 @@ import {
   type FlightSeatState,
   type FlightState,
   flightStartFailedText,
+  NEW_LOOP,
+  type PullRequestView,
   type Run,
   type SeatSessionRow,
   wakeSummary,
@@ -197,6 +199,73 @@ afterEach(() => {
   watch.stop();
   vi.useRealTimers();
   rmSync(dir, { recursive: true, force: true });
+});
+
+const stored = (number: number, over: Partial<PullRequestView> = {}): PullRequestView => ({
+  repoId: "mc",
+  number,
+  title: `PR ${number}`,
+  url: "u",
+  branch: `feature/${number}-x`,
+  ticket: `mc#${number}`,
+  state: "open",
+  isDraft: true,
+  review: null,
+  ci: null,
+  createdAt: T0,
+  updatedAt: T0,
+  mergedAt: null,
+  headSha: `sha${number}`,
+  mergeable: null,
+  author: null,
+  assignees: [],
+  ...over,
+});
+const listed = () => flightState({ config, store, busy: [], now: nowMs }).prs;
+
+describe("FLIGHT's PR list", () => {
+  it("keeps a PR listed, marked stale with its last good read, when a poll could not read it", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    expect(listed()).toEqual([
+      {
+        ref: "mc#7",
+        pr: 7,
+        seat: "",
+        ready: false,
+        state: "open",
+        headSha: "sha7",
+        readAt: "13:00",
+        stale: false,
+      },
+    ]);
+    store.markPullRequestsStale("mc");
+    expect(listed()).toMatchObject([{ pr: 7, state: "open", readAt: "13:00", stale: true }]);
+    store.upsertPullRequests("mc", [stored(7)], T0 + MIN);
+    expect(listed()[0]?.stale).toBe(false);
+  });
+
+  it("lists a merged PR once, then drops it", () => {
+    store.upsertPullRequests("mc", [stored(7), stored(8)], T0);
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
+    expect(listed().map((p) => [p.pr, p.state])).toEqual([
+      [7, "merged"],
+      [8, "open"],
+    ]);
+    expect(listed().map((p) => p.pr)).toEqual([8]);
+  });
+
+  it("still lists the PR of a parked run, with its seat", () => {
+    live("guido-1", "r-guido");
+    store.upsertRun(run("r-guido", "guido-1", { ticket: "mc#7" }));
+    store.setRunLoop("r-guido", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: "silent", reason: "x", ended: false },
+      prNumber: 7,
+    });
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    expect(listed()).toMatchObject([{ pr: 7, seat: "guido-1", state: "open" }]);
+  });
 });
 
 describe("the FLIGHT watcher", () => {
@@ -571,7 +640,16 @@ describe("wakeSummary", () => {
   });
   const park = { kind: "silent", reason: "x" };
   const q = { id: 1, seat: "guido-1", ticket: null, text: "t", ageMin: 0 };
-  const pr = { ref: "mc#1", pr: 1, seat: "guido-1", ready: false };
+  const pr = {
+    ref: "mc#1",
+    pr: 1,
+    seat: "guido-1",
+    ready: false,
+    state: "open" as const,
+    headSha: null,
+    readAt: "12:00",
+    stale: false,
+  };
   const state = (over: Partial<FlightState>): FlightState => ({
     time: "12:00",
     repo: "mc",
