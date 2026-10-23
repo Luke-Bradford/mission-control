@@ -35,7 +35,9 @@ import { openDockChat, openItem, useFlightUnread } from "../shell/overlays.ts";
 import { GUARD_DRAWER_ID } from "../telemetry/guardCopy.ts";
 import { type AnswerTarget, answerTarget, sendAnswer } from "./answer.ts";
 import { BriefOptions } from "./ItemBrief.tsx";
-import { isChannelItem } from "./unread.ts";
+
+/** Attention raised by the crew's messages (an @CAPCOM tag or an unread direct reply), cleared by Read. */
+const isChannelItem = (i: AttentionItem): boolean => i.kind === "tag" || i.kind === "message";
 
 /** Rows are cut here (catalogue 2.5.1). */
 export const NEED_TEXT_MAX = 170;
