@@ -898,7 +898,7 @@ describe("filters", () => {
 describe("lanes", () => {
   it("omits All mine without a GitHub login even when the hub operator is configured", async () => {
     localStorage.setItem("mc-lane", "@mine");
-    stub({ config: { ...CONFIG, githubLogin: null } as ConfigView, shopApp: [todo(1)] });
+    stub({ config: { ...CONFIG, githubLogin: null }, shopApp: [todo(1)] });
     await open();
     await screen.findByText("Ticket 1");
     expect(screen.queryByRole("button", { name: "All mine" })).toBeNull();
@@ -909,7 +909,7 @@ describe("lanes", () => {
 
   it("keeps All mine across crew sessions, including its unassigned and Done cards", async () => {
     stub({
-      config: { ...CONFIG, githubLogin: "pilot" } as ConfigView, // githubLogin: #395
+      config: { ...CONFIG, githubLogin: "pilot" },
       shopApp: [1, 2].map((n) => todo(n, { assignees: ["pilot"] })),
       engine: [
         todo(3, { repoId: "site-builder", assignees: ["PILOT"] }),
@@ -955,7 +955,7 @@ describe("lanes", () => {
 
   it("All mine uses the hub's GitHub login across repos, links its query and is remembered", async () => {
     stub({
-      config: { ...CONFIG, githubLogin: "pilot" } as ConfigView, // githubLogin: #395
+      config: { ...CONFIG, githubLogin: "pilot" },
       shopApp: [
         todo(1, { assignees: ["pilot"] }),
         todo(2, { assignees: ["someone-else"] }),

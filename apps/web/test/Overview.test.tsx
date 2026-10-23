@@ -1753,6 +1753,32 @@ describe("Activity panel", () => {
     expect(act_.querySelectorAll(".arow")).toHaveLength(4);
   });
 
+  it("renders the check, commit, lock and guard kinds, and an unknown kind falls back", async () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null, who: "shop-app-ta" };
+    const kinds = [
+      ["check", "✓", "k-check"],
+      ["commit", "●", "k-commit"],
+      ["lock", "⊟", "k-lock"],
+      ["guard", "⊘", "k-guard"],
+      ["mystery", "◆", "k-step"],
+    ] as const;
+    const activity = kinds.map(([kind], i) => ({
+      ...base,
+      at: NOW - i * MIN,
+      kind,
+      text: `${kind} event`,
+    })) as unknown as ActivityEvent[];
+    stub({ rows, activity });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText("check event");
+    for (const [kind, glyph, cls] of kinds) {
+      const row = within(act_).getByText(`${kind} event`).closest(".arow") as HTMLElement;
+      expect(row.className).toContain(cls);
+      expect(row.querySelector(".g")?.textContent).toBe(glyph);
+    }
+  });
+
   // A regression guard: these pass without the turn-line filter too, and fail only if it widens.
   it("Steps keeps parked, error and woken state rows", async () => {
     const texts = ["Running → Parked", "Running → Error: exit 1", "Error → Idle (run #3 woken)"];

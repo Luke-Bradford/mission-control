@@ -33,7 +33,10 @@ const SUB: Record<Filter, string> = {
 };
 const SHOWN = 120;
 
-const GLYPH: Record<ActivityRow["kind"], string> = {
+const FALLBACK_GLYPH = "◆";
+const FALLBACK_CLASS = "k-step";
+// Keyed by string, not ActivityKind: a kind the server sends before this map knows it falls back.
+const GLYPH: Record<string, string> = {
   "run-start": "→",
   "run-end": "◆",
   escalation: "◆",
@@ -44,9 +47,13 @@ const GLYPH: Record<ActivityRow["kind"], string> = {
   board: "▤",
   loop: "↻",
   push: "⇡",
+  check: "✓",
+  commit: "●",
+  lock: "⊟",
+  guard: "⊘",
   comms: "›",
 };
-const KIND_CLASS: Record<ActivityRow["kind"], string> = {
+const KIND_CLASS: Record<string, string> = {
   "run-start": "k-step",
   "run-end": "k-state",
   escalation: "k-state",
@@ -57,6 +64,10 @@ const KIND_CLASS: Record<ActivityRow["kind"], string> = {
   board: "k-step",
   loop: "k-step",
   push: "k-step",
+  check: "k-check",
+  commit: "k-commit",
+  lock: "k-lock",
+  guard: "k-guard",
   comms: "k-comms",
 };
 /** A state change into one of these is red (the text reads `{From} → {To}`). */
@@ -247,9 +258,9 @@ export function ActivityPanel() {
           const red = failed || e.kind === "collector" || intoRed || boardFailed;
           const split = splitRef(e.text, e.ref);
           return (
-            <div key={key} className={`arow ${KIND_CLASS[e.kind]}`}>
+            <div key={key} className={`arow ${KIND_CLASS[e.kind] ?? FALLBACK_CLASS}`}>
               <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
-              <span className={red ? "g crit-t" : "g"}>{GLYPH[e.kind]}</span>
+              <span className={red ? "g crit-t" : "g"}>{GLYPH[e.kind] ?? FALLBACK_GLYPH}</span>
               <span className="txt">
                 {agent ? (
                   <AgentTag id={agent.id} index={agent.index} sm />

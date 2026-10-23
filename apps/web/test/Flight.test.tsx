@@ -1053,7 +1053,7 @@ describe("FLIGHT's brief", () => {
     stubFetch({
       "/api/attention": [personItem],
       "/api/notifications": { open: [thread({ snippet })], handledToday: [] },
-      "/api/config": CONFIG,
+      "/api/config": { ...CONFIG, githubLogin: "octocat" },
     });
     render(<Flight />);
     const card = await screen.findByTestId("person-card");
