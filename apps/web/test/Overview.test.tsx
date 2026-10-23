@@ -5,6 +5,7 @@ import {
   type CommsEvent,
   type CrewLoop,
   type CrewRow,
+  DEFAULT_PROFILES,
   GITHUB_SLOWED_PREFIX,
   type GithubRateState,
   type HealthRow,
@@ -290,6 +291,24 @@ describe("Agents panel", () => {
     );
   const bar = (row: HTMLElement | undefined) =>
     [...(row?.querySelectorAll(".loopstep .stepbar i") ?? [])].map((i) => i.className);
+
+  it("the step bar follows the run's profile steps", async () => {
+    const loop: CrewLoop = {
+      ...loopOf("ci", "CI is running"),
+      profile: "feature",
+      step: "verify",
+      steps: DEFAULT_PROFILES.find((p) => p.name === "feature")?.steps,
+      planned: true,
+    };
+    stub({ rows: [crewRow({ loop })] });
+    const { container } = render(<Overview />);
+    await stepLabel("feature › verify");
+    const row = agentRows(container)[0];
+    expect(bar(row)).toEqual(["d", "", "d", "c", "", ""]);
+    expect(row?.querySelector(".stepbar")?.getAttribute("title")).toBe(
+      "plan → go/no-go → implement → verify → review → draft PR",
+    );
+  });
 
   it("the Loop step column shows the loop type, step and a step bar; a dash without a loop", async () => {
     const loop = loopOf("review", "In review · PR #9", 9);
