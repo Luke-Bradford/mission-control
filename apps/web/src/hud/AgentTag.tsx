@@ -14,13 +14,16 @@ export function agentColor(index: number | "flight"): string {
  * the call sign on a wide screen, `title` the tooltip that carries it on a phone. Both null while
  * the crew loads or for an observed loop.
  */
-export function useRoleLabel(id: string): { suffix: string | null; title: string | undefined } {
+export function useRoleLabel(
+  id: string,
+  bare = false,
+): { suffix: string | null; title: string | undefined } {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const phone = usePhone();
   const role = seatRoleTitle(id, crew?.rows, config?.crew?.roles);
   if (role === null) return { suffix: null, title: undefined };
-  return phone ? { suffix: null, title: role } : { suffix: role, title: undefined };
+  return phone || bare ? { suffix: null, title: role } : { suffix: role, title: undefined };
 }
 
 /** A coloured square, the agent's id and its role's title; `sm` is the small row variant. */
@@ -28,16 +31,19 @@ export function AgentTag({
   id,
   index,
   sm,
+  bare,
   domId,
 }: {
   id: string;
   index: number | "flight";
   sm?: boolean;
+  /** The call sign alone, with the role's title in the tooltip: for a column too narrow for both. */
+  bare?: boolean;
   /** The element's DOM id, for an `aria-labelledby` that names a control by the call sign alone. */
   domId?: string;
 }) {
   const style = { "--c": agentColor(index) } as CSSProperties;
-  const { suffix, title } = useRoleLabel(id);
+  const { suffix, title } = useRoleLabel(id, bare);
   return (
     <span className={`ag${sm ? " sm" : ""}`} style={style} title={title}>
       <i aria-hidden="true" />

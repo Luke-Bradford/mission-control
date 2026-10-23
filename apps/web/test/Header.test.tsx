@@ -1,6 +1,6 @@
 import type { AttentionItem, AwaySettings, Crew } from "@mc/core";
 import { DEFAULT_AWAY, LOCK_HEADER_TITLE, type TestLockState } from "@mc/core";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Header } from "../src/shell/Header.tsx";
@@ -10,7 +10,18 @@ import { Toast } from "../src/shell/Toast.tsx";
 import { THEME_KEY } from "../src/storage.ts";
 import { setTheme } from "../src/theme.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, crewRow, HOUR, item, itemWithoutOwner, MIN, NOW, REPOS } from "./fixtures.ts";
+import {
+  brief,
+  CONFIG,
+  crewRow,
+  HOUR,
+  item,
+  itemWithoutOwner,
+  MIN,
+  NOW,
+  REPOS,
+  seatRow,
+} from "./fixtures.ts";
 
 const crew = (over: Partial<Crew> = {}): Crew => ({
   rows: [crewRow()],
@@ -35,6 +46,7 @@ function routes(
     "/api/machine": over.machine ?? { latest: null },
     "/api/repos": REPOS,
     "/api/config": CONFIG,
+    "/api/flight": { seat: null, decisions: [] },
   });
 }
 
@@ -48,15 +60,65 @@ afterEach(() => {
 });
 
 describe("Header chat button", () => {
-  it("badges unread FLIGHT replies and names the count", () => {
+  it("badges the asks FLIGHT has put to you and names the count", async () => {
+    routes({
+      attention: [
+        item({ key: "esc:a#1", brief: brief() }),
+        item({ key: "esc:a#2", brief: brief() }),
+        item({ key: "esc:a#3" }),
+      ],
+    });
+    render(<Header page="board" />);
+    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 2 waiting on you" });
+    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
+  });
+
+  it("shows no badge for unread replies alone", async () => {
     routes();
     render(<Header page="board" />);
     act(() => setFlightUnread(2));
-    const btn = screen.getByRole("button", { name: "FLIGHT chat, 2 new" });
-    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
-    act(() => setFlightUnread(0));
-    const quiet = screen.getByRole("button", { name: "FLIGHT chat" });
+    const quiet = await screen.findByRole("button", { name: "FLIGHT chat" });
     expect(quiet.querySelector(".dock-unread")).toBeNull();
+    act(() => setFlightUnread(0));
+  });
+});
+
+describe("Header machine button", () => {
+  const lock = (waiting: number): TestLockState => ({
+    holder: { runId: "r-1", seatId: "guido-1", command: "pnpm test", since: NOW - MIN },
+    waiting: Array.from({ length: waiting }, (_, i) => ({
+      runId: `r-${i + 2}`,
+      seatId: "guido-2",
+      since: NOW - MIN,
+    })),
+  });
+
+  it("turns amber, with the stalled tooltip, when the holder is stalled and someone is queued", async () => {
+    routes({ lock: lock(1), crew: crew({ rows: [seatRow({ hudState: "stalled" })] }) });
+    render(<Header page="board" />);
+    await screen.findByText(/^Lock: guido-1/i);
+    const btn = screen.getByRole("button", { name: /^CPU/ });
+    await waitFor(() => expect(btn.classList.contains("hot")).toBe(true));
+    expect(within(btn).getByText(/^Lock:/).title).toBe("The run holding the lock is stalled");
+  });
+
+  it("stays plain with a running holder", async () => {
+    routes({ lock: lock(1), crew: crew({ rows: [seatRow({ hudState: "running" })] }) });
+    render(<Header page="board" />);
+    const btn = screen.getByRole("button", { name: /^CPU/ });
+    await screen.findByText(/^Lock: guido-1/i);
+    expect(btn.classList.contains("hot")).toBe(false);
+    expect(within(btn).getByText(/^Lock:/).title).toBe(LOCK_HEADER_TITLE);
+  });
+
+  it("a stalled holder with nobody queued gives the tooltip but no amber", async () => {
+    routes({ lock: lock(0), crew: crew({ rows: [seatRow({ hudState: "stalled" })] }) });
+    render(<Header page="board" />);
+    const btn = screen.getByRole("button", { name: /^CPU/ });
+    await waitFor(() =>
+      expect(within(btn).getByText(/^Lock:/).title).toBe("The run holding the lock is stalled"),
+    );
+    expect(btn.classList.contains("hot")).toBe(false);
   });
 });
 

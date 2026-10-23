@@ -148,7 +148,7 @@ export interface CardSeat {
   index: number;
 }
 
-export const NOT_QUEUED = "Unassigned · not queued";
+export const NOT_QUEUED = "Unassigned · FLIGHT will offer it to an agent";
 export const NO_PR_YET = "No PR yet";
 export const NO_REVIEWER = "No reviewer on it now";
 export const NO_LOOP_STEP = "no template step";

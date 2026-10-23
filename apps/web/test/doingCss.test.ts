@@ -306,4 +306,10 @@ describe("doing lines and run rows (hud.css)", () => {
   it("a panel-body list keeps the panel body's side padding", () => {
     expect(rule(String.raw`\.pb\.tlist`)).toMatch(/padding: \d+px 14px/);
   });
+
+  it("a seat chip on Setup wraps inside its panel and does not clip its state pill", () => {
+    const chip = rule(String.raw`\.crew button`);
+    expect(chip).toContain("flex-wrap: wrap");
+    expect(chip).toContain("max-width: 100%");
+  });
 });

@@ -4,12 +4,13 @@ import {
   COMMS_CAPCOM,
   COMMS_MC,
   type CrewRow,
-  FLIGHT_NOT_RUNNING,
+  type FlightView,
 } from "@mc/core";
 import { useLayoutEffect, useRef } from "react";
 import { useTz } from "../clock.ts";
 import { seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { flightOffText } from "../flight/flightTypes.ts";
 import { hhmm } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -23,6 +24,7 @@ export const FLIGHT_IN_DOCK = "FLIGHT's chat is in the dock.";
 /** Comms › Conversation (catalogue 2.5.3): the selected thread; FLIGHT's is a placeholder until phase 3. */
 export function Conversation({ row }: { row: CrewRow | null }) {
   const dock = useDock().visible;
+  const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
   const activity = useResource<ActivityRow[]>(RESOURCES.activity);
   const tz = useTz();
   const box = useRef<HTMLDivElement>(null);
@@ -41,7 +43,7 @@ export function Conversation({ row }: { row: CrewRow | null }) {
         title="FLIGHT"
         sub="decisions and questions come to you here, tagged @CAPCOM"
       >
-        <p className="pb note">{dock ? FLIGHT_IN_DOCK : FLIGHT_NOT_RUNNING}</p>
+        <p className="pb note">{dock ? FLIGHT_IN_DOCK : flightOffText(flightSeat)}</p>
       </Panel>
     );
   }

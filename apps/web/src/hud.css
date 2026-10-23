@@ -2254,7 +2254,7 @@ pre.diff .h {
   font-weight: 600;
 }
 .dock-unread {
-  background: var(--accent);
+  background: var(--warn-mark);
   color: var(--bg);
   border-radius: 9px;
   padding: 0 6px;
@@ -2557,8 +2557,10 @@ td.wrap {
 }
 .crew button {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
 }
 /* a seat's description text: its parts lay out as the button's own children */
 .crew .seatinfo {

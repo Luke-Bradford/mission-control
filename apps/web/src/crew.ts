@@ -460,6 +460,9 @@ export const LOOP_PHASE_LABEL: Record<LoopPhase, string> = {
 
 /** The build loop's name on screen: the 7a loop is one implicit loop per run, with no template file. */
 export const BUILD_LOOP_TEMPLATE = "build";
+
+/** What stands where a seat's loop would show, when it has none. */
+export const NO_LOOP = "No loop in flight.";
 /** The template on screen: the run's profile, else the build loop. */
 export const loopTemplate = (loop: CrewLoop): string => loop.profile ?? BUILD_LOOP_TEMPLATE;
 

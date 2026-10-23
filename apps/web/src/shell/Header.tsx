@@ -8,17 +8,19 @@ import {
   type RepoView,
   seatCallSign,
 } from "@mc/core";
-import { type ReactNode, useSyncExternalStore } from "react";
+import { type ReactNode, useMemo, useSyncExternalStore } from "react";
 import { operatorItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { waitingAsks } from "../flight/conversation.ts";
+import type { FlightView } from "../flight/flightTypes.ts";
 import { hms, MONTHS } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
-import { openAway, useDock, useFlightUnread } from "./overlays.ts";
+import { openAway, useDock } from "./overlays.ts";
 import { SESSION_ALL, useSession } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
@@ -139,11 +141,19 @@ function Met() {
   );
 }
 
+const LOCK_STALLED_TITLE = "The run holding the lock is stalled";
+
 const pct = (n: number | null): string => (n === null ? "—" : `${Math.round(n)}%`);
 
 function MachineButton() {
   const m = useResource<{ latest: MachineSample | null }>(RESOURCES.machine).data?.latest ?? null;
   const lock = useTestLock();
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const holderStalled =
+    lock?.holder != null &&
+    crew?.rows.find((r) => r.id === lock.holder?.seatId)?.hudState === "stalled";
+  // Blocked: the holder is stalled and someone is queued behind it.
+  const blocked = holderStalled && (lock?.waiting.length ?? 0) > 0;
   const lockText =
     lock === undefined
       ? "Lock: —"
@@ -158,7 +168,7 @@ function MachineButton() {
   return (
     <button
       type="button"
-      className="mach-btn"
+      className={`mach-btn${blocked ? " hot" : ""}`}
       title="Machine and test lock (on Overview)"
       onClick={() => {
         navigate(PAGE_PATHS.overview);
@@ -168,7 +178,7 @@ function MachineButton() {
     >
       <span className="num">{`CPU ${pct(m?.cpuPct ?? null)}`}</span>
       <span className="num">{`RAM ${pct(ram)}`}</span>
-      <span title={LOCK_HEADER_TITLE}>{lockText}</span>
+      <span title={holderStalled ? LOCK_STALLED_TITLE : LOCK_HEADER_TITLE}>{lockText}</span>
     </button>
   );
 }
@@ -285,16 +295,21 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
   );
 }
 
-/** FLIGHT's chat: toggles the dock; a badge counts replies not yet seen on its Chat tab. */
+/** FLIGHT's chat: toggles the dock; an amber badge counts the asks FLIGHT has put to you. */
 function DockButton() {
   const dock = useDock();
-  const unread = useFlightUnread();
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const decisions = useResource<FlightView>(RESOURCES.flight).data?.decisions;
+  const waiting = useMemo(
+    () => waitingAsks(attention ?? [], decisions ?? []).length,
+    [attention, decisions],
+  );
   return (
     <button
       type="button"
       className={`iconbtn${dock.visible ? " on" : ""}`}
       title="Show or hide FLIGHT's chat (f)"
-      aria-label={unread > 0 ? `FLIGHT chat, ${unread} new` : "FLIGHT chat"}
+      aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
       aria-pressed={dock.visible}
       onClick={dock.toggle}
     >
@@ -307,7 +322,7 @@ function DockButton() {
           strokeLinejoin="round"
         />
       </svg>
-      {unread > 0 && <span className="dock-unread">{unread}</span>}
+      {waiting > 0 && <span className="dock-unread">{waiting}</span>}
     </button>
   );
 }

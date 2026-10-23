@@ -58,7 +58,7 @@ import {
   waitsOnText,
   wrongAreaText,
 } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import { CliHold } from "../src/cli-update.ts";
@@ -106,6 +106,7 @@ import {
   Store,
 } from "../src/store.ts";
 import { crewRefusal } from "../src/update.ts";
+import { expectNoLeftovers } from "./leftovers.ts";
 
 /** prepareCheckout calls in flight at once, per clone (R22: they must queue). */
 const prep = vi.hoisted(() => ({
@@ -119,6 +120,8 @@ const prep = vi.hoisted(() => ({
   failWrite: false,
   /** Set: every existingCheckout (a resume's) waits for it. */
   resumeGate: null as Promise<void> | null,
+  /** Set: every attachSession (a restart's take-back) waits for it. */
+  attachGate: null as Promise<void> | null,
   /** The `peers` each prepare call was given, in order. */
   peers: [] as unknown[],
 }));
@@ -165,6 +168,10 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/session.ts")>();
   return {
     ...real,
+    attachSession: async (...a: Parameters<typeof real.attachSession>) => {
+      if (prep.attachGate) await prep.attachGate;
+      return real.attachSession(...a);
+    },
     startSession: (...a: Parameters<typeof real.startSession>) => {
       const session = real.startSession(...a);
       return new Proxy(session, {
@@ -183,7 +190,7 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
 });
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
-const OLD_KEEPER = fileURLToPath(new URL("./fixtures/old-keeper.mjs", import.meta.url));
+const OLD_KEEPER = fileURLToPath(new URL("./fixtures/old-keeper-cli.mjs", import.meta.url));
 const HUB_ROLES = fileURLToPath(new URL("../../../roles", import.meta.url));
 const HUB_ROOT = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 /** The port seats are told the hub is on: nothing listens on 1, so a hook run here gets no verdict. */
@@ -312,6 +319,7 @@ function make(
     rules?: SupervisorDeps["rules"];
     login?: string | null;
     profiles?: SupervisorDeps["profiles"];
+    controlTimeoutMs?: number;
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
@@ -359,7 +367,7 @@ function make(
     cliVersion: over.cliVersion ?? (async () => null),
     enabled: over.enabled ?? true,
     stopGraceMs: 300,
-    controlTimeoutMs: 500,
+    controlTimeoutMs: over.controlTimeoutMs ?? 500,
     log,
     tokens,
     lock,
@@ -402,12 +410,26 @@ async function refusal(p: Promise<unknown> | (() => unknown)): Promise<Superviso
   throw new Error("expected a SupervisorError");
 }
 
+/** One tmp root for every folder this file makes: `afterAll` looks for processes that name it. */
+let tmpRoot: string;
+beforeAll(() => {
+  tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), "mc-sv-")));
+});
+afterAll(async () => {
+  try {
+    await expectNoLeftovers(tmpRoot);
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 beforeEach(() => {
   prep.failRemove = false;
   prep.resumeGate = null;
+  prep.attachGate = null;
   prep.failWrite = false;
   prep.peers = [];
-  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-supervisor-")));
+  dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");
   clone = join(dir, "clone");
@@ -3021,6 +3043,129 @@ describe("a seat keeps running through a restart", () => {
     expect(existsSync(keeperDir)).toBe(false);
     expect(store.keeperCursor(runId)).toBeNull();
   });
+
+  it("failResume ends the keeper and revokes the token", async () => {
+    const tokens = new RunTokens();
+    const first = make({ tokens });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    const keeperDir = crewKeeperDir(dbPath, runId);
+    const keeperPid = readPidFile(keeperDir, KEEPER_PID_FILE) as number;
+    const cliPid = readPidFile(keeperDir, CLI_PID_FILE) as number;
+    const token = readFileSync(crewTokenPath(dbPath, runId), "utf8").trim();
+    expect(tokens.resolve(token)).not.toBeNull();
+    // the next hub's take-back throws once: the run is failed as a run that cannot be resumed
+    const cursor = vi.spyOn(store, "keeperCursor").mockImplementationOnce(() => {
+      throw new Error("db is locked");
+    });
+    const { sup } = make({ tokens });
+    sup.start();
+    await until(() =>
+      expect(store.seatSession("guido-1")).toMatchObject({
+        state: "error",
+        reason: "could not resume the session",
+      }),
+    );
+    cursor.mockRestore();
+    await until(() => expect(existsSync(keeperDir)).toBe(false));
+    expect(pidAlive(keeperPid)).toBe(false);
+    expect(pidAlive(cliPid)).toBe(false);
+    expect(tokens.resolve(token)).toBeNull();
+    expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
+    expect(existsSync(crewMcpPath(dbPath, runId))).toBe(false);
+  });
+
+  it("the moved path drops the grant and ends the keeper", async () => {
+    const tokens = new RunTokens();
+    const first = make({ tokens });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    const keeperDir = crewKeeperDir(dbPath, runId);
+    const token = readFileSync(crewTokenPath(dbPath, runId), "utf8").trim();
+    process.kill(readPidFile(keeperDir, CLI_PID_FILE) as number, "SIGTERM");
+    await until(() => expect(existsSync(join(keeperDir, KEEPER_EXIT_FILE))).toBe(true));
+    // the next hub's attach is held while the operator ends the run, which has no process to end
+    let open: () => void = () => {};
+    prep.attachGate = new Promise<void>((r) => {
+      open = r;
+    });
+    const { sup } = make({ tokens });
+    sup.start();
+    await sup.endRun("guido-1");
+    expect(tokens.resolve(token)).not.toBeNull(); // nothing of the run's has been dropped yet
+    open();
+    await until(() => expect(existsSync(keeperDir)).toBe(false));
+    expect(tokens.resolve(token)).toBeNull();
+    expect(existsSync(crewTokenPath(dbPath, runId))).toBe(false);
+    expect(existsSync(crewMcpPath(dbPath, runId))).toBe(false);
+    expect(store.run(runId)).toMatchObject({ endedBy: "operator" });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+  });
+
+  it("the start's sweep ends a keeper whose run is not active", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    const keeperDir = crewKeeperDir(dbPath, runId);
+    const keeperPid = readPidFile(keeperDir, KEEPER_PID_FILE) as number;
+    const cliPid = readPidFile(keeperDir, CLI_PID_FILE) as number;
+    expect(pidAlive(keeperPid)).toBe(true);
+    // the seat has no run any more, though its keeper runs on: an orphan
+    const row = store.seatSession("guido-1");
+    if (row) store.setSeatSession({ ...row, runId: null, state: "idle", reason: null });
+    const { sup } = make();
+    sup.start();
+    await until(() => expect(existsSync(keeperDir)).toBe(false));
+    expect(pidAlive(keeperPid)).toBe(false);
+    expect(pidAlive(cliPid)).toBe(false);
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+    await sup.stopAll();
+  });
+
+  it("a replayed result does not free a later turn's test-lock hold", async () => {
+    const lock = new TestLock();
+    const first = make({ lock });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await first.sup.stopAll();
+    // as if the hub had died before it stored the lines: all of them, the first turn's result among
+    // them, are replayed to the next hub while the SLOW turn is still open
+    const cursor = store.keeperCursor(runId);
+    if (cursor) store.setKeeperCursor({ ...cursor, line: 0 });
+    await lock.acquire({ runId, toolUseId: "toolu_held" }, "guido-1", "pnpm -s test", 1000, live());
+    const { sup } = make({ lock });
+    sup.start();
+    await until(() => expect(store.keeperCursor(runId)?.line).toBeGreaterThan(0)); // the replay is in
+    expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: true });
+    expect(lock.state().holder?.runId).toBe(runId);
+    // the turn's own result, live, frees it
+    await until(() => expect(lock.state().holder).toBeNull());
+  });
+
+  it("stopAll sends a Stop's close that is still waiting on its interrupt", async () => {
+    const first = make({ controlTimeoutMs: 20_000 });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const cliPid = readPidFile(crewKeeperDir(dbPath, runId), CLI_PID_FILE) as number;
+    await first.sup.message("guido-1", "NOCONTROL SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    // the interrupt gets no answer, so the Stop's close would wait the whole control timeout
+    const ending = first.sup.endRun("guido-1");
+    await first.sup.stopAll();
+    expect(pidAlive(cliPid)).toBe(false);
+    await ending;
+    expect(store.run(runId)).toMatchObject({ endedBy: "operator" });
+  });
 });
 
 describe("the mc tools and the guard (phase 2b)", () => {
@@ -3208,7 +3353,9 @@ describe("the mc tools and the guard (phase 2b)", () => {
     expect(lock.state().holder?.runId).toBe(runId);
     expect(seatState("guido-1")).toBe("running");
     lock.release({ runId, toolUseId: "toolu_p" });
-    expect(lock.state().holder).toBeNull();
+    // the lock is free once toolu_g's hold is gone too: the transcript line is written by the keeper
+    // before the hub has read it, so that release may be a moment behind
+    await until(() => expect(lock.state().holder).toBeNull());
     // a hold no tool_result ends (an interrupt, a refusal) is freed at the turn's end
     await lock.acquire({ runId, toolUseId: "toolu_q" }, "guido-1", "pnpm -s test", 1000, live());
     await cue(sup);

@@ -135,15 +135,7 @@ import {
   removeCheckout,
   writeReviewInputs,
 } from "./checkouts.ts";
-import {
-  CLI_PID_FILE,
-  endKeeper,
-  KEEPER_ENTRY,
-  KEEPER_PID_FILE,
-  type KeeperHello,
-  pidAlive,
-  readPidFile,
-} from "./keeper.ts";
+import { endKeeper, KEEPER_ENTRY, type KeeperHello, keeperAlive, pidAlive } from "./keeper.ts";
 import { attachSession, type CrewSession, type SessionEvent, startSession } from "./session.ts";
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
@@ -167,6 +159,8 @@ const SHUTTING_DOWN = "the server is shutting down";
 const CANNOT_START = "could not start the CLI";
 const RESUMED = "resumed after a restart; send a message to continue";
 const RESUME_FAILED = "could not resume the session";
+/** How long `stopAll` waits for a Stop's `close` line to reach its keeper's socket. */
+const CLOSE_SENT_WAIT_MS = 1000;
 const RESUME_MODE_CHANGED = "could not resume: the seat's mode changed";
 /**
  * A resumed process that exits this soon after its spawn failed to resume. The real CLI prints
@@ -504,6 +498,10 @@ interface Live {
   spawn: string;
   /** Attached to a keeper that is still replaying the lines the hub missed: no line goes out yet. */
   attaching: boolean;
+  /** At an attach: the keeper's line count, below which the lines are a replay of what the last hub missed. */
+  replayedBelow: number;
+  /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
+  awaitingAtAttach: boolean;
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -736,8 +734,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         deps.lock.release({ runId: l.run.id, toolUseId: e.toolUseId });
         break;
       case "result": {
-        // no call is in flight once the turn has ended: whatever the run held is freed
-        deps.lock.releaseRun(l.run.id);
+        // No call is in flight once the turn has ended: whatever the run held is freed. Not for a
+        // result replayed at an attach while a later turn is open: its hold is that turn's.
+        if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
+          deps.lock.releaseRun(l.run.id);
+        }
         const interrupted = l.interrupted;
         l.inTurn = false;
         l.interrupted = false;
@@ -880,14 +881,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       );
       const dir = crewDir(deps.dbPath);
       for (const name of readdirSync(dir)) {
-        // a keeper's folder of a run that is no longer active, once its keeper and CLI are gone
+        // a keeper's folder of a run that is no longer active: its keeper and CLI are ended, then it goes
         if (CREW_KEEPER_DIR.test(name)) {
           const folder = join(dir, name);
-          const alive = [KEEPER_PID_FILE, CLI_PID_FILE].some((f) => {
-            const pid = readPidFile(folder, f);
-            return pid !== null && pidAlive(pid);
+          if (keeping.has(name)) continue;
+          if (!keeperAlive(folder)) {
+            rmSync(folder, { recursive: true, force: true });
+            continue;
+          }
+          void endKeeper(folder, keeperEndWait(), log).then((ended) => {
+            if (ended) rmSync(folder, { recursive: true, force: true });
+            else log(`could not end the orphan keeper in ${folder}; its folder is kept`);
           });
-          if (!keeping.has(name) && !alive) rmSync(folder, { recursive: true, force: true });
           continue;
         }
         // a PR body file left by a hub that died during `gh pr create`: no draft_pr runs before
@@ -1014,6 +1019,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         entry: join(deps.hubRoot, KEEPER_ENTRY),
         dir: crewKeeperDir(deps.dbPath, run.id),
         spawn: keeperSpawn,
+        cliSessionId,
+        log,
         controlTimeoutMs: deps.controlTimeoutMs,
         stopGraceMs: deps.stopGraceMs,
       });
@@ -1070,6 +1077,28 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /** How long `endKeeper` waits for a keeper and CLI to take the SIGTERM: their stop grace twice, and a margin. */
+  const keeperEndWait = () => 2 * (deps.stopGraceMs ?? STOP_GRACE_MS) + 5000;
+
+  /**
+   * Ends a run's keeper and CLI, then removes the folder and the cursor. A folder whose keeper is
+   * not alive goes at once; one whose processes will not end is kept (and said), so the next start
+   * finds it. Never throws.
+   */
+  async function endAndRemoveKeeper(seatId: string, runId: string): Promise<void> {
+    const dir = crewKeeperDir(deps.dbPath, runId);
+    try {
+      if (keeperAlive(dir) && !(await endKeeper(dir, keeperEndWait(), log))) {
+        log(`${seatId}: could not end the keeper of ${runId}; its folder is kept`);
+        return;
+      }
+    } catch (e) {
+      log(`${seatId}: could not end the keeper of ${runId}: ${errText(e)}`);
+      return;
+    }
+    removeKeeper(seatId, runId);
+  }
+
   /** Registers a seat's process: its exit releases the grant, and its events reach `onEvent`. */
   function track(
     info: SeatInfo,
@@ -1102,6 +1131,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       off: () => {},
       lastStderr: null,
       attaching: false,
+      replayedBelow: 0,
+      awaitingAtAttach: false,
       ...init,
     };
     live.set(info.seat.id, l);
@@ -1119,7 +1150,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.setRunEnded(run.id, at, "failed", "exit");
     }
     setSeat(row.seatId, { state: "error", reason });
-    if (row.runId !== null) removeKeeper(row.seatId, row.runId);
+    if (row.runId !== null) {
+      // the run's token goes with it, and so does its keeper: nothing is left running for a failed run
+      dropGrant(row.seatId, row.runId);
+      void endAndRemoveKeeper(row.seatId, row.runId);
+    }
     const info = findSeat(row.seatId);
     if (info) closeRunItems(info);
     if (open) emit({ kind: "run-ended", seatId: row.seatId, runId: run.id, endedBy: "exit" });
@@ -1304,16 +1339,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       from: (h) => (cursor?.spawn === h.spawn ? cursor.line : 0),
       controlTimeoutMs: deps.controlTimeoutMs,
       stopGraceMs: deps.stopGraceMs,
+      log,
     });
     // The attach awaited: the operator or the engine may have ended the run meanwhile. Whoever did
     // recorded the end and set the seat; nothing here may overwrite it.
     const moved = () => store.seatSession(row.seatId)?.runId !== runId;
     if (moved()) {
-      if (found.kind === "attached") {
-        dropGrant(row.seatId, runId);
-        await found.session.close();
-        removeKeeper(row.seatId, runId);
-      }
+      // whoever ended the run found no process to end, so the run's token and holds are still here
+      dropGrant(row.seatId, runId);
+      if (found.kind === "attached") await found.session.close();
+      await endAndRemoveKeeper(row.seatId, runId);
       return;
     }
     if (found.kind === "attached") {
@@ -1348,7 +1383,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return;
     }
     // Two CLIs must never run one session: the old keeper and its CLI are gone before the resume.
-    const ended = await endKeeper(dir, 2 * (deps.stopGraceMs ?? STOP_GRACE_MS) + 5000);
+    const ended = await endKeeper(dir, keeperEndWait(), log);
     if (moved()) return;
     if (!ended) {
       log(`${row.seatId}: could not end the old keeper`);
@@ -1397,6 +1432,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     track(info, run, session, grant(info, run), {
       spawn: hello.spawn,
       attaching: true,
+      replayedBelow: hello.lines,
+      awaitingAtAttach: hello.awaiting,
       inTurn: hello.awaiting,
       parkedTurn: hello.awaiting && row.state === "parked",
       rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,
@@ -2394,9 +2431,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // it has acted on stored, and keeps their tokens, files and holds for the next hub.
       // A seat whose Stop or engine end is under way finishes it first, so `onExit` records the end
       // as it always did: a detach would cut its close off. The wait is bounded.
-      const ending = [...live.values()].flatMap((l) =>
-        l.ending === null ? [] : [l.ending.catch(() => {})],
-      );
+      const endingSeats = [...live.values()].filter((l) => l.ending !== null);
+      // The close goes first, not after the interrupt the Stop waits on (up to the control timeout):
+      // a hub that exits before that must not leave the seat running.
+      for (const l of endingSeats) void l.session.close();
+      const ending = endingSeats.map((l) => (l.ending as Promise<void>).catch(() => {}));
       if (ending.length > 0) {
         let t: NodeJS.Timeout | undefined;
         await Promise.race([
@@ -2406,6 +2445,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           }),
         ]);
         clearTimeout(t);
+        // whatever the race left: the close is on the socket before the hub's exit
+        let c: NodeJS.Timeout | undefined;
+        await Promise.race([
+          Promise.all(endingSeats.map((l) => l.session.closeSent)),
+          new Promise<void>((r) => {
+            c = setTimeout(r, CLOSE_SENT_WAIT_MS);
+          }),
+        ]);
+        clearTimeout(c);
       }
       for (const l of [...live.values()]) {
         if (l.ending !== null) continue; // still ending: its socket stays, so the close goes through

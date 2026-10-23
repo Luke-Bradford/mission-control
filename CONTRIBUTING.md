@@ -65,7 +65,8 @@ open links. A Ready ticket therefore carries everything needed to build it.
 1. Branch from `main`: `feature/<issue>-short-name`, `fix/<issue>-short-name`, `docs/<name>` or
    `chore/<name>`.
 2. Before you open the PR, run `pnpm -s lint && pnpm -s typecheck && pnpm -s test && pnpm -s build`.
-   CI runs lint, typecheck and test, but not build.
+   CI runs lint, typecheck and test, but not build. Crew developer seats run only the test files for
+   their change and leave the full suite to CI (`roles/GUIDO.md`, `roles/INCO.md`).
 3. Open a PR with `Closes #<issue>`. The description says what changed and why, and it carries a
    security note whenever the change touches auth, the seats' tool grants or anything that writes to
    GitHub.

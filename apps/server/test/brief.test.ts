@@ -304,9 +304,9 @@ describe("rolePrompt", () => {
     }
   });
 
-  it("tells the seat what ECONNREFUSED means and what to do about it", () => {
+  it("tells the seat what ECONNREFUSED and ECONNRESET mean and what to do about them", () => {
     expect(MC_RESTART_TEXT).toBe(
-      "If an mc tool fails with ECONNREFUSED, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.",
+      "If an mc tool fails with ECONNREFUSED or ECONNRESET, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.",
     );
   });
 });

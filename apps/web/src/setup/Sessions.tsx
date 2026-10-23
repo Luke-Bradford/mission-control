@@ -436,13 +436,21 @@ function CrewSession({
                     (p) => p.sessionId === session.id && p.seatId === s.id,
                   )?.reason;
                   const input = s.input;
+                  const state = crew?.rows.find((c) => c.id === s.id)?.hudState;
                   return (
                     <tr key={s.id}>
                       <td>{s.id}</td>
                       <td>{s.role}</td>
                       <td>{s.model}</td>
                       <td>{areaCell(s)}</td>
-                      <td>{status ?? NO_STATUS}</td>
+                      <td>
+                        {status ??
+                          (state === undefined ? (
+                            NO_STATUS
+                          ) : (
+                            <Pill tone={HUD_STATE_TONE[state]}>{HUD_STATE_LABEL[state]}</Pill>
+                          ))}
+                      </td>
                       <td>
                         {input === null ? null : removing === s.id ? (
                           <>
@@ -588,7 +596,7 @@ export function Sessions({ config }: { config: ConfigView }) {
           {refusedText(failure.text)}
         </p>
       )}
-      <div>
+      <div className="wide">
         <button type="button" disabled={busy} onClick={() => void reload()}>
           Reload config.yaml
         </button>
