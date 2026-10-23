@@ -2231,6 +2231,30 @@ describe("the engine runs reviews", () => {
         });
       });
 
+      it("a carried blocking review sends its findings in the fix line", async () => {
+        h.busyList = [{ seatId: RETRO, state: "running" }];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", mergeable: "CONFLICTING" });
+        behindMain();
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
+        await vi.waitFor(async () => {
+          await h.engine.reconcileRun(RUN);
+          expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+        });
+        h.gate = { ...need(h.gate), containsMain: true };
+        setPr({ ci: "passing", headSha: SHA_B });
+        h.busyList = [];
+        await h.engine.tick();
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
+        expect(h.steps).not.toContain("merge");
+        await vi.waitFor(() =>
+          expect(h.sent.some((s) => s.text.includes("a Important thing"))).toBe(true),
+        );
+      });
+
       it("a conflict is left for the seat, and the line goes once", async () => {
         behindMain();
         h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
