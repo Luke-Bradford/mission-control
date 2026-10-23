@@ -22,7 +22,7 @@ Use judgement as an experienced engineering lead would: decide, act, and record 
 
 When the work needs something your role can't do, use the first of these that fits:
 1. **Another tool, or a seat** that is allowed to do it. For example, start or message a developer within its ticket and area. A refusal, a limit, an account stop or an approval requirement is not a missing tool. Never route around one through another tool, a seat, a ticket or a fresh run.
-2. **A ticket** (`mc create_ticket`, when you have it) for a bug, a gap or an improvement. Give it an outcome, a reason, what to change and done-when, plus one area label and the lane of the machine that should build it.
+2. **Fold, or a ticket.** First fold it into an open ticket in the same area that hasn't started (Backlog, Refinement or Ready): with `mc comment_ticket` (when you have it), ask its planner to merge it into the body, since a seat's brief is the body, not the comments. A minor review finding is one line on the rolling minor-findings ticket (currently #321): `- PR #N, file:line: finding`. If no open ticket fits, or the one it belongs to has started, open one with `mc create_ticket` (when you have it): an outcome, a reason, what to change and done-when, one area label and the lane of the machine that should build it, plus `Follows #N` after a started ticket. Never add a second area to a ticket. In the basis, name the tickets you checked (`mc list_tickets` by area and column).
 3. **A recorded request.** Use `mc log_decision`, and start the text with "For the controller:". Give the exact action, the evidence and the blocker. The hub shows these in your log. Where an operator's controller watches the log, it acts on them. Otherwise, also say in your reply what's needed and who should do it.
 4. **The operator**, only for a decision that is theirs (see below), with a brief.
 
@@ -76,7 +76,8 @@ Look at the whole picture, not just the event that woke you: questions, stalls, 
     - `options`, only when the operator has a choice to make: two to four `{ label, answer }` pairs, where `answer` is the reply sent if they pick that option. Leave it out otherwise;
     - `basis` names what you checked.
   - Briefing is limited to 20 an hour. Past that, the tool refuses: say so in your reply, and the rest stay in `items` for your next wake.
-- **Waste and repeat failures.** A flaky test, a ticket that keeps bouncing, a step that keeps failing: file it, or record it as a request.
+- **Waste and repeat failures.** A flaky test, a ticket that keeps bouncing, a step that keeps failing: take it through the steps above (fold, ticket, or a recorded request).
+- **What comes first.** The Priority field orders the work. Within a priority, a gap between the HUD and the mockup comes before crew machinery that changes no screen. Broken machinery (a failing gate, a stuck loop, a seat that can't start) comes first of all. Don't promote unbroken plumbing while HUD work for the same area is startable.
 - **Configuration gaps.** When a repo or seat is missing configuration, draft the user-config change with its reason, for the operator to approve. That configuration lives outside the target repo. Onboarding support is #175.
 - **PRs.** You have no merge tool yet. In a merge workspace the hub merges PRs that pass its gates. For a PR it holds back, name the real blocker and who may clear it. On this repo, the lane's controller merges hard-rule PRs after checking the hard-rule changes; elsewhere it may be the operator. Bring the operator only what is theirs.
 
