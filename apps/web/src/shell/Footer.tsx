@@ -1,10 +1,6 @@
 import { useBuildStatus } from "./overlays.ts";
 
-/**
- * Build-status toggle and legend, then the key hints (catalogue §1.2; `s Setup` added, §7.6).
- * Decision: `/` reads "Agent page" where the mockup says "message agent", until the engine can
- * message an agent; the key itself is unchanged.
- */
+/** Build-status toggle and legend, then the key hints (catalogue §1.2; `s Setup` added, §7.6). */
 export function Footer() {
   const [on, setOn] = useBuildStatus();
   return (
@@ -37,7 +33,7 @@ export function Footer() {
         <kbd>k</kbd> next agent
       </span>
       <span>
-        <kbd>/</kbd> Agent page
+        <kbd>/</kbd> message agent
       </span>
       <span>
         <kbd>i</kbd> interrupt

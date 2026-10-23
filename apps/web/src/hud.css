@@ -1569,6 +1569,10 @@ main > section {
   position: relative;
   z-index: 1;
 }
+.kcard .overlay a {
+  position: relative;
+  z-index: 1;
+}
 .kcard:hover {
   border-color: var(--line-2);
 }
@@ -2548,6 +2552,9 @@ td.wrap {
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: var(--r-s);
+}
+.tiles .tile.stray {
+  border-color: var(--crit);
 }
 .tiles .tile-vis {
   display: inline-flex;

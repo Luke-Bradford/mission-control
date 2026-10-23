@@ -137,6 +137,35 @@ describe("Setup tabs", () => {
     expect(window.location.pathname).toBe("/setup/roles");
   });
 
+  it("Sessions marks stray folder tiles with file and time for this session", async () => {
+    load({
+      "/api/config": SESSIONS_CFG,
+      "/api/crew/sessions": sessionsOf([
+        { name: "docs", owners: [] },
+        { name: "apps", owners: [] },
+      ]),
+      "/api/attention": [
+        {
+          kind: "stray",
+          key: "stray:a",
+          text: "docs/guide.md changed in s/s1 outside every agent's area",
+          at: NOW,
+        },
+        {
+          kind: "stray",
+          key: "stray:b",
+          text: "apps/other.ts changed in s/s2 outside every agent's area",
+          at: NOW,
+        },
+      ],
+    });
+    at("sessions");
+    const p = await screen.findByRole("region", { name: "s/s1" });
+    const stray = await within(p).findByText("Stray change");
+    expect(stray.closest("li")?.textContent).toContain("docs/guide.md · 13:00");
+    expect(p.textContent).not.toContain("apps/other.ts");
+  });
+
   it("Sessions: a panel per repo with the crew and the branch, filtered by session", async () => {
     load();
     at("sessions");
