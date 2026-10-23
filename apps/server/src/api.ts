@@ -1710,6 +1710,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return crewFail(e, reply);
         }
       });
+      // The operator resumes a parked, looped run, for one whose seat no longer holds it (set aside at
+      // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
+      // review or review-ruling park waives that head's findings, as the message does. The answer
+      // waits for the engine's pass, so "ok" means the park was lifted.
+      // Reader: docs/runbook.md#resume-a-parked-run (by hand; a HUD Resume action is a follow-up web ticket)
+      api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        if (!run.loop) return reply.code(404).send({ error: "not a looped run" });
+        if (!crewGate(run.agentId, reply)) return reply;
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (deps.engine?.status().on !== true) {
+          return reply.code(409).send({ error: "the loop engine is off" });
+        }
+        if (!(await deps.engine.onOperatorMessage(run.id))) {
+          return reply.code(409).send({
+            error: "nothing to resume: the run is not parked, or its park is not lifted this way",
+          });
+        }
+        return { ok: true };
+      });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view; it reads this once Plan 7a Task 8 lands)
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {

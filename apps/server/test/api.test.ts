@@ -484,6 +484,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/interrupt"],
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
+  ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/example/discussion"],
@@ -4175,6 +4176,72 @@ describe("the first loop's engine", () => {
     expect((await message(none.a)).statusCode).toBe(200);
     expect(none.told).toEqual([]);
     await none.a.close();
+  });
+
+  it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const { a, told } = engineApp(null);
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(told).toEqual(["aside"]);
+    expect(r.statusCode).toBe(409);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
+        .statusCode,
+    ).toBe(404);
+    await a.close();
+  });
+
+  it.each([
+    ["a body", { x: 1 }, true, "aside", 400],
+    ["no engine", {}, false, "aside", 409],
+    ["an unlooped run", {}, true, "plain-run", 404],
+  ] as const)("refuses %s", async (_what, payload, withEngine, id, code) => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    store.upsertRun(run({ id: "plain-run", agentId: "guido-1" }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      ...(withEngine
+        ? {
+            engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+          }
+        : {}),
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: `/api/runs/${id}/resume`,
+      headers: json,
+      payload,
+    });
+    expect(r.statusCode).toBe(code);
+    await a.close();
+  });
+
+  it("answers ok when the engine lifts the park", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ok: true });
+    await a.close();
   });
 
   it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {
