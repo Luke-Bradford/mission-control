@@ -65,6 +65,7 @@ const pr = (
   mergeable: "MERGEABLE",
   polledAt: NOW,
   isDraft: true,
+  reviewStatus: "passing",
   ...over,
 });
 

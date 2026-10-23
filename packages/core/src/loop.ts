@@ -14,6 +14,7 @@ import {
   nextAttempt,
   REVIEW_ATTEMPTS,
   REVIEW_ROUNDS,
+  REVIEW_STATUS_CONTEXT,
   readyHardRuleText,
   readyNoteKey,
   readyRuledText,
@@ -25,7 +26,51 @@ import {
   reviewRulingParkText,
 } from "./review.ts";
 import type { SeatState } from "./runtime.ts";
-import type { MergeStep, RunLoop } from "./types.ts";
+import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
+
+/** What a PR head's checks say about CI, with the names behind it. */
+export interface CiVerdict {
+  ci: PullRequestView["ci"];
+  failing: string[];
+  pending: string[];
+  missing: string[];
+}
+
+const CHECK_RANK: Record<PrCheck["state"], number> = { passing: 0, pending: 1, failing: 2 };
+
+function worstStates(checks: readonly PrCheck[]): Map<string, PrCheck["state"]> {
+  const worst = new Map<string, PrCheck["state"]>();
+  for (const c of checks) {
+    const seen = worst.get(c.name);
+    if (seen === undefined || CHECK_RANK[c.state] > CHECK_RANK[seen]) worst.set(c.name, c.state);
+  }
+  return worst;
+}
+
+/** The worst state of the checks with this name; null when there are none. */
+export function checkState(checks: readonly PrCheck[], name: string): PrCheck["state"] | null {
+  return worstStates(checks).get(name) ?? null;
+}
+
+/**
+ * The CI verdict of a head's checks. `mc/review` is left out. With `required` set only those names
+ * decide, and one not reported is missing; else every name does.
+ */
+export function ciVerdict(checks: readonly PrCheck[], required: readonly string[]): CiVerdict {
+  const worst = worstStates(checks.filter((c) => c.name !== REVIEW_STATUS_CONTEXT));
+  if (worst.size === 0) return { ci: null, failing: [], pending: [], missing: [] };
+  const judged = required.length > 0 ? [...new Set(required)] : [...worst.keys()];
+  const failing = judged.filter((n) => worst.get(n) === "failing");
+  const pending = judged.filter((n) => worst.get(n) === "pending");
+  const missing = judged.filter((n) => !worst.has(n));
+  const ci =
+    failing.length > 0
+      ? "failing"
+      : pending.length > 0 || missing.length > 0
+        ? "pending"
+        : "passing";
+  return { ci, failing, pending, missing };
+}
 
 /** The run has no loop state: Mission Control is not driving it. */
 export const EVIDENCE_NO_LOOP =
@@ -277,6 +322,10 @@ export interface LoopSnapshot {
     mergeable: string | null;
     polledAt: number;
     isDraft?: boolean;
+    /** The names behind `ci`; absent or empty: the texts say none. */
+    checks?: { failing: string[]; pending: string[]; missing: string[] };
+    /** The state of `mc/review` on GitHub; null when not reported. Absent: not reported. */
+    reviewStatus?: PrCheck["state"] | null;
   } | null;
   /** The repo is a `merge` workspace: the engine merges a PR that passes the gate. Absent: false. */
   autoMerge?: boolean;
@@ -412,6 +461,7 @@ function gateView(s: LoopSnapshot, loop: RunLoop) {
     s.pr.headSha === P &&
     s.headCommit === P &&
     s.pr.ci === "passing" &&
+    s.pr.reviewStatus === "passing" &&
     loop.ciFailedSha !== P &&
     !rv.waived &&
     rv.cur !== null &&
@@ -651,12 +701,13 @@ function stateStep(s: LoopSnapshot): Step {
       // a poll from before the re-run still shows the old failure
       if (pr.polledAt <= loop.rerun.at) return unchanged(loop);
       const failed = { ...loop, ciFails: loop.ciFails + 1, ciFailedSha: pushed.sha };
+      const named = pr.checks?.failing.length ? ` (failing: ${pr.checks.failing.join(", ")})` : "";
       if (failed.ciFails >= (s.limits?.tries ?? CI_TRIES)) {
-        return park(failed, "ci", `CI failed ${failed.ciFails} times; last on ${short}`);
+        return park(failed, "ci", `CI failed ${failed.ciFails} times; last on ${short}${named}`);
       }
       return {
         loop: { ...failed, phase: "working" },
-        actions: [{ kind: "event", text: `CI failed on ${short}` }],
+        actions: [{ kind: "event", text: `CI failed on ${short}${named}` }],
       };
     }
     // a run the operator un-parked is judged from the un-park, not from a push made before it;
@@ -667,10 +718,16 @@ function stateStep(s: LoopSnapshot): Step {
       loop.rerun?.sha === pushed.sha ? loop.rerun.at : 0,
     );
     if (pr.ci === "pending" && now - since > CI_PENDING_MAX_MS) {
+      const parts = [
+        pr.checks?.pending.length ? `pending: ${pr.checks.pending.join(", ")}` : "",
+        pr.checks?.missing.length ? `missing: ${pr.checks.missing.join(", ")}` : "",
+      ].filter((p) => p !== "");
       return park(
         loop,
         "ci-pending",
-        `CI pending for ${minutes(CI_PENDING_MAX_MS)} minutes on ${short}`,
+        `CI pending for ${minutes(CI_PENDING_MAX_MS)} minutes on ${short}${
+          parts.length > 0 ? ` (${parts.join("; ")})` : ""
+        }`,
       );
     }
     if (pr.ci === null && pr.polledAt - since > NO_CI_AFTER_MS) {
