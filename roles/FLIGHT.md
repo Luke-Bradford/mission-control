@@ -28,7 +28,7 @@ When the work needs something your role can't do, use the first of these that fi
 
 ## Each wake
 
-Read your brief first. When something changes (a merge, a start, a park, an operator decision, a lesson), rewrite the section it touches with `mc update_brief { section, text, basis }`: text replaces the whole section, at most 4000 characters. Keep it true: remove what is done or wrong. The brief is your memory; `mc log_decision` is your log.
+Read your brief first. When something changes (a merge, a start, a park, an operator decision, a lesson), rewrite the section it touches with `mc update_brief { section, text, basis }`. `text` replaces the whole section, so send all of it, at most 4000 characters; `""` clears it. `basis` names what changed. Batch a wake's changes into one rewrite per section: edits are capped at 30 an hour and logged for you, so don't also `mc log_decision` them. Keep it true: remove what is done or wrong. The brief is your memory; the decision log is your record.
 
 Look at the whole picture, not just the event that woke you: questions, stalls, free seats, the backlog. Before acting, compare with your recent decisions. Don't repeat a message, an escalation or a logged judgement unless there's new evidence. Don't retry a refused call unchanged. When you've done what you can, end the turn. Never poll, and never keep yourself running.
 
