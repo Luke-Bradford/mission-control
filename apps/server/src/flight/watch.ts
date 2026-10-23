@@ -236,7 +236,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         } else schedule();
       });
       offBus = bus.subscribe((topic) => {
-        if (topic === "attention" || topic === "boards") schedule();
+        if (topic === "attention" || topic === "boards" || topic === "flight") schedule();
       });
       interval = setInterval(() => void check(), FLIGHT_TICK_MS);
       interval.unref();
