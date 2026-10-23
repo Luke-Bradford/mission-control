@@ -1,3 +1,4 @@
+import type { ProfileStepPhase, ReviewDepth } from "./profiles.ts";
 import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from "./runtime.ts";
 import type {
   AccountId,
@@ -9,6 +10,17 @@ import type {
   SubagentInfo,
   TicketState,
 } from "./types.ts";
+
+/** One template profile as `/api/config` shows it. */
+export interface ConfigProfile {
+  name: string;
+  labels: string[];
+  steps: { name: string; phase: ProfileStepPhase | null }[];
+  planRequired: boolean;
+  reviewer: { role: string; depth: ReviewDepth };
+  tries: number;
+  rounds: number;
+}
 
 /** Per-agent numbers in the Overview (no route serves it now). Token counts are totals of all four kinds. */
 export interface AgentNumbers {
@@ -157,6 +169,14 @@ export interface ConfigView {
       }[];
     }[];
   } | null;
+  /** Template profiles, read per request; absent when the server has no profiles path. */
+  profiles?: {
+    /** The profiles file, or BUILTIN_PROFILES_SOURCE when none exists. */
+    source: string;
+    /** Why the file cannot be loaded; null when it can. `list` is then empty. */
+    error: string | null;
+    list: ConfigProfile[];
+  };
 }
 
 /** A seat as config.yaml says it (what Setup edits). */
@@ -255,7 +275,18 @@ export interface Telemetry {
     excluded: number;
   };
   /** Over FLOW_DAYS of merged PRs whose first-push CI is known; null when there are none. */
-  quality: { ciGreenFirstPushPct: number | null; prs: number };
+  quality: {
+    ciGreenFirstPushPct: number | null;
+    prs: number;
+    /** Mean review rounds per merged PR (over FLOW_DAYS) that has a reported review; null when none. */
+    reviewRoundsPerPr?: number | null;
+    /** % of those PRs whose round 1 review had no blocking findings; null when none. */
+    firstPassReviewPct?: number | null;
+    /** The merged PRs with a reported review: what the two figures above cover. */
+    reviewedPrs?: number;
+    /** Mean commits per finished, looped, non-review crew run started over FLOW_DAYS; null when none. */
+    commitsPerRun?: number | null;
+  };
   /** TELEMETRY_POINTS points over the range, tokens per minute. */
   tokensPerMinute: AgentSeries[];
   /** The last LIVE_MINUTES minutes, oldest first, from the digests' minute buckets. */
