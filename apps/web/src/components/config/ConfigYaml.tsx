@@ -1,5 +1,4 @@
 import type { ConfigView } from "@mc/core";
-import { Fragment } from "react";
 
 /** One coloured run of text on a YAML line: key, value, comment, or plain (indent, punctuation). */
 interface Seg {
@@ -112,15 +111,15 @@ export function yamlLines(c: ConfigView): Line[] {
 export function ConfigYaml({ config }: { config: ConfigView }) {
   const lines = yamlLines(config);
   return (
-    <section className="yaml" aria-label="config.yaml, read-only">
-      <div className="yln" aria-hidden="true">
-        {lines.map((_, i) => i + 1).join("\n")}
-      </div>
-      <div className="ytx" data-testid="config-yaml">
-        {lines.map((line, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: lines are positional and never reorder
-          <Fragment key={i}>
-            {i > 0 && "\n"}
+    <section className="yaml" aria-label="config.yaml, read-only" data-testid="config-yaml">
+      {lines.map((line, i) => (
+        // One row per line: a wrapped line pushes its own number and the rows below it down together.
+        // biome-ignore lint/suspicious/noArrayIndexKey: lines are positional and never reorder
+        <div key={i} className="yrow">
+          <span className="yln" aria-hidden="true">
+            {i + 1}
+          </span>
+          <span className="ytx">
             {line.map((s, j) =>
               s.cls ? (
                 // biome-ignore lint/suspicious/noArrayIndexKey: segments are positional
@@ -131,9 +130,9 @@ export function ConfigYaml({ config }: { config: ConfigView }) {
                 s.text
               ),
             )}
-          </Fragment>
-        ))}
-      </div>
+          </span>
+        </div>
+      ))}
     </section>
   );
 }
