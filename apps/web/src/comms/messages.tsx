@@ -49,7 +49,7 @@ export function commsKeys(list: CommsEvent[]): string[] {
 /** Plain text with each mention picked out. */
 export function MentionText({ text }: { text: string }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
-  const login = (config as (ConfigView & { githubLogin?: string | null }) | undefined)?.githubLogin;
+  const login = config?.githubLogin;
   const parts = text.split(/((?<![\w.])@[\w-]+)/);
   return (
     <>
