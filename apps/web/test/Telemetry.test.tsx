@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type ConfigView,
   LIVE_MINUTES,
@@ -66,7 +68,7 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
       { agentId: "codex-ta", points: flat(LIVE_MINUTES, 20) },
     ],
     utilisation: [
-      { agentId: "shop-app-ta", working: 63.6, waiting: 8.2, idle: 28.2 },
+      { agentId: "shop-app-ta", working: 63.6, waiting: 8.2, blocked: 6, idle: 22.2 },
       { agentId: "studio", working: 10, waiting: 0, idle: 90 },
       { agentId: "codex-ta", working: 0, waiting: 0, idle: 100 },
     ],
@@ -82,7 +84,14 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
       { agentId: "codex-ta", turns: [] },
     ],
     toolLatency: [
-      { tool: "Bash", calls: 212, p50Ms: 2800, p95Ms: 41_000, failed: 6 },
+      {
+        tool: "Bash",
+        calls: 212,
+        p50Ms: 2800,
+        p95Ms: 41_000,
+        failed: 6,
+        slowest: { detail: "just test", agentId: "studio", durationMs: 660000 },
+      },
       { tool: "Read", calls: 611, p50Ms: 100, p95Ms: null, failed: 0 },
     ],
     subagents: [
@@ -145,6 +154,8 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
         cacheHitPct: 96.4,
         turns: 40,
         toolCalls: 500,
+        additions: 42,
+        deletions: 7,
         costUsd: 2.47,
       },
       {
@@ -270,7 +281,7 @@ describe("Telemetry toolbar", () => {
     );
   });
 
-  it("Agent and Account selects list All plus each from config; no Ticket select; the note", async () => {
+  it("Agent and Account selects list All plus each from config; Ticket select; the note", async () => {
     await loaded();
     const agent = screen.getByLabelText("Agent") as HTMLSelectElement;
     expect([...agent.options].map((o) => o.textContent)).toEqual([
@@ -285,7 +296,7 @@ describe("Telemetry toolbar", () => {
       "claude-main",
       "codex-main",
     ]);
-    expect(screen.queryByLabelText("Ticket")).toBeNull();
+    expect(screen.getByLabelText("Ticket")).toBeInstanceOf(HTMLSelectElement);
     screen.getByText(
       "Token counts come from each provider's usage events. Costs marked ~ are API-equivalent estimates; a subscription isn't billed per token.",
     );
@@ -627,18 +638,20 @@ describe("Agents", () => {
     expect(panel("tTotals").querySelectorAll("tbody tr")).toHaveLength(1);
   });
 
-  it("where agent time goes: working / waiting on you / idle, rounded for display", async () => {
+  it("where agent time goes: four labelled shares, rounded for display", async () => {
     await loaded();
     const row = panel("tUtil").querySelector(".hrow") as HTMLElement;
     expect(row.textContent).toBe("shop-app-ta64%");
     expect([...row.querySelectorAll(".ubar i")].map((i) => i.getAttribute("title"))).toEqual([
       "working 64%",
-      "waiting on you 8%",
-      "idle 28%",
+      "waiting (lock, reviews) 8%",
+      "blocked, parked or stalled 6%",
+      "idle 22%",
     ]);
     expect([...panel("tUtil").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
       "working",
-      "waiting on you",
+      "waiting (lock, reviews)",
+      "blocked, parked or stalled",
       "idle",
     ]);
   });
@@ -667,10 +680,11 @@ describe("Agents", () => {
       "p50",
       "p95",
       "Failed",
+      "Slowest",
     ]);
     expect([...lat.querySelectorAll("tbody tr")].map((r) => r.textContent)).toEqual([
-      "Bash2122.8s41s6",
-      "Read6110.1s—0",
+      "Bash2122.8s41s6just test (11m 00s, studio)",
+      "Read6110.1s—0—",
     ]);
     const subs = panel("tSubs");
     expect([...subs.querySelectorAll("th")].map((t) => t.textContent)).toEqual([
@@ -735,11 +749,12 @@ describe("Capacity and cost", () => {
       "Cache hit",
       "Turns",
       "Tool calls",
+      "Lines (+/−)",
       "~Cost",
     ]);
     expect([...t.querySelectorAll("tbody tr")].map((r) => r.textContent)).toEqual([
-      "shop-app-taclaude-mainclaude-opus-4-112.0k3.4k1.20M96%40500~$2.47",
-      "codex-tacodex-main—9001000—34—",
+      "shop-app-taclaude-mainclaude-opus-4-112.0k3.4k1.20M96%40500+42 −7~$2.47",
+      "codex-tacodex-main—9001000—34— ——",
     ]);
   });
 
@@ -1014,4 +1029,104 @@ describe("engine telemetry", () => {
     });
     expect(live.querySelectorAll("td")[4]?.textContent).toBe("1:02");
   });
+});
+
+describe("ticket scope", () => {
+  it("selects each ticket, combines and clears filters using response bars and totals", async () => {
+    const data = tel();
+    const routes: Record<string, unknown> = {
+      [RESOURCES.config.path]: CFG,
+      "/api/telemetry?range=6h": data,
+    };
+    for (const row of data.tokensByTicket) {
+      routes[`/api/telemetry?range=6h&ticket=${encodeURIComponent(row.ticket)}`] = tel({
+        tokensByTicket: [{ ...row, tokens: 123 }],
+        totals: [{ ...(data.totals[0] as TelemetryData["totals"][number]), input: 321 }],
+      });
+    }
+    routes["/api/telemetry?range=6h&agent=studio"] = data;
+    routes["/api/telemetry?range=6h&agent=studio&ticket=site-builder%2312"] = EMPTY;
+    routes["/api/telemetry?range=6h&agent=studio&account=codex-main"] = data;
+    routes["/api/telemetry?range=6h&agent=studio&account=codex-main&ticket=site-builder%2312"] =
+      EMPTY;
+    const fetch = stubFetch(routes);
+    render(<Telemetry />);
+    const select = await screen.findByLabelText("Ticket");
+    await waitFor(() => expect((select as HTMLSelectElement).options).toHaveLength(3));
+    select.focus();
+    expect(document.activeElement).toBe(select);
+    for (const row of data.tokensByTicket) {
+      fireEvent.change(select, { target: { value: row.ticket } });
+      await within(panel("tTicketBars")).findByText("123");
+      expect(panel("tTicketBars").querySelectorAll(".hrow")).toHaveLength(1);
+      within(panel("tTotals")).getByText("321");
+    }
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "studio" } });
+    await within(panel("tTotals")).findByText("No usage for this filter in the last 6h.");
+    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "codex-main" } });
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/telemetry?range=6h&agent=studio&account=codex-main&ticket=site-builder%2312",
+        expect.anything(),
+      ),
+    );
+    fireEvent.change(select, { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "" } });
+    await within(panel("tTicketBars")).findByText("220k");
+  });
+
+  it("resets a ticket absent from a new range", async () => {
+    stubFetch({
+      [RESOURCES.config.path]: CFG,
+      "/api/telemetry?range=6h": tel(),
+      "/api/telemetry?range=6h&ticket=shop-app%233349": tel(),
+      "/api/telemetry?range=1h": EMPTY,
+      "/api/telemetry?range=1h&ticket=shop-app%233349": EMPTY,
+    });
+    render(<Telemetry />);
+    const select = await screen.findByLabelText("Ticket");
+    await waitFor(() => expect((select as HTMLSelectElement).options).toHaveLength(3));
+    fireEvent.change(select, { target: { value: "shop-app#3349" } });
+    fireEvent.click(screen.getByRole("button", { name: "1h" }));
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe(""));
+    await within(panel("tTicketBars")).findByText("No ticket work in the last 1h.");
+  });
+});
+
+it("keeps telemetry controls and wide tables usable on narrow screens", async () => {
+  await loaded();
+  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  expect(css.match(/\.toolbar \{([^}]*)\}/)?.[1]).toContain("flex-wrap: wrap");
+  expect(css.match(/\.tw \{([^}]*)\}/)?.[1]).toContain("overflow-x: auto");
+  expect(css).toMatch(
+    /@media \(max-width: 999px\) \{[^}]*\.tgrid,[^}]*grid-template-columns: minmax\(0, 1fr\)/,
+  );
+  for (const id of ["tLat", "tTotals"]) {
+    expect(panel(id).querySelector("table")?.parentElement?.classList.contains("tw")).toBe(true);
+  }
+});
+
+it("preserves unknown time and independently unavailable line and slowest details", async () => {
+  const data = tel();
+  await loaded(
+    tel({
+      utilisation: [
+        { agentId: "shop-app-ta", working: 20, waiting: 10, blocked: 5, idle: 15, unknown: 50 },
+      ],
+      totals: [
+        { ...(data.totals[0] as TelemetryData["totals"][number]), additions: 0, deletions: null },
+      ],
+      toolLatency: [
+        {
+          ...(data.toolLatency[0] as TelemetryData["toolLatency"][number]),
+          slowest: { detail: null, agentId: "studio", durationMs: 1000 },
+        },
+      ],
+    }),
+  );
+  within(panel("tLat")).getByText("— (1.0s, studio)");
+  expect(panel("tUtil").querySelector('[title="unknown 50%"]')).toBeTruthy();
+  within(panel("tTotals")).getByText("+0");
+  expect(panel("tTotals").querySelector(".del")?.textContent).toBe("—");
 });

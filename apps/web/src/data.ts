@@ -56,12 +56,13 @@ export const RESOURCES = {
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
-  /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account is all. */
-  telemetry: (range: string, agent = "", account = ""): ResourceRef => ({
+  /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
+  telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
     path:
       `/api/telemetry?range=${enc(range)}` +
       (agent === "" ? "" : `&agent=${enc(agent)}`) +
-      (account === "" ? "" : `&account=${enc(account)}`),
+      (account === "" ? "" : `&account=${enc(account)}`) +
+      (ticket === "" ? "" : `&ticket=${enc(ticket)}`),
     topic: "agents",
   }),
   comms: (agentId: string): ResourceRef => ({

@@ -24,6 +24,8 @@ export interface Scope {
   agents: AgentInfo[];
   /** The Account select; "" for all. */
   account: string;
+  /** The Ticket select; "" for all. */
+  ticket?: string;
   /** What a panel says while there is no data: loading, or why not. */
   wait: string;
 }
