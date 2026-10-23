@@ -13,7 +13,7 @@
  * from the first try; after that it is the same deny. An HTTP answer is never retried.
  *
  * A Post that fails (hub down, a bad answer) is not retried: the call's hold then lasts until the
- * supervisor's `releaseRun` (the turn's end, an interrupt or the process's exit; Task 6).
+ * supervisor's `releaseRun` (the turn's end, an interrupt or the process's exit).
  */
 
 import { readFile } from "node:fs/promises";

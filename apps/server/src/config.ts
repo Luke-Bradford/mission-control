@@ -400,12 +400,16 @@ const roleSchema = z.strictObject({
 const fileSchema = z
   .strictObject({
     sources: z.strictObject({ teams: TeamsConfig.optional() }).optional(),
-    operator: z.strictObject({
-      id: nonEmpty.default(DEFAULT_OPERATOR_ID),
-      timezone: nonEmpty,
-      /** Legacy (sign-in was removed): still accepted so existing configs load; never used. */
-      password_hash: z.string().optional(),
-    }),
+    operator: z.preprocess(
+      (v) =>
+        typeof v === "object" && v !== null && !Array.isArray(v)
+          ? Object.fromEntries(Object.entries(v).filter(([key]) => key !== "password_hash"))
+          : v,
+      z.strictObject({
+        id: nonEmpty.default(DEFAULT_OPERATOR_ID),
+        timezone: nonEmpty,
+      }),
+    ),
     accounts: z.array(
       z.strictObject({
         id: nonEmpty,

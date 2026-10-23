@@ -1,3 +1,4 @@
+import { errorText } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api.ts";
 import { ACTIONS } from "../data.ts";
@@ -12,8 +13,6 @@ import {
   SET_UP_BOARD,
   statusLines,
 } from "./boardSetup.ts";
-
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Where focus goes once the control that held it is gone or busy. */
 type FocusNext = "trigger" | "recheck";

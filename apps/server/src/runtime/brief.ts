@@ -110,7 +110,7 @@ function profileLines(i: BriefInput): string[] {
   ];
 }
 
-/** The first message of a run (plan 5, Task 5; its closing sentence, plan 6 Task 6). */
+/** The first message of a run. */
 export function ticketBrief(i: BriefInput): string {
   const writer = i.mode === "writer";
   const scope = writer

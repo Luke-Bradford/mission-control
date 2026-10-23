@@ -24,6 +24,7 @@ import {
 } from "./collectors/github.ts";
 import type { CcConfig } from "./config.ts";
 import type { RepoLocation } from "./config-write.ts";
+import { projectFields } from "./github-fields.ts";
 import type { Store } from "./store.ts";
 
 export function repoProfiles(config: CcConfig, store: Store): RepoProfile[] {
@@ -80,8 +81,7 @@ const PREVIEW_QUERY = `query($owner: String!, $number: Int!, $name: String!) {
         fields(first: 50) {
           pageInfo { hasNextPage }
           nodes {
-            ... on ProjectV2FieldCommon { name }
-            ... on ProjectV2SingleSelectField { options { name } }
+            ${projectFields(false)}
           }
         }
       }

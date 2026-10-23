@@ -4,21 +4,13 @@
  * shows its text without the time). A unit is chosen after rounding (99 960 tokens is `100k`,
  * 59.6 s is `1m 00s`).
  */
-import { startOfLocalDay } from "@mc/core";
+import { startOfLocalDay, zoneFormatter } from "@mc/core";
 
 const DAY = 86_400_000;
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
-/** Intl formatters are costly to build; one per (options, zone). */
-const formatters = new Map<string, Intl.DateTimeFormat>();
 function format(ms: number, tz: string, opts: Intl.DateTimeFormatOptions): string {
-  const id = `${tz}|${JSON.stringify(opts)}`;
-  let f = formatters.get(id);
-  if (!f) {
-    f = new Intl.DateTimeFormat("en-GB", { timeZone: tz, ...opts });
-    formatters.set(id, f);
-  }
-  return f.format(new Date(ms));
+  return zoneFormatter(tz, opts).format(new Date(ms));
 }
 
 const HHMM: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
@@ -50,12 +42,7 @@ const YMD: Intl.DateTimeFormatOptions = { year: "numeric", month: "numeric", day
 
 /** The calendar date of `ms` in `tz`: year, month (1–12) and day. */
 function localDate(ms: number, tz: string): { y: number; m: number; d: number } {
-  const id = `${tz}|ymd`;
-  let f = formatters.get(id);
-  if (!f) {
-    f = new Intl.DateTimeFormat("en-GB", { timeZone: tz, ...YMD });
-    formatters.set(id, f);
-  }
+  const f = zoneFormatter(tz, YMD);
   const p: Record<string, number> = {};
   for (const part of f.formatToParts(new Date(ms))) {
     if (part.type !== "literal") p[part.type] = Number(part.value);

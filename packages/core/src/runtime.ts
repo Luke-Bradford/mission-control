@@ -4,7 +4,7 @@ import { ROLES } from "./roles.ts";
 import type { AgentId } from "./types.ts";
 
 // What a crew process is started with: the CLI's tool allowlist (in `-p` mode anything not allowed
-// is denied, spike 2026-10-20), the guard hook before every tool call (phase 2b), and the OS
+// is denied, spike 2026-10-20), the guard hook before every tool call, and the OS
 // sandbox around every Bash, with `autoAllowBashIfSandboxed` off so the sandbox never widens the
 // allowlist. The sandbox writes no git state: commits, pushes and PRs are the mc tools', made by
 // the hub in its own clone.
@@ -34,14 +34,14 @@ export type ConfigSeatMode = (typeof CONFIG_SEAT_MODES)[number];
  */
 export const LOOP_KINDS = ["build", "review", "plan", "watch", "none"] as const;
 export type LoopKind = (typeof LOOP_KINDS)[number];
-/** The loops each mode may have. `plan` behaves as `none` until the planner ticket. */
+/** The loops each mode may have. */
 export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
   writer: ["build"],
   "read-only": ["none", "plan", "watch"],
   scratch: ["review"],
 };
 
-/** The mc tools the FLIGHT seat (a `watch` role) holds; later FLIGHT tickets append to it. Only `read_ticket` may also go to a `plan` role. */
+/** The mc tools the FLIGHT seat (a `watch` role) holds. Only `read_ticket` may also go to a `plan` role. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.readTicket,
@@ -679,7 +679,7 @@ export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
 /**
  * A seat's pnpm store, in the sandbox's temp root. A sandboxed pnpm cannot write the global store
  * in `~/Library`, and with no store set it falls back to `.pnpm-store/` at the top of the worktree,
- * where the commit tool's `add -A` would find it (Task 11).
+ * where the commit tool's `add -A` would find it.
  */
 export const crewPnpmStoreDir = (uid: number, seatId: string): string =>
   `${crewSandboxTmp(uid)}/mc-pnpm-store/${seatId}`;
@@ -696,7 +696,7 @@ export const STOP_GRACE_MS = 10_000;
 export const CREW_DISABLED = "crew is disabled on this server";
 /**
  * `GET /api/agents/:id/files` for a crew seat (its note; `/files/diff` answers it as the error):
- * no host git runs in a worktree a seat can write until the guard (phase 2b).
+ * no host git runs in a worktree a seat can write until the guard.
  */
 export const CREW_FILES_NOTE = "Files for crew seats arrive with the mailbox (phase 2d).";
 
@@ -760,7 +760,7 @@ export interface CrewHook {
 const POST_HOOK_MATCHER = "Bash";
 
 /**
- * The `hooks` block (spike 2026-10-21, Task 1's shape): the guard before every tool call
+ * The `hooks` block (spike 2026-10-21): the guard before every tool call
  * (PreToolUse, matcher `*`), and after each Bash call ends (PostToolUse, PostToolUseFailure), when
  * a call that holds the test lock releases it.
  */
@@ -808,7 +808,7 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
       network: { allowedDomains: [] },
       filesystem: {
         // Nothing under a git dir. When the cwd is a linked worktree the CLI itself opens most of
-        // the clone's git dir to sandboxed Bash (Plan 5's note); an explicit denyWrite on the whole
+        // the clone's git dir to sandboxed Bash; an explicit denyWrite on the whole
         // of it closes that (spike 2026-10-21: commit, add, update-ref, objects and
         // config.worktree all fail; git reads and the full suite still work). That also covers
         // other seats' refs and objects (#31 R19, R24) and every file inside either git dir.

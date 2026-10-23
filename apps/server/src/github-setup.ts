@@ -1,4 +1,5 @@
 import {
+  isObj,
   OWNER_FIELD,
   OWNERS,
   PRIORITIES,
@@ -10,6 +11,7 @@ import {
   TICKET_SIZES,
 } from "@mc/core";
 import type { Gql } from "./collectors/github.ts";
+import { projectFields } from "./github-fields.ts";
 
 type FieldName =
   | typeof STAGE_FIELD
@@ -67,8 +69,7 @@ const FIELDS_QUERY = `query($owner: String!, $number: Int!) {
         fields(first: 50) {
           pageInfo { hasNextPage }
           nodes {
-            ... on ProjectV2FieldCommon { id name }
-            ... on ProjectV2SingleSelectField { options { id name } }
+            ${projectFields(true)}
           }
         }
       }
@@ -95,9 +96,6 @@ const LABELS_MAX_PAGES = 20;
 const CREATE_LABEL = `mutation($input: CreateLabelInput!) {
   createLabel(input: $input) { label { name } }
 }`;
-
-const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
 
 const sameOptions = (have: string[], want: FieldSpec["options"]): boolean =>
   have.length === want.length && want.every((o) => have.includes(o.name));

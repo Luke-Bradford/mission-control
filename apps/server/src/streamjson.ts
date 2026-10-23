@@ -1,5 +1,6 @@
 import {
   cutAtWord,
+  isObj,
   LIVE_DETAIL_MAX,
   type LiveTask,
   leadSentence,
@@ -11,6 +12,7 @@ import {
   workSummary,
 } from "@mc/core";
 import { cleanText } from "./clean.ts";
+import { str } from "./util.ts";
 
 export interface TranscriptFacts {
   sessionId: string | null;
@@ -164,9 +166,6 @@ function copyDigestState(d: DigestState): DigestState {
 
 export type Json = Record<string, unknown>;
 
-export const isObj = (v: unknown): v is Json =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-export const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const numOrNull = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -683,3 +682,7 @@ export function foldTranscript(
   digestStates.set(facts, d);
   return facts;
 }
+
+export { isObj } from "@mc/core";
+
+export { str } from "./util.ts";

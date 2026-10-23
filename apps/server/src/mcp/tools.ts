@@ -1,5 +1,5 @@
 /**
- * The mc tools the hub serves at `/mcp` (phase 2b): `commit`, the only way a seat's work becomes a
+ * The mc tools the hub serves at `/mcp`: `commit`, the only way a seat's work becomes a
  * commit, and `ask_operator`. Each call is already tied to one seat and one run by its token, and
  * serialised per run by the MCP server; nothing in a call's arguments names a path, a branch or a
  * repo. Those come from the run's own rows.
@@ -500,8 +500,7 @@ function ownBranch(store: Store, run: Run, branch: string, defaultBranch: string
 
 /**
  * Mission Control's push: a plain fast-forward of the run's own branch, sending only commits the commit
- * tool made, after an object check and a secret scan. The steps and their answers are fixed (Plan
- * 6, Task 9); every git call runs in the session clone, in its queue.
+ * tool made, after an object check and a secret scan. Every git call runs in the session clone, in its queue.
  */
 export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result> {
   const { store, bus } = deps;

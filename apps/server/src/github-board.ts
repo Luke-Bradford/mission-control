@@ -10,6 +10,7 @@ import {
 } from "@mc/core";
 import { type Gql, GqlError, isObj, isTransient } from "./collectors/github.ts";
 import type { CcConfig } from "./config.ts";
+import { singleSelectField } from "./github-fields.ts";
 import { readStatusField } from "./github-setup.ts";
 import type { Store } from "./store.ts";
 
@@ -36,7 +37,7 @@ const CARD_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
         nodes {
           id
           project { id }
-          status: fieldValueByName(name: "${STATUS_FIELD}") { ... on ProjectV2ItemFieldSingleSelectValue { optionId } }
+          ${singleSelectField("status", STATUS_FIELD, "optionId")}
         }
       }
     }

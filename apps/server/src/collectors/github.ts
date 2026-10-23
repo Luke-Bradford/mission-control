@@ -10,6 +10,7 @@ import {
   type GithubRateLimit,
   githubCollector,
   inferTicket,
+  isObj,
   labelPriority,
   OWNER_FIELD,
   OWNERS,
@@ -34,8 +35,10 @@ import {
   type TitleMarker,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
+import { singleSelectField } from "../github-fields.ts";
 import { hasQuestionFence, parseAutonomyQuestion } from "../sd32.ts";
 import type { Store } from "../store.ts";
+import { str } from "../util.ts";
 import {
   exhaustedReading,
   isRateLimitedError,
@@ -55,15 +58,12 @@ const MAX_BOARD_PAGES = 50;
 
 export type Gql = (query: string, vars: Record<string, unknown>) => Promise<unknown>;
 
-const singleSelectField = (alias: string, name: string) =>
-  `${alias}: fieldValueByName(name: "${name}") { ... on ProjectV2ItemFieldSingleSelectValue { name } }`;
-
 /** What the board reads from a project item; the item list and an issue's own cards share it. */
 const ITEM_FIELDS = `
           id
           updatedAt
-          status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-          priority: fieldValueByName(name: "Priority") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          ${singleSelectField("status", "Status")}
+          ${singleSelectField("priority", "Priority")}
           ${singleSelectField("stage", STAGE_FIELD)}
           ${singleSelectField("owner", OWNER_FIELD)}
           ${singleSelectField("size", SIZE_FIELD)}`;
@@ -143,7 +143,7 @@ const CARD_NOW_QUERY = `query CardNow($owner: String!, $name: String!, $number: 
       projectItems(first: 20) {
         nodes {
           project { number }
-          status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+          ${singleSelectField("status", "Status")}
         }
       }
     }
@@ -360,9 +360,6 @@ export async function githubToken(timeoutMs?: number): Promise<string> {
 
 export const path = (v: unknown, ...keys: string[]): unknown =>
   keys.reduce<unknown>((acc, k) => (isObj(acc) ? acc[k] : undefined), v);
-export const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-const str = (v: unknown): string => (typeof v === "string" ? v : "");
 export const ms = (v: unknown): number => {
   const t = typeof v === "string" ? Date.parse(v) : NaN;
   return Number.isNaN(t) ? 0 : t;
@@ -390,7 +387,12 @@ function blockers(v: unknown): BoardItem["blockedBy"] {
   const nodes = isObj(v) && Array.isArray(v.nodes) ? v.nodes : [];
   return nodes.flatMap((n) =>
     isObj(n) && typeof n.number === "number"
-      ? [{ ref: `${str(path(n, "repository", "name"))}#${n.number}`, closed: n.state === "CLOSED" }]
+      ? [
+          {
+            ref: `${str(path(n, "repository", "name"), "")}#${n.number}`,
+            closed: n.state === "CLOSED",
+          },
+        ]
       : [],
   );
 }
@@ -531,8 +533,8 @@ async function fetchBoard(
 
 /** Whether an issue node (with `repository { name owner { login } }`) belongs to owner/repoName. */
 const inRepo = (issue: Record<string, unknown>, owner: string, repoName: string): boolean =>
-  str(path(issue, "repository", "name")).toLowerCase() === repoName.toLowerCase() &&
-  str(path(issue, "repository", "owner", "login")).toLowerCase() === owner.toLowerCase();
+  str(path(issue, "repository", "name"), "").toLowerCase() === repoName.toLowerCase() &&
+  str(path(issue, "repository", "owner", "login"), "").toLowerCase() === owner.toLowerCase();
 
 /**
  * One board item from a project item node whose `content` is its issue; null when the node is not
@@ -562,7 +564,7 @@ function boardItem(
   return {
     repoId: repo.id,
     issueNumber: c.number as number,
-    title: str(c.title),
+    title: str(c.title, ""),
     status: status ?? "",
     state: state ?? "planned",
     labels,
@@ -574,7 +576,7 @@ function boardItem(
     createdAt: ms(c.createdAt),
     itemId: typeof node.id === "string" ? node.id : null,
     projectId: null,
-    url: str(c.url),
+    url: str(c.url, ""),
     stage: option<Stage>(node.stage, STAGES),
     owner: option<Owner>(node.owner, OWNERS),
     size: singleSelect(node.size),
@@ -593,7 +595,9 @@ function boardItem(
         : null,
     blockedBy: blockers(c.blockedBy),
     milestone:
-      typeof path(c, "milestone", "title") === "string" ? str(path(c, "milestone", "title")) : null,
+      typeof path(c, "milestone", "title") === "string"
+        ? str(path(c, "milestone", "title"), "")
+        : null,
   };
 }
 
@@ -631,11 +635,11 @@ export async function fetchTicket(
   if (!isObj(issue) || typeof issue.number !== "number") return null;
   const nodes = (v: unknown): Record<string, unknown>[] =>
     isObj(v) && Array.isArray(v.nodes) ? v.nodes.filter(isObj) : [];
-  const chars = Array.from(str(issue.body));
+  const chars = Array.from(str(issue.body, ""));
   return {
     number: issue.number,
-    title: str(issue.title),
-    url: str(issue.url),
+    title: str(issue.title, ""),
+    url: str(issue.url, ""),
     state: openClosed(issue.state),
     body: chars.slice(0, TICKET_BODY_MAX).join(""),
     bodyTruncated: chars.length > TICKET_BODY_MAX,
@@ -643,14 +647,14 @@ export async function fetchTicket(
     labels: names(issue.labels),
     milestone:
       typeof path(issue, "milestone", "title") === "string"
-        ? str(path(issue, "milestone", "title"))
+        ? str(path(issue, "milestone", "title"), "")
         : null,
     subIssues: nodes(issue.subIssues).flatMap((n) =>
       typeof n.number === "number"
         ? [
             {
               number: n.number,
-              title: str(n.title),
+              title: str(n.title, ""),
               state: openClosed(n.state),
               repoId: repoIdOf(repos, n),
             },
@@ -662,8 +666,8 @@ export async function fetchTicket(
         ? [
             {
               number: n.number,
-              title: str(n.title),
-              url: str(n.url),
+              title: str(n.title, ""),
+              url: str(n.url, ""),
               state: n.merged === true ? ("merged" as const) : openClosed(n.state),
               repoId: repoIdOf(repos, n),
             },
@@ -720,7 +724,7 @@ const rawComments = (conn: unknown): RawComment[] =>
   isObj(conn) && Array.isArray(conn.nodes)
     ? conn.nodes.flatMap((c) =>
         isObj(c) && typeof c.body === "string"
-          ? [{ body: c.body, createdAt: str(c.createdAt) }]
+          ? [{ body: c.body, createdAt: str(c.createdAt, "") }]
           : [],
       )
     : [];
@@ -786,7 +790,7 @@ async function fetchEscalations(
   }
   const out: Escalation[] = [];
   for (const [number, n] of seen) {
-    const title = str(n.title);
+    const title = str(n.title, "");
     const marker = TITLE_MARKER_RE.exec(title)?.[1] as TitleMarker | undefined;
     const hasLabel = names(n.labels).some((l) => labels.includes(l));
     if (!marker && !hasLabel) continue;
@@ -814,7 +818,7 @@ async function fetchEscalations(
       kind: marker ?? (question ? "autonomy-question" : "operator-decision"),
       source: marker ? "title" : "label",
       openedAt: ms(n.createdAt),
-      url: str(n.url),
+      url: str(n.url, ""),
       question,
     });
   }
@@ -856,7 +860,7 @@ export function parseChecks(rollup: unknown): PrCheck[] {
   for (const n of nodes) {
     if (!isObj(n)) continue;
     if (n.__typename === "CheckRun") {
-      const name = str(n.name);
+      const name = str(n.name, "");
       if (name === "") continue;
       const attempt = path(n, "checkSuite", "workflowRun", "runAttempt");
       out.push({
@@ -865,23 +869,23 @@ export function parseChecks(rollup: unknown): PrCheck[] {
         state:
           n.status !== "COMPLETED"
             ? "pending"
-            : PASSING_CONCLUSIONS.has(str(n.conclusion))
+            : PASSING_CONCLUSIONS.has(str(n.conclusion, ""))
               ? "passing"
               : "failing",
-        conclusion: str(n.conclusion) || str(n.status),
+        conclusion: str(n.conclusion, "") || str(n.status, ""),
         attempt: typeof attempt === "number" ? attempt : null,
-        url: str(n.detailsUrl) || null,
+        url: str(n.detailsUrl, "") || null,
       });
     } else if (n.__typename === "StatusContext") {
-      const name = str(n.context);
+      const name = str(n.context, "");
       if (name === "") continue;
       out.push({
         name,
         kind: "status",
         state: lookup(CHECKS, n.state) ?? "pending",
-        conclusion: str(n.state),
+        conclusion: str(n.state, ""),
         attempt: null,
-        url: str(n.targetUrl) || null,
+        url: str(n.targetUrl, "") || null,
       });
     }
   }
@@ -893,7 +897,7 @@ function mapPr(
   n: Record<string, unknown>,
 ): PullRequestView | null {
   if (typeof n.number !== "number") return null;
-  const branch = str(n.headRefName);
+  const branch = str(n.headRefName, "");
   const closing = path(n, "closingIssuesReferences", "nodes");
   const first = Array.isArray(closing) ? path(closing[0], "number") : undefined;
   const rollup = path(n, "commits", "nodes");
@@ -903,8 +907,8 @@ function mapPr(
   return {
     repoId: repo.id,
     number: n.number,
-    title: str(n.title),
-    url: str(n.url),
+    title: str(n.title, ""),
+    url: str(n.url, ""),
     branch,
     // The loops name the ticket in the branch and almost never write "Closes #n".
     ticket:
@@ -919,7 +923,7 @@ function mapPr(
     mergedAt: typeof n.mergedAt === "string" ? ms(n.mergedAt) : null,
     headSha: typeof headOid === "string" && headOid !== "" ? headOid : null,
     mergeable: lookup(MERGEABLE, n.mergeable),
-    author: str(path(n, "author", "login")) || null,
+    author: str(path(n, "author", "login"), "") || null,
     assignees: logins(n.assignees),
   };
 }
@@ -1122,3 +1126,5 @@ export async function collectGithub(
   }
   return changes;
 }
+
+export { isObj } from "@mc/core";

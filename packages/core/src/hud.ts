@@ -9,6 +9,7 @@ import type {
   SeatSessionRow,
   SubagentInfo,
 } from "./types.ts";
+import { zoneFormatter } from "./util.ts";
 
 export const STALL_MS = 10 * 60_000;
 /** The stall threshold while the run has a background task in flight (ruling R21). */
@@ -29,8 +30,6 @@ export const UPDATE_UNAVAILABLE = "updates are not available on this server";
 export const PREVIEW_SERVER = "this is a preview server";
 export const FLIGHT_NOT_RUNNING = "FLIGHT is not running yet. It arrives in phase 3.";
 export const ENGINE_NOT_RUNNING = "Arrives with the engine (phase 2).";
-/** Flow of work: why the review stats show a dash. */
-export const NO_REVIEWS = "These repos have no PR reviews; review happens in comments.";
 export const RETRY_NOTE =
   "Tries 1 and 2 resume the same agent; try 3 starts a fresh agent on a stronger model; after that the ticket parks for you. A retry that makes no progress (same failures, same diff) stops early.";
 
@@ -73,24 +72,16 @@ export const usageCollector = (accountId: string): string =>
 /** The settings key under which the collector keeps a loop's driver stop (JSON `DriverStop`). */
 export const driverStopKey = (loopId: string): string => `driver-stop:${loopId}`;
 
-/** One formatter per time zone: building one costs far more than using it (#26 A1). */
-const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
-
 function zoneParts(ms: number, timeZone: string) {
-  let f = zoneFormatters.get(timeZone);
-  if (!f) {
-    f = new Intl.DateTimeFormat("en-GB", {
-      timeZone,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-    zoneFormatters.set(timeZone, f);
-  }
+  const f = zoneFormatter(timeZone, {
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
   const p: Record<string, number> = {};
   for (const part of f.formatToParts(new Date(ms))) {
     if (part.type !== "literal") p[part.type] = Number(part.value);
@@ -534,8 +525,6 @@ export const GUARD_NOTE =
 /** The test lock, as the Overview box, Setup and the header say it. */
 export const LOCK_FREE_TEXT = "No full-suite run in progress.";
 export const LOCK_NOBODY_WAITING = "Nobody waiting.";
-/** Lock history and the Lock-wait KPI need run records. */
-export const LOCK_HISTORY_NOTE = "History arrives with run records (phase 2c).";
 export const lockHolderText = (call: string, command: string, elapsed: string): string =>
   `${call} holds it: ${command} · ${elapsed}`;
 export const lockWaitingLine = (call: string, elapsed: string): string =>

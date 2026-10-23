@@ -1,4 +1,5 @@
 import {
+  errorText,
   GITHUB_POINTS_PER_HOUR,
   type GithubBudget,
   hudColumnOf,
@@ -25,8 +26,6 @@ const lacks = (columns: string[]): string =>
 
 const budgetLine = (b: GithubBudget): string =>
   `GitHub: ≈${num(b.totalPerHour)} requests/hour at most (board ${num(b.boardPerHour)} · PR sweep ${num(b.sweepPerHour)} · flow ${num(b.flowPerHour)}) of ${GITHUB_POINTS_PER_HOUR.toLocaleString("en-GB")}`;
-
-const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Setup › Repos (#26 A8): how the configured repos' boards differ, and the add-a-repo form. */
 export function Repos() {

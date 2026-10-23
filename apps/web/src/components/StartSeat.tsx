@@ -10,7 +10,7 @@ import { toast } from "../shell/Toast.tsx";
 const roleHere = (role: string): string => ROLES.find((r) => r.callSign === role)?.here ?? role;
 
 /**
- * Start a seat on this ticket (Plan 5 Task 10): shown for an open issue in a repo that has a crew
+ * Start a seat on this ticket: shown for an open issue in a repo that has a crew
  * session. The click is the approval; Mission Control makes the branch in its own clone and
  * pushes nothing.
  */
