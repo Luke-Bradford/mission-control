@@ -10,10 +10,12 @@ import {
   type CrewRole,
   type LoopKind,
   MC_LINE_PREFIX,
+  profileRouteText,
   REVIEW_DIFF_FILE,
   REVIEW_NOTES_MAX,
   REVIEW_SINCE_FILE,
   type ReviewFinding,
+  type RunProfile,
 } from "@mc/core";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { readBaseFile } from "./checkouts.ts";
@@ -50,6 +52,10 @@ export interface BriefInput {
   commands: readonly string[];
   /** The repo's whole-suite commands, which take the test lock. */
   fullSuite: readonly string[];
+  /** The run's template profile, as snapshotted; absent adds no profile lines. */
+  profile?: RunProfile;
+  /** Every profile's name, for the planner's line about another template. */
+  profileNames?: readonly string[];
 }
 
 const codeList = (cmds: readonly string[]): string => cmds.map((c) => `\`${c}\``).join(", ");
@@ -83,6 +89,27 @@ export function cutNoteText(
   return `[The ticket body was cut at ${n(TICKET_BODY_MAX)} characters; ${n(missing)} more are missing. Do not guess them; ask with mc ask_operator.]`;
 }
 
+/** The lines a run's template profile adds to its brief, or none without a profile. */
+function profileLines(i: BriefInput): string[] {
+  if (i.profile === undefined) return [];
+  const { profile: p, route } = i.profile;
+  return [
+    `Template: ${p.name} (${profileRouteText(route)}). Steps: ${p.steps.map((s) => s.name).join(" → ")}.`,
+    p.checks.length > 0
+      ? `CI checks that must pass: ${p.checks.join(", ")}.`
+      : "CI: every check on your pushed commit must pass.",
+    ...(p.planRequired
+      ? ["This template needs a ## Plan before a developer starts, at Size M or larger."]
+      : []),
+    ...(p.checklist === "" ? [] : ["Before you report, check:", p.checklist]),
+    ...(i.loop === "plan" && i.profileNames !== undefined
+      ? [
+          `To use another template, call mc report_plan with profile (one of: ${i.profileNames.join(", ")}) and profile_reason; the developer still runs every CI check the picked template requires.`,
+        ]
+      : []),
+  ];
+}
+
 /** The first message of a run (plan 5, Task 5; its closing sentence, plan 6 Task 6). */
 export function ticketBrief(i: BriefInput): string {
   const writer = i.mode === "writer";
@@ -98,6 +125,7 @@ export function ticketBrief(i: BriefInput): string {
             ? ` A whole suite (${codeList(i.fullSuite)}) takes the test lock, one seat at a time; for one test, give the command a test file path.`
             : ""
         }`;
+  const profile = profileLines(i);
   const last =
     i.loop === "plan"
       ? PLANNER_CLOSE
@@ -109,6 +137,7 @@ export function ticketBrief(i: BriefInput): string {
     ...(note === null ? [] : [note, ""]),
     i.body,
     "",
+    ...(profile.length > 0 ? [...profile, ""] : []),
     ran,
     last,
   ].join("\n");

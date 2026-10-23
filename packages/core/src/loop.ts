@@ -285,6 +285,8 @@ export interface LoopSnapshot {
    * at "ready for a human". Absent: false.
    */
   hardRulesSet?: boolean;
+  /** The run's profile limits: CI tries and review rounds. Absent: `CI_TRIES` and `REVIEW_ROUNDS`. */
+  limits?: { tries: number; rounds: number };
   /** The card's column from the poll. */
   card: string | null;
   /** This run's seat_lines keys, with the time each was claimed. */
@@ -458,6 +460,7 @@ function afterMerge(s: LoopSnapshot): LoopAction[] {
 /** The state step: the first matching row of the table changes the loop. */
 function stateStep(s: LoopSnapshot): Step {
   const { loop, pr, evidence, headCommit, pushed, now, seat } = s;
+  const rounds = s.limits?.rounds ?? REVIEW_ROUNDS;
   const prNumber = pr?.number ?? loop.prNumber;
   const merged = pr?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
 
@@ -572,9 +575,9 @@ function stateStep(s: LoopSnapshot): Step {
     } else if (
       rv.blocked &&
       !(fixKey(s.runId, loop.epoch, cur.id) in s.claimed) &&
-      fixesSent(s.claimed, s.runId, loop.epoch) + 1 >= REVIEW_ROUNDS
+      fixesSent(s.claimed, s.runId, loop.epoch) + 1 >= rounds
     ) {
-      return park(loop, "review", reviewParkText(R.retro, P));
+      return park(loop, "review", reviewParkText(R.retro, P, rounds));
     }
   }
 
@@ -648,7 +651,7 @@ function stateStep(s: LoopSnapshot): Step {
       // a poll from before the re-run still shows the old failure
       if (pr.polledAt <= loop.rerun.at) return unchanged(loop);
       const failed = { ...loop, ciFails: loop.ciFails + 1, ciFailedSha: pushed.sha };
-      if (failed.ciFails >= CI_TRIES) {
+      if (failed.ciFails >= (s.limits?.tries ?? CI_TRIES)) {
         return park(failed, "ci", `CI failed ${failed.ciFails} times; last on ${short}`);
       }
       return {
@@ -811,7 +814,7 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
     rv.cur !== null &&
     rv.blocked &&
     !(fixKey(s.runId, loop.epoch, rv.cur.id) in s.claimed) &&
-    fixesSent(s.claimed, s.runId, loop.epoch) + 1 < REVIEW_ROUNDS
+    fixesSent(s.claimed, s.runId, loop.epoch) + 1 < (s.limits?.rounds ?? REVIEW_ROUNDS)
   );
 }
 

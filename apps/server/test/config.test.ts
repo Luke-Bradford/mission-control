@@ -327,6 +327,12 @@ ${seats.join("\n")}
   const load = (t: string) => parseConfig(t, "test", guard);
   const fails = (t: string) => errorOf(() => load(t));
 
+  it("refuses a relative crew.worktrees", () => {
+    const e = fails(crewText({ worktrees: "../mc-crew" }));
+    expect(e.path).toBe("crew.worktrees");
+    expect(e.message).toBe("crew.worktrees: ../mc-crew is not an absolute path");
+  });
+
   it("is absent when the file has no crew section", () => {
     expect(load(withoutCrew).crew).toBeUndefined();
   });

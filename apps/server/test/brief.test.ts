@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
+import { DEFAULT_PROFILES, type Profile, type ProfileRoute, type RunProfile } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import {
@@ -81,6 +82,81 @@ const READONLY_CLOSE =
   "You read and report; you cannot commit, push or open PRs. Ask the operator with mc ask_operator if you need a decision. Reply with your findings, starting with DONE.";
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
+
+describe("ticketBrief profile lines", () => {
+  const base = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+  const chosen = (profile: Profile, route: ProfileRoute): RunProfile => ({
+    profile,
+    route,
+    hash: "h",
+  });
+  const lines = (i: Partial<BriefInput>): string => {
+    const out = ticketBrief({ ...input, ...i });
+    const from = out.indexOf(`${input.body}\n\n`) + input.body.length + 2;
+    return out.slice(from, out.indexOf("\n\nCommands you may run here"));
+  };
+
+  it("names the template, the checks, the plan rule and the checklist", () => {
+    const profile: Profile = {
+      ...base,
+      checks: ["lint", "test"],
+      checklist: "- one\n- two",
+      steps: [
+        { name: "a", phase: null },
+        { name: "b", phase: null },
+      ],
+    };
+    expect(lines({ profile: chosen(profile, { by: "label", label: "type:feature" }) })).toBe(
+      [
+        "Template: feature (picked by the label type:feature). Steps: a → b.",
+        "CI checks that must pass: lint, test.",
+        "This template needs a ## Plan before a developer starts, at Size M or larger.",
+        "Before you report, check:",
+        "- one\n- two",
+      ].join("\n"),
+    );
+  });
+
+  it("says every check must pass when none are named, and skips empty parts", () => {
+    const profile: Profile = {
+      ...base,
+      planRequired: false,
+      checklist: "",
+      steps: [{ name: "x", phase: null }],
+    };
+    const route: ProfileRoute = {
+      by: "override",
+      from: "feature",
+      who: "FLIGHT",
+      reason: "trivial",
+    };
+    expect(lines({ profile: chosen(profile, route) })).toBe(
+      [
+        "Template: feature (chosen by FLIGHT over feature: trivial). Steps: x.",
+        "CI: every check on your pushed commit must pass.",
+      ].join("\n"),
+    );
+  });
+
+  it("tells a planner how to use another template", () => {
+    const profile: Profile = { ...base, planRequired: false, checklist: "" };
+    const out = lines({
+      loop: "plan",
+      profile: chosen(profile, { by: "size", size: "M" }),
+      profileNames: ["feature", "bugfix"],
+    });
+    expect(out.split("\n").at(-1)).toBe(
+      "To use another template, call mc report_plan with profile (one of: feature, bugfix) and profile_reason; the developer still runs every CI check the picked template requires.",
+    );
+    expect(
+      lines({ profile: chosen(profile, { by: "size", size: "M" }), profileNames: ["feature"] }),
+    ).not.toContain("To use another template");
+  });
+
+  it("adds nothing without a profile", () => {
+    expect(ticketBrief(input)).not.toContain("Template:");
+  });
+});
 
 describe("ticketBrief", () => {
   it("carries a body up to the collector's cap whole, with no cut note", () => {

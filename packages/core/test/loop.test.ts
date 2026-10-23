@@ -394,6 +394,17 @@ describe("state step", () => {
     expect(reconcile(s).loop.phase).toBe("working");
   });
 
+  it("a profile's try limit parks CI on the first real failure at tries 1", () => {
+    const r = reconcile({
+      ...inCi({ pr: pr({ ci: "failing" }) }, { rerun: reran() }),
+      limits: { tries: 1, rounds: 3 },
+    });
+    expect(r.loop.parked).toMatchObject({
+      kind: "ci",
+      reason: "CI failed 1 times; last on aaaaaaa",
+    });
+  });
+
   describe("a failed CI is re-run once", () => {
     it("the first failure on a sha asks for a re-run and tells the seat nothing", () => {
       const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }));
@@ -1711,6 +1722,27 @@ describe("review decisions", () => {
     const r = reconcile(s);
     expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA) });
     expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a profile's round limit parks review after one blocking review at rounds 1", () => {
+    const s = inReview(withReview([fact({ id: 1, blocking: 1 })], [finding]));
+    const r = reconcile({ ...s, limits: { tries: 3, rounds: 1 } });
+    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
+    expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a profile's round limit above 3 sends the third fix line instead of parking", () => {
+    const rows = [
+      fact({ id: 1, blocking: 1 }),
+      fact({ id: 2, blocking: 1, sha: SHA }),
+      fact({ id: 3, blocking: 1 }),
+    ];
+    const s = inReview(withReview(rows, [finding]), {
+      claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
+    });
+    const r = reconcile({ ...s, limits: { tries: 3, rounds: 4 } });
+    expect(r.loop.parked ?? null).toBeNull();
+    expect(sends(r.actions)).toEqual(["fix:r1:0:3"]);
   });
 
   it("a clean review raises the ready note and the PR body edit", () => {

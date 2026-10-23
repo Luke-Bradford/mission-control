@@ -12,6 +12,7 @@ import {
   answerMessageText,
   areaLabelsOf,
   askerRunEndedText,
+  BRIEF_CLEARED_DECISION,
   BRIEF_INPUT_MAX,
   BRIEF_ITEM_DESCRIPTION,
   BRIEF_KEY_MAX,
@@ -19,7 +20,12 @@ import {
   BRIEF_OPTIONS_MAX,
   BRIEF_OPTIONS_MIN,
   BRIEFED_TEXT,
+  briefAboutText,
+  briefClearedText,
   briefNoItemText,
+  briefSavedDecision,
+  briefSavedText,
+  briefTooLongText,
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
   COMMENTED_DECISION,
@@ -41,6 +47,7 @@ import {
   createFailedText,
   createLabelsText,
   createTextText,
+  DEFAULT_PROFILES,
   dependsOn,
   duplicateLabelText,
   duplicateTitleText,
@@ -55,6 +62,11 @@ import {
   endFailedText,
   FLIGHT_ABOUT_MAX,
   FLIGHT_BASIS_MAX,
+  FLIGHT_BRIEF_EDITS_PER_HOUR,
+  FLIGHT_BRIEF_INPUT_MAX,
+  FLIGHT_BRIEF_SECTION_MAX,
+  FLIGHT_BRIEF_SECTIONS,
+  FLIGHT_BRIEF_TITLES,
   FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
@@ -137,9 +149,14 @@ import {
   PASSED_DECISION,
   PASSED_TEXT,
   PLAN_SIZES,
+  PROFILE_NAME,
+  PROFILE_PAIR_TEXT,
+  PROFILE_REASON_MAX,
   PROMOTE_ENGINE_OFF,
   PROMOTE_NO_GITHUB,
   PROMOTE_NO_RULES,
+  type Profile,
+  type ProfileOverride,
   parkNotYoursText,
   planAlreadyText,
   plannerStartedDecision,
@@ -188,6 +205,7 @@ import {
   syncedText,
   type TicketView,
   ticketReadText,
+  UPDATE_BRIEF_DESCRIPTION,
   unclosedMarkdown,
   unknownLabelText,
   unparkCapText,
@@ -217,6 +235,7 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
+import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
@@ -238,6 +257,8 @@ export interface FlightToolsDeps {
   supervisor: Pick<Supervisor, "message" | "busy" | "startRun" | "endRun" | "endAsideRun">;
   /** The hub's own `gh` login; null when it could not be read (then any assigned card is another's). */
   login: string | null;
+  /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
+  profiles?: () => readonly Profile[] | ProfilesError;
   engine: Pick<
     Engine,
     "onOperatorMessage" | "status" | "acceptRuling" | "syncMain" | "uncommitted"
@@ -289,6 +310,11 @@ const BriefItemArgs = z.strictObject({
     .optional(),
   basis: basisArg,
 });
+const UpdateBriefArgs = z.strictObject({
+  section: z.enum(FLIGHT_BRIEF_SECTIONS),
+  text: z.string().max(FLIGHT_BRIEF_INPUT_MAX),
+  basis: basisArg,
+});
 const AnswerArgs = z
   .strictObject({
     question_id: z.number().int().min(1),
@@ -297,11 +323,17 @@ const AnswerArgs = z
     basis: basisArg,
   })
   .refine((a) => (a.answer === undefined) !== (a.pass_to_operator === undefined), ANSWER_ONE_OF);
-const StartSeatArgs = z.strictObject({
-  seat: z.string().regex(SEAT_ID),
-  issue: issueNumber,
-  basis: basisArg,
-});
+const StartSeatArgs = z
+  .strictObject({
+    seat: z.string().regex(SEAT_ID),
+    issue: issueNumber,
+    profile: z.string().regex(PROFILE_NAME).optional(),
+    profile_reason: text(PROFILE_REASON_MAX).optional(),
+    basis: basisArg,
+  })
+  .refine((a) => (a.profile === undefined) === (a.profile_reason === undefined), {
+    message: PROFILE_PAIR_TEXT,
+  });
 /** A developer run by its id: `accept_ruling`, `sync_main` and `end_run` take this. */
 const RunArgs = z.strictObject({ runId: z.string().min(1).max(200), basis: basisArg });
 const MessageSeatArgs = z.strictObject({
@@ -671,6 +703,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const c = flightCall(deps, ctx, StartSeatArgs, args);
     if (!c.ok) return c.result;
     const { seat, issue, basis } = c.args;
+    const override: ProfileOverride | undefined =
+      c.args.profile !== undefined && c.args.profile_reason !== undefined
+        ? { profile: c.args.profile, reason: c.args.profile_reason, by: "FLIGHT" }
+        : undefined;
     const cfg = seatCfg(seat);
     const repo = repoOf();
     if (cfg === undefined || repo === undefined) return fail(notInSessionText(seat));
@@ -707,13 +743,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
     let body: string;
+    let labels: string[];
     try {
-      body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+      const ticket = await deps.fetchTicket(repo, issue);
+      body = ticket?.body ?? "";
+      labels = ticket?.labels ?? card.labels;
     } catch {
       return fail(START_NO_GITHUB);
     }
+    const chosen = chooseRunProfile(
+      deps.profiles?.() ?? DEFAULT_PROFILES,
+      labels,
+      card.size,
+      override ?? store.profileOverride(repo.id, issue),
+    );
+    if ("refusal" in chosen) return fail(chosen.refusal);
     const board = store.board(repo.id);
     const refusal = eligibleToStart({
+      planRequired: chosen.profile.planRequired,
       repoId: repo.id,
       issue,
       card,
@@ -743,12 +790,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     try {
       // a planner starts with no loop: the engine never reconciles it or moves its card
-      if (planner) await deps.supervisor.startRun(seat, issue);
-      else {
+      if (planner) {
+        if (override) await deps.supervisor.startRun(seat, issue, { override });
+        else await deps.supervisor.startRun(seat, issue);
+      } else {
+        const loop = deps.engine?.status().on === true ? { loop: NEW_LOOP } : {};
         await deps.supervisor.startRun(
           seat,
           issue,
-          deps.engine?.status().on === true ? { loop: NEW_LOOP } : undefined,
+          override || loop.loop ? { ...loop, ...(override ? { override } : {}) } : undefined,
         );
       }
     } catch (e) {
@@ -1573,6 +1623,34 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: JSON.stringify({ repo: repo.id, tickets, more }) };
   }
 
+  async function updateBrief(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, UpdateBriefArgs, args);
+    if (!c.ok) return c.result;
+    const { section, text: body, basis } = c.args;
+    const session = flightSeat(config)?.session.id;
+    if (session === undefined) return fail(MC_FLIGHT_ONLY);
+    const title = FLIGHT_BRIEF_TITLES[section];
+    if (body.length > FLIGHT_BRIEF_SECTION_MAX) return fail(briefTooLongText(title, body.length));
+    const at = now();
+    const n = lastHour(["brief"], at);
+    if (n >= FLIGHT_BRIEF_EDITS_PER_HOUR) return fail(capText("updated your brief", n));
+    store.setFlightBriefSection({
+      sessionId: session,
+      section,
+      text: body,
+      updatedAt: at,
+      updatedBy: ctx.seatId,
+    });
+    record(at, {
+      kind: "brief",
+      about: briefAboutText(title),
+      decision: body === "" ? BRIEF_CLEARED_DECISION : briefSavedDecision(body.length),
+      basis,
+    });
+    bus.emit("flight");
+    return { text: body === "" ? briefClearedText(title) : briefSavedText(title, body.length) };
+  }
+
   return [
     {
       name: MC_TOOL_NAMES.logDecision,
@@ -1628,11 +1706,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.startSeat,
       description: START_SEAT_DESCRIPTION,
-      inputSchema: objectSchema({ seat: SEAT_SCHEMA, issue: ISSUE_SCHEMA, basis: BASIS_SCHEMA }, [
-        "seat",
-        "issue",
-        "basis",
-      ]),
+      inputSchema: objectSchema(
+        {
+          seat: SEAT_SCHEMA,
+          issue: ISSUE_SCHEMA,
+          profile: { type: "string", pattern: PROFILE_NAME.source },
+          profile_reason: { type: "string", minLength: 1, maxLength: PROFILE_REASON_MAX },
+          basis: BASIS_SCHEMA,
+        },
+        ["seat", "issue", "basis"],
+      ),
       modes: [],
       grantable: ["read-only"],
       call: startSeat,
@@ -1658,7 +1741,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.flightState,
       description:
-        "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and limits.",
+        "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and limits; and your brief.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       modes: [],
       grantable: ["read-only"],
@@ -1797,6 +1880,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: listTickets,
+    },
+    {
+      name: MC_TOOL_NAMES.updateBrief,
+      description: UPDATE_BRIEF_DESCRIPTION,
+      inputSchema: objectSchema(
+        {
+          section: { type: "string", enum: FLIGHT_BRIEF_SECTIONS },
+          text: { type: "string", maxLength: FLIGHT_BRIEF_SECTION_MAX },
+          basis: BASIS_SCHEMA,
+        },
+        ["section", "text", "basis"],
+      ),
+      modes: [],
+      grantable: ["read-only"],
+      call: updateBrief,
     },
   ];
 }
