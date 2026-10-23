@@ -6,6 +6,7 @@ import {
   fillLoopText,
   freezeRules,
   NEW_LOOP,
+  type PullRequestView,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
   type RepoRules,
@@ -844,6 +845,83 @@ describe("takeNext", () => {
     expect(seatMayTake(store, SERVER)).toBe(false);
     store.setRunLoop("r-aside", loop(null));
     expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
+  it("rework first: CI failing on a set-aside run in ci holds the seat before any engine pass", async () => {
+    const SHA = "a".repeat(40);
+    store.upsertRun(
+      run({
+        id: "r-ci",
+        agentId: SERVER,
+        ticket: `${REPO}#9`,
+        loop: { ...NEW_LOOP, phase: "ci", prNumber: 12, aside: { worktree: "/w/x", wake: false } },
+      }),
+    );
+    store.setRunPush({ runId: "r-ci", sha: SHA, at: NOW });
+    seatRow("idle");
+    await queued(card(1));
+    const pr = (over: Partial<PullRequestView>): PullRequestView => ({
+      repoId: REPO,
+      number: 12,
+      title: "t",
+      url: "u",
+      branch: "b",
+      ticket: null,
+      state: "open",
+      isDraft: true,
+      review: null,
+      ci: "pending",
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: SHA,
+      mergeable: "MERGEABLE",
+      ...over,
+    });
+    store.upsertPullRequests(REPO, [pr({})], NOW);
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    store.upsertPullRequests(REPO, [pr({ ci: "failing" })], NOW);
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    await take();
+    expect(started).toEqual([]);
+    expect(store.queue(SERVER)[0]?.takenAt).toBeNull();
+    store.upsertPullRequests(REPO, [pr({ ci: "failing", headSha: "b".repeat(40) })], NOW);
+    expect(seatMayTake(store, SERVER)).toBe(true);
+  });
+
+  it("the cap: a seat with two runs set aside takes no third", async () => {
+    seatRow("idle");
+    await queued(card(1));
+    const loop = {
+      ...NEW_LOOP,
+      phase: "review" as const,
+      aside: { worktree: "/w/x", wake: false },
+    };
+    store.upsertRun(run({ id: "r-a", agentId: SERVER, ticket: `${REPO}#8`, loop }));
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    store.upsertRun(
+      run({ id: "r-b", agentId: SERVER, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }),
+    );
+    expect(seatMayTake(store, SERVER)).toBe(false);
+    await take();
+    expect(started).toEqual([]);
+    expect(seatMayTake(store, SERVER, 3)).toBe(true);
+    // the other seat's run does not count
+    store.upsertRun(
+      run({ id: "r-b", agentId: WEB, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }),
+    );
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    // nor does a finished one
+    store.upsertRun(
+      run({ id: "r-b", agentId: SERVER, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }),
+    );
+    store.setRunLoop("r-b", { ...loop, phase: "done" });
+    expect(seatMayTake(store, SERVER)).toBe(true);
+    // the configured cap is read
+    store.setRunLoop("r-b", loop);
+    if (config.crew !== undefined) config.crew.maxOpenRunsPerSeat = 3;
+    await take();
+    expect(started).toHaveLength(1);
   });
 
   it.each(["stopped", "error", "starting", "running", "parked"] as const)(

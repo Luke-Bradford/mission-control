@@ -358,6 +358,7 @@ describe("restartNeeded", () => {
     // not restart keys: the note is prose, max_seats applies live
     expect(changed((_c, k) => void Object.assign(k, { nodeNote: "old node" }))).toEqual([]);
     expect(changed((_c, k) => void Object.assign(k, { maxSeats: 2 }))).toEqual([]);
+    expect(changed((_c, k) => void Object.assign(k, { maxOpenRunsPerSeat: 5 }))).toEqual([]);
   });
 
   it("a changed checkout is crew.sessions; no crew on one side is crew", () => {

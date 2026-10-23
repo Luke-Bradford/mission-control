@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   asideEventText,
+  asideInCiEventText,
   type BoardItem,
   cleanupBranchNoteKey,
   closedIssueText,
@@ -2995,6 +2996,47 @@ describe("the engine runs reviews", () => {
       );
       reported(first().id, [finding("Important")]);
       await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+    });
+  });
+
+  describe("a run set aside in CI", () => {
+    /** PR open on the pushed sha, CI pending: off its seat. */
+    async function inCi(): Promise<void> {
+      h.asideOn = true;
+      report();
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "pending" });
+      await h.engine.reconcileRun(RUN);
+    }
+
+    it("freed in CI: the seat takes its next ticket", async () => {
+      await inCi();
+      expect(h.asides).toEqual([RUN]);
+      expect(loopOf().phase).toBe("ci");
+      expect(loopOf().aside).toEqual({ worktree: join(dir, "wt"), wake: false });
+      expect(store.seatSession(SEAT)?.runId).toBeNull();
+      expect(loopTexts()).toContain(asideInCiEventText("GUIDO-1"));
+      await vi.waitFor(() => expect(h.taken).toEqual([SEAT]));
+    });
+
+    it("CI passes while set aside: in review, still set aside", async () => {
+      await inCi();
+      setPr({ ci: "passing" });
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().phase).toBe("review");
+      expect(loopOf().aside?.wake).toBe(false);
+      expect(h.wakes).toEqual([]);
+    });
+
+    it("a CI failure wakes the run first, then its excerpt goes", async () => {
+      await inCi();
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(sentKeys()).toEqual([`ci:${RUN}:${SHA}`]));
+      expect(h.wakes).toEqual([RUN]);
+      expect(loopOf().aside).toBeNull();
+      expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+      expect(h.taken).toEqual([SEAT]);
     });
   });
 });

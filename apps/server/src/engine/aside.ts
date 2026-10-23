@@ -2,10 +2,11 @@ import { carriedFrom, fixKey, type Run, reviewFor } from "@mc/core";
 import type { Store } from "../store.ts";
 
 /**
- * Whether a run set aside in review is due back on its seat: the loop flagged it (`aside.wake`),
- * or its current review (this epoch, the pushed sha) has reported blocking findings whose fix line
- * is not yet claimed. The second reading is what keeps rework ahead of a new ticket in the gap
- * between RETRO recording findings and the author run's next engine pass setting the flag.
+ * Whether a run set aside in CI or review is due back on its seat: the loop flagged it
+ * (`aside.wake`), CI is failing on its pushed sha while it is in `ci`, or its current review (this
+ * epoch, the pushed sha) has reported blocking findings whose fix line is not yet claimed. The
+ * later readings keep rework ahead of a new ticket in the gap between the poll or RETRO recording
+ * the failure and the run's next engine pass setting the flag.
  */
 export function asideWakeDue(store: Store, run: Run): boolean {
   const aside = run.loop?.aside;
@@ -13,6 +14,11 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   if (aside.wake) return true;
   const pushed = store.runPush(run.id);
   if (pushed === null || run.loop === null || run.loop === undefined) return false;
+  if (run.loop.phase === "ci") {
+    const prNumber = run.loop.prNumber;
+    const pr = store.pullRequests(run.repoId).find((p) => p.number === prNumber);
+    return pr !== undefined && pr.headSha === pushed.sha && pr.ci === "failing";
+  }
   const cur = reviewFor(
     store.reviewsOfRun(run.id),
     run.loop.epoch,

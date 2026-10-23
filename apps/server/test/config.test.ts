@@ -295,6 +295,7 @@ describe("crew", () => {
     node?: string;
     denyRead?: string[];
     budget?: string;
+    maxOpen?: string;
     lane?: string;
     laneDefault?: string;
     /** `crew.roles` entries, one `NAME: {…}` per line. */
@@ -311,6 +312,7 @@ crew:
   ${opts.maxSeats === undefined ? "" : `max_seats: ${opts.maxSeats}`}
   ${opts.denyRead === undefined ? "" : `deny_read: ${JSON.stringify(opts.denyRead)}`}
   ${opts.budget === undefined ? "" : `run_token_budget: ${opts.budget}`}
+  ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
   ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
@@ -353,6 +355,14 @@ ${seats.join("\n")}
   it("rejects a run_token_budget of 0 or a non-integer", () => {
     for (const bad of ["0", "-5", "1.5", '"lots"']) {
       expect(fails(crewText({ budget: bad })).path).toBe("crew.runTokenBudget");
+    }
+  });
+
+  it("defaults max_open_runs_per_seat to 2 and takes a positive integer", () => {
+    expect(load(crewText({})).crew?.maxOpenRunsPerSeat).toBe(2);
+    expect(load(crewText({ maxOpen: "3" })).crew?.maxOpenRunsPerSeat).toBe(3);
+    for (const bad of ["0", "-1", "1.5"]) {
+      expect(fails(crewText({ maxOpen: bad })).path).toBe("crew.maxOpenRunsPerSeat");
     }
   });
 
