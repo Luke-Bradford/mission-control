@@ -11,6 +11,7 @@ import {
   otherLaneText,
   PLAN_SIZES,
   researchText,
+  startClosedText,
   startMissingNeedsText,
   startNeedsPlanText,
   ticketHasRunText,
@@ -18,6 +19,7 @@ import {
   waitsOnText,
   wrongAreaText,
 } from "./flight.ts";
+import { hudColumnOf } from "./hud.ts";
 import { type LoopKind, pathInArea } from "./runtime.ts";
 import type { BoardItem } from "./types.ts";
 
@@ -165,7 +167,10 @@ export function inLane(
 export interface StartCheck {
   repoId: string;
   issue: number;
-  card: Pick<BoardItem, "labels" | "assignees" | "blockedBy" | "size">;
+  card: Pick<
+    BoardItem,
+    "labels" | "assignees" | "blockedBy" | "size" | "status" | "state" | "closed"
+  >;
   rules: Pick<RepoRules, "areas" | "needs">;
   seat: { call: string; area: string[]; loop: LoopKind };
   login: string | null;
@@ -184,6 +189,8 @@ export interface StartCheck {
 export function eligibleToStart(c: StartCheck): string | null {
   const { card, rules, seat, body } = c;
   const ref = `${c.repoId}#${c.issue}`;
+  // work that has landed is not started again, whatever path asked
+  if (hudColumnOf(card) === "Done") return startClosedText(ref);
   if (c.lane !== undefined && !inLane(card.labels, c.lane, c.laneDefault)) {
     const laneLabels = card.labels.filter((l) => l.startsWith(LANE_PREFIX));
     return otherLaneText(ref, laneLabels, c.lane);

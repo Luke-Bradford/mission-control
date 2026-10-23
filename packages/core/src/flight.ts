@@ -179,6 +179,7 @@ export const waitsOnText = (ref: string, open: readonly string[]): string =>
   `Not started: ${ref} waits on ${open.join(", ")}.`;
 export const otherLaneText = (ref: string, laneLabels: readonly string[], lane: string): string =>
   `Not started: ${ref} has ${laneLabels.length === 0 ? "no lane label" : laneLabels.join(", ")}; this hub starts only lane:${lane} cards.`;
+export const startClosedText = (ref: string): string => `Not started: ${ref} is closed`;
 export const noAreaText = (ref: string): string => `Not started: ${ref} has no area label.`;
 export const researchText = (ref: string): string =>
   `Not started: ${ref} is a research ticket; developer seats do not start those.`;
