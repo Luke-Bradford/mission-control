@@ -394,6 +394,17 @@ describe("state step", () => {
     expect(reconcile(s).loop.phase).toBe("working");
   });
 
+  it("a profile's try limit parks CI on the first real failure at tries 1", () => {
+    const r = reconcile({
+      ...inCi({ pr: pr({ ci: "failing" }) }, { rerun: reran() }),
+      limits: { tries: 1, rounds: 3 },
+    });
+    expect(r.loop.parked).toMatchObject({
+      kind: "ci",
+      reason: "CI failed 1 times; last on aaaaaaa",
+    });
+  });
+
   describe("a failed CI is re-run once", () => {
     it("the first failure on a sha asks for a re-run and tells the seat nothing", () => {
       const r = reconcile(inCi({ pr: pr({ ci: "failing" }) }));
@@ -717,6 +728,35 @@ describe("desired-state step", () => {
       expect(r.actions).toEqual([{ kind: "ci-excerpt", key: `ci:r1:${SHA}`, sha: SHA }]);
       expect(reconcile(fail({}, { relayedSha: SHA })).actions).toEqual([]);
       expect(reconcile(fail({ claimed: { [`ci:r1:${SHA}`]: 1 } })).actions).toEqual([]);
+    });
+
+    it("relays the failure of FLIGHT's re-run once, keyed by the sha, ahead of the first excerpt", () => {
+      const rerun = { sha: SHA, runs: [{ id: 11, attempt: 1 }] };
+      const again = { kind: "ci-excerpt", key: `rerun:r1:${SHA}`, sha: SHA, again: true };
+      const failed = fail({}, { relayedSha: SHA, rulingRerun: { ...rerun, outcome: "failed" } });
+      expect(reconcile(failed).actions).toEqual([again]);
+      expect(reconcile({ ...failed, claimed: { [`rerun:r1:${SHA}`]: 1 } }).actions).toEqual([]);
+      // a re-run still going, or one that passed, or one on another sha, says nothing
+      for (const outcome of ["pending", "passed"] as const) {
+        expect(
+          reconcile(fail({}, { relayedSha: SHA, rulingRerun: { ...rerun, outcome } })).actions,
+        ).toEqual([]);
+      }
+      const other = { ...rerun, sha: SHA2, outcome: "failed" as const };
+      expect(reconcile(fail({}, { relayedSha: SHA, rulingRerun: other })).actions).toEqual([]);
+    });
+
+    it("keeps the re-run on the loop it hands back, sharing nothing with the input", () => {
+      const s = fail(
+        {},
+        {
+          relayedSha: SHA,
+          rulingRerun: { sha: SHA, runs: [{ id: 11, attempt: 1 }], outcome: "pending" },
+        },
+      );
+      const out = reconcile(s).loop.rulingRerun;
+      expect(out).toEqual(s.loop.rulingRerun);
+      expect(out?.runs).not.toBe(s.loop.rulingRerun?.runs);
     });
 
     it("sends nothing while the seat is in a turn", () => {
@@ -1682,6 +1722,27 @@ describe("review decisions", () => {
     const r = reconcile(s);
     expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA) });
     expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a profile's round limit parks review after one blocking review at rounds 1", () => {
+    const s = inReview(withReview([fact({ id: 1, blocking: 1 })], [finding]));
+    const r = reconcile({ ...s, limits: { tries: 3, rounds: 1 } });
+    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
+    expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a profile's round limit above 3 sends the third fix line instead of parking", () => {
+    const rows = [
+      fact({ id: 1, blocking: 1 }),
+      fact({ id: 2, blocking: 1, sha: SHA }),
+      fact({ id: 3, blocking: 1 }),
+    ];
+    const s = inReview(withReview(rows, [finding]), {
+      claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
+    });
+    const r = reconcile({ ...s, limits: { tries: 3, rounds: 4 } });
+    expect(r.loop.parked ?? null).toBeNull();
+    expect(sends(r.actions)).toEqual(["fix:r1:0:3"]);
   });
 
   it("a clean review raises the ready note and the PR body edit", () => {

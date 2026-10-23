@@ -7,6 +7,8 @@ import {
   type AttentionItem,
   clockHm,
   FLIGHT_ABOUT_MAX,
+  FLIGHT_BRIEF_SECTIONS,
+  FLIGHT_BRIEF_TITLES,
   FLIGHT_HOUR_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_MESSAGES_PER_HOUR,
@@ -17,6 +19,8 @@ import {
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
+  type FlightBriefSection,
+  type FlightBriefView,
   type FlightSeatState,
   type FlightState,
   type FlightView,
@@ -26,6 +30,8 @@ import {
   OWNER_OPERATOR,
   PRIORITIES,
   READY_LABEL,
+  RULING_PARK,
+  type Run,
   seatCallSign,
   seatDef,
 } from "@mc/core";
@@ -72,6 +78,16 @@ export function flightSeat(
   return null;
 }
 
+/** The seats whose run the HUD shows as stalled. */
+export function stalledSeats(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  rows = crew(config, store, now, NO_LOCK, () => null).rows,
+): Set<string> {
+  return new Set(rows.filter((r) => r.hudState === "stalled").map((r) => r.id));
+}
+
 /** The ids FLIGHT can answer for: its own session's seats other than FLIGHT itself. */
 export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
   const found = flightSeat(config);
@@ -103,6 +119,28 @@ export function flightView(config: CcConfig, store: Store, now: number): FlightV
           },
     decisions: store.flightDecisions(now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
   };
+}
+
+/** All nine sections of a session's brief, in order; one never written (or no session) is empty. */
+export function flightBriefSections(store: Store, sessionId: string | null): FlightBriefSection[] {
+  const rows = new Map(
+    (sessionId === null ? [] : store.flightBrief(sessionId)).map((r) => [r.section, r]),
+  );
+  return FLIGHT_BRIEF_SECTIONS.map((section) => {
+    const r = rows.get(section);
+    return {
+      section,
+      title: FLIGHT_BRIEF_TITLES[section],
+      text: r?.text ?? "",
+      updatedAt: r?.updatedAt ?? null,
+      updatedBy: r?.updatedBy ?? null,
+    };
+  });
+}
+
+export function flightBriefView(config: CcConfig, store: Store): FlightBriefView {
+  const session = flightSeat(config)?.session.id ?? null;
+  return { session, sections: flightBriefSections(store, session) };
 }
 
 const priorityRank = (p: string | null): number => {
@@ -165,11 +203,22 @@ export function flightState(i: {
         store.countFlightDecisions({ kinds: ["answer", "message", "unpark"], since }),
     ),
   };
-  const recent = store.flightDecisions(0, FLIGHT_RECENT_LISTED).map((d) => ({
-    time: clockHm(d.at, tz),
-    kind: d.kind,
-    about: d.about,
-    decision: d.decision,
+  // brief edits stay out of `recent`: the brief itself is in the state, and edits would crowd it
+  const recent = store
+    .flightDecisions(0, FLIGHT_RECENT_LISTED * 4)
+    .filter((d) => d.kind !== "brief")
+    .slice(0, FLIGHT_RECENT_LISTED)
+    .map((d) => ({
+      time: clockHm(d.at, tz),
+      kind: d.kind,
+      about: d.about,
+      decision: d.decision,
+    }));
+  const brief = flightBriefSections(store, found?.session.id ?? null).map((b) => ({
+    section: b.section,
+    title: b.title,
+    text: b.text,
+    ageMin: b.updatedAt === null ? null : Math.floor((now - b.updatedAt) / 60_000),
   }));
   if (found === null) {
     return {
@@ -178,6 +227,7 @@ export function flightState(i: {
       lane: config.crew?.lane ?? null,
       hubLogin: i.hubLogin ?? null,
       seats: [],
+      aside: [],
       questions: [],
       tickets: [],
       prs: [],
@@ -185,12 +235,13 @@ export function flightState(i: {
       holds: [],
       recent,
       limits,
+      brief,
     };
   }
   const { session } = found;
   const board = store.board(session.repoId);
   const crewRows = crew(config, store, now, NO_LOCK, () => null).rows;
-  const stalled = new Set(crewRows.filter((r) => r.hudState === "stalled").map((r) => r.id));
+  const stalled = stalledSeats(config, store, now, crewRows);
   const mine = session.seats.filter((s) => s.id !== found.seat.id && !s.retiring);
   const unended = (seatId: string) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -207,6 +258,7 @@ export function flightState(i: {
     const last = row?.lastTurnEndedAt ?? null;
     return {
       id: s.id,
+      runId: run?.id ?? null,
       call: seatCallSign(s.id),
       role: s.role,
       loop: seatDef(s).loop,
@@ -304,6 +356,7 @@ export function flightState(i: {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
         seat: holder?.agentId ?? "",
+        runId: holder?.id ?? "",
         ready: holder !== undefined && ready.has(holder.id),
         state: p.state,
         headSha: p.headSha,
@@ -311,6 +364,23 @@ export function flightState(i: {
         stale: stale.has(p.number),
       };
     });
+
+  const aside = store
+    .loopRuns(now)
+    .filter(
+      (r) =>
+        r.endedAt === null &&
+        r.loop?.aside != null &&
+        r.repoId === session.repoId &&
+        mine.some((s) => s.id === r.agentId),
+    )
+    .map((r) => ({
+      runId: r.id,
+      seat: r.agentId,
+      ticket: r.ticket ?? null,
+      phase: r.loop?.phase ?? "working",
+      parked: asideParked(r),
+    }));
 
   const prStates = new Map(store.pullRequests(session.repoId).map((p) => [p.number, p.state]));
   // A hold ends when the board has moved its card past Backlog (or closed or dropped it). A PR
@@ -341,6 +411,7 @@ export function flightState(i: {
       },
     ];
   });
+
   const briefed = store.briefs();
   const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
     .filter((x) => !briefed.has(x.key))
@@ -360,6 +431,7 @@ export function flightState(i: {
     lane: config.crew?.lane ?? null,
     hubLogin: i.hubLogin ?? null,
     seats,
+    aside,
     questions,
     tickets,
     prs,
@@ -367,8 +439,15 @@ export function flightState(i: {
     holds,
     recent,
     limits,
+    brief,
   };
 }
+
+/** A set-aside run's park, as FLIGHT reads it; null when it is not parked. */
+const asideParked = (run: Run): { kind: string; reason: string } | null =>
+  run.loop?.phase === "parked"
+    ? { kind: run.loop.parked?.kind ?? "", reason: run.loop.parked?.reason ?? "" }
+    : null;
 
 /** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
 export function wakeFacts(s: FlightState): string {
@@ -381,10 +460,14 @@ export function wakeFacts(s: FlightState): string {
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: free.length > 0 ? startable.map((t) => t.ref) : [],
-    parked: s.seats
-      .filter((x) => x.parked !== null)
-      .map((x) => `${x.id}:${x.ticket}:${x.parked?.kind}`)
-      .sort(),
+    parked: [
+      ...s.seats
+        .filter((x) => x.parked !== null)
+        .map((x) => `${x.id}:${x.ticket}:${x.parked?.kind}`),
+      ...s.aside
+        .filter((x) => x.parked !== null)
+        .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
+    ].sort(),
     stopped: stoppedSeats(s),
     prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}`).sort(),
     items: s.items.map((x) => x.key).sort(),
@@ -406,6 +489,10 @@ const stoppedSeats = (s: FlightState): string[] =>
     .map((x) => x.id)
     .sort();
 
+/** A park FLIGHT acts on: one it may lift, or a CI ruling it may settle. */
+const flightParkKind = (kind: string): boolean =>
+  kind === RULING_PARK || (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
+
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
 export function pending(s: FlightState): boolean {
   return (
@@ -414,9 +501,7 @@ export function pending(s: FlightState): boolean {
     releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
     (s.tickets.some((t) => t.ready) && s.seats.some((x) => x.loop === "build" && x.free)) ||
-    s.seats.some(
-      (x) =>
-        x.parked !== null && (FLIGHT_UNPARK_KINDS as readonly string[]).includes(x.parked.kind),
-    )
+    s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
+    s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
   );
 }

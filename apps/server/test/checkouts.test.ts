@@ -265,6 +265,38 @@ describe("prepareCheckout", () => {
     expect(git(wtPath(), "status", "--porcelain")).toBe("");
   });
 
+  it("installs when a base lockfile is over the 4 MiB default read", async () => {
+    commit(seed, {
+      "package.json": PKG,
+      "pnpm-lock.yaml": `${EMPTY_LOCK}${"# padding padding padding padding\n".repeat(160_000)}`,
+    });
+    git(seed, "push", "-q", "origin", "main");
+    await prepareCheckout(input());
+    expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
+  });
+
+  it("says a git that times out reading a base file timed out", async () => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const shim = join(dir, "shim");
+    mkdirSync(shim);
+    writeFileSync(
+      join(shim, "git"),
+      `#!/bin/sh\ncase " $* " in *" cat-file -e "*) ;; *" cat-file "*) exec sleep 30;; esac\nexec ${realGit} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${shim}:${savedPath}`;
+    try {
+      const e = await fail(prepareCheckout(input()));
+      expect(e.code).toBe("protected");
+      expect(e.message).toMatch(/^could not read \S+ from the crew clone \(timed out\)$/);
+    } finally {
+      process.env.PATH = savedPath;
+    }
+  }, 30_000);
+
   it("removes the worktree and the fresh branch when the install fails", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": "garbage: [\n" });
     git(seed, "push", "-q", "origin", "main");

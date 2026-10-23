@@ -235,6 +235,7 @@ describe("FLIGHT's PR list", () => {
         ref: "mc#7",
         pr: 7,
         seat: "",
+        runId: "",
         ready: false,
         state: "open",
         headSha: "sha7",
@@ -457,6 +458,35 @@ describe("FLIGHT's items to brief", () => {
     const cfg = structuredClone(config);
     for (const s of cfg.crew?.sessions[0]?.seats ?? []) if (s.id === "flight-1") s.retiring = true;
     expect(flightState({ config: cfg, store, busy: [], now: T0 }).items).toEqual([]);
+  });
+});
+
+describe("FLIGHT's brief in the digest", () => {
+  const setGoals = (at: number) =>
+    store.setFlightBriefSection({
+      sessionId: "s1",
+      section: "goals",
+      text: "Ship the brief.",
+      updatedAt: at,
+      updatedBy: "flight-1",
+    });
+
+  it("starts FLIGHT with the whole brief", async () => {
+    setGoals(T0);
+    await watch.check();
+    const state = JSON.parse(startCalls[0]?.first?.split("\n")[2] ?? "") as FlightState;
+    expect(state.brief).toHaveLength(9);
+    expect(state.brief[0]?.text).toBe("Ship the brief.");
+  });
+
+  it("a brief edit alone does not wake FLIGHT", async () => {
+    liveCrew();
+    await watch.check();
+    const sent = sendCalls.length;
+    setGoals(T0);
+    nowMs = T0 + MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(sent);
   });
 });
 
@@ -856,6 +886,7 @@ describe("the FLIGHT watcher", () => {
 describe("wakeSummary", () => {
   const s = (over: Partial<FlightSeatState>): FlightSeatState => ({
     id: "guido-1",
+    runId: null,
     call: "GUIDO-1",
     role: "GUIDO",
     loop: "build",
@@ -878,6 +909,7 @@ describe("wakeSummary", () => {
     ref: "mc#1",
     pr: 1,
     seat: "guido-1",
+    runId: "r-1",
     ready: false,
     state: "open" as const,
     headSha: null,
@@ -890,6 +922,7 @@ describe("wakeSummary", () => {
     lane: null,
     hubLogin: null,
     seats: [],
+    aside: [],
     questions: [],
     tickets: [],
     prs: [],
@@ -897,6 +930,7 @@ describe("wakeSummary", () => {
     holds: [],
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
+    brief: [],
     ...over,
   });
 
@@ -988,6 +1022,29 @@ describe("wakeSummary", () => {
       );
       expect(pending(state({ seats: [s({ free: true })] }))).toBe(false);
       expect(pending(state({}))).toBe(false);
+    });
+
+    it("is true for a ruling park, which FLIGHT settles, and false for a budget park", () => {
+      expect(pending(state({ seats: [s({ parked: { kind: "ruling", reason: "r" } })] }))).toBe(
+        true,
+      );
+      expect(pending(state({ seats: [s({ parked: { kind: "budget", reason: "r" } })] }))).toBe(
+        false,
+      );
+    });
+
+    it("counts a parked set-aside run, in pending and in wakeFacts", () => {
+      const aside = {
+        runId: "r1",
+        seat: "guido-1",
+        ticket: "#1",
+        phase: "parked" as const,
+        parked: { kind: "ruling", reason: "r" },
+      };
+      expect(pending(state({ aside: [aside] }))).toBe(true);
+      const unparked = state({ aside: [{ ...aside, parked: null }] });
+      expect(pending(unparked)).toBe(false);
+      expect(wakeFacts(state({ aside: [aside] }))).not.toBe(wakeFacts(unparked));
     });
   });
 });

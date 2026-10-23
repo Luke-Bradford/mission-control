@@ -1,12 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   asideEventText,
   asideInCiEventText,
   type BoardItem,
   cleanupBranchNoteKey,
   closedIssueText,
+  DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   deletedLocalText,
   deletedRemoteText,
@@ -28,6 +30,7 @@ import {
   minorNotPostedText,
   NEW_LOOP,
   originMovedText,
+  type Profile,
   type PullRequestView,
   parkedEventText,
   prNamedRefText,
@@ -54,6 +57,7 @@ import {
   reviewQueuedText,
   reviewStartedText,
   type SeatSessionRow,
+  seatDef,
   wakeFailedText,
   wokenEventText,
 } from "@mc/core";
@@ -73,6 +77,8 @@ import type {
   OpenPrResult,
   Publisher,
   PublishResult,
+  RerunResult,
+  RerunStateResult,
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
 import { MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
@@ -288,6 +294,12 @@ interface Harness {
   wakeError: Error | null;
   /** The run's local branch no longer exists (localBranchGone answers true). */
   branchGone: boolean;
+  /** FLIGHT's CI re-runs asked for, and the next answers of rerunRuling and rerunState (empty: one run, pending). */
+  rulingReruns: { repo: string; sha: string }[];
+  rerunResults: RerunResult[];
+  rerunStates: RerunStateResult[];
+  /** What worktreeChanges answers (a path list, or a refusal). */
+  changes: string[] | { ok: false; text: string; transient: boolean };
   rules: EngineDeps["rules"];
   make: (over?: Partial<EngineDeps>) => Engine;
 }
@@ -343,6 +355,10 @@ function harness(): Harness {
     wakes: [],
     wakeError: null,
     branchGone: false,
+    rulingReruns: [],
+    rerunResults: [],
+    rerunStates: [],
+    changes: [],
     rules: async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true }),
     make: (over = {}) => {
       const publisher: Publisher = {
@@ -384,6 +400,16 @@ function harness(): Harness {
           x.reruns.push(sha);
           x.duringRerun?.();
           return x.rerunRuns;
+        },
+        async rerunRuling(repo, sha) {
+          x.rulingReruns.push({ repo, sha });
+          return x.rerunResults.shift() ?? { ok: true, runs: [{ id: 11, attempt: 1 }] };
+        },
+        async rerunState() {
+          return x.rerunStates.shift() ?? { ok: true, outcome: "pending" };
+        },
+        async worktreeChanges() {
+          return x.changes;
         },
         async hardRuleTouches() {
           return x.touches;
@@ -544,6 +570,24 @@ const report = (note = "Changed the thing", sha = SHA) => {
   clock += 1000;
   store.addEvidence(RUN, note, clock);
   clock += 1000;
+};
+/** Gives RUN a profile snapshot; `upsertRun` never rewrites one, so this writes the row directly. */
+const giveProfile = (over: Partial<Profile>): void => {
+  const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+  const snapshot = {
+    profile: { ...feature, ...over },
+    route: { by: "size", size: "M" },
+  };
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    db.prepare("UPDATE runs SET profile = ?, profile_hash = ? WHERE id = ?").run(
+      JSON.stringify(snapshot),
+      "h",
+      RUN,
+    );
+  } finally {
+    db.close();
+  }
 };
 const setPr = (over: Partial<PullRequestView> = {}) =>
   store.upsertPullRequests(REPO, [prRow(over)], clock);
@@ -1137,6 +1181,19 @@ describe("The operator's message", () => {
     await h.engine.reconcileRun(RUN);
   }
 
+  it("the run's profile try limit parks CI on the first real failure at tries 1", async () => {
+    giveProfile({ tries: 1 });
+    report();
+    await h.engine.reconcileRun(RUN);
+    // the first failure is re-run; the second is the real one
+    await failCi();
+    await h.engine.reconcileRun(RUN);
+    expect(store.run(RUN)?.loop?.parked).toMatchObject({
+      kind: "ci",
+      reason: "CI failed 1 times; last on aaaaaaa",
+    });
+  });
+
   it("un-parks a parked run, and its next park has a new blocked key", async () => {
     await parkOnCi();
     expect(noteKeys()).toContain(`blocked:${RUN}:0`);
@@ -1620,6 +1677,130 @@ describe("boot", () => {
   });
 });
 
+describe("FLIGHT settles a ruling", () => {
+  /** The author ruled on the CI failure on SHA: parked as `ruling`, PR 12 open with head SHA. */
+  async function ruled(): Promise<void> {
+    commit();
+    store.setRunPush({ runId: RUN, sha: SHA, at: clock });
+    setPr({ ci: "failing" });
+    setLoop({
+      phase: "parked",
+      prNumber: 12,
+      ciFailedSha: SHA,
+      ciFails: 1,
+      relayedSha: SHA,
+      cardFor: "working:0",
+      parked: { kind: "ruling", reason: "ruled", ended: false },
+    });
+  }
+  const accept = (mayRerun = true) => h.engine.acceptRuling(RUN, { mayRerun });
+
+  it("re-runs once, waits while it runs, then accepts a pass and clears the failure", async () => {
+    await ruled();
+    expect(await accept()).toEqual({ kind: "rerun", sha: SHA });
+    expect(h.rulingReruns).toEqual([{ repo: "o/mc", sha: SHA }]);
+    expect(loopOf().rulingRerun).toEqual({
+      sha: SHA,
+      runs: [{ id: 11, attempt: 1 }],
+      outcome: "pending",
+    });
+    expect(await accept()).toEqual({ kind: "pending", sha: SHA });
+    h.rerunStates = [{ ok: true, outcome: "passed" }];
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
+    expect(loopOf()).toMatchObject({
+      phase: "review",
+      ciFailedSha: null,
+      parked: null,
+      ciFails: 0,
+      epoch: 1,
+      unparkedAt: clock,
+    });
+    expect(h.rulingReruns).toHaveLength(1);
+    expect(h.polls).toBeGreaterThan(0);
+    expect(sentKeys()).toEqual([]);
+  });
+
+  it("sends the author the failure when the re-run fails, and refuses", async () => {
+    await ruled();
+    await accept();
+    h.rerunStates = [{ ok: true, outcome: "failed" }];
+    expect(await accept()).toEqual({ kind: "refused", sha: SHA });
+    expect(loopOf()).toMatchObject({ phase: "working", ciFailedSha: SHA, parked: null });
+    expect(sentKeys()).toEqual([`rerun:${RUN}:${SHA}`]);
+    expect(h.sent[0]?.text).toBe(
+      `CI failed again on ${SHA.slice(0, 7)} when FLIGHT re-ran it, so your ruling was not accepted. Fix it, commit, and report again. The failing output:\nEXCERPT`,
+    );
+    // the line is sent once
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it("re-runs a sha only once: a second ruling on it goes to the operator", async () => {
+    await ruled();
+    await accept();
+    h.rerunStates = [{ ok: true, outcome: "failed" }];
+    await accept();
+    // the author rules again on the same sha
+    setLoop({ phase: "parked", parked: { kind: "ruling", reason: "ruled again", ended: false } });
+    const r = await accept();
+    expect(r).toEqual({
+      kind: "not",
+      text: `${SHA.slice(0, 7)} was already re-run once; pass this ruling to the operator`,
+    });
+    expect(h.rulingReruns).toHaveLength(1);
+  });
+
+  it("does not re-run when the hourly cap is used, and says so", async () => {
+    await ruled();
+    expect(await accept(false)).toEqual({ kind: "capped" });
+    expect(h.rulingReruns).toEqual([]);
+  });
+
+  it("refuses a run that is not parked on a ruling, or whose ruled commit is not the PR's head", async () => {
+    await ruled();
+    setLoop({ parked: { kind: "ci", reason: "x", ended: false } });
+    expect(await accept()).toEqual({
+      kind: "not",
+      text: "the run is not parked on a CI ruling",
+    });
+    setLoop({ parked: { kind: "ruling", reason: "x", ended: true } });
+    expect(await accept()).toMatchObject({ kind: "not" });
+    setLoop({ parked: { kind: "ruling", reason: "x", ended: false } });
+    setPr({ ci: "failing", headSha: SHA_B });
+    expect(await accept()).toEqual({
+      kind: "not",
+      text: "the ruled commit is no longer its open PR's head",
+    });
+    expect(h.rulingReruns).toEqual([]);
+  });
+
+  it("refuses a rerun gh would not start, leaving no re-run recorded", async () => {
+    await ruled();
+    h.rerunResults = [{ ok: false, text: "no failed Actions run", transient: false }];
+    expect(await accept()).toEqual({ kind: "not", text: "no failed Actions run" });
+    expect(loopOf().rulingRerun ?? null).toBeNull();
+  });
+
+  it("does nothing while the engine is off", async () => {
+    await ruled();
+    h.engine.stop();
+    expect(await accept()).toEqual({ kind: "not", text: "the loop engine is off" });
+  });
+});
+
+describe("the paths a run's worktree holds uncommitted", () => {
+  it("reads the seat's worktree, and null when there is none or it cannot be read", async () => {
+    h.changes = ["apps/a.ts"];
+    expect(await h.engine.uncommitted(RUN)).toEqual(["apps/a.ts"]);
+    h.changes = { ok: false, text: "git failed", transient: true };
+    expect(await h.engine.uncommitted(RUN)).toBeNull();
+    h.changes = [];
+    seatIdle(null);
+    expect(await h.engine.uncommitted(RUN)).toBeNull();
+    expect(await h.engine.uncommitted("no-such-run")).toBeNull();
+  });
+});
+
 describe("review round", () => {
   it("reads a Ruling: report as a ruling on the failed sha, and parks", async () => {
     commit();
@@ -2002,6 +2183,21 @@ describe("the engine runs reviews", () => {
     expect(reviewerOf(config, "guido-1")).toBeNull();
   });
 
+  it("requests the review from the seat with the run's profile reviewer role", async () => {
+    seats().push({ ...retroSeat(), id: "other-1", role: "AUDIT", def: seatDef(retroSeat()) });
+    giveProfile({ reviewer: { role: "AUDIT", depth: "light" } });
+    await toReview();
+    expect(reviewRows().map((r) => r.seatId)).toEqual(["other-1"]);
+  });
+
+  it("reviewerOf prefers the review seat with the profile's role, else the first", () => {
+    seats().push({ ...retroSeat(), id: "other-1", role: "AUDIT", def: seatDef(retroSeat()) });
+    expect(reviewerOf(config, "guido-1", "AUDIT")?.id).toBe("other-1");
+    expect(reviewerOf(config, "guido-1", "RETRO")?.id).toBe(RETRO);
+    expect(reviewerOf(config, "guido-1", "NOBODY")?.id).toBe(RETRO);
+    expect(reviewerOf(config, "guido-1")?.id).toBe(RETRO);
+  });
+
   it("a queued review for a removed reviewer is re-requested for the new one", async () => {
     h.busyList = [{ seatId: RETRO, state: "running" }];
     await toReview();
@@ -2283,6 +2479,106 @@ describe("the engine runs reviews", () => {
         expect(reviewRows().map((r) => r.sha)).toContain(SHA_B);
         // nothing is merged into the branch twice
         expect(h.updates).toHaveLength(1);
+      });
+
+      describe("FLIGHT asks for it", () => {
+        const parkedOnConflict = async () => {
+          await toReview();
+          await h.engine.reconcileRun(RUN);
+          setLoop({
+            phase: "parked",
+            parked: { kind: "conflict", reason: "PR #12 conflicts with main", ended: false },
+          });
+        };
+
+        it("syncMain merges main with the engine's own merge", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
+          await parkedOnConflict();
+          const before = loopOf().epoch;
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "merged",
+            sha: SHA_B,
+            mainSha: MAIN,
+          });
+          expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
+          expect(loopOf()).toMatchObject({
+            phase: "ci",
+            pushFor: SHA_B,
+            parked: null,
+            epoch: before + 1,
+            unparkedAt: clock,
+          });
+          expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(true);
+          expect(loopTexts()).toContain(`merged main ${MAIN.slice(0, 7)} into the branch`);
+        });
+
+        it("a conflicting merge goes back to the author", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts"] }];
+          await parkedOnConflict();
+          expect(await h.engine.syncMain(RUN)).toEqual({ kind: "conflict", files: ["apps/a.ts"] });
+          expect(loopOf()).toMatchObject({
+            phase: "working",
+            mainMerge: { mainSha: MAIN, files: ["apps/a.ts"] },
+          });
+        });
+
+        it("a branch that has main already is current, and nothing is merged", async () => {
+          await parkedOnConflict();
+          expect(await h.engine.syncMain(RUN)).toEqual({ kind: "current", mainSha: MAIN });
+          expect(h.updates).toEqual([]);
+        });
+
+        it("a run in review that is behind is merged without a park", async () => {
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
+          await toReview();
+          await h.engine.reconcileRun(RUN);
+          const before = loopOf().epoch;
+          expect(await h.engine.syncMain(RUN)).toMatchObject({ kind: "merged" });
+          expect(loopOf().epoch).toBe(before);
+        });
+
+        it("refuses a seat in a turn, a worktree with changes, a run in the wrong place", async () => {
+          behindMain();
+          await parkedOnConflict();
+          h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "refused",
+            text: "its seat is in a turn",
+          });
+          h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+          // updateBranch answers wait (its default): the worktree has changes
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "refused",
+            text: "the worktree has uncommitted changes",
+          });
+          expect(loopOf().phase).toBe("parked");
+          setLoop({ parked: { kind: "ci", reason: "x", ended: false } });
+          expect(await h.engine.syncMain(RUN)).toMatchObject({ kind: "refused" });
+          setLoop({ phase: "working", parked: null });
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "refused",
+            text: "the run is not in CI or review, or parked on a conflict",
+          });
+        });
+
+        it("refuses a branch with unpushed commits, and a draft repo", async () => {
+          behindMain();
+          await parkedOnConflict();
+          commit("e".repeat(40));
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "refused",
+            text: "the branch has unpushed commits",
+          });
+          draftWorkspace();
+          expect(await h.engine.syncMain(RUN)).toEqual({
+            kind: "refused",
+            text: "its repo is a draft workspace",
+          });
+          expect(h.updates).toEqual([]);
+        });
       });
 
       it("a clean update that leaves the PR's diff as it was carries the review", async () => {
