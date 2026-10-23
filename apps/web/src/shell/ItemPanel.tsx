@@ -10,7 +10,7 @@ import {
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answer.ts";
-import { BriefOptions, ItemBrief } from "../comms/ItemBrief.tsx";
+import { BriefOptions, ItemBrief, PersonChoices, PersonStory } from "../comms/ItemBrief.tsx";
 import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
@@ -50,7 +50,8 @@ export function ItemPanel() {
   const escRes = useResource<Escalation[]>(RESOURCES.escalations);
   const escalations = escRes.data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const notes = useResource<NotificationsView>(RESOURCES.notifications).data;
+  const notesRes = useResource<NotificationsView>(RESOURCES.notifications);
+  const notes = notesRes.data;
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
   const [person, setPerson] = useState<{ item: AttentionItem; thread: PersonThreadView } | null>(
     null,
@@ -143,7 +144,7 @@ export function ItemPanel() {
           {item && !holding && (
             <span className="sub">
               {thread
-                ? `${whereOf(thread)} · ${when(thread.updatedAt)}`
+                ? `${item?.brief?.person?.source.kind === "teams" ? "Teams" : "GitHub"} · ${whereOf(thread).replace(/^GitHub · /, "")} · ${when(thread.updatedAt)}`
                 : esc
                   ? `opened ${when(esc.openedAt)}`
                   : when(item.at)}
@@ -151,6 +152,18 @@ export function ItemPanel() {
           )}
           <BuildChips panel="discuss" />
           <span className="act">
+            {thread && item?.brief?.person && (
+              <ExternalLink
+                url={thread.message?.url ?? thread.url}
+                allowedOrigin={
+                  item.brief.person.source.kind === "teams"
+                    ? "https://teams.microsoft.com"
+                    : "https://github.com"
+                }
+              >
+                Open in {item.brief.person.source.kind === "teams" ? "Teams" : "GitHub"} ↗
+              </ExternalLink>
+            )}
             {item && (
               <button type="button" className="sm ghost" disabled={busy} onClick={dismiss}>
                 Dismiss
@@ -168,11 +181,29 @@ export function ItemPanel() {
             </p>
           ) : (
             <>
-              {item.brief && <ItemBrief brief={item.brief} />}
+              {item.brief && !item.brief.person && <ItemBrief brief={item.brief} />}
               {esc ? (
                 <EscalationBrief esc={esc} tz={tz} now={now} />
               ) : thread ? (
-                <PersonBrief thread={thread} tz={tz} />
+                item.brief?.person ? (
+                  <PersonStory
+                    brief={item.brief}
+                    items={items ?? []}
+                    tz={tz}
+                    now={now}
+                    thread={thread}
+                  />
+                ) : (
+                  <PersonBrief thread={thread} tz={tz} />
+                )
+              ) : item.kind === "person" ? (
+                <p className="note">
+                  {notesRes.error
+                    ? `Could not load the message: ${notesRes.error.message}`
+                    : notes === undefined
+                      ? "Loading the message…"
+                      : "This message is no longer open."}
+                </p>
               ) : (
                 <div className="brief">
                   <div className="s qtext">
@@ -194,7 +225,7 @@ export function ItemPanel() {
             </>
           )}
         </div>
-        {item && !holding && (esc || options.length > 0) && (
+        {item && !item.brief?.person && !holding && (esc || options.length > 0) && (
           <div className="composer" id="dsOpts">
             {options.length > 0 && (
               <>
@@ -235,7 +266,8 @@ export function ItemPanel() {
             )}
           </div>
         )}
-        {item?.kind === "person" && !holding && (
+        {item?.brief?.person && <PersonChoices key={item.key} item={item} thread={thread} />}
+        {item?.kind === "person" && !item.brief?.person && !holding && (
           <div className="composer" id="dsPerson">
             {handledHow ? (
               <span>
@@ -295,7 +327,15 @@ export function ItemPanel() {
   );
 }
 
-function PersonBrief({ thread, tz }: { thread: PersonThreadView; tz: string | null }) {
+function PersonBrief({
+  thread,
+  tz,
+  source,
+}: {
+  thread: PersonThreadView;
+  tz: string | null;
+  source?: "github" | "teams";
+}) {
   const tone = thread.catchUp === "new" ? "plain" : "warn";
   return (
     <div className="brief">
@@ -318,7 +358,9 @@ function PersonBrief({ thread, tz }: { thread: PersonThreadView; tz: string | nu
         </>
       )}
       <div className="row">
-        <ExternalLink url={thread.url}>Open in GitHub ↗</ExternalLink>
+        <ExternalLink url={thread.message?.url ?? thread.url}>
+          Open in {source === "teams" ? "Teams" : "GitHub"} ↗
+        </ExternalLink>
       </div>
     </div>
   );
