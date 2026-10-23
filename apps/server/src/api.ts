@@ -79,6 +79,7 @@ import {
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
+import { threadMessages } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -114,7 +115,7 @@ import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
-import { crewDir, crewPrBodyPath, type Store } from "./store.ts";
+import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { median, telemetry } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
@@ -541,6 +542,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
         },
       );
+
+      // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot; web wiring is a separate ticket)
+      api.get<{ Params: { id: string } }>("/comms/:id", async (req, reply) => {
+        if (!agentById(req.params.id)) return reply.code(404).send({ error: "unknown agent" });
+        return {
+          messages: threadMessages(store, req.params.id, agentById(req.params.id)?.kind === "crew"),
+        };
+      });
+
+      // Reader: apps/web/src/comms/Conversation.tsx (opening a thread; web wiring is a separate ticket)
+      api.post<{ Params: { id: string } }>("/comms/:id/read", async (req, reply) => {
+        const id = req.params.id;
+        if (!agentById(id)) return reply.code(404).send({ error: "unknown agent" });
+        const body = z
+          .object({ messageIds: z.array(z.string().max(300)).max(10200) })
+          .strict()
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const latest = new Map<string, { offset: number; block: number }>();
+        for (const message of threadMessages(store, id, agentById(id)?.kind === "crew")) {
+          const p = commsPosition(message.id);
+          if (!p) continue;
+          const prev = latest.get(p.source);
+          if (!prev || p.offset > prev.offset || (p.offset === prev.offset && p.block > prev.block))
+            latest.set(p.source, p);
+        }
+        const valid = body.data.messageIds.every((key) => {
+          if (!store.threadOwnsMessage(id, key)) return false;
+          const p = commsPosition(key);
+          const last = p && latest.get(p.source);
+          return (
+            p &&
+            last &&
+            (p.offset < last.offset || (p.offset === last.offset && p.block <= last.block))
+          );
+        });
+        if (!valid) return reply.code(400).send({ error: "unknown thread message" });
+        store.markThreadRead(id, body.data.messageIds);
+        bus.emit("attention");
+        bus.emit("agents");
+        return { ok: true };
+      });
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 

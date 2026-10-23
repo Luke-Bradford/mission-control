@@ -448,6 +448,19 @@ export interface StreamEvent {
   tool?: { name: string; input: string; result: string | null; ms: number | null; error: boolean };
 }
 
+/** A bounded Comms thread snapshot. IDs survive folds and reloads; undated messages stay null. */
+export interface CommsThreadMessage {
+  id: string;
+  at: number | null;
+  from: string;
+  to: string;
+  ticket: string | null;
+  text: string;
+  tagged: boolean;
+  direct: boolean;
+  seen: boolean;
+}
+
 /** `GET /api/agents/:id/stream`: the latest run's events, oldest first. */
 export interface AgentStream {
   runId: string | null;
@@ -748,7 +761,10 @@ export interface AttentionItem {
   /** A stray's file and crew session; null for other kinds. */
   path?: string | null;
   sessionId?: string | null;
+  /** Sort time; 0 for an undated Comms item (see messageAt). */
   at: number;
+  /** Original Comms timestamp, including null when the transcript supplied none. */
+  messageAt?: number | null;
   url: string | null;
   escalationId: string | null;
   /** The ticket (`repo#n`) this is about: an escalation's own id, a PR's ticket; null otherwise. */
