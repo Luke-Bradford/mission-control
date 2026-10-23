@@ -3,6 +3,8 @@ import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from ".
 import type {
   AccountId,
   AgentId,
+  CliAccountStatus,
+  NotificationPreferences,
   RepoId,
   RunDigest,
   RunPr,
@@ -122,7 +124,17 @@ export interface ConfigView {
    * when the read fails; optional only until the web fixtures carry it.
    */
   githubLogin?: string | null;
-  accounts: { id: AccountId; vendor: "claude" | "codex"; alertAt: number; stopAt: number }[];
+  accounts: {
+    id: AccountId;
+    vendor: "claude" | "codex";
+    alertAt: number;
+    stopAt: number;
+    binding?: "machine";
+    canCheck?: boolean;
+    signInHint?: string;
+    status?: CliAccountStatus;
+  }[];
+  notificationPreferences?: NotificationPreferences;
   repos: {
     id: RepoId;
     github: string;
@@ -161,6 +173,8 @@ export interface ConfigView {
       id: string;
       repoId: RepoId;
       checkout: string;
+      branch?: string | null;
+      managedCheckout?: boolean;
       seats: {
         id: AgentId;
         focus?: string | null;

@@ -1,5 +1,5 @@
 /**
- * The server's one write to its own config: appending a repo to config.yaml (#26 A8). The path is
+ * Atomic edits to the server's own config.yaml: repos, session seats and accounts. The path is
  * the one the server started with; no request names a path, and a symbolic link there is refused.
  * Every write re-reads the file, keeps its comments and key order (the YAML Document API, never
  * string concatenation; other spacing and quoting may be normalised), re-validates the whole result
@@ -394,4 +394,62 @@ async function pruneBackups(path: string, keep: string): Promise<void> {
   for (const old of ours.slice(CONFIG_BACKUPS_KEEP - 1)) {
     await rm(join(dir, old.name), { force: true });
   }
+}
+
+export const NewAccountBody = z.strictObject({
+  name: z.string().regex(REPO_ID, "must be 1–40 letters, digits, . _ or -, starting alphanumeric"),
+  provider: z.enum(["claude", "codex"]),
+});
+
+export function accountDuplicateReason(
+  accounts: CcConfig["accounts"],
+  account: z.infer<typeof NewAccountBody>,
+): string | null {
+  if (accounts.some((a) => a.id.toLowerCase() === account.name.toLowerCase())) {
+    return "an account with that name is already configured";
+  }
+  if (accounts.some((a) => a.vendor === account.provider)) {
+    return "only one account per provider is supported until independent bindings are available";
+  }
+  return null;
+}
+
+/** Adds configuration only: no login, credentials, folders or seat operations. */
+export function addAccount(path: string, account: z.infer<typeof NewAccountBody>, now: number) {
+  const run = queue.then(async () => {
+    const parsed = NewAccountBody.safeParse(account);
+    if (!parsed.success) throw new ConfigWriteError("invalid", "invalid account provider or name");
+    const { bytes, text, current } = await readCurrent(path);
+    const duplicate = accountDuplicateReason(current.accounts, account);
+    if (duplicate) throw new ConfigWriteError("duplicate", duplicate);
+    const doc = parseDocument(text);
+    const accounts = doc.get("accounts", true);
+    if (!isSeq(accounts) || doc.errors.length > 0) {
+      throw new ConfigWriteError("current", "config.yaml has no accounts list");
+    }
+    accounts.add(
+      doc.createNode({ id: account.name, vendor: account.provider, alert_at: 80, stop_at: 100 }),
+    );
+    accounts.flow = false;
+    const newText = doc.toString({ lineWidth: 0 });
+    let next: CcConfig;
+    try {
+      next = parseConfig(newText, "the new config.yaml");
+    } catch {
+      throw new ConfigWriteError("invalid", "the new account config would not load");
+    }
+    const added = { id: account.name, vendor: account.provider, alertAt: 80, stopAt: 100 };
+    if (!isDeepStrictEqual(next, { ...current, accounts: [...current.accounts, added] })) {
+      throw new ConfigWriteError(
+        "write",
+        "the new config.yaml would change more than the added account",
+      );
+    }
+    const backup = await backUp(path, bytes, now);
+    await replace(path, newText);
+    await pruneBackups(path, basename(backup)).catch(() => undefined);
+    return { config: next, backup };
+  });
+  queue = run.catch(() => undefined);
+  return run;
 }
