@@ -357,6 +357,8 @@ describe("collectStudioLoop", () => {
         model: "m-prev",
       });
     }
+    // Only a fold writes the cost: the stored row had none.
+    expect(byId().get("studio-builder:20261017-112003")?.costUsd).toBe(2.4711);
   });
 
   it("stores the PRs and summary of a folded fire, and marks an ended folded fire folded", async () => {
