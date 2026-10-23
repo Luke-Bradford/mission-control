@@ -514,6 +514,57 @@ describe("Agent page: need banner", () => {
     expect(body.keys.sort()).toEqual(["esc:shop-app#4001", "stall:shop-app-ta:r-12"]);
   });
 
+  describe("a stalled crew seat", () => {
+    const stall = item({
+      key: "stall:guido-1:r-12",
+      agentId: "guido-1",
+      kind: "stalled",
+      at: NOW - 11 * MIN,
+      tool: "Bash",
+      ticket: null,
+      escalationId: null,
+    });
+    const rows = () => [seat({ hudState: "stalled", lastOutputAt: NOW - 11 * MIN }), studio()];
+    const banner = (container: HTMLElement) => $(container, "#needBanner .banner") as HTMLElement;
+
+    it("holding the test lock shows the Overview's line with Stop the run", async () => {
+      const fn = stub({
+        rows: rows(),
+        items: [stall],
+        extra: SEAT_ROUTES({
+          "/api/test-lock": {
+            holder: { runId: "r-12", seatId: "guido-1", command: "pnpm -s test", since: NOW - MIN },
+            waiting: [
+              { runId: "r-2", seatId: "retro-1", since: NOW - MIN },
+              { runId: "r-3", seatId: "inco-1", since: NOW - MIN },
+            ],
+          },
+        }),
+      });
+      const { container } = render(<Agent id="guido-1" />);
+      await waitFor(() =>
+        expect(banner(container).textContent).toContain(
+          "Stalled 11:00 and holding the test lock; 2 waiting",
+        ),
+      );
+      fireEvent.click(within(banner(container)).getByRole("button", { name: "Stop the run" }));
+      await waitFor(() => expect(bodyOf(fn, "/api/seats/guido-1/interrupt")).toBe("{}"));
+    });
+
+    it("holding nothing shows Interrupt", async () => {
+      const fn = stub({
+        rows: rows(),
+        items: [stall],
+        extra: SEAT_ROUTES({ "/api/test-lock": { holder: null, waiting: [] } }),
+      });
+      const { container } = render(<Agent id="guido-1" />);
+      await waitFor(() => expect(banner(container).textContent).toContain("Stalled 11:00 in Bash"));
+      expect(within(banner(container)).queryByRole("button", { name: "Stop the run" })).toBeNull();
+      fireEvent.click(within(banner(container)).getByRole("button", { name: "Interrupt" }));
+      await waitFor(() => expect(bodyOf(fn, "/api/seats/guido-1/interrupt")).toBe("{}"));
+    });
+  });
+
   it(`Ack sends more than ${ACK_BATCH_MAX} keys in batches the server accepts`, async () => {
     const many = Array.from({ length: 51 }, (_, i) => item({ key: `esc:shop-app#${i + 1}` }));
     const fetch = stub({ items: many });

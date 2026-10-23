@@ -27,7 +27,16 @@ import {
   WAIT_TEXT,
   waitText,
 } from "../src/crew.ts";
-import { crewRow, item as fixtureItem, HOUR, item, MIN, NOW, stoppedSeat } from "./fixtures.ts";
+import {
+  crewRow,
+  item as fixtureItem,
+  HOUR,
+  item,
+  MIN,
+  NOW,
+  seatRow,
+  stoppedSeat,
+} from "./fixtures.ts";
 
 const ids = (rows: CrewRow[]) => rows.map((r) => r.id);
 
@@ -400,6 +409,48 @@ describe("needLine", () => {
       { text: "Stalled 2:05 in Bash", action: null, key: "stall:a:r" },
     ]);
     expect(needLine(row, [{ ...i, tool: null }], NOW)[0]?.text).toBe("Stalled 2:05");
+  });
+
+  describe("a stalled crew seat", () => {
+    const seat = seatRow({ id: "guido-1", hudState: "stalled" });
+    const stall = fixtureItem({
+      key: "stall:guido-1:r",
+      agentId: "guido-1",
+      kind: "stalled",
+      ticket: seat.ticket,
+      at: NOW - 11 * MIN,
+      tool: "Bash",
+    });
+    const lock = (holder: string, waiting: string[]) => ({
+      holder: { runId: "r-1", seatId: holder, command: "pnpm -s test", since: NOW - 12 * MIN },
+      waiting: waiting.map((seatId, i) => ({ runId: `w-${i}`, seatId, since: NOW - MIN })),
+    });
+
+    it("holding the test lock reads Stop the run, with the seats waiting", () => {
+      const l = lock("guido-1", ["inco-1", "retro-1", "inco-1"]);
+      expect(needLine(seat, [stall], NOW, l)).toEqual([
+        {
+          text: "Stalled 11:00 and holding the test lock; 2 waiting",
+          action: "stop",
+          key: "stall:guido-1:r",
+        },
+      ]);
+    });
+
+    it("drops the waiting count when nobody waits", () => {
+      expect(needLine(seat, [stall], NOW, lock("guido-1", []))[0]?.text).toBe(
+        "Stalled 11:00 and holding the test lock",
+      );
+    });
+
+    it("holding nothing reads the tool, with Interrupt", () => {
+      const other = lock("retro-1", ["guido-1"]);
+      for (const l of [other, undefined]) {
+        expect(needLine(seat, [stall], NOW, l)).toEqual([
+          { text: "Stalled 11:00 in Bash", action: "interrupt", key: "stall:guido-1:r" },
+        ]);
+      }
+    });
   });
 
   it("parked opens the item; asks answer it", () => {

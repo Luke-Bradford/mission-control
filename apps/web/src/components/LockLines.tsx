@@ -1,6 +1,5 @@
 import {
   LOCK_FREE_TEXT,
-  LOCK_NOBODY_WAITING,
   lockHolderText,
   lockWaitingLine,
   seatCallSign,
@@ -17,15 +16,9 @@ export function useTestLock(): TestLockState | undefined {
 
 /**
  * Who holds the lock and for how long, then the seats in line (oldest first, as the server lists
- * them), or that no full suite is running. `nobodyWaiting` adds the empty-queue line to a held lock.
+ * them), or that no full suite is running.
  */
-export function LockLines({
-  lock,
-  nobodyWaiting = false,
-}: {
-  lock: TestLockState | undefined;
-  nobodyWaiting?: boolean;
-}) {
+export function LockLines({ lock }: { lock: TestLockState | undefined }) {
   const now = useSecond();
   if (lock === undefined) return null;
   const h = lock.holder;
@@ -48,9 +41,6 @@ export function LockLines({
           </div>
         );
       })}
-      {nobodyWaiting && h !== null && lock.waiting.length === 0 && (
-        <div className="s muted">{LOCK_NOBODY_WAITING}</div>
-      )}
     </>
   );
 }

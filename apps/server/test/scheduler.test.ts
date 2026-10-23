@@ -123,6 +123,8 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
     sessions: vi.fn(() => []),
     githubToken: vi.fn(async () => "tok"),
     makeGql: vi.fn(() => async () => ({})),
+    makeRest: vi.fn(() => async () => ({ status: 200, headers: new Headers(), body: [] })),
+    notifications: vi.fn(async () => ({ changed: true })),
     github: vi.fn(async () => ({ boards: true, escalations: true })),
     prSweep: vi.fn(async () => ({ boards: true, escalations: false })),
     flow: vi.fn(async () => undefined),
@@ -318,6 +320,19 @@ describe("scheduler", () => {
     expect(vi.mocked(c.github).mock.calls[0]?.[0]).toBe(config.repos[0]);
     flushEmits();
     expect(topics).toEqual(expect.arrayContaining(["boards", "escalations", "agents"]));
+  });
+
+  it("the github tick reads notifications once, for the configured repos, with the REST client", async () => {
+    vi.useFakeTimers();
+    const rest = vi.fn(async () => ({ status: 200, headers: new Headers(), body: [] }));
+    const c = stubs({ makeRest: vi.fn(() => rest) });
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
+    await s.tick("github");
+    expect(c.makeRest).toHaveBeenCalledWith("tok");
+    expect(c.notifications).toHaveBeenCalledTimes(1);
+    expect(c.notifications).toHaveBeenCalledWith(config.repos, store, rest, NOW);
+    flushEmits();
+    expect(topics).toContain("attention");
   });
 
   it("a GitHub poll emits limits so the GitHub budget row refreshes", async () => {
