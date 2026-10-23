@@ -10,6 +10,7 @@ import {
   type RunView,
 } from "@mc/core";
 import type { LOOP_PATH } from "../crew.ts";
+import { kTokens } from "../fmt.ts";
 
 export type LoopStep = (typeof LOOP_PATH)[number];
 
@@ -53,9 +54,6 @@ export function loopRule(step: LoopStep, limits: LoopLimits): string | null {
   }
   return null;
 }
-
-export const loopNote = (limits: LoopLimits): string =>
-  `CI gets ${limits.tries} tries and review ${limits.rounds} rounds; after that the run parks for you.`;
 
 /** The step the run's newest try is at, else null. */
 export const heldStep = (tries: readonly LoopTry[]): LoopStep | null => tries.at(-1)?.step ?? null;
@@ -174,3 +172,12 @@ export function barPlace(
     width: (((t.endedAt ?? end) - t.startedAt) * 100) / total,
   };
 }
+
+/** Only measured attempts contribute; missing usage is not a zero reading. */
+export const stepTokens = (tries: readonly LoopTry[]): number | null => {
+  const measured = tries.filter((t) => t.tokens != null);
+  return measured.length === 0 ? null : measured.reduce((sum, t) => sum + (t.tokens ?? 0), 0);
+};
+
+export const tokenText = (tokens: number | null | undefined): string =>
+  tokens == null ? "—" : kTokens(tokens);

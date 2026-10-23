@@ -1,7 +1,15 @@
 import type { CrewRow, RunLoopView } from "@mc/core";
 import { LOOP_PATH, LOOP_PHASE_LABEL, NO_LOOP } from "../crew.ts";
 import type { Resource } from "../data.ts";
-import { barClass, barPlace, loopSpan, stepTries, tryMinutes, tryText } from "./loopView.ts";
+import {
+  barClass,
+  barPlace,
+  loopSpan,
+  stepTries,
+  tokenText,
+  tryMinutes,
+  tryText,
+} from "./loopView.ts";
 
 const LEGEND = [
   ["tl-pass", "passed"],
@@ -45,7 +53,7 @@ export function LoopTimeline({
                   key={`${t.fix ? "fix" : "try"}${t.n}:${t.startedAt}`}
                   className={barClass(t)}
                   style={{ left: `${left}%`, width: `${width}%` }}
-                  title={`${t.fix ? "fix" : LOOP_PHASE_LABEL[step]} try ${t.n} · ${tryText(t)} · ${tryMinutes(t, now)} min`}
+                  title={`${t.fix ? "fix" : LOOP_PHASE_LABEL[step]} try ${t.n} · ${tryText(t)} · ${tokenText(t.tokens)} tokens · ${tryMinutes(t, now)} min`}
                 />
               );
             })}

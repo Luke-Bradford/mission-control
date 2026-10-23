@@ -242,7 +242,8 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
           <small>tokens/s</small>
         </span>
         <span className="d">
-          {typeof speed?.turnMs === "number" ? `turn ${dur(speed.turnMs)}` : DASH}
+          first token {typeof speed?.firstTokenMs === "number" ? dur(speed.firstTokenMs) : DASH} ·
+          turn {typeof speed?.turnMs === "number" ? dur(speed.turnMs) : DASH}
         </span>
       </Tile>
       <Tile label="Work">

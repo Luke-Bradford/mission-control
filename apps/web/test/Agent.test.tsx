@@ -891,7 +891,7 @@ describe("Agent page: header and tiles", () => {
     stub({
       rows: [
         crewRow({
-          digest: digest({ speed: { tokensPerSec: 64.4, turnMs: 160_000 } }),
+          digest: digest({ speed: { tokensPerSec: 64.4, turnMs: 160_000, firstTokenMs: 1200 } }),
           contextWindow: 200_000,
         }),
       ],
@@ -900,7 +900,7 @@ describe("Agent page: header and tiles", () => {
     await loaded();
     const speed = tileOf(first.container, "Speed");
     expect($(speed, ".v")?.textContent).toBe("64tokens/s");
-    expect($(speed, ".d")?.textContent).toBe("turn 2m 40s");
+    expect($(speed, ".d")?.textContent).toBe("first token 1.2s · turn 2m 40s");
     expect(speed.textContent).not.toContain("phase 2");
     first.unmount();
     hub.clear();
@@ -909,7 +909,7 @@ describe("Agent page: header and tiles", () => {
     const second = render(<Agent id="shop-app-ta" />);
     await loaded();
     expect($(tileOf(second.container, "Speed"), ".v")?.textContent).toBe("—tokens/s");
-    expect($(tileOf(second.container, "Speed"), ".d")?.textContent).toBe("—");
+    expect($(tileOf(second.container, "Speed"), ".d")?.textContent).toBe("first token — · turn —");
   });
 
   it("Work sums +add −del from the Files list and shows commits and ⊘denials from row.work", async () => {
@@ -1961,6 +1961,7 @@ describe("Agent page: loop steps", () => {
       endedAt: NOW - 10 * MIN,
       outcome,
       reason: null,
+      tokens: 0,
       ...over,
     });
     const viewOf = (
@@ -2144,7 +2145,7 @@ describe("Agent page: loop steps", () => {
       expect(first.style.left).toBe("25%");
       expect(first.style.width).toBe("22.5%");
       expect(first.className).toBe("tl-fail");
-      expect(first.title).toBe("CI try 1 · fail: CI failed on abc1234 · 9 min");
+      expect(first.title).toBe("CI try 1 · fail: CI failed on abc1234 · 0 tokens · 9 min");
       expect(panel.textContent).toContain("(40 min)");
       expect(panel.textContent).toContain("Round 1 of 3");
     });
@@ -2454,30 +2455,13 @@ describe("Agent page: side tabs", () => {
     return $(container, "#sideP") as HTMLElement;
   };
 
-  it("Plan shows the ticket's ## Plan, and says when there is none or no ticket", async () => {
-    const body = "## Outcome\nOutcome words\n## Plan\n1. cache the quotes\n## Notes\nNotes words";
+  it("Plan never substitutes ticket Markdown for the live list", async () => {
     const side = await sideOf(crewRow({ digest: digest() }), {
-      [TICKET_ROUTE]: ticketOf(body, { bodyTruncated: true }),
+      [TICKET_ROUTE]: ticketOf("## Plan\n1. cache the quotes"),
     });
-    expect(await within(side).findByText("cache the quotes")).toBeTruthy();
-    const text = $(side, "#sideBody")?.textContent ?? "";
-    expect(text).not.toContain("Outcome words");
-    expect(text).not.toContain("Notes words");
-    expect(text).toContain("From the ## Plan section of shop-app#3349.");
-    expect(within(side).getByText("Continue on GitHub ↗")).toBeTruthy();
-    cleanup();
-    const bare = await sideOf(crewRow({ digest: digest() }), {
-      [TICKET_ROUTE]: ticketOf("## Outcome\nx"),
-    });
-    expect(await within(bare).findByText("shop-app#3349 has no ## Plan yet.")).toBeTruthy();
-    cleanup();
-    const none = await sideOf(crewRow({ digest: digest(), ticket: null }));
-    expect($(none, "#sideBody")?.textContent).toBe("No ticket on this run.");
-  });
-
-  it("Plan says why a ticket did not load", async () => {
-    const side = await sideOf(crewRow({ digest: digest() }));
-    expect(await within(side).findByText(/^Could not load the ticket: /)).toBeTruthy();
+    expect(await within(side).findByText("No task list yet.")).toBeTruthy();
+    expect(side.textContent).not.toContain("cache the quotes");
+    expect(within(side).getByRole("button", { name: "Plan 0/0" })).toBeTruthy();
   });
 
   it("Queue shows what the seat holds and what comes next", async () => {
@@ -2615,10 +2599,7 @@ describe("Agent page: side tabs", () => {
     const side = $(container, "#sideP") as HTMLElement;
     fireEvent.click(await within(side).findByRole("button", { name: "Files 2" }));
     const rows = [...side.querySelectorAll<HTMLElement>(".f")];
-    expect(rows.map((r) => r.textContent)).toEqual([
-      "src/a.ts+10 −2uncommitted",
-      "img/logo.png—committed",
-    ]);
+    expect(rows.map((r) => r.textContent)).toEqual(["src/a.ts+10 −2uncommitted", "img/logo.png——"]);
     expect(side.textContent).toContain("no origin/HEAD: showing uncommitted changes only");
   });
 

@@ -1,4 +1,10 @@
-import type { CrewRow, PullRequestView, RunLoop, RunLoopView } from "@mc/core";
+import {
+  type CrewRow,
+  type PullRequestView,
+  RETRY_NOTE,
+  type RunLoop,
+  type RunLoopView,
+} from "@mc/core";
 import { useState } from "react";
 import { loopSteps, NO_LOOP, type StepMark, stepMarks } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -8,10 +14,11 @@ import {
   CHECK_ICON,
   heldStep,
   type LoopLimits,
-  loopNote,
   loopRule,
   stepChecks,
+  stepTokens,
   stepTries,
+  tokenText,
   tryClass,
   tryMinutes,
   tryText,
@@ -156,7 +163,7 @@ export function LoopSteps({
         {steps.map((step, i) => {
           const mark = marks[i] as StepMark;
           const current = mark === "cur" || mark === "held";
-          const open = current || toggled.has(step.name);
+          const open = current !== toggled.has(step.name);
           const own = step.phase === null ? [] : stepTries(tries, step.phase);
           const count = own.filter((t) => !t.fix).length;
           const minutes = own.reduce((sum, t) => sum + tryMinutes(t, now), 0);
@@ -184,7 +191,11 @@ export function LoopSteps({
                   {step.name}
                   {count > 1 && <span className="titer">×{count}</span>}
                 </span>
-                {own.length > 0 && <span className="vmeta">{minutes}m</span>}
+                {own.length > 0 && (
+                  <span className="vmeta">
+                    {tokenText(stepTokens(own))} · {minutes}m
+                  </span>
+                )}
               </button>
               {current && <div className="vnow">{loop.text}</div>}
               {current && prRef}
@@ -196,6 +207,7 @@ export function LoopSteps({
                     <div className="att" key={`${t.fix ? "fix" : "try"}${t.n}:${t.startedAt}`}>
                       <span className={t.fix ? "ok-t" : "fg2"}>{t.fix ? "fix" : `try ${t.n}`}</span>
                       <span className={tryClass(t)}>{tryText(t)}</span>
+                      <span className="num muted">{tokenText(t.tokens)}</span>
                       <span className="num muted">{tryMinutes(t, now)}m</span>
                     </div>
                   ))}
@@ -215,7 +227,7 @@ export function LoopSteps({
           );
         })}
       </div>
-      <p className="note xs">{loopNote(limits)}</p>
+      <p className="note xs">{RETRY_NOTE}</p>
     </>
   );
 }
