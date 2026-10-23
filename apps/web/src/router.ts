@@ -70,6 +70,21 @@ export const ticketPath = (repoId: string, issueNumber: number): string =>
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
 export const setupPath = (tab: SetupTab): string => `/setup/${tab}`;
+/** The query parameter that names the session whose Add agent form should open (`?add=s1`). */
+export const ADD_AGENT_PARAM = "add";
+/** The session id a URL's add-agent query names; null when it names none. */
+export const addAgentParam = (search: string): string | null =>
+  new URLSearchParams(search).get(ADD_AGENT_PARAM);
+/** The current URL without `?add=`, keeping its path, other parameters and hash. */
+export function withoutAddAgentParam(): string {
+  const { pathname, search, hash } = window.location;
+  const q = new URLSearchParams(search);
+  q.delete(ADD_AGENT_PARAM);
+  const qs = q.toString();
+  return pathname + (qs ? `?${qs}` : "") + hash;
+}
+export const addAgentPath = (sessionId: string): string =>
+  `${setupPath("sessions")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
 
 /** A popped-out window (`?popout=1`, the Agent header's Pop out): the page alone, no chrome. */
 export const isPopout = (search: string): boolean =>
