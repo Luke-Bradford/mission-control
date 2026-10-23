@@ -2,7 +2,6 @@ import {
   type CrewRow,
   LOCK_OUTCOME_TEXT,
   lockWaitingLine,
-  seatCallSign,
   startOfLocalDay,
   TELEMETRY_RANGES,
   type Telemetry,
@@ -17,12 +16,14 @@ import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { useSeatName } from "../seatName.ts";
 import { DASH, indexOf, minutesAgo, NOT_TRACKED, type Scope } from "./common.ts";
 
 const MINUTE_MS = 60_000;
 
 /** Capacity (catalogue 2.6.5): quota per account window, machine load; the test lock waits. */
 export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+  const nameOf = useSeatName();
   const now = useSecond();
   const tz = useTz();
   const history = useResource<TestLockHistory>(RESOURCES.testLockHistory).data;
@@ -130,7 +131,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
               bands={holds.map((r) => ({
                 from: r.startedAt,
                 to: r.endedAt ?? now,
-                label: `${seatCallSign(r.seatId)} suite`,
+                label: `${nameOf(r.seatId)} suite`,
               }))}
               {...chart}
             />
@@ -202,7 +203,7 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
                 waits.set(w.runId, n);
                 return (
                   <p key={`${w.runId}#${n}`} className="s warn-t">
-                    {lockWaitingLine(seatCallSign(w.seatId), mss(now - w.since))}
+                    {lockWaitingLine(nameOf(w.seatId), mss(now - w.since))}
                   </p>
                 );
               })

@@ -2035,6 +2035,17 @@ export class Store {
     return rows.map(toReview);
   }
 
+  /** The latest review of a PR that has reported, else null. */
+  latestReportedReview(repoId: string, prNumber: number): ReviewRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? AND state = 'reported'
+         ORDER BY ended_at DESC, id DESC LIMIT 1`,
+      )
+      .get(repoId, prNumber) as Row | undefined;
+    return row ? toReview(row) : null;
+  }
+
   /** The review the run (a review run) performs, else null. */
   reviewOfRun(reviewRunId: string): ReviewRow | null {
     const row = this.db.prepare("SELECT * FROM reviews WHERE run_id = ?").get(reviewRunId) as
@@ -3062,21 +3073,34 @@ export class Store {
   }
 
   drafts(includeDone = false): ReplyDraft[] {
+    return this.readDrafts(includeDone ? "all" : "pending");
+  }
+
+  draftHistory(): ReplyDraft[] {
+    return this.readDrafts("history");
+  }
+
+  private readDrafts(selection: "pending" | "all" | "history"): ReplyDraft[] {
     const rows = this.db
       .prepare(
         `SELECT id, target, kind, text, created_at AS createdAt, state, metadata, completed_at AS completedAt
        FROM drafts ${
-         includeDone
-           ? `WHERE state = 'pending' OR id IN (
+         selection === "history"
+           ? "WHERE state != 'pending' ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 100"
+           : selection === "all"
+             ? `WHERE state = 'pending' OR id IN (
                SELECT id FROM drafts WHERE state != 'pending'
                ORDER BY created_at DESC, id DESC LIMIT 100
              ) ORDER BY created_at DESC, id DESC`
-           : "WHERE state = 'pending' ORDER BY created_at, id"
+             : "WHERE state = 'pending' ORDER BY created_at, id"
        }`,
       )
       .all() as Row[];
     return rows.map(({ metadata, completedAt, ...r }) => ({
       ...r,
+      to: r.target,
+      via: "GitHub",
+      where: r.target,
       ...(metadata ? JSON.parse(metadata as string) : {}),
       ...(completedAt === null ? {} : { completedAt }),
     })) as ReplyDraft[];

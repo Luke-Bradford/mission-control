@@ -5,9 +5,9 @@ import {
   type CommsEvent,
   type ConfigView,
   type Crew,
-  seatCallSign,
 } from "@mc/core";
 import { Fragment } from "react";
+import { seatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 
@@ -16,11 +16,13 @@ export const CAPCOM_TAG = "@CAPCOM";
 
 export const isComms = (r: ActivityRow): r is CommsEvent => r.kind === "comms";
 
+const seatNameFallback = (id: string) => seatName(id, undefined);
+
 /** What an end of a message is called: the operator, the engine, or a seat's call sign. */
-export function commsName(id: string): string {
+export function commsName(id: string, nameOf: (id: string) => string = seatNameFallback): string {
   if (id === COMMS_CAPCOM) return "You";
   if (id === COMMS_MC) return "Mission Control";
-  return seatCallSign(id);
+  return nameOf(id);
 }
 
 /** What `id` sent or received (since `since`), oldest first. */
@@ -31,8 +33,10 @@ export function agentComms(rows: ActivityRow[], id: string, since = Number.NEGAT
 }
 
 /** A message as `id` sees it: `→ CALL: text` when sent, `← CALL: text` when received. */
-export function commsLine(c: CommsEvent, id: string): string {
-  return c.who === id ? `→ ${commsName(c.to)}: ${c.text}` : `← ${commsName(c.who)}: ${c.text}`;
+export function commsLine(c: CommsEvent, id: string, nameOf?: (id: string) => string): string {
+  return c.who === id
+    ? `→ ${commsName(c.to, nameOf)}: ${c.text}`
+    : `← ${commsName(c.who, nameOf)}: ${c.text}`;
 }
 
 /** Messages have no id: key by content, and number repeats so twins never share a key. */
@@ -49,7 +53,7 @@ export function commsKeys(list: CommsEvent[]): string[] {
 /** Plain text with each mention picked out. */
 export function MentionText({ text }: { text: string }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
-  const login = (config as (ConfigView & { githubLogin?: string | null }) | undefined)?.githubLogin;
+  const login = config?.githubLogin;
   const parts = text.split(/((?<![\w.])@[\w-]+)/);
   return (
     <>

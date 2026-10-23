@@ -20,7 +20,7 @@ The operator's words:
 The evidence from 22–23 Oct:
 - **FLIGHT handed most of its work to the controller.** In the 24 hours to 20:00 on 23 Oct it logged 220 notes, and 114 of them begin "For the controller:". Counted by keyword across all 220 notes, where one note can match several keywords: merge (98, many of them hard-rule merges), CI or checks (92), review (62), labels and lanes (15).
 - **Its memory doesn't accumulate.** The brief has nine sections, at most 4,000 characters each, and was rewritten about 150 times a day. So known faults keep being found again.
-- **Nothing orders merges.** The `main` ruleset requires branches to be up to date, there is no GitHub merge queue on a personal account, and the engine updates every PR that falls behind. So PRs chase main.
+- **PRs chased main.** The `main` ruleset required branches to be up to date, and the engine updated every PR that fell behind. On 23 Oct the operator turned the ruleset's strict check off, and #449 stops the engine bringing main in except on a conflict.
 
 ## The principle
 
@@ -65,11 +65,11 @@ The hub enforces these even for a `superuser` FLIGHT. They are a recommendation;
 
 Each slice is one ticket. Order:
 1. #262 and #198 start first.
-2. #449 has no dependency, and its plan orders it.
+2. #449 has no dependency.
 3. #457 (merges and settles) depends on #198 and #449.
 4. #458 (board) depends on #198.
 5. #459 (research) depends on #198 and on #203's home-read build tickets.
-6. #176 depends on #198 and #449.
+6. #176 depends on #198.
 7. #450 depends on #176.
 
 ### #262: evidence in the digest (S; in progress)
@@ -92,34 +92,32 @@ Each slice is one ticket. Order:
 - **Floor 7 at the engine's merge step.** A fixed list in code. The effective hard-rule list is the repo's list plus `DEFAULT_HARD_RULES`. `update.ts`, `config.ts` and `crew-apply.ts` are added to `DEFAULT_HARD_RULES` and to `CLAUDE.md`'s block.
 - **The role rewrite** covers only what has landed: the principle, the floor, code written by the crew, and naming missing powers. Each tool ticket adds its own lines.
 
-### #449: the merge queue (L; no dependency)
+### #449: merge without bringing main in (S; no dependency)
 
-- **What joins.** Run PRs in this hub's lane, once their review is clean or carried and CI is green. Accepted heads are admitted from #457.
-- **Merge order.**
-  - A "queue front" fact is required in `gateView.passes`.
-  - `sync_main` is refused for queued PRs that aren't at the front.
-  - A PR that left the queue rejoins only on a new head.
-- **Bringing the front up to date.** Only the front PR is brought up to date, by the engine's worktree merge of main. `branchUpdateDue` returns null for queued PRs behind the front.
-- **Leaving the queue.** A PR leaves on a conflict, on red CI, or after 45 minutes at the front without merging. The queue then moves on.
-- **Main moving underneath.** A merge to main by another hub or a person just moves main.
+This replaces the merge queue that this design first planned. The operator turned off the ruleset's up-to-date check, so no queue is needed.
+
+- **What the gate needs.** `gateView.passes` no longer needs the branch to contain `main`. It does need GitHub not to report the PR as conflicting.
+- **When main is merged in.** Only a conflict brings `main` into a branch.
+- **Notes.** No hold note is raised for a PR that is only behind `main`. A hard-rule PR gets its ready note straight away.
+- **Order.** Order comes from FLIGHT's Priority.
+- **A red main.** CI on `main` after a merge catches one, and #176 raises it to FLIGHT.
 
 ### #457: FLIGHT merges and settles (M; depends on #198 and #449)
 
 - **The hard-rule join.**
-  - On a `superuser` repo, hard-rule run PRs join the queue. At the front they wait `awaiting-flight`, which is a wake fact for FLIGHT.
+  - On a `superuser` repo, a hard-rule run PR that passes every other gate waits `awaiting-flight`, which is a wake fact for FLIGHT, until FLIGHT clears it.
   - `hard_rules_by` resolves to FLIGHT.
   - `CLAUDE.md`'s hard-rule merge line changes in this PR.
   - `mission-control` is raised to `superuser` only after this merges.
-- **`merge_pr { pr, urgent?, basis }`.**
+- **`merge_pr { pr, basis }`.**
   - It clears an `awaiting-flight` run PR in FLIGHT's lane.
-  - `urgent` moves the PR to the front, and the previous front PR goes second.
-  - The clearance carries across a main merge when the PR's own diff is unchanged.
+  - The clearance carries across a conflict merge of main when the PR's own diff is unchanged.
   - It refuses floors 2, 3, 4 and 7. Floor 4 is checked against seat state `stopped` versus `error`, park kinds and operator holds.
   - The hub posts the basis after `scanSecrets` and the notifier check.
 - **`settle_park { runId, action, basis }`.** The actions are:
   - `lift`: a stuck park whose head descends from the push;
   - `rereview`: a fresh RETRO review;
-  - `accept`: accepts a ruling or a review through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"), and the queue admits the accepted head. It is refused for a blocked RETRO review of the hard-rule files that enforce the floor: `apps/server/src/{guard,flight,mcp,engine}/**`, `update.ts`, `config.ts`, `crew-apply.ts`, `apps/server/src/runtime/**`, and `packages/core/src/{guard,flight,runtime,loop,repo-rules}.ts`, so RETRO stays the independent check on FLIGHT's own powers;
+  - `accept`: accepts a ruling or a review through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"), and the engine merges the accepted head. It is refused for a blocked RETRO review of the hard-rule files that enforce the floor: `apps/server/src/{guard,flight,mcp,engine}/**`, `update.ts`, `config.ts`, `crew-apply.ts`, `apps/server/src/runtime/**`, and `packages/core/src/{guard,flight,runtime,loop,repo-rules}.ts`, so RETRO stays the independent check on FLIGHT's own powers;
   - `rework`: sends the findings to the seat.
 - **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, and 4 an hour shared with `accept_ruling`.
 - **Untrusted authors.** `read_ticket` and the digest mark text written by people who aren't collaborators, from a cached `GET collaborators/{login}/permission`. The role doesn't act on that text without the operator.
@@ -152,9 +150,9 @@ Each slice is one ticket. Order:
   - Each case has a test.
   - The CLI's subagent tool name is checked by experiment before it is granted, with a test.
 
-### #176: ops signals and triage (M; depends on #198 and #449)
+### #176: ops signals and triage (M; depends on #198)
 
-- **The signals:** `flaky_test`, `repeat_park`, `queue_stall` (from `merge_queue`), `idle_seat`, `github_budget` and `hub_error`. Each wakes FLIGHT once per key.
+- **The signals:** `flaky_test`, `repeat_park`, `main_red` (CI failing on main after a merge), `idle_seat`, `github_budget` and `hub_error`. Each wakes FLIGHT once per key.
 - **Triage wakes:** new Backlog tickets, finished plans and resolved dependencies.
 - **No wake on a phase change.**
 - **The role:** fix it with your tools, or file a ticket.
@@ -197,6 +195,6 @@ Each slice is one ticket. Order:
 
 - FLIGHT's "For the controller" notes fall to near zero, and the retrospective reports the count.
 - Crew PRs on `mission-control`, hard-rule ones included, merge without a person-side controller. Hub-code Updates are still run by the operator or the controller session.
-- No queued PR is brought up to date with main while it is behind the front.
+- No PR is brought up to date with main unless it conflicts.
 - A flaky check seen twice becomes a ticket with evidence, or gets fixed, before a person notices it.
 - FLIGHT's memory holds the week's lessons, and its wakes cite them.

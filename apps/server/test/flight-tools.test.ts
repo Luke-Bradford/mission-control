@@ -2142,6 +2142,8 @@ describe("flight_state", () => {
           headSha: "abc",
           readAt: "13:00",
           stale: false,
+          review: null,
+          failingChecks: [],
         },
       ],
       items: [{ key: "note:ready:r-pr", kind: "ready", ticket: "mc#7", text: "ready", ageMin: 0 }],
@@ -3639,10 +3641,33 @@ describe("draft_reply", () => {
         text: "Prepared reply",
         createdAt: NOW,
         state: "pending",
+        to: "mc#12",
+        via: "GitHub",
+        where: "mc#12",
       },
     ]);
     expect(ghCalls).toEqual([]);
     expect(tools.filter((t) => /draft.*post|post.*draft/.test(t.name))).toEqual([]);
+  });
+  it("retains recipient context supplied to draft_reply", async () => {
+    const metadata = {
+      to: "Preview team",
+      via: "GitHub",
+      where: "mc#12",
+      context: "Review follow-up",
+    };
+    expect(
+      (
+        await call("draft_reply", {
+          target: "mc#12",
+          kind: "issue",
+          text: "Prepared reply",
+          ...metadata,
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(store.drafts()[0]).toMatchObject(metadata);
+    expect(ghCalls).toEqual([]);
   });
   it("is available through FLIGHT's MCP grant, which has no draft posting tool", async () => {
     const tokens = new RunTokens();

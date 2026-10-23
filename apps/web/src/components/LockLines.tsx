@@ -3,13 +3,13 @@ import {
   lockHolderText,
   lockUsualText,
   lockWaitingLine,
-  seatCallSign,
   type TestLockHistory,
   type TestLockState,
 } from "@mc/core";
 import { useSecond } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { mss } from "../fmt.ts";
+import { useSeatName } from "../seatName.ts";
 
 /** The test lock as `/api/test-lock` last said it; undefined until the first answer. */
 export function useTestLock(): TestLockState | undefined {
@@ -42,6 +42,7 @@ export function LockUsual({
  * them), or that no full suite is running.
  */
 export function LockLines({ lock }: { lock: TestLockState | undefined }) {
+  const nameOf = useSeatName();
   const now = useSecond();
   if (lock === undefined) return null;
   const h = lock.holder;
@@ -51,7 +52,7 @@ export function LockLines({ lock }: { lock: TestLockState | undefined }) {
       <div className="s">
         {h === null
           ? LOCK_FREE_TEXT
-          : lockHolderText(seatCallSign(h.seatId), h.command, mss(now - h.since))}
+          : lockHolderText(nameOf(h.seatId), h.command, mss(now - h.since))}
       </div>
       {h && (
         <div className="s fg2">
@@ -65,7 +66,7 @@ export function LockLines({ lock }: { lock: TestLockState | undefined }) {
         waits.set(w.runId, n);
         return (
           <div key={`${w.runId}#${n}`} className="s warn-t">
-            {lockWaitingLine(seatCallSign(w.seatId), mss(now - w.since))}
+            {lockWaitingLine(nameOf(w.seatId), mss(now - w.since))}
           </div>
         );
       })}
