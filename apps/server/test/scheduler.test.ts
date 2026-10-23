@@ -875,6 +875,16 @@ describe("scheduler", () => {
     expect([...store.acks().keys()]).toEqual(["esc:shop-app#9"]);
   });
 
+  it("the studio tick alone drops an ack absent over 7 days", async () => {
+    store.ack(["esc:gone"], NOW);
+    let t = NOW;
+    const s = createScheduler({ config, store, bus, now: () => t, collectors: stubs() });
+    await s.tick("studio");
+    t = NOW + ACK_ABSENT_MS + 1;
+    await s.tick("studio");
+    expect(store.acks().has("esc:gone")).toBe(false);
+  });
+
   it("does not sweep acks from the usage or machine jobs", async () => {
     store.ack(["esc:gone"], NOW);
     const sweep = vi.spyOn(store, "sweepAcks");

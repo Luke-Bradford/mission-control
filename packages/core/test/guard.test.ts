@@ -293,6 +293,56 @@ describe("scanSecrets", () => {
     );
     expect(out).toEqual([{ where: "src/a.ts", line: 3, kind: "GitHub token" }]);
   });
+  it("finds a token hidden behind a fake commit header inside a file", () => {
+    const body = diff("a.ts", [`x\0commit ${TOKEN}`]);
+    const found = [{ where: "a.ts", line: 2, kind: "GitHub token" }];
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${body}`), [])).toEqual(found);
+    expect(scanSecrets(log(`staged\n${body}`), [])).toEqual(found);
+    for (const fake of [`x\0commit staged${TOKEN}`, `x\0commit ${sha}${TOKEN}`]) {
+      expect(scanSecrets(log(`${sha}\nmsg\n\n${diff("a.ts", [fake])}`), [])).toEqual(found);
+    }
+  });
+  it("finds a known credential faked as a commit id inside a file", () => {
+    const hex = "0123456789abcdef0123456789abcdef01234567";
+    const body = diff("a.ts", [`x\0commit ${hex}`, "y"]);
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${body}`), [hex])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "local credential" },
+    ]);
+  });
+  it("finds a token in a header-only file whose name holds ' b/'", () => {
+    const name = `${TOKEN} b/x.empty`;
+    const empty = `diff --git a/${name} b/${name}\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${empty}`), [])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "GitHub token" },
+    ]);
+  });
+  it("finds a token used as an added file's name", () => {
+    const out = scanSecrets(log(`${sha}\nmsg\n\n${diff(`d/${TOKEN}`, ["hi"])}`), []);
+    expect(out).toEqual([{ where: "(name withheld)", line: 0, kind: "GitHub token" }]);
+  });
+  it("finds a token in the name of an empty added file (no hunk)", () => {
+    const name = `${TOKEN}.empty`;
+    const empty = `diff --git a/${name} b/${name}\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${empty}`), [])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "GitHub token" },
+    ]);
+  });
+  it("finds a token in a header-only file whose name git quotes", () => {
+    const q = `"a/${TOKEN}\\303\\251.empty" "b/${TOKEN}\\303\\251.empty"`;
+    const empty = `diff --git ${q}\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${empty}`), [])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "GitHub token" },
+    ]);
+    const plain = `diff --git "a/x\\303\\251" "b/x\\303\\251"\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${plain}`), [])).toEqual([]);
+  });
+  it("ignores a deleted file named like a token", () => {
+    const name = `${TOKEN}.txt`;
+    const gone = `diff --git a/${name} b/${name}\ndeleted file mode 100644\nindex e69de29..0000000\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${gone}`), [])).toEqual([]);
+    const gone2 = `diff --git a/${name} b/${name}\ndeleted file mode 100644\nindex 1..0000000\n--- a/${name}\n+++ /dev/null\n@@ -1 +0,0 @@\n-hi\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${gone2}`), [])).toEqual([]);
+  });
   it("ignores a removed line", () => {
     expect(scanSecrets(log(`${sha}\nmsg\n\n${diff("a.ts", ["ok"], [TOKEN])}`), [])).toEqual([]);
   });
@@ -1475,6 +1525,24 @@ describe("firstCommitNotifier (Task 9)", () => {
     ["plain", null],
   ])("passes %j (issue %s)", (message, issue) => {
     expect(firstCommitNotifier(message, { repo: "o/mc", issue })).toBeNull();
+  });
+});
+
+describe("firstPrNotifier allowOwnRepoRefs", () => {
+  const own = (text: string) =>
+    firstPrNotifier(text, { repo: "o/mc", issue: null, allowOwnRepoRefs: true });
+
+  it("lets a bare #n and GH-n through, which are this repo's own issues", () => {
+    expect(own("Depends on #12 and GH-13")).toBeNull();
+    expect(firstPrNotifier("Depends on #12", { repo: "o/mc", issue: null })).toBe("#12");
+  });
+
+  it("still finds mentions, other items by name or link, and closing keywords", () => {
+    expect(own("ask @octocat")).toBe("@octocat");
+    expect(own("see other/repo#5")).toBe("other/repo#5");
+    expect(own("see o/mc#5")).toBe("o/mc#5");
+    expect(own("see https://github.com/other/repo/issues/5")).not.toBeNull();
+    expect(own("fixes #5")).not.toBeNull();
   });
 });
 

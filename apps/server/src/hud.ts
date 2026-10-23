@@ -470,10 +470,12 @@ export function attentionItems(
   }
 
   // A PR waits on you when it is linked to a ticket on a configured board and no agent is running
-  // on that ticket (the loops merge their own PRs; see PR_WAIT_MS).
+  // on that ticket (the loops merge their own PRs; see PR_WAIT_MS). A ticket whose run is still
+  // open is the crew's, whether or not a seat is running on it (set aside, queued, held).
   const working = new Set(
     rows.filter((r) => r.run?.status === "running" && r.ticket !== null).map((r) => r.ticket),
   );
+  for (const ticket of store.activeTickets()) working.add(ticket);
   for (const repo of config.repos) {
     const onBoard = new Set(store.board(repo.id).map((b) => `${repo.id}#${b.issueNumber}`));
     for (const pr of store.pullRequests(repo.id)) {

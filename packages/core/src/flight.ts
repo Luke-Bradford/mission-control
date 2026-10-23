@@ -29,6 +29,8 @@ export const FLIGHT_DECISION_KINDS = [
   "note",
   "promote",
   "end",
+  "ticket",
+  "comment",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
@@ -242,6 +244,54 @@ export const sentText = (call: string): string => `Sent to ${call}.`;
 export const sentUnparkedText = (call: string): string =>
   `Sent to ${call}, and its run is un-parked.`;
 
+/** The tickets FLIGHT may file, and the comments it may post, in an hour. */
+export const FLIGHT_TICKETS_PER_HOUR = 10;
+export const FLIGHT_COMMENTS_PER_HOUR = 20;
+export const FLIGHT_TICKET_TITLE_MAX = 200;
+export const AREA_LABEL_PREFIX = "area:";
+export const LANE_LABEL_PREFIX = "lane:";
+/** The labels a filed ticket may carry besides its one area and one lane. */
+export const FLIGHT_TICKET_TYPE_LABELS: readonly string[] = [
+  "type:feature",
+  "bug",
+  "chore",
+  "test",
+  "docs",
+];
+export const hasOutcomeSection = (body: string): boolean => /^## Outcome[ \t]*$/m.test(body);
+
+export const GITHUB_WRITES_OFF =
+  "Not done: the loop engine is off on this server, so nothing is written to GitHub.";
+export const CREATE_NO_REPO = "Not filed: your session's repo is not configured.";
+export const createLabelsText = (why: string): string => `Not filed: ${why}.`;
+export const labelCountText = (prefix: string, found: readonly string[]): string =>
+  `labels must include exactly one ${prefix}* label (found ${found.length === 0 ? "none" : found.join(", ")})`;
+export const unknownLabelText = (label: string): string =>
+  `${label} is not a label you may set (${AREA_LABEL_PREFIX}*, ${LANE_LABEL_PREFIX}*, ${FLIGHT_TICKET_TYPE_LABELS.join(", ")})`;
+export const duplicateLabelText = (label: string): string => `${label} is given twice`;
+export const createBodyText = (missing: readonly string[]): string =>
+  `Not filed: the body needs ${missing.join(" and ")} as a heading line.`;
+export const duplicateTitleText = (n: number): string =>
+  `Not filed: an open issue with that title exists: #${n}. Comment on it with mc comment_ticket.`;
+export const createTextText = (what: string): string =>
+  `Not filed: ${what}. The ticket is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.`;
+export const createFailedText = (step: string): string =>
+  `Not filed: GitHub refused ${step}; see the server log.`;
+export const createdDecision = (n: number): string => `Filed #${n}`;
+export const createdText = (ref: string, inBacklog: boolean): string =>
+  `Filed ${ref}, on the project${inBacklog ? " in Backlog" : ", but not confirmed in Backlog"}. Recorded in Decided without you.`;
+export const createdDraftText = (ref: string, repoId: string): string =>
+  `Filed ${ref}, on the project; ${repoId} is a draft workspace, so its Status is not set. Recorded in Decided without you.`;
+export const notOnProjectText = (ref: string): string =>
+  `Filed ${ref}, but GitHub refused adding it to the project; tell the operator with mc ask_operator.`;
+export const COMMENTED_DECISION = "Commented";
+export const commentedText = (issue: number): string =>
+  `Commented on #${issue}. Recorded in Decided without you.`;
+export const commentTextText = (what: string): string =>
+  `Not commented: ${what}. The comment is posted to GitHub: no @mentions, no other issues' numbers, no secrets, no unclosed code blocks.`;
+export const commentFailedText = (issue: number): string =>
+  `Not commented: GitHub refused the comment on #${issue}; see the server log.`;
+
 export interface FlightSeatState {
   id: string;
   call: string;
@@ -275,7 +325,21 @@ export interface FlightState {
     ready: boolean;
     blockedBy: string[];
   }[];
-  prs: { ref: string; pr: number; seat: string; ready: boolean }[];
+  /**
+   * The repo's open PRs from the stored read, plus a PR that merged or closed since FLIGHT last
+   * read the list (listed once, with its state). `seat` is "" when no crew run holds the PR;
+   * `readAt` is the time of its last good read, and `stale` says the latest poll could not read it.
+   */
+  prs: {
+    ref: string;
+    pr: number;
+    seat: string;
+    ready: boolean;
+    state: "open" | "merged" | "closed";
+    headSha: string | null;
+    readAt: string;
+    stale: boolean;
+  }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
 }
@@ -306,12 +370,13 @@ export function wakeSummary(s: FlightState): string {
   const free = s.seats.filter((x) => x.loop === "build" && x.free).length;
   const parked = s.seats.filter((x) => x.parked !== null).length;
   const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
+  const inReview = s.prs.filter((p) => p.state === "open").length;
   const parts = [
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
     stopped > 0 ? `${stopped} stopped` : "",
     parked > 0 ? `${parked} parked` : "",
-    s.prs.length > 0 ? counted(s.prs.length, "PR in review", "PRs in review") : "",
+    inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
   ].filter((p) => p !== "");
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }

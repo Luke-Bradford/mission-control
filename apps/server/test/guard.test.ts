@@ -17,6 +17,8 @@ import {
   guardAckKey,
   guardDenyOutput,
   HOOK_DEADLINE_MS,
+  HOOK_RETRY_ENV,
+  HOOK_RETRY_MS,
   LOCK_WAIT_MS,
   lockBusyText,
   MC_TOOLS,
@@ -51,6 +53,11 @@ describe("constants", () => {
     expect(GUARD_HOOK_TIMEOUT_S).toBe(630);
     expect(HOOK_DEADLINE_MS).toBe(620_000);
     expect(GUARD_BODY_LIMIT).toBe(64 * 1024);
+  });
+
+  it("keeps the hook's retry window for a restarting hub below its deadline", () => {
+    expect(HOOK_RETRY_MS).toBe(60_000);
+    expect(HOOK_RETRY_MS).toBeLessThan(HOOK_DEADLINE_MS);
   });
 });
 
@@ -834,6 +841,82 @@ describe("hookMain", () => {
     expect(r).toEqual({ out: DENY_UNREACHABLE, exit: 2 });
   });
 
+  describe("while the hub is down", () => {
+    const refused = () =>
+      Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    /** Runs the clock forward a second at a time until the hook settles or `ms` have passed. */
+    async function settle<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+      let done = false;
+      let value: T | undefined;
+      void p.then((v) => {
+        done = true;
+        value = v;
+      });
+      for (let t = 0; t <= ms && !done; t += 1000) {
+        // The token file is read for real, so wait for the hook's next sleep (or its answer).
+        // Bound it in real time: a spin count runs out on a loaded runner, losing a retry.
+        const giveUpAt = performance.now() + 2000;
+        while (!done && vi.getTimerCount() < 2) {
+          if (performance.now() > giveUpAt) throw new Error("the hook did not sleep within 2 s");
+          await new Promise((r) => setImmediate(r));
+        }
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      await new Promise((r) => setImmediate(r));
+      return value;
+    }
+
+    it("retries a refused connection and acts on the hub's verdict once it answers", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      let calls = 0;
+      const r = hookMain(stdinFor(), [tokenFile, URL_OK], async () => {
+        if (++calls <= 2) throw refused();
+        return { status: 200, body: "{}" };
+      });
+      expect(await settle(r, 10_000)).toEqual({ out: "{}", exit: 0 });
+      expect(calls).toBe(3);
+    });
+
+    it("reads the token file again before each try", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      const tokens: string[] = [];
+      const next = "b".repeat(64);
+      const r = hookMain(stdinFor(), [tokenFile, URL_OK], async (_u, token) => {
+        tokens.push(token);
+        if (tokens.length === 1) {
+          writeFileSync(tokenFile, `${next}\n`, { mode: 0o600 });
+          throw refused();
+        }
+        return { status: 200, body: "{}" };
+      });
+      expect(await settle(r, 10_000)).toEqual({ out: "{}", exit: 0 });
+      expect(tokens).toEqual([TOKEN, next]);
+    });
+
+    it("denies as unreachable, exit 2, once the hub is still down after the limit", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      let calls = 0;
+      const r = hookMain(stdinFor(), [tokenFile, URL_OK], async () => {
+        calls++;
+        throw refused();
+      });
+      expect(await settle(r, HOOK_RETRY_MS + 5000)).toEqual({ out: DENY_UNREACHABLE, exit: 2 });
+      expect(calls).toBeGreaterThan(50);
+      expect(calls).toBeLessThanOrEqual(HOOK_RETRY_MS / 1000 + 1);
+    });
+
+    it("denies at once on an HTTP answer, with no retry", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      let calls = 0;
+      const r = hookMain(stdinFor(), [tokenFile, URL_OK], async () => {
+        calls++;
+        return { status: 401, body: "" };
+      });
+      expect(await r).toEqual({ out: DENY_UNREACHABLE, exit: 2 });
+      expect(calls).toBe(1);
+    });
+  });
+
   it("fails closed, without posting, on a missing or malformed token file", async () => {
     const missing = await hookMain(
       stdinFor(),
@@ -916,6 +999,7 @@ describe("hook-cli.ts run as the CLI runs it", () => {
       encoding: "utf8",
       timeout: 20_000,
       killSignal: "SIGKILL",
+      env: { ...process.env, [HOOK_RETRY_ENV]: "0" },
     });
 
   it("prints exactly the deny form, one fixed stderr line, and exits 2 when the hub is not there", () => {
@@ -956,7 +1040,13 @@ describe("hook-cli.ts run as the CLI runs it", () => {
         tokenFile,
         "http://127.0.0.1:1/api/guard/check",
       ],
-      { input: stdin, encoding: "utf8", timeout: 20_000, killSignal: "SIGKILL" },
+      {
+        input: stdin,
+        encoding: "utf8",
+        timeout: 20_000,
+        killSignal: "SIGKILL",
+        env: { ...process.env, [HOOK_RETRY_ENV]: "0" },
+      },
     );
     expect(r.status).toBe(2);
     expect(r.stdout).toBe(DENY_UNREACHABLE);

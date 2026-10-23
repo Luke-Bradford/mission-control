@@ -67,6 +67,8 @@ export interface TakeDeps {
   supervisor: Pick<Supervisor, "startRun">;
   /** The hub's own `gh` login; null when it could not be read, and then nothing is taken. */
   login: string | null;
+  /** A repo's board rules (read at origin/HEAD); an error means no card is moved between queues. */
+  rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
   /** The card as GitHub has it now (the issue and its project item); null when it is not there. */
   readCard: (repoId: RepoId, issue: number) => Promise<CardNow | null>;
   /** false: a preview, crew off, or loop writes disabled; nothing is taken. */
@@ -304,6 +306,52 @@ export const isTransientStart = (e: unknown): boolean =>
   (e instanceof CheckoutError && (e.code === "fetch" || e.code === "checkout"));
 
 /**
+ * A seat about to take picks, in `readyCards` order, the first card of its own queue and the queues
+ * of the seats that may not take now (busy, or at their account's quota stop), among the cards its area labels cover. A card from another
+ * seat's queue moves to the head of this seat's, so a busy seat's queue never holds back a higher
+ * Priority. A card a seat holds taken stays with it.
+ */
+async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConfig): Promise<void> {
+  const { config, store } = deps;
+  const rules = await deps.rules(repoId);
+  if (rules instanceof RepoRulesError) return;
+  const own = store.queue(seat.id);
+  if (own.some((q) => q.takenAt !== null)) return;
+  const labels = areaLabelsFor(rules, seat.area);
+  const holder = new Map<number, string>();
+  for (const q of own) if (q.repoId === repoId) holder.set(q.issue, seat.id);
+  for (const { session, seat: other } of writerSeats(config)) {
+    if (
+      other.id === seat.id ||
+      session.repoId !== repoId ||
+      (seatMayTake(store, other.id) && !atQuotaStop(deps, other.accountId))
+    ) {
+      continue;
+    }
+    for (const q of store.queue(other.id)) {
+      if (q.repoId === repoId && q.takenAt === null) holder.set(q.issue, other.id);
+    }
+  }
+  const best = readyCards(store, repoId).find((c) => {
+    const l = areaLabelsOf(rules, c);
+    const label = l[0];
+    return (
+      holder.has(c.issueNumber) && l.length === 1 && label !== undefined && labels.includes(label)
+    );
+  });
+  if (best === undefined) return;
+  const from = holder.get(best.issueNumber);
+  if (from === undefined || from === seat.id) return;
+  store.dropQueued(from, repoId, best.issueNumber);
+  store.replaceQueue(seat.id, [
+    { repoId, issue: best.issueNumber },
+    ...own
+      .filter((q) => q.issue !== best.issueNumber)
+      .map((q) => ({ repoId: q.repoId, issue: q.issue })),
+  ]);
+}
+
+/**
  * The seat's next queued ticket, started as a looped run. Nothing happens for a draft repo, a
  * preview, a seat that is not idle or has a run, or an account at its quota stop.
  */
@@ -314,6 +362,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
   if (!seatMayTake(store, seatId)) return;
   if (atQuotaStop(deps, found.seat.accountId)) return;
+  await claimBestReady(deps, found.session.repoId, found.seat);
 
   const taken = store.takeQueued(seatId, deps.now());
   if (taken === null) return;

@@ -7,14 +7,15 @@
  *   '<crew.node>' --experimental-strip-types '<hub root>/apps/server/src/guard/hook-cli.ts' \
  *     '<token file>' 'http://127.0.0.1:<port>/api/guard/check' || exit 2
  *
- * It reads all of stdin, asks `hookMain`, prints its answer and exits with its code. Any failure of
+ * It reads all of stdin, asks `hookMain`, prints its answer and exits with its code. `postHttp`
+ * rejects with node's own error (`code` ECONNREFUSED or ECONNRESET), which `hookMain` retries. Any failure of
  * its own once loaded, and its hard deadline, print the "unreachable" deny and exit 2. A failure to
  * load the module (node missing, an import that fails) exits 1 (127 for a missing node) before any
  * of this runs: the `|| exit 2` wrapper turns that into exit 2, which blocks the tool.
  */
 import { writeSync } from "node:fs";
 import { request } from "node:http";
-import { HOOK_DEADLINE_MS } from "@mc/core";
+import { HOOK_DEADLINE_MS, HOOK_RETRY_ENV, HOOK_RETRY_MS } from "@mc/core";
 import { FAILED, type HookResult, hookMain } from "./hook.ts";
 
 /** The one stderr line on a failure; the CLI shows it (and the command line) to the model. */
@@ -59,6 +60,12 @@ function postHttp(
   });
 }
 
+/** `HOOK_RETRY_MS`, or less if the env var says so (it can only shorten the wait: still fail closed). */
+function retryMs(): number {
+  const n = Number(process.env[HOOK_RETRY_ENV]);
+  return Number.isFinite(n) && n >= 0 && n < HOOK_RETRY_MS ? n : HOOK_RETRY_MS;
+}
+
 function finish(r: HookResult): never {
   let exit = r.exit;
   try {
@@ -90,5 +97,7 @@ process.on("unhandledRejection", fail);
 // covers reading stdin too: a CLI that never closes it still gets a deny in time
 setTimeout(fail, HOOK_DEADLINE_MS);
 readStdin()
-  .then((stdin) => hookMain(stdin, [process.argv[2] ?? "", process.argv[3] ?? ""], postHttp))
+  .then((stdin) =>
+    hookMain(stdin, [process.argv[2] ?? "", process.argv[3] ?? ""], postHttp, retryMs()),
+  )
   .then(finish, fail);

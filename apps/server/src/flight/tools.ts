@@ -6,13 +6,28 @@
 import {
   ANSWER_ONE_OF,
   ANSWER_OWN_QUESTION,
+  AREA_LABEL_PREFIX,
   accountStoppedText,
   answeredText,
   answerMessageText,
   areaLabelsOf,
   askerRunEndedText,
+  COMMENTED_DECISION,
+  CREATE_NO_REPO,
   capText,
+  commentedText,
+  commentFailedText,
+  commentTextText,
+  createBodyText,
+  createdDecision,
+  createdDraftText,
+  createdText,
+  createFailedText,
+  createLabelsText,
+  createTextText,
   dependsOn,
+  duplicateLabelText,
+  duplicateTitleText,
   ENGINE_OFF_TEXT,
   eligibleToStart,
   endedDecision,
@@ -20,6 +35,7 @@ import {
   endFailedText,
   FLIGHT_ABOUT_MAX,
   FLIGHT_BASIS_MAX,
+  FLIGHT_COMMENTS_PER_HOUR,
   FLIGHT_DECISION_MAX,
   FLIGHT_ENDS_PER_HOUR,
   FLIGHT_HOUR_MS,
@@ -31,19 +47,27 @@ import {
   FLIGHT_READS_PER_HOUR,
   FLIGHT_STARTABLE,
   FLIGHT_TICKET_RESTART_MS,
+  FLIGHT_TICKET_TITLE_MAX,
+  FLIGHT_TICKET_TYPE_LABELS,
+  FLIGHT_TICKETS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_UNPARKS_PER_RUN,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
+  GITHUB_WRITES_OFF,
   hasDoneWhenSection,
+  hasOutcomeSection,
   hasPlanSection,
   hudColumnOf,
+  LANE_LABEL_PREFIX,
+  labelCountText,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   MC_TOOL_NAMES,
+  mcToolHitText,
   messageAboutText,
   missingNeedsText,
   modeOfSeat,
@@ -64,6 +88,7 @@ import {
   notEndableSeatText,
   notInSessionText,
   notOnBoardText,
+  notOnProjectText,
   notParkedText,
   notReadyText,
   notSentText,
@@ -105,23 +130,36 @@ import {
   type TicketView,
   ticketReadText,
   unclosedMarkdown,
+  unknownLabelText,
   unparkCapText,
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
 import type { ChangeBus } from "../bus.ts";
+import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import type { Move, MoveResult } from "../github-board.ts";
+import type { GhRunner } from "../mcp/gh.ts";
 import type { McTool, McToolContext } from "../mcp/server.ts";
-import { badArgs, seatPlace, text } from "../mcp/tools.ts";
+import {
+  badArgs,
+  evidenceProblemText,
+  type McToolsDeps,
+  prTextProblem,
+  queued,
+  readKnown,
+  redact,
+  seatPlace,
+  text,
+} from "../mcp/tools.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import type { Store } from "../store.ts";
-import { flightSeat, flightStartCap, flightState } from "./state.ts";
+import { crewDir, type Store } from "../store.ts";
+import { flightSeat, flightStartCap, flightState, markPrsShown } from "./state.ts";
 
 export interface FlightToolsDeps {
   config: CcConfig;
@@ -136,6 +174,13 @@ export interface FlightToolsDeps {
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** The same card move the engine makes. */
   board: { move: (m: Move) => Promise<MoveResult> };
+  /** gh, through its one wrapper (`createGh`): create_ticket and comment_ticket write with it. */
+  gh: GhRunner;
+  /** The DB's path; gh runs in `{DB dir}/crew/`. */
+  dbPath: string;
+  /** The secrets the ticket and comment scans look for verbatim, read for each call. */
+  knownSecrets: McToolsDeps["knownSecrets"];
+  log?: (line: string) => void;
   now?: () => number;
 }
 
@@ -188,6 +233,18 @@ const PromoteArgs = z.strictObject({
   to: z.enum(PROMOTE_TO),
   basis: basisArg,
 });
+const SCOPED_LABEL = /^(?:area|lane):[A-Za-z0-9._-]+$/;
+const CreateTicketArgs = z.strictObject({
+  title: text(FLIGHT_TICKET_TITLE_MAX).refine((s) => !/[\r\n]/.test(s), "must be one line"),
+  body: text(TICKET_BODY_MAX),
+  labels: z.array(z.string().min(1).max(100)).min(1).max(10),
+  basis: basisArg,
+});
+const CommentTicketArgs = z.strictObject({
+  issue: issueNumber,
+  text: text(MC_TEXT_MAX),
+  basis: basisArg,
+});
 const objectSchema = (properties: object, required: string[]) => ({
   type: "object",
   properties,
@@ -232,6 +289,27 @@ export function flightCall<S extends z.ZodType>(
   }
   return { ok: true, args: parsed.data };
 }
+
+/** The open issues of a `gh issue list --json=number,title` answer; null when it is not that. */
+function openIssues(stdout: string): { number: number; title: string }[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  return parsed.filter(
+    (i): i is { number: number; title: string } =>
+      typeof i === "object" &&
+      i !== null &&
+      typeof (i as { number?: unknown }).number === "number" &&
+      typeof (i as { title?: unknown }).title === "string",
+  );
+}
+
+/** Each repo's last create_ticket or comment_ticket call: one at a time, so the cap and the duplicate check hold. */
+const ticketQueue = new Map<string, Promise<unknown>>();
 
 /** Each tool: `modes: []`, `grantable: ["read-only"]`, so #222's grant filter shows it only to a seat whose role grants it (FLIGHT; `read_ticket` also a planner). */
 export function createFlightTools(deps: FlightToolsDeps): McTool[] {
@@ -667,14 +745,215 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: movedText(ref, to) };
   }
 
+  /** The labels' refusal (what is wrong with them), or null. */
+  function labelsProblem(labels: readonly string[]): string | null {
+    const seen = new Set<string>();
+    for (const l of labels) {
+      if (seen.has(l)) return duplicateLabelText(l);
+      seen.add(l);
+      if (!SCOPED_LABEL.test(l) && !FLIGHT_TICKET_TYPE_LABELS.includes(l)) {
+        return unknownLabelText(l);
+      }
+    }
+    for (const prefix of [AREA_LABEL_PREFIX, LANE_LABEL_PREFIX]) {
+      const found = labels.filter((l) => l.startsWith(prefix));
+      if (found.length !== 1) return labelCountText(prefix, found);
+    }
+    return null;
+  }
+
+  /** Refuses `body` as GitHub text (a secret also leaves a guard hit); null when it is clean. */
+  async function textProblem(
+    ctx: McToolContext,
+    tool: string,
+    github: string,
+    issue: number | null,
+    texts: readonly { label: string; text: string }[],
+    known: readonly string[],
+  ): Promise<string | null> {
+    for (const t of texts) {
+      const problem = prTextProblem(t.text, {
+        repo: github,
+        issue,
+        known,
+        label: t.label,
+        unclosed: true,
+        allowOwnRepoRefs: true,
+      });
+      if (problem === null) continue;
+      if (problem.problem === "secret") {
+        store.addGuardHit({
+          agentId: ctx.seatId,
+          runId: ctx.runId,
+          rule: "secret",
+          text: mcToolHitText("secret", tool),
+          at: now(),
+        });
+        bus.emit("guard");
+      }
+      return evidenceProblemText(problem);
+    }
+    return null;
+  }
+
+  async function createTicket(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, CreateTicketArgs, args);
+    if (!c.ok) return c.result;
+    const { title, body, labels, basis } = c.args;
+    const repo = repoOf();
+    if (repo === undefined) return fail(CREATE_NO_REPO);
+    if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
+    const bad = labelsProblem(labels);
+    if (bad !== null) return fail(createLabelsText(bad));
+    const missing = [
+      ...(hasOutcomeSection(body) ? [] : ["## Outcome"]),
+      ...(hasDoneWhenSection(body) ? [] : ["## Done when"]),
+    ];
+    if (missing.length > 0) return fail(createBodyText(missing));
+    const known = await readKnown(deps, "create_ticket");
+    const unfit = await textProblem(
+      ctx,
+      "create_ticket",
+      repo.github,
+      null,
+      [
+        { label: "title", text: title },
+        { label: "body", text: body },
+      ],
+      known,
+    );
+    if (unfit !== null) return fail(createTextText(unfit));
+
+    // one at a time per repo, so the cap and the duplicate check see the earlier call's issue; the
+    // check lists the repo's open issues, not GitHub search, whose index lags and reads qualifiers
+    return queued(ticketQueue, repo.id, async (): Promise<Result> => {
+      const at = now();
+      const filed = lastHour(["ticket"], at);
+      if (filed >= FLIGHT_TICKETS_PER_HOUR) return fail(capText("filed tickets", filed));
+      const cwd = crewDir(deps.dbPath);
+      const failed = (step: string, r: { code: number | null; stderr: string }): Result => {
+        deps.log?.(
+          redact(`mc create_ticket: gh ${step} failed (${String(r.code)}): ${r.stderr}`, known),
+        );
+        return fail(createFailedText(step));
+      };
+      const listed = await deps.gh(
+        [
+          "issue",
+          "list",
+          `--repo=${repo.github}`,
+          "--state=open",
+          "--json=number,title",
+          "--limit=1000",
+        ],
+        { cwd },
+      );
+      if (listed.code !== 0) return failed("issue list", listed);
+      const same = openIssues(listed.stdout)?.find((i) => i.title === title);
+      if (same !== undefined) return fail(duplicateTitleText(same.number));
+
+      const created = await deps.gh(
+        [
+          "issue",
+          "create",
+          `--repo=${repo.github}`,
+          `--title=${title}`,
+          `--body=${body}`,
+          ...labels.map((l) => `--label=${l}`),
+        ],
+        { cwd },
+      );
+      if (created.code !== 0) return failed("issue create", created);
+      const url = created.stdout.trim().split("\n").pop() ?? "";
+      const number = new RegExp(`^https://github\\.com/${repo.github}/issues/(\\d+)$`, "i").exec(
+        url,
+      )?.[1];
+      if (number === undefined) return failed("issue create", { code: 0, stderr: "no issue URL" });
+      const issue = Number(number);
+      const ref = `${repo.id}#${issue}`;
+      // the issue exists now: whatever follows, it counts against the cap and is logged
+      record(at, {
+        kind: "ticket",
+        ref,
+        about: cut(`${ref}: ${title}`, FLIGHT_ABOUT_MAX),
+        decision: createdDecision(issue),
+        basis,
+      });
+      bus.emit("flight");
+      const [owner = ""] = repo.github.split("/");
+      const added = await deps.gh(
+        ["project", "item-add", String(repo.project), `--owner=${owner}`, `--url=${url}`],
+        { cwd },
+      );
+      if (added.code !== 0) {
+        failed("project item-add", added);
+        return fail(notOnProjectText(ref));
+      }
+      // a draft repo's board is never written: moveCard would answer ok and change nothing
+      if (repo.autonomy !== "merge") return { text: createdDraftText(ref, repo.id) };
+      const moved = await deps.board.move({
+        runId: ctx.runId,
+        repoId: repo.id,
+        issue,
+        column: "Backlog",
+      });
+      return { text: createdText(ref, moved.ok) };
+    });
+  }
+
+  async function commentTicket(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, CommentTicketArgs, args);
+    if (!c.ok) return c.result;
+    const { issue, text: comment, basis } = c.args;
+    const repo = repoOf();
+    if (repo === undefined) return fail(CREATE_NO_REPO);
+    if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
+    const known = await readKnown(deps, "comment_ticket");
+    const unfit = await textProblem(
+      ctx,
+      "comment_ticket",
+      repo.github,
+      issue,
+      [{ label: "comment", text: comment }],
+      known,
+    );
+    if (unfit !== null) return fail(commentTextText(unfit));
+    return queued(ticketQueue, repo.id, async (): Promise<Result> => {
+      const at = now();
+      const posted = lastHour(["comment"], at);
+      if (posted >= FLIGHT_COMMENTS_PER_HOUR) return fail(capText("posted comments", posted));
+      const r = await deps.gh(
+        ["issue", "comment", String(issue), `--repo=${repo.github}`, `--body=${comment}`],
+        { cwd: crewDir(deps.dbPath) },
+      );
+      if (r.code !== 0) {
+        deps.log?.(
+          redact(
+            `mc comment_ticket: gh issue comment failed (${String(r.code)}): ${r.stderr}`,
+            known,
+          ),
+        );
+        return fail(commentFailedText(issue));
+      }
+      const ref = `${repo.id}#${issue}`;
+      record(at, {
+        kind: "comment",
+        ref,
+        about: ref,
+        decision: COMMENTED_DECISION,
+        basis,
+      });
+      bus.emit("flight");
+      return { text: commentedText(issue) };
+    });
+  }
+
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, FlightStateArgs, args);
     if (!c.ok) return c.result;
-    return {
-      text: JSON.stringify(
-        flightState({ config, store, busy: deps.supervisor.busy(), now: now() }),
-      ),
-    };
+    const state = flightState({ config, store, busy: deps.supervisor.busy(), now: now() });
+    markPrsShown(store, state);
+    return { text: JSON.stringify(state) };
   }
 
   return [
@@ -786,6 +1065,37 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: endRun,
+    },
+    {
+      name: MC_TOOL_NAMES.createTicket,
+      description: `File a ticket in your repo's Backlog when you find a bug, a gap or an idea; never ask the operator to file one. labels: exactly one ${AREA_LABEL_PREFIX}* and one ${LANE_LABEL_PREFIX}*, plus any of ${FLIGHT_TICKET_TYPE_LABELS.join(", ")}. The body needs ## Outcome and ## Done when. A title that matches an open issue is refused with that issue's number: comment on it instead. At most ${FLIGHT_TICKETS_PER_HOUR} an hour. It is posted to GitHub: no @mentions, no issue numbers, no secrets.`,
+      inputSchema: objectSchema(
+        {
+          title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
+          body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },
+          labels: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10 },
+          basis: BASIS_SCHEMA,
+        },
+        ["title", "body", "labels", "basis"],
+      ),
+      modes: [],
+      grantable: ["read-only"],
+      call: createTicket,
+    },
+    {
+      name: MC_TOOL_NAMES.commentTicket,
+      description: `Comment on an issue of your repo. At most ${FLIGHT_COMMENTS_PER_HOUR} an hour. It is posted to GitHub: no @mentions, no other issues' numbers, no secrets.`,
+      inputSchema: objectSchema(
+        {
+          issue: ISSUE_SCHEMA,
+          text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+          basis: BASIS_SCHEMA,
+        },
+        ["issue", "text", "basis"],
+      ),
+      modes: [],
+      grantable: ["read-only"],
+      call: commentTicket,
     },
   ];
 }
