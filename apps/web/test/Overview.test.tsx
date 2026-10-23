@@ -1,9 +1,10 @@
 import {
   type ActivityEvent,
+  type ActivityRow,
   type AttentionItem,
+  type CommsEvent,
   type CrewLoop,
   type CrewRow,
-  ENGINE_NOT_RUNNING,
   FLIGHT_NOT_RUNNING,
   GITHUB_SLOWED_PREFIX,
   type GithubRateState,
@@ -64,7 +65,7 @@ interface Data {
   limits?: LimitRow[];
   githubRate?: GithubRateState;
   health?: HealthRow[];
-  activity?: ActivityEvent[];
+  activity?: ActivityRow[];
   away?: unknown;
   lock?: TestLockState;
   config?: unknown;
@@ -1530,20 +1531,93 @@ describe("Activity panel", () => {
     });
   });
 
-  it("Messages says the engine is needed; Everything changes the subtitle; Pause freezes", async () => {
-    const f = stub({ rows, activity: events });
+  const TAG = "@" + "CAPCOM";
+  const comms = (over: Partial<CommsEvent> = {}): CommsEvent => ({
+    at: NOW,
+    kind: "comms",
+    who: "guido-1",
+    to: "CAPCOM",
+    text: "x",
+    ref: null,
+    url: null,
+    status: null,
+    prs: [],
+    summary: null,
+    ...over,
+  });
+
+  it("Messages lists hand-offs FROM → TO; Steps hides them; Everything shows all; Pause freezes", async () => {
+    const f = stub({
+      rows: [...rows, seatRow({ index: 2 })],
+      activity: [
+        ...events.slice(0, 1),
+        comms({ at: NOW - 2 * MIN, text: `Need a call ${TAG}`, ref: "shop-app#3349" }),
+        comms({
+          at: NOW - 3 * MIN,
+          who: "MC",
+          to: "guido-1",
+          text: "CI failed on lint",
+          ref: "shop-app#3349",
+        }),
+        ...events.slice(1),
+      ],
+    });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText("run #11 failed");
+    expect(act_.querySelectorAll(".arow").length).toBe(4);
+    expect(act_.textContent).not.toContain("CI failed on lint");
+    fireEvent.click(within(act_).getByRole("button", { name: "Messages" }));
+    const msgs = [...act_.querySelectorAll<HTMLElement>(".arow.k-comms")];
+    expect(act_.querySelectorAll(".arow").length).toBe(2);
+    const [mc, you] = msgs as [HTMLElement, HTMLElement];
+    for (const part of ["Mission Control", "→", "guido-1", "CI failed on lint"]) {
+      expect(mc.textContent, part).toContain(part);
+    }
+    expect(mc.querySelector(".g")?.textContent).toBe("›");
+    expect(within(mc).getByRole("link").getAttribute("href")).toMatch(/\/issues\/3349$/);
+    for (const part of ["guido-1", "→", "You"]) expect(you.textContent, part).toContain(part);
+    expect(you.querySelector(".mention")?.textContent).toBe(TAG);
+    expect(act_.textContent).toContain("what agents said to each other");
+    expect(act_.textContent).not.toContain("Arrives with the engine (phase 2).");
+    fireEvent.click(within(act_).getByRole("button", { name: "Everything" }));
+    expect(act_.textContent).toContain("every event");
+    expect(act_.querySelectorAll(".arow").length).toBe(6);
+    expect(f).toHaveBeenCalled();
+    fireEvent.click(within(act_).getByRole("button", { name: "Pause" }));
+    expect(within(act_).getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  it("a comms row between agents of another session is hidden", async () => {
+    stub({
+      rows: [
+        ...rows,
+        seatRow({ id: "inco-1", index: 2, repoId: "site-builder" }),
+        seatRow({ index: 3 }),
+      ],
+      activity: [
+        comms({ at: NOW - MIN, who: "inco-1", text: "site talk" }),
+        comms({ at: NOW - 2 * MIN, text: "shop talk" }),
+        comms({ at: NOW - 3 * MIN, who: "MC", text: "hub talk" }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    fireEvent.click(within(act_).getByRole("button", { name: "Messages" }));
+    await within(act_).findByText("site talk");
+    act(() => setSession("shop-app"));
+    expect(within(act_).getByText("shop talk")).toBeTruthy();
+    expect(within(act_).getByText("hub talk")).toBeTruthy();
+    expect(within(act_).queryByText("site talk")).toBeNull();
+  });
+
+  it("an empty Messages list says No events yet.", async () => {
+    stub({ rows, activity: events });
     const { container } = render(<Overview />);
     const act_ = container.querySelector("#actP") as HTMLElement;
     await within(act_).findByText("run #11 failed");
     fireEvent.click(within(act_).getByRole("button", { name: "Messages" }));
-    expect(within(act_).getByText(ENGINE_NOT_RUNNING)).toBeTruthy();
-    expect(act_.textContent).toContain("what agents said to each other");
-    fireEvent.click(within(act_).getByRole("button", { name: "Everything" }));
-    expect(act_.textContent).toContain("every event");
-    expect(act_.querySelectorAll(".arow").length).toBe(4);
-    expect(f).toHaveBeenCalled();
-    fireEvent.click(within(act_).getByRole("button", { name: "Pause" }));
-    expect(within(act_).getByRole("button", { name: "Resume" })).toBeTruthy();
+    expect(within(act_).getByText("No events yet.")).toBeTruthy();
   });
 
   it("hides other repos' rows under a session filter", async () => {
