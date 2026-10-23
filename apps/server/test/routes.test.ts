@@ -155,6 +155,8 @@ describe("the route table", () => {
     expect(routes).toContain("POST /api/accounts/:id/check");
     expect(routes).toContain("POST /api/accounts");
     expect(routes).toContain("POST /api/seats/:id/start");
+    expect(routes).toContain("GET /api/attention/:key/discussion");
+    expect(routes).toContain("POST /api/attention/:key/discussion");
     expect(routes).toContain("GET /api/comms/:id");
     expect(routes).toContain("POST /api/comms/:id/read");
     expect(orphans(routes, webReads(), readerComments())).toEqual([]);

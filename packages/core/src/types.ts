@@ -817,6 +817,13 @@ export interface PersonBrief {
 }
 
 /** Correlates item chat without changing how messages are delivered or executed. */
+export interface ItemDiscussion {
+  id: string;
+  itemKey: string;
+  version: string;
+  messages: ItemChatMessage[];
+}
+
 export interface ItemChatMessage {
   id: string;
   itemKey: string;

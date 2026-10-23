@@ -112,10 +112,17 @@ import {
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
 import { changedFiles, fileDiff, type GitExec, GitFailed, NO_WORKTREE_NOTE } from "./files.ts";
-import { flightBriefView, flightView } from "./flight/state.ts";
+import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
-import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
+import {
+  attentionItems,
+  attentionVersion,
+  CREW_ERROR_KEY,
+  crew,
+  NO_LOCK,
+  NOTE_KEY,
+} from "./hud.ts";
 import { loopTries } from "./loophistory.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -1717,6 +1724,94 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.hubLogin?.() ?? null,
           ),
       );
+
+      const discussionSends = new Set<string>();
+      const currentDiscussionItem = (key: string) => {
+        const item = attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          undefined,
+          deps.hubLogin?.() ?? null,
+        ).find((item) => item.key === key && !item.acked);
+        return item ? { ...item, version: attentionVersion(item) } : undefined;
+      };
+      const openDiscussion = (item: AttentionItem & { version: string }) => {
+        const brief = item.brief;
+        const recommended = brief?.recommendedOptionId
+          ? brief.options.find((o) => o.id === brief.recommendedOptionId)
+          : undefined;
+        const text = recommended?.description
+          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description}. What would help you decide? I can pull the Teams thread or the code.`
+          : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
+        return store.ensureDiscussion(item.key, item.version, { text, at: now() });
+      };
+      // Reader: apps/web/src/shell/ItemPanel.tsx
+      api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
+        "/attention/:key/discussion",
+        async (req, reply) => {
+          const { key } = req.params;
+          if (req.query.id) {
+            const thread = store.discussion(key, req.query.id);
+            return thread ?? reply.code(404).send({ error: "Unknown discussion." });
+          }
+          const item = currentDiscussionItem(key);
+          if (!item?.version) return reply.code(404).send({ error: "No current item." });
+          return openDiscussion({ ...item, version: item.version });
+        },
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/discussion", async (req, reply) => {
+        const body = z
+          .strictObject({
+            version: z.string().min(1).max(100),
+            messageId: z.string().regex(/^[a-zA-Z0-9:_-]{1,100}$/),
+            text: z.string().trim().min(1).max(4000),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const item = currentDiscussionItem(req.params.key);
+        if (!item || item.version !== body.data.version)
+          return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
+        const thread = openDiscussion({ ...item, version: body.data.version });
+        const { messageId, text } = body.data;
+        try {
+          store.askDiscussion(thread.id, messageId, text, now());
+        } catch {
+          return reply.code(409).send({ error: "Message id already used." });
+        }
+        if (store.discussionSent(thread.id, messageId))
+          return store.discussion(item.key, thread.id);
+        const flight = flightSeat(config);
+        if (!flight || !supervisor || !crewGate(flight.seat.id, reply))
+          return reply.sent ? reply : reply.code(503).send({ error: "FLIGHT is unavailable." });
+        const sendKey = `${thread.id}:${messageId}`;
+        if (discussionSends.has(sendKey))
+          return reply.code(409).send({ error: "Message is being sent." });
+        discussionSends.add(sendKey);
+        try {
+          await supervisor.message(
+            flight.seat.id,
+            JSON.stringify({
+              kind: "item-discussion",
+              discussion: { id: thread.id, replyTo: messageId },
+              item,
+              question: text,
+              instruction:
+                "Reply using log_decision with discussion.id, discussion.replyTo and a stable discussion.messageId. Discussion is chat only; do not execute a choice.",
+            }),
+            { interrupt: false, questions: "none" },
+          );
+          store.markDiscussionSent(thread.id, messageId);
+          bus.emit("attention");
+          return store.discussion(item.key, thread.id);
+        } catch {
+          return reply.code(503).send({ error: "Could not send to FLIGHT. Retry this message." });
+        } finally {
+          discussionSends.delete(sendKey);
+        }
+      });
 
       api.post("/attention/ack", async (req, reply) => {
         const body = AckBody.safeParse(req.body);
