@@ -101,6 +101,11 @@ export interface RunLoop {
   merging?: { sha: string; done: MergeStep[] } | null;
   /** Merging main into the branch conflicted: the markers are in the worktree, and the seat resolves them. */
   mainMerge?: { mainSha: string; files: string[] } | null;
+  /**
+   * The hub's conflict-free merges of main made `to` from `from` (each merge's first parent the
+   * one before) and left the PR's own diff as it was at `from`: `to` goes by `from`'s review.
+   */
+  carry?: { from: string; to: string } | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */

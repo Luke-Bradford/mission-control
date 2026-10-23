@@ -3,7 +3,7 @@ import { clockHm } from "./hud.ts";
 import { COMMIT_PATHS_NAMED, REFERENCE_ADVICE } from "./mcp.ts";
 import type { MoveColumn } from "./repos.ts";
 import {
-  currentReview,
+  carriedFrom,
   failedAttempts,
   fixesSent,
   fixKey,
@@ -20,6 +20,7 @@ import {
   readyText,
   readyWaivedText,
   reviewFailedParkText,
+  reviewFor,
   reviewParkText,
   reviewRulingParkText,
 } from "./review.ts";
@@ -130,6 +131,8 @@ export const conflictText = (files: readonly string[]): string =>
 /** The Activity rows for merging main into a run's branch. */
 export const mergedMainText = (mainSha: string): string =>
   `merged main ${mainSha.slice(0, 7)} into the branch`;
+export const reviewCarriedText = (from: string, to: string): string =>
+  `review of ${from.slice(0, 7)} carried to ${to.slice(0, 7)} (main merged, PR diff unchanged)`;
 export const mainConflictText = (mainSha: string, n: number): string =>
   `merging main ${mainSha.slice(0, 7)} conflicted in ${n} ${n === 1 ? "file" : "files"}`;
 /** The Activity row for a park. */
@@ -351,7 +354,8 @@ const owesReport = (s: LoopSnapshot): boolean => {
 function reviewView(s: LoopSnapshot, loop: RunLoop) {
   const R = s.review ?? null;
   const P = s.pushed?.sha ?? null;
-  const cur = R !== null && P !== null ? currentReview(R.rows, loop.epoch, P) : null;
+  const from = P !== null ? carriedFrom(loop.carry, loop.reviewWaivedSha, P) : null;
+  const cur = R !== null && P !== null ? reviewFor(R.rows, loop.epoch, P, from) : null;
   const waived = P !== null && (loop.reviewWaivedSha ?? null) === P;
   const on =
     R !== null &&
@@ -362,7 +366,7 @@ function reviewView(s: LoopSnapshot, loop: RunLoop) {
     s.pr.headSha === P &&
     !waived;
   const blocked = cur !== null && cur.state === "reported" && cur.blocking > 0;
-  return { R, P, cur, waived, on, blocked };
+  return { R, P, from, cur, waived, on, blocked };
 }
 
 /**
@@ -935,9 +939,9 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         s.ended === null &&
         (loop.phase === "review" || loop.phase === "ci") &&
         row.epoch === loop.epoch &&
-        row.sha === rv.P &&
+        (row.sha === rv.P || (rv.from !== null && row.sha === rv.from)) &&
         s.pr?.state === "open" &&
-        (s.pr.headSha === null || s.pr.headSha === row.sha) &&
+        (s.pr.headSha === null || s.pr.headSha === row.sha || s.pr.headSha === rv.P) &&
         (loop.reviewWaivedSha ?? null) !== row.sha;
       if (!wanted) actions.push({ kind: "supersede-review", reviewId: row.id });
     }
@@ -1011,7 +1015,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside, gate, merging, mainMerge } = step.loop;
+  const { parked, touches, aside, gate, merging, mainMerge, carry } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
@@ -1020,6 +1024,7 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
     ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
     ...(mainMerge ? { mainMerge: { ...mainMerge, files: [...mainMerge.files] } } : {}),
+    ...(carry ? { carry: { ...carry } } : {}),
   };
   if (loop.aside) {
     if (s.seat.holdsRun) {

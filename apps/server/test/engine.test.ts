@@ -47,6 +47,7 @@ import {
   readyRuledText,
   readyText,
   readyWaivedText,
+  reviewCarriedText,
   reviewDroppedText,
   reviewFailedText,
   reviewQueuedText,
@@ -2142,7 +2143,7 @@ describe("the engine runs reviews", () => {
 
       it("a clean update moves the run to ci, pushes the merge, and reviews the new sha", async () => {
         behindMain();
-        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B }];
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
         await gateOpen();
         await vi.waitFor(() => expect(h.pushes.length).toBeGreaterThanOrEqual(2));
         expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
@@ -2158,6 +2159,26 @@ describe("the engine runs reviews", () => {
         expect(reviewRows().map((r) => r.sha)).toContain(SHA_B);
         // nothing is merged into the branch twice
         expect(h.updates).toHaveLength(1);
+      });
+
+      it("a clean update that leaves the PR's diff as it was carries the review", async () => {
+        behindMain();
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
+        await gateOpen();
+        await vi.waitFor(() => expect(h.pushes.length).toBeGreaterThanOrEqual(2));
+        h.gate = { ...need(h.gate), containsMain: true };
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        await h.engine.reconcileRun(RUN);
+        expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
+        expect(loopOf().carry).toEqual({ from: SHA, to: SHA_B });
+        expect(loopTexts()).toContain(reviewCarriedText(SHA, SHA_B));
+        expect(h.statusCalls).toContainEqual({
+          sha: SHA_B,
+          state: "success",
+          description: "QA review passed (carried from aaaaaaa, main merged)",
+        });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
       });
 
       it("a conflict is left for the seat, and the line goes once", async () => {

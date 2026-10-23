@@ -3425,6 +3425,17 @@ describe("startReview", () => {
     expect(brief).not.toContain("ruff");
   });
 
+  it("startReview starts a review whose sha the pushed sha carries", async () => {
+    const pushSha = "e".repeat(40);
+    const r = reviewOfPush({ pushSha });
+    store.setRunLoop(r.author.id, { ...NEW_LOOP, carry: { from: r.sha, to: pushSha } });
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).resolves.toMatchObject({
+      runId: expect.any(String),
+    });
+  });
+
   it("startReview launches a scratch run", async () => {
     const r = reviewOfPush();
     const { sup } = make({ scratchRetro: true });
