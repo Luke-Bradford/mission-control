@@ -91,13 +91,17 @@ export function stalledSeats(
 }
 
 /**
- * A reply FLIGHT itself wrote on its direct line: the operator's to read, not work for FLIGHT. Listing
- * it in the digest woke FLIGHT with every reply it wrote (2026-10-23).
+ * A reply or `@CAPCOM` tag FLIGHT itself wrote: the operator's to read (Needs you still shows it),
+ * not work for FLIGHT. Listing it in the digest woke FLIGHT with every reply it wrote. Assumes one
+ * live FLIGHT seat (`flightSeat`).
  */
 export const ownReply = (
   item: Pick<AttentionItem, "kind" | "agentId">,
   flightId: string | null,
-): boolean => item.kind === "message" && flightId !== null && item.agentId === flightId;
+): boolean =>
+  (item.kind === "message" || item.kind === "tag") &&
+  flightId !== null &&
+  item.agentId === flightId;
 
 /** The ids FLIGHT can answer for: its own session's seats other than FLIGHT itself. */
 export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_MAX_WAKES,
   FLIGHT_NOTE_KEY,
@@ -470,6 +471,19 @@ describe("FLIGHT's items to brief", () => {
       at: T0,
     });
     expect(items()).toEqual([]);
+  });
+
+  it("leaves out FLIGHT's own replies and tags, and keeps another seat's reply", () => {
+    live("flight-1", "r-flight");
+    const say = (at: number, from: string, to: string, text: string) =>
+      store.addComms({ at, from, to, ticket: null, text });
+    say(T0, COMMS_CAPCOM, "flight-1", "status?");
+    say(T0 + MIN, "flight-1", COMMS_CAPCOM, "No change @CAPCOM");
+    say(T0, COMMS_CAPCOM, "guido-1", "how is it going?");
+    say(T0 + MIN, "guido-1", COMMS_CAPCOM, "tests pass");
+    const listed = items();
+    expect(listed.map((i) => i.kind)).toEqual(["message"]);
+    expect(listed.some((i) => i.key.includes("flight-1"))).toBe(false);
   });
 
   it("lists nothing without a FLIGHT seat", () => {
@@ -1072,6 +1086,7 @@ describe("ownReply", () => {
   it("leaves FLIGHT's own direct-line reply out of its digest and keeps another seat's", () => {
     expect(ownReply({ kind: "message", agentId: "flight-1" }, "flight-1")).toBe(true);
     expect(ownReply({ kind: "message", agentId: "guido-1" }, "flight-1")).toBe(false);
+    expect(ownReply({ kind: "tag", agentId: "flight-1" }, "flight-1")).toBe(true);
     expect(ownReply({ kind: "question", agentId: "flight-1" }, "flight-1")).toBe(false);
     expect(ownReply({ kind: "message", agentId: "flight-1" }, null)).toBe(false);
   });
