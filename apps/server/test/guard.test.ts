@@ -215,8 +215,8 @@ describe("TestLock", () => {
     clock = 3000;
     const c = lock.acquire({ runId: "C", toolUseId: "c1" }, "s-c", "pnpm -s test", 60_000, live());
     expect(lock.state().waiting).toEqual([
-      { runId: "B", seatId: "s-b", since: 2000 },
-      { runId: "C", seatId: "s-c", since: 3000 },
+      { runId: "B", seatId: "s-b", command: "pnpm -s test", since: 2000 },
+      { runId: "C", seatId: "s-c", command: "pnpm -s test", since: 3000 },
     ]);
     clock = 4000;
     lock.release({ runId: "A", toolUseId: "a1" });
@@ -683,7 +683,7 @@ describe("POST /api/guard/check", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json<TestLockState>()).toEqual({
       holder: { runId: "run-a", seatId: "guido-1", command: "pnpm -s test", since: NOW },
-      waiting: [{ runId: "run-b", seatId: "guido-2", since: NOW }],
+      waiting: [{ runId: "run-b", seatId: "guido-2", command: "pnpm -s test", since: NOW }],
     });
     lock.releaseRun("run-b");
   });
