@@ -1759,6 +1759,42 @@ describe("board and PR cadence", () => {
     await s.stop();
   });
 
+  it("a trigger does not read the boards while the rate-limit back-off holds", async () => {
+    vi.useFakeTimers({ now: NOW });
+    config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };
+    let rates: RateLimits | undefined;
+    const makeGql = vi.fn((_t: string, r: RateLimits) => {
+      rates = r;
+      return async () => ({});
+    });
+    const github = vi.fn<Collectors["github"]>(async () => {
+      rates?.record("Board", {
+        cost: 1,
+        limit: 5000,
+        remaining: 400,
+        resetAt: NOW + 10 * MIN,
+        at: Date.now(),
+      });
+      return { boards: false, escalations: false };
+    });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: Date.now,
+      collectors: stubs({ makeGql, github }),
+      waitedPrs: () => [],
+    });
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(github).toHaveBeenCalledTimes(1); // low reading: backed off
+    await vi.advanceTimersByTimeAsync(10_000);
+    s.refreshBoards(); // its timer waits out the 30 s debounce, so run past it
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(github).toHaveBeenCalledTimes(1);
+    await s.stop();
+  });
+
   it("waited PRs are read every github_seconds, others only with the board", async () => {
     const { s, prs, github } = cadence({ waited: (r) => (r === "shop-app" ? [7] : []) });
     s.start();

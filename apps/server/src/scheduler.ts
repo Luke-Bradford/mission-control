@@ -853,7 +853,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const wait = Math.max(BOARD_TRIGGER_DELAY_MS, lastBoardAt + BOARD_REFRESH_DEBOUNCE_MS - now());
     triggerTimer = setTimeout(() => {
       triggerTimer = null;
-      // direct ticks skip githubDue; a poll still in flight is asked again
+      // while backed off the ask stays (boardWanted): the first tick after the back-off reads
+      if (!githubDue()) return;
+      // a poll still in flight is asked again
       void tick("github").then((r) => {
         if (r === "skipped") refreshBoards();
       });
