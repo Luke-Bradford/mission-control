@@ -8,6 +8,7 @@ import {
 } from "@mc/core";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RESOURCES } from "../src/data.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { setSelectedAgent } from "../src/shell/selection.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
@@ -305,6 +306,28 @@ describe("scoped telemetry", () => {
         expect.anything(),
       ),
     );
+  });
+
+  it("choosing All again drops the Agent or Account filter and shows the unscoped numbers", async () => {
+    const scoped = tel({ today: { ...tel().today, tokens: 42_100 } });
+    stubFetch({
+      [RESOURCES.telemetry("6h").path]: tel(),
+      [RESOURCES.telemetry("6h", "studio").path]: scoped,
+      [RESOURCES.telemetry("6h", "", "codex-main").path]: scoped,
+      "/api/config": CFG,
+    });
+    render(<Telemetry />);
+    await screen.findByText("61.2k");
+    for (const [label, value] of [
+      ["Agent", "studio"],
+      ["Account", "codex-main"],
+    ] as const) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+      await screen.findByText("42.1k");
+      fireEvent.change(screen.getByLabelText(label), { target: { value: "" } });
+      await screen.findByText("61.2k");
+      expect(screen.queryByText("42.1k")).toBeNull();
+    }
   });
 });
 
