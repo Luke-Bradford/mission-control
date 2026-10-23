@@ -22,9 +22,14 @@ export const MC_TOOL_NAMES = {
   flightState: "flight_state",
   promote: "promote",
   endRun: "end_run",
+  acceptRuling: "accept_ruling",
+  syncMain: "sync_main",
   createTicket: "create_ticket",
   commentTicket: "comment_ticket",
   briefItem: "brief_item",
+  readPr: "read_pr",
+  readCiLog: "read_ci_log",
+  listTickets: "list_tickets",
   updateBrief: "update_brief",
 } as const;
 
@@ -47,9 +52,14 @@ export const MC_TOOLS = {
   flightState: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.flightState}`,
   promote: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.promote}`,
   endRun: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.endRun}`,
+  acceptRuling: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.acceptRuling}`,
+  syncMain: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.syncMain}`,
   createTicket: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.createTicket}`,
   commentTicket: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.commentTicket}`,
   briefItem: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.briefItem}`,
+  readPr: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.readPr}`,
+  readCiLog: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.readCiLog}`,
+  listTickets: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.listTickets}`,
   updateBrief: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.updateBrief}`,
 } as const;
 

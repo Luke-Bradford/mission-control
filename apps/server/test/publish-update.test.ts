@@ -133,6 +133,29 @@ describe("prDiffKey", () => {
   });
 });
 
+describe("worktreeChanges (real git)", () => {
+  it("is [] for a clean worktree, and lists changed, staged and new files", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    expect(await publisher().worktreeChanges(run(), worktree)).toEqual([]);
+    write(worktree, "apps/a.ts", "edited\n");
+    write(worktree, "apps/new.ts", "new\n");
+    git(worktree, "add", "apps/new.ts");
+    write(worktree, "apps/deep/loose.ts", "loose\n");
+    expect(((await publisher().worktreeChanges(run(), worktree)) as string[]).sort()).toEqual([
+      "apps/a.ts",
+      "apps/deep/loose.ts",
+      "apps/new.ts",
+    ]);
+  });
+
+  it("refuses a path that is not one of the clone's worktrees", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    const r = await publisher().worktreeChanges(run(), join(dir, "elsewhere"));
+    expect(r).toMatchObject({ ok: false });
+  });
+});
+
 describe("updateBranch (real git)", () => {
   it("a clean merge makes an engine commit with both parents, and records it", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
@@ -266,5 +289,88 @@ describe("deleteLocalBranch (real git)", () => {
     expect(await publisher().localBranchGone(run({}))).toBe(false);
     git(clone, "branch", "-D", BRANCH);
     expect(await publisher().localBranchGone(run({}))).toBe(true);
+  });
+});
+
+describe("a merged branch (real git)", () => {
+  const merging = (sha: string) =>
+    run({ loop: { prNumber: 12, merging: { sha, done: ["merge"] } } as never });
+  /** The PR merges `sha` into origin's main, as GitHub does. */
+  const prMerges = (sha: string): string =>
+    elsewhereOnMain((root) => {
+      git(root, "fetch", "-q", "origin", BRANCH);
+      git(root, "merge", "-q", "--no-ff", "--no-edit", sha);
+    });
+  const remoteTip = (): string => git(clone, "ls-remote", "origin", `refs/heads/${BRANCH}`);
+
+  it("never merges main into a branch whose head is already on main", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    git(worktree, "push", "-q", "origin", BRANCH);
+    const merged = prMerges(tip);
+    store.upsertRun(run());
+    expect(await publisher().updateBranch(run(), merged, worktree)).toMatchObject({
+      ok: false,
+      transient: true,
+    });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(tip);
+  });
+
+  it("deletes a branch with only a hub main merge past its merged head, locally and on origin", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    await publisher().updateBranch(run(), mainSha, worktree);
+    git(worktree, "push", "-q", "origin", BRANCH);
+    prMerges(tip);
+    git(clone, "worktree", "remove", "--force", worktree);
+    const r = merging(tip);
+    expect(await publisher().deleteRemoteBranch(r, tip)).toEqual({ ok: true });
+    expect(remoteTip()).toBe("");
+    expect(await publisher().deleteLocalBranch(r)).toEqual({ ok: true });
+    expect(git(clone, "branch", "--list", BRANCH)).toBe("");
+  });
+
+  it("keeps a branch with a seat commit after the merge", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    await publisher().updateBranch(run(), mainSha, worktree);
+    write(worktree, "apps/late.ts", "late\n");
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-q", "-m", "late work");
+    git(worktree, "push", "-q", "origin", BRANCH);
+    prMerges(tip);
+    git(clone, "worktree", "remove", "--force", worktree);
+    const r = merging(tip);
+    expect(await publisher().deleteRemoteBranch(r, tip)).toMatchObject({
+      ok: false,
+      transient: false,
+    });
+    expect(remoteTip()).not.toBe("");
+    expect(await publisher().deleteLocalBranch(r)).toMatchObject({ ok: false, transient: false });
+    expect(git(clone, "branch", "--list", BRANCH)).not.toBe("");
+  });
+
+  it("keeps a branch whose hub merge sits on a head that is not on main", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    await publisher().updateBranch(run(), mainSha, worktree);
+    git(worktree, "push", "-q", "origin", BRANCH);
+    git(clone, "worktree", "remove", "--force", worktree);
+    expect(await publisher().deleteRemoteBranch(merging(tip), tip)).toMatchObject({
+      ok: false,
+      transient: false,
+    });
+    expect(remoteTip()).not.toBe("");
+  });
+
+  it("keeps a branch whose extra merge is not the hub's", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    git(worktree, "merge", "-q", "--no-ff", "-m", `Merge main into ${BRANCH}`, mainSha);
+    git(worktree, "push", "-q", "origin", BRANCH);
+    prMerges(tip);
+    git(clone, "worktree", "remove", "--force", worktree);
+    expect(await publisher().deleteRemoteBranch(merging(tip), tip)).toMatchObject({
+      ok: false,
+      transient: false,
+    });
   });
 });

@@ -37,11 +37,14 @@ export const EVIDENCE_PARKED =
 export const EVIDENCE_IN_CI =
   "CI is running on your last push; Mission Control will message you the result.";
 /** The worktree holds changes no commit has. */
-export const evidenceUncommittedText = (paths: readonly string[]): string => {
+export const evidenceUncommittedText = (paths: readonly string[]): string =>
+  `Not recorded: uncommitted changes in ${pathsText(paths)}. Commit them with mc commit, then report again.`;
+/** The first COMMIT_PATHS_NAMED paths, comma-separated, then "and {n} more". */
+export const pathsText = (paths: readonly string[]): string => {
   const shown = paths.slice(0, COMMIT_PATHS_NAMED).join(", ");
   const more =
     paths.length > COMMIT_PATHS_NAMED ? ` and ${paths.length - COMMIT_PATHS_NAMED} more` : "";
-  return `Not recorded: uncommitted changes in ${shown}${more}. Commit them with mc commit, then report again.`;
+  return `${shown}${more}`;
 };
 /** No commit since the last report, or the newest commit is the one CI failed on. */
 export const EVIDENCE_NO_COMMIT =
@@ -84,6 +87,12 @@ export const blockedNoteKey = (runId: string, epoch: number): string => `blocked
 
 /** `{sha7}` is the first 7 characters of the failed sha; the excerpt follows. */
 export const CI_FAILED_TEXT = `CI failed on {sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
+/** The park kind of a run whose author ruled on a CI failure instead of fixing it. */
+export const RULING_PARK = "ruling";
+/** The key of the line sent when FLIGHT's re-run of the failed jobs on `sha` failed too. */
+export const rerunFailedKey = (runId: string, sha: string): string => `rerun:${runId}:${sha}`;
+/** `{sha7}` is the first 7 characters of the failed sha; the excerpt of the re-run's failure follows. */
+export const CI_RERUN_FAILED_TEXT = `CI failed again on {sha7} when FLIGHT re-ran it, so your ruling was not accepted. Fix it, commit, and report again. The failing output:\n`;
 export const NO_NEW_COMMIT_TEXT = `No new commit since CI failed on {sha7}. Fix it and commit first, then report; or report with a note starting "${EVIDENCE_RULING_PREFIX}" if the failure is not yours.`;
 /** How a failed merge step is named in the park reason; the server parks it with kind `merge-step`. */
 export const MERGE_STEP_WORDS = {
@@ -216,6 +225,9 @@ export const NEW_LOOP: RunLoop = {
 /** A run in review leaves its seat when the session has a review seat. */
 export const asideEventText = (call: string): string =>
   `in review; ${call} is free for its next ticket`;
+/** A run in CI leaves its seat once its PR is open and its turn has ended. */
+export const asideInCiEventText = (call: string): string =>
+  `in CI; ${call} is free for its next ticket`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
@@ -248,7 +260,7 @@ export interface LoopSnapshot {
     /** The seat row holds this unended run. */
     holdsRun: boolean;
   };
-  /** The run's session has a review seat, so the run may leave its seat in review. */
+  /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean } | null;
@@ -294,7 +306,7 @@ export type LoopAction =
   | { kind: "push" }
   | { kind: "open-pr" }
   | { kind: "send"; key: string; text: string }
-  | { kind: "ci-excerpt"; key: string; sha: string }
+  | { kind: "ci-excerpt"; key: string; sha: string; again?: boolean }
   | { kind: "rerun-ci"; sha: string }
   | { kind: "move-card"; column: MoveColumn }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
@@ -519,7 +531,7 @@ function stateStep(s: LoopSnapshot): Step {
       if (evidence.ruling) {
         return park(
           seen,
-          "ruling",
+          RULING_PARK,
           `${seat.call} ruled on the CI failure on ${sha7(headCommit)} instead of fixing it; see its last report`,
         );
       }
@@ -803,14 +815,14 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
   );
 }
 
-/** Whether the run in review may leave its seat now. */
+/** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat, pushed, pr } = s;
   return (
     s.asideOk &&
     !loop.aside &&
     s.ended === null &&
-    loop.phase === "review" &&
+    (loop.phase === "review" || loop.phase === "ci") &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn &&
@@ -880,6 +892,17 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   if (working && loop.mainMerge) {
     const key = conflictKey(runId, loop.mainMerge.mainSha);
     if (free(key)) return { kind: "send", key, text: conflictText(loop.mainMerge.files) };
+  }
+
+  // FLIGHT re-ran the failed jobs on the ruled sha and they failed again: the author gets that failure
+  if (
+    working &&
+    loop.ciFailedSha !== null &&
+    loop.rulingRerun?.sha === loop.ciFailedSha &&
+    loop.rulingRerun.outcome === "failed"
+  ) {
+    const key = rerunFailedKey(runId, loop.ciFailedSha);
+    if (free(key)) return { kind: "ci-excerpt", key, sha: loop.ciFailedSha, again: true };
   }
 
   if (working && loop.ciFailedSha !== null && loop.relayedSha !== loop.ciFailedSha) {
@@ -1056,7 +1079,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside, gate, merging, mainMerge, carry } = step.loop;
+  const { parked, touches, aside, gate, merging, mainMerge, carry, rerun, rulingRerun } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
@@ -1066,6 +1089,10 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
     ...(mainMerge ? { mainMerge: { ...mainMerge, files: [...mainMerge.files] } } : {}),
     ...(carry ? { carry: { ...carry } } : {}),
+    ...(rerun ? { rerun: { ...rerun, runs: rerun.runs.map((r) => ({ ...r })) } } : {}),
+    ...(rulingRerun
+      ? { rulingRerun: { ...rulingRerun, runs: rulingRerun.runs.map((r) => ({ ...r })) } }
+      : {}),
   };
   if (loop.aside) {
     if (s.seat.holdsRun) {

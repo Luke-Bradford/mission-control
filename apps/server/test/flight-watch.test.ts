@@ -235,6 +235,7 @@ describe("FLIGHT's PR list", () => {
         ref: "mc#7",
         pr: 7,
         seat: "",
+        runId: "",
         ready: false,
         state: "open",
         headSha: "sha7",
@@ -885,6 +886,7 @@ describe("the FLIGHT watcher", () => {
 describe("wakeSummary", () => {
   const s = (over: Partial<FlightSeatState>): FlightSeatState => ({
     id: "guido-1",
+    runId: null,
     call: "GUIDO-1",
     role: "GUIDO",
     loop: "build",
@@ -907,6 +909,7 @@ describe("wakeSummary", () => {
     ref: "mc#1",
     pr: 1,
     seat: "guido-1",
+    runId: "r-1",
     ready: false,
     state: "open" as const,
     headSha: null,
@@ -916,7 +919,10 @@ describe("wakeSummary", () => {
   const state = (over: Partial<FlightState>): FlightState => ({
     time: "12:00",
     repo: "mc",
+    lane: null,
+    hubLogin: null,
     seats: [],
+    aside: [],
     questions: [],
     tickets: [],
     prs: [],
@@ -977,6 +983,8 @@ describe("wakeSummary", () => {
       labels: [],
       ready: true,
       blockedBy: [],
+      laneLabel: null,
+      assignees: [],
     };
     it("is true for a question, a free build seat with a ticket, or a park FLIGHT can lift", () => {
       expect(pending(state({ questions: [q] }))).toBe(true);
@@ -1014,6 +1022,29 @@ describe("wakeSummary", () => {
       );
       expect(pending(state({ seats: [s({ free: true })] }))).toBe(false);
       expect(pending(state({}))).toBe(false);
+    });
+
+    it("is true for a ruling park, which FLIGHT settles, and false for a budget park", () => {
+      expect(pending(state({ seats: [s({ parked: { kind: "ruling", reason: "r" } })] }))).toBe(
+        true,
+      );
+      expect(pending(state({ seats: [s({ parked: { kind: "budget", reason: "r" } })] }))).toBe(
+        false,
+      );
+    });
+
+    it("counts a parked set-aside run, in pending and in wakeFacts", () => {
+      const aside = {
+        runId: "r1",
+        seat: "guido-1",
+        ticket: "#1",
+        phase: "parked" as const,
+        parked: { kind: "ruling", reason: "r" },
+      };
+      expect(pending(state({ aside: [aside] }))).toBe(true);
+      const unparked = state({ aside: [{ ...aside, parked: null }] });
+      expect(pending(unparked)).toBe(false);
+      expect(wakeFacts(state({ aside: [aside] }))).not.toBe(wakeFacts(unparked));
     });
   });
 });
