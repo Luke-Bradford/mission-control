@@ -20,7 +20,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { addAgentParam, agentPath, navigate, setupPath } from "../router.ts";
+import { addAgentParam, agentPath, navigate, withoutAddAgentParam } from "../router.ts";
 import { inSession, useSession } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
@@ -545,6 +545,7 @@ export function Sessions({ config }: { config: ConfigView }) {
   const folders = useResource<CrewSessionFolders[]>(RESOURCES.crewSessions).data;
   const changes = useResource<CrewChanges>(RESOURCES.crewChanges).data;
   const [session] = useSession();
+  // Read once on mount: Overview's Add agent arrives from another page, so Setup mounts fresh.
   const [requestedSessionId] = useState(() => addAgentParam(window.location.search));
   const [form, setForm] = useState<FormState | null>(() => {
     const target = config.crew?.sessions.find((s) => s.id === requestedSessionId);
@@ -556,7 +557,7 @@ export function Sessions({ config }: { config: ConfigView }) {
       form?.sessionId === requestedSessionId &&
       addAgentParam(window.location.search) === requestedSessionId
     ) {
-      navigate(setupPath("sessions"), { replace: true });
+      navigate(withoutAddAgentParam(), { replace: true });
     }
   }, [changes, form?.sessionId, requestedSessionId]);
   const [busy, setBusy] = useState(false);

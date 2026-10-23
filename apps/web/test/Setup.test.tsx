@@ -684,7 +684,9 @@ describe("Setup tabs", () => {
       expect(window.location.search).toBe("");
       expect(window.location.pathname).toBe("/setup/sessions");
       expect(window.history.length).toBe(historyLength);
-      fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+      // The same form element: clearing the URL did not remount Sessions and close it.
+      expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBe(form);
+      fireEvent.click(within(screen.getByRole("form")).getByRole("button", { name: "Cancel" }));
       expect(screen.queryByRole("form")).toBeNull();
       page.unmount();
       render(<Setup tab="sessions" />);

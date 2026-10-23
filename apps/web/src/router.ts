@@ -75,6 +75,14 @@ export const ADD_AGENT_PARAM = "add";
 /** The session id a URL's add-agent query names; null when it names none. */
 export const addAgentParam = (search: string): string | null =>
   new URLSearchParams(search).get(ADD_AGENT_PARAM);
+/** The current URL without `?add=`, keeping its path, other parameters and hash. */
+export function withoutAddAgentParam(): string {
+  const { pathname, search, hash } = window.location;
+  const q = new URLSearchParams(search);
+  q.delete(ADD_AGENT_PARAM);
+  const qs = q.toString();
+  return pathname + (qs ? `?${qs}` : "") + hash;
+}
 export const addAgentPath = (sessionId: string): string =>
   `${setupPath("sessions")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
 

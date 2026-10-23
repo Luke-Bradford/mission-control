@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addAgentParam,
+  withoutAddAgentParam,
   agentPath,
   boardPath,
   isPopout,
@@ -79,6 +80,15 @@ describe("addAgentParam()", () => {
     ["?other=1", null],
   ])("%s → %s", (search, expected) => {
     expect(addAgentParam(search)).toBe(expected);
+  });
+});
+
+describe("withoutAddAgentParam()", () => {
+  it("drops only ?add, keeping the path, other parameters and the hash", () => {
+    window.history.replaceState(null, "", "/setup/sessions?add=s1&item=esc%3Ax%233#top");
+    expect(withoutAddAgentParam()).toBe("/setup/sessions?item=esc%3Ax%233#top");
+    window.history.replaceState(null, "", "/setup/sessions?add=s1");
+    expect(withoutAddAgentParam()).toBe("/setup/sessions");
   });
 });
 
