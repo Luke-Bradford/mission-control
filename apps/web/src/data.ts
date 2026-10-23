@@ -93,6 +93,7 @@ export const RESOURCES = {
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
+  accountStatus: { path: "/api/accounts/status", topic: "config" },
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
@@ -139,6 +140,8 @@ export const RESOURCES = {
 /** POST endpoints. */
 export const ACTIONS = {
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
+  addAccount: "/api/accounts",
+  checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
