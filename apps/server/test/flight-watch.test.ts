@@ -313,6 +313,112 @@ describe("FLIGHT's PR list", () => {
   });
 });
 
+describe("FLIGHT's holds", () => {
+  const heldCard = (status: string) =>
+    store.replaceBoard("mc", [
+      {
+        repoId: "mc",
+        issueNumber: 9,
+        title: "Ticket 9",
+        status,
+        state: "planned",
+        labels: [],
+        priority: null,
+        updatedAt: T0,
+        url: "u",
+        stage: null,
+        owner: null,
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: T0,
+        itemId: "I9",
+        projectId: "P1",
+      },
+    ]);
+  beforeEach(() => heldCard("Backlog"));
+  const hold = () => store.addHold({ ref: "mc#9", waitsOn: 7, basis: "same files", at: T0 });
+
+  it("lists a hold in the digest with its age", () => {
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    nowMs = T0 + 5 * MIN;
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([
+      { ref: "mc#9", waitsOn: 7, ageMin: 5, prState: "open", told: false },
+    ]);
+  });
+
+  it("wakes once when the waited-on PR merges, with the hold listed", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    await watch.check();
+    expect(sendCalls[0]?.text).not.toContain("to release");
+    sendCalls = [];
+    // updatedAt is over an hour old, so the PR is not listed and only the hold can cause the wake
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
+      T0 + MIN,
+    );
+    nowMs = T0 + MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("1 hold to release");
+    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightState;
+    expect(sent.holds).toMatchObject([{ ref: "mc#9", waitsOn: 7, prState: "merged" }]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("wakes when the PR closes unmerged, and a released hold wakes nothing", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { state: "closed", updatedAt: T0 - 120 * MIN })],
+      T0 + MIN,
+    );
+    sendCalls = [];
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain("1 hold to release");
+    // FLIGHT keeps the hold: it is told once, not at every re-wake
+    nowMs = T0 + 3 * 60 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
+      { ref: "mc#9", prState: "closed", told: true },
+    ]);
+    store.releaseHold("mc#9", nowMs);
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
+  });
+
+  it("drops a hold whose card the board has moved past, and does not wake for it", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    hold();
+    await watch.check();
+    sendCalls = [];
+    heldCard("Ready");
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
+      T0 + MIN,
+    );
+    nowMs = T0 + MIN;
+    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+    expect(store.activeHolds()).toEqual([]);
+  });
+});
+
 const raiseBlocked = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
   store.raiseNote({
     key,
@@ -786,6 +892,7 @@ describe("wakeSummary", () => {
     tickets: [],
     prs: [],
     items: [],
+    holds: [],
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
     ...over,
