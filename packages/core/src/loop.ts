@@ -213,6 +213,8 @@ export const reworkFirstText = (call: string, ref: string): string =>
 export const ticketInReviewText = (ref: string): string =>
   `${ref} is in review; it comes back to its seat when it needs rework`;
 export const NOT_ASIDE = "the run is not waiting on its review";
+export const seatBusyText = (call: string): string =>
+  `${call} is busy (waking a run or starting one); try again in a moment`;
 
 /** One run's facts, read by the caller; `reconcile` reads no clock and does no I/O. */
 export interface LoopSnapshot {
