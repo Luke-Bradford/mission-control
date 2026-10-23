@@ -322,7 +322,7 @@ const UNREADABLE_SCRIPT = "\0unreadable-shell-script";
 const STDIN_SCRIPT = "\0stdin-shell-script";
 /** A pseudo-program for a line the tokenizer could not fully read; the guard denies it. */
 const UNREADABLE_LINE = "\0unreadable-line";
-const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 
 /** One command a line would run: its argv, and whether something runs it in the background. */
 interface Cmd {
@@ -1327,8 +1327,8 @@ export function guardDecision(e: GuardEvent, ctx: GuardContext): GuardVerdict {
     return deny("read-only", `${e.tool} (a scratch review answers with report_findings)`);
   }
   if (e.tool !== "Bash") return { kind: "allow" };
-  // a GIT_* assignment anywhere in the line (prefix, `env`, `export`) is a global option too
-  const gitEnv = /\bGIT_[A-Za-z0-9_]*=/.test(e.input.command ?? "");
+  // any GIT_* name in the line, or a sourced script, may set git's environment: no scratch restore
+  const gitEnv = /\bGIT_[A-Za-z0-9_]|(?:^|[\s;&|()])(?:source|\.)\s/.test(e.input.command ?? "");
   let lock: string | null = null;
   let backgroundSuite = false;
   const walk = newWalk();

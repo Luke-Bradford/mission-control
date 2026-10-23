@@ -77,6 +77,12 @@ describe("scratch mode", () => {
     }
   });
 
+  it("a `NAME+=value` prefix does not hide the command from the guard", () => {
+    expect(ruleOf(bash("X+=1 git push origin HEAD"), writer)).toBe("git-write");
+    expect(ruleOf(bash("X+=1 git commit -m x"), writer)).toBe("git-write");
+    expect(ruleOf(bash("X+=1 gh pr merge 1"), writer)).toBe("github-write");
+  });
+
   it("scratch: history, refs, remotes, config and the shared stash stay refused", () => {
     for (const c of [
       "git commit -m x",
@@ -104,6 +110,11 @@ describe("scratch mode", () => {
       "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/x git checkout -- a.ts",
       "env GIT_DIR=/x git restore a.ts",
       "export GIT_DIR=/x; git restore a.ts",
+      "GIT_DIR+=/x git restore a.ts",
+      "read -r GIT_DIR <<< /x; export GIT_DIR; git restore a.ts",
+      "printf -v GIT_DIR /x; export GIT_DIR; git restore a.ts",
+      "export GIT_DIR; git restore a.ts",
+      "source ./x.sh; git restore a.ts",
       "git config user.name x",
       "git fetch",
       "git pull",
