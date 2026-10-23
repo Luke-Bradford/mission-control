@@ -121,7 +121,7 @@ import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import { flightSeat, flightStartCap, flightState } from "./state.ts";
+import { flightSeat, flightStartCap, flightState, markPrsShown } from "./state.ts";
 
 export interface FlightToolsDeps {
   config: CcConfig;
@@ -670,11 +670,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, FlightStateArgs, args);
     if (!c.ok) return c.result;
-    return {
-      text: JSON.stringify(
-        flightState({ config, store, busy: deps.supervisor.busy(), now: now() }),
-      ),
-    };
+    const state = flightState({ config, store, busy: deps.supervisor.busy(), now: now() });
+    markPrsShown(store, state);
+    return { text: JSON.stringify(state) };
   }
 
   return [

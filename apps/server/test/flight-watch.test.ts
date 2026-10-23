@@ -26,6 +26,7 @@ import {
   flightSeat,
   flightStartCap,
   flightState,
+  markPrsShown,
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
@@ -79,6 +80,7 @@ let sendCalls: { runId: string; key: string; text: string }[];
 let endCalls: string[];
 let statusCalls: number;
 let startFails: string | null;
+let sendFails = false;
 let facts: SeatFacts | null;
 let enabled: boolean;
 let started = 0;
@@ -145,6 +147,7 @@ beforeEach(() => {
   endCalls = [];
   statusCalls = 0;
   startFails = null;
+  sendFails = false;
   facts = null;
   enabled = true;
   started = 0;
@@ -178,6 +181,7 @@ beforeEach(() => {
       },
       send: async (runId, key, text): Promise<SendResult> => {
         sendCalls.push({ runId, key, text });
+        if (sendFails) return "busy";
         const ok = store.claimLine(key, {
           runId,
           seatId: "flight-1",
@@ -251,7 +255,33 @@ describe("FLIGHT's PR list", () => {
       [7, "merged"],
       [8, "open"],
     ]);
+    // reading is not delivering: it stays listed until FLIGHT has received it
+    expect(listed().map((p) => p.pr)).toEqual([7, 8]);
+    markPrsShown(store, flightState({ config, store, busy: [], now: nowMs }));
     expect(listed().map((p) => p.pr)).toEqual([8]);
+  });
+
+  it("a wake that failed to send still lists the merged PR at the next one", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0);
+    sendFails = true;
+    await watch.check();
+    sendFails = false;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    const last = JSON.parse(sendCalls[1]?.text.split("\n").at(-1) ?? "") as FlightState;
+    expect(last.prs.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("does not wake again when a merged PR leaves the list after its wake", async () => {
+    liveCrew();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
   });
 
   it("still lists the PR of a parked run, with its seat", () => {
@@ -664,6 +694,9 @@ describe("wakeSummary", () => {
 
   it("says nothing new, then each part with its singular", () => {
     expect(wakeSummary(state({}))).toBe("nothing new");
+    expect(wakeSummary(state({ prs: [pr, { ...pr, pr: 2, state: "merged" }] }))).toBe(
+      "1 PR in review",
+    );
     expect(
       wakeSummary(
         state({
@@ -715,6 +748,9 @@ describe("wakeSummary", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
       expect(wakeSummary(stopped)).toBe("1 free seat · 1 stopped");
+      expect(wakeFacts(state({ prs: [{ ...pr, state: "merged" }] }))).not.toBe(
+        wakeFacts(state({ prs: [pr] })),
+      );
       expect(wakeFacts(stopped)).not.toBe(wakeFacts(state({ seats: [s({ free: true })] })));
     });
 

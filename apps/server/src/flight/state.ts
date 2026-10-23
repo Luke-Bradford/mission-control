@@ -102,6 +102,18 @@ const shownPrs = (store: Store): Set<string> => {
 const shownKey = (p: { repoId: string; number: number; state: string }): string =>
   `${p.repoId}#${p.number}:${p.state}`;
 
+/** FLIGHT has received `s`: each merged or closed PR in it is not listed again. */
+export function markPrsShown(store: Store, s: FlightState): void {
+  const shown = shownPrs(store);
+  for (const p of s.prs) {
+    if (p.state !== "open") shown.add(shownKey({ repoId: s.repo, number: p.pr, state: p.state }));
+  }
+}
+
+/** The facts a delivered state leaves behind: the PRs that will leave the list are not counted. */
+export const deliveredFacts = (s: FlightState): string =>
+  wakeFacts({ ...s, prs: s.prs.filter((p) => p.state === "open") });
+
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
 export function flightState(i: {
   config: CcConfig;
@@ -255,7 +267,6 @@ export function flightState(i: {
     )
     .sort((a, b) => a.number - b.number)
     .map((p) => {
-      if (p.state !== "open") shown.add(shownKey(p));
       const holder = holders.find((r) => r.loop?.prNumber === p.number);
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
