@@ -1,10 +1,11 @@
 import {
   type ConfigView,
+  type Crew,
   TELEMETRY_RANGES,
   type Telemetry as TelemetryData,
   type TelemetryRange,
 } from "@mc/core";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
 import { Seg } from "../hud/Seg.tsx";
 import { useSelectedAgent } from "../shell/selection.ts";
@@ -36,12 +37,22 @@ export function Telemetry() {
   const accountSel = useId();
   const res = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account, ticket));
   const available = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account)).data;
-  const tickets = available?.tokensByTicket.map((r) => r.ticket);
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const tickets = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...(crew?.rows.flatMap((r) => (r.ticket ? [r.ticket] : [])) ?? []),
+          ...(available?.tokensByTicket.map((r) => r.ticket) ?? []),
+        ]),
+      ].sort(),
+    [crew, available],
+  );
   useEffect(() => {
-    if (ticket && available && !available.tokensByTicket.some((r) => r.ticket === ticket)) {
+    if (ticket && available && !tickets.includes(ticket)) {
       setTicket("");
     }
-  }, [ticket, available]);
+  }, [ticket, available, tickets]);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const [selected] = useSelectedAgent();
 
@@ -107,7 +118,7 @@ export function Telemetry() {
         </label>
         <select id={ticketSel} value={ticket} onChange={(e) => setTicket(e.target.value)}>
           <option value="">All</option>
-          {(tickets ?? (ticket ? [ticket] : [])).map((id) => (
+          {(tickets.length ? tickets : ticket ? [ticket] : []).map((id) => (
             <option key={id} value={id}>
               {id}
             </option>

@@ -1032,6 +1032,36 @@ describe("engine telemetry", () => {
 });
 
 describe("ticket scope", () => {
+  it("merges held tickets with usage tickets, sorted without duplicates, and keeps a held selection", async () => {
+    stubFetch({
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.crew.path]: {
+        rows: [
+          seatRow({ id: "held", ticket: "mission-control#398" }),
+          seatRow({ id: "duplicate", ticket: "mission-control#398" }),
+          seatRow({ id: "used", ticket: "shop-app#3349" }),
+          seatRow({ id: "free", ticket: null }),
+        ],
+        firstRunToday: null,
+      },
+      [RESOURCES.telemetry("6h").path]: tel(),
+      [RESOURCES.telemetry("6h", "", "", "mission-control#398").path]: EMPTY,
+    });
+    render(<Telemetry />);
+    const select = screen.getByLabelText("Ticket") as HTMLSelectElement;
+    await waitFor(() =>
+      expect([...select.options].map((o) => o.textContent)).toEqual([
+        "All",
+        "mission-control#398",
+        "shop-app#3349",
+        "site-builder#12",
+      ]),
+    );
+    fireEvent.change(select, { target: { value: "mission-control#398" } });
+    await within(panel("tTotals")).findByText("No usage for this filter in the last 6h.");
+    expect(select.value).toBe("mission-control#398");
+  });
+
   it("selects each ticket, combines and clears filters using response bars and totals", async () => {
     const data = tel();
     const routes: Record<string, unknown> = {
