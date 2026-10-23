@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { whereOf } from "../src/notifications.ts";
 import { Sources } from "../src/setup/Sources.tsx";
@@ -164,4 +164,55 @@ it("shows last successful poll while a later poll is backing off", async () => {
   render(<Sources config={CONFIG} error={null} />);
   await screen.findByText("last successful poll 5 min ago");
   expect(screen.getByText(/^Retry /)).toBeTruthy();
+});
+
+it("refreshes Teams status and health every minute only while Sources is open", async () => {
+  vi.useFakeTimers();
+  try {
+    let current = { ...status, note: "Polls on a timer.", retryAt: null as number | null };
+    let health: unknown[] = [];
+    const fn = stubFetch({
+      "/api/config": CONFIG,
+      "/api/sources/teams": () => ({ status: 200, body: current }),
+      "/api/health": () => ({ status: 200, body: health }),
+    });
+    const view = render(<Sources config={CONFIG} error={null} />);
+    await act(async () => {});
+    expect(screen.getByText("Polls on a timer.")).toBeTruthy();
+    fn.mockClear();
+    current = { ...current, note: "not permitted with this login", retryAt: null };
+    health = [{ collector: "teams", ok: false, error: "Teams permission refused", lastOkAt: null }];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(59_999);
+    });
+    expect(fn.mock.calls.filter(([p]) => p === "/api/sources/teams")).toHaveLength(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(
+      screen.getByText(/Configure login and app consent outside Mission Control/),
+    ).toBeTruthy();
+    expect(screen.getByText("Teams permission refused")).toBeTruthy();
+    current = { ...current, note: "Teams HTTP 429; will retry", retryAt: NOW + MIN };
+    health = [{ collector: "teams", ok: true, error: null, lastOkAt: NOW }];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(screen.getByText("Teams HTTP 429; will retry")).toBeTruthy();
+    expect(screen.getByText(/^Retry /)).toBeTruthy();
+    expect(screen.queryByText("Teams permission refused")).toBeNull();
+    expect(
+      screen.queryByText(/Configure login and app consent outside Mission Control/),
+    ).toBeNull();
+    expect(fn.mock.calls.filter(([p]) => p === "/api/sources/teams")).toHaveLength(2);
+    expect(fn.mock.calls.filter(([p]) => p === "/api/health")).toHaveLength(2);
+    view.unmount();
+    fn.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(fn).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
 });

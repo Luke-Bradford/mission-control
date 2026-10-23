@@ -1,5 +1,5 @@
 import type { ConfigView, HealthRow } from "@mc/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
@@ -24,6 +24,14 @@ interface TeamsStatus {
 export function TeamsSources({ config }: { config: ConfigView | undefined }) {
   const result = useResource<TeamsStatus>(RESOURCES.teams);
   const health = useResource<HealthRow[]>(RESOURCES.health);
+  // Collector status writes emit no SSE topic; keep status current while Sources is open.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      hub.refetch(RESOURCES.teams.path);
+      hub.refetch(RESOURCES.health.path);
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [selection, setSelection] = useState<Feed[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
