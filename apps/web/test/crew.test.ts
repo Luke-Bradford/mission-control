@@ -569,6 +569,11 @@ describe("loopMarks", () => {
     expect(loopMarks(loop(phase), state)).toEqual(expected);
   });
 
+  it("parked with heldAt marks steps before it done and it held", () => {
+    expect(loopMarks(loop("parked"), "idle", "ci")).toEqual(["done", "held", "todo", "todo"]);
+    expect(loopMarks(loop("parked"), "idle", "working")).toEqual(["held", "todo", "todo", "todo"]);
+  });
+
   it("the step bar's tooltip is the path", () => {
     expect(LOOP_PATH_TITLE).toBe("Working → CI → In review → Done");
   });

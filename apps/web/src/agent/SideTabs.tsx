@@ -1,27 +1,116 @@
 import {
+  type BoardItem,
   type ChangedFiles,
   CREW_FILES_NOTE,
   type CrewRow,
   DIFF_MAX_CHARS,
-  ENGINE_NOT_RUNNING,
   type FileDiff,
   SUBAGENT_PILL,
+  type TicketView,
 } from "@mc/core";
 import { useState } from "react";
 import { errorNote } from "../api.ts";
-import { RESOURCES, type Resource, useResource } from "../data.ts";
+import { ExternalLink } from "../components/ExternalLink.tsx";
+import { Markdown } from "../components/Markdown.tsx";
+import { LOOP_PHASE_LABEL } from "../crew.ts";
+import { RESOURCES, type Resource, useResource, useResources } from "../data.ts";
 import { dur, kTokens } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
+import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
+import { ticketPlan } from "./ticketPlan.ts";
 
 const DASH = "—";
 
-/** **Decision (Task 2):** the loops' CLI has no task-list tool, so the Plan tab waits for one. */
-export const PLAN_PLACEHOLDER =
-  "The loops' CLI has no task-list tool; the Plan tab fills when the agent runtime reports one (phase 2).";
-
 type Tab = "plan" | "queue" | "subs" | "files";
+
+/** The ticket's `## Plan` section: nothing records the agent's own task list, so this is the plan it builds from. */
+function Plan({ row }: { row: CrewRow }) {
+  const ticket = row.ticket ? parseTicket(row.ticket) : null;
+  const res = useResource<TicketView>(
+    ticket ? RESOURCES.ticket(ticket.repoId, ticket.number) : null,
+  );
+  if (!row.ticket || !ticket) return <p className="s muted">No ticket on this run.</p>;
+  if (!res.data) {
+    return res.error ? (
+      <p className="s crit-t">Could not load the ticket: {res.error.message}</p>
+    ) : (
+      <p className="s muted">Loading…</p>
+    );
+  }
+  const plan = ticketPlan(res.data.body);
+  if (plan === null) return <p className="s muted">{row.ticket} has no ## Plan yet.</p>;
+  return (
+    <>
+      <div className="tbody">
+        <Markdown text={plan} />
+      </div>
+      <p className="note xs">From the ## Plan section of {row.ticket}.</p>
+      {res.data.bodyTruncated && (
+        <p className="s">
+          <ExternalLink url={res.data.url}>Continue on GitHub ↗</ExternalLink>
+        </p>
+      )}
+    </>
+  );
+}
+
+/** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
+function Queue({ row }: { row: CrewRow }) {
+  const queue = row.queue ?? [];
+  const queued = queue.flatMap((q) => {
+    const t = parseTicket(q.ref);
+    return t ? [{ ...q, ...t }] : [];
+  });
+  const repoIds = [...new Set(queued.map((q) => q.repoId))];
+  const boards = useResources<BoardItem[]>(repoIds.map((id) => RESOURCES.boards(id)));
+  if (row.kind !== "crew" || row.mode !== "writer") {
+    return <p className="s muted">Only a writer seat has a queue.</p>;
+  }
+  const holding = row.run !== null && row.run.endedAt === null && row.ticket !== null;
+  return (
+    <>
+      <div className="qsec">Now</div>
+      {holding && row.ticket ? (
+        <div className="qi">
+          <span style={{ color: "var(--accent)" }}>▸</span>
+          <span className="min0">
+            <TicketRef ticket={row.ticket} bare /> {row.ticketTitle}
+          </span>
+          {row.loop && <span className="xs muted">{LOOP_PHASE_LABEL[row.loop.phase]}</span>}
+        </div>
+      ) : (
+        <p className="s muted">Nothing assigned.</p>
+      )}
+      <div className="qsec">Next · from Ready, by priority</div>
+      {queued.length === 0 ? (
+        <p className="s muted">
+          Empty: the engine queues Ready cards in this seat's area, in merge repos only.
+        </p>
+      ) : (
+        queued.map((q) => {
+          const item = boards[repoIds.indexOf(q.repoId)]?.data?.find(
+            (b) => b.issueNumber === q.number,
+          );
+          return (
+            <div className="qi" key={q.ref}>
+              <span className="num muted">{q.pos}</span>
+              <span className="min0">
+                <TicketRef ticket={q.ref} bare /> {item?.title}
+              </span>
+              <span className="xs muted">{item?.priority}</span>
+            </div>
+          );
+        })
+      )}
+      <p className="note xs">
+        Each ticket starts as a fresh run on its own branch. Earlier tickets' conversations aren't
+        carried over.
+      </p>
+    </>
+  );
+}
 
 function Subagents({ row }: { row: CrewRow }) {
   const subs = row.digest?.subagents ?? [];
@@ -175,8 +264,8 @@ export function SideTabs({ row }: { row: CrewRow }) {
         <BuildChips panel="sideP" />
       </div>
       <div className="pb scroll" id="sideBody">
-        {tab === "plan" && <p className="s muted">{PLAN_PLACEHOLDER}</p>}
-        {tab === "queue" && <p className="s muted">{ENGINE_NOT_RUNNING}</p>}
+        {tab === "plan" && <Plan row={row} />}
+        {tab === "queue" && <Queue row={row} />}
         {tab === "subs" && <Subagents row={row} />}
         {tab === "files" && <Files agentId={row.id} files={files} />}
       </div>
