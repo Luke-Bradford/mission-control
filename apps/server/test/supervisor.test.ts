@@ -630,6 +630,7 @@ describe("two hubs, one card", () => {
     store,
     supervisor: made.sup,
     login: "me",
+    rules: async () => START_RULES,
     readCard: async (_repoId, issue) =>
       store.board("mc").find((c) => c.issueNumber === issue) ?? null,
     enabled: true,

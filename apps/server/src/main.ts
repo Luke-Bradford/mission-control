@@ -209,6 +209,7 @@ async function main(): Promise<void> {
           store,
           supervisor,
           login: hubLogin,
+          rules: engineRules,
           readCard: async (repoId, issue) => {
             const repo = config.repos.find((r) => r.id === repoId);
             return repo === undefined
