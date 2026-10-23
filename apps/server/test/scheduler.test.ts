@@ -10,6 +10,7 @@ import {
   MACHINE_COLLECTOR,
   type MachineSample,
   type Run,
+  type TestLockState,
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -925,6 +926,29 @@ describe("scheduler", () => {
   });
 
   describe("machine job", () => {
+    it("passes the current test-lock command to the collector, or null when free", async () => {
+      let lock: TestLockState = {
+        holder: { runId: "r", seatId: "guido-1", command: "pnpm -s test", since: 0 },
+        waiting: [],
+      };
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        lockState: () => lock,
+      });
+      await s.tick("machine");
+      expect(c.machine).toHaveBeenLastCalledWith(null, null, NOW, "pnpm -s test");
+
+      lock = hud.NO_LOCK;
+      const prev = s.machine();
+      await s.tick("machine");
+      expect(c.machine).toHaveBeenLastCalledWith([], prev, NOW, null);
+    });
+
     it("runs every 2 s, keeps the latest sample in memory and emits machine", async () => {
       vi.useFakeTimers();
       expect(JOBS).toContain("machine");

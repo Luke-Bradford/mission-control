@@ -133,8 +133,8 @@ export function parsePsTree(text: string): PsProc[] {
 const squash = (s: string): string => s.replace(/\s+/g, " ");
 
 /**
- * The processes running `command` (any whose args include it, agents excluded) and everything under
- * them. RSS is KiB in, bytes out.
+ * The processes running `command` (args include it followed by whitespace or their end, agents
+ * excluded) and everything under them. RSS is KiB in, bytes out.
  */
 export function testRunUse(
   procs: PsProc[],
@@ -145,7 +145,10 @@ export function testRunUse(
   const queue = procs.filter((p) => {
     const args = squash(p.args);
     const first = args.split(" ")[0] as string;
-    return args.includes(wanted) && !AGENT_COMMANDS.has(first.slice(first.lastIndexOf("/") + 1));
+    return (
+      `${args} `.includes(`${wanted} `) &&
+      !AGENT_COMMANDS.has(first.slice(first.lastIndexOf("/") + 1))
+    );
   });
   while (queue.length > 0) {
     const p = queue.shift() as PsProc;

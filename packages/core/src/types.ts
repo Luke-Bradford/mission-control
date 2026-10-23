@@ -741,7 +741,10 @@ export interface CrewRow {
   asideRuns?: CrewAsideRun[];
   /** A writer seat's queued tickets, without the one it holds; [] for other rows. */
   queue?: CrewQueueItem[];
-  /** Crew seat parked: CAPCOM messages sent to it since it parked; 0 otherwise. */
+  /**
+   * Crew seat parked: CAPCOM messages since its latest seat update; 0 otherwise. A patch while
+   * parked (e.g. a new reason) resets this window, so earlier queued messages are not counted.
+   */
   queuedMessages?: number;
   /** The latest run. */
   run: {

@@ -161,6 +161,7 @@ export function lockLabel(config: CcConfig, seatId: string, command: string): st
  * The last 24h as events, newest first, at most ACTIVITY_LIMIT: run starts and ends of the
  * configured agents, escalations opened, collectors currently failing (at their latest status),
  * board Status moves that finished, CI checks, commits, test-lock turns and guard denials.
+ * Test-lock turns only include holds started in the window, even if an older hold ended in it.
  */
 export function activity(config: CcConfig, store: Store, now: number): ActivityRow[] {
   const since = now - ACTIVITY_WINDOW_MS;
