@@ -131,6 +131,7 @@ describe("the keeper's transcript writer", () => {
     await until(() => expect(c.outs()).toHaveLength(2));
     c.say({ t: "close", graceMs: 300 });
     await k.done;
+    await c.closed; // the exit line is on its way when the keeper is done
     expect(c.msgs.filter((m) => m.t === "err")).toEqual([
       { t: "err", text: "transcript write failed: no bytes written" },
     ]);
@@ -334,9 +335,12 @@ describe("the keeper", () => {
   });
 
   it("terminate() ends the CLI with SIGTERM, and SIGKILL when it will not go", async () => {
-    const folder = folderFor(`process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);`);
+    const folder = folderFor(
+      `process.on("SIGTERM", () => {}); console.log("up"); setInterval(() => {}, 1000);`,
+    );
     const k = keep(folder);
-    await until(() => expect(readPidFile(folder, "cli.pid")).not.toBeNull());
+    // its SIGTERM handler is in place once it has said so
+    await until(() => expect(lines()).toEqual(["up"]));
     const t0 = Date.now();
     k.terminate();
     await k.done;

@@ -87,6 +87,7 @@ describe("startSession against the fake CLI", () => {
   it("a turn emits init, turn-start and result, and the transcript holds every line", async () => {
     const { s, events, until } = start();
     expect(s.alive).toBe(true);
+    await s.ready; // the keeper's hello names the CLI's pid
     expect(typeof s.pid).toBe("number");
     s.send("hello");
     await until(isResult);

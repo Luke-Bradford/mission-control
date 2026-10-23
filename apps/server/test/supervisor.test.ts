@@ -2820,6 +2820,7 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(starts()).toHaveLength(3));
     // in order: the old CLI's start, its exit, the resume's start: never two CLIs for one session
     const order = recorded()
+      .filter((r) => Array.isArray(r.argv) || "exited" in r)
       .slice(1)
       .map((r) =>
         "exited" in r ? "exited" : (r.argv as string[]).includes("--resume") ? "resume" : "start",
@@ -2873,7 +2874,7 @@ describe("a seat keeps running through a restart", () => {
     sup.start();
     await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
     expect(seen).toContainEqual({ kind: "idle", seatId: "guido-1", runId, resumed: true });
-    expect(starts()).toHaveLength(2);
+    await until(() => expect(starts()).toHaveLength(2)); // the resumed CLI records its start once up
     const argv = starts()[1].argv as string[];
     expect(argv).toContain("--resume");
     expect(sup.seatFacts("guido-1")?.resumedAt).toEqual(expect.any(Number));
@@ -2891,7 +2892,7 @@ describe("a seat keeps running through a restart", () => {
     const { sup } = make();
     sup.start();
     await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
-    expect(starts()).toHaveLength(2);
+    await until(() => expect(starts()).toHaveLength(2));
   });
 
   it("a seat that never got its brief is failed at attach, not resumed", async () => {
