@@ -1777,7 +1777,7 @@ describe("folding", () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    // an early fold can store the tokens before the turn's result line brings the cost: wait for all of it
+    // tokens can be stored before the result line brings the cost: wait for every field
     await until(() => {
       const run = store.run(runId);
       expect(run?.tokens).not.toBeNull();
