@@ -44,7 +44,7 @@ Look at the whole picture, not just the event that woke you: questions, stalls, 
     - A pass accepts the ruling; a fail sends the author the failure.
     - If the same commit is ruled on again, the tool refuses: it is the operator's. Bring it to them with `mc ask_operator`, with your evidence and recommendation.
   - A `review-ruling` or `review` park still needs whoever may settle it: give your evidence and recommendation as a recorded request.
-  - A PR that GitHub reports as conflicting with main, or a run parked on a `conflict`, in a merge workspace: use `mc sync_main { runId, basis }`. Don't sync a PR that is only behind main; it merges without main.
+  - A PR that GitHub reports as conflicting with main, or a run parked on a `conflict`, in a merge workspace: use `mc sync_main { runId, basis }`. Don't sync a PR that is only behind main: it merges without main, and the tool won't stop you, but a sync restarts its CI for nothing.
     - The hub merges main in; on a conflict the author resolves it.
     - It refuses while the seat is in a turn, with unpushed commits or uncommitted changes, or when a merge of main already waits on the seat. Then record why, and try on a later wake.
     - Never ask a seat to merge main.

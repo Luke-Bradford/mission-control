@@ -300,10 +300,10 @@ hub-made commits (`run_commits`, Plan 6). Any push resets all six. (Since 2026-1
 branch need not contain current `main`. `main`'s ruleset no longer requires up-to-date branches,
 and CI on `main` after each merge, with #176's `main_red` signal, covers what that gave up.)
 
-Conflicting with `main`: when GitHub reports a PR as conflicting, the engine merges `main` into the branch inside the run's own worktree (moving the
-branch ref in the clone would leave that worktree's index stale, and the seat's next commit would
-undo `main`'s changes) (an engine-made merge commit,
-recorded in `run_commits`; Plan 6's push rule becomes "no merge commit unless it is in
+Conflicting with `main`: when GitHub reports a PR as conflicting, the engine merges `main` into the
+branch inside the run's own worktree (moving the branch ref in the clone would leave that worktree's
+index stale, and the seat's next commit would undo `main`'s changes; it is an engine-made merge
+commit, recorded in `run_commits`; Plan 6's push rule becomes "no merge commit unless it is in
 `run_commits`"), pushes, and verify runs again on the new sha. A conflict becomes a `fix` step:
 the engine leaves the conflicted files with their markers in the seat's worktree, the brief names
 them, and the seat resolves and calls `mc commit`. The commit tool knows a merge is in progress
@@ -369,7 +369,7 @@ a decision, and refuses a run that is not a developer's own:
   author rules on that commit again.
 - `sync_main` has the engine merge main into the run's branch now (a `merge` repo only; the run in CI
   or review, or parked on a conflict; at most 6 an hour). The commit is the hub's own, made by the same
-  path as the engine's update of a branch behind main, never FLIGHT's or the seat's.
+  path as the engine's merge of main into a conflicting branch, never FLIGHT's or the seat's.
 - `end_run` ends a parked or stalled run, on its seat or set aside in review. It refuses a run with
   uncommitted work (or a worktree it cannot read), and is capped at 4 an hour.
 

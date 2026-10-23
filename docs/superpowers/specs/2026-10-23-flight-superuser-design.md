@@ -98,6 +98,7 @@ This replaces the merge queue that this design first planned. The operator turne
 
 - **What the gate needs.** `gateView.passes` no longer needs the branch to contain `main`. It does need GitHub not to report the PR as conflicting.
 - **When main is merged in.** Only a conflict brings `main` into a branch.
+- **Notes.** No hold note is raised for a PR that is only behind `main`. A hard-rule PR gets its ready note straight away.
 - **Order.** Order comes from FLIGHT's Priority.
 - **A red main.** CI on `main` after a merge catches one, and #176 raises it to FLIGHT.
 
