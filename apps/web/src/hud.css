@@ -3553,6 +3553,16 @@ button.nrow.thread.tagged {
 #discuss.person-item .panel {
   overflow: visible;
 }
+.access-preferences {
+  display: grid;
+  gap: 8px;
+}
+.access-preferences input[type="time"] {
+  max-width: 100%;
+}
+.notif {
+  overflow-wrap: anywhere;
+}
 .watch-row {
   display: flex;
   align-items: baseline;

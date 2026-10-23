@@ -51,6 +51,8 @@ export const RESOURCES = {
     topic: "attention",
   }),
   attention: { path: "/api/attention", topic: "attention" },
+  notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
+  notificationEvents: { path: "/api/notifications/events", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
@@ -143,6 +145,8 @@ export const RESOURCES = {
 
 /** POST endpoints. */
 export const ACTIONS = {
+  notificationPreferences: RESOURCES.notificationPreferences.path,
+  notificationTest: "/api/notifications/test",
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
   addAccount: "/api/accounts",
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
@@ -265,7 +269,13 @@ class Hub {
       // the brief when either changes, including rows omitted from its last response.
       const briefChanged =
         e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
-      if ((e.topic === topic || briefChanged) && e.listeners.size > 0) void this.fetch(e);
+      const notificationSettingsChanged =
+        topic === "settings" && e.path === RESOURCES.notificationEvents.path;
+      if (
+        (e.topic === topic || briefChanged || notificationSettingsChanged) &&
+        e.listeners.size > 0
+      )
+        void this.fetch(e);
     }
   }
 

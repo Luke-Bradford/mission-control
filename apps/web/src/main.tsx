@@ -10,6 +10,7 @@ import "./hud.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { BrowserNotifications } from "./browserNotifications.ts";
 import { applyThemeColor, getTheme } from "./theme.ts";
 
 applyThemeColor(getTheme()); // public/theme-init.js already applied a remembered theme itself
@@ -19,5 +20,6 @@ if (!root) throw new Error("#root missing");
 createRoot(root).render(
   <StrictMode>
     <App />
+    <BrowserNotifications />
   </StrictMode>,
 );

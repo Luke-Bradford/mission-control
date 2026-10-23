@@ -336,3 +336,22 @@ describe("RESOURCES", () => {
     expect(ACTIONS.away).toBe("/api/settings/away");
   });
 });
+
+describe("browser notification resources", () => {
+  it("refetches events on both settings and attention invalidations", async () => {
+    const fetch = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const off = hub.subscribe(RESOURCES.notificationEvents.path, "attention", () => {});
+    await settle();
+    fetch.mockClear();
+    hub.refetchTopic("settings");
+    await settle();
+    hub.refetchTopic("attention");
+    await settle();
+    expect(fetch.mock.calls.map((c) => (c as unknown[])[0])).toEqual([
+      "/api/notifications/events",
+      "/api/notifications/events",
+    ]);
+    off();
+  });
+});
