@@ -1,15 +1,17 @@
-import type { CrewRow, LimitRow } from "@mc/core";
+import type { CrewChanges, CrewRow, LimitRow } from "@mc/core";
 import { type CSSProperties, useState } from "react";
+import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { PauseButton } from "../components/PauseButton.tsx";
 import { callSign, modelLine, seatAreaText, seatStatus, seatTurn } from "../crew.ts";
-import { useReviewPrs } from "../data.ts";
+import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { agentColor, useRoleLabel } from "../hud/AgentTag.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { agentPath } from "../router.ts";
 import { BuildChips } from "../shell/buildStatus.tsx";
 import { useIsPopout } from "../shell/popout.ts";
+import { toast } from "../shell/Toast.tsx";
 import { endConfirm, endSeat, interruptSeat, seatError } from "./seat.ts";
 import { Tiles } from "./Tiles.tsx";
 
@@ -22,7 +24,15 @@ const popOut = (id: string): void => {
  * Interrupt and End the run for a crew seat with a live session. `interrupt` false leaves Interrupt
  * out, where the row's need line already carries one.
  */
-export function SeatControls({ row, interrupt = true }: { row: CrewRow; interrupt?: boolean }) {
+export function SeatControls({
+  row,
+  interrupt = true,
+  hold = false,
+}: {
+  row: CrewRow;
+  interrupt?: boolean;
+  hold?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const turn = seatTurn(row);
@@ -60,12 +70,79 @@ export function SeatControls({ row, interrupt = true }: { row: CrewRow; interrup
           className="sm warn"
           disabled={busy}
           onClick={() => {
-            if (window.confirm(endConfirm(row))) void run(() => endSeat(row));
+            if (window.confirm(endConfirm(row, hold))) void run(() => endSeat(row, hold));
           }}
         >
-          End the run
+          {hold ? "Stop" : "End the run"}
         </button>
       )}
+    </>
+  );
+}
+
+/** Removal uses config.yaml's seat list, including changes that have not applied yet. */
+function SeatSettings({ row }: { row: CrewRow }) {
+  const removable = row.hudState === "idle" || row.hudState === "stopped";
+  const changes = useResource<CrewChanges>(removable ? RESOURCES.crewChanges : null);
+  const base = changes.data?.sessions.find((s) => s.id === row.sessionId)?.seats;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    if (!base || row.sessionId === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost(ACTIONS.crewSeats(row.sessionId), {
+        base,
+        seats: base.filter((s) => s.id !== row.id),
+      });
+      toast(
+        `${callSign(row)} removed from s/${row.sessionId}. Its area is freed when its run ends.`,
+      );
+    } catch (e) {
+      setError(seatError(e));
+    } finally {
+      hub.refetch(RESOURCES.crewChanges.path);
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.crew.path);
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      {(error || changes.error) && (
+        <span className="crit-t s" role="alert">
+          {error ?? changes.error?.message}
+        </span>
+      )}
+      {removable && (
+        <button
+          type="button"
+          className="sm"
+          disabled={busy || !base?.some((s) => s.id === row.id)}
+          onClick={() => {
+            if (
+              window.confirm(
+                `Remove ${callSign(row)} from s/${row.sessionId}? Its area will be freed when its run ends.`,
+              )
+            )
+              void remove();
+          }}
+        >
+          Remove
+        </button>
+      )}
+      <button
+        type="button"
+        className="sm ghost"
+        onClick={() =>
+          toast(
+            `Rename ${callSign(row)}: call signs are fixed. In Setup › Sessions, remove this seat and use Add agent to choose a new call sign.`,
+          )
+        }
+      >
+        Rename
+      </button>
     </>
   );
 }
@@ -114,7 +191,12 @@ export function Header({ row, limits, now }: { row: CrewRow; limits: LimitRow[];
         </span>
         <BuildChips panel="ahead" />
         <span className="ctl">
-          {row.kind === "crew" && <SeatControls row={row} />}
+          {row.kind === "crew" && (
+            <>
+              <SeatControls key={`controls:${row.id}`} row={row} hold />
+              <SeatSettings key={`settings:${row.id}`} row={row} />
+            </>
+          )}
           {row.loopKind === "ta-loop" && <PauseButton row={row} />}
           {!popout && (
             <button type="button" className="sm ghost" onClick={() => popOut(row.id)}>

@@ -5,6 +5,7 @@ import {
   DIFF_MAX_CHARS,
   type FileDiff,
   READONLY_FILES_NOTE,
+  type RunView,
   SUBAGENT_PILL,
   type TicketView,
 } from "@mc/core";
@@ -58,6 +59,15 @@ function Plan({ row }: { row: CrewRow }) {
 
 /** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
 function Queue({ row }: { row: CrewRow }) {
+  const runs = useResource<RunView[]>(
+    row.kind === "crew" && row.mode === "writer" ? RESOURCES.runs(row.id) : null,
+  );
+  const done = (runs.data ?? [])
+    .filter(
+      (r): r is RunView & { ticket: string } =>
+        r.ticket !== null && r.status === "ok" && r.endedAt !== null,
+    )
+    .filter((r, i, all) => all.findIndex((other) => other.ticket === r.ticket) === i);
   const queue = row.queue ?? [];
   const queued = queue.flatMap((q) => {
     const t = parseTicket(q.ref);
@@ -105,9 +115,26 @@ function Queue({ row }: { row: CrewRow }) {
         })
       )}
       <p className="note xs">
-        Each ticket starts as a fresh run on its own branch. Earlier tickets' conversations aren't
-        carried over.
+        Each ticket starts as a fresh run on its own branch, with the ticket, the repo's docs and
+        this lane's notes. Earlier tickets' conversations aren't carried over.
       </p>
+      <div className="qsec">Done</div>
+      {done.map((r) => (
+        <div className="qi" key={r.ticket}>
+          <span className="ok-t">✓</span>
+          <span className="min0">
+            <TicketRef ticket={r.ticket} bare />
+            {r.ticketTitle && <> {r.ticketTitle}</>}
+          </span>
+        </div>
+      ))}
+      {!runs.data ? (
+        <p className="s muted">
+          {runs.error ? `Could not load the runs: ${runs.error.message}` : "Loading…"}
+        </p>
+      ) : (
+        done.length === 0 && <p className="s muted">None yet.</p>
+      )}
     </>
   );
 }

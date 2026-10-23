@@ -9,6 +9,7 @@ import {
   stepMarks,
   WAIT_WARN,
 } from "../crew.ts";
+import { mss } from "../fmt.ts";
 
 const MARK_CLASS: Record<StepMark, string | undefined> = {
   done: "d",
@@ -25,10 +26,12 @@ export function LoopStep({
   loop,
   hudState,
   wait,
+  elapsed,
 }: {
   loop: CrewLoop;
   hudState: HudState;
   wait: string | null;
+  elapsed?: number | null;
 }) {
   const marks = stepMarks(loop, hudState);
   const steps = loopSteps(loop);
@@ -38,6 +41,12 @@ export function LoopStep({
       <span className="ellip xs" title={loop.text}>
         {loopTemplate(loop)} › <b>{loopStepLabel(loop)}</b>
         {loopTryText(loop)}
+        {elapsed !== undefined && (
+          <>
+            {" "}
+            · <span className="num">{elapsed === null ? "—" : mss(elapsed)}</span> in this step
+          </>
+        )}
       </span>
       <span className="stepbar" title={loopPathTitle(loop)} aria-hidden="true">
         {marks.map((m, i) => (
