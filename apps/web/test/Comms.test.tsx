@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type ActivityRow,
   type AttentionItem,
+  type CommsEvent,
   FLIGHT_NOT_RUNNING,
   GUARD_NONE_TEXT,
   type GuardHitsView,
@@ -19,6 +21,7 @@ import {
   crewRow,
   item,
   itemWithoutOwner,
+  MIN,
   NOW,
   prView,
   SEAT_Q,
@@ -537,20 +540,88 @@ describe("Threads and conversation", () => {
     expect(within(list).getByText(/^Idle since/)).toBeTruthy();
   });
 
-  it("FLIGHT shows its placeholder; an agent shows its head and the mailbox note", async () => {
-    stub();
+  const TAG = "@" + "CAPCOM";
+  const comms = (over: Partial<CommsEvent> = {}): CommsEvent => ({
+    at: NOW,
+    kind: "comms",
+    who: "guido-1",
+    to: "CAPCOM",
+    text: "x",
+    ref: null,
+    url: null,
+    status: null,
+    prs: [],
+    summary: null,
+    ...over,
+  });
+  const stubMessages = (activity?: ActivityRow[]) =>
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": {
+        rows: [seatRow(), seatRow({ id: "retro-1", index: 1 })],
+        firstRunToday: null,
+      },
+      "/api/config": CONFIG,
+      ...(activity ? { "/api/activity": activity } : {}),
+    });
+  const MESSAGES = [
+    comms({ at: NOW - MIN, who: "guido-1", to: "retro-1", text: `Draft PR is up ${TAG}` }),
+    comms({ at: NOW - 2 * MIN, who: "MC", to: "guido-1", text: "CI failed on lint" }),
+    comms({ at: NOW - 3 * MIN, who: "CAPCOM", to: "guido-1", text: "Use the quote cache" }),
+    comms({ at: NOW - 4 * MIN, who: "retro-1", to: "CAPCOM", text: "Not guido's" }),
+  ];
+
+  it("FLIGHT shows its placeholder; an agent's thread opens its messages", async () => {
+    stubMessages(MESSAGES);
     render(<Comms item={null} />);
     expect((await screen.findAllByText(FLIGHT_NOT_RUNNING)).length).toBe(1); // the thread row
     expect(screen.getByText("FLIGHT's chat is in the dock.")).toBeTruthy();
     const list = document.querySelector("#chanList") as HTMLElement;
-    fireEvent.click(await within(list).findByRole("button", { name: /studio/ }));
-    expect(screen.getByText("Threads arrive with the mailbox (phase 2).")).toBeTruthy();
+    fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
+    const msgs = await waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLElement>("#convo .msg")];
+      expect(found).toHaveLength(3);
+      return found as [HTMLElement, HTMLElement, HTMLElement];
+    });
+    const [mine, sys, tagged] = msgs;
+    expect(mine.classList.contains("mine")).toBe(true);
+    for (const part of ["You", "→", "guido-1"]) {
+      expect(mine.querySelector(".from")?.textContent, part).toContain(part);
+    }
+    expect(sys.classList.contains("sys")).toBe(true);
+    expect(sys.textContent).toContain("Mission Control");
+    expect(tagged.classList.contains("tagged")).toBe(true);
+    expect(tagged.textContent).toContain("Tagged you");
+    expect(tagged.querySelector(".from")?.textContent).toContain("retro-1");
+    expect(tagged.querySelector(".mention")?.textContent).toBe(TAG);
+    expect(document.querySelector("#convo")?.textContent).not.toContain("Not guido's");
+    expect(document.body.textContent).not.toContain("Threads arrive with the mailbox");
     expect(screen.getByRole("link", { name: "See its activity" }).getAttribute("href")).toBe(
-      "/agent/studio",
+      "/agent/guido-1",
     );
     const head = screen.getByRole("heading", { name: /^Thread ·/ });
-    expect(head.textContent).toBe("Thread · studio · Idle");
-    screen.getByText("everything studio sent or received: you, FLIGHT and other agents");
+    expect(head.textContent?.startsWith("Thread · guido-1")).toBe(true);
+    screen.getByText("everything guido-1 sent or received: you, FLIGHT and other agents");
+  });
+
+  it("a thread shows its last message instead of its doing line", async () => {
+    stubMessages(MESSAGES);
+    render(<Comms item={null} />);
+    await waitFor(() => {
+      const lines = [...document.querySelectorAll<HTMLElement>("#chanList .thread .doing")];
+      const texts = lines.map((el) => el.textContent);
+      expect(texts).toContain(`→ RETRO-1: Draft PR is up ${TAG}`);
+      expect(texts).toContain(`← GUIDO-1: Draft PR is up ${TAG}`);
+      for (const el of lines) expect(el.getAttribute("title")).toBe(el.textContent);
+    });
+  });
+
+  it("an agent with no messages says No messages yet.", async () => {
+    stubMessages([]);
+    render(<Comms item={null} />);
+    const list = document.querySelector("#chanList") as HTMLElement;
+    fireEvent.click(await within(list).findByRole("button", { name: /^guido-1/ }));
+    expect(await screen.findByText("No messages yet.")).toBeTruthy();
   });
 });
 
