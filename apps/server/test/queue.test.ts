@@ -147,6 +147,7 @@ const takeDeps = (): TakeDeps => ({
   store,
   enabled,
   login: myLogin,
+  rules: async () => rules,
   readCard: async (_repoId, issue) => {
     if (readFails) throw new Error("GitHub is down");
     return fresh(issue);
@@ -436,6 +437,66 @@ describe("refillQueues", () => {
       expect(issues(SERVER)).toEqual([1, 2, 4]);
       expect(store.queue(SERVER)[0]?.takenAt).toBe(NOW);
       expect(issues("guido-2")).toEqual([3]);
+    });
+  });
+
+  describe("a free seat and a busy seat sharing an area, at take time", () => {
+    beforeEach(() => {
+      const first = config.crew?.sessions[0]?.seats[0];
+      if (first === undefined) throw new Error("no seat");
+      config.crew?.sessions[0]?.seats.push({ ...first, id: "guido-2" });
+    });
+
+    const busyServer = async (...cards: BoardItem[]) => {
+      store.replaceBoard(REPO, cards);
+      await refill();
+      store.upsertRun(run({ id: "r9", agentId: SERVER, ticket: `${REPO}#9` }));
+      seatRow("running", "r9");
+    };
+
+    it("takes the highest-Priority card even when it was dealt to the busy seat", async () => {
+      // both free at refill: P1 (#1) lands on guido-1, P2 (#2) on guido-2
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      // guido-1 gets busy; guido-2 frees up
+      store.upsertRun(run({ id: "r9", agentId: SERVER, ticket: `${REPO}#9` }));
+      seatRow("running", "r9");
+      expect(issues(SERVER)).toEqual([1]);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 1, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([]);
+    });
+
+    it("leaves the deal alone when both seats are free", async () => {
+      store.replaceBoard(REPO, [card(1, { priority: "P1" }), card(2, { priority: "P2" })]);
+      await refill();
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 2, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([1]);
+    });
+
+    it("never moves a card outside the free seat's area labels", async () => {
+      await busyServer(
+        card(1, { priority: "P1", labels: ["area:web"] }),
+        card(2, { priority: "P2" }),
+      );
+      // the web card sits in a busy seat's queue, ahead of the card guido-2 may take
+      store.replaceQueue(WEB, []);
+      store.replaceQueue(SERVER, [
+        { repoId: REPO, issue: 1 },
+        { repoId: REPO, issue: 2 },
+      ]);
+      await take("guido-2");
+      expect(started).toEqual([{ seatId: "guido-2", issue: 2, loop: NEW_LOOP }]);
+      expect(issues(SERVER)).toEqual([1]);
+    });
+
+    it("leaves a card the busy seat holds taken", async () => {
+      await busyServer(card(1, { priority: "P1" }), card(2, { priority: "P2" }));
+      store.takeQueued(SERVER, NOW);
+      await take("guido-2");
+      expect(started.map((s) => s.issue)).toEqual([2]);
+      expect(store.queue(SERVER).map((q) => q.takenAt)).toEqual([NOW]);
     });
   });
 
