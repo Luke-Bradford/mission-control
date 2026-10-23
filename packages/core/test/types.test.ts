@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentView, Run } from "../src/index.ts";
+import type { AgentView, ChangedFiles, CrewRow, LiveTask, LoopTry, Run } from "../src/index.ts";
 
 describe("core types", () => {
   it("accepts literal Run and AgentView objects", () => {
@@ -44,5 +44,27 @@ describe("core types", () => {
     } satisfies AgentView;
 
     expect(view.currentRun?.id).toBe("r1");
+  });
+});
+
+describe("recorded measurements", () => {
+  it("distinguishes unknown and zero and file commits from response snapshots", () => {
+    const attempts: Pick<LoopTry, "tokens">[] = [{}, { tokens: null }, { tokens: 0 }];
+    const tasks: [LiveTask] = [{ id: "verify", text: "Verify changes", status: "pending" }];
+    const updated: LiveTask = { ...tasks[0], status: "done" };
+    const files: ChangedFiles = {
+      sha: "snapshot",
+      note: null,
+      files: [{ path: "sample.ts", add: 1, del: 0, state: "committed", commitSha: "file-commit" }],
+    };
+    const seat: Pick<CrewRow, "id" | "focus" | "displayCallSign"> = {
+      id: "guido-1",
+      focus: "Measurements",
+      displayCallSign: "GUIDO-2",
+    };
+    expect(attempts.map((t) => t.tokens)).toEqual([undefined, null, 0]);
+    expect(updated.id).toBe(tasks[0]?.id);
+    expect(files.files[0]?.commitSha).not.toBe(files.sha);
+    expect(seat.id).toBe("guido-1");
   });
 });
