@@ -2254,3 +2254,111 @@ describe("merge workspace", () => {
     });
   });
 });
+
+describe("carried review", () => {
+  const RETRO = "RETRO-1";
+  const SHA3 = "ddddddd4444";
+  const fact = (over: Partial<ReviewFact> = {}): ReviewFact => ({
+    id: 1,
+    sha: SHA,
+    epoch: 0,
+    attempt: 1,
+    state: "reported",
+    blocking: 0,
+    minor: 0,
+    failure: null,
+    ...over,
+  });
+  const finding: ReviewFinding = {
+    severity: "Important",
+    file: "a.ts",
+    line: 3,
+    summary: "s",
+    scenario: "w",
+    fix: "f",
+  };
+  /** The head moved from SHA (reviewed) to SHA2 by a hub-made merge of main. */
+  const carried = (
+    over: Partial<LoopSnapshot> = {},
+    loop: Partial<RunLoop> = {},
+    row: Partial<ReviewFact> = {},
+    findings: ReviewFinding[] = [],
+  ): LoopSnapshot => {
+    const head = over.pushed?.sha ?? SHA2;
+    return snap(
+      {
+        autoMerge: true,
+        hardRulesSet: true,
+        headCommit: head,
+        pushed: { sha: head, at: NOW - 60_000 },
+        pr: pr({ ci: "passing", headSha: head }),
+        evidence: { id: 1, at: 2000, ruling: false },
+        evidenceCount: 1,
+        review: { retro: RETRO, rows: [fact(row)], findings },
+        ...over,
+      },
+      {
+        phase: "review",
+        reportedEvidenceId: 1,
+        cardFor: "review:0",
+        gate: { sha: head, mainSha: "cccccccc3333", containsMain: true, hubOnly: true, strays: [] },
+        touches: { sha: head, paths: [] },
+        carry: { from: SHA, to: SHA2 },
+        ...loop,
+      },
+    );
+  };
+  const of = (a: LoopAction[], kind: LoopAction["kind"]): LoopAction[] =>
+    a.filter((x) => x.kind === kind);
+
+  it("a hub-made, conflict-free main merge carries a clean verdict, with no new request-review", () => {
+    const a = reconcile(carried()).actions;
+    expect(of(a, "request-review")).toEqual([]);
+    expect(a).toContainEqual({ kind: "merge", sha: SHA2 });
+    const fresh = reconcile(carried({}, { carry: null })).actions;
+    expect(of(fresh, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+  });
+
+  it("a running review isn't superseded by such a merge", () => {
+    const cases: [Partial<LoopSnapshot>, Partial<RunLoop>][] = [
+      [{}, {}],
+      [{}, { phase: "ci" }],
+      [{ pr: pr({ ci: "passing", headSha: SHA }) }, {}],
+    ];
+    for (const [over, loop] of cases) {
+      const a = reconcile(carried(over, loop, { state: "running" })).actions;
+      expect(of(a, "supersede-review")).toEqual([]);
+      expect(of(a, "request-review")).toEqual([]);
+    }
+    const fresh = reconcile(carried({}, { carry: null }, { state: "running" })).actions;
+    expect(of(fresh, "supersede-review")).toEqual([{ kind: "supersede-review", reviewId: 1 }]);
+  });
+
+  it("a seat commit, a foreign commit, or a changed PR diff each still request a fresh review", () => {
+    const seatCommit = reconcile(carried({ pushed: { sha: SHA3, at: NOW - 60_000 } })).actions;
+    expect(of(seatCommit, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA3, attempt: 1 },
+    ]);
+    const foreign = reconcile(carried({}, { carry: { from: "eeeeeee5555", to: SHA2 } })).actions;
+    expect(of(foreign, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+    const changed = reconcile(carried({}, { carry: null })).actions;
+    expect(of(changed, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+    const waived = reconcile(carried({}, { reviewWaivedSha: SHA })).actions;
+    expect(of(waived, "request-review")).toEqual([
+      { kind: "request-review", sha: SHA2, attempt: 1 },
+    ]);
+  });
+
+  it("a blocking verdict carries as blocking", () => {
+    const r = reconcile(carried({}, {}, { blocking: 1 }, [finding]));
+    expect(of(r.actions, "request-review")).toEqual([]);
+    expect(of(r.actions, "merge")).toEqual([]);
+    expect(sends(r.actions)).toContain("fix:r1:0:1");
+  });
+});
