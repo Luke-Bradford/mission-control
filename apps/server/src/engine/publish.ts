@@ -148,9 +148,13 @@ export interface Publisher {
   ciExcerpt(repo: string, sha: string): Promise<string>;
   /**
    * Re-runs the failed jobs of every failed Actions run on `sha`; the runs re-run (none: nothing
-   * failed to re-run), or null when gh could not be read or refused.
+   * failed to re-run), "running" when a run on `sha` has not completed (nothing is re-run; gh refuses
+   * a running run), or null when gh could not be read or refused.
    */
-  rerunFailed(repo: string, sha: string): Promise<{ id: number; name: string }[] | null>;
+  rerunFailed(
+    repo: string,
+    sha: string,
+  ): Promise<{ id: number; name: string }[] | null | "running">;
   /** The paths changed between origin's default branch and `sha` that match `hardRules`. */
   hardRuleTouches(run: Run, sha: string, hardRules: readonly string[]): Promise<string[]>;
   /**
@@ -601,12 +605,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(sha)) return null;
       try {
         const listed = await deps.gh(
-          ["run", "list", `--repo=${repo}`, `--commit=${sha}`, "--json=databaseId,name,conclusion"],
+          [
+            "run",
+            "list",
+            `--repo=${repo}`,
+            `--commit=${sha}`,
+            "--json=databaseId,name,conclusion,status",
+          ],
           { cwd: cwd() },
         );
         if (listed.code !== 0) return null;
         const runs: unknown = JSON.parse(listed.stdout);
         if (!Array.isArray(runs)) return null;
+        if (runs.some((r: unknown) => (r as { status?: unknown } | null)?.status !== "completed")) {
+          return "running";
+        }
         const failed = runs.flatMap((r: unknown) => {
           const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
           return x?.conclusion === "failure" &&
