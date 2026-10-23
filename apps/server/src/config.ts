@@ -703,6 +703,9 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
       }
     }
   };
+  if (!isAbsolute(crew.worktrees)) {
+    throw new ConfigError("crew.worktrees", `${crew.worktrees} is not an absolute path`);
+  }
   checkPath("crew.worktrees", crew.worktrees);
   const roles = crew.roles ?? { ...BUILTIN_ROLES };
   const rolesDirReal = realish(join(hubRootPath, ROLE_PROMPT_DIR));
