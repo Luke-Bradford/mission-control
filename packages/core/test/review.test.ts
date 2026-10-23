@@ -17,6 +17,7 @@ import {
   type ReviewFact,
   type ReviewFinding,
   type ReviewRunSnapshot,
+  reviewDepth,
   reviewFor,
   reviewRunStep,
   reviewStatusOf,
@@ -316,5 +317,23 @@ describe("reviewStatusOf", () => {
       state: "failure",
       description: "QA review found blocking issues (carried from aaaaaaa, main merged)",
     });
+  });
+});
+
+describe("reviewDepth", () => {
+  it("is light for a small size or a small label", () => {
+    expect(reviewDepth({ labels: [], size: "XS" })).toBe("light");
+    expect(reviewDepth({ labels: [], size: "S" })).toBe("light");
+    for (const label of ["chore", "test", "docs"]) {
+      expect(reviewDepth({ labels: [label], size: null })).toBe("light");
+    }
+  });
+
+  it("is full otherwise, and full wins where the rules overlap", () => {
+    expect(reviewDepth({ labels: [], size: "M" })).toBe("full");
+    expect(reviewDepth({ labels: ["docs"], size: "M" })).toBe("full");
+    expect(reviewDepth({ labels: ["bug"], size: "S" })).toBe("full");
+    expect(reviewDepth({ labels: ["type:feature"], size: "XS" })).toBe("full");
+    expect(reviewDepth({ labels: [], size: null })).toBe("full");
   });
 });
