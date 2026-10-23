@@ -260,8 +260,14 @@ export function useDock(): DockState & { toggle: () => void } {
   return { ...s, toggle: () => toggleDock() };
 }
 
+/** FLIGHT's replies the operator has not seen on the dock's Chat tab; the header badges it. */
+const flightUnread = store(0);
+export const setFlightUnread = (n: number): void => flightUnread.set(n);
+export const useFlightUnread = (): number => useStore(flightUnread);
+
 /** Forget every overlay (the tests' reset: these are module singletons). */
 export function resetOverlays(): void {
+  flightUnread.set(0);
   stack.length = 0;
   help.set(false);
   away.set(false);

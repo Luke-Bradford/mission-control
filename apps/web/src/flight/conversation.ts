@@ -2,7 +2,7 @@ import type { AgentStream } from "@mc/core";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
-  | { kind: "you"; id: string; at: number | null; text: string }
+  | { kind: "you"; id: string; at: number | null; text: string; pending?: true }
   | { kind: "flight"; id: string; at: number | null; text: string }
   | { kind: "hub"; id: string; at: number | null; text: string }
   | { kind: "decision"; id: string; at: number; d: FlightDecision };
@@ -34,6 +34,43 @@ function hubLine(text: string): string {
   const rest = text.slice(MC_LINE_PREFIX.length).replace(/^ /, "");
   const line = rest.split("\n")[0] ?? "";
   return line.length > HUB_LINE_MAX ? `${line.slice(0, HUB_LINE_MAX - 1)}…` : line;
+}
+
+/** The Chat tab's rows: only what the operator and FLIGHT said to each other. */
+export const chatRows = (rows: readonly DockRow[]): DockRow[] =>
+  rows.filter((r) => r.kind === "you" || r.kind === "flight");
+
+/** The Feed tab's rows: Mission Control's wake lines and FLIGHT's decisions. */
+export const feedRows = (rows: readonly DockRow[]): DockRow[] =>
+  rows.filter((r) => r.kind === "hub" || r.kind === "decision");
+
+/**
+ * Messages sent but not yet in FLIGHT's stream, as `you` rows marked pending. One is settled once
+ * the stream holds more of that text than when it was sent (`seen`).
+ */
+export interface PendingMsg {
+  id: string;
+  text: string;
+  at: number;
+  seen: number;
+}
+
+export function withPending(
+  rows: readonly DockRow[],
+  pending: readonly PendingMsg[],
+): { rows: DockRow[]; open: PendingMsg[] } {
+  const have = new Map<string, number>();
+  for (const r of rows) if (r.kind === "you") have.set(r.text, (have.get(r.text) ?? 0) + 1);
+  const open = pending.filter((p) => (have.get(p.text) ?? 0) <= p.seen);
+  return {
+    rows: [
+      ...rows,
+      ...open.map(
+        (p): DockRow => ({ kind: "you", id: p.id, at: p.at, text: p.text, pending: true }),
+      ),
+    ],
+    open,
+  };
 }
 
 /** The dock's rows from FLIGHT's stream and its decisions, in time order. */
