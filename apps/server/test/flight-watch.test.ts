@@ -773,9 +773,42 @@ describe("the FLIGHT watcher", () => {
     raiseBlocked("blocked:r1:1", { at: nowMs });
     await watch.check();
     expect(sendCalls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS - MIN - 1);
+    expect(sendCalls).toHaveLength(1);
     nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
-    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS - MIN);
+    await vi.advanceTimersByTimeAsync(1);
     expect(sendCalls).toHaveLength(2);
+  });
+
+  it("measures the gap from the end of FLIGHT's turn, not only from the wake", async () => {
+    liveCrew();
+    raiseBlocked();
+    watch.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendCalls).toHaveLength(1);
+    // a turn longer than the gap: its own end must not wake it straight away
+    nowMs = T0 + 3 * MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + 3 * MIN + FLIGHT_MIN_WAKE_GAP_MS;
+    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS);
+    expect(sendCalls).toHaveLength(2);
+    watch.stop();
+  });
+
+  it("drops a held wake when the watcher stops", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    await watch.check();
+    watch.stop();
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
+    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS);
+    expect(sendCalls).toHaveLength(1);
   });
 
   it("does not wake mid-turn", async () => {

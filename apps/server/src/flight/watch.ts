@@ -71,6 +71,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   let lastFacts = "";
   let lastWakeAt = 0;
+  /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
+  let lastTurnEndAt = 0;
+  let stopped = false;
   /** When FLIGHT itself was started; a rotation is left out. */
   let starts: number[] = [];
   let rotating = false;
@@ -172,8 +175,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const listed = hasFacts(wake);
     const due =
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
-    if (due && t - lastWakeAt < FLIGHT_MIN_WAKE_GAP_MS) {
-      later(lastWakeAt + FLIGHT_MIN_WAKE_GAP_MS - t);
+    const since = Math.max(lastWakeAt, lastTurnEndAt);
+    if (due && t - since < FLIGHT_MIN_WAKE_GAP_MS) {
+      later(since + FLIGHT_MIN_WAKE_GAP_MS - t);
       return;
     }
     if (due) {
@@ -208,7 +212,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let gapTimer: NodeJS.Timeout | null = null;
   /** Checks again once the wake gap has passed; one pending re-check at a time. */
   function later(ms: number): void {
-    if (gapTimer !== null) return;
+    if (gapTimer !== null || stopped) return;
     gapTimer = setTimeout(() => {
       gapTimer = null;
       void check();
@@ -224,9 +228,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     check,
     start() {
       if (interval !== null) return;
+      stopped = false;
       offSupervisor = supervisor.on((e) => {
-        if (e.seatId === flightSeat(config)?.seat.id) void check();
-        else schedule();
+        if (e.seatId === flightSeat(config)?.seat.id) {
+          if (e.kind === "idle") lastTurnEndAt = now();
+          void check();
+        } else schedule();
       });
       offBus = bus.subscribe((topic) => {
         if (topic === "attention" || topic === "boards") schedule();
@@ -236,6 +243,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       void check();
     },
     stop() {
+      stopped = true;
       offSupervisor?.();
       offBus?.();
       offSupervisor = null;
