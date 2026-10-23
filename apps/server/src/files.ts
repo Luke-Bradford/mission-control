@@ -33,6 +33,7 @@ export const GIT_TIMEOUT_MS = 5000;
 export const GIT_MAX_BUFFER = 4 * 1024 * 1024;
 export const FILES_MAX = 200;
 export const NO_ORIGIN_HEAD_NOTE = "no origin/HEAD: showing uncommitted changes only";
+export const NO_WORKTREE_NOTE = "No worktree: this seat has no run on it.";
 export const FILTERS_NOTE = "repo uses git filters: uncommitted changes not read";
 const FILTERS_UNKNOWN_NOTE = "could not check for git filters: uncommitted changes not read";
 /** An attribute line that sets a filter driver (a macro's `[attr]x filter=y` included). */

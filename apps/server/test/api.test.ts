@@ -26,7 +26,6 @@ import {
   type BoardItem,
   type ChangedFiles,
   type ConfigView,
-  CREW_FILES_NOTE,
   type Crew,
   type CrewChanges,
   type CrewSessionFolders,
@@ -43,6 +42,7 @@ import {
   otherLaneText,
   type PrCheck,
   projectAtReset,
+  READONLY_FILES_NOTE,
   type ReloadResult,
   type Run,
   type RunDigest,
@@ -61,7 +61,7 @@ import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
-import { GitFailed } from "../src/files.ts";
+import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -3571,31 +3571,137 @@ describe("seat ids in the agent routes", () => {
     });
   });
 
-  it("files and a file's diff for a seat answer the fixed phase-2b line, never git", async () => {
-    const seen: string[] = [];
-    const a = buildApp({
-      config,
-      store,
-      bus,
-      changedFiles: async (wt) => {
-        seen.push(wt);
-        return { files: [], note: null, sha: null };
-      },
+  describe("a seat's Files tab", () => {
+    const gitIn = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", ...args], {
+        cwd,
+        encoding: "utf8",
+      });
+    let clone: string;
+    let wt: string;
+    const seatRow = (worktree: string | null) => ({
+      seatId: "guido-1",
+      runId: "c1",
+      cliSessionId: null,
+      state: "running" as const,
+      reason: null,
+      worktree,
+      updatedAt: NOW,
     });
-    await a.ready();
-    const files = await a.inject({ method: "GET", url: "/api/agents/guido-1/files" });
-    expect(files.statusCode).toBe(200);
-    expect(files.json<ChangedFiles>()).toEqual({
-      files: [],
-      note: CREW_FILES_NOTE,
-      sha: null,
+    // a clone with origin/HEAD at its first commit
+    const makeClone = (name: string) => {
+      const r = join(dir, name);
+      mkdirSync(r, { recursive: true });
+      gitIn(r, "init", "-q");
+      writeFileSync(join(r, "a.txt"), "one\n");
+      gitIn(r, "add", "-A");
+      gitIn(r, "commit", "-qm", "init");
+      gitIn(r, "update-ref", "refs/remotes/origin/main", "HEAD");
+      gitIn(r, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+      return r;
+    };
+    // the seat's worktree: one commit ahead, with an uncommitted edit and an untracked file
+    beforeEach(() => {
+      clone = makeClone("clone");
+      wt = join(dir, "seat-wt");
+      gitIn(clone, "worktree", "add", "-q", "-b", "seat", wt);
+      writeFileSync(join(wt, "done.txt"), "x\n");
+      gitIn(wt, "add", "-A");
+      gitIn(wt, "commit", "-qm", "done");
+      writeFileSync(join(wt, "a.txt"), "two\n");
+      writeFileSync(join(wt, "new.txt"), "n1\nn2\n");
+      store.upsertRun(run({ id: "c1", agentId: "guido-1", repoId: "shop-app" }));
+      store.setSeatSession(seatRow(wt));
     });
-    const diff = await a.inject({ method: "GET", url: "/api/agents/guido-1/files/diff?path=a" });
-    expect(diff.statusCode).toBe(409);
-    expect(diff.json()).toEqual({ error: CREW_FILES_NOTE });
-    expect(seen).toEqual([]);
-    expect(CREW_FILES_NOTE).toBe("Files for crew seats arrive with the mailbox (phase 2d).");
-    await a.close();
+
+    it("a writer seat lists its committed, uncommitted and untracked files, and diffs one", async () => {
+      const list = await get("/api/agents/guido-1/files");
+      expect(list.statusCode).toBe(200);
+      const body = list.json<ChangedFiles>();
+      expect(body.note).toBeNull();
+      expect(body.sha).toBe(gitIn(wt, "rev-parse", "HEAD").trim());
+      expect([...body.files].sort((x, y) => x.path.localeCompare(y.path))).toEqual([
+        { path: "a.txt", add: 1, del: 1, state: "uncommitted" },
+        { path: "done.txt", add: 1, del: 0, state: "committed" },
+        { path: "new.txt", add: null, del: null, state: "untracked" },
+      ]);
+      const diff = await get("/api/agents/guido-1/files/diff?path=a.txt");
+      expect(diff.statusCode).toBe(200);
+      const text = diff.json<FileDiff>().text;
+      expect(text).toContain("-one");
+      expect(text).toContain("+two");
+      expect((await get("/api/agents/guido-1/files/diff?path=nope.txt")).statusCode).toBe(404);
+    });
+
+    it("a run set aside in review, with no seat worktree, is read from the run's aside", async () => {
+      store.setSeatSession(seatRow(null));
+      store.setRunLoop("c1", {
+        ...NEW_LOOP,
+        phase: "review",
+        aside: { worktree: wt, wake: false },
+      });
+      const body = (await get("/api/agents/guido-1/files")).json<ChangedFiles>();
+      expect(body.files.map((f) => f.path)).toContain("done.txt");
+    });
+
+    it("answers 502 when the worktree's .git pointer was rewritten to another repository", async () => {
+      const other = makeClone("other");
+      gitIn(other, "worktree", "add", "-q", "-b", "evil", join(dir, "evil-wt"));
+      writeFileSync(join(wt, ".git"), `gitdir: ${join(other, ".git", "worktrees", "evil-wt")}\n`);
+      const list = await get("/api/agents/guido-1/files");
+      expect(list.statusCode).toBe(502);
+      expect(list.json()).toEqual({ error: "git failed" });
+      const diff = await get("/api/agents/guido-1/files/diff?path=a.txt");
+      expect(diff.statusCode).toBe(502);
+      expect(diff.json()).toEqual({ error: "git failed" });
+    });
+
+    it("a writer seat with no worktree answers the no-worktree note, and 404 for a diff", async () => {
+      store.setSeatSession(seatRow(null));
+      expect((await get("/api/agents/guido-1/files")).json()).toEqual({
+        files: [],
+        note: NO_WORKTREE_NOTE,
+        sha: null,
+      });
+      store.setSeatSession(seatRow(join(dir, "gone")));
+      expect((await get("/api/agents/guido-1/files")).json<ChangedFiles>().note).toBe(
+        NO_WORKTREE_NOTE,
+      );
+      const diff = await get("/api/agents/guido-1/files/diff?path=a.txt");
+      expect(diff.statusCode).toBe(404);
+      expect(diff.json()).toEqual({ error: "unknown file" });
+    });
+
+    it("a read-only seat answers the read-only note and runs no git", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "retro-1",
+        role: "RETRO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: [],
+      });
+      store.setSeatSession({ ...seatRow(wt), seatId: "retro-1" });
+      const seen: string[] = [];
+      const a = buildApp({
+        config,
+        store,
+        bus,
+        changedFiles: async (w) => {
+          seen.push(w);
+          return { files: [], note: null, sha: null };
+        },
+      });
+      await a.ready();
+      const files = await a.inject({ method: "GET", url: "/api/agents/retro-1/files" });
+      expect(files.statusCode).toBe(200);
+      expect(files.json()).toEqual({ files: [], note: READONLY_FILES_NOTE, sha: null });
+      const diff = await a.inject({ method: "GET", url: "/api/agents/retro-1/files/diff?path=a" });
+      expect(diff.statusCode).toBe(404);
+      expect(diff.json()).toEqual({ error: "unknown file" });
+      expect(seen).toEqual([]);
+      expect(READONLY_FILES_NOTE).toBe("Read-only agent: no file changes.");
+      await a.close();
+    });
   });
 
   it("GET /api/telemetry?agent=<seat id> is accepted", async () => {

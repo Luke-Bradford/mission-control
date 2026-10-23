@@ -453,6 +453,8 @@ describe("foldTranscript digest", () => {
       turnUsage: [],
       background: [],
       compactions: 0,
+      costTokens: null,
+      speed: { tokensPerSec: null, turnMs: null },
     });
   });
 });
@@ -758,5 +760,72 @@ describe("foldTranscript live tool detail and last text", () => {
     const t = foldTranscript(null, [long], 1).digest.lastText as string;
     expect(t.length).toBeLessThanOrEqual(LAST_TEXT_MAX);
     expect(t.endsWith("…")).toBe(true);
+  });
+});
+
+describe("foldTranscript: reply speed and the cost's token count", () => {
+  const at = (s: number) => new Date(T("2026-10-22T10:00:00Z") + s * 1000).toISOString();
+  const reply = (id: string, s: number, output: number, tool?: string) =>
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        id,
+        usage: { input_tokens: 10, output_tokens: output },
+        content: tool ? [{ type: "tool_use", id: tool, name: "Bash", input: {} }] : [],
+      },
+      parent_tool_use_id: null,
+      timestamp: at(s),
+    });
+  const ask = (tool: string, s: number, parent: string | null = null) =>
+    JSON.stringify({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: tool, content: "ok" }] },
+      parent_tool_use_id: parent,
+      timestamp: at(s),
+    });
+  const result = (cost: unknown = 1) => JSON.stringify({ type: "result", total_cost_usd: cost });
+
+  it("measures each reply from its ask to its last frame; the first reply has no ask", () => {
+    const f = foldTranscript(
+      null,
+      [
+        reply("m1", 1, 999, "t1"), // the turn's first reply: no ask before it, left out
+        ask("t1", 3),
+        reply("m2", 5, 100, "t2"), // asked at 3, last frame at 5
+        reply("m2", 6, 100), // a later frame of the same message: last frame at 6, 3 s in all
+        ask("t2", 8),
+        reply("m3", 12, 300), // asked at 8, last frame at 12: 4 s
+      ],
+      1,
+    ).digest;
+    // (100 + 300) tokens over (3 + 4) s, and the mean of 3 s and 4 s
+    expect(f.speed?.tokensPerSec).toBeCloseTo(400 / 7, 10);
+    expect(f.speed?.turnMs).toBe(3500);
+  });
+
+  it("is null with no ask, and a result line clears the ask", () => {
+    const none = foldTranscript(null, [reply("m1", 1, 50)], 1).digest;
+    expect(none.speed).toEqual({ tokensPerSec: null, turnMs: null });
+    const cleared = foldTranscript(null, [ask("t1", 3), result(), reply("m2", 5, 100)], 1).digest;
+    expect(cleared.speed).toEqual({ tokensPerSec: null, turnMs: null });
+  });
+
+  it("ignores a subagent's frames, and folds the same in chunks", () => {
+    const all = [ask("t1", 3), ask("tx", 4, "toolu_sub"), reply("m2", 6, 90)];
+    const whole = foldTranscript(null, all, 1);
+    expect(whole.digest.speed).toEqual({ tokensPerSec: 30, turnMs: 3000 });
+    const chunked = foldTranscript(foldTranscript(null, all.slice(0, 2), 1), all.slice(2), 1);
+    expect(chunked.digest.speed).toEqual(whole.digest.speed);
+  });
+
+  it("costTokens is the summed tokens at the latest result with a cost, null before one", () => {
+    const m1 = reply("m1", 1, 100);
+    const m2 = reply("m2", 5, 200);
+    expect(foldTranscript(null, [m1], 1).digest.costTokens).toBeNull();
+    const f = foldTranscript(null, [m1, result(), m2], 1);
+    expect(f.digest.costTokens).toBe(110);
+    expect(foldTranscript(f, [result()], 1).digest.costTokens).toBe(110 + 210);
+    // a result with no numeric cost is not one
+    expect(foldTranscript(null, [m1, result("x")], 1).digest.costTokens).toBeNull();
   });
 });
