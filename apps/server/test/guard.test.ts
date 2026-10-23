@@ -465,6 +465,22 @@ describe("POST /api/guard/check", () => {
     expect(m.statusCode).toBe(200);
   });
 
+  it("refuses a superuser-only tool at the next call once the repo is lowered", async () => {
+    const cfg = config();
+    for (const r of cfg.repos) r.flightPowers = "superuser";
+    const a = await build({ config: cfg, superuserTools: ["promote"] });
+    try {
+      expect((await check(tokA, pre("m1", "mcp__mc__promote", {}), a)).body).toBe("{}");
+      for (const r of cfg.repos) r.flightPowers = "standard";
+      const r = await check(tokA, pre("m2", "mcp__mc__promote", {}), a);
+      expect(reason(r.body)).toBe(
+        `${GUARD_RULES["flight-powers"]}: mcp__mc__promote (needs flight_powers: superuser)`,
+      );
+    } finally {
+      await a.close();
+    }
+  });
+
   it("crewGuardDeps (what main.ts passes) judges a seat by its configured role", async () => {
     const deps = crewGuardDeps(config(), tokens, lock);
     expect(deps.tokens).toBe(tokens);
@@ -732,6 +748,7 @@ describe("POST /api/guard/check", () => {
       "git-write": 2,
       "github-write": 0,
       "merge-push": 0,
+      "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
       network: 1,

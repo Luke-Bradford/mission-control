@@ -126,6 +126,7 @@ describe("addRepo", () => {
           commands: DEFAULT_SEAT_COMMANDS,
           protectedFiles: [],
           autonomy: "draft",
+          flightPowers: "standard",
         },
       ],
     });

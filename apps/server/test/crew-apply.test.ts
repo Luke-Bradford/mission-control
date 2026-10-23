@@ -395,6 +395,8 @@ describe("the reloader", () => {
   let listener: ((e: SupervisorEvent) => void) | null;
   let loaded: CcConfig | Error;
   let applied: CcConfig;
+  let rotateFlight: ReturnType<typeof vi.fn<() => void>>;
+  let endRunByEngine: ReturnType<typeof vi.fn<(runId: string) => Promise<void>>>;
 
   const supervisor = () => ({
     on: (fn: (e: SupervisorEvent) => void) => {
@@ -404,6 +406,7 @@ describe("the reloader", () => {
       };
     },
     seatBusy: (id: string) => busy.has(id),
+    endRunByEngine,
   });
   const make = () =>
     createCrewReloader({
@@ -412,6 +415,7 @@ describe("the reloader", () => {
       store,
       bus,
       supervisor: supervisor(),
+      rotateFlight,
       log: () => {},
       load: () => {
         if (loaded instanceof Error) throw loaded;
@@ -436,6 +440,8 @@ describe("the reloader", () => {
     topics = [];
     bus.subscribe((t) => topics.push(t));
     busy = new Set();
+    endRunByEngine = vi.fn(async () => {});
+    rotateFlight = vi.fn();
     listener = null;
     applied = config([{ id: "s1", seats: [seat("guido-1")] }]);
     loaded = structuredClone(applied);
@@ -444,6 +450,97 @@ describe("the reloader", () => {
     vi.useRealTimers();
     store.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  describe("flight_powers", () => {
+    const repoOf = (flightPowers: "standard" | "superuser") => ({
+      id: "shop-app",
+      github: "o/shop",
+      project: 1,
+      statusMap: {},
+      flightPowers,
+    });
+    beforeEach(() => {
+      const flight = seat("flight-1", { role: "FLIGHT" });
+      applied = config([{ id: "s1", seats: [seat("guido-1"), flight] }]);
+      applied.repos = [{ ...repoOf("standard"), autonomy: "draft" }];
+      loaded = structuredClone(applied);
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-1:1",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: 1,
+      });
+    });
+    const raise = (to: "standard" | "superuser") => {
+      (loaded as CcConfig).repos.forEach((r) => {
+        r.flightPowers = to;
+      });
+    };
+
+    it("is no hub restart; it applies live and requests one FLIGHT rotation", async () => {
+      const r = make();
+      raise("superuser");
+      const out = await r.reload();
+      expect(out.restartNeeded).toEqual([]);
+      expect(applied.repos[0]?.flightPowers).toBe("superuser");
+      expect(out.applied).toContain("repo shop-app flight_powers superuser");
+      expect(rotateFlight).toHaveBeenCalledTimes(1);
+      expect(endRunByEngine).not.toHaveBeenCalled();
+      await r.reload();
+      expect(rotateFlight).toHaveBeenCalledTimes(1);
+    });
+
+    it("lowering applies live too", async () => {
+      for (const r of applied.repos) r.flightPowers = "superuser";
+      loaded = structuredClone(applied);
+      const r = make();
+      raise("standard");
+      const out = await r.reload();
+      expect(out.restartNeeded).toEqual([]);
+      expect(applied.repos[0]?.flightPowers).toBe("standard");
+      expect(rotateFlight).toHaveBeenCalledTimes(1);
+    });
+
+    it("restartNeeded ignores flightPowers and nothing else in repos", () => {
+      const a = structuredClone(applied);
+      const b = structuredClone(applied);
+      for (const r of b.repos) r.flightPowers = "superuser";
+      expect(restartNeeded(a, b)).toEqual([]);
+      for (const r of b.repos) r.project = 2;
+      expect(restartNeeded(a, b)).toEqual(["repos"]);
+    });
+
+    it.each(["plan", "queues"])(
+      "applies powers before a failure in %s and a later config load",
+      async (where) => {
+        const r = make();
+        raise("superuser");
+        const target = loaded as CcConfig;
+        target.crew?.sessions[0]?.seats.push(seat("guido-2", { area: ["other/**"] }));
+        if (where === "plan") {
+          vi.spyOn(applied.accounts, "some").mockImplementation(() => {
+            throw new Error("plan failed");
+          });
+        } else {
+          target.crew?.sessions[0]?.seats.splice(0, 1);
+          vi.spyOn(store, "replaceQueues").mockImplementation(() => {
+            throw new Error("queues failed");
+          });
+        }
+        const out = await r.reload();
+        expect(applied.repos[0]?.flightPowers).toBe("superuser");
+        expect(out.applied).toContain("repo shop-app flight_powers superuser");
+        expect(rotateFlight).toHaveBeenCalledTimes(1);
+        loaded = new ConfigError("crew", "bad config");
+        await r.reload();
+        expect(applied.repos[0]?.flightPowers).toBe("superuser");
+        expect(rotateFlight).toHaveBeenCalledTimes(1);
+      },
+    );
   });
 
   it("a changed file is reloaded on the poll", async () => {

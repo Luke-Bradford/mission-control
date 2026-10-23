@@ -1,4 +1,5 @@
 import type { Owner, Stage } from "./board.ts";
+import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { ReviewStatus } from "./review.ts";
@@ -90,7 +91,7 @@ export interface RunLoop {
   budgetExtra: number;
   parked: { kind: string; reason: string; ended: boolean } | null;
   /** Hard-rule files in the pushed sha's diff. */
-  touches: { sha: string; paths: string[] } | null;
+  touches: { sha: string; paths: string[]; flightPowers?: FlightPowers } | null;
   /** `<phase>:<epoch>` whose card move is done. */
   cardFor: string | null;
   /** CAPCOM waived the review findings on this sha (un-park of a review park). */

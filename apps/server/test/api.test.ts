@@ -113,6 +113,7 @@ let updaterResult: () => Promise<{ upToDate: true } | { restarting: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
 const stubUpdater = (): Updater => ({
+  changes: async () => null,
   version: async () => {
     updaterCalls.push("version");
     return updaterVersion;
@@ -633,6 +634,7 @@ describe("add a repo (POST /api/repos)", () => {
       commands: DEFAULT_SEAT_COMMANDS,
       protectedFiles: [],
       autonomy: "draft",
+      flightPowers: "standard",
     });
     expect(events).toContain("config");
     expect(events).toContain("boards");
@@ -647,6 +649,7 @@ describe("add a repo (POST /api/repos)", () => {
       { statusMap: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`s${i}`, "done"])) },
     ],
     ["an extra key", { path: "/etc/passwd" }],
+    ["flightPowers (only the config file sets it)", { flightPowers: "superuser" }],
   ])("400 for %s, nothing written", async (_name, over) => {
     const r = await postBody("/api/repos", { ...NEW_REPO, ...over });
     expect(r.statusCode).toBe(400);
