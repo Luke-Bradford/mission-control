@@ -130,6 +130,7 @@ import {
   NO_LOCK,
   NOTE_KEY,
 } from "./hud.ts";
+import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -423,6 +424,8 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
 
 export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
+const NOTIFICATION_RECONCILE_MS = 1000;
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
@@ -539,8 +542,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  const notifications = new LocalNotifications(store, config, bus, now);
+  const reconcileNotifications = () =>
+    notifications.reconcile(
+      attentionItems(
+        config,
+        store,
+        now(),
+        deps.lock?.state() ?? NO_LOCK,
+        undefined,
+        deps.hubLogin?.() ?? null,
+      ),
+    );
+  let notificationTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconcilingNotifications = false;
+  const scheduleNotifications = () => {
+    if (notificationTimer !== undefined || reconcilingNotifications) return;
+    notificationTimer = setTimeout(() => {
+      notificationTimer = undefined;
+      reconcilingNotifications = true;
+      try {
+        reconcileNotifications();
+      } finally {
+        reconcilingNotifications = false;
+      }
+    }, NOTIFICATION_RECONCILE_MS);
+    notificationTimer.unref();
+  };
+  const unsubscribeNotifications = bus.subscribe((topic) => {
+    if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
+      scheduleNotifications();
+  });
+  app.addHook("onReady", async () => {
+    scheduleNotifications();
+  });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
+    unsubscribeNotifications();
+    clearTimeout(notificationTimer);
     for (const end of [...streams]) end();
   });
 
@@ -1953,6 +1992,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         bus.emit("attention");
         return { dismissed: key };
+      });
+
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.get("/notification-preferences", async () => notifications.preferences());
+
+      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      api.post("/notification-preferences", async (req, reply) => {
+        const body = NotificationPreferencesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        notifications.setPreferences(body.data);
+        return notifications.preferences();
+      });
+
+      // Reader: apps/web/src/notifications.ts (local notification feed; web wiring is a separate ticket)
+      api.get("/notifications/events", async () => {
+        return notifications.events();
+      });
+
+      // Reader: apps/web/src/notifications.ts (Send a test notification; web wiring is a separate ticket)
+      api.post("/notifications/test", async (req, reply) => {
+        const body = NoBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        return notifications.test();
       });
 
       // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)

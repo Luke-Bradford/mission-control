@@ -427,6 +427,9 @@ export function crew(
           : view.stateSince;
       return {
         id: agent.id,
+        ...(agent.kind === "crew" && agent.seat.displayCallSign !== undefined
+          ? { displayCallSign: agent.seat.displayCallSign }
+          : {}),
         repoId: agent.repoId,
         index,
         hudState: state,

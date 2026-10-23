@@ -2,7 +2,6 @@ import {
   type ConfigView,
   type Crew,
   type CrewChanges,
-  ENGINE_NOT_RUNNING,
   FREE_SUITE_HINT,
   GITHUB_SLOWED_PREFIX,
   GUARD_NOTE,
@@ -475,8 +474,24 @@ describe("Setup tabs", () => {
     expect(document.getElementById("page-setup")?.textContent).not.toContain("Crew is off");
   });
 
-  it("Accounts: a crew account is Signed in when its usage collector is ok; actions are —", async () => {
+  it("Accounts: CLI status overrides collector health and does not depend on a crew seat", async () => {
     load({
+      "/api/accounts/status": [
+        {
+          accountId: "claude-main",
+          status: "not-logged-in",
+          checkedAt: NOW,
+          plan: null,
+          identity: null,
+        },
+        {
+          accountId: "codex-main",
+          status: "logged-in",
+          checkedAt: NOW,
+          plan: "pro",
+          identity: "Fictional operator",
+        },
+      ],
       "/api/config": SESSIONS_CFG,
       "/api/health": [
         health({ collector: "usage:claude-main" }),
@@ -486,13 +501,10 @@ describe("Setup tabs", () => {
     at("accounts");
     const table = await screen.findByRole("table");
     const rows = within(table).getAllByRole("row");
-    await waitFor(() => expect(rows[1]?.textContent).toContain("Signed in"));
-    const claude = rows[1] as HTMLElement;
-    const cell = claude.querySelector("td:last-child") as HTMLElement;
-    expect(cell.textContent).toBe("—");
-    expect(cell.title).toBe(ENGINE_NOT_RUNNING);
-    // codex has no crew seat: nothing is claimed about its login
-    expect(rows[2]?.textContent).not.toContain("Signed in");
+    await waitFor(() => expect(rows[1]?.textContent).toContain("Not signed in"));
+    expect(within(rows[1] as HTMLElement).getByRole("button", { name: "Check" })).toBeTruthy();
+    expect(rows[2]?.textContent).toContain("Signed in");
+    expect(rows[2]?.textContent).toContain("Fictional operator");
   });
 
   it("Accounts: the GitHub row shows what is left, the poll cost and the reset", async () => {
@@ -518,14 +530,25 @@ describe("Setup tabs", () => {
     expect((await screen.findByText(note)).getAttribute("role")).toBe("status");
   });
 
-  it("Accounts: a crew account whose usage collector failed is not Signed in", async () => {
+  it("Accounts: a failed usage collector does not prevent a CLI Signed in reading", async () => {
     load({
       "/api/config": SESSIONS_CFG,
       "/api/health": [health({ collector: "usage:claude-main", ok: false, error: "401" })],
+      "/api/accounts/status": [
+        {
+          accountId: "claude-main",
+          status: "logged-in",
+          checkedAt: NOW,
+          plan: "team",
+          identity: "Fictional operator",
+        },
+      ],
     });
     at("accounts");
     const table = await screen.findByRole("table");
-    expect(within(table).getAllByRole("row")[1]?.textContent).not.toContain("Signed in");
+    await waitFor(() =>
+      expect(within(table).getAllByRole("row")[1]?.textContent).toContain("Signed in"),
+    );
   });
 
   it("Accounts: thresholds, rounded quota in amber and red, the fixed-threshold title", async () => {
@@ -536,7 +559,17 @@ describe("Setup tabs", () => {
       within(table)
         .getAllByRole("columnheader")
         .map((h) => h.textContent),
-    ).toEqual(["Account", "Provider", "Alert at", "Stop at", "Quota", "Status", "Sign in / Check"]);
+    ).toEqual([
+      "Account",
+      "Provider",
+      "Plan",
+      "Signed in as",
+      "Alert at",
+      "Stop at",
+      "Quota",
+      "Status",
+      "Check",
+    ]);
     const rows = within(table).getAllByRole("row");
     const claude = rows[1] as HTMLElement;
     expect(claude.textContent).toContain("claude-main");
@@ -549,7 +582,7 @@ describe("Setup tabs", () => {
     const codex = rows[2] as HTMLElement;
     expect(codex.textContent).toContain("5h 100%");
     expect(codex.querySelectorAll(".meter.full")).toHaveLength(2);
-    const cell = claude.querySelector("td:nth-child(5)") as HTMLElement;
+    const cell = claude.querySelector("td:nth-child(7)") as HTMLElement;
     expect(cell.title).toMatch(/fixed 80\/100/);
     expect(cell.title).toMatch(/alert\/stop levels are in the columns beside/);
     expect(
@@ -560,7 +593,8 @@ describe("Setup tabs", () => {
     expect(boxes).toHaveLength(5);
     expect(boxes.every((b) => b.disabled)).toBe(true);
     expect(auto.textContent).toContain("P2");
-    expect(screen.queryByRole("button", { name: /Sign in|Check/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Check" })).toHaveLength(CFG.accounts.length);
   });
 
   const FREE: TestLockState = { holder: null, waiting: [] };
@@ -1189,8 +1223,8 @@ describe("Setup tabs", () => {
   });
 });
 
-describe("Setup is read-only (except Repos and Sessions)", () => {
-  it.each(SETUP_TABS.filter((t) => t !== "repos" && t !== "sessions"))(
+describe("Setup is read-only (except Repos, Sessions and Accounts)", () => {
+  it.each(SETUP_TABS.filter((t) => t !== "repos" && t !== "sessions" && t !== "accounts"))(
     "%s: no enabled field, and no button posts",
     async (tab) => {
       load();
