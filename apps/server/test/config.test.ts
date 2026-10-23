@@ -559,6 +559,17 @@ ${modelless("flight-2", "FLIGHT")}
       expect(cfg.crew?.roles?.FAO?.tools).toEqual(["report_plan", "read_ticket"]);
     });
 
+    it("a watch role may hold read_ticket", () => {
+      const cfg = load(
+        crewText({
+          roles: [
+            "WATCHER: { prompt: roles/SCOUT.md, model: opus, mode: read-only, loop: watch, tools: [read_ticket] }",
+          ],
+        }),
+      );
+      expect(cfg.crew?.roles?.WATCHER?.tools).toEqual(["read_ticket"]);
+    });
+
     it("a plan role may not hold another FLIGHT tool", () => {
       const e = roleErr([
         "FAO: { prompt: roles/SCOUT.md, model: opus, mode: read-only, loop: plan, tools: [report_plan, answer_question] }",
