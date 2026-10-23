@@ -302,6 +302,13 @@ describe("scanSecrets", () => {
       expect(scanSecrets(log(`${sha}\nmsg\n\n${diff("a.ts", [fake])}`), [])).toEqual(found);
     }
   });
+  it("finds a known credential faked as a commit id inside a file", () => {
+    const hex = "0123456789abcdef0123456789abcdef01234567";
+    const body = diff("a.ts", [`x\0commit ${hex}`, "y"]);
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${body}`), [hex])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "local credential" },
+    ]);
+  });
   it("finds a token in a header-only file whose name holds ' b/'", () => {
     const name = `${TOKEN} b/x.empty`;
     const empty = `diff --git a/${name} b/${name}\nnew file mode 100644\nindex 0000000..e69de29\n`;

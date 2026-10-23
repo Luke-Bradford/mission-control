@@ -1463,7 +1463,10 @@ export function scanSecrets(text: string, known: readonly string[]): SecretFindi
   const out: SecretFinding[] = [];
   for (const chunk of text.split(COMMIT_HEADER).slice(1)) {
     const lines = chunk.split("\n");
-    const sha7 = (lines.shift() ?? "").trim().slice(0, 7);
+    const id = (lines.shift() ?? "").trim();
+    // a file line can fake a header whose id is a known credential: scan the id too
+    for (const kind of kindsIn(id, known)) out.push({ where: "(name withheld)", line: 0, kind });
+    const sha7 = id.slice(0, 7);
     const commitWhere = `commit ${sha7}`;
     let messageLine = 0;
     const message = (l: string) => {
