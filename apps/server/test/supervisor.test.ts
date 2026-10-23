@@ -22,6 +22,7 @@ import {
   CREW_DISABLED,
   claimedText,
   clockHm,
+  DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
@@ -33,17 +34,21 @@ import {
   notOnBoardText,
   otherLaneText,
   PNPM_STORE_ENV,
+  type Profile,
   READONLY_BUILTINS,
   READONLY_TOOLS,
+  REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoRules,
   type Run,
   type RunLoop,
+  type RunProfile,
   researchText,
   retiringText,
   reworkFirstText,
   START_NO_RULES,
   seatBusyText,
+  startClosedText,
   startMissingNeedsText,
   startNeedsPlanText,
   type TicketView,
@@ -64,10 +69,12 @@ import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
+import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, reviewBrief, ticketBrief, watchBrief } from "../src/runtime/brief.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import {
   CREW_LOCK_FILE,
+  clonePeers,
   createSupervisor,
   type Supervisor,
   type SupervisorDeps,
@@ -90,6 +97,8 @@ const prep = vi.hoisted(() => ({
   failWrite: false,
   /** Set: every existingCheckout (a resume's) waits for it. */
   resumeGate: null as Promise<void> | null,
+  /** The `peers` each prepare call was given, in order. */
+  peers: [] as unknown[],
 }));
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
@@ -103,7 +112,20 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
       if (prep.failRemove) throw new Error("worktree is locked");
       return real.removeCheckout(...a);
     },
+    preparePlanCheckout: async (i: Parameters<typeof real.preparePlanCheckout>[0]) => {
+      prep.peers.push(i.peers);
+      return real.preparePlanCheckout(i);
+    },
+    prepareDetachedCheckout: async (i: Parameters<typeof real.prepareDetachedCheckout>[0]) => {
+      prep.peers.push(i.peers);
+      return real.prepareDetachedCheckout(i);
+    },
+    prepareScratch: async (i: Parameters<typeof real.prepareScratch>[0]) => {
+      prep.peers.push(i.peers);
+      return real.prepareScratch(i);
+    },
     prepareCheckout: async (i: Parameters<typeof real.prepareCheckout>[0]) => {
+      prep.peers.push(i.peers);
       prep.inFlight++;
       prep.maxInFlight = Math.max(prep.maxInFlight, prep.inFlight);
       try {
@@ -265,6 +287,7 @@ function make(
     cliVersion?: SupervisorDeps["cliVersion"];
     rules?: SupervisorDeps["rules"];
     login?: string | null;
+    profiles?: SupervisorDeps["profiles"];
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
@@ -303,6 +326,7 @@ function make(
     resumeWindowMs: over.resumeWindowMs ?? 500,
     fetchTicket,
     ...(over.claim === undefined ? {} : { claim: over.claim }),
+    ...(over.profiles === undefined ? {} : { profiles: over.profiles }),
     ...(over.cliHold === undefined ? {} : { cliHold: over.cliHold }),
     cliVersion: over.cliVersion ?? (async () => null),
     enabled: over.enabled ?? true,
@@ -354,6 +378,7 @@ beforeEach(() => {
   prep.failRemove = false;
   prep.resumeGate = null;
   prep.failWrite = false;
+  prep.peers = [];
   dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-supervisor-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");
@@ -493,6 +518,16 @@ describe("startRun eligibility", () => {
     expect(claim).not.toHaveBeenCalled();
   }
 
+  it("0: refuses a closed card", async () => {
+    onBoard(boardCard(42, { closed: true }));
+    await refused(422, startClosedText("mc#42"));
+  });
+
+  it("0: refuses a card in Done", async () => {
+    onBoard(boardCard(42, { status: "Done", state: "done" }));
+    await refused(422, startClosedText("mc#42"));
+  });
+
   it("1: refuses another lane", async () => {
     const { sup, cfg } = make({
       rules: withRules(),
@@ -596,10 +631,113 @@ describe("startRun eligibility", () => {
   });
 
   it("starts an eligible ticket", async () => {
-    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    const { sup, cfg } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
     sup.start();
     await sup.startRun("guido-1", 42);
     expect(store.seatSession("guido-1")).not.toBeNull();
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
+  });
+});
+
+describe("startRun profiles", () => {
+  const profilesFile = () => join(dir, "profiles.yaml");
+  const FILE = (tries: number) => `profiles:
+  - name: small-change
+    labels: [chore]
+    steps: [{ name: implement, phase: working }]
+    plan_required: false
+    reviewer: { role: RETRO, depth: light }
+    tries: 2
+    rounds: 2
+  - name: feature
+    steps: [{ name: implement, phase: working }]
+    plan_required: true
+    reviewer: { role: RETRO, depth: full }
+    tries: ${tries}
+    rounds: 3
+`;
+
+  it("an override from opts wins, is stored, and a later start reuses it", async () => {
+    const { sup } = make();
+    sup.start();
+    const override = { profile: "research", reason: "no code here", by: "FLIGHT" as const };
+    const { runId } = await sup.startRun("guido-1", 42, { override });
+    const got = store.run(runId)?.profile;
+    expect(got).toMatchObject({
+      profile: { name: "research" },
+      route: { by: "override", from: "small-change", who: "FLIGHT", reason: "no code here" },
+    });
+    expect(got?.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(store.profileOverride("mc", 42)).toEqual(override);
+  });
+
+  it("a later start without an override reuses the stored one", async () => {
+    store.setProfileOverride(
+      "mc",
+      42,
+      { profile: "bugfix", reason: "was a bug", by: "planner" },
+      1,
+    );
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    expect(store.run(runId)?.profile).toMatchObject({
+      profile: { name: "bugfix" },
+      route: { by: "override", who: "planner", reason: "was a bug" },
+    });
+  });
+
+  it("refuses an unknown profile with 422, before a worktree or claim", async () => {
+    const claim = vi.fn(async () => {});
+    const { sup } = make({ claim });
+    sup.start();
+    const e = await refusal(
+      sup.startRun("guido-1", 42, { override: { profile: "zzz", reason: "r", by: "FLIGHT" } }),
+    );
+    expect(e.status).toBe(422);
+    expect(e.message).toContain('no template profile is named "zzz"');
+    expect(store.profileOverride("mc", 42)).toBeNull();
+    expect(store.seatSession("guido-1")).toBeNull();
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 502 when the profiles file is broken", async () => {
+    writeFileSync(profilesFile(), "profiles: 3\n");
+    const { sup } = make({ profiles: () => loadProfiles(profilesFile()) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(e.message).toContain("the template profiles in user config could not be read");
+  });
+
+  it("keeps a running run's snapshot when the profiles file changes", async () => {
+    writeFileSync(profilesFile(), FILE(3));
+    store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
+    const { sup } = make({
+      profiles: () => loadProfiles(profilesFile()),
+      fetchTicket: async () => ({ ...TICKET, body: "## Done when\n- x\n## Plan\n- y\n" }),
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    const before = store.run(runId)?.profile;
+    expect(before?.profile).toMatchObject({ name: "feature", tries: 3 });
+    writeFileSync(profilesFile(), FILE(5));
+    const file = loadProfiles(profilesFile()) as Profile[];
+    expect(file.find((p) => p.name === "feature")?.tries).toBe(5);
+    expect(store.run(runId)?.profile).toEqual(before);
+    expect(profileHash(file.find((p) => p.name === "feature") as Profile)).not.toBe(before?.hash);
+  });
+
+  it("a profile that needs no plan starts a Size M build without one", async () => {
+    writeFileSync(profilesFile(), FILE(3));
+    store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
+    const { sup } = make({
+      profiles: () => loadProfiles(profilesFile()),
+      fetchTicket: async () => ({ ...TICKET, labels: ["chore"] }),
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    expect(store.run(runId)?.profile?.profile.name).toBe("small-change");
   });
 });
 
@@ -753,6 +891,7 @@ describe("startRun", () => {
     expect(argv[argv.indexOf("--model") + 1]).toBe("haiku");
     expect(argv[argv.indexOf("--effort") + 1]).toBe("high");
     expect(start.cwd).toBe(wt);
+    const startedProfile = store.run(out.runId)?.profile;
     expect(userLines()[0]).toBe(
       ticketBrief({
         call: "GUIDO-1",
@@ -770,8 +909,14 @@ describe("startRun", () => {
         area: ["apps/**"],
         commands: [],
         fullSuite: [],
+        ...(startedProfile ? { profile: startedProfile } : {}),
+        profileNames: DEFAULT_PROFILES.map((p) => p.name),
       }),
     );
+    expect(store.run(out.runId)?.profile).toMatchObject({
+      profile: { name: "small-change" },
+      route: { by: "size", size: "S" },
+    });
     expect(userLines()[0]).toMatch(
       /^You are GUIDO-1, the backend developer, test-first in its area on o\/mc\. Ticket o\/mc#42: /,
     );
@@ -954,6 +1099,11 @@ describe("startRun", () => {
       join(dir, "studio", "wt"),
       join(dir, "studio", "state"),
     ];
+    expect(clonePeers(cfg, hub)).toEqual([
+      { label: "the hub's checkout", dir: hub },
+      { label: "loop ta worktree", dir: join(dir, "ta", "wt") },
+      { label: "loop studio worktree", dir: join(dir, "studio", "wt") },
+    ]);
     // another session's worktree folder is denied, the seat's own never is
     expect(seatDenyRead(cfg, hub, "mc-crew")).toEqual([
       hub,
@@ -1186,9 +1336,10 @@ describe("startRun", () => {
     const rolesDir = join(dir, "roles");
     mkdirSync(rolesDir);
     writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
-    const { sup } = make({ rolesDir });
+    const { sup, cfg } = make({ rolesDir });
     sup.start();
     const out = await sup.startRun("fao-1", 42);
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     const wt = join(root, "mc-crew", "fao-1-42");
     expect(store.run(out.runId)).toMatchObject({ branch: null, ticket: "mc#42" });
     expect(store.seatSession("fao-1")?.worktree).toBe(wt);
@@ -1335,6 +1486,20 @@ describe("startRun", () => {
     expect(e.status).toBe(404);
     expect(e.message).toBe("unknown issue");
     expect(existsSync(join(root, "mc-crew", "guido-1-9999"))).toBe(false);
+  });
+
+  it("answers 502 when GitHub cannot be read, with no run and no worktree", async () => {
+    const { sup } = make({
+      fetchTicket: async () => {
+        throw new Error("rate limited");
+      },
+    });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(502);
+    expect(e.message).toBe("could not read o/mc#42 from GitHub");
+    expect(store.runs("guido-1", 1)).toEqual([]);
+    expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(false);
   });
 
   it("queues two starts on one clone, so their fetches never race", async () => {
@@ -2016,17 +2181,24 @@ describe("startWatch", () => {
       "mcp__mc__flight_state",
       "mcp__mc__promote",
       "mcp__mc__end_run",
+      "mcp__mc__accept_ruling",
+      "mcp__mc__sync_main",
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",
       "mcp__mc__brief_item",
+      "mcp__mc__read_pr",
+      "mcp__mc__read_ci_log",
+      "mcp__mc__list_tickets",
+      "mcp__mc__update_brief",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
 
   it("ending the watch seat's run stops it, so the watch does not restart it", async () => {
-    const { sup } = flightMake();
+    const { sup, cfg } = flightMake();
     sup.start();
     await sup.startWatch("flight-1");
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     await until(() => expect(seatState("flight-1")).toBe("idle"));
     await sup.endRun("flight-1");
     expect(seatState("flight-1")).toBe("stopped");
@@ -2153,6 +2325,44 @@ describe("reattach after a restart", () => {
     expect(after).toContain("echo: carry on");
     await sup.endRun("guido-1");
     expect(store.run(runId)?.status).toBe("ok");
+  });
+
+  it("resumes the next run when resuming the first fails", async () => {
+    const first = make();
+    first.sup.start();
+    const a = await first.sup.startRun("guido-1", 42);
+    const b = await first.sup.startRun("retro", 43);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    expect(starts()).toHaveLength(2);
+    rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+    const { sup } = make();
+    sup.start();
+    await until(() => expect(store.seatSession("retro")?.reason).toBe(RESUMED));
+    expect(store.seatSession("guido-1")).toMatchObject({
+      state: "error",
+      reason: "could not resume: checkout missing",
+    });
+    expect(store.run(a.runId)?.status).toBe("failed");
+    expect(store.run(b.runId)).toMatchObject({ status: "running", endedAt: null });
+    await until(() => expect(starts()).toHaveLength(3));
+    expect(starts()[2].cwd).toBe(join(root, "mc-crew", "retro-43"));
+  });
+
+  it("resumes both of two active runs left by a stopped hub", async () => {
+    const first = make();
+    first.sup.start();
+    await first.sup.startRun("guido-1", 42);
+    await first.sup.startRun("retro", 43);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    const { sup } = make();
+    sup.start();
+    await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
+    await until(() => expect(store.seatSession("retro")?.reason).toBe(RESUMED));
+    await until(() => expect(starts()).toHaveLength(4));
   });
 
   it("marks a seat removed from config in error and its run failed", async () => {
@@ -3255,6 +3465,19 @@ describe("supervisor events (Plan 7a)", () => {
       expect(snaps).toHaveLength(1);
     });
 
+    it("stopAll stops a resume waiting in its checkout check: no CLI, the run stays active", async () => {
+      const runId = await leftActive();
+      const { sup } = make();
+      const release = holdResume();
+      sup.start();
+      await sup.stopAll();
+      release();
+      await settle();
+      expect(launches()).toBe(1); // the first supervisor's only
+      expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+      expect(store.activeSeatSessions().map((r) => r.seatId)).toContain("guido-1");
+    });
+
     it("Stop's end stops the resume too", async () => {
       const runId = await leftActive();
       const { sup } = make();
@@ -3360,7 +3583,9 @@ describe("startReview", () => {
   const scratch = (id: number) => join(root, "mc-crew", `retro-review-${id}`);
 
   /** An author run with a pushed PR head, and a review of it in `starting`. */
-  function reviewOfPush(opts: { state?: "queued" | "starting"; pushSha?: string } = {}) {
+  function reviewOfPush(
+    opts: { state?: "queued" | "starting"; pushSha?: string; profile?: RunProfile } = {},
+  ) {
     const seed = join(dir, "seed");
     const fork = git(seed, "rev-parse", "HEAD");
     git(seed, "checkout", "-q", "-b", "pr");
@@ -3388,6 +3613,7 @@ describe("startReview", () => {
       transcriptPath: join(dir, "author.jsonl"),
       prs: [],
       summary: null,
+      ...(opts.profile === undefined ? {} : { profile: opts.profile }),
     };
     store.upsertRun(author);
     store.setRunPush({ runId: author.id, sha: opts.pushSha ?? sha, at: 1 });
@@ -3452,11 +3678,45 @@ describe("startReview", () => {
     });
   });
 
-  it("startReview launches a scratch run", async () => {
-    const r = reviewOfPush();
+  /** A review of an author run whose profile has this review depth; the review run's model. */
+  async function reviewModel(depth: "light" | "full"): Promise<string | null> {
+    const model = await reviewRunModel(depth);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    // the CLI is launched on the model the depth calls for, as the run row says
+    expect(argv[argv.indexOf("--model") + 1]).toBe(depth === "full" ? REVIEW_FULL_MODEL : "haiku");
+    return model;
+  }
+
+  async function reviewRunModel(depth: "light" | "full"): Promise<string | null> {
+    const base = DEFAULT_PROFILES[0] as Profile;
+    const r = reviewOfPush({
+      profile: {
+        profile: { ...base, reviewer: { role: "RETRO", depth } },
+        route: { by: "size", size: "M" },
+        hash: "h",
+      },
+    });
     const { sup } = make({ scratchRetro: true });
     sup.start();
     const { runId } = await sup.startReview("retro", r.reviewId);
+    return store.run(runId)?.model ?? null;
+  }
+
+  it("a full-depth review runs on the full-depth model", async () => {
+    expect(await reviewModel("full")).toBe(REVIEW_FULL_MODEL);
+  });
+
+  it("a light review runs on the seat's model", async () => {
+    expect(await reviewModel("light")).toBe("haiku");
+  });
+
+  it("startReview launches a scratch run", async () => {
+    const r = reviewOfPush();
+    const { sup, cfg } = make({ scratchRetro: true });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     expect(store.run(runId)).toMatchObject({
       agentId: "retro",
       reviewId: r.reviewId,
