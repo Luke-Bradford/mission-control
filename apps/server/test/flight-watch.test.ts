@@ -6,6 +6,7 @@ import {
   COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_MAX_WAKES,
+  FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
@@ -368,7 +369,7 @@ describe("FLIGHT's holds", () => {
       [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
       T0 + MIN,
     );
-    nowMs = T0 + MIN;
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0]?.text).toContain("1 hold to release");
@@ -729,7 +730,7 @@ describe("the FLIGHT watcher", () => {
     liveCrew();
     raiseBlocked();
     await watch.check();
-    nowMs = T0 + MIN;
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
     raiseBlocked("blocked:r1:1", { at: nowMs });
     await watch.check();
     expect(sendCalls).toHaveLength(2);
@@ -758,7 +759,22 @@ describe("the FLIGHT watcher", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     store.upsertRun(run("r-guido", "guido-1"));
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("holds a second wake until the gap has passed, then sends it without another event", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
+    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS - MIN);
     expect(sendCalls).toHaveLength(2);
   });
 

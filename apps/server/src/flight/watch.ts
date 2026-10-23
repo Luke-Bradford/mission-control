@@ -9,6 +9,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_HOUR_MS,
   FLIGHT_MAX_WAKES,
+  FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_REWAKE_MS,
   FLIGHT_STARTS_MAX,
@@ -171,6 +172,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const listed = hasFacts(wake);
     const due =
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
+    if (due && t - lastWakeAt < FLIGHT_MIN_WAKE_GAP_MS) {
+      later(lastWakeAt + FLIGHT_MIN_WAKE_GAP_MS - t);
+      return;
+    }
     if (due) {
       if ((await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state))) === "sent") {
         markPrsShown(store, state);
@@ -198,6 +203,17 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       void check();
     }, FLIGHT_DEBOUNCE_MS);
     timer.unref();
+  }
+
+  let gapTimer: NodeJS.Timeout | null = null;
+  /** Checks again once the wake gap has passed; one pending re-check at a time. */
+  function later(ms: number): void {
+    if (gapTimer !== null) return;
+    gapTimer = setTimeout(() => {
+      gapTimer = null;
+      void check();
+    }, ms);
+    gapTimer.unref();
   }
 
   let interval: NodeJS.Timeout | null = null;
@@ -228,6 +244,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       interval = null;
       if (timer !== null) clearTimeout(timer);
       timer = null;
+      if (gapTimer !== null) clearTimeout(gapTimer);
+      gapTimer = null;
     },
   };
 }
