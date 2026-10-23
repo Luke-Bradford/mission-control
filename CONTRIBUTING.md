@@ -14,6 +14,20 @@ agents share one queue.
 - Work on one ticket at a time, and keep PRs small. Tickets say the outcome and when they are done.
   If one is unclear or too big, say so on the ticket rather than guessing.
 
+## Fold, don't file
+
+New tickets are the last resort. Before opening one:
+- **A review finding** is fixed in the PR where it was found. If it can't be, add one line to the
+  open rolling minor-findings ticket (`Tech debt: the rolling list of minor review findings`).
+  There is never a ticket per PR.
+- **A related gap** goes into the open ticket it belongs to, as a section of that ticket. A web
+  screen and the server data it reads are one piece of work: when one area label can't cover both,
+  there is one web ticket and one server ticket for it, not one ticket per field.
+- **A new ticket** is only for work that fits no open ticket. Say in it which tickets you checked.
+
+Priority follows what the operator sees. A gap between the HUD and the mockup comes before crew
+machinery that changes no screen, unless that machinery is broken.
+
 ## Ticket shape
 
 A seat's brief is the ticket's title and body. It has the repo checkout but no network, so it cannot
