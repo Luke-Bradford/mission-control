@@ -11,6 +11,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answer.ts";
 import { BriefOptions, ItemBrief } from "../comms/ItemBrief.tsx";
+import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
@@ -51,8 +52,22 @@ export function ItemPanel() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const notes = useResource<NotificationsView>(RESOURCES.notifications).data;
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
+  const [person, setPerson] = useState<{ item: AttentionItem; thread: PersonThreadView } | null>(
+    null,
+  );
+  const currentItem = items?.find((i) => i.key === key);
+  const currentThread = notes?.open.find((t) => t.key === key);
+  useEffect(() => {
+    if (currentItem?.kind === "person" && currentThread) {
+      setPerson({ item: currentItem, thread: currentThread });
+    } else if (person?.item.key !== key) {
+      setPerson(null);
+    }
+  }, [key, currentItem, currentThread, person?.item.key]);
+  const savedPerson = person?.item.key === key ? person : null;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [justHandled, setJustHandled] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
   const now = useNow();
@@ -64,7 +79,7 @@ export function ItemPanel() {
   }, [key]);
   if (key === null) return null;
 
-  const item = items?.find((i) => i.key === key);
+  const item = currentItem ?? savedPerson?.item;
   const esc = item?.escalationId ? escalations?.find((e) => e.id === item.escalationId) : undefined;
   // An escalation item waits for its escalations rather than flash the generic view.
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
@@ -111,7 +126,9 @@ export function ItemPanel() {
       () => closeItem(),
     );
   };
-  const thread = item?.kind === "person" ? notes?.open.find((t) => t.key === item.key) : undefined;
+  const thread = currentThread ?? savedPerson?.thread;
+  const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
+  const handledHow = handled?.how ?? justHandled[key];
   const flightTitle = live ? undefined : flightOffText(seat);
   const options = item?.brief?.options ?? [];
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
@@ -220,19 +237,27 @@ export function ItemPanel() {
         )}
         {item?.kind === "person" && !holding && (
           <div className="composer" id="dsPerson">
-            <button
-              type="button"
-              className="primary"
-              disabled={busy}
-              onClick={() =>
-                void act(
-                  () => markHandled(item.key),
-                  () => closeItem(),
-                )
-              }
-            >
-              Mark handled
-            </button>
+            {handledHow ? (
+              <span>
+                Handled: <b>{handledHow}</b>
+              </span>
+            ) : !currentItem ? (
+              <span>No longer open</span>
+            ) : (
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() =>
+                  void act(
+                    () => markHandled(item.key),
+                    () => setJustHandled((prev) => ({ ...prev, [item.key]: "marked handled" })),
+                  )
+                }
+              >
+                Mark handled
+              </button>
+            )}
           </div>
         )}
         <form className="composer" id="dsForm" onSubmit={submit}>
@@ -287,7 +312,9 @@ function PersonBrief({ thread, tz }: { thread: PersonThreadView; tz: string | nu
       {thread.snippet !== null && (
         <>
           <div className="bsec">The message</div>
-          <blockquote className="s qtext">{thread.snippet}</blockquote>
+          <blockquote className="s qtext">
+            <MentionText text={thread.snippet} />
+          </blockquote>
         </>
       )}
       <div className="row">
