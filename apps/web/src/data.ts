@@ -44,6 +44,10 @@ export const RESOURCES = {
   crewStatus: { path: "/api/crew/status", topic: "agents" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
+  discussion: (key: string, id = ""): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
+    topic: "attention",
+  }),
   attention: { path: "/api/attention", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.

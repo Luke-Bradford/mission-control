@@ -10,7 +10,22 @@ import { Dock } from "../src/shell/Dock.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { installKeys } from "../src/shell/keys.ts";
 import { closeItem, openItem, syncItem, toggleDock, useItem } from "../src/shell/overlays.ts";
-import { stubFetch } from "./fetchStub.ts";
+import { stubFetch as fetchRoutes } from "./fetchStub.ts";
+
+const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
+function stubFetch(routes: Parameters<typeof fetchRoutes>[0]) {
+  const items = routes["/api/attention"];
+  const discussions: Record<string, unknown> = {};
+  if (Array.isArray(items))
+    for (const item of items as AttentionItem[]) {
+      const thread = { id: `thread:${item.key}`, itemKey: item.key, version: "v1", messages: [] };
+      discussions[discussionPath(item.key)] = thread;
+      discussions[`${discussionPath(item.key)}?id=${encodeURIComponent(thread.id)}`] = thread;
+      discussions[`POST ${discussionPath(item.key)}`] = thread;
+    }
+  return fetchRoutes({ ...discussions, ...routes });
+}
+
 import { brief, CONFIG, crewRow, escalation, HOUR, item, NOW, SEAT_Q } from "./fixtures.ts";
 
 const KEY = `person:101:${NOW - HOUR}`;
@@ -107,9 +122,9 @@ describe("ItemPanel, Ask FLIGHT", () => {
   it("is switched off with no live seat", async () => {
     withFlight({ seat: null, decisions: [] });
     await screen.findByText("Which eviction policy should the quote cache use?");
-    expect(
-      (screen.getByLabelText("Reply, or ask FLIGHT about this") as HTMLInputElement).disabled,
-    ).toBe(true);
+    expect((screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement).disabled).toBe(
+      true,
+    );
     expect(screen.getByRole("button", { name: "Ask FLIGHT" }).getAttribute("title")).toBe(
       FLIGHT_NO_SEAT,
     );
@@ -118,22 +133,26 @@ describe("ItemPanel, Ask FLIGHT", () => {
     );
   });
 
-  it("posts the text, led by the item's key and title, to the live FLIGHT seat", async () => {
+  it("posts the text to the item discussion with its version and message id", async () => {
     const fn = withFlight({
       seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
       decisions: [],
     });
-    const input = (await screen.findByLabelText(
-      "Reply, or ask FLIGHT about this",
-    )) as HTMLInputElement;
+    const input = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLInputElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     fireEvent.change(input, { target: { value: " why? " } });
     fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
     await waitFor(() => expect(input.value).toBe(""));
-    const call = fn.mock.calls.find(([p]) => p === "/api/seats/flight-1/message");
+    const call = fn.mock.calls.find(
+      ([p, init]) => p === discussionPath(item().key) && init?.method === "POST",
+    );
     const text = JSON.parse(call?.[1]?.body as string).text as string;
-    expect(text).toContain("Choose a cache eviction policy");
-    expect(text.endsWith("why?")).toBe(true);
+    expect(text).toBe("why?");
+    expect(JSON.parse(call?.[1]?.body as string)).toMatchObject({
+      version: "v1",
+      messageId: expect.any(String),
+    });
+    expect(fn.mock.calls.some(([p]) => p === "/api/seats/flight-1/message")).toBe(false);
   });
 
   const sent = async (items: AttentionItem[]) => {
@@ -150,34 +169,28 @@ describe("ItemPanel, Ask FLIGHT", () => {
     });
     render(<ItemPanel />);
     act(() => openItem(items[0]?.key ?? ""));
-    const input = (await screen.findByLabelText(
-      "Reply, or ask FLIGHT about this",
-    )) as HTMLInputElement;
+    const input = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLInputElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     fireEvent.change(input, { target: { value: " why? " } });
     fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
     await waitFor(() => expect(input.value).toBe(""));
-    const call = fn.mock.calls.find(([p]) => p === "/api/seats/flight-1/message");
+    const call = fn.mock.calls.find(
+      ([p, init]) => p === discussionPath(item().key) && init?.method === "POST",
+    );
     expect(call).toBeTruthy();
     return JSON.parse(call?.[1]?.body as string).text as string;
   };
 
-  it("leads with the key alone from an item with no title to quote", async () => {
-    expect(await sent([item({ escalationId: null, text: "" })])).toBe(
-      "Re: esc:shop-app#4001\n\nwhy?",
-    );
+  it("discusses an item with no title", async () => {
+    expect(await sent([item({ escalationId: null, text: "" })])).toBe("why?");
   });
 
-  it("a whitespace-only title gets no Re: line either", async () => {
-    expect(await sent([item({ escalationId: null, text: "   " })])).toBe(
-      "Re: esc:shop-app#4001\n\nwhy?",
-    );
+  it("discusses an item with a whitespace-only title", async () => {
+    expect(await sent([item({ escalationId: null, text: "   " })])).toBe("why?");
   });
 
-  it("leads with Re:, the key, a blank line and the body when the item has text", async () => {
-    expect(await sent([item({ escalationId: null, text: "Stalled on tests" })])).toBe(
-      "Re: esc:shop-app#4001 · Stalled on tests\n\nwhy?",
-    );
+  it("keeps the question text separate from the item title", async () => {
+    expect(await sent([item({ escalationId: null, text: "Stalled on tests" })])).toBe("why?");
   });
 });
 
@@ -282,9 +295,9 @@ describe("ItemPanel, an escalation with a question", () => {
   it("has the chat switched off", async () => {
     open([item()]);
     await screen.findByText(QUESTION.question);
-    const input = screen.getByLabelText("Reply, or ask FLIGHT about this") as HTMLInputElement;
+    const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
     expect(input.disabled).toBe(true);
-    expect(input.placeholder).toBe("Reply, or ask FLIGHT about this…");
+    expect(input.placeholder).toBe("Ask FLIGHT about this…");
     expect(input.title).toBe(FLIGHT_NO_SEAT);
   });
 });
@@ -343,7 +356,7 @@ describe("ItemPanel, acting on an item", () => {
   it("renders FLIGHT's brief: context, recommendation and an option per choice", async () => {
     acting([SEAT_Q]);
     await within(panel()).findByText("The dev seat asks which port to preview on.");
-    expect(within(panel()).getByText("Use 5174.")).toBeTruthy();
+    expect(within(panel()).getAllByText("Use 5174.")).toHaveLength(2);
     expect(within(panel()).getByRole("button", { name: "5174" })).toBeTruthy();
     expect(within(panel()).getByRole("button", { name: "5180" })).toBeTruthy();
   });
@@ -357,18 +370,17 @@ describe("ItemPanel, acting on an item", () => {
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
-  it("an option on FLIGHT's own question posts to FLIGHT and opens the dock", async () => {
+  it("an option on FLIGHT's own question posts to its discussion and keeps the dock closed", async () => {
     act(() => toggleDock(false));
     const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }]);
     fireEvent.click(await enabled("5180"));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Re: ask:7 · Which port?\n\nUse port 5180." },
+      expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([
+        { version: "v1", messageId: expect.any(String), text: "Use port 5180." },
       ]),
     );
-    await waitFor(() =>
-      expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(false),
-    );
+    await waitFor(() => expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true));
+    expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
   it("an escalation's options are text beside Reply on GitHub, and nothing is posted", async () => {
@@ -437,13 +449,16 @@ describe("ItemPanel, acting on an item", () => {
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([{ text: "port?" }]),
     );
     await waitFor(() => expect(input.value).toBe(""));
-    fireEvent.change(input, { target: { value: " port? " } });
+    fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
+      target: { value: " port? " },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
     await waitFor(() =>
-      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Re: ask:7 · Which port?\n\nport?" },
+      expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([
+        { text: "port?", version: "v1", messageId: expect.any(String) },
       ]),
     );
+    expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 });
 
@@ -979,3 +994,269 @@ describe("ItemPanel, person variant", () => {
     expect(document.querySelector("#discuss")).not.toBeNull();
   });
 });
+
+describe("ItemPanel choice state", () => {
+  it("keeps an answered choice visible and disables another answer", async () => {
+    stubFetch({
+      "/api/attention": [SEAT_Q],
+      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/flight": { seat: null, decisions: [] },
+      "POST /api/seats/mc-dev-1/message": {},
+    });
+    render(<ItemPanel />);
+    act(() => openItem(SEAT_Q.key));
+    const choice = await screen.findByRole("button", { name: "5174" });
+    fireEvent.click(choice);
+    await screen.findByText("You chose:");
+    expect((choice as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "5180" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+  it("uses primary approval buttons and the catalogue call label", async () => {
+    const approval = { ...SEAT_Q, kind: "approval" as const };
+    stubFetch({
+      "/api/attention": [approval],
+      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+    });
+    render(<ItemPanel />);
+    act(() => openItem(approval.key));
+    await screen.findByText("Your call:");
+    expect(screen.getByRole("button", { name: "5174" }).classList.contains("primary")).toBe(true);
+    expect(screen.queryByText("What FLIGHT checked")).toBeNull();
+  });
+});
+
+describe("ItemPanel item chat isolation", () => {
+  it("interleaves two items with global chat, keeps the dock closed and echoes an answer", async () => {
+    const a = { ...SEAT_Q, key: "ask:a" };
+    const b = { ...SEAT_Q, key: "ask:b", text: "Another decision" };
+    const chat = (key: string) => ({
+      id: `thread:${key}`,
+      itemKey: key,
+      version: "v1",
+      messages: [] as {
+        id: string;
+        itemKey: string;
+        correlationId: string;
+        replyTo?: string;
+        role: "operator" | "flight";
+        text: string;
+        at: number;
+      }[],
+    });
+    const first = chat(a.key);
+    const second = chat(b.key);
+    const fn = stubFetch({
+      "/api/attention": [a, b],
+      "/api/config": CONFIG,
+      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/flight": {
+        seat: { id: "flight-1", live: true, call: "FLIGHT-1", model: "opus", state: "idle" },
+        decisions: [],
+      },
+      "/api/agents/flight-1/stream": {
+        events: [{ id: "global", kind: "msg", text: "Global conversation", at: NOW }],
+        total: 1,
+      },
+      "POST /api/seats/mc-dev-1/message": {},
+      [discussionPath(a.key)]: first,
+      [`${discussionPath(a.key)}?id=${encodeURIComponent(first.id)}`]: first,
+      [discussionPath(b.key)]: second,
+      [`${discussionPath(b.key)}?id=${encodeURIComponent(second.id)}`]: second,
+      [`POST ${discussionPath(a.key)}`]: (init: RequestInit | undefined) => {
+        const body = JSON.parse(init?.body as string);
+        first.messages.push({
+          id: body.messageId,
+          itemKey: a.key,
+          correlationId: first.id,
+          role: "operator",
+          text: body.text,
+          at: NOW,
+        });
+        return { status: 200, body: first };
+      },
+    });
+    render(
+      <>
+        <Dock />
+        <ItemPanel />
+      </>,
+    );
+    act(() => toggleDock(true));
+    await screen.findByText("Global conversation");
+    act(() => {
+      toggleDock(false);
+      openItem(a.key);
+    });
+    await screen.findByText("No messages yet.");
+    fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
+      target: { value: "Why this port?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
+    await screen.findByText("Why this port?");
+    act(() => openItem(b.key));
+    await screen.findByText("No messages yet.");
+    expect(screen.queryByText("Why this port?")).toBeNull();
+    first.messages.push({
+      id: "reply",
+      replyTo: first.messages[0]?.id,
+      itemKey: a.key,
+      correlationId: first.id,
+      role: "flight",
+      text: "The port is available.",
+      at: NOW,
+    });
+    act(() => {
+      openItem(a.key);
+      hub.refetchTopic("attention");
+    });
+    await screen.findByText("The port is available.");
+    fireEvent.click(screen.getByRole("button", { name: "5174" }));
+    await screen.findByText("You chose:");
+    await waitFor(() =>
+      expect(first.messages.some((m) => m.text === "You chose: 5174")).toBe(true),
+    );
+    expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true);
+    expect(
+      fn.mock.calls.some(
+        ([path, init]) => path === "/api/seats/flight-1/message" && init?.method === "POST",
+      ),
+    ).toBe(false);
+  });
+});
+
+it("retains the brief and choices while sending, and a late failure stays with its item", async () => {
+  const a = { ...SEAT_Q, key: "ask:pending" };
+  const b = { ...SEAT_Q, key: "ask:other" };
+  const base = stubFetch({
+    "/api/attention": [a, b],
+    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+    "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+  });
+  let finish: (response: Response) => void = () => {};
+  vi.stubGlobal("fetch", (path: string, init?: RequestInit) =>
+    path === discussionPath(a.key) && init?.method === "POST"
+      ? new Promise<Response>((resolve) => {
+          finish = resolve;
+        })
+      : base(path, init),
+  );
+  render(<ItemPanel />);
+  act(() => openItem(a.key));
+  await screen.findByText("No messages yet.");
+  fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
+    target: { value: "Check the evidence" },
+  });
+  fireEvent.submit(
+    screen.getByRole("button", { name: "Ask FLIGHT" }).closest("form") as HTMLFormElement,
+  );
+  await screen.findByText("Sending…");
+  expect(screen.getByText("The dev seat asks which port to preview on.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "5174" })).toBeTruthy();
+  act(() => openItem(b.key));
+  await screen.findByText("No messages yet.");
+  const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "A different question" } });
+  await act(async () =>
+    finish(new Response(JSON.stringify({ error: "First send failed" }), { status: 503 })),
+  );
+  expect(input.value).toBe("A different question");
+  expect(screen.queryByText("First send failed")).toBeNull();
+  expect(document.querySelector("#discuss")).toBeTruthy();
+});
+
+it("sends a FLIGHT choice through the item discussion without opening the dock", async () => {
+  const q = { ...SEAT_Q, agentId: "flight-1" };
+  const discussion = { id: "flight-choice", itemKey: q.key, version: "v1", messages: [] };
+  const fn = stubFetch({
+    "/api/attention": [q],
+    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+    [discussionPath(q.key)]: discussion,
+    [`${discussionPath(q.key)}?id=flight-choice`]: discussion,
+    [`POST ${discussionPath(q.key)}`]: discussion,
+    "POST /api/seats/flight-1/message": {},
+  });
+  render(
+    <>
+      <Dock />
+      <ItemPanel />
+    </>,
+  );
+  act(() => {
+    toggleDock(false);
+    openItem(q.key);
+  });
+  await screen.findByText("No messages yet.");
+  fireEvent.click(screen.getByRole("button", { name: "5174" }));
+  await waitFor(() =>
+    expect(fn).toHaveBeenCalledWith(
+      discussionPath(q.key),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining(q.brief?.options[0]?.answer ?? "missing"),
+      }),
+    ),
+  );
+  expect(
+    fn.mock.calls.some(
+      ([path, init]) => path === "/api/seats/flight-1/message" && init?.method === "POST",
+    ),
+  ).toBe(false);
+  expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true);
+  expect(
+    within(screen.getByRole("log", { name: "Item discussion" })).getByText(
+      q.brief?.options[0]?.answer ?? "missing",
+      { exact: false },
+    ),
+  ).toBeTruthy();
+});
+
+it.each(["offline", "load failed", "echo failed"])(
+  "keeps a successful seat answer in the discussion when %s",
+  async (mode) => {
+    const fn = stubFetch({
+      "/api/attention": [SEAT_Q],
+      "/api/crew": { rows: [crewRow({ id: "mc-dev-1", kind: "crew" })], firstRunToday: null },
+      "/api/flight": {
+        seat: mode === "offline" ? null : { id: "flight-1", live: true },
+        decisions: [],
+      },
+      "POST /api/seats/mc-dev-1/message": {},
+      ...(mode === "load failed"
+        ? {
+            [discussionPath(SEAT_Q.key)]: () => ({
+              status: 503,
+              body: { error: "Discussion unavailable" },
+            }),
+          }
+        : {}),
+      [`POST ${discussionPath(SEAT_Q.key)}`]: () => ({
+        status: 503,
+        body: { error: "FLIGHT unavailable" },
+      }),
+    });
+    render(<ItemPanel />);
+    act(() => openItem(SEAT_Q.key));
+    if (mode === "load failed") await screen.findByText("Discussion unavailable");
+    else await screen.findByText("No messages yet.");
+    fireEvent.click(screen.getByRole("button", { name: "5174" }));
+    await screen.findByText("You chose:");
+    const log = within(screen.getByRole("log", { name: "Item discussion" }));
+    await waitFor(() =>
+      expect(
+        log.getByText(SEAT_Q.brief?.options[0]?.answer ?? "missing", { exact: false }),
+      ).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(
+        log.getByText(
+          mode === "load failed" ? /discussion couldn't be loaded/i : /FLIGHT hasn't replied yet/i,
+        ),
+      ).toBeTruthy(),
+    );
+    expect(
+      fn.mock.calls.filter(
+        ([path, init]) => path === "/api/seats/mc-dev-1/message" && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
+  },
+);

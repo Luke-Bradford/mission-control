@@ -3529,3 +3529,24 @@ button.nrow.thread.tagged {
 .person-choices textarea {
   min-height: 6em;
 }
+
+#dsDiscussionForm {
+  flex-wrap: wrap;
+}
+#dsDiscussionForm input {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+#discuss.decision-item .brief,
+#discuss.decision-item .opt,
+#discuss.decision-item .ctx {
+  overflow-wrap: anywhere;
+}
+#discuss .panel {
+  overflow: auto;
+}
+
+/* Person items retain their own scrolling brief and reply choices. */
+#discuss.person-item .panel {
+  overflow: visible;
+}
