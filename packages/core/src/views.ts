@@ -252,7 +252,25 @@ export interface AgentSeries {
  * input + output unless named otherwise.
  */
 export interface Telemetry {
+  /** The range's crew runs by loop step, pro rata like `tokensByTicket`; all three steps are sent. */
+  tokensByStep?: {
+    step: "plan" | "build" | "review";
+    tokens: number;
+    costUsd: number | null;
+    runs: number;
+  }[];
+  /** Today since local midnight: seat questions the operator answered, and the runs they stopped. */
+  capcom?: {
+    answered: number;
+    medianMs: number | null;
+    p90Ms: number | null;
+    stopped: number;
+    longest: { agentId: AgentId; ms: number } | null;
+    agentWaitMs: number;
+  };
   today: {
+    /** Commits today by the scoped agents. */
+    commits?: number;
     tokens: number;
     /** Cache-read tokens today, pro rata like `tokens`. */
     cacheRead: number;
@@ -276,6 +294,12 @@ export interface Telemetry {
   };
   /** Over FLOW_DAYS of merged PRs whose first-push CI is known; null when there are none. */
   quality: {
+    /** Over the PRs `reviewRoundsPerPr` covers: blocking + minor findings per PR; null when none. */
+    retroFindingsPerPr?: number | null;
+    /** Of those PRs, the ones a reported review sent back (blocking > 0). */
+    sentBackPrs?: number;
+    /** Median time a `ready` or `review` note waited for the operator, over FLOW_DAYS; null when none. */
+    humanReviewWaitMs?: number | null;
     ciGreenFirstPushPct: number | null;
     prs: number;
     /** Mean review rounds per merged PR (over FLOW_DAYS) that has a reported review; null when none. */
@@ -318,4 +342,26 @@ export interface Telemetry {
     toolCalls: number;
     costUsd: number | null;
   }[];
+}
+
+export interface TestLockRun {
+  runId: string;
+  seatId: string;
+  command: string;
+  /** When it joined the line; startedAt when it took the lock at once. */
+  queuedAt: number;
+  startedAt: number;
+  /** Null while held. */
+  endedAt: number | null;
+  outcome: "done" | "freed" | null;
+  ticket: string | null;
+}
+
+export interface TestLockHistory {
+  /** Holds started in the last 7 days (TELEMETRY_RANGES["7d"]), newest first. */
+  runs: TestLockRun[];
+  /** Holds started since local midnight (operator timezone) and their time in line. */
+  today: { runs: number; waitMs: number };
+  /** Median length per command, once it has three done holds. */
+  usualMs: Record<string, number>;
 }
