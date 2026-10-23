@@ -26,6 +26,14 @@ export class CrewGitError extends Error {
   }
 }
 
+/** Node's error for a child whose output passed maxBuffer (it is `killed` too: check this first). */
+const MAX_BUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+export const overflowed = (e: unknown): boolean =>
+  (e as { code?: unknown } | null)?.code === MAX_BUFFER_CODE;
+/** The error execFile gives a child it killed at its timeout. */
+export const timedOut = (e: unknown): boolean =>
+  (e as { killed?: unknown } | null)?.killed === true;
+
 /** Applied before every subcommand: no hooks, no fsmonitor daemon. */
 export const SAFE_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor="];
 

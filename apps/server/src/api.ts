@@ -1043,7 +1043,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(422).send({ error: e.message });
         }
         if (e instanceof SupervisorError) return reply.code(e.status).send({ error: e.message });
-        reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "crew action failed");
+        reply.log.warn(
+          {
+            err: e instanceof Error ? e.name : typeof e,
+            message: e instanceof Error ? e.message : String(e),
+          },
+          "crew action failed",
+        );
         return reply.code(500).send({ error: CREW_ACTION_FAILED });
       };
       const seatAction = <B>(
