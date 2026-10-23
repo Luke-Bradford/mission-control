@@ -259,14 +259,19 @@ function make(
   return { sup, fetchTicket, log, tokens, lock, cfg };
 }
 
-/** What the fake CLI received: its start line, then every stdin line, parsed. */
-const recorded = () =>
-  existsSync(recordFile)
-    ? readFileSync(recordFile, "utf8")
-        .split("\n")
-        .filter((l) => l !== "")
-        .map((l) => JSON.parse(l))
-    : [];
+/**
+ * What the fake CLI received: its start line, then every stdin line, parsed. Only complete
+ * lines count: the fake may be mid-write, so a tail with no newline is not a record yet.
+ */
+const recorded = () => {
+  if (!existsSync(recordFile)) return [];
+  const text = readFileSync(recordFile, "utf8");
+  return text
+    .slice(0, text.lastIndexOf("\n") + 1)
+    .split("\n")
+    .filter((l) => l !== "")
+    .map((l) => JSON.parse(l));
+};
 const userLines = () =>
   recorded()
     .filter((l) => l.type === "user")
