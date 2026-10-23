@@ -671,3 +671,21 @@ export function seatTurn(row: CrewRow): SeatTurn {
     return "none";
   return row.hudState === "running" || row.hudState === "stalled" ? "running" : "idle";
 }
+
+/** Resolve a seat id or its call sign, ignoring case and preferring an exact id. */
+export function namedSeat(id: string, rows: readonly CrewRow[] | undefined): CrewRow | undefined {
+  return (
+    rows?.find((row) => row.id === id) ??
+    rows?.find(
+      (row) =>
+        row.id.toLowerCase() === id.toLowerCase() ||
+        callSign(row).toLowerCase() === id.toLowerCase(),
+    )
+  );
+}
+
+/** A configured seat's display name, with the raw call sign as a loading/unknown fallback. */
+export function seatName(id: string, rows: readonly CrewRow[] | undefined): string {
+  const row = namedSeat(id, rows);
+  return row ? callSign(row) : seatCallSign(id);
+}
