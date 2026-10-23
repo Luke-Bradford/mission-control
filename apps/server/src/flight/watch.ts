@@ -23,10 +23,12 @@ import { accountAtStop } from "../engine/queue.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import {
+  deliveredFacts,
   flightLive,
   flightOwnSeatIds,
   flightSeat,
   flightState,
+  markPrsShown,
   pending,
   wakeFacts,
 } from "./state.ts";
@@ -124,7 +126,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = false;
       try {
         await supervisor.startWatch(id, { first: wakeLine(state) });
-        lastFacts = wakeFacts(state);
+        markPrsShown(store, state);
+        lastFacts = deliveredFacts(state);
         lastWakeAt = t;
       } catch (e) {
         lastFailure = (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -156,7 +159,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       (wake !== lastFacts && listed) || (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     if (due) {
       if ((await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state))) === "sent") {
-        lastFacts = wake;
+        markPrsShown(store, state);
+        lastFacts = deliveredFacts(state);
         lastWakeAt = t;
       }
     } else if (!listed) {

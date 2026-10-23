@@ -643,6 +643,8 @@ export class Store {
     // When we read the row from GitHub, by our own clock (GitHub's updatedAt does not move when a
     // PR's CI finishes). 0: stored before it existed, older than any read.
     this.addColumn("pull_requests", "read_at", "INTEGER NOT NULL DEFAULT 0");
+    // 1 while the latest poll failed to read the repo's PRs: the row is the last good read.
+    this.addColumn("pull_requests", "stale", "INTEGER NOT NULL DEFAULT 0");
     // Machine samples' CPU and memory shares, extracted once so the telemetry ranges average
     // columns rather than parsing every sample's JSON.
     this.whenColumnMissing("machine_samples", "cpu_pct", () => {
@@ -1328,7 +1330,7 @@ export class Store {
          created_at = excluded.created_at, updated_at = excluded.updated_at,
          merged_at = excluded.merged_at, read_at = excluded.read_at,
          head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
-         assignees = excluded.assignees`,
+         assignees = excluded.assignees, stale = 0`,
     );
     for (const p of prs) {
       ins.run(
@@ -1377,6 +1379,19 @@ export class Store {
       author: (r.author as string | null) ?? null,
       assignees: JSON.parse(r.assignees as string) as string[],
     }));
+  }
+
+  /** Marks the repo's stored PRs stale: a poll could not read them, so each row is its last good read. */
+  markPullRequestsStale(repoId: RepoId): void {
+    this.db.prepare("UPDATE pull_requests SET stale = 1 WHERE repo_id = ?").run(repoId);
+  }
+
+  /** The numbers of the repo's PRs whose latest read failed. */
+  stalePullRequests(repoId: RepoId): Set<number> {
+    const rows = this.db
+      .prepare("SELECT number FROM pull_requests WHERE repo_id = ? AND stale = 1")
+      .all(repoId) as { number: number }[];
+    return new Set(rows.map((r) => r.number));
   }
 
   /** When the poll last read the PR (our clock), else null. */

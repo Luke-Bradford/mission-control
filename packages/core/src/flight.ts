@@ -325,7 +325,21 @@ export interface FlightState {
     ready: boolean;
     blockedBy: string[];
   }[];
-  prs: { ref: string; pr: number; seat: string; ready: boolean }[];
+  /**
+   * The repo's open PRs from the stored read, plus a PR that merged or closed since FLIGHT last
+   * read the list (listed once, with its state). `seat` is "" when no crew run holds the PR;
+   * `readAt` is the time of its last good read, and `stale` says the latest poll could not read it.
+   */
+  prs: {
+    ref: string;
+    pr: number;
+    seat: string;
+    ready: boolean;
+    state: "open" | "merged" | "closed";
+    headSha: string | null;
+    readAt: string;
+    stale: boolean;
+  }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
 }
@@ -356,12 +370,13 @@ export function wakeSummary(s: FlightState): string {
   const free = s.seats.filter((x) => x.loop === "build" && x.free).length;
   const parked = s.seats.filter((x) => x.parked !== null).length;
   const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
+  const inReview = s.prs.filter((p) => p.state === "open").length;
   const parts = [
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
     stopped > 0 ? `${stopped} stopped` : "",
     parked > 0 ? `${parked} parked` : "",
-    s.prs.length > 0 ? counted(s.prs.length, "PR in review", "PRs in review") : "",
+    inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
   ].filter((p) => p !== "");
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }
