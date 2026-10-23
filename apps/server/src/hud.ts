@@ -60,6 +60,7 @@ import {
 } from "@mc/core";
 import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
+import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
 import { asideWakeDue } from "./engine/aside.ts";
@@ -609,6 +610,25 @@ export function attentionItems(
         ticket: pr.ticket,
       });
     }
+  }
+
+  // A person waits on you: an open GitHub notification thread of a configured repo.
+  const crewed = new Set(config.repos.map((r) => r.id));
+  for (const n of store.notifications()) {
+    if (!crewed.has(n.repoId) || !notificationOpen(n)) continue;
+    items.push({
+      owner: OWNER_OPERATOR,
+      key: personKey(n),
+      kind: "person",
+      agentId: null,
+      repoId: n.repoId,
+      text: personText(n),
+      tool: null,
+      at: n.updatedAt,
+      url: n.url,
+      escalationId: null,
+      ticket: n.subjectType === "Issue" && n.number !== null ? `${n.repoId}#${n.number}` : null,
+    });
   }
 
   items.push(...crewItems(config, store, now, lock, rows));
