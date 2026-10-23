@@ -56,7 +56,7 @@ import { ChangeBus } from "../src/bus.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import { CliHold } from "../src/cli-update.ts";
 import { type CcConfig, type CrewSeatConfig, isInside } from "../src/config.ts";
-import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
+import { refillQueues, seatMayTake, type TakeDeps, takeNext } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -1546,9 +1546,44 @@ describe("questions and strays", () => {
     store.addQuestion({ agentId: "guido-1", runId: "guido-1:old", text: "one?", at: 1 });
     store.addStrays([stray("docs/a.md")]);
     await sup.endRun("guido-1");
-    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
     expect(store.openQuestions()).toEqual([]);
     expect(store.strays()).toEqual([]);
+  });
+
+  it("endRun with hold on a run with no process stops the seat, out of rotation", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "guido-1:old",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "guido-1:old",
+      cliSessionId: "s",
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: 1,
+    });
+    await sup.endRun("guido-1", { hold: true });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(seatMayTake(store, "guido-1")).toBe(false);
   });
 
   it("endRun on a run with no process folds its transcript, so a stale DONE. summary is replaced", async () => {
@@ -1619,13 +1654,14 @@ describe("questions and strays", () => {
 });
 
 describe("endRun", () => {
-  it("ends the run ok, stops the seat and keeps the worktree", async () => {
+  it("ends the run ok, leaves the seat idle for its next ticket and keeps the worktree", async () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     await sup.endRun("guido-1");
-    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+    expect(seatMayTake(store, "guido-1")).toBe(true);
     expect(store.run(runId)).toMatchObject({ status: "ok" });
     expect(store.run(runId)?.endedAt).not.toBeNull();
     expect(existsSync(join(root, "guido-1-42", "README.md"))).toBe(true);
@@ -1635,6 +1671,17 @@ describe("endRun", () => {
     expect(next.runId).not.toBe(runId);
     expect(store.run(next.runId)?.seq).toBe(2);
     expect(store.run(runId)?.status).toBe("ok");
+  });
+
+  it("with hold, stops the seat and keeps it out of rotation", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.endRun("guido-1", { hold: true });
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
+    expect(seatMayTake(store, "guido-1")).toBe(false);
+    expect(store.run(runId)).toMatchObject({ status: "ok" });
   });
 
   it("interrupts a turn in flight, then closes", async () => {
@@ -1647,7 +1694,7 @@ describe("endRun", () => {
     await sup.endRun("guido-1");
     expect(recorded().some((l) => l.request?.subtype === "interrupt")).toBe(true);
     expect(store.run(runId)?.status).toBe("ok");
-    expect(seatState("guido-1")).toBe("stopped");
+    expect(seatState("guido-1")).toBe("idle");
   });
 });
 
@@ -1849,6 +1896,15 @@ describe("startWatch", () => {
       "mcp__mc__end_run",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
+  });
+
+  it("ending the watch seat's run stops it, so the watch does not restart it", async () => {
+    const { sup } = flightMake();
+    sup.start();
+    await sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await sup.endRun("flight-1");
+    expect(seatState("flight-1")).toBe("stopped");
   });
 
   it("appends first after a blank line", async () => {
@@ -2689,7 +2745,7 @@ describe("supervisor events (Plan 7a)", () => {
         { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
       ]);
       expect(atEvent).toMatchObject({ status: "ok", endedBy: "operator" });
-      expect(seatState("guido-1")).toBe("stopped");
+      expect(seatState("guido-1")).toBe("idle");
     });
 
     it("is exit after a crash", async () => {
@@ -3080,7 +3136,7 @@ describe("supervisor events (Plan 7a)", () => {
       expect(sup.seatFacts("guido-1")).toBeNull();
       expect(snaps).toHaveLength(1);
       expect(store.run(runId)?.endedBy).toBe("operator");
-      expect(seatState("guido-1")).toBe("stopped");
+      expect(seatState("guido-1")).toBe("idle");
     });
 
     it("an ended run whose worktree check fails does not overwrite the seat", async () => {
@@ -3159,7 +3215,7 @@ describe("supervisor events (Plan 7a)", () => {
         { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
       ]);
       expect(store.run(runId)?.endedBy).toBe("operator");
-      expect(seatState("guido-1")).toBe("stopped");
+      expect(seatState("guido-1")).toBe("idle");
       expect(existsSync(join(root, "guido-1-42"))).toBe(true);
     });
   });
@@ -3466,7 +3522,7 @@ describe("a run set aside in review", () => {
     const { sup, runId } = await aside(false);
     const other = await sup.startRun("guido-1", 43, { loop: NEW_LOOP });
     await until(() => expect(seatState("guido-1")).toBe("idle"));
-    await sup.endRun("guido-1");
+    await sup.endRun("guido-1", { hold: true });
     expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId: null });
     expect(other.runId).not.toBe(runId);
     await sup.wakeRun(runId);

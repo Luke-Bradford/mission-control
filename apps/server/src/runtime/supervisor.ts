@@ -371,7 +371,8 @@ export interface Supervisor {
     opts: { interrupt: boolean; questions?: "all" | "unpassed" | "none" },
   ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
-  endRun(seatId: string): Promise<void>;
+  /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
+  endRun(seatId: string, opts?: { hold?: boolean }): Promise<void>;
   /** null when the seat has no live session, or it did not answer. */
   contextUsage(seatId: string): Promise<ContextUsage | null>;
   seat(seatId: string): SeatSessionRow | null;
@@ -420,6 +421,8 @@ interface Live {
   ending: Promise<void> | null;
   /** Who is ending the run, while `ending` is set. */
   endedBy: Exclude<EndedBy, "exit"> | null;
+  /** The operator also took the seat out of rotation: it ends stopped, not idle. */
+  hold: boolean;
   /** When the rate limit that parked this turn lifts (ms); null until one comes, and after a line. */
   rateLimitedUntil: number | null;
   lastFoldAt: number;
@@ -645,7 +648,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const worktree = store.seatSession(seatId)?.worktree ?? null;
     if (l.run.reviewId != null) void dropScratch(l.info, l.run.id, l.run.seq, worktree);
     if (l.ending !== null) {
-      setSeat(seatId, { state: "stopped", reason: null, runId: null });
+      setSeat(seatId, { state: l.hold ? "stopped" : "idle", reason: null, runId: null });
     } else {
       // Neither a code nor a signal: the CLI never started (its stderr event says why).
       const how = e.code ?? e.signal;
@@ -966,6 +969,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       parkedTurn: false,
       ending: null,
       endedBy: null,
+      hold: false,
       rateLimitedUntil: null,
       lastFoldAt: 0,
       foldTimer: undefined,
@@ -1605,10 +1609,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
-  async function endRun(seatId: string): Promise<void> {
+  async function endRun(seatId: string, opts: { hold?: boolean } = {}): Promise<void> {
     const info = need(seatId);
+    // FLIGHT's seat is never dealt a ticket: ending it always benches it, or the watch restarts it
+    const hold = opts.hold ?? seatDef(info.seat).loop === "watch";
     const l = live.get(seatId);
     if (l) {
+      if (hold) l.hold = true;
       if (l.ending === null) {
         l.endedBy = "operator";
         l.ending = closeLive(l);
@@ -1638,7 +1645,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (facts) persistDigest(store, digests, run.id, facts.digest);
       store.setRunEnded(run.id, at, "ok", "operator");
     }
-    setSeat(seatId, { state: "stopped", reason: null, runId: null });
+    setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
     closeRunItems(info);
     if (open) emit({ kind: "run-ended", seatId, runId: run.id, endedBy: "operator" });
     if (run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
