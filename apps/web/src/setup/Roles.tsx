@@ -92,6 +92,11 @@ export function Roles() {
           </table>
         </div>
         <div className="pb">
+          <p className="note">
+            One full suite at a time across the machine; others wait in line, oldest first. An agent
+            that types a full-suite command directly is told to ask Mission Control instead. Max at
+            once: <b>1</b>. Single-file runs go straight through.
+          </p>
           <LockLines lock={lock} />
         </div>
       </Panel>

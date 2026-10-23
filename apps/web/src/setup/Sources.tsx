@@ -74,6 +74,11 @@ export function Sources({
               <span className="muted xs">last poll {lastPoll(r.id)}</span>
             </p>
           ))}
+          <p className="s">PRs, checks and reviews per ticket.</p>
+          <p className="s">
+            Notifications: assigned, mentioned, review requested, comments and CI on your work feed{" "}
+            <b>Needs you</b>.
+          </p>
           <p className="note">
             Writes (comments, labels, board moves, Priority) go through approvals; nothing posts on
             its own.
@@ -83,13 +88,30 @@ export function Sources({
       <Panel title="Microsoft Teams" sub="read-only" actions={<Pill tone="plain">P5</Pill>}>
         <div className="pb">
           <p className="s">Work only; arrives in phase 5.</p>
+          <p className="s">
+            Will watch the chats and channels you pick for: your name or @mentions, your ticket and
+            PR numbers, and words like "bug", "broken" or "urgent" near your areas.
+          </p>
+          <p className="s">
+            Matches will become Needs you items or a FLIGHT digest, with a link to the message.
+            FLIGHT will be able to draft a GitHub issue from one for you to approve.
+          </p>
+          <p className="note">
+            Will poll on a timer; Graph change notifications need a public HTTPS endpoint, which a
+            local app doesn't have. Mission Control never posts to Teams.
+          </p>
         </div>
       </Panel>
       <Panel title="Agents" sub="what each provider reports">
         <div className="pb">
           <p className="s">
-            Claude (CLI transcripts): messages, tool calls, usage per call, run totals with cost,
-            rate-limit events, subagent progress.
+            Claude (Agent SDK): messages, tool calls, usage per call, run totals with cost and
+            timing, rate-limit events, context breakdown, subagent progress, task-list updates,
+            hooks.
+          </p>
+          <p className="s">
+            Codex (app-server): items, token usage with the context window, live rate limits, plan
+            updates, per-turn diffs.
           </p>
           <p className="s">
             This Mac: CPU, memory, disk and per-process memory, read by mc-server.

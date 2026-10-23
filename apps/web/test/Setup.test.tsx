@@ -565,6 +565,19 @@ describe("Setup tabs", () => {
     expect(lock.textContent).not.toContain(LOCK_FREE_TEXT);
   });
 
+  it("Roles: explains the full-suite lock policy and single-file bypass", async () => {
+    load();
+    at("roles");
+    const lock = await screen.findByRole("region", { name: "Test lock" });
+    expect(lock.textContent).toContain(
+      "One full suite at a time across the machine; others wait in line, oldest first.",
+    );
+    expect(lock.textContent).toContain(
+      "An agent that types a full-suite command directly is told to ask Mission Control instead. Max at once: 1.",
+    );
+    expect(lock.textContent).toContain("Single-file runs go straight through.");
+  });
+
   it("Sources: GitHub connected, a note is not a failure, last poll per repo", async () => {
     load();
     at("sources");
@@ -583,12 +596,35 @@ describe("Setup tabs", () => {
     expect(teams.textContent).toContain("Work only; arrives in phase 5.");
     const agents = screen.getByRole("region", { name: "Agents" });
     expect(agents.textContent).toContain(
-      "Claude (CLI transcripts): messages, tool calls, usage per call, run totals with cost, rate-limit events, subagent progress.",
+      "Claude (Agent SDK): messages, tool calls, usage per call, run totals with cost and timing, rate-limit events, context breakdown, subagent progress, task-list updates, hooks.",
     );
     expect(agents.textContent).toContain(
       "This Mac: CPU, memory, disk and per-process memory, read by mc-server.",
     );
     expect(screen.getByTestId("config-yaml")).toBeTruthy();
+  });
+
+  it("Sources: explains GitHub collection, future Teams ingestion and Codex capabilities", async () => {
+    load();
+    at("sources");
+    const gh = await screen.findByRole("region", { name: "GitHub" });
+    expect(gh.textContent).toContain("PRs, checks and reviews per ticket.");
+    expect(gh.textContent).toContain(
+      "Notifications: assigned, mentioned, review requested, comments and CI on your work feed Needs you.",
+    );
+    const teams = screen.getByRole("region", { name: "Microsoft Teams" });
+    expect(teams.textContent).toContain("Work only; arrives in phase 5.");
+    expect(teams.textContent).toContain(
+      'Will watch the chats and channels you pick for: your name or @mentions, your ticket and PR numbers, and words like "bug", "broken" or "urgent" near your areas.',
+    );
+    expect(teams.textContent).toContain(
+      "Matches will become Needs you items or a FLIGHT digest, with a link to the message. FLIGHT will be able to draft a GitHub issue from one for you to approve.",
+    );
+    expect(teams.textContent).toContain("Mission Control never posts to Teams.");
+    const agents = screen.getByRole("region", { name: "Agents" });
+    expect(agents.textContent).toContain(
+      "Codex (app-server): items, token usage with the context window, live rate limits, plan updates, per-turn diffs.",
+    );
   });
 
   it("Sources: Not polled yet when no GitHub collector has reported", async () => {
@@ -643,7 +679,30 @@ describe("Setup tabs", () => {
     expect(boxes).toHaveLength(8);
     expect(boxes.filter((b) => b.checked)).toHaveLength(6);
     expect(boxes.every((b) => b.disabled)).toBe(true);
-    expect(screen.queryByText(/What a notification looks like/)).toBeNull();
+  });
+
+  it("Access: previews person, decision and stalled-run notifications with sample actions", async () => {
+    load();
+    at("access");
+    const previews = await screen.findByRole("region", { name: "What a notification looks like" });
+    expect(within(previews).getAllByText("Mission Control")).toHaveLength(3);
+    expect(
+      within(previews).getByText("A teammate asked you in Teams: is this change ready to review?"),
+    ).toBeTruthy();
+    expect(within(previews).getByText("Read the brief · Open in Teams · Later")).toBeTruthy();
+    expect(
+      within(previews).getByText(
+        "Decision for you: ship this change now, or wait for the next release?",
+      ),
+    ).toBeTruthy();
+    expect(within(previews).getByText("Read the brief · Discuss · Later")).toBeTruthy();
+    expect(
+      within(previews).getByText(
+        "An agent's full-suite run has printed nothing for 11 min and holds the test lock.",
+      ),
+    ).toBeTruthy();
+    expect(within(previews).getByText("Stop the run · Open")).toBeTruthy();
+    expect(within(previews).queryAllByRole("button")).toHaveLength(0);
   });
 
   describe("Sessions: seats", () => {

@@ -54,6 +54,31 @@ export function Access() {
           <p className="note">Notifications arrive in phase 4.</p>
         </div>
       </Panel>
+      <Panel title="What a notification looks like">
+        <div className="pb">
+          <div className="notif">
+            <b>Mission Control</b>
+            <span className="s">
+              A teammate asked you in Teams: is this change ready to review?
+            </span>
+            <span className="xs muted">Read the brief · Open in Teams · Later</span>
+          </div>
+          <div className="notif">
+            <b>Mission Control</b>
+            <span className="s">
+              Decision for you: ship this change now, or wait for the next release?
+            </span>
+            <span className="xs muted">Read the brief · Discuss · Later</span>
+          </div>
+          <div className="notif">
+            <b>Mission Control</b>
+            <span className="s">
+              An agent's full-suite run has printed nothing for 11 min and holds the test lock.
+            </span>
+            <span className="xs muted">Stop the run · Open</span>
+          </div>
+        </div>
+      </Panel>
     </>
   );
 }
