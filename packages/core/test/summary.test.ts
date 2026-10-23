@@ -162,6 +162,16 @@ describe("leadSentence", () => {
     expect(leadSentence("Reading `a.ts` now. Then more.")).toBe("Reading a.ts now.");
     expect(leadSentence("")).toBeNull();
   });
+  it("skips leading heading lines when text follows", () => {
+    expect(leadSentence("## Summary\n\nI changed the parser so it reads both forms.")).toBe(
+      "I changed the parser so it reads both forms.",
+    );
+    expect(leadSentence("**Plan**\nEdit `a.ts` first. Then test.")).toBe("Edit a.ts first.");
+    expect(leadSentence("**Summary:**\n\n# Notes\nIt works.")).toBe("It works.");
+    expect(leadSentence("## Summary")).toBe("Summary");
+    expect(leadSentence("**Plan:** edit a.ts first.")).toBe("Plan: edit a.ts first.");
+    expect(leadSentence("# Done\n\nAll tests pass.")).toBe("All tests pass.");
+  });
   it("skips a DONE marker like the summary does", () => {
     expect(leadSentence("DONE. the checks pass. More.")).toBe("The checks pass.");
   });

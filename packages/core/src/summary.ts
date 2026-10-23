@@ -23,6 +23,9 @@ const LOWER_START = /^\s+[a-z]/;
 const LIST_NUMBER = /^\d{1,3}[.)]\s+/;
 // A first token in backticks (an identifier or a command) keeps its case.
 const STARTS_IN_CODE = /^\s*(?:(?:[-*+>]|\d{1,3}[.)]|#+)\s+)*(?:\*\*)?`/;
+// A heading line: `#`s and a space; or a line that is bold from end to end.
+const HEADING_LINE = /^#+\s/;
+const BOLD_LINE = /^\*\*[^*]+\*\*$/;
 const ENDS_SENTENCE = /[.!?]["')\]]*$/;
 // A piece ending in `:` is followed by a space, not a `; `.
 const JOINS_SENTENCE = /[.!?:]["')\]]*$/;
@@ -139,7 +142,21 @@ export function workSummary(text: string): string | null {
   return describe(text, WORK_SUMMARY_MAX, Number.POSITIVE_INFINITY);
 }
 
-/** The first sentence of `text`, as workSummary reads it, cut at LAST_TEXT_MAX; null when empty. */
+/** The text from its first line that is neither blank nor a heading; the text itself when none is. */
+function skipHeadings(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const at = lines.findIndex((l) => {
+    const s = l.trim();
+    return s !== "" && !HEADING_LINE.test(s) && !BOLD_LINE.test(s);
+  });
+  return at <= 0 ? text : lines.slice(at).join("\n");
+}
+
+/**
+ * The first sentence of `text`, as workSummary reads it, cut at LAST_TEXT_MAX; null when empty.
+ * Leading heading lines (`## Summary`, `**Plan**`) are skipped when text follows them.
+ */
 export function leadSentence(text: string): string | null {
-  return describe(text, LAST_TEXT_MAX, 1);
+  const body = skipDone(text).skipped ? text : skipHeadings(text);
+  return describe(body, LAST_TEXT_MAX, 1);
 }
