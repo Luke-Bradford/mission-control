@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { AgentView, ChangedFiles, CrewRow, LiveTask, LoopTry, Run } from "../src/index.ts";
+import type {
+  AgentView,
+  ChangedFiles,
+  CliAccountStatus,
+  ConfigView,
+  CrewRow,
+  LiveTask,
+  LoopTry,
+  NotificationEvent,
+  NotificationPreferences,
+  Run,
+} from "../src/index.ts";
 
 describe("core types", () => {
   it("accepts literal Run and AgentView objects", () => {
@@ -67,4 +78,64 @@ describe("recorded measurements", () => {
     expect(files.files[0]?.commitSha).not.toBe(files.sha);
     expect(seat.id).toBe("guido-1");
   });
+});
+
+it("accepts complete setup contracts while legacy records omit additions", () => {
+  const status = {
+    accountId: "primary",
+    provider: "codex",
+    binding: "machine",
+    identity: null,
+    plan: null,
+    status: "unknown",
+    checkedAt: 10,
+    detail: null,
+  } satisfies CliAccountStatus;
+  const preferences = {
+    categories: {
+      people: true,
+      decisions: true,
+      stalls: true,
+      prs: true,
+      capcom: true,
+      awayDigest: true,
+      quota: false,
+      agentMessages: false,
+    },
+    quietHours: { start: "19:00", end: "08:00", timezone: "UTC", stallsBypass: true },
+    softChime: true,
+  } satisfies NotificationPreferences;
+  const event = {
+    id: "notice",
+    category: "stalls",
+    at: 10,
+    text: "Run is stuck",
+  } satisfies NotificationEvent;
+  const legacy = {
+    id: "primary",
+    vendor: "codex",
+    alertAt: 80,
+    stopAt: 100,
+  } satisfies ConfigView["accounts"][number];
+  const complete = {
+    ...legacy,
+    binding: "machine",
+    canCheck: true,
+    signInHint: "Sign in with the Codex CLI on this machine.",
+  } satisfies ConfigView["accounts"][number];
+  const session = {
+    id: "work",
+    repoId: "repo",
+    checkout: "checkout",
+    seats: [],
+    branch: "feat/work",
+    managedCheckout: true,
+  } satisfies NonNullable<ConfigView["crew"]>["sessions"][number];
+  expect([
+    status.plan,
+    preferences.softChime,
+    event.category,
+    complete.canCheck,
+    session.managedCheckout,
+  ]).toEqual([null, true, "stalls", true, true]);
 });
