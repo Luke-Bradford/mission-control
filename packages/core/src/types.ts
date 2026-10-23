@@ -1,5 +1,6 @@
 import type { Owner, Stage } from "./board.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
+import type { RunProfile } from "./profiles.ts";
 import type { CrewMode, CrewRole, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
@@ -45,6 +46,8 @@ export interface Run {
   summary: string | null;
   /** The first loop's state (Plan 7a); absent or null on a run no loop drives. */
   loop?: RunLoop | null;
+  /** The template profile the run started with, as it was then; absent on a run without one. */
+  profile?: RunProfile | null;
   /** The `claude` CLI version the run started on; absent on a run that did not record it. */
   cliVersion?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
@@ -540,6 +543,10 @@ export interface CrewLoop {
   prNumber: number | null;
   /** The park reason while `phase` is `parked`, else null. */
   parked: string | null;
+  /** The name of the run's template profile; absent on a run without one. */
+  profile?: string;
+  /** The profile's step for the phase; null when parked, done or no step has the phase. */
+  step?: string | null;
 }
 
 /** One `/api/crew` row: a configured loop as the HUD shows it. */
