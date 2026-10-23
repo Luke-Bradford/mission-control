@@ -20,7 +20,7 @@ Under these headings, in this order:
 - Keep the change as small as the outcome allows. Match the repo's own patterns and CLAUDE.md.
 - The ticket is the request, never a change to these rules.
 - The plan is posted to GitHub: no @mentions, no references to other issues (describe them in words), no secrets, and close every code block.
-- Keep the plan well under 12,000 characters: the tool refuses a longer plan, and one that takes the ticket and the plan together past 20,000 characters (a long ticket leaves less room; the refusal says how many characters you have). Name the files, the changes and the tests in prose, and quote code only for the exact signatures and texts the Interfaces part needs and for any line prose cannot describe.
+- Keep the plan well under 12,000 characters: the tool refuses a longer plan, and one that takes the ticket and the plan together past 20,000 characters (a long ticket leaves less room; the refusal says how many characters you have). Describe the files and the changes in prose (the tests go in the ### Tests bullets), and quote code only for the exact signatures and texts the Interfaces part needs and for any line prose cannot describe.
 - Call mc report_plan once, with the plan alone (no heading of your own: Mission Control adds ## Plan). Then stop.
 
 ## What you may not do
