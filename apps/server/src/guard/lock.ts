@@ -1,5 +1,6 @@
 import type { TestLockState } from "@mc/core";
 import type { ChangeBus, Topic } from "../bus.ts";
+import type { LockHoldRow } from "../store.ts";
 
 /**
  * What a lock change touches: its own state and the guard resources ("guard"), the lock
@@ -16,6 +17,13 @@ export const lockChanged = (bus: ChangeBus) => (): void => {
 export interface LockKey {
   runId: string;
   toolUseId: string;
+}
+
+/** Where the lock's holds are kept across a restart (the Store). */
+export interface LockHolds {
+  addLockHold(h: LockHoldRow): void;
+  deleteLockHold(runId: string, toolUseId: string): void;
+  deleteLockHolds(runId: string): void;
 }
 
 interface Holder {
@@ -47,11 +55,39 @@ export class TestLock {
   private readonly waiting: Waiter[] = [];
   private readonly now: () => number;
   private readonly onChange: () => void;
+  private readonly holds: LockHolds | undefined;
+  private readonly log: (msg: string) => void;
 
   /** `onChange` runs after the holder or the queue changed (the HUD refetches on it). */
-  constructor(opts: { now?: () => number; onChange?: () => void } = {}) {
+  constructor(
+    opts: {
+      now?: () => number;
+      onChange?: () => void;
+      holds?: LockHolds;
+      log?: (msg: string) => void;
+    } = {},
+  ) {
     this.now = opts.now ?? Date.now;
     this.onChange = opts.onChange ?? (() => {});
+    this.holds = opts.holds;
+    this.log = opts.log ?? (() => {});
+  }
+
+  /** Puts back holds stored by an earlier hub (at start, before anything acquires). */
+  restore(rows: readonly LockHoldRow[]): void {
+    const first = rows[0];
+    if (first === undefined || this.holder !== null || this.waiting.length > 0) return;
+    this.holder = {
+      runId: first.runId,
+      seatId: first.seatId,
+      command: first.command,
+      since: first.since,
+      calls: new Set(rows.filter((r) => r.runId === first.runId).map((r) => r.toolUseId)),
+    };
+    for (const other of new Set(rows.map((r) => r.runId))) {
+      if (other !== first.runId) this.store((s) => s.deleteLockHolds(other));
+    }
+    this.onChange();
   }
 
   /**
@@ -73,6 +109,7 @@ export class TestLock {
     }
     if (this.holder.runId === key.runId) {
       this.holder.calls.add(key.toolUseId);
+      this.storeAdd(this.holder, key.toolUseId, this.now());
       return Promise.resolve(true);
     }
     return new Promise((resolve) => {
@@ -108,6 +145,7 @@ export class TestLock {
   release(key: LockKey): void {
     const h = this.holder;
     if (h === null || h.runId !== key.runId || !h.calls.delete(key.toolUseId)) return;
+    this.store((s) => s.deleteLockHold(key.runId, key.toolUseId));
     if (h.calls.size === 0) {
       this.grantNext();
       this.onChange();
@@ -123,6 +161,7 @@ export class TestLock {
       changed = true;
     }
     if (this.holder?.runId === runId) {
+      this.store((s) => s.deleteLockHolds(runId));
       this.grantNext();
       changed = true;
     }
@@ -148,7 +187,24 @@ export class TestLock {
       since: this.now(),
       calls: new Set([key.toolUseId]),
     };
+    this.storeAdd(this.holder, key.toolUseId, this.holder.since);
     return this.holder;
+  }
+
+  private storeAdd(h: Holder, toolUseId: string, since: number): void {
+    this.store((s) =>
+      s.addLockHold({ runId: h.runId, toolUseId, seatId: h.seatId, command: h.command, since }),
+    );
+  }
+
+  /** Runs a store call; the lock never depends on it succeeding. */
+  private store(f: (s: LockHolds) => void): void {
+    if (this.holds === undefined) return;
+    try {
+      f(this.holds);
+    } catch (e) {
+      this.log(`test lock: could not store a hold: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   /** Hands the lock to the oldest live waiter, with its run's other waiting calls. */
@@ -170,6 +226,7 @@ export class TestLock {
           continue;
         }
         h.calls.add(w.key.toolUseId);
+        this.storeAdd(h, w.key.toolUseId, this.now());
         w.settle(true);
       }
       return;
