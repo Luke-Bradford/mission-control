@@ -1,3 +1,4 @@
+import type { AttentionBrief, PersonMessage } from "@mc/core";
 import { ApiError, apiPost } from "./api.ts";
 import { ACTIONS, hub, RESOURCES } from "./data.ts";
 
@@ -19,6 +20,9 @@ export interface PersonThreadView {
   updatedAt: number;
   firstSeenAt: number;
   catchUp: CatchUpKind;
+  message?: PersonMessage;
+  history?: PersonMessage[];
+  brief?: AttentionBrief;
 }
 
 export interface HandledThreadView {
@@ -60,4 +64,21 @@ export async function markHandled(key: string): Promise<string | null> {
   } catch (e) {
     return e instanceof ApiError ? e.message : "server unreachable";
   }
+}
+
+/** Explicit operator approval; the server revalidates the retained source before posting. */
+export async function postPersonReply(key: string, replyId: string, text: string): Promise<void> {
+  await apiPost(
+    `/api/attention/${encodeURIComponent(key)}/replies/${encodeURIComponent(replyId)}/post`,
+    { text },
+  );
+}
+
+/** Keep the result in the panel before refreshing the surrounding lists. */
+export function handlePerson(
+  key: string,
+  how: "marked" | "copied" | "flight",
+  replyId?: string,
+): Promise<{ handled: string; message?: string }> {
+  return apiPost(ACTIONS.handled(key), { how, ...(replyId ? { replyId } : {}) });
 }

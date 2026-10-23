@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import type { ItemChatMessage, ItemDiscussion, PersonMessage, PersonSource } from "@mc/core";
 import {
   type AccountId,
   type AgentId,
@@ -239,6 +240,10 @@ CREATE TABLE IF NOT EXISTS briefs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, context TEXT NOT NULL,
   recommendation TEXT NOT NULL, options TEXT NOT NULL, basis TEXT NOT NULL, at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS item_discussions (
+  id TEXT PRIMARY KEY, item_key TEXT NOT NULL, version TEXT NOT NULL, messages TEXT NOT NULL, sent TEXT NOT NULL DEFAULT '[]',
+  UNIQUE(item_key, version)
+);
 CREATE INDEX IF NOT EXISTS briefs_key ON briefs(key);
 CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
 -- The template profile FLIGHT or the planner chose for a ticket, with the reason; the latest wins.
@@ -285,7 +290,9 @@ export interface NotificationRow {
   unread: boolean;
   firstSeenAt: number;
   handledAt: number | null;
-  handledHow: "marked" | "read" | null;
+  handledHow: "marked" | "read" | "replied" | "copied" | "flight" | null;
+  message?: PersonMessage;
+  history?: PersonMessage[];
   /** The `updatedAt` that was handled: a thread updated after it is open again. */
   handledThrough: number | null;
 }
@@ -297,6 +304,7 @@ export type NotificationRead = Omit<
 >;
 
 const notificationRow = (r: Row): NotificationRow => ({
+  ...(r.source_content ? JSON.parse(r.source_content as string) : {}),
   id: r.id as string,
   repoId: r.repo_id as string,
   subjectType: r.subject_type as string,
@@ -743,6 +751,9 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    this.addColumn("notifications", "source_content", "TEXT");
+    this.addColumn("briefs", "structured", "TEXT");
+    this.addColumn("drafts", "source", "TEXT");
     // An ok row last succeeded when it was recorded; a failing row's last success is unknown.
     this.whenColumnMissing("collector_status", "last_ok_at", () => {
       this.db.exec("ALTER TABLE collector_status ADD COLUMN last_ok_at INTEGER");
@@ -1740,13 +1751,13 @@ export class Store {
       const before = this.notificationsJson();
       const ins = this.db.prepare(
         `INSERT INTO notifications (id, repo_id, subject_type, title, number, reason, url, author,
-           snippet, updated_at, last_read_at, unread, first_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+           snippet, updated_at, last_read_at, unread, first_seen_at, source_content)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
          ON CONFLICT(id) DO UPDATE SET repo_id = excluded.repo_id,
            subject_type = excluded.subject_type, title = excluded.title, number = excluded.number,
            reason = excluded.reason, url = excluded.url, author = excluded.author,
            snippet = excluded.snippet, updated_at = excluded.updated_at,
-           last_read_at = excluded.last_read_at, unread = 1`,
+           last_read_at = excluded.last_read_at, unread = 1, source_content = excluded.source_content`,
       );
       for (const n of rows) {
         ins.run(
@@ -1762,6 +1773,7 @@ export class Store {
           n.updatedAt,
           n.lastReadAt,
           now,
+          JSON.stringify({ message: n.message, history: n.history }),
         );
       }
       if (complete) {
@@ -1810,7 +1822,7 @@ export class Store {
   markNotificationHandled(
     id: string,
     updatedAt: number,
-    how: "marked" | "read",
+    how: Exclude<NotificationRow["handledHow"], null>,
     at: number,
   ): boolean {
     const r = this.db
@@ -2910,6 +2922,27 @@ export class Store {
     );
   }
 
+  addSourceDraft(
+    target: string,
+    kind: ReplyDraft["kind"],
+    text: string,
+    at: number,
+    source: { itemKey: string; replyId: string; source: PersonSource },
+  ): number {
+    const id = this.addDraft(target, kind, text, at);
+    this.db.prepare("UPDATE drafts SET source = ? WHERE id = ?").run(JSON.stringify(source), id);
+    return id;
+  }
+
+  draftSource(
+    id: number,
+  ): { itemKey: string; replyId: string; source: PersonSource; state: string } | null {
+    const row = this.db.prepare("SELECT source, state FROM drafts WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row?.source ? { ...JSON.parse(row.source as string), state: row.state as string } : null;
+  }
+
   drafts(): ReplyDraft[] {
     return this.db
       .prepare(
@@ -2993,15 +3026,196 @@ export class Store {
     }));
   }
 
+  /** A stable, bounded thread for one exact version of an item. */
+  ensureDiscussion(
+    itemKey: string,
+    version: string,
+    opening?: { text: string; at: number },
+  ): ItemDiscussion {
+    const id = randomUUID();
+    const messages: ItemChatMessage[] = opening
+      ? [
+          {
+            id: `${id}:opening`,
+            itemKey,
+            correlationId: id,
+            role: "flight",
+            text: opening.text,
+            at: opening.at,
+          },
+        ]
+      : [];
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO item_discussions (id, item_key, version, messages) VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, itemKey, version, JSON.stringify(messages));
+    const row = this.db
+      .prepare("SELECT id FROM item_discussions WHERE item_key = ? AND version = ?")
+      .get(itemKey, version) as Row;
+    return this.discussion(itemKey, row.id as string) as ItemDiscussion;
+  }
+
+  discussion(itemKey: string, id: string): ItemDiscussion | null {
+    const row = this.db
+      .prepare("SELECT * FROM item_discussions WHERE item_key = ? AND id = ?")
+      .get(itemKey, id) as Row | undefined;
+    return row
+      ? {
+          id,
+          itemKey,
+          version: row.version as string,
+          messages: JSON.parse(row.messages as string) as ItemChatMessage[],
+        }
+      : null;
+  }
+
+  private discussionById(id: string): ItemDiscussion | null {
+    const row = this.db.prepare("SELECT item_key FROM item_discussions WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row ? this.discussion(row.item_key as string, id) : null;
+  }
+
+  private saveDiscussion(thread: ItemDiscussion): void {
+    this.db
+      .prepare("UPDATE item_discussions SET messages = ? WHERE id = ?")
+      .run(JSON.stringify(thread.messages.slice(-100)), thread.id);
+  }
+
+  askDiscussion(id: string, messageId: string, text: string, at: number): boolean {
+    const thread = this.discussionById(id);
+    if (!thread) throw new Error("Unknown discussion.");
+    const prior = thread.messages.find((m) => m.id === messageId);
+    if (prior) {
+      if (prior.role !== "operator" || prior.text !== text)
+        throw new Error("Message id already used.");
+      return false;
+    }
+    thread.messages.push({
+      id: messageId,
+      itemKey: thread.itemKey,
+      correlationId: id,
+      role: "operator",
+      text,
+      at,
+    });
+    this.saveDiscussion(thread);
+    return true;
+  }
+
+  replyDiscussion(
+    id: string,
+    replyTo: string,
+    messageId: string,
+    text: string,
+    at: number,
+  ): boolean {
+    const thread = this.discussionById(id);
+    if (!thread?.messages.some((m) => m.id === replyTo && m.role === "operator")) return false;
+    const prior = thread.messages.find((m) => m.id === messageId || m.replyTo === replyTo);
+    if (prior) return prior.id === messageId && prior.replyTo === replyTo && prior.text === text;
+    thread.messages.push({
+      id: messageId,
+      itemKey: thread.itemKey,
+      correlationId: id,
+      replyTo,
+      role: "flight",
+      text,
+      at,
+    });
+    this.saveDiscussion(thread);
+    return true;
+  }
+
+  discussionSent(id: string, messageId: string): boolean {
+    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row ? (JSON.parse(row.sent as string) as string[]).includes(messageId) : false;
+  }
+
+  markDiscussionSent(id: string, messageId: string): void {
+    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as Row;
+    const sent = JSON.parse(row.sent as string) as string[];
+    this.db
+      .prepare("UPDATE item_discussions SET sent = ? WHERE id = ?")
+      .run(JSON.stringify([...new Set([...sent, messageId])].slice(-100)), id);
+  }
+
+  pendingDiscussions(): ItemDiscussion[] {
+    const rows = this.db
+      .prepare(`
+        SELECT d.item_key, d.id,
+          (SELECT MIN(json_extract(q.value, '$.at'))
+           FROM json_each(d.messages) AS q
+           WHERE json_extract(q.value, '$.role') = 'operator'
+             AND NOT EXISTS (
+               SELECT 1 FROM json_each(d.messages) AS r
+               WHERE json_extract(r.value, '$.replyTo') = json_extract(q.value, '$.id')
+             )) AS waiting_since
+        FROM item_discussions AS d
+        WHERE waiting_since IS NOT NULL
+        ORDER BY waiting_since ASC, d.rowid ASC
+        LIMIT 100
+      `)
+      .all() as Row[];
+    return rows.map((r) => this.discussion(r.item_key as string, r.id as string) as ItemDiscussion);
+  }
+
   /** Stores FLIGHT's brief on an attention key; returns its id. */
   addBrief(b: AttentionBrief & { key: string }): number {
-    const r = this.db
-      .prepare(
-        `INSERT INTO briefs (key, context, recommendation, options, basis, at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(b.key, b.context, b.recommendation, JSON.stringify(b.options), b.basis, b.at);
-    return Number(r.lastInsertRowid);
+    let id = 0;
+    this.transaction(() => {
+      const { key, context, recommendation, options, basis, at, ...structured } = b;
+      if (structured.person) {
+        const thread = /^person:(\d+):(\d+)$/.exec(key);
+        const n = thread ? this.notification(thread[1] as string) : null;
+        if (
+          !n ||
+          n.updatedAt !== Number(thread?.[2]) ||
+          !n.unread ||
+          (n.handledThrough !== null && n.updatedAt <= n.handledThrough) ||
+          !n.message ||
+          JSON.stringify(n.message.source) !== JSON.stringify(structured.person.source)
+        ) {
+          throw new Error("Source changed; refresh the item before drafting.");
+        }
+        const source = n.message.source;
+        structured.person = {
+          ...structured.person,
+          history: n.history,
+          replies: structured.person.replies?.map(({ draftId: _ignored, ...r }) => ({
+            ...r,
+            ...(structured.person?.source.kind === "github" && n.number !== null
+              ? {
+                  draftId: this.addSourceDraft(
+                    `${n.repoId}#${n.number}`,
+                    n.subjectType === "PullRequest" ? "pr" : "issue",
+                    r.text,
+                    at,
+                    { itemKey: key, replyId: r.id, source },
+                  ),
+                }
+              : {}),
+          })),
+        };
+      }
+      const r = this.db
+        .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          key,
+          context,
+          recommendation,
+          JSON.stringify(options),
+          basis,
+          at,
+          JSON.stringify(structured),
+        );
+      id = Number(r.lastInsertRowid);
+    });
+    return id;
   }
 
   /** The newest brief on each attention key. */
@@ -3010,16 +3224,30 @@ export class Store {
       .prepare("SELECT * FROM briefs WHERE id IN (SELECT MAX(id) FROM briefs GROUP BY key)")
       .all() as Row[];
     return new Map(
-      rows.map((r) => [
-        r.key as string,
-        {
-          context: r.context as string,
-          recommendation: r.recommendation as string,
-          options: JSON.parse(r.options as string) as BriefOption[],
-          basis: r.basis as string,
-          at: r.at as number,
-        },
-      ]),
+      rows
+        .filter((r) => {
+          const person = r.structured
+            ? (JSON.parse(r.structured as string) as AttentionBrief).person
+            : undefined;
+          if (!person) return true;
+          const thread = /^person:(\d+):(\d+)$/.exec(r.key as string);
+          const n = thread ? this.notification(thread[1] as string) : null;
+          return (
+            n?.updatedAt === Number(thread?.[2]) &&
+            JSON.stringify(n?.message?.source) === JSON.stringify(person.source)
+          );
+        })
+        .map((r) => [
+          r.key as string,
+          {
+            ...(r.structured ? JSON.parse(r.structured as string) : {}),
+            context: r.context as string,
+            recommendation: r.recommendation as string,
+            options: JSON.parse(r.options as string) as BriefOption[],
+            basis: r.basis as string,
+            at: r.at as number,
+          },
+        ]),
     );
   }
 

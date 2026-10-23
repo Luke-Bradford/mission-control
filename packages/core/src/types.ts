@@ -764,14 +764,90 @@ export interface Crew {
   firstRunToday: number | null;
 }
 
+/** Catch-up text is evidence to display, never instructions to execute. */
+export interface BriefCatchUp {
+  kind: "new" | "follow-up" | "old";
+  line: string;
+  story: string[];
+  aware: string[];
+}
+
+export interface BriefCheck {
+  source: string;
+  finding: string;
+}
+
+export interface BriefReference {
+  label: string;
+  /** Read-only navigation, never a posting target. */
+  url?: string;
+}
+
+export interface PersonSource {
+  kind: "github" | "teams";
+  messageId: string;
+  /** Opaque identity of the exact source content that was assessed. */
+  revision: string;
+}
+
+export interface PersonMessage {
+  source: PersonSource;
+  author: string | null;
+  at: number;
+  text: string;
+  url: string;
+}
+
+export interface SuggestedReply {
+  id: string;
+  label: string;
+  text: string;
+  /** Assigned by the server; generation never approves this draft. */
+  draftId?: number;
+}
+
+export interface PersonBrief {
+  source: PersonSource;
+  history?: PersonMessage[];
+  assessment?: string[];
+  take?: string;
+  related?: BriefReference[];
+  decisionKey?: string;
+  replies?: SuggestedReply[];
+}
+
+/** Correlates item chat without changing how messages are delivered or executed. */
+export interface ItemDiscussion {
+  id: string;
+  itemKey: string;
+  version: string;
+  messages: ItemChatMessage[];
+}
+
+export interface ItemChatMessage {
+  id: string;
+  itemKey: string;
+  correlationId: string;
+  replyTo?: string;
+  role: "operator" | "flight";
+  text: string;
+  at: number;
+}
+
 /** One answer FLIGHT suggests for an item that is a choice. */
 export interface BriefOption {
+  id?: string;
+  description?: string;
   label: string;
   answer: string;
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
 export interface AttentionBrief {
+  catchUp?: BriefCatchUp;
+  checked?: BriefCheck[];
+  recommendedOptionId?: string;
+  person?: PersonBrief;
   context: string;
   recommendation: string;
   options: BriefOption[];

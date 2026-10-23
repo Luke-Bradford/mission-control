@@ -26,6 +26,7 @@ import {
   type FlightState,
   type FlightView,
   hudColumnOf,
+  type ItemDiscussion,
   inLane,
   LANE_LABEL_PREFIX,
   OWNER_OPERATOR,
@@ -89,6 +90,19 @@ export function stalledSeats(
 ): Set<string> {
   return new Set(rows.filter((r) => r.hudState === "stalled").map((r) => r.id));
 }
+
+/**
+ * A reply or `@CAPCOM` tag FLIGHT itself wrote: the operator's to read (Needs you still shows it),
+ * not work for FLIGHT. Listing it in the digest woke FLIGHT with every reply it wrote. Assumes one
+ * live FLIGHT seat (`flightSeat`).
+ */
+export const ownReply = (
+  item: Pick<AttentionItem, "kind" | "agentId">,
+  flightId: string | null,
+): boolean =>
+  (item.kind === "message" || item.kind === "tag") &&
+  flightId !== null &&
+  item.agentId === flightId;
 
 /** The ids FLIGHT can answer for: its own session's seats other than FLIGHT itself. */
 export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
@@ -197,8 +211,9 @@ export function flightState(i: {
   busy: readonly SeatBusy[];
   now: number;
   hubLogin?: string | null;
-}): FlightState {
+}): FlightState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
+  const discussions = store.pendingDiscussions();
   const tz = config.operator.timezone;
   const found = flightSeat(config);
   const since = now - FLIGHT_HOUR_MS;
@@ -232,6 +247,7 @@ export function flightState(i: {
   }));
   if (found === null) {
     return {
+      discussions,
       time: clockHm(now, tz),
       repo: "",
       lane: config.crew?.lane ?? null,
@@ -425,8 +441,9 @@ export function flightState(i: {
   });
 
   const briefed = store.briefs();
+  const flightId = flightSeat(config)?.seat.id ?? null;
   const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
-    .filter((x) => !briefed.has(x.key))
+    .filter((x) => !briefed.has(x.key) && !ownReply(x, flightId))
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -438,6 +455,7 @@ export function flightState(i: {
     }));
 
   return {
+    discussions,
     time: clockHm(now, tz),
     repo: session.repoId,
     lane: config.crew?.lane ?? null,
@@ -462,13 +480,14 @@ const asideParked = (run: Run): { kind: string; reason: string } | null =>
     : null;
 
 /** What a wake is about, as a stable string (no times): it changes only when something new needs FLIGHT. */
-export function wakeFacts(s: FlightState): string {
+export function wakeFacts(s: FlightState & { discussions?: ItemDiscussion[] }): string {
   const startable = s.tickets.filter((t) => t.ready);
   const free =
     startable.length > 0
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
   return JSON.stringify({
+    discussions: s.discussions?.map((t) => [t.id, t.messages.map((m) => m.id)]),
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: free.length > 0 ? startable.map((t) => t.ref) : [],
@@ -506,8 +525,9 @@ const flightParkKind = (kind: string): boolean =>
   kind === RULING_PARK || (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
-export function pending(s: FlightState): boolean {
+export function pending(s: FlightState & { discussions?: ItemDiscussion[] }): boolean {
   return (
+    (s.discussions?.length ?? 0) > 0 ||
     s.questions.length > 0 ||
     s.items.length > 0 ||
     releasable(s).length > 0 ||

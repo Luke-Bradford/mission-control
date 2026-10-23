@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BoardItem,
+  COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_MAX_WAKES,
+  FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
@@ -27,6 +29,7 @@ import {
   flightStartCap,
   flightState,
   markPrsShown,
+  ownReply,
   pending,
   wakeFacts,
 } from "../src/flight/state.ts";
@@ -205,6 +208,40 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+it("keeps an older unanswered discussion visible and waking after 101 newer answered threads", () => {
+  const current = () => flightState({ config, store, busy: [], now: nowMs });
+  expect(pending(current())).toBe(false);
+  const waiting = store.ensureDiscussion("note:waiting", "v1");
+  store.askDiscussion(waiting.id, "waiting-question", "Why?", T0);
+  for (let n = 0; n < 101; n++) {
+    const answered = store.ensureDiscussion(`note:answered-${n}`, "v1");
+    store.askDiscussion(answered.id, `ask-${n}`, "Why?", T0 + n + 1);
+    expect(
+      store.replyDiscussion(answered.id, `ask-${n}`, `reply-${n}`, "Because", T0 + n + 2),
+    ).toBe(true);
+  }
+  expect(store.pendingDiscussions().map((t) => t.id)).toEqual([waiting.id]);
+  expect(current().discussions.map((t) => t.id)).toEqual([waiting.id]);
+  expect(pending(current())).toBe(true);
+  expect(store.replyDiscussion(waiting.id, "waiting-question", "answer", "Because", T0 + 200)).toBe(
+    true,
+  );
+  expect(pending(current())).toBe(false);
+});
+
+it("bounds pending discussions by the oldest unanswered question, not thread creation", () => {
+  const threads = [];
+  for (let n = 0; n < 102; n++) {
+    const thread = store.ensureDiscussion(`note:pending-${n}`, "v1");
+    // Keep the oldest wait first; the remaining questions reverse thread creation order.
+    store.askDiscussion(thread.id, `ask-${n}`, "Why?", T0 + (n === 0 ? 0 : 102 - n));
+    threads.push(thread.id);
+  }
+  expect(store.pendingDiscussions().map((t) => t.id)).toEqual(
+    [threads[0], ...threads.slice(1).reverse()].slice(0, 100),
+  );
+});
+
 const stored = (number: number, over: Partial<PullRequestView> = {}): PullRequestView => ({
   repoId: "mc",
   number,
@@ -366,7 +403,7 @@ describe("FLIGHT's holds", () => {
       [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
       T0 + MIN,
     );
-    nowMs = T0 + MIN;
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0]?.text).toContain("1 hold to release");
@@ -469,6 +506,19 @@ describe("FLIGHT's items to brief", () => {
       at: T0,
     });
     expect(items()).toEqual([]);
+  });
+
+  it("leaves out FLIGHT's own replies and tags, and keeps another seat's reply", () => {
+    live("flight-1", "r-flight");
+    const say = (at: number, from: string, to: string, text: string) =>
+      store.addComms({ at, from, to, ticket: null, text });
+    say(T0, COMMS_CAPCOM, "flight-1", "status?");
+    say(T0 + MIN, "flight-1", COMMS_CAPCOM, "No change @CAPCOM");
+    say(T0, COMMS_CAPCOM, "guido-1", "how is it going?");
+    say(T0 + MIN, "guido-1", COMMS_CAPCOM, "tests pass");
+    const listed = items();
+    expect(listed.map((i) => i.kind)).toEqual(["message"]);
+    expect(listed.some((i) => i.key.includes("flight-1"))).toBe(false);
   });
 
   it("lists nothing without a FLIGHT seat", () => {
@@ -714,7 +764,7 @@ describe("the FLIGHT watcher", () => {
     liveCrew();
     raiseBlocked();
     await watch.check();
-    nowMs = T0 + MIN;
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
     raiseBlocked("blocked:r1:1", { at: nowMs });
     await watch.check();
     expect(sendCalls).toHaveLength(2);
@@ -743,8 +793,56 @@ describe("the FLIGHT watcher", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     store.upsertRun(run("r-guido", "guido-1"));
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
+  });
+
+  it("holds a second wake until the gap has passed, then sends it without another event", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS - MIN - 1);
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("measures the gap from the end of FLIGHT's turn, not only from the wake", async () => {
+    liveCrew();
+    raiseBlocked();
+    watch.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendCalls).toHaveLength(1);
+    // a turn longer than the gap: its own end must not wake it straight away
+    nowMs = T0 + 3 * MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + 3 * MIN + FLIGHT_MIN_WAKE_GAP_MS;
+    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS);
+    expect(sendCalls).toHaveLength(2);
+    watch.stop();
+  });
+
+  it("drops a held wake when the watcher stops", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    await watch.check();
+    watch.stop();
+    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
+    await vi.advanceTimersByTimeAsync(FLIGHT_MIN_WAKE_GAP_MS);
+    expect(sendCalls).toHaveLength(1);
   });
 
   it("does not wake mid-turn", async () => {
@@ -1064,5 +1162,15 @@ describe("wakeSummary", () => {
       expect(pending(unparked)).toBe(false);
       expect(wakeFacts(state({ aside: [aside] }))).not.toBe(wakeFacts(unparked));
     });
+  });
+});
+
+describe("ownReply", () => {
+  it("leaves FLIGHT's own direct-line reply out of its digest and keeps another seat's", () => {
+    expect(ownReply({ kind: "message", agentId: "flight-1" }, "flight-1")).toBe(true);
+    expect(ownReply({ kind: "message", agentId: "guido-1" }, "flight-1")).toBe(false);
+    expect(ownReply({ kind: "tag", agentId: "flight-1" }, "flight-1")).toBe(true);
+    expect(ownReply({ kind: "question", agentId: "flight-1" }, "flight-1")).toBe(false);
+    expect(ownReply({ kind: "message", agentId: "flight-1" }, null)).toBe(false);
   });
 });
