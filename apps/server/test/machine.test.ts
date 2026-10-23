@@ -61,6 +61,8 @@ function deps(over: Partial<MachineDeps> = {}): MachineDeps {
     vmStat: async () => VM_STAT,
     statfs: async () => ({ bavail: 250, blocks: 1000, bsize: 4096 }),
     ps: async () => PS,
+    psTree: async () => "",
+    testCommand: null,
     prevCpus: [cpu(100, 100, 400), cpu(50, 50, 400)],
     prev: null,
     now: 5000,
@@ -90,7 +92,52 @@ describe("parsers", () => {
   });
 });
 
+// `ps -axww -o pid=,ppid=,rss=,%cpu=,args=`: a test run (shell, pnpm, vitest), an agent and a bystander.
+const PS_TREE = `  100     1  1000  1.0 /bin/zsh -c pnpm -s test
+  101   100  2000  2.0 node /opt/homebrew/bin/pnpm -s test
+  102   101  3000 30.5 node vitest
+  200     1  9000  5.0 claude
+  300     1   500  1.0 node other.js
+`;
+
 describe("sampleMachine", () => {
+  it.each(["", " --run"])("excludes similarly named test commands (suffix %j)", async (suffix) => {
+    const r = await sampleMachine(
+      deps({
+        testCommand: "pnpm test",
+        psTree: async () => `100 1 1000 1.0 /bin/zsh -c pnpm test${suffix}
+101 100 2000 2.0 node vitest
+200 1 9000 5.0 node /opt/homebrew/bin/pnpm test:unit
+201 200 9000 5.0 node vitest
+300 1 9000 5.0 pnpm test:e2e
+`,
+      }),
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.sample.testRun).toEqual({ count: 2, rssBytes: 3000 * 1024, cpuPct: 3 });
+  });
+
+  it("separates the test-lock holder's process tree from agents", async () => {
+    const r = await sampleMachine(
+      deps({ psTree: async () => PS_TREE, testCommand: "pnpm -s test" }),
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.sample.testRun).toEqual({ count: 3, rssBytes: 6000 * 1024, cpuPct: 33.5 });
+    expect(r.sample.agents).toEqual(parsePs(PS));
+    const free = await sampleMachine(deps({ psTree: async () => PS_TREE, testCommand: null }));
+    expect(free.sample.testRun).toBeNull();
+    const failed = await sampleMachine(
+      deps({
+        testCommand: "pnpm -s test",
+        psTree: async () => {
+          throw new Error("ps timed out");
+        },
+      }),
+    );
+    expect(failed.sample.testRun).toBeNull();
+    expect(failed.errors).toEqual(["ps tree: ps timed out"]);
+  });
+
   it("reads CPU, memory, disk and processes", async () => {
     const r = await sampleMachine(deps());
     expect(r.errors).toEqual([]);
@@ -103,6 +150,7 @@ describe("sampleMachine", () => {
       diskFreeBytes: 250 * 4096,
       diskTotalBytes: 1000 * 4096,
       agents: { count: 5, rssBytes: 985920 * 1024, cpuPct: 14.7 },
+      testRun: null,
     });
     expect(r.cpus).toHaveLength(2);
   });

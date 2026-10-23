@@ -596,6 +596,8 @@ export interface MachineSample {
   diskTotalBytes: number | null;
   /** The `claude` and `codex` processes on this machine (editor sessions included). */
   agents: { count: number; rssBytes: number; cpuPct: number } | null;
+  /** The test-lock holder's command and every process under it; null when the lock is free. Optional: older stored samples lack it. */
+  testRun?: { count: number; rssBytes: number; cpuPct: number } | null;
 }
 
 /** `/api/machine`: the latest sample, with the crew's seat capacity for the Machine panel's agents row. */
@@ -739,6 +741,11 @@ export interface CrewRow {
   asideRuns?: CrewAsideRun[];
   /** A writer seat's queued tickets, without the one it holds; [] for other rows. */
   queue?: CrewQueueItem[];
+  /**
+   * Crew seat parked: CAPCOM messages since its latest seat update; 0 otherwise. A patch while
+   * parked (e.g. a new reason) resets this window, so earlier queued messages are not counted.
+   */
+  queuedMessages?: number;
   /** The latest run. */
   run: {
     id: string;

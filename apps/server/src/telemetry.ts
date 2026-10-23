@@ -17,6 +17,10 @@ import {
   TELEMETRY_RANGES,
   type Telemetry,
   type TelemetryRange,
+  type TestLockEntryView,
+  type TestLockRun,
+  type TestLockState,
+  type TestLockView,
   TICKET_SIZES,
 } from "@mc/core";
 import { WINDOWS } from "./collectors/usage-common.ts";
@@ -24,7 +28,7 @@ import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "./config
 import { crew } from "./hud.ts";
 import { type PrCache, runPrs, runTicket } from "./runview.ts";
 import type { Store } from "./store.ts";
-import { clippedMs, dayFormatter, endOf, lastDays } from "./views.ts";
+import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./views.ts";
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -71,6 +75,42 @@ export function median(values: number[]): number | null {
   return s.length % 2 === 1
     ? (s[mid] as number)
     : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
+}
+
+/** Median length of each command's done holds, once it has three. */
+export function usualLockMs(runs: TestLockRun[]): Record<string, number> {
+  const lengths = new Map<string, number[]>();
+  for (const r of runs) {
+    if (r.outcome !== "done" || r.endedAt === null) continue;
+    const list = lengths.get(r.command) ?? [];
+    list.push(r.endedAt - r.startedAt);
+    lengths.set(r.command, list);
+  }
+  return Object.fromEntries(
+    [...lengths]
+      .filter(([, list]) => list.length >= 3)
+      .map(([command, list]) => [command, median(list) as number]),
+  );
+}
+
+/** The test lock as `/api/test-lock` serves it: each holder and waiter labelled, the holder with its usual length. */
+export function lockView(
+  config: CcConfig,
+  store: Store,
+  state: TestLockState,
+  now: number,
+): TestLockView {
+  const entry = (e: TestLockState["waiting"][number]): TestLockEntryView => ({
+    ...e,
+    label: lockLabel(config, e.seatId, e.command),
+  });
+  const usual = usualLockMs(store.lockRuns(now - TELEMETRY_RANGES["7d"] * MINUTE_MS));
+  return {
+    holder: state.holder
+      ? { ...entry(state.holder), usualMs: usual[state.holder.command] ?? null }
+      : null,
+    waiting: state.waiting.map(entry),
+  };
 }
 
 const addCost = (sum: number | null, c: number | null, f = 1): number | null =>

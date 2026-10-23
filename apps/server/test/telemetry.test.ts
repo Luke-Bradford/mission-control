@@ -14,8 +14,9 @@ import type {
 import { COMMS_CAPCOM, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
+import { NO_LOCK } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
-import { type TelemetryScope, telemetry } from "../src/telemetry.ts";
+import { lockView, type TelemetryScope, telemetry } from "../src/telemetry.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -764,6 +765,54 @@ describe("cost", () => {
       run({ id: "a", tokens: tok(10, 0), prs: [{ repo: "o/shop-app", number: 41 }] }),
     );
     expect(tel().tokensByTicket).toEqual([{ ticket: "shop-app#3349", tokens: 10, costUsd: null }]);
+  });
+});
+
+describe("lockView", () => {
+  it("labels holder and waiters and gives usualMs from three done holds", () => {
+    const c: CcConfig = {
+      ...config,
+      repos: [{ ...(config.repos[0] as CcConfig["repos"][number]), fullSuite: ["pnpm -s test"] }],
+      crew: {
+        worktrees: join(dir, "wt"),
+        maxSeats: 4,
+        sessions: [
+          {
+            id: "shop-app-1",
+            repoId: "shop-app",
+            checkout: join(dir, "co"),
+            seats: [
+              { id: "guido-1", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] },
+            ],
+          },
+        ],
+      },
+    };
+    const add = (id: string, started: number, length: number) => {
+      store.addLockHold({
+        runId: id,
+        seatId: "guido-1",
+        toolUseId: "call",
+        command: "pnpm -s test",
+        since: started,
+        queuedAt: started,
+      });
+      store.deleteLockHold(id, "call", started + length);
+    };
+    add("a", NOW - 3 * HOUR, 100);
+    add("b", NOW - 2 * HOUR, 200);
+    const since = NOW - MIN;
+    const state = {
+      holder: { runId: "h", seatId: "guido-1", command: "pnpm -s test", since },
+      waiting: [{ runId: "w", seatId: "guido-9", command: "make check", since }],
+    };
+    expect(lockView(c, store, state, NOW).holder?.usualMs).toBeNull();
+    add("c", NOW - HOUR, 900);
+    expect(lockView(c, store, state, NOW)).toEqual({
+      holder: { ...state.holder, label: "shop-app full suite", usualMs: 200 },
+      waiting: [{ ...state.waiting[0], label: "make check" }],
+    });
+    expect(lockView(c, store, NO_LOCK, NOW)).toEqual({ holder: null, waiting: [] });
   });
 });
 

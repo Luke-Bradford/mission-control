@@ -13,6 +13,7 @@ import {
   agentState,
   type BoardItem,
   CI_TRIES,
+  COMMS_CAPCOM,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -478,6 +479,10 @@ export function crew(
                 })
             : [],
         queue: queueOf(store, agent),
+        queuedMessages:
+          agent.kind === "crew" && state === "parked" && seatRow
+            ? store.commsCountTo(COMMS_CAPCOM, agent.id, seatRow.updatedAt)
+            : 0,
         run: latest
           ? {
               id: latest.id,

@@ -209,6 +209,7 @@ export interface Collectors {
     prevCpus: CpuInfo[] | null,
     prev: MachineSample | null,
     now: number,
+    testCommand: string | null,
   ) => Promise<MachineResult>;
 }
 
@@ -299,7 +300,8 @@ export function realCollectors(config: CcConfig): Collectors {
         { appServer: () => appServer(), latestRollout: () => latestRollout(), onError },
         now,
       ),
-    machine: (prevCpus, prev, now) => sampleMachine({ ...realMachineDeps(), prevCpus, prev, now }),
+    machine: (prevCpus, prev, now, testCommand) =>
+      sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand }),
   };
 }
 
@@ -806,7 +808,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       }),
     machine: async () => {
       const at = now();
-      const r = await c.machine(machineCpus, latestMachine, at);
+      const r = await c.machine(
+        machineCpus,
+        latestMachine,
+        at,
+        deps.lockState?.().holder?.command ?? null,
+      );
       machineCpus = r.cpus;
       latestMachine = r.sample;
       emit("machine");

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ATTENTION_LABEL,
   type BoardItem,
+  COMMS_CAPCOM,
   DEFAULT_PROFILES,
   driverStopKey,
   type Escalation,
@@ -211,6 +212,7 @@ describe("crew", () => {
       loop: null,
       asideRuns: [],
       queue: [],
+      queuedMessages: 0,
       run: null,
       work: null,
       prs: [],
@@ -926,6 +928,22 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("profile");
     expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("steps");
     expect(rowOf(c, "GUIDO-1")?.loop).not.toHaveProperty("planned");
+  });
+
+  it("a parked seat reports its queued messages", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    const send = (at: number) =>
+      store.addComms({ at, from: COMMS_CAPCOM, to: "GUIDO-1", ticket: null, text: "hello" });
+    send(NOW - 20 * MIN);
+    send(NOW - 5 * MIN);
+    send(NOW - MIN);
+    store.setSeatSession(
+      seat({ state: "parked", reason: "rate limited", updatedAt: NOW - 10 * MIN }),
+    );
+    expect(rowOf(c, "GUIDO-1")).toMatchObject({ hudState: "parked", queuedMessages: 2 });
+    store.setSeatSession(seat({ state: "running" }));
+    expect(rowOf(c, "GUIDO-1")?.queuedMessages).toBe(0);
   });
 
   it("a crew row's loop carries the profile's steps and whether a planner's plan landed", () => {
