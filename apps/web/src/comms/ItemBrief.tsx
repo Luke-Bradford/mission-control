@@ -205,7 +205,7 @@ export function PersonChoices({
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [text, setText] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -248,7 +248,7 @@ export function PersonChoices({
   };
   const edit = (id: string, value: string) => {
     setEditing(id);
-    setText(value);
+    setDrafts((previous) => ({ ...previous, [id]: previous[id] ?? value }));
   };
   return (
     <div className="composer person-choices">
@@ -271,21 +271,23 @@ export function PersonChoices({
                   <textarea
                     ref={input}
                     aria-label="Suggested reply"
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
+                    value={drafts[reply.id] ?? reply.text}
+                    onChange={(e) =>
+                      setDrafts((previous) => ({ ...previous, [reply.id]: e.target.value }))
+                    }
                     disabled={busy}
                   />
                 ) : (
-                  <span className="s qtext">{reply.text}</span>
+                  <span className="s qtext">{drafts[reply.id] ?? reply.text}</span>
                 )}
                 <span className="row">
                   <button
                     type="button"
                     className="sm primary"
-                    disabled={busy || (editing === reply.id && !text.trim())}
+                    disabled={busy || !(drafts[reply.id] ?? reply.text).trim()}
                     onClick={() =>
                       void run(async () => {
-                        const body = editing === reply.id ? text : reply.text;
+                        const body = drafts[reply.id] ?? reply.text;
                         if (person.source.kind === "github") {
                           await postPersonReply(item.key, reply.id, body);
                           setDone("replied on GitHub");

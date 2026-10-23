@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AttentionItem } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
@@ -10,7 +10,13 @@ import { item } from "./fixtures.ts";
 
 const key = "person:123:1000";
 const path = `/api/attention/${encodeURIComponent(key)}`;
-function setup(kind: "github" | "teams" = "github", fail = false, empty = false) {
+function setup(
+  kind: "github" | "teams" = "github",
+  fail = false,
+  empty = false,
+  url?: string,
+  multiple = false,
+) {
   const person: AttentionItem = item({
     key,
     kind: "person",
@@ -47,6 +53,12 @@ function setup(kind: "github" | "teams" = "github", fail = false, empty = false)
     },
   });
   if (empty && person.brief?.person) person.brief.person.replies = [];
+  if (multiple && person.brief?.person)
+    person.brief.person.replies?.push({
+      id: "r2",
+      label: "Defer",
+      text: "I will review tomorrow.",
+    });
   const fn = stubFetch({
     "/api/attention": [
       person,
@@ -66,7 +78,7 @@ function setup(kind: "github" | "teams" = "github", fail = false, empty = false)
             author: "Finch",
             at: 1000,
             text: "<img onerror=alert(1)>",
-            url: "https://github.com/example/demo/issues/1#issuecomment-123",
+            url: url ?? "https://github.com/example/demo/issues/1#issuecomment-123",
           },
           url: "https://github.com/example/demo/issues/1",
           repoId: "demo",
@@ -197,4 +209,64 @@ it("constrains the reply region and wraps long text on narrow screens", () => {
   expect(css).toMatch(/width: min\(540px, 100%\)/);
   expect(css).toMatch(/\.person-choices\s*\{[^}]*overflow: auto;[^}]*min-height: 0;/);
   expect(css).toMatch(/\.person-choices \.opt\s*\{[^}]*overflow-wrap: anywhere;/);
+});
+
+it("opens only Teams-origin message URLs from the Teams action", async () => {
+  const url = "https://teams.microsoft.com/l/message/thread/123?context=test";
+  setup("teams", false, false, url);
+  const link = await screen.findByRole("link", { name: "Open in Teams ↗" });
+  expect(link.getAttribute("href")).toBe(url);
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  cleanup();
+  for (const unsafe of [
+    "https://github.com/example/demo/issues/1",
+    "http://teams.microsoft.com/l/message/123",
+    "https://teams.microsoft.com.evil.test/l/message/123",
+    "https://teams.microsoft.com@evil.test/l/message/123",
+    "javascript:alert(1)",
+    "/l/message/123",
+  ]) {
+    setup("teams", false, false, unsafe);
+    await screen.findByText("Open in Teams ↗");
+    expect(screen.queryByRole("link", { name: "Open in Teams ↗" })).toBeNull();
+    cleanup();
+  }
+});
+
+it.each(["github", "teams"] as const)("keeps independent reply drafts for %s", async (kind) => {
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  const fn = setup(kind, false, false, undefined, true);
+  const edits = await screen.findAllByRole("button", { name: "Edit first" });
+  const change = (value: string) =>
+    fireEvent.change(screen.getByRole("textbox", { name: "Suggested reply" }), {
+      target: { value },
+    });
+  fireEvent.click(edits[0]);
+  change("First draft");
+  fireEvent.click(edits[1]);
+  change("Second draft");
+  fireEvent.click(edits[0]);
+  expect(
+    (screen.getByRole("textbox", { name: "Suggested reply" }) as HTMLTextAreaElement).value,
+  ).toBe("First draft");
+  fireEvent.click(edits[1]);
+  expect(
+    (screen.getByRole("textbox", { name: "Suggested reply" }) as HTMLTextAreaElement).value,
+  ).toBe("Second draft");
+  const actions = screen.getAllByRole("button", {
+    name: kind === "github" ? "Post on GitHub" : "Copy for Teams",
+  });
+  fireEvent.click(actions[0]);
+  if (kind === "github") {
+    await screen.findByText("replied on GitHub");
+    expect(fn).toHaveBeenCalledWith(
+      `${path}/replies/r1/post`,
+      expect.objectContaining({ body: JSON.stringify({ text: "First draft" }) }),
+    );
+  } else {
+    await screen.findByText("reply copied for Teams");
+    expect(writeText).toHaveBeenCalledWith("First draft");
+  }
 });

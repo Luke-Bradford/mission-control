@@ -153,7 +153,14 @@ export function ItemPanel() {
           <BuildChips panel="discuss" />
           <span className="act">
             {thread && item?.brief?.person && (
-              <ExternalLink url={thread.message?.url ?? thread.url}>
+              <ExternalLink
+                url={thread.message?.url ?? thread.url}
+                allowedOrigin={
+                  item.brief.person.source.kind === "teams"
+                    ? "https://teams.microsoft.com"
+                    : "https://github.com"
+                }
+              >
                 Open in {item.brief.person.source.kind === "teams" ? "Teams" : "GitHub"} ↗
               </ExternalLink>
             )}
