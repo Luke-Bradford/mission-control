@@ -2359,6 +2359,24 @@ pre.diff .h {
   font-size: var(--fs-xs);
   color: var(--fg-2);
 }
+@media (prefers-reduced-motion: no-preference) {
+  .kpi .v.kpi-change {
+    animation: kpi-change 450ms ease-out;
+  }
+  @keyframes kpi-change {
+    from {
+      color: var(--ok);
+      transform: translateY(-2px);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+}
+.ticket-bars {
+  max-height: 320px;
+  overflow-y: auto;
+}
 .kpi.live .lbl::after {
   content: " ● live";
   color: var(--ok);

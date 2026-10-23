@@ -1,16 +1,19 @@
-import type { Telemetry } from "@mc/core";
+import type { BoardItem, Telemetry } from "@mc/core";
+import { ticketRef } from "../board/cards.ts";
+import { RESOURCES, useResources } from "../data.ts";
 import { cost, kTokens } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { TicketRef } from "../hud/RepoRef.tsx";
+import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { DASH, indexOf, NOT_TRACKED, type Scope } from "./common.ts";
-
-const TICKET_ROWS = 8;
 
 /** Cost (catalogue 2.6.6): tokens by ticket, totals and loop steps. */
 export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
-  const tickets = (t?.tokensByTicket ?? []).slice(0, TICKET_ROWS);
+  const tickets = t?.tokensByTicket ?? [];
+  const repoIds = [...new Set(tickets.flatMap((r) => parseTicket(r.ticket)?.repoId ?? []))];
+  const boards = useResources<BoardItem[]>(repoIds.map(RESOURCES.boards));
+  const titles = new Map(boards.flatMap((b) => (b.data ?? []).map((i) => [ticketRef(i), i.title])));
   const steps = t?.tokensByStep;
   const mostStep = Math.max(1, ...(steps?.map((r) => r.tokens) ?? []));
   const most = Math.max(1, ...tickets.map((r) => r.tokens));
@@ -27,18 +30,24 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
         ) : tickets.length === 0 ? (
           <p className="pb s muted">No ticket work in the last {scope.range}.</p>
         ) : (
-          <div className="pb">
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the complete ticket list
+          <section className="pb ticket-bars" aria-label="Ticket tokens" tabIndex={0}>
             {tickets.map((r) => (
               <HBar
                 key={r.ticket}
-                label={<TicketRef ticket={r.ticket} />}
+                label={
+                  <>
+                    <TicketRef ticket={r.ticket} />
+                    {titles.has(r.ticket) && <> {titles.get(r.ticket)}</>}
+                  </>
+                }
                 pct={(r.tokens / most) * 100}
                 value={kTokens(r.tokens)}
                 extra={cost(r.costUsd)}
-                title={`${r.ticket}: ${kTokens(r.tokens)} tokens`}
+                title={`${r.ticket}${titles.has(r.ticket) ? ` · ${titles.get(r.ticket)}` : ""}: ${kTokens(r.tokens)} tokens`}
               />
             ))}
-          </div>
+          </section>
         )}
       </Panel>
       <Panel id="tStepBars" title="Tokens by loop step" sub="repeats cost more">
