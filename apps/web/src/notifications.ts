@@ -1,8 +1,6 @@
-import type { AttentionBrief, PersonMessage } from "@mc/core";
+import type { AttentionBrief, CatchUpKind, PersonMessage } from "@mc/core";
 import { ApiError, apiPost } from "./api.ts";
 import { ACTIONS, hub, RESOURCES } from "./data.ts";
-
-export type CatchUpKind = "new" | "follow-up" | "old";
 
 export interface PersonThreadView {
   key: string;
