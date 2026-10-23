@@ -499,19 +499,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     requestErrors.set(req, error);
   });
 
-  app.addHook("preSerialization", async (req, reply, payload) => {
-    if (
-      reply.statusCode >= 500 &&
-      !requestErrors.has(req) &&
-      payload !== null &&
-      typeof payload === "object" &&
-      "error" in payload &&
-      typeof payload.error === "string"
-    ) {
-      requestErrors.set(req, new Error(payload.error));
-    }
-    return payload;
-  });
+  // Routes that translate exceptions into response objects must retain the caught
+  // error before Fastify serializes the public (sometimes deliberately generic) text.
+  const captureError = (reply: FastifyReply, error: unknown) => {
+    requestErrors.set(reply.request, error instanceof Error ? error : new Error(String(error)));
+  };
 
   app.addHook("onResponse", async (req, reply) => {
     if (reply.statusCode >= 400 || reply.elapsedTime > 1000) {
@@ -1063,6 +1055,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           bus.emit("config");
           return { account: added };
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof ConfigWriteError) {
             return reply
               .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
@@ -1102,6 +1095,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           return await repoPreview(await githubGql(), body.data, config, store);
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof PreviewError) return reply.code(e.status).send({ error: e.message });
           return reply
             .code(502)
@@ -1127,6 +1121,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           result = await addRepo(configPath, repo, now());
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof ConfigWriteError && (e.kind === "duplicate" || e.kind === "current")) {
             return reply.code(409).send({ error: e.message });
           }
@@ -1189,6 +1184,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const ticket = await fetchTicket(repo, n, await githubGql(), config.repos);
             return ticket ?? reply.code(404).send({ error: "unknown issue" });
           } catch (e) {
+            captureError(reply, e);
             return reply
               .code(502)
               .send({ error: `GitHub failed: ${e instanceof Error ? e.message : String(e)}` });
@@ -1226,6 +1222,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           );
           return { ...status, missingLabels: await missingLabels(gql, repo.github, TYPE_LABELS) };
         } catch (e) {
+          captureError(reply, e);
           return setupFailed(reply, e);
         }
       });
@@ -1246,6 +1243,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           return result;
         } catch (e) {
+          captureError(reply, e);
           return setupFailed(reply, e);
         }
       });
@@ -1308,6 +1306,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               now(),
             );
           } catch (e) {
+            captureError(reply, e);
             if (e instanceof ConfigWriteError) {
               const status = { missing: 404, conflict: 409, invalid: 400, current: 409 }[
                 e.kind as string
@@ -1458,6 +1457,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (paused) await writeFile(path, "", { flag: "wx" });
           else await unlink(path);
         } catch (e) {
+          captureError(reply, e);
           const benign = paused ? errCode(e) === "EEXIST" : errCode(e) === "ENOENT";
           if (!benign) {
             reply.log.warn({ code: errCode(e) }, `pause state update failed for ${loop.id}`);
@@ -1490,6 +1490,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return true;
       };
       const crewFail = (e: unknown, reply: FastifyReply) => {
+        captureError(reply, e);
         if (e instanceof CheckoutError) {
           // the detail (a path, git's own text) goes to the log, never into the response
           if (e.detail !== null) reply.log.warn({ detail: e.detail }, "crew checkout refused");
@@ -1692,7 +1693,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 return reply
                   .code(409)
                   .send({ error: "Source changed; refresh the item before posting." });
-            } catch {
+            } catch (e) {
+              captureError(reply, e);
               return reply
                 .code(502)
                 .send({ error: "Could not verify the source. Nothing was posted." });
@@ -1903,6 +1905,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           return await updater.check();
         } catch (e) {
+          captureError(reply, e);
           if (e instanceof UpdateError) {
             return reply.code(e.status).send({ error: e.message, checkedAt: e.checkedAt ?? null });
           }
@@ -1926,6 +1929,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const out = await updater.update();
             return "restarting" in out ? reply.code(202).send(out) : out;
           } catch (e) {
+            captureError(reply, e);
             if (e instanceof UpdateError) return reply.code(e.status).send({ error: e.message });
             reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
             return reply.code(500).send({ error: UPDATE_FAILED });
@@ -2027,7 +2031,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store.markDiscussionSent(thread.id, messageId);
           bus.emit("attention");
           return store.discussion(item.key, thread.id);
-        } catch {
+        } catch (e) {
+          captureError(reply, e);
           return reply.code(503).send({ error: "Could not send to FLIGHT. Retry this message." });
         } finally {
           discussionSends.delete(sendKey);

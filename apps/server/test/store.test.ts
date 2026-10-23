@@ -2058,6 +2058,58 @@ it("retains each reopened attention episode and closes notes by run", () => {
 });
 
 describe("hub retention", () => {
+  it("retains the latest plan while a newer run on the same ticket is kept", async () => {
+    const old = run({ id: "planner", ticket: "repo#494", endedAt: 1 });
+    const newer = run({ id: "worker", ticket: old.ticket });
+    store.upsertRun(old);
+    store.upsertRun(newer);
+    store.addLoopEvent("planner:plan", old.id, "Plan landed", 1);
+    await store.pruneHistory(100 * 86_400_000);
+    expect(store.planLanded(newer)).toBe(true);
+    expect(store.loopEventsOfRun(old.id)).toHaveLength(1);
+    expect(store.run(old.id)).not.toBeNull();
+  });
+
+  it("prunes plan owners and their readers with all children in one transaction", async () => {
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      for (const id of ["planner", "reader"]) {
+        store.upsertRun(run({ id, ticket: "repo#494", endedAt: 1 }));
+        store.addLoopEvent(`${id}:plan`, id, "Plan landed", 1);
+        store.claimLine(`fix:${id}:0:1`, {
+          runId: id,
+          seatId: "seat",
+          origin: "engine",
+          text: "fix",
+          at: 1,
+        });
+        db.prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, 'note', 1)").run(id);
+      }
+      // The first run deletion must already see the entire ticket's children removed.
+      db.exec(`CREATE TRIGGER atomic_ticket_prune BEFORE DELETE ON runs BEGIN
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM loop_events)
+          OR EXISTS (SELECT 1 FROM seat_lines) OR EXISTS (SELECT 1 FROM run_evidence)
+          THEN RAISE(ABORT, 'partial ticket prune') END;
+      END`);
+      await store.pruneHistory(100 * 86_400_000);
+      expect(store.run("planner")).toBeNull();
+      expect(store.run("reader")).toBeNull();
+      for (const table of ["loop_events", "seat_lines", "run_evidence"]) {
+        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an oversized run intact when its children exceed the sweep budget", async () => {
+    store.upsertRun(run({ endedAt: 1 }));
+    for (let i = 0; i < 5001; i++) store.addLoopEvent(String(i), "r1", "event", 1);
+    await store.pruneHistory(100 * 86_400_000);
+    expect(store.loopEventsOfRun("r1")).toHaveLength(5001);
+    expect(store.run("r1")).not.toBeNull();
+  });
+
   it.each(["seat_lines", "loop_events", "run_evidence", "review_findings"])(
     "protects live owners and measures expiry from completion: %s",
     async (table) => {
@@ -2137,9 +2189,12 @@ describe("hub retention", () => {
   it("bounds batches, yields between them, and caps each sweep", async () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
     try {
-      store.upsertRun(run({ endedAt: 1 }));
-      const insert = db.prepare("INSERT INTO loop_events VALUES (?, 'r1', 'text', 0)");
-      for (let i = 0; i < 5501; i++) insert.run(String(i));
+      const insert = db.prepare("INSERT INTO loop_events VALUES (?, ?, 'text', 0)");
+      for (let i = 0; i < 5501; i++) {
+        const id = String(i);
+        store.upsertRun(run({ id, endedAt: 1 }));
+        insert.run(id, id);
+      }
       let during = -1;
       const observe = setImmediate(() => {
         during = Number(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()?.n);
@@ -2161,16 +2216,16 @@ describe("hub retention", () => {
   it("prunes past each window, keeping boundary and newer rows and review history", async () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
     const now = 40 * 86_400_000;
-    const week = now - 7 * 86_400_000;
+    const seatCutoff = now - 30 * 86_400_000;
     const month = now - 30 * 86_400_000;
     store.upsertRun(run());
     for (const [i, offset] of [-1, 0, 1].entries()) {
-      store.upsertRun(run({ id: `seat${i}`, endedAt: week + offset }));
+      store.upsertRun(run({ id: `seat${i}`, endedAt: seatCutoff + offset }));
       store.upsertRun(run({ id: `owner${i}`, endedAt: month + offset }));
       db.prepare("INSERT INTO seat_lines VALUES (?, ?, 'seat', 'sys', 'text', ?)").run(
         String(i),
         `seat${i}`,
-        week + offset,
+        seatCutoff + offset,
       );
       db.prepare("INSERT INTO loop_events VALUES (?, ?, 'text', ?)").run(
         String(i),

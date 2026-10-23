@@ -1408,7 +1408,7 @@ export class Store {
         AND json_extract(r.loop, '$.aside') IS NULL
         AND NOT EXISTS (SELECT 1 FROM reviews v
           WHERE (v.author_run_id = r.id OR v.run_id = r.id)
-            AND (v.ended_at IS NULL OR v.state IN ('queued', 'starting', 'running')))
+            AND (v.ended_at IS NULL OR v.ended_at >= ? OR v.state IN ('queued', 'starting', 'running')))
         AND NOT EXISTS (SELECT 1 FROM seat_questions q WHERE q.run_id = r.id AND q.answered_at IS NULL)
         AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.state = 'pending'
           AND (d.target = r.ticket OR EXISTS (SELECT 1 FROM reviews v
@@ -1416,37 +1416,76 @@ export class Store {
               AND d.target = v.repo_id || '#' || v.pr_number)))
         AND NOT EXISTS (SELECT 1 FROM attention_notes n WHERE n.run_id = r.id
           AND n.cleared_at IS NULL AND n.dismissed_at IS NULL)`;
-    const tables = [
-      ["seat_lines", `run_id IN (${eligibleRun})`, now - 7 * day],
-      ["loop_events", `run_id IN (${eligibleRun})`, now - 30 * day],
-      ["run_evidence", `run_id IN (${eligibleRun})`, now - 30 * day],
-      [
-        "review_findings",
-        `author_run_id IN (${eligibleRun})
-        AND review_id IN (SELECT id FROM reviews WHERE ended_at < ?
-          AND state IN ('reported', 'failed', 'superseded'))
-        AND NOT EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
-          AND v.run_id IS NOT NULL AND v.run_id NOT IN (${eligibleRun}))`,
-        now - 30 * day,
-      ],
+    const cutoff = now - 30 * day;
+    const candidates = this.db
+      .prepare(`${eligibleRun} ORDER BY r.ended_at, r.id LIMIT ?`)
+      .all(cutoff, cutoff, HISTORY_SWEEP_MAX_ROWS) as { id: string }[];
+    const visited = new Set<string>();
+    const children = [
+      ["seat_lines", "run_id"],
+      ["loop_events", "run_id"],
+      ["run_evidence", "run_id"],
+      ["review_findings", "author_run_id"],
     ] as const;
     let remaining = HISTORY_SWEEP_MAX_ROWS;
-    for (const [table, condition, cutoff] of tables) {
-      const statement = this.db.prepare(
-        `DELETE FROM ${table} WHERE rowid IN
-          (SELECT rowid FROM ${table} WHERE ${condition} LIMIT ?)`,
-      );
-      while (remaining > 0) {
-        const limit = Math.min(HISTORY_BATCH_ROWS, remaining);
-        const args =
-          table === "review_findings" ? [cutoff, cutoff, cutoff, limit] : [cutoff, limit];
-        let deleted = 0;
-        this.transaction(() => {
-          deleted = Number(statement.run(...args).changes);
-        });
-        remaining -= deleted;
-        if (deleted > 0) await new Promise<void>((resolve) => setImmediate(resolve));
-        if (deleted < limit) break;
+    let batchRows = 0;
+    for (const { id } of candidates) {
+      if (visited.has(id)) continue;
+      let deleted = 0;
+      this.transaction(() => {
+        // Plan events are read across runs. A ticket with a plan is therefore an
+        // indivisible retention unit: its plan owners and all readers leave together.
+        const peers = this.db
+          .prepare(`SELECT peer.id FROM runs r JOIN runs peer
+          ON peer.repo_id = r.repo_id AND peer.ticket = r.ticket
+          WHERE r.id = ? AND r.ticket IS NOT NULL
+            AND EXISTS (SELECT 1 FROM loop_events e JOIN runs owner ON owner.id = e.run_id
+            WHERE owner.repo_id = r.repo_id AND owner.ticket = r.ticket AND e.key LIKE '%:plan')`)
+          .all(id) as { id: string }[];
+        const ids = peers.length ? peers.map((peer) => peer.id) : [id];
+        const unit = new Set(ids);
+        let size = 0;
+        for (const runId of ids) {
+          visited.add(runId);
+          // Recheck under the transaction, including after a yield between batches.
+          if (!this.db.prepare(`${eligibleRun} AND r.id = ?`).get(cutoff, cutoff, runId)) return;
+          // Findings are also read through a review's seat run. Keep them while
+          // that reader is retained outside this unit.
+          const readers = this.db
+            .prepare(`SELECT v.run_id AS id FROM review_findings f
+            JOIN reviews v ON v.id = f.review_id JOIN runs reader ON reader.id = v.run_id
+            WHERE f.author_run_id = ?`)
+            .all(runId) as { id: string }[];
+          if (readers.some((reader) => !unit.has(reader.id))) return;
+          size += Math.max(
+            1,
+            children.reduce(
+              (total, [table, owner]) =>
+                total +
+                Number(
+                  this.db
+                    .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${owner} = ?`)
+                    .get(runId)?.n,
+                ),
+              0,
+            ),
+          );
+        }
+        // Oversized units stay intact; never spend the budget by partially pruning a run.
+        if (size > remaining) return;
+        for (const runId of ids) {
+          for (const [table, owner] of children) {
+            this.db.prepare(`DELETE FROM ${table} WHERE ${owner} = ?`).run(runId);
+          }
+        }
+        for (const runId of ids) this.db.prepare("DELETE FROM runs WHERE id = ?").run(runId);
+        deleted = size;
+      });
+      remaining -= deleted;
+      batchRows += deleted;
+      if (batchRows >= HISTORY_BATCH_ROWS) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        batchRows = 0;
       }
       if (remaining === 0) break;
     }

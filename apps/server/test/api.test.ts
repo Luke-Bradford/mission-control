@@ -4694,3 +4694,43 @@ it("logs the error message and stack of an explicit 5xx response", async () => {
     stack: expect.stringContaining("Could not reach origin."),
   });
 });
+
+it("keeps claim keys and the review round for a retained run past seven days", async () => {
+  const retained = run({
+    id: "retained-loop",
+    endedAt: NOW - 8 * 86_400_000,
+    loop: { ...NEW_LOOP },
+  });
+  store.upsertRun(retained);
+  const key = `fix:${retained.id}:0:1`;
+  store.claimLine(key, {
+    runId: retained.id,
+    seatId: "flight-1",
+    origin: "engine",
+    text: "fix",
+    at: 1,
+  });
+  await store.pruneHistory(NOW);
+  expect(store.claimedKeys(retained.id)).toEqual({ [key]: 1 });
+  expect((await get(`/api/runs/${retained.id}/loop`)).json().round).toBe(2);
+});
+
+it.each([false, true])(
+  "logs the original caught exception with generic response: %s",
+  async (generic) => {
+    const error = generic
+      ? new Error("original private failure")
+      : new UpdateError(502, "Could not reach origin.");
+    error.stack = "Error: original failure\n    at originalThrowSite (updater.ts:123:4)";
+    updaterCheckError = error;
+    logs.length = 0;
+    const response = await post("/api/version/check");
+    expect(response.statusCode).toBe(generic ? 500 : 502);
+    expect(response.json().error).toBe(generic ? CHECK_FAILED : error.message);
+    const completed = logs
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.msg === "request completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0].err).toMatchObject({ message: error.message, stack: error.stack });
+  },
+);
