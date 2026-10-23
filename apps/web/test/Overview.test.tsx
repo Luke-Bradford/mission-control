@@ -29,6 +29,7 @@ import { setSession } from "../src/shell/session.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
 import {
   CONFIG,
+  CREW_CONFIG,
   crewRow,
   GITHUB_RATE,
   GITHUB_RATE_LINE,
@@ -125,6 +126,33 @@ describe("Overview panels", () => {
 });
 
 describe("Agents panel", () => {
+  it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
+    const crew = CREW_CONFIG.crew;
+    const first = crew?.sessions[0];
+    if (!crew || !first) throw new Error("no crew session");
+    const f = stub({
+      config: {
+        ...CREW_CONFIG,
+        crew: { ...crew, sessions: [first, { ...first, id: "s2" }] },
+      },
+    });
+    const { container } = render(<Overview />);
+    await settled(f, "/api/config");
+    const header = container.querySelector<HTMLElement>("#agentsP .ph") as HTMLElement;
+    fireEvent.click(within(header).getByRole("button", { name: "Add agent" }));
+    expect(window.location.pathname + window.location.search).toBe("/setup/sessions?add=s1");
+  });
+
+  it("disables Add agent when there is no crew session", async () => {
+    expect(CONFIG.crew?.sessions ?? []).toEqual([]);
+    const f = stub({ config: CONFIG });
+    render(<Overview />);
+    await settled(f, "/api/config");
+    expect((screen.getByRole("button", { name: "Add agent" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
   it("says Crew is off with the note when the server has crew off", async () => {
     stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
     const { container } = render(<Overview />);
@@ -296,7 +324,7 @@ describe("Agents panel", () => {
     expect(btn.textContent?.startsWith("FLIGHT")).toBe(true);
   });
 
-  it("subtitle counts the working agents and says FLIGHT is not counted; no Add agent", async () => {
+  it("subtitle counts the working agents and says FLIGHT is not counted", async () => {
     stub({
       rows: [
         crewRow({ id: "a" }),
@@ -306,7 +334,6 @@ describe("Agents panel", () => {
     });
     render(<Overview />);
     await screen.findByText("2 working · 3 agents · FLIGHT not counted");
-    expect(screen.queryByText("Add agent")).toBeNull();
   });
 
   const loopOf = (phase: CrewLoop["phase"], text: string, prNumber: number | null = null) => ({
@@ -1337,15 +1364,40 @@ describe("Account quota panel", () => {
     ).toBeTruthy();
     const rows = quota.querySelectorAll(".quotarow");
     expect(rows.length).toBe(2);
-    expect(rows[0]?.textContent).toContain("5h 100%");
-    expect(rows[0]?.textContent).toContain("7d 60%");
-    expect(rows[1]?.textContent).toContain("no 5h window");
+    expect(rows[0]?.textContent).toContain("5h 100% used · resets 15:00");
+    expect(rows[0]?.textContent).toContain("7d 60% used · resets Sun 18 Oct 19:00");
+    expect(rows[1]?.textContent).toContain("5h: none on this plan");
     expect(
       quota.querySelector('[title^="claude-main 7d: 60% used · not filling at this rate"]'),
     ).toBeTruthy();
     expect(quota.querySelector(".meter.full")).toBeTruthy();
     expect(quota.textContent).toContain(
-      "Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every 30 min. Hover a bar for its reset time.",
+      "Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every 30 min.",
+    );
+  });
+
+  it("every slot reads used %, then the reset: the time today, else weekday, date and time", async () => {
+    stub({
+      limits: [
+        limit5h({ accountId: "claude-main", used: 21, resetAt: NOW + 4 * HOUR + 20 * MIN }),
+        limit7d({ accountId: "claude-main", used: 73, resetAt: Date.UTC(2026, 9, 28, 2, 0) }),
+        limit7d({ accountId: "codex-main", used: 9, resetAt: Date.UTC(2026, 9, 29, 16, 22) }),
+      ],
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    await waitFor(() => expect(quota.querySelectorAll(".quotarow").length).toBe(2));
+    const rows = quota.querySelectorAll(".quotarow");
+    expect(rows[0]?.textContent).toContain("5h 21% used · resets 17:20");
+    expect(rows[0]?.textContent).toContain("7d 73% used · resets Wed 28 Oct 02:00");
+    expect(rows[1]?.textContent).toContain("5h: none on this plan");
+    expect(rows[1]?.textContent).toContain("7d 9% used · resets Thu 29 Oct 16:22");
+    // the none slot is shaped like a bar slot, and the 7d slots match across rows
+    const slot = (r: Element | undefined, i: number) => r?.children[i];
+    expect(slot(rows[1], 1)?.querySelector(".track")).toBeTruthy();
+    expect(slot(rows[1], 2)?.children[0]?.className).toBe(slot(rows[0], 2)?.children[0]?.className);
+    expect(slot(rows[1], 2)?.querySelectorAll("*").length).toBe(
+      slot(rows[0], 2)?.querySelectorAll("*").length,
     );
   });
 

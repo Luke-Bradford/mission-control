@@ -29,8 +29,10 @@ import {
   LOCK_HEADER_TITLE,
   LOCK_HISTORY_NOTE,
   LOCK_NOBODY_WAITING,
+  LOCK_OUTCOME_TEXT,
   lockHeaderText,
   lockHolderText,
+  lockUsualText,
   lockWaitingLine,
   MACHINE_COLLECTOR,
   METER_FULL_PCT,
@@ -590,4 +592,10 @@ describe("guard and test lock copy", () => {
     expect(GUARD_WINDOW_DAYS).toBe(7);
     expect(guardAckKey(12)).toBe("guard:12");
   });
+});
+
+it("describes the usual lock time and how a hold ended", () => {
+  expect(lockUsualText(9, false)).toBe("usually about 9 min");
+  expect(lockUsualText(9, true)).toBe("usually about 9 min · over its usual time");
+  expect(LOCK_OUTCOME_TEXT).toEqual({ done: "finished", freed: "freed with its run" });
 });

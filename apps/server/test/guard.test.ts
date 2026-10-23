@@ -80,6 +80,27 @@ describe("TestLock", () => {
     });
     afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+    it("keeps queue time and closes holds using the lock clock", async () => {
+      await lock.acquire({ runId: "A", toolUseId: "a" }, "guido-1", "test", 300000, live());
+      const waiting = lock.acquire(
+        { runId: "B", toolUseId: "b" },
+        "guido-2",
+        "test",
+        300000,
+        live(),
+      );
+      clock += 120000;
+      lock.releaseRun("A");
+      expect(await waiting).toBe(true);
+      expect(store.lockRuns(0)).toEqual([
+        expect.objectContaining({ runId: "B", queuedAt: 1000, startedAt: 121000, endedAt: null }),
+        expect.objectContaining({ runId: "A", endedAt: 121000, outcome: "freed" }),
+      ]);
+      clock += 3000;
+      lock.release({ runId: "B", toolUseId: "b" });
+      expect(store.lockRuns(0)[0]).toMatchObject({ endedAt: 124000, outcome: "done" });
+    });
+
     it("stores each held call and deletes it when released", async () => {
       await lock.acquire({ runId: "A", toolUseId: "a1" }, "guido-1", "pnpm -s test", 1000, live());
       await lock.acquire({ runId: "A", toolUseId: "a2" }, "guido-1", "pnpm -s test", 1000, live());

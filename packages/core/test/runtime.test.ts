@@ -81,6 +81,17 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
+  it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
+    expect(FLIGHT_TOOLS).toContain("draft_reply");
+    const argv = crewCliArgs({ ...base, mode: "read-only", mcTools: ["draft_reply"] });
+    const allowed = argv.slice(
+      argv.indexOf("--allowedTools") + 1,
+      argv.indexOf("--disallowedTools"),
+    );
+    expect(allowed).toContain("mcp__mc__draft_reply");
+    expect(allowed).not.toContain("mcp__mc__post_draft");
+  });
+
   it("starts a new writer session with isolation, the allow and deny lists, and --session-id", () => {
     const a = crewCliArgs(base);
     expect(a.slice(0, 6)).toEqual([
@@ -217,6 +228,7 @@ describe("the allowlist in phase 2b", () => {
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
       draftPr: "mcp__mc__draft_pr",
+      draftReply: "mcp__mc__draft_reply",
       askOperator: "mcp__mc__ask_operator",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
@@ -526,6 +538,7 @@ describe("crew constants", () => {
           "read_ci_log",
           "list_tickets",
           "update_brief",
+          "draft_reply",
         ],
         here: "head agent: assigns, unblocks, brings you decisions",
       },
@@ -611,6 +624,7 @@ describe("mc tool grants", () => {
       "read_ci_log",
       "list_tickets",
       "update_brief",
+      "draft_reply",
     ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");

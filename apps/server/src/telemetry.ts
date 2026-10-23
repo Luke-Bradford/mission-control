@@ -19,7 +19,7 @@ import {
   TICKET_SIZES,
 } from "@mc/core";
 import { WINDOWS } from "./collectors/usage-common.ts";
-import { agentIds, type CcConfig, configuredAgents } from "./config.ts";
+import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "./config.ts";
 import { crew } from "./hud.ts";
 import { type PrCache, runPrs, runTicket } from "./runview.ts";
 import type { Store } from "./store.ts";
@@ -63,7 +63,7 @@ function percentile(sorted: number[], p: number): number | null {
   return sorted[rank - 1] ?? null;
 }
 
-function median(values: number[]): number | null {
+export function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
@@ -147,6 +147,10 @@ export function telemetry(
   );
   const merged = prs.flatMap((p) => (p.mergedAt === null ? [] : [p.mergedAt]));
   const today: Telemetry["today"] = {
+    commits: store
+      .commitsSince(dayStart)
+      .filter((r) => scopedIds.has(r.agentId))
+      .reduce((sum, r) => sum + r.n, 0),
     tokens: Math.round(tokens),
     cacheRead: Math.round(cacheRead),
     costUsd,
@@ -226,6 +230,15 @@ export function telemetry(
         r.reviewId == null,
     );
   const quality: Telemetry["quality"] = {
+    retroFindingsPerPr:
+      reviewed.length === 0
+        ? null
+        : reviewed.reduce(
+            (sum, rvs) => sum + rvs.reduce((n, r) => n + r.blocking + r.minor, 0),
+            0,
+          ) / reviewed.length,
+    sentBackPrs: reviewed.filter((rvs) => rvs.some((r) => r.blocking > 0)).length,
+    humanReviewWaitMs: median(store.noteWaits(["ready", "review"], flowSince)),
     ciGreenFirstPushPct: ciKnown.length === 0 ? null : (green / ciKnown.length) * 100,
     prs: ciKnown.length,
     reviewRoundsPerPr:
@@ -280,6 +293,7 @@ export function telemetry(
 
   const elapsed = now - dayStart;
   const escalations = store.escalations().filter((e) => e.source === "title");
+  let agentWaitMs = 0;
   const utilisation: Telemetry["utilisation"] = agents.map((loop) => {
     if (elapsed <= 0) return { agentId: loop.id, working: 0, waiting: 0, idle: 100 };
     const clip = (a: number, b: number): Interval => [Math.max(a, dayStart), Math.min(b, now)];
@@ -296,11 +310,27 @@ export function telemetry(
     // A loop's wait counts only where it does not overlap its work; a seat's wait is subtracted from it.
     const waitMs =
       loop.kind === "crew" ? unionMs(wait) : unionMs([...work, ...wait]) - unionMs(work);
+    if (loop.kind === "crew") agentWaitMs += waitMs;
     const workMs = loop.kind === "crew" ? unionMs([...work, ...wait]) - waitMs : unionMs(work);
     const working = (workMs / elapsed) * 100;
     const waiting = (waitMs / elapsed) * 100;
     return { agentId: loop.id, working, waiting, idle: Math.max(0, 100 - working - waiting) };
   });
+
+  const answers = store.operatorAnswers(dayStart);
+  const responses = answers.map((a) => a.answeredAt - a.at).sort((a, b) => a - b);
+  const longest = answers.reduce<{ agentId: string; ms: number } | null>((best, a) => {
+    const ms = a.answeredAt - a.at;
+    return best === null || ms > best.ms ? { agentId: a.agentId, ms } : best;
+  }, null);
+  const capcom: NonNullable<Telemetry["capcom"]> = {
+    answered: answers.length,
+    medianMs: median(responses),
+    p90Ms: percentile(responses, 90),
+    stopped: store.operatorStops(dayStart),
+    longest,
+    agentWaitMs,
+  };
 
   const turnUsage: Telemetry["turnUsage"] = ids.map((agentId) => {
     const latest = latestRuns.get(agentId);
@@ -355,12 +385,22 @@ export function telemetry(
   );
 
   // ── cost: runs in range, pro rata to their wall time inside it ──
+  const tokensByStep: NonNullable<Telemetry["tokensByStep"]> = (
+    ["plan", "build", "review"] as const
+  ).map((step) => ({ step, tokens: 0, costUsd: null, runs: 0 }));
   const byTicket = new Map<string, { tokens: number; costUsd: number | null }>();
   type TotalsAcc = Omit<Telemetry["totals"][number], "cacheHitPct"> & { cacheCreate: number };
   const totals = new Map<string, TotalsAcc>();
   for (const r of inRange) {
     const f = share(r, since, now);
     const d = digests.get(r.id);
+    const step = r.reviewId != null ? "review" : crewSeatDef(config, r.agentId).loop;
+    const stepRow = tokensByStep.find((row) => row.step === step);
+    if (crewIds.has(r.agentId) && stepRow) {
+      stepRow.tokens += ioTokens(r) * f;
+      stepRow.costUsd = addCost(stepRow.costUsd, r.costUsd, f);
+      stepRow.runs += 1;
+    }
     const ticket = runTicket(r, runPrs(config, store, r, prCache));
     if (ticket !== null) {
       const t = byTicket.get(ticket) ?? { tokens: 0, costUsd: null };
@@ -432,6 +472,8 @@ export function telemetry(
     quota,
     machine,
     tokensByTicket,
+    tokensByStep: tokensByStep.map((row) => ({ ...row, tokens: Math.round(row.tokens) })),
+    capcom,
     totals: totalRows,
   };
 }

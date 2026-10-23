@@ -22,8 +22,8 @@ export interface LockKey {
 /** Where the lock's holds are kept across a restart (the Store). */
 export interface LockHolds {
   addLockHold(h: LockHoldRow): void;
-  deleteLockHold(runId: string, toolUseId: string): void;
-  deleteLockHolds(runId: string): void;
+  deleteLockHold(runId: string, toolUseId: string, at?: number): void;
+  deleteLockHolds(runId: string, at?: number): void;
 }
 
 interface Holder {
@@ -85,7 +85,7 @@ export class TestLock {
       calls: new Set(rows.filter((r) => r.runId === first.runId).map((r) => r.toolUseId)),
     };
     for (const other of new Set(rows.map((r) => r.runId))) {
-      if (other !== first.runId) this.store((s) => s.deleteLockHolds(other));
+      if (other !== first.runId) this.store((s) => s.deleteLockHolds(other, this.now()));
     }
     this.onChange();
   }
@@ -145,7 +145,7 @@ export class TestLock {
   release(key: LockKey): void {
     const h = this.holder;
     if (h === null || h.runId !== key.runId || !h.calls.delete(key.toolUseId)) return;
-    this.store((s) => s.deleteLockHold(key.runId, key.toolUseId));
+    this.store((s) => s.deleteLockHold(key.runId, key.toolUseId, this.now()));
     if (h.calls.size === 0) {
       this.grantNext();
       this.onChange();
@@ -161,7 +161,7 @@ export class TestLock {
       changed = true;
     }
     if (this.holder?.runId === runId) {
-      this.store((s) => s.deleteLockHolds(runId));
+      this.store((s) => s.deleteLockHolds(runId, this.now()));
       this.grantNext();
       changed = true;
     }
@@ -179,7 +179,7 @@ export class TestLock {
     };
   }
 
-  private hold(key: LockKey, seatId: string, command: string): Holder {
+  private hold(key: LockKey, seatId: string, command: string, queuedAt = this.now()): Holder {
     this.holder = {
       runId: key.runId,
       seatId,
@@ -187,13 +187,20 @@ export class TestLock {
       since: this.now(),
       calls: new Set([key.toolUseId]),
     };
-    this.storeAdd(this.holder, key.toolUseId, this.holder.since);
+    this.storeAdd(this.holder, key.toolUseId, this.holder.since, queuedAt);
     return this.holder;
   }
 
-  private storeAdd(h: Holder, toolUseId: string, since: number): void {
+  private storeAdd(h: Holder, toolUseId: string, since: number, queuedAt = since): void {
     this.store((s) =>
-      s.addLockHold({ runId: h.runId, toolUseId, seatId: h.seatId, command: h.command, since }),
+      s.addLockHold({
+        runId: h.runId,
+        toolUseId,
+        seatId: h.seatId,
+        command: h.command,
+        since,
+        queuedAt,
+      }),
     );
   }
 
@@ -217,7 +224,7 @@ export class TestLock {
         next.settle(false);
         continue;
       }
-      const h = this.hold(next.key, next.seatId, next.command);
+      const h = this.hold(next.key, next.seatId, next.command, next.since);
       next.settle(true);
       for (const w of this.waiting.filter((x) => x.key.runId === h.runId)) {
         this.waiting.splice(this.waiting.indexOf(w), 1);
@@ -226,7 +233,7 @@ export class TestLock {
           continue;
         }
         h.calls.add(w.key.toolUseId);
-        this.storeAdd(h, w.key.toolUseId, this.now());
+        this.storeAdd(h, w.key.toolUseId, this.now(), w.since);
         w.settle(true);
       }
       return;

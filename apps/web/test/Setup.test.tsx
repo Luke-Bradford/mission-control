@@ -647,6 +647,85 @@ describe("Setup tabs", () => {
   });
 
   describe("Sessions: seats", () => {
+    it.each(["s1", "s2", "unknown"])(
+      "?add=%s opens only the matching session's form",
+      async (id) => {
+        const crew = CREW_CONFIG.crew;
+        const first = crew?.sessions[0];
+        if (!crew || !first) throw new Error("no crew session");
+        load({
+          "/api/config": {
+            ...SESSIONS_CFG,
+            crew: { ...crew, sessions: [first, { ...first, id: "s2", seats: [] }] },
+          },
+          "/api/crew/changes": CHANGES,
+        });
+        window.history.replaceState(null, "", `/setup/sessions?add=${id}`);
+        render(<Setup tab="sessions" />);
+        await screen.findByRole("region", { name: "s/s2" });
+        await settled(fetchFn, "/api/crew/changes");
+        if (id === "unknown") {
+          expect(screen.queryByRole("form")).toBeNull();
+        } else {
+          const form = await screen.findByRole("form", { name: `Add agent to s/${id}` });
+          expect(screen.getAllByRole("form")).toEqual([form]);
+          fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+          expect(screen.queryByRole("form")).toBeNull();
+        }
+      },
+    );
+
+    it("replaces the add-agent URL, stays closed after Cancel, and does not reopen on reload", async () => {
+      load({ "/api/config": SESSIONS_CFG, "/api/crew/changes": CHANGES });
+      window.history.replaceState(null, "", "/setup/sessions?add=s1");
+      const historyLength = window.history.length;
+      const page = render(<Setup tab="sessions" />);
+      const form = await screen.findByRole("form", { name: "Add agent to s/s1" });
+      expect(window.location.search).toBe("");
+      expect(window.location.pathname).toBe("/setup/sessions");
+      expect(window.history.length).toBe(historyLength);
+      // The same form element: clearing the URL did not remount Sessions and close it.
+      expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBe(form);
+      fireEvent.click(within(screen.getByRole("form")).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("form")).toBeNull();
+      page.unmount();
+      render(<Setup tab="sessions" />);
+      await screen.findByRole("region", { name: "s/s1" });
+      expect(screen.queryByRole("form")).toBeNull();
+    });
+
+    it("renders safely without a form while crew changes are unresolved", async () => {
+      load({ "/api/config": SESSIONS_CFG });
+      const answer = fetchFn.getMockImplementation();
+      if (!answer) throw new Error("no fetch implementation");
+      fetchFn.mockImplementation((input, init) =>
+        input === "/api/crew/changes" ? new Promise<Response>(() => {}) : answer(input, init),
+      );
+      window.history.replaceState(null, "", "/setup/sessions?add=s1");
+      render(<Setup tab="sessions" />);
+      await settled(fetchFn, "/api/config");
+      expect(fetchFn).toHaveBeenCalledWith("/api/crew/changes", expect.anything());
+      expect(screen.getByRole("region", { name: "s/s1" })).toBeTruthy();
+      expect(screen.queryByRole("form")).toBeNull();
+      expect(window.location.search).toBe("?add=s1");
+    });
+
+    it("keeps the requested session visible outside the session filter after Cancel", async () => {
+      load({ "/api/config": SESSIONS_CFG, "/api/crew/changes": CHANGES });
+      setSession("site-builder");
+      const page = at("sessions");
+      await settled(fetchFn, "/api/config");
+      expect(screen.getByText(SESSIONS_NOTE)).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "s/s1" })).toBeNull();
+      page.unmount();
+      window.history.replaceState(null, "", "/setup/sessions?add=s1");
+      render(<Setup tab="sessions" />);
+      const form = await screen.findByRole("form", { name: "Add agent to s/s1" });
+      fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("form")).toBeNull();
+      expect(screen.getByRole("region", { name: "s/s1" })).toBeTruthy();
+    });
+
     const BACKUP = "config.yaml.bak-x";
     const SAVED = { backup: BACKUP, changes: { ...CHANGES, applied: [] } };
     const post = (path: string) => {

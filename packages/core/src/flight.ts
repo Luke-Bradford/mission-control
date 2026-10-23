@@ -623,3 +623,18 @@ export function wakeSummary(s: FlightState): string {
 export function wakeLine(s: FlightState): string {
   return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)}\n${WAKE_ASK}\n${JSON.stringify(s)}`;
 }
+
+/** A reply prepared by FLIGHT; only the HUD may post it. */
+export interface ReplyDraft {
+  id: number;
+  target: string;
+  kind: "issue" | "pr";
+  text: string;
+  createdAt: number;
+  state: "pending" | "posted";
+}
+export const DRAFT_REPLY_DESCRIPTION =
+  "Prepare a reply or comment for the operator to edit and approve. Only stores a draft; never posts. Target is a configured repo id followed by #number; kind is issue or pr.";
+export const DRAFT_BAD_TARGET = "Target must be a configured repo#number.";
+export const draftedReplyText = (id: number): string =>
+  `Draft ${id} saved for the operator to approve.`;

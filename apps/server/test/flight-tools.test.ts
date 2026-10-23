@@ -62,13 +62,21 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { type CcConfig, type CrewSeatConfig, SEAT_ID } from "../src/config.ts";
+import {
+  type CcConfig,
+  type CrewSeatConfig,
+  crewSeatGrants,
+  crewSeatMode,
+  SEAT_ID,
+} from "../src/config.ts";
 import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
 import { createFlightTools, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
+import { RunTokens } from "../src/mcp/tokens.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
@@ -463,6 +471,7 @@ describe("tool list", () => {
       "read_ci_log",
       "list_tickets",
       "update_brief",
+      "draft_reply",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -3461,5 +3470,89 @@ describe("list_tickets", () => {
     expect(paged.more).toBe(true);
     ghImpl = async () => failed("x");
     expect(await call("list_tickets", { limit: 5 })).toEqual(refused(READ_NO_GITHUB));
+  });
+});
+
+describe("draft_reply", () => {
+  it("stores a reply without GitHub calls, and exposes no posting tool", async () => {
+    const result = await call("draft_reply", {
+      target: "mc#12",
+      kind: "issue",
+      text: "Prepared reply",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(store.drafts()).toEqual([
+      {
+        id: 1,
+        target: "mc#12",
+        kind: "issue",
+        text: "Prepared reply",
+        createdAt: NOW,
+        state: "pending",
+      },
+    ]);
+    expect(ghCalls).toEqual([]);
+    expect(tools.filter((t) => /draft.*post|post.*draft/.test(t.name))).toEqual([]);
+  });
+  it("is available through FLIGHT's MCP grant, which has no draft posting tool", async () => {
+    const tokens = new RunTokens();
+    const token = tokens.issue("flight-1", "r-flight");
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      tokens,
+      seatMode: (id) => crewSeatMode(cfg, id),
+      seatGrants: (id) => crewSeatGrants(cfg, id),
+      mcpTools: () => tools,
+    });
+    const rpc = (name: string, args: object) =>
+      app.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/json, text/event-stream",
+        },
+        payload: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
+      });
+    try {
+      const draft = await rpc("draft_reply", {
+        target: "mc#12",
+        kind: "issue",
+        text: "MCP prepared reply",
+      });
+      expect(draft.json().result.isError).toBeUndefined();
+      expect(store.drafts()[0]?.text).toBe("MCP prepared reply");
+      const response = await rpc("post_draft", { id: store.drafts()[0]?.id });
+      expect(response.json().error.message).toBe("unknown tool");
+      expect(ghCalls).toEqual([]);
+      expect(store.drafts()).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("refuses invalid targets and non-FLIGHT callers", async () => {
+    for (const target of [
+      "other-repo#1",
+      "https://github.com/o/mc/issues/1",
+      "mc#0",
+      "mc#1 --help",
+    ]) {
+      expect((await call("draft_reply", { target, kind: "pr", text: "Reply" })).isError).toBe(true);
+    }
+    live("guido-1", "r-guido");
+    expect(
+      (
+        await call(
+          "draft_reply",
+          { target: "mc#1", kind: "issue", text: "Reply" },
+          ctx("guido-1", "r-guido"),
+        )
+      ).isError,
+    ).toBe(true);
+    expect(store.drafts()).toEqual([]);
+    expect(ghCalls).toEqual([]);
   });
 });

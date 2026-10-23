@@ -10,16 +10,22 @@ import { hub } from "../src/data.ts";
 import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
+import { postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
 import { incomingCards, incomingThreads, NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
 import { rel } from "../src/fmt.ts";
 import { type PersonThreadView, whereOf } from "../src/notifications.ts";
-import { DRAFTS_NOT_TRACKED, Flight } from "../src/pages/Flight.tsx";
+import { Flight } from "../src/pages/Flight.tsx";
 import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
-import { stubFetch } from "./fetchStub.ts";
+import { Toast } from "../src/shell/Toast.tsx";
+import { stubFetch as fetchStub } from "./fetchStub.ts";
+
+const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
+  fetchStub({ "/api/drafts": [], ...routes });
+
 import {
   boardItem,
   brief,
@@ -238,7 +244,7 @@ describe("FLIGHT page", () => {
         expect(container.querySelector(`#${id}`)?.textContent, id).toContain(FLIGHT_NO_SEAT),
       );
     }
-    expect(container.querySelector("#draftsP")?.textContent).toContain(DRAFTS_NOT_TRACKED);
+    expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send.");
   });
 
   it("Work in flight is empty without crew runs, and does not list loops", async () => {
@@ -973,7 +979,7 @@ describe("FLIGHT's brief", () => {
     );
   });
 
-  it("Incoming lists cards new in Backlog or Refinement; Watch list is FLIGHT's risks; Drafts are not tracked", async () => {
+  it("Incoming lists cards new in Backlog or Refinement; Watch list is FLIGHT's risks; Drafts are empty", async () => {
     const cards = [
       boardItem({ issueNumber: 12, status: "Backlog", createdAt: NOW - 30 * HOUR }),
       boardItem({ issueNumber: 11, status: "Refinement", createdAt: NOW - 2 * HOUR }),
@@ -997,7 +1003,7 @@ describe("FLIGHT's brief", () => {
     await waitFor(() =>
       expect(container.querySelector("#watchP")?.textContent).toContain("The cache may thrash."),
     );
-    expect(container.querySelector("#draftsP")?.textContent).toContain(DRAFTS_NOT_TRACKED);
+    expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send.");
   });
 
   it("Incoming and Watch list say so when empty", async () => {
@@ -1015,5 +1021,74 @@ describe("FLIGHT's brief", () => {
     await waitFor(() =>
       expect(container.querySelector("#watchP")?.textContent).toContain(WATCH_EMPTY),
     );
+  });
+});
+
+describe("Draft replies", () => {
+  it("shows the panel and count, and posts edited text only after Post", async () => {
+    let drafts = [
+      {
+        id: 1,
+        target: "shop-app#12",
+        kind: "issue",
+        text: "Prepared reply",
+        createdAt: NOW,
+        state: "pending",
+      },
+    ];
+    const fn = stubFetch({
+      "/api/drafts": () => ({ status: 200, body: drafts }),
+      "/api/config": CONFIG,
+      "POST /api/drafts/1/post": () => {
+        drafts = [];
+        return { status: 200, body: { ok: true } };
+      },
+    });
+    const { container } = render(
+      <>
+        <Flight />
+        <Toast />
+      </>,
+    );
+    expect(await screen.findByText("Prepared reply")).toBeTruthy();
+    expect(container.querySelector(".sitstats")?.textContent).toContain("1 drafts to send");
+    expect(screen.getByText("shop-app#12")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Draft for shop-app#12" }), {
+      target: { value: "Approved reply" },
+    });
+    expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Post on GitHub" }));
+    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
+    expect(screen.getByText(postedText("shop-app#12"))).toBeTruthy();
+    const post = fn.mock.calls.find(([p]) => p === "/api/drafts/1/post");
+    expect(JSON.parse(post?.[1]?.body as string)).toEqual({ text: "Approved reply" });
+    expect(container.querySelector(".sitstats")?.textContent).toContain("0 drafts to send");
+  });
+
+  it("discards a draft and displays posting failures", async () => {
+    let drafts = [
+      {
+        id: 2,
+        target: "shop-app#4",
+        kind: "pr",
+        text: "PR reply",
+        createdAt: NOW,
+        state: "pending",
+      },
+    ];
+    stubFetch({
+      "/api/drafts": () => ({ status: 200, body: drafts }),
+      "POST /api/drafts/2/post": () => ({ status: 400, body: { error: "mentions are refused" } }),
+      "POST /api/drafts/2/discard": () => {
+        drafts = [];
+        return { status: 200, body: {} };
+      },
+    });
+    render(<Flight />);
+    fireEvent.click(await screen.findByRole("button", { name: "Post on GitHub" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("mentions are refused");
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
   });
 });
