@@ -890,3 +890,45 @@ export interface VersionInfo {
   /** Why Update is refused; null when it may run. */
   reason: string | null;
 }
+
+/** Provider CLI status in the same machine binding used by usage collection. */
+export interface CliAccountStatus {
+  accountId: AccountId;
+  provider: "claude" | "codex";
+  binding: "machine";
+  identity: string | null;
+  plan: string | null;
+  status: "logged-in" | "not-logged-in" | "unknown";
+  checkedAt: number;
+  /** Fixed safe failure text, never CLI output. */
+  detail: string | null;
+}
+
+export type NotificationCategory =
+  | "people"
+  | "decisions"
+  | "stalls"
+  | "prs"
+  | "capcom"
+  | "awayDigest"
+  | "quota"
+  | "agentMessages";
+
+/** Notify me about, on every signed-in device (catalogue §2.7.6). */
+export interface NotificationPreferences {
+  categories: Record<NotificationCategory, boolean>;
+  quietHours: {
+    start: string;
+    end: string;
+    timezone: string;
+    stallsBypass: boolean;
+  };
+  softChime: boolean;
+}
+
+export interface NotificationEvent {
+  id: string;
+  category: NotificationCategory;
+  at: number;
+  text: string;
+}

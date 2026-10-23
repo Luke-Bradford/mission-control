@@ -70,6 +70,7 @@ import {
 } from "@mc/core";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { readAccountStatus } from "./accounts.ts";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
@@ -91,9 +92,12 @@ import {
   DEFAULT_MAX_SEATS,
 } from "./config.ts";
 import {
+  accountDuplicateReason,
+  addAccount,
   addRepo,
   ConfigWriteError,
   duplicateReason,
+  NewAccountBody,
   NewRepoBody,
   RepoLocation,
   SeatsBody,
@@ -910,6 +914,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
         },
       );
+
+      // Reader: apps/web/src/setup/Accounts.tsx (account status; UI integration follows)
+      api.get("/accounts/status", async () =>
+        Promise.all(config.accounts.map((account) => readAccountStatus(account, now()))),
+      );
+      // Reader: apps/web/src/setup/Accounts.tsx (Check; UI integration follows)
+      api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        return readAccountStatus(account, now());
+      });
+      // Reader: apps/web/src/setup/Accounts.tsx (Add account; UI integration follows)
+      api.post("/accounts", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = NewAccountBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const duplicate = accountDuplicateReason(config.accounts, body.data);
+        if (duplicate) return reply.code(409).send({ error: duplicate });
+        try {
+          const result = await addAccount(deps.configPath, body.data, now());
+          const added = result.config.accounts.find((a) => a.id === body.data.name);
+          if (added) config.accounts.push(added);
+          bus.emit("config");
+          return { account: added };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
+              .send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
 
       api.get("/limits", async () => limitRows(config, store, now()));
       // Reader: apps/web/src/data.ts#RESOURCES (the Limits view's GitHub row)

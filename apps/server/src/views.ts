@@ -367,6 +367,9 @@ export function configView(
     accounts: config.accounts.map((a) => ({
       id: a.id,
       vendor: a.vendor,
+      binding: "machine",
+      canCheck: true,
+      signInHint: `Sign in with the ${a.vendor === "claude" ? "Claude" : "Codex"} CLI on this machine.`,
       alertAt: a.alertAt,
       stopAt: a.stopAt,
     })),

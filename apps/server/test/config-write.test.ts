@@ -15,9 +15,11 @@ import { DEFAULT_SEAT_COMMANDS, type NewRepo, type SeatInput } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig, seatInput } from "../src/config.ts";
 import {
+  addAccount,
   addRepo,
   CONFIG_BACKUPS_KEEP,
   ConfigWriteError,
+  NewAccountBody,
   NewRepoBody,
   noSessionText,
   RepoLocation,
@@ -574,5 +576,45 @@ describe("SeatsBody", () => {
       false,
     );
     expect(SeatsBody.safeParse({ base: [], seats: [{ ...s, x: 1 }] }).success).toBe(false);
+  });
+});
+
+describe("addAccount", () => {
+  it("adds configuration only, with a byte-for-byte backup and no other changes", async () => {
+    const text = COMMENTED;
+    const doc = (await import("yaml")).parseDocument(text);
+    const accounts = doc.get("accounts", true);
+    if (!(await import("yaml")).isSeq(accounts)) throw new Error("no accounts");
+    accounts.items = accounts.items.filter(
+      (item) => (item as { get(k: string): unknown }).get("vendor") !== "codex",
+    );
+    writeFileSync(path, doc.toString());
+    const before = readFileSync(path);
+    const current = loadConfig(path);
+    const result = await addAccount(path, { name: "secondary", provider: "codex" }, NOW);
+    expect(readFileSync(result.backup)).toEqual(before);
+    expect(result.config).toEqual({
+      ...current,
+      accounts: [
+        ...current.accounts,
+        { id: "secondary", vendor: "codex", alertAt: 80, stopAt: 100 },
+      ],
+    });
+    await expect(addAccount(path, { name: "secondary", provider: "claude" }, NOW)).rejects.toThrow(
+      /name/,
+    );
+    await expect(addAccount(path, { name: "another", provider: "codex" }, NOW)).rejects.toThrow(
+      /one account per provider/,
+    );
+  });
+  it("validates provider and a short safe name", () => {
+    expect(NewAccountBody.safeParse({ name: "primary", provider: "claude" }).success).toBe(true);
+    for (const body of [
+      { name: "../bad", provider: "claude" },
+      { name: "primary", provider: "other" },
+      { name: "primary", provider: "codex", token: "secret" },
+    ]) {
+      expect(NewAccountBody.safeParse(body).success).toBe(false);
+    }
   });
 });

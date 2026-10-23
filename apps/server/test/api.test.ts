@@ -459,6 +459,9 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
+  ["GET", "/api/accounts/status"],
+  ["POST", "/api/accounts/claude-main/check"],
+  ["POST", "/api/accounts", { name: "another", provider: "claude" }],
   ["POST", "/api/config/reload"],
   ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
@@ -930,6 +933,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(202);
         continue;
       }
+      if (url === "/api/accounts" && method === "POST") {
+        expect(r.statusCode).toBe(409);
+        expect(r.json().error).toContain("one account per provider");
+        continue;
+      }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
     }
   });
@@ -1058,6 +1066,7 @@ describe("local access", () => {
             ?.replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
+            .replace("/claude-main/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
@@ -2704,8 +2713,24 @@ describe("config", () => {
       operator: { id: "operator", timezone: "Europe/London" },
       githubLogin: "octo-op",
       accounts: [
-        { id: "claude-main", vendor: "claude", alertAt: 85, stopAt: 95 },
-        { id: "codex-main", vendor: "codex", alertAt: 70, stopAt: 80 },
+        {
+          id: "claude-main",
+          vendor: "claude",
+          alertAt: 85,
+          stopAt: 95,
+          binding: "machine",
+          canCheck: true,
+          signInHint: "Sign in with the Claude CLI on this machine.",
+        },
+        {
+          id: "codex-main",
+          vendor: "codex",
+          alertAt: 70,
+          stopAt: 80,
+          binding: "machine",
+          canCheck: true,
+          signInHint: "Sign in with the Codex CLI on this machine.",
+        },
       ],
       repos: [
         {
@@ -4216,3 +4241,17 @@ describe("test lock history", () => {
     expect(h.usualMs).toEqual({ test: 200 });
   });
 });
+
+// Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
+vi.mock("../src/accounts.ts", () => ({
+  readAccountStatus: async (account: { id: string; vendor: string }, now: number) => ({
+    accountId: account.id,
+    provider: account.vendor,
+    binding: "machine",
+    identity: null,
+    plan: null,
+    status: "unknown",
+    checkedAt: now,
+    detail: null,
+  }),
+}));
