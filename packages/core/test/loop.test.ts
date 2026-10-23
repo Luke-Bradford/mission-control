@@ -2313,16 +2313,16 @@ describe("merge workspace", () => {
     });
   });
 
-  it("behind main: a flag note keyed behind, no merge", () => {
+  it("behind main: a clear, reviewed, green PR merges", () => {
     const r = reconcile(merge({}, { gate: gateOf({ containsMain: false }) }));
-    noMerge(r);
     expect(r.loop.phase).toBe("review");
-    expect(r.actions).toContainEqual({
-      kind: "note",
-      key: `behind:r1:${SHA}`,
-      noteKind: "flag",
-      text: `${REF}: PR #12 is behind main (${MAIN.slice(0, 7)}), so Mission Control has not merged it; it merges once the branch contains main`,
-    });
+    expect(r.actions).toContainEqual({ kind: "merge", sha: SHA });
+    expect(kindsOf(r.actions)).not.toContain("update-branch");
+  });
+
+  it("behind main alone raises no hold note", () => {
+    const r = reconcile(merge({}, { gate: gateOf({ containsMain: false }) }));
+    expect(kindsOf(r.actions)).not.toContain("note");
   });
 
   it("strays park the run with kind gate", () => {
@@ -2379,7 +2379,7 @@ describe("merge workspace", () => {
     );
   });
 
-  it("a hard-rule touch behind main: the behind note, not the hard-rule ready note", () => {
+  it("a hard-rule touch behind main: the operator merges", () => {
     const r = reconcile(
       merge(
         {},
@@ -2390,10 +2390,13 @@ describe("merge workspace", () => {
       ),
     );
     noMerge(r);
-    expect(r.actions).toContainEqual(
-      expect.objectContaining({ key: `behind:r1:${SHA}`, noteKind: "flag" }),
-    );
-    expect(r.actions).not.toContainEqual(expect.objectContaining({ key: readyKey }));
+    expect(r.actions).not.toContainEqual(expect.objectContaining({ key: `behind:r1:${SHA}` }));
+    expect(r.actions).toContainEqual({
+      kind: "note",
+      key: readyKey,
+      noteKind: "ready",
+      text: readyHardRuleText(REF, 12, ["CLAUDE.md"]),
+    });
   });
 
   it("the head moved off the pushed sha: no merge", () => {

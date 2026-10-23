@@ -81,7 +81,7 @@ import type {
   RerunStateResult,
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
-import { MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
+import { MERGE_CONFLICTING, MERGE_HEAD_MOVED, MERGE_WAITS_ON_MAIN } from "../src/engine/publish.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
@@ -2528,12 +2528,13 @@ describe("the engine runs reviews", () => {
       expect(noteKeys()).not.toContain(hardRulesUnsetNoteKey(REPO));
     });
 
-    it("a branch that is behind main is not merged", async () => {
+    it("a branch that is only behind main merges without updating or a hold note", async () => {
       h.gate = { ...need(h.gate), containsMain: false };
       await gateOpen();
       await h.engine.reconcileRun(RUN);
-      expect(h.steps).toEqual([]);
-      expect(noteKeys().some((k) => k.startsWith("behind:"))).toBe(true);
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(h.updates).toEqual([]);
+      expect(noteKeys().some((k) => k.startsWith("behind:"))).toBe(false);
     });
 
     it("mc/review not passing on GitHub is not merged", async () => {
@@ -2564,10 +2565,17 @@ describe("the engine runs reviews", () => {
         h.gate = { ...need(h.gate), mainSha: MAIN, containsMain: false };
       };
 
+      async function conflictingReview(): Promise<void> {
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", mergeable: "CONFLICTING" });
+        reported(first().id, []);
+      }
+
       it("a clean update moves the run to ci, pushes the merge, and reviews the new sha", async () => {
         behindMain();
         h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
-        await gateOpen();
+        await conflictingReview();
         await vi.waitFor(() => expect(h.pushes.length).toBeGreaterThanOrEqual(2));
         expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
         expect(loopOf()).toMatchObject({ phase: "ci", pushFor: SHA_B });
@@ -2687,7 +2695,7 @@ describe("the engine runs reviews", () => {
       it("a clean update that leaves the PR's diff as it was carries the review", async () => {
         behindMain();
         h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
-        await gateOpen();
+        await conflictingReview();
         await vi.waitFor(() => expect(h.pushes.length).toBeGreaterThanOrEqual(2));
         h.gate = { ...need(h.gate), containsMain: true };
         setPr({ ci: "passing", headSha: SHA_B });
@@ -2711,10 +2719,10 @@ describe("the engine runs reviews", () => {
           { ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true },
           { ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame: true },
         ];
-        await gateOpen();
+        await conflictingReview();
         await vi.waitFor(() => expect(store.runPush(RUN)?.sha).toBe(SHA_B));
-        setPr({ ci: "passing", headSha: SHA_B });
-        // main moves again before the first merge is judged
+        setPr({ ci: "passing", headSha: SHA_B, mergeable: "CONFLICTING" });
+        // main moves again and conflicts before the first merge is judged
         h.gate = { ...need(h.gate), mainSha: "9".repeat(40), containsMain: false };
         await vi.waitFor(async () => {
           await h.engine.reconcileRun(RUN);
@@ -2783,7 +2791,7 @@ describe("the engine runs reviews", () => {
         h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
         // a busy seat is offered the line again, and nothing is recorded until it goes through
         h.busy = true;
-        await gateOpen();
+        await conflictingReview();
         await vi.waitFor(() => expect(loopOf()?.mainMerge).toBeTruthy());
         await h.engine.tick();
         expect(sentKeys()).toEqual([]);
@@ -2842,7 +2850,7 @@ describe("the engine runs reviews", () => {
 
       it("waits while the worktree has changes, and asks again on the next pass", async () => {
         behindMain();
-        await gateOpen();
+        await conflictingReview();
         await vi.waitFor(() => expect(h.updates).toHaveLength(1));
         expect(loopOf().phase).toBe("review");
         await h.engine.tick();
@@ -2855,7 +2863,7 @@ describe("the engine runs reviews", () => {
         h.updateResults = [
           { ok: false, text: "merging main into the branch failed", transient: false },
         ];
-        await gateOpen();
+        await conflictingReview();
         await vi.waitFor(() => expect(loopOf().phase).toBe("parked"));
         expect(loopOf().parked).toMatchObject({
           kind: "refused",
@@ -3003,6 +3011,74 @@ describe("the engine runs reviews", () => {
       expect(loopOf().gate ?? null).toBeNull();
       expect(loopOf().touches ?? null).toBeNull();
       expect(loopTexts().some((t) => t.includes(MERGE_HEAD_MOVED))).toBe(false);
+    });
+
+    it.each([
+      ["MERGEABLE", MERGE_CONFLICTING],
+      ["UNKNOWN", MERGE_CONFLICTING],
+    ] as const)(
+      "refreshes a stale %s PR after a merge conflict without counting refusals",
+      async (mergeable, text) => {
+        const refusal = { ok: false, text, transient: true } as const;
+        h.stepResults.merge = Array(4).fill(refusal);
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", mergeable });
+        reported(first().id, []);
+        await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+        for (const n of [1, 2, 3, 4]) {
+          if (n > 1) {
+            clock += ENGINE_TICK_MS;
+            await h.engine.reconcileRun(RUN);
+          }
+          expect(h.steps.filter((s) => s === "merge")).toHaveLength(n);
+          expect(h.polls).toBe(n);
+          expect(loopOf()).toMatchObject({
+            phase: "review",
+            parked: null,
+            gate: null,
+            transient: 0,
+            lastRefusal: null,
+          });
+        }
+        expect(authorEnded()).toEqual([]);
+        expect(h.steps).not.toContain("close");
+        // The refreshed GitHub and gate facts route the next pass to an update.
+        setPr({ ci: "passing", mergeable: "CONFLICTING" });
+        h.gate = { ...need(h.gate), containsMain: false };
+        await h.engine.reconcileRun(RUN);
+        expect(h.gateReads.at(-1)?.known).toBe(false);
+        expect(h.updates).toEqual([{ mainSha: need(h.gate).mainSha, worktree: join(dir, "wt") }]);
+        expect(h.steps.filter((s) => s === "merge")).toHaveLength(4);
+      },
+    );
+
+    it("counts a merge refused for another reason (a branch policy), as before", async () => {
+      const refusal = {
+        ok: false,
+        text: "gh pr merge: Pull request is not mergeable: the base branch policy prohibits the merge.",
+        transient: true,
+      } as const;
+      h.stepResults.merge = Array(4).fill(refusal);
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "passing", mergeable: "MERGEABLE" });
+      reported(first().id, []);
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      expect(loopOf().transient).toBe(1);
+      expect(loopOf().lastRefusal).not.toBeNull();
+    });
+
+    it("leaves one Activity line while a merge waits on a conflict", async () => {
+      h.stepResults.merge = Array(2).fill({ ok: false, text: MERGE_CONFLICTING, transient: true });
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "passing", mergeable: "MERGEABLE" });
+      reported(first().id, []);
+      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      clock += ENGINE_TICK_MS;
+      await h.engine.reconcileRun(RUN);
+      expect(loopTexts().filter((t) => t === MERGE_WAITS_ON_MAIN)).toHaveLength(1);
     });
 
     it("a repo that is not a merge workspace takes no merge step, whatever was planned", async () => {
