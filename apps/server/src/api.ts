@@ -1,7 +1,9 @@
+import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   ACK_BATCH_MAX,
+  ACTIVITY_LIMIT,
   type AgentStream,
   type AttentionItem,
   type AwaySettings,
@@ -63,6 +65,7 @@ import {
   type TelemetryRange,
   type TestLockHistory,
   type TestLockView,
+  type Topic,
   TYPE_LABELS,
   UPDATE_UNAVAILABLE,
   type UsageSample,
@@ -570,6 +573,55 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   }
 
+  // These aggregates repeat expensive store/filesystem reads. Topics invalidate immediately;
+  // the short TTL also refreshes elapsed times and files changed outside the collectors.
+  const responseCache = new Map<string, { payload: string; at: number; stamp: string }>();
+  const responseStamp = () => {
+    let profiles = "";
+    if (deps.profilesPath !== undefined) {
+      try {
+        const file = statSync(deps.profilesPath);
+        profiles = `${file.mtimeMs}:${file.ctimeMs}:${file.size}`;
+      } catch {
+        /* A missing profiles file uses the built-ins. */
+      }
+    }
+    return JSON.stringify([
+      store.readVersion(),
+      config,
+      profiles,
+      deps.lock?.state(),
+      deps.hubLogin?.(),
+    ]);
+  };
+  let responseRevision = 0;
+  const revisions = new WeakMap<object, { revision: number; stamp: string }>();
+  const cachedPaths = new Set(["/api/telemetry", "/api/attention", "/api/config"]);
+  app.addHook("preHandler", async (req, reply) => {
+    if (req.method !== "GET" || !cachedPaths.has(req.url.split("?")[0] ?? "")) return;
+    const stamp = responseStamp();
+    revisions.set(req, { revision: responseRevision, stamp });
+    const cached = responseCache.get(req.url);
+    if (cached && cached.stamp === stamp && now() - cached.at < 10_000)
+      return reply.type("application/json").send(cached.payload);
+  });
+  app.addHook("onSend", async (req, reply, payload) => {
+    const started = revisions.get(req);
+    if (
+      !started ||
+      started.revision !== responseRevision ||
+      reply.statusCode !== 200 ||
+      typeof payload !== "string"
+    )
+      return;
+    // Telemetry may fill only part of its commit cache this call; keep reading next time.
+    if (started.stamp !== responseStamp()) return;
+    const cached = responseCache.get(req.url);
+    if (cached && cached.stamp === started.stamp && now() - cached.at < 10_000) return;
+    if (responseCache.size >= 64) responseCache.clear();
+    responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
+  });
+
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () =>
     notifications.reconcile(
@@ -598,6 +650,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     notificationTimer.unref();
   };
   const unsubscribeNotifications = bus.subscribe((topic) => {
+    if (topic !== "machine") {
+      responseRevision++;
+      responseCache.clear();
+    }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
   });
@@ -1251,7 +1307,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
 
-      api.get("/activity", async () => activity(config, store, now()));
+      // Reader: apps/web/src/data.ts
+      api.get<{ Querystring: { since?: string; limit?: string } }>(
+        "/activity",
+        async (req, reply) => {
+          const { since, limit } = req.query;
+          const integer = (value: unknown) =>
+            typeof value === "string" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
+          if (
+            (since !== undefined && !integer(since)) ||
+            (limit !== undefined && (!integer(limit) || Number(limit) < 1))
+          )
+            return reply.code(400).send({
+              error: "since must be a non-negative timestamp; limit must be a positive integer",
+            });
+          return activity(config, store, now(), {
+            ...(since === undefined ? {} : { since: Number(since) }),
+            ...(limit === undefined ? {} : { limit: Math.min(Number(limit), ACTIVITY_LIMIT) }),
+          });
+        },
+      );
 
       api.get("/config", async () =>
         configView(
@@ -2170,6 +2245,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return body.data;
       });
 
+      // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
       api.get("/stream", (_req, reply) => {
         reply.hijack();
         const res = reply.raw;
@@ -2180,11 +2256,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           "x-accel-buffering": "no",
         });
         res.write(": connected\n\n");
-        const unsubscribe = bus.subscribe((topic) => {
+        let machineTimer: ReturnType<typeof setTimeout> | undefined;
+        const send = (topic: Topic) =>
           res.write(`event: changed\ndata: ${JSON.stringify({ topic })}\n\n`);
+        const unsubscribe = bus.subscribe((topic) => {
+          if (topic !== "machine") {
+            send(topic);
+            return;
+          }
+          if (machineTimer !== undefined) return;
+          machineTimer = setTimeout(() => {
+            machineTimer = undefined;
+            send("machine");
+          }, 10_000);
         });
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
+          clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
           streams.delete(end);

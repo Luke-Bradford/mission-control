@@ -1634,7 +1634,17 @@ describe("Activity panel", () => {
       summary: null,
     }));
     let current: ActivityRow[] = base;
-    stub({ activityNow: () => current });
+    // The refetch is a delta from the newest row's millisecond; answer it as the server does.
+    const since = NOW - 1;
+    stub({
+      activityNow: () => current,
+      extra: {
+        [`/api/activity?since=${since}`]: () => ({
+          status: 200,
+          body: current.filter((r) => r.at > since),
+        }),
+      },
+    });
     const { container } = render(<Overview />);
     await screen.findByText("event 0");
     const list = container.querySelector("#actList") as HTMLElement;

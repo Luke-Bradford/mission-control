@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { navigate } from "../src/router.ts";
@@ -33,9 +33,9 @@ describe("App", () => {
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
     ["/setup/loops", "page-setup", null],
-  ])("%s renders its page and marks its tab", (path, id, tabName) => {
+  ])("%s renders its page and marks its tab", async (path, id, tabName) => {
     const { container } = at(path);
-    expect(container.querySelector(`main > section#${id}`)).not.toBeNull();
+    await waitFor(() => expect(container.querySelector(`main > section#${id}`)).not.toBeNull());
     const nav = screen.getByRole("navigation", { name: "Pages" });
     const current = within(nav)
       .queryAllByRole("link")
@@ -64,7 +64,7 @@ describe("App", () => {
   it("an unknown path shows Overview at /", async () => {
     const { container } = at("/nope");
     await vi.waitFor(() => expect(window.location.pathname).toBe("/"));
-    expect(container.querySelector("#page-overview")).not.toBeNull();
+    await waitFor(() => expect(container.querySelector("#page-overview")).not.toBeNull());
   });
 
   it.each([
@@ -89,7 +89,7 @@ describe("App", () => {
       fireEvent.keyDown(document.body, { key: "b" });
     });
     expect(window.location.pathname).toBe("/board");
-    expect(container.querySelector("#page-board")).not.toBeNull();
+    await waitFor(() => expect(container.querySelector("#page-board")).not.toBeNull());
     act(() => {
       fireEvent.keyDown(document.body, { key: "?" });
     });
@@ -127,9 +127,11 @@ describe("App", () => {
     expect(localStorage.getItem("mc-build-status")).toBe("true");
   });
 
-  it("a popped-out agent (?popout=1) renders only the Agent page, titled with its id", () => {
+  it("a popped-out agent (?popout=1) renders only the Agent page, titled with its id", async () => {
     const { container, unmount } = at("/agent/shop-app-ta?popout=1");
-    expect(container.querySelector("main > section#page-agent")).not.toBeNull();
+    await waitFor(() =>
+      expect(container.querySelector("main > section#page-agent")).not.toBeNull(),
+    );
     expect(screen.queryByRole("navigation", { name: "Pages" })).toBeNull();
     expect(container.querySelector(".keys")).toBeNull();
     expect(container.querySelector("#dock")).toBeNull();
@@ -187,9 +189,9 @@ describe("App", () => {
     await screen.findByRole("button", { name: "Pop out" });
   });
 
-  it("the setup tabs follow the URL", () => {
+  it("the setup tabs follow the URL", async () => {
     at("/setup");
-    const tabs = screen.getByRole("group", { name: "Setup" });
+    const tabs = await screen.findByRole("group", { name: "Setup" });
     expect(
       within(tabs).getByRole("button", { name: "Sessions" }).getAttribute("aria-pressed"),
     ).toBe("true");

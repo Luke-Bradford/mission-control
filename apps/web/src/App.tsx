@@ -1,13 +1,7 @@
 import type { AttentionItem, Crew } from "@mc/core";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { RESOURCES, startStream, useResource } from "./data.ts";
-import { Agent } from "./pages/Agent.tsx";
-import { BoardPage } from "./pages/BoardPage.tsx";
-import { Comms, ITEM_GONE } from "./pages/Comms.tsx";
-import { Flight } from "./pages/Flight.tsx";
-import { Overview } from "./pages/Overview.tsx";
-import { Setup } from "./pages/Setup.tsx";
-import { Telemetry } from "./pages/Telemetry.tsx";
+
 import {
   agentPath,
   isPopout,
@@ -28,6 +22,7 @@ import { ItemPanel } from "./shell/ItemPanel.tsx";
 import { installKeys } from "./shell/keys.ts";
 import {
   closeItem,
+  ITEM_GONE,
   openHelp,
   syncItem,
   toggleDock,
@@ -38,6 +33,18 @@ import { PopoutContext } from "./shell/popout.ts";
 import { getSelectedAgent, nextAgent, setSelectedAgent } from "./shell/selection.ts";
 import { getSession, useSessionScope } from "./shell/session.ts";
 import { Toast, toast } from "./shell/Toast.tsx";
+
+const Agent = lazy(() => import("./pages/Agent.tsx").then((m) => ({ default: m.Agent })));
+const BoardPage = lazy(() =>
+  import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
+);
+const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
+const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
+const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
+const Setup = lazy(() => import("./pages/Setup.tsx").then((m) => ({ default: m.Setup })));
+const Telemetry = lazy(() =>
+  import("./pages/Telemetry.tsx").then((m) => ({ default: m.Telemetry })),
+);
 
 /** The document title (index.html's); a popped-out agent is `{id} · Mission Control`. */
 const TITLE = "Mission Control";
@@ -92,7 +99,9 @@ export function App() {
       <div className={`${cls} popout`}>
         <main>
           <PopoutContext.Provider value={true}>
-            <Agent id={agentId} />
+            <Suspense fallback={<p>Loading…</p>}>
+              <Agent id={agentId} />
+            </Suspense>
           </PopoutContext.Provider>
         </main>
         <Toast />
@@ -103,7 +112,9 @@ export function App() {
     <div className={cls}>
       <Header page={shown.page} />
       <div className="shell">
-        <main>{r && <PageView route={r} />}</main>
+        <main>
+          <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
+        </main>
         <Dock />
       </div>
       <Footer />
