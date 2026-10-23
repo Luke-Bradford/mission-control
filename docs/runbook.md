@@ -262,8 +262,11 @@ working checkout or a loop's. To set up the first one, a GUIDO seat on this repo
 
    Absolute paths (`~` allowed). An entry that is or holds `crew.worktrees`, a session checkout or
    a temp dir (the hub's, or `/tmp`) is refused at start-up
-   (`crew.deny_read: <path> holds the crew's own folders`), so list the folders beside
-   `~/code/mc-crew`, not `~/code` itself.
+   (`crew.deny_read: <path> holds the crew's own folders`), and so is one inside `crew.worktrees`
+   or a session checkout (`… is inside the crew's own folders`). Letter case is ignored, and the
+   folders need not exist yet. List the folders beside `~/code/mc-crew`, not `~/code` itself.
+   A loop repo whose main working tree holds a crew folder stays readable to seats; the hub logs
+   `crew: loop <id>'s repo <repo> stays readable to seats` at crew start.
 
 5. Restart the hub: it reads the config, the `crew` section included, only at startup, and Update
    restarts it only when `main` has moved.

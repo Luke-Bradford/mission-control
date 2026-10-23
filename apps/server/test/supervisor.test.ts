@@ -62,7 +62,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import { CliHold } from "../src/cli-update.ts";
-import { type CcConfig, type CrewSeatConfig, isInside } from "../src/config.ts";
+import { type CcConfig, type CrewSeatConfig, isInside, realish } from "../src/config.ts";
 import { refillQueues, seatMayTake, type TakeDeps, takeNext } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
@@ -2026,6 +2026,32 @@ describe("the crew lock", () => {
     const { sup, log } = make({ secondSession: true });
     sup.start();
     expect(log.mock.calls.filter(([m]) => m === FLAT_NOTE)).toHaveLength(1);
+  });
+
+  it("crew start says once that a loop repo holding crew.worktrees stays readable", () => {
+    const { sup, log, cfg } = make();
+    const main = join(dir, "shop-app");
+    git(dir, "init", "-q", "-b", "main", main);
+    git(main, "commit", "-q", "--allow-empty", "-m", "init");
+    git(main, "worktree", "add", "-q", "-b", "loop", join(dir, "shop-app-loop"));
+    cfg.loops = [
+      {
+        id: "ta",
+        repoId: "mc",
+        kind: "ta-loop",
+        accountId: "claude-main",
+        stateDir: join(dir, "shop-app-loop", "var"),
+        worktree: join(dir, "shop-app-loop"),
+        launchdLabel: "com.example.ta",
+      },
+    ];
+    const crew = cfg.crew;
+    if (!crew) throw new Error("no crew");
+    crew.worktrees = join(main, "crew-worktrees");
+    sup.start();
+    const folder = realish(crew.worktrees);
+    const note = `crew: loop ta's repo ${realish(main)} stays readable to seats: it holds ${folder}`;
+    expect(log.mock.calls.filter(([m]) => m === note)).toHaveLength(1);
   });
 
   it("crew start says nothing about flat worktrees with one session", () => {
