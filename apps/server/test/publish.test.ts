@@ -1249,6 +1249,43 @@ describe("merge steps", () => {
       }
     });
 
+    it("answers a refused merge with the conflict when GitHub now reports one", async () => {
+      mainSame();
+      ghAnswers = [
+        view("OPEN"),
+        () => ({ code: 1, stdout: "", stderr: "Pull request o/mc#12 is not mergeable" }),
+        view("OPEN", SHA, { mergeable: "CONFLICTING" }),
+      ];
+      expect(await publisher().merge(R, SHA)).toEqual({
+        ok: false,
+        text: MERGE_CONFLICTING,
+        transient: true,
+      });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "merge", "view"]);
+    });
+
+    it.each(["MERGEABLE", "UNKNOWN"])(
+      "keeps gh's own refusal when the PR still reads %s, so the engine counts it",
+      async (mergeable) => {
+        mainSame();
+        ghAnswers = [
+          view("OPEN"),
+          () => ({ code: 1, stdout: "", stderr: "the base branch policy prohibits the merge" }),
+          view("OPEN", SHA, { mergeable }),
+        ];
+        const r = await publisher().merge(R, SHA);
+        expect(r).toMatchObject({ ok: false, transient: true });
+        expect(r.ok === false && r.text).not.toBe(MERGE_CONFLICTING);
+      },
+    );
+
+    it("reports a conflict before the base check", async () => {
+      mainSame();
+      ghAnswers = [view("OPEN", SHA, { baseRefName: "release", mergeable: "CONFLICTING" })];
+      expect(await publisher().merge(R, SHA)).toMatchObject({ text: MERGE_CONFLICTING });
+      expect(gitCalls).toEqual([]);
+    });
+
     it("counts a merge whose reply was lost as success when the PR is then merged", async () => {
       mainSame();
       ghAnswers = [view("OPEN"), () => ({ code: 1, stdout: "", stderr: "502" }), view("MERGED")];
