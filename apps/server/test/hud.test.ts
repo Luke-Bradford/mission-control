@@ -1210,10 +1210,11 @@ describe("crew seats in the rows", () => {
         note("behind:c1:abc");
         expect(waitOf(withCrew())).toBe("main");
       });
-      it("retro: a review with a review seat, a push and a queued review of it", () => {
+      /** A run in review at epoch 1, pushed at abc123, with a queued review of it; its id. */
+      const queueReview = (): number => {
         start({ phase: "review", epoch: 1 });
         store.setRunPush({ runId: "c1", sha: "abc123", at: NOW });
-        store.requestReview({
+        const id = store.requestReview({
           authorRunId: "c1",
           repoId: "shop-app",
           seatId: "RETRO-1",
@@ -1224,10 +1225,43 @@ describe("crew seats in the rows", () => {
           round: 1,
           at: NOW,
         });
+        if (id === null) throw new Error("no review");
+        return id;
+      };
+      /** The crew config with RETRO-1 a scratch seat, which makes it the review seat. */
+      const withReviewSeat = (): CcConfig => {
         const c = withCrew();
         const seats = c.crew?.sessions[0]?.seats ?? [];
         for (const s of seats) if (s.id === "RETRO-1") s.mode = "scratch";
-        expect(waitOf(c)).toBe("retro");
+        return c;
+      };
+      it("retro: a review with a review seat, a push and a queued review of it", () => {
+        queueReview();
+        expect(waitOf(withReviewSeat())).toBe("retro");
+      });
+      it("null: a review with no review seat", () => {
+        queueReview();
+        expect(waitOf(withCrew())).toBeNull();
+      });
+      it("null: a reported review the seat is fixing", () => {
+        const id = queueReview();
+        store.setReviewState(id, ["queued"], "running", { at: NOW, runId: "rr" });
+        store.recordFindings(id, "rr", {
+          verdict: { spec: "pass", quality: "fail" },
+          summary: "s",
+          findings: [
+            { severity: "Important", file: "a.ts", line: 1, summary: "s", scenario: "w", fix: "f" },
+          ],
+          at: NOW,
+        });
+        store.claimLine(`fix:c1:1:${id}`, {
+          runId: "c1",
+          seatId: "GUIDO-1",
+          origin: "engine",
+          text: "fix",
+          at: NOW,
+        });
+        expect(waitOf(withReviewSeat())).toBeNull();
       });
       it("null: working, and an ended run", () => {
         start({ phase: "working" });
