@@ -95,6 +95,10 @@ crew:
   # Input + output tokens one build-loop run may use (the engine will park a run that goes over).
   # Default 400000.
   # run_token_budget: 400000
+  # Start only cards labelled `lane:<lane>` (home or work); unset: any card, as before lanes.
+  # lane_default: true also starts cards with no lane label; set it on one hub only.
+  # lane: home
+  # lane_default: true
   sessions:
     - id: mission-control
       repo_id: mission-control

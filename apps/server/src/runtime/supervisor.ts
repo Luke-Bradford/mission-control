@@ -42,6 +42,7 @@ import {
   crewMcpConfig,
   crewPnpmStoreDir,
   DEFAULT_CREW_NODE,
+  eligibleToStart,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
   guardHookCommand,
@@ -51,10 +52,13 @@ import {
   MCP_PATH,
   modeOfSeat,
   NOT_ASIDE,
+  notOnBoardText,
   notReviewSeatText,
   notWatchSeatText,
   PNPM_STORE_ENV,
   REVIEW_NOT_WANTED,
+  type RepoId,
+  type RepoRules,
   ROLE_PROMPT_DIR,
   type Run,
   type RunLoop,
@@ -62,6 +66,7 @@ import {
   reworkFirstText,
   type SeatSessionRow,
   type SeatState,
+  START_NO_RULES,
   scratchStartRefusedText,
   seatCallSign,
   seatDef,
@@ -84,6 +89,7 @@ import {
   realish,
 } from "../config.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
+import { RepoRulesError } from "../engine/rules.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
@@ -221,6 +227,10 @@ export interface SupervisorDeps {
   bus: ChangeBus;
   /** The DB path: transcripts and prompt files live in `{its dir}/crew/`. */
   dbPath: string;
+  /** A repo's board rules (read at origin/HEAD); an error refuses every start in the repo. */
+  rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
+  /** The hub's own `gh` login; null when it could not be read, so any assigned card is another's. */
+  login: () => string | null;
   now?: () => number;
   /** Default `"claude"`; tests pass `process.execPath` and the fake CLI in `commandArgs`. */
   command?: string;
@@ -1184,6 +1194,35 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
+      // Every way a run starts ends here: the one eligibility check, before a worktree or a claim.
+      const board = store.board(info.repo.id);
+      const card = board.find((i) => i.issueNumber === issue);
+      if (card === undefined) throw new SupervisorError(422, notOnBoardText(ref));
+      const rules = await deps.rules(info.repo.id);
+      if (rules instanceof RepoRulesError) throw new SupervisorError(502, START_NO_RULES);
+      const refusal = eligibleToStart({
+        repoId: info.repo.id,
+        issue,
+        card: {
+          labels: ticket.labels,
+          assignees: card.assignees ?? [],
+          blockedBy: card.blockedBy,
+          size: card.size,
+        },
+        rules,
+        seat: { call: call(info), area: info.seat.area, loop: def.loop },
+        login: deps.login(),
+        hasRun:
+          store.activeTickets().has(ref) ||
+          store
+            .staleTakes(Number.POSITIVE_INFINITY)
+            .some((r) => r.repoId === info.repo.id && r.issue === issue && r.seatId !== seatId),
+        lane: config.crew?.lane,
+        laneDefault: config.crew?.laneDefault ?? false,
+        body: ticket.body,
+        closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+      });
+      if (refusal !== null) throw new SupervisorError(422, refusal);
       const title = ticket.title;
       // A planner has no branch: a detached checkout of the default branch, for reading only
       const planner = def.loop === "plan";
