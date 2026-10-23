@@ -158,14 +158,11 @@ const shownPrs = (store: Store): Set<string> => {
 const shownKey = (p: { repoId: string; number: number; state: string }): string =>
   `${p.repoId}#${p.number}:${p.state}`;
 
-const holdKey = (ref: string, waitsOn: number, prState: string): string =>
-  `hold:${ref}:${waitsOn}:${prState}`;
-
 /** FLIGHT has received `s`: each merged or closed PR in it is not listed again, nor a hold re-announced. */
 export function markPrsShown(store: Store, s: FlightState): void {
   const shown = shownPrs(store);
   for (const h of s.holds) {
-    if (h.prState !== "open") shown.add(holdKey(h.ref, h.waitsOn, h.prState));
+    if (h.prState !== "open") store.markHoldTold(h.ref, h.prState);
   }
   for (const p of s.prs) {
     if (p.state !== "open") shown.add(shownKey({ repoId: s.repo, number: p.pr, state: p.state }));
@@ -382,9 +379,11 @@ export function flightState(i: {
       parked: asideParked(r),
     }));
 
-  const prStates = new Map(store.pullRequests(session.repoId).map((p) => [p.number, p.state]));
+  const prStates = new Map<number, FlightState["prs"][number]["state"]>(
+    store.pullRequests(session.repoId).map((p) => [p.number, p.state]),
+  );
   // A hold ends when the board has moved its card past Backlog (or closed or dropped it). A PR
-  // gone from the stored read left the poll's lists, so its hold is ready to release.
+  // gone from the stored read is reported as unknown, for FLIGHT to check.
   const holds = store.activeHolds().flatMap((h) => {
     const card = board.find((b) => `${b.repoId}#${b.issueNumber}` === h.ref);
     // The stored board lags the move to Backlog until the next poll, so a card is only past its
@@ -400,14 +399,14 @@ export function flightState(i: {
       return [];
     }
     if (!h.seen && hudColumnOf(card) === "Backlog") store.markHoldSeen(h.ref);
-    const prState = prStates.get(h.waitsOn) ?? "closed";
+    const prState: FlightState["holds"][number]["prState"] = prStates.get(h.waitsOn) ?? "unknown";
     return [
       {
         ref: h.ref,
         waitsOn: h.waitsOn,
         ageMin: Math.floor((now - h.at) / 60_000),
         prState,
-        told: shownPrs(store).has(holdKey(h.ref, h.waitsOn, prState)),
+        told: h.toldState === prState,
       },
     ];
   });
