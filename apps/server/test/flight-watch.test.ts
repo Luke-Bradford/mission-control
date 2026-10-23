@@ -248,6 +248,21 @@ describe("FLIGHT's PR list", () => {
     expect(listed()[0]?.stale).toBe(false);
   });
 
+  it("FLIGHT's first digest lists a merged PR once, and no second wake follows", async () => {
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    const first = JSON.parse(startCalls[0]?.first?.split("\n").at(-1) ?? "") as FlightState;
+    expect(first.prs.map((p) => [p.pr, p.state])).toEqual([
+      [7, "merged"],
+      [8, "open"],
+    ]);
+    expect(listed().map((p) => p.pr)).toEqual([8]);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(sendCalls).toEqual([]);
+  });
+
   it("lists a merged PR once, then drops it", () => {
     store.upsertPullRequests("mc", [stored(7), stored(8)], T0);
     store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0 + MIN);
