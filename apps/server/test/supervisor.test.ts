@@ -3040,8 +3040,11 @@ describe("the mc tools and the guard (phase 2b)", () => {
     expect(readFileSync(recordFile, "utf8")).not.toContain(token);
     expect(JSON.stringify(log.mock.calls)).not.toContain(token);
     // only these two files hold it
-    const holders = readdirSync(crewDir()).filter((f) =>
-      readFileSync(join(crewDir(), f), "utf8").includes(token),
+    // the keeper's folder holds the CLI's spec (its env), not the token: files only
+    const holders = readdirSync(crewDir()).filter(
+      (f) =>
+        statSync(join(crewDir(), f)).isFile() &&
+        readFileSync(join(crewDir(), f), "utf8").includes(token),
     );
     expect(holders.sort()).toEqual([`${runId}.mcp.json`, `${runId}.token`]);
   });
@@ -3216,11 +3219,15 @@ describe("the mc tools and the guard (phase 2b)", () => {
   }, 30_000);
 
   it("a hook whose node is missing still blocks (|| exit 2)", async () => {
-    const m = make({ node: join(dir, "no-such-node") });
+    // the keeper runs under crew.node too, so the hook's node is made missing after the start
+    const m = make();
     m.sup.start();
     await m.sup.startRun("guido-1", 42);
     await until(() => expect(starts()).toHaveLength(1));
-    const r = spawnSync("/bin/sh", ["-c", hookCommand()], {
+    const missing = `'${join(dir, "no-such-node")}'`;
+    const command = hookCommand().replace(`'${process.execPath}'`, missing);
+    expect(command).toContain(missing);
+    const r = spawnSync("/bin/sh", ["-c", command], {
       input: "{}",
       encoding: "utf8",
       timeout: 20_000,
@@ -3276,7 +3283,8 @@ describe("the mc tools and the guard (phase 2b)", () => {
     const tokenPath = crewTokenPath(dbPath, runId);
     const victim = join(dir, "victim.txt");
     writeFileSync(victim, "victim\n");
-    symlinkSync(victim, tokenPath); // kept by the sweep: the run is still active
+    unlinkSync(tokenPath); // the stopped hub left it; the sweep keeps it for an active run
+    symlinkSync(victim, tokenPath);
     const { sup } = make();
     sup.start();
     await until(() => expect(lstatSync(tokenPath).isSymbolicLink()).toBe(false));

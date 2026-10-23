@@ -1280,6 +1280,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       controlTimeoutMs: deps.controlTimeoutMs,
       stopGraceMs: deps.stopGraceMs,
     });
+    // The attach awaited: the operator or the engine may have ended the run meanwhile. Whoever did
+    // recorded the end and set the seat; nothing here may overwrite it.
+    const moved = () => store.seatSession(row.seatId)?.runId !== runId;
+    if (moved()) {
+      if (found.kind === "attached") {
+        dropGrant(row.seatId, runId);
+        await found.session.close();
+        removeKeeper(row.seatId, runId);
+      }
+      return;
+    }
     if (found.kind === "attached") {
       if (stopping) return found.session.detach();
       // no await before the seat is tracked: the replay's first line must find its listeners
@@ -1313,6 +1324,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     // Two CLIs must never run one session: the old keeper and its CLI are gone before the resume.
     const ended = await endKeeper(dir, 2 * (deps.stopGraceMs ?? STOP_GRACE_MS) + 5000);
+    if (moved()) return;
     if (!ended) {
       log(`${row.seatId}: could not end the old keeper`);
       return failResume(row, RESUME_FAILED);
