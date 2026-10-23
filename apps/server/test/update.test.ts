@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { PREVIEW_SERVER, type SeatSessionRow, UP_TO_DATE_MAIN } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -66,6 +66,12 @@ function upstreamCommit(name: string) {
   git(dev, "add", "-A");
   git(dev, "commit", "-qm", name);
   git(dev, "push", "-q", "origin", "main");
+}
+
+/** A commit on origin/main adding the file `path`. */
+function upstreamPath(path: string) {
+  mkdirSync(dirname(join(dev, path)), { recursive: true });
+  upstreamCommit(path);
 }
 
 const web = (...p: string[]) => join(hub, "apps", "web", ...p);
@@ -465,6 +471,75 @@ describe("update", () => {
       expect((e as UpdateError).message).toBe(reason);
       expect(calls.map((c) => c.cmd)).not.toContain(UPDATE_CMDS[0]);
     }
+  });
+
+  describe("a change under apps/web/ and docs/ only", () => {
+    const MID_TURN = "GUIDO-1 is mid-turn";
+
+    it("swaps without a restart or a mid-turn refusal, and the running sha becomes the new head", async () => {
+      upstreamPath("apps/web/src/x.txt");
+      upstreamPath("docs/y.md");
+      const { u, calls, exit } = updater({ crewRefusal: () => MID_TURN });
+      expect(await u.update()).toEqual({ swapped: true });
+      const cmds = calls.map((c) => c.cmd);
+      expect(cmds.filter((c) => UPDATE_CMDS.includes(c))).toEqual(UPDATE_CMDS);
+      expect(readFileSync(web("dist", "index.html"), "utf8")).toBe("new");
+      expect(readFileSync(logPath, "utf8")).toContain("web-only update; not restarting");
+      expect(exit).not.toHaveBeenCalled();
+      const v = await u.version();
+      expect(v.sha).toBe(head());
+      expect(v.behind).toBe(0);
+    });
+
+    it("lets check() say canUpdate while a seat is mid-turn", async () => {
+      upstreamPath("apps/web/src/x.txt");
+      const { u } = updater({ crewRefusal: () => MID_TURN });
+      expect(await u.check()).toMatchObject({ canUpdate: true, reason: null });
+    });
+
+    it("still refuses a branch other than main", async () => {
+      upstreamPath("apps/web/src/x.txt");
+      git(hub, "checkout", "-q", "-b", "other");
+      const { u } = updater();
+      const e = (await u.update().catch((x: unknown) => x)) as UpdateError;
+      expect(e.message).toBe("not on main");
+    });
+
+    it("refuses mid-turn when a path is under apps/server/", async () => {
+      upstreamPath("apps/server/src/x.txt");
+      const { u, calls } = updater({ crewRefusal: () => MID_TURN });
+      const e = (await u.update().catch((x: unknown) => x)) as UpdateError;
+      expect(e).toBeInstanceOf(UpdateError);
+      expect([e.status, e.message]).toEqual([409, MID_TURN]);
+      expect(calls.map((c) => c.cmd)).not.toContain(UPDATE_CMDS[0]);
+      expect((await u.check()).reason).toBe(MID_TURN);
+    });
+
+    it("takes today's path for mixed paths", async () => {
+      upstreamPath("apps/web/src/x.txt");
+      upstreamPath("packages/core/y.ts");
+      const busy = updater({ crewRefusal: () => MID_TURN });
+      const e = (await busy.u.update().catch((x: unknown) => x)) as UpdateError;
+      expect(e.message).toBe(MID_TURN);
+      expect(await updater().u.update()).toEqual({ restarting: true });
+    });
+
+    it("is recorded by auto update as web only, with no restart", async () => {
+      upstreamPath("apps/web/src/x.txt");
+      const upd = updater({ crewRefusal: () => MID_TURN });
+      const record = vi.fn();
+      const restart = vi.spyOn(upd.u, "restart");
+      const tick = createAutoUpdate({
+        enabled: true,
+        updater: upd.u,
+        blocked: () => null,
+        headSha: async () => head(),
+        record,
+      });
+      await expect(tick()).resolves.toBe("updated");
+      expect(record).toHaveBeenCalledWith(`Updated to ${head()} (auto, web only)`);
+      expect(restart).not.toHaveBeenCalled();
+    });
   });
 
   it("runs pull, install, build in order, the build into dist-next, then swaps", async () => {
