@@ -11,6 +11,7 @@
  */
 import {
   asideEventText,
+  asideInCiEventText,
   BLOCKING_SEVERITIES,
   blockedNoteKey,
   CI_FAILED_TEXT,
@@ -83,7 +84,7 @@ import {
   NO_FAILED_RUN,
   type Publisher,
 } from "./publish.ts";
-import { accountAtStop, isTransientStart, seatMayTake } from "./queue.ts";
+import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
 import type { RepoRulesError } from "./rules.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
@@ -572,6 +573,11 @@ export function createEngine(deps: EngineDeps): Engine {
       case "rerun-ci": {
         // once per sha: the loop marked it before this ran, so a refusal is not tried again
         const runs = await publisher.rerunFailed(repo?.github ?? "", a.sha);
+        // jobs still going: no re-run spent, no event; the next failing poll asks again
+        if (runs === "running") {
+          if (cur.rerun?.sha === a.sha) cur.rerun = null;
+          return;
+        }
         // stamped once gh has answered: a poll taken during the call still shows the old failure
         if (cur.rerun?.sha === a.sha) {
           cur.rerun.runs = runs ?? [];
@@ -681,10 +687,11 @@ export function createEngine(deps: EngineDeps): Engine {
           return;
         }
         const sha = store.runPush(run.id)?.sha ?? "";
+        const call = seatCallSign(run.agentId);
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          asideEventText(seatCallSign(run.agentId)),
+          cur.phase === "ci" ? asideInCiEventText(call) : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1134,7 +1141,7 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(
       seats
         .filter((s) => !s.retiring && seatDef(s).loop === "build")
-        .filter((s) => seatMayTake(store, s.id))
+        .filter((s) => seatMayTake(store, s.id, maxOpenRunsOf(config)))
         .map((s) =>
           deps.takeNext(s.id).catch((e: unknown) => {
             log(`take ${s.id}: ${e instanceof Error ? e.message : String(e)}`);

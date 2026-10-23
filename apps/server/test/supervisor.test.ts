@@ -68,6 +68,7 @@ import { CLAUDE_MD_HEADING, reviewBrief, ticketBrief, watchBrief } from "../src/
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import {
   CREW_LOCK_FILE,
+  clonePeers,
   createSupervisor,
   type Supervisor,
   type SupervisorDeps,
@@ -90,6 +91,8 @@ const prep = vi.hoisted(() => ({
   failWrite: false,
   /** Set: every existingCheckout (a resume's) waits for it. */
   resumeGate: null as Promise<void> | null,
+  /** The `peers` each prepare call was given, in order. */
+  peers: [] as unknown[],
 }));
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
@@ -103,7 +106,20 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
       if (prep.failRemove) throw new Error("worktree is locked");
       return real.removeCheckout(...a);
     },
+    preparePlanCheckout: async (i: Parameters<typeof real.preparePlanCheckout>[0]) => {
+      prep.peers.push(i.peers);
+      return real.preparePlanCheckout(i);
+    },
+    prepareDetachedCheckout: async (i: Parameters<typeof real.prepareDetachedCheckout>[0]) => {
+      prep.peers.push(i.peers);
+      return real.prepareDetachedCheckout(i);
+    },
+    prepareScratch: async (i: Parameters<typeof real.prepareScratch>[0]) => {
+      prep.peers.push(i.peers);
+      return real.prepareScratch(i);
+    },
     prepareCheckout: async (i: Parameters<typeof real.prepareCheckout>[0]) => {
+      prep.peers.push(i.peers);
       prep.inFlight++;
       prep.maxInFlight = Math.max(prep.maxInFlight, prep.inFlight);
       try {
@@ -354,6 +370,7 @@ beforeEach(() => {
   prep.failRemove = false;
   prep.resumeGate = null;
   prep.failWrite = false;
+  prep.peers = [];
   dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-supervisor-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");
@@ -596,10 +613,11 @@ describe("startRun eligibility", () => {
   });
 
   it("starts an eligible ticket", async () => {
-    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    const { sup, cfg } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
     sup.start();
     await sup.startRun("guido-1", 42);
     expect(store.seatSession("guido-1")).not.toBeNull();
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
   });
 });
 
@@ -954,6 +972,11 @@ describe("startRun", () => {
       join(dir, "studio", "wt"),
       join(dir, "studio", "state"),
     ];
+    expect(clonePeers(cfg, hub)).toEqual([
+      { label: "the hub's checkout", dir: hub },
+      { label: "loop ta worktree", dir: join(dir, "ta", "wt") },
+      { label: "loop studio worktree", dir: join(dir, "studio", "wt") },
+    ]);
     // another session's worktree folder is denied, the seat's own never is
     expect(seatDenyRead(cfg, hub, "mc-crew")).toEqual([
       hub,
@@ -1186,9 +1209,10 @@ describe("startRun", () => {
     const rolesDir = join(dir, "roles");
     mkdirSync(rolesDir);
     writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
-    const { sup } = make({ rolesDir });
+    const { sup, cfg } = make({ rolesDir });
     sup.start();
     const out = await sup.startRun("fao-1", 42);
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     const wt = join(root, "mc-crew", "fao-1-42");
     expect(store.run(out.runId)).toMatchObject({ branch: null, ticket: "mc#42" });
     expect(store.seatSession("fao-1")?.worktree).toBe(wt);
@@ -2019,14 +2043,18 @@ describe("startWatch", () => {
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",
       "mcp__mc__brief_item",
+      "mcp__mc__read_pr",
+      "mcp__mc__read_ci_log",
+      "mcp__mc__list_tickets",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });
 
   it("ending the watch seat's run stops it, so the watch does not restart it", async () => {
-    const { sup } = flightMake();
+    const { sup, cfg } = flightMake();
     sup.start();
     await sup.startWatch("flight-1");
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     await until(() => expect(seatState("flight-1")).toBe("idle"));
     await sup.endRun("flight-1");
     expect(seatState("flight-1")).toBe("stopped");
@@ -3454,9 +3482,10 @@ describe("startReview", () => {
 
   it("startReview launches a scratch run", async () => {
     const r = reviewOfPush();
-    const { sup } = make({ scratchRetro: true });
+    const { sup, cfg } = make({ scratchRetro: true });
     sup.start();
     const { runId } = await sup.startReview("retro", r.reviewId);
+    expect(prep.peers.at(-1)).toEqual(clonePeers(cfg, HUB_ROOT));
     expect(store.run(runId)).toMatchObject({
       agentId: "retro",
       reviewId: r.reviewId,

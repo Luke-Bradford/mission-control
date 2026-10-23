@@ -707,7 +707,11 @@ defaulted. `pick_from: []` and an area with no globs are refused, and an area gl
 repo-relative with `**` only as a trailing `/**`. Nothing uses the rules yet (the build loop will,
 and a refused block stops new tickets for that repo). This repo's own block is at the end of its
 `CLAUDE.md`. `crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
-run may use; the engine parks a run that goes over.
+run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
+its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
+the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.
+`crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
+hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
 **FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
 that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
@@ -724,15 +728,23 @@ ever. Mission Control checks:
 
 - **TA:** the `status.md` IN FLIGHT iteration is `running` only while its `pid` (the
   `ta_loop.sh` process) is alive (`kill -0`).
-- **Studio:** the latest fire with no `exited` line is `running` only while a live Claude
-  session in `~/.claude/sessions/` has the loop's `worktree` as its cwd. The sessions collector's
-  15 s read is reused, and a fire younger than 60 s is given grace while its CLI registers.
+- **Studio:** liveness comes from the loop's launchd job, read with `launchctl print`. The latest
+  fire with no `exited` line is `running` while the job has a process (`state = running`). With
+  the job loaded but no process it is `unknown` and the collector reports
+  `loop process not running (launchd job <label> has no process)`, even with a Claude session
+  open in the worktree. Only when launchctl's answer cannot be read does the old check apply: a
+  live Claude session in `~/.claude/sessions/` with the loop's `worktree` as its cwd (the
+  sessions collector's 15 s read, with 60 s of grace for a young fire), else
+  `loop process not running (no live Claude session in its worktree)`. Between fires a job with no
+  process is normal after a `STOP:` line in `driver.log`; with no `STOP:` since the last fire the
+  collector reports `studio driver not running (no STOP logged)`. Only the `state` and `pid` lines
+  of the `launchctl print` output are read; the rest (which can hold the job's environment) is
+  discarded.
 
 Otherwise the run is shown as `unknown` and the loop's collector reports
-`loop process not running (pid N)` (TA) or
-`loop process not running (no live Claude session in its worktree)` (studio), so the card shows
-an error. If the session registry cannot be read, the studio check is skipped (the `sessions`
-row in health says why). A driver that dies *between* fires is not detected yet.
+`loop process not running (pid N)` (TA) or one of the studio errors above, so the card shows
+an error. If the session registry cannot be read, the session check is skipped (the `sessions`
+row in health says why).
 
 ### Staleness
 

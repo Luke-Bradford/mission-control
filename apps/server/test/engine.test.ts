@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   asideEventText,
+  asideInCiEventText,
   type BoardItem,
   cleanupBranchNoteKey,
   closedIssueText,
@@ -75,6 +76,7 @@ import type {
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
 import { MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
+import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -255,7 +257,7 @@ interface Harness {
   reruns: string[];
   /** Runs inside rerunFailed (a poll landing mid-call). */
   duringRerun: (() => void) | null;
-  rerunRuns: { id: number; name: string }[] | null;
+  rerunRuns: { id: number; name: string }[] | null | "running";
   busy: boolean;
   facts: SeatFacts | null;
   /** The review seat's process facts. */
@@ -760,6 +762,20 @@ describe("CI and review", () => {
     expect(h.reruns).toEqual([SHA]);
     expect(h.sent).toHaveLength(1);
     expect(loopTexts()).toContain("CI failed on aaaaaaa; no run could be re-run");
+  });
+
+  it("a failure seen while the run still has jobs going spends no re-run", async () => {
+    h.rerunRuns = "running";
+    await inCi();
+    await failCi();
+    expect(loopOf().rerun).toBeNull();
+    expect(h.sent).toEqual([]);
+    h.rerunRuns = [{ id: 77, name: "CI" }];
+    clock += 1000;
+    setPr({ ci: "failing" });
+    await h.engine.reconcileRun(RUN);
+    expect(h.reruns).toEqual([SHA, SHA]);
+    expect(h.sent).toEqual([]);
   });
 
   it("a seat in a turn is not written to", async () => {
@@ -3120,6 +3136,60 @@ describe("the engine runs reviews", () => {
       );
       reported(first().id, [finding("Important")]);
       await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+    });
+  });
+
+  describe("a run set aside in CI", () => {
+    /** PR open on the pushed sha, CI pending: off its seat. */
+    async function inCi(): Promise<void> {
+      h.asideOn = true;
+      report();
+      await h.engine.reconcileRun(RUN);
+      setPr({ ci: "pending" });
+      await h.engine.reconcileRun(RUN);
+    }
+
+    it("freed in CI: the seat takes its next ticket", async () => {
+      await inCi();
+      expect(h.asides).toEqual([RUN]);
+      expect(loopOf().phase).toBe("ci");
+      expect(loopOf().aside).toEqual({ worktree: join(dir, "wt"), wake: false });
+      expect(store.seatSession(SEAT)?.runId).toBeNull();
+      expect(loopTexts()).toContain(asideInCiEventText("GUIDO-1"));
+      await vi.waitFor(() => expect(h.taken).toEqual([SEAT]));
+    });
+
+    it("the first CI failure is re-run: the seat is not held", async () => {
+      await inCi();
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().rerun?.sha).toBe(SHA);
+      expect(loopOf().aside?.wake).toBe(false);
+      expect(seatMayTake(store, SEAT)).toBe(true);
+    });
+
+    it("CI passes while set aside: in review, still set aside", async () => {
+      await inCi();
+      setPr({ ci: "passing" });
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().phase).toBe("review");
+      expect(loopOf().aside?.wake).toBe(false);
+      expect(h.wakes).toEqual([]);
+    });
+
+    it("a CI failure wakes the run first, then its excerpt goes", async () => {
+      await inCi();
+      // the first failure on a sha is re-run; the seat hears of the failure on a later poll
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      clock += 1000;
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(sentKeys()).toEqual([`ci:${RUN}:${SHA}`]));
+      expect(h.wakes).toEqual([RUN]);
+      expect(loopOf().aside).toBeNull();
+      expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+      expect(h.taken).toEqual([SEAT]);
     });
   });
 });

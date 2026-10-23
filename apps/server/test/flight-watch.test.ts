@@ -887,6 +887,8 @@ describe("wakeSummary", () => {
   const state = (over: Partial<FlightState>): FlightState => ({
     time: "12:00",
     repo: "mc",
+    lane: null,
+    hubLogin: null,
     seats: [],
     questions: [],
     tickets: [],
@@ -947,6 +949,8 @@ describe("wakeSummary", () => {
       labels: [],
       ready: true,
       blockedBy: [],
+      laneLabel: null,
+      assignees: [],
     };
     it("is true for a question, a free build seat with a ticket, or a park FLIGHT can lift", () => {
       expect(pending(state({ questions: [q] }))).toBe(true);

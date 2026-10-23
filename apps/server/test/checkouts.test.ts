@@ -837,3 +837,62 @@ describe("existingCheckout", () => {
     expect((await fail(existingCheckout(clone, wtPath(), BRANCH))).code).toBe("path");
   });
 });
+
+describe("a crew clone that shares its git repository", () => {
+  const refs = () => git(clone, "for-each-ref");
+  /** A linked worktree of the clone, standing in for a loop's worktree. */
+  const loopWorktree = () => {
+    const loop = join(dir, "loop-wt");
+    git(clone, "worktree", "add", "-q", "--detach", loop);
+    return loop;
+  };
+
+  it("is refused before anything is fetched, pruned or added", async () => {
+    const loop = loopWorktree();
+    // origin dropped a branch the clone still tracks: a prune would remove it
+    git(seed, "push", "-q", "origin", "main:refs/heads/gone");
+    git(clone, "fetch", "-q", "origin");
+    git(origin, "branch", "-q", "-D", "gone");
+    const refsBefore = refs();
+    const treesBefore = worktrees();
+
+    const peers = [{ label: "loop shop worktree", dir: loop }];
+    const e = await fail(prepareCheckout({ ...input(), peers }));
+    expect(e.code).toBe("checkout");
+    expect(e.message).toBe("the crew clone shares its git repository with loop shop worktree");
+    expect(refs()).toBe(refsBefore);
+    expect(worktrees()).toEqual(treesBefore);
+  });
+
+  it("is refused for plan, review and detached checkouts too", async () => {
+    const peers = [{ label: "the hub's checkout", dir: loopWorktree() }];
+    const text = "the crew clone shares its git repository with the hub's checkout";
+    const base = { checkout: clone, worktreesRoot: root, sessionId: "a" };
+    const plan = await fail(preparePlanCheckout({ ...base, seatId: "guido", issue: 42, peers }));
+    expect(plan.message).toBe(text);
+    const scratch = await fail(
+      prepareScratch({
+        ...base,
+        seatId: "retro",
+        reviewId: 1,
+        sha: git(clone, "rev-parse", "HEAD"),
+        peers,
+      }),
+    );
+    expect(scratch.message).toBe(text);
+    const detached = await fail(
+      prepareDetachedCheckout({ ...base, name: "flight-1-watch", peers }),
+    );
+    expect(detached.message).toBe(text);
+  });
+
+  it("skips a peer git cannot read and one in another repository", async () => {
+    const other = join(dir, "other");
+    git(dir, "init", "-q", "-b", "main", other);
+    const peers = [
+      { label: "loop gone worktree", dir: join(dir, "missing") },
+      { label: "loop other worktree", dir: other },
+    ];
+    expect((await prepareCheckout({ ...input(), peers })).created).toBe(true);
+  });
+});
