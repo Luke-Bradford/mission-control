@@ -15,6 +15,7 @@ import {
   projectUrlOf,
   sweepPullRequests,
 } from "../src/collectors/github.ts";
+import { queryName } from "../src/collectors/rate-limit.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -243,8 +244,6 @@ function stub(opts: {
   search?: (v: Record<string, unknown>) => unknown[];
   boardError?: Error;
   searchError?: Error;
-  milestones?: unknown[];
-  milestoneError?: Error;
   prPages?: unknown[];
   prError?: Error;
 }) {
@@ -271,10 +270,6 @@ function stub(opts: {
           issues: { pageInfo: { hasNextPage: more, endCursor: more ? `ic${ip}` : null }, nodes },
         },
       };
-    }
-    if (q.includes("milestones")) {
-      if (opts.milestoneError) throw opts.milestoneError;
-      return { repository: { milestones: { nodes: opts.milestones ?? [] } } };
     }
     if (opts.searchError) throw opts.searchError;
     return { search: { nodes: opts.search?.(v) ?? [] } };
@@ -799,62 +794,12 @@ describe("collectGithub board fields", () => {
   });
 });
 
-describe("collectGithub goal", () => {
-  const ms = (title: string, dueOn: string | null, open: number, closed: number) => ({
-    title,
-    dueOn,
-    openIssues: { totalCount: open },
-    closedIssues: { totalCount: closed },
-  });
-
-  it("picks the first open milestone with a due date", async () => {
-    const { gql } = stub({
-      milestones: [ms("Big", null, 20, 0), ms("Soon", "2026-11-01T00:00:00Z", 3, 2)],
-    });
+describe("collectGithub queries", () => {
+  it("sends no Milestones query", async () => {
+    const { gql, calls } = stub({ pages: [page([item(1, "Todo")])] });
     await collectGithub(repo, store, gql, NOW);
-    expect(store.goal("shop-app")).toEqual({
-      repoId: "shop-app",
-      title: "Soon",
-      dueOn: Date.parse("2026-11-01T00:00:00Z"),
-      open: 3,
-      closed: 2,
-    });
-  });
-
-  it("else picks the open milestone with the most issues", async () => {
-    const { gql } = stub({
-      milestones: [ms("A", null, 2, 1), ms("B", null, 5, 4), ms("C", null, 1, 0)],
-    });
-    await collectGithub(repo, store, gql, NOW);
-    expect(store.goal("shop-app")).toMatchObject({ title: "B", dueOn: null, open: 5, closed: 4 });
-  });
-
-  it("clears the goal when there is no open milestone", async () => {
-    store.replaceGoal("shop-app", {
-      repoId: "shop-app",
-      title: "old",
-      dueOn: null,
-      open: 1,
-      closed: 0,
-    });
-    const { gql } = stub({ milestones: [] });
-    await collectGithub(repo, store, gql, NOW);
-    expect(store.goal("shop-app")).toBeNull();
-  });
-
-  it("keeps the previous goal and records the failure when the milestone query fails", async () => {
-    store.replaceGoal("shop-app", {
-      repoId: "shop-app",
-      title: "old",
-      dueOn: null,
-      open: 1,
-      closed: 0,
-    });
-    const { gql } = stub({ milestoneError: new Error("boom") });
-    await collectGithub(repo, store, gql, NOW);
-    expect(store.goal("shop-app")?.title).toBe("old");
-    expect(statusOf()).toMatchObject({ ok: false });
-    expect(statusOf()?.error).toContain("goal: boom");
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.map((c) => queryName(c.q))).not.toContain("Milestones");
   });
 });
 
@@ -1521,15 +1466,11 @@ describe("sweepPullRequests", () => {
 
 // #26 A1: the scheduler emits `boards` / `escalations` only when a poll changed a row.
 describe("change reporting", () => {
-  const milestone = { title: "MVP", dueOn: null, openIssues: { totalCount: 2 } };
   /** The same GitHub answers every time, except for what `over` changes. */
-  const answers = (
-    over: { status2?: string; search?: readonly unknown[]; closed?: number; draft?: boolean } = {},
-  ) =>
+  const answers = (over: { status2?: string; search?: readonly unknown[]; draft?: boolean } = {}) =>
     stub({
       pages: [page([item(1, "Todo"), item(2, over.status2 ?? "Done")])],
       search: () => [...(over.search ?? [issue(10, "[mvp-ready] a", [])])],
-      milestones: [{ ...milestone, closedIssues: { totalCount: over.closed ?? 1 } }],
       prPages: [prPage([pull(1, { isDraft: over.draft ?? false })])],
     }).gql;
 
@@ -1544,20 +1485,16 @@ describe("change reporting", () => {
     });
   });
 
-  it("reports boards for a board, goal or PR change, and escalations for an escalation change", async () => {
+  it("reports boards for a board or PR change, and escalations for an escalation change", async () => {
     await collectGithub(repo, store, answers(), NOW);
     const changes = [
       [{ status2: "In Progress" }, { boards: true, escalations: false }],
       [
-        { status2: "In Progress", closed: 2 },
+        { status2: "In Progress", draft: true },
         { boards: true, escalations: false },
       ],
       [
-        { status2: "In Progress", closed: 2, draft: true },
-        { boards: true, escalations: false },
-      ],
-      [
-        { status2: "In Progress", closed: 2, draft: true, search: [] },
+        { status2: "In Progress", draft: true, search: [] },
         { boards: false, escalations: true },
       ],
     ] as const;
