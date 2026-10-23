@@ -66,6 +66,60 @@ it("sums measured retries once and shows each attempt and timeline tokens, inclu
 });
 
 describe("live Plan", () => {
+  it.each(["loading", "failed", "another run", "no run"])(
+    "keeps the Plan count unknown for %s",
+    async (state) => {
+      const streamPath = `/api/agents/${row.id}/stream`;
+      const fetch = stubFetch({
+        [streamPath]: () => ({
+          status: state === "failed" ? 503 : 200,
+          body:
+            state === "failed"
+              ? { error: "Stream unavailable" }
+              : { runId: "older-run", tasks: [], events: [] },
+        }),
+        [`/api/agents/${row.id}/files`]: { files: [], note: null },
+      });
+      if (state === "loading") {
+        fetch.mockImplementation(() => new Promise<Response>(() => {}));
+      }
+      render(<SideTabs row={state === "no run" ? { ...row, run: null } : row} />);
+      if (state === "failed") await screen.findByText(/Could not load the task list:/);
+      if (state === "another run") await screen.findByText("No task list yet.");
+      expect(screen.getByRole("button", { name: "Plan" })).toBeTruthy();
+    },
+  );
+
+  it.each([false, true])(
+    "marks a cached task list as last known after refresh fails (empty: %s)",
+    async (empty) => {
+      let failed = false;
+      stubFetch({
+        [`/api/agents/${row.id}/stream`]: () => ({
+          status: failed ? 503 : 200,
+          body: failed
+            ? { error: "Stream unavailable" }
+            : {
+                runId: row.run?.id,
+                tasks: empty ? [] : [{ id: "1", text: "Cached task", status: "done" }],
+                events: [],
+              },
+        }),
+        [`/api/agents/${row.id}/files`]: { files: [], note: null },
+      });
+      render(<SideTabs row={row} />);
+      await screen.findByRole("button", { name: empty ? "Plan 0/0" : "Plan 1/1" });
+      failed = true;
+      act(() => hub.refetch(`/api/agents/${row.id}/stream`));
+      expect(
+        await screen.findByText("Could not refresh the task list: Stream unavailable"),
+      ).toBeTruthy();
+      expect(screen.getByText(/Last known task list/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Plan" })).toBeTruthy();
+      expect(screen.getByText(empty ? "No task list yet." : "Cached task")).toBeTruthy();
+    },
+  );
+
   it("replays status changes and clears tasks when runs or agents change", async () => {
     let stream: AgentStream = {
       runId: row.run?.id ?? null,

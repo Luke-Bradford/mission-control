@@ -40,9 +40,15 @@ function Plan({
       <p className="s muted">Loading…</p>
     );
   }
-  if (tasks.length === 0) return <p className="s muted">No task list yet.</p>;
   return (
     <>
+      {hasRun && stream.error && (
+        <>
+          <p className="s crit-t">Could not refresh the task list: {stream.error.message}</p>
+          <p className="note xs">Last known task list.</p>
+        </>
+      )}
+      {tasks.length === 0 && <p className="s muted">No task list yet.</p>}
       {tasks.map((task) => (
         <div className="check" key={task.id}>
           <span
@@ -63,10 +69,12 @@ function Plan({
           <span className={task.status === "done" ? "fg2" : undefined}>{task.text}</span>
         </div>
       ))}
-      <p className="note xs">
-        The agent's own task list: Claude's task tools or Codex plan updates, replayed from its
-        stream.
-      </p>
+      {tasks.length > 0 && (
+        <p className="note xs">
+          The agent's own task list: Claude's task tools or Codex plan updates, replayed from its
+          stream.
+        </p>
+      )}
     </>
   );
 }
@@ -306,9 +314,11 @@ export function SideTabs({ row }: { row: CrewRow }) {
   const nFiles = files.data?.note === READONLY_FILES_NOTE ? undefined : files.data?.files.length;
   const stream = useResource<AgentStream>(row.run ? RESOURCES.stream(row.id) : null);
   const tasks = row.run && stream.data?.runId === row.run.id ? (stream.data.tasks ?? []) : [];
+  const tasksKnown =
+    row.run !== null && stream.data?.runId === row.run.id && !stream.loading && !stream.error;
   const done = tasks.filter((task) => task.status === "done").length;
   const options = [
-    { value: "plan", label: `Plan ${done}/${tasks.length}` },
+    { value: "plan", label: tasksKnown ? `Plan ${done}/${tasks.length}` : "Plan" },
     { value: "queue", label: "Queue" },
     { value: "subs", label: `Subagents ${row.digest?.subagents.length ?? 0}` },
     { value: "files", label: nFiles === undefined ? "Files" : `Files ${nFiles}` },
