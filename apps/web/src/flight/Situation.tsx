@@ -1,4 +1,4 @@
-import type { AttentionItem, BoardItem, RepoView } from "@mc/core";
+import type { AttentionItem, BoardItem, ReplyDraft, RepoView } from "@mc/core";
 import { cardColumn } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
@@ -20,6 +20,7 @@ const count = (items: AttentionItem[], kinds: AttentionItem["kind"][]): number =
  * and the timeline are computed from today's data.
  */
 export function Situation() {
+  const drafts = useResource<ReplyDraft[]>(RESOURCES.drafts).data;
   const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
@@ -64,6 +65,9 @@ export function Situation() {
           <span>
             <b className="num">{num(approvals)}</b> routine{" "}
             {approvals === 1 ? "approval" : "approvals"}
+          </span>
+          <span>
+            <b className="num">{drafts === undefined ? "—" : drafts.length}</b> drafts to send
           </span>
           <span>
             <b className="num">{answered}</b> answered by FLIGHT today

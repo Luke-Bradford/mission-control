@@ -320,6 +320,8 @@ async function main(): Promise<void> {
   });
 
   const app = buildApp({
+    gh,
+    knownSecrets: mcDeps.knownSecrets,
     config,
     store,
     bus,
