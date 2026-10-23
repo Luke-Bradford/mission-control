@@ -453,6 +453,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/drafts"],
   ["POST", "/api/drafts/guido-1/post"],
   ["POST", "/api/drafts/guido-1/discard"],
+  ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/health"],
@@ -481,6 +482,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
+  ["GET", "/api/attention/example/discussion"],
+  ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
   ["GET", "/api/notifications"],
@@ -920,7 +923,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
-      if (url.endsWith("/dismiss") || url.endsWith("/handled")) {
+      if (url.endsWith("/discussion")) {
+        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
+        continue;
+      }
+      if (url.endsWith("/dismiss") || url.endsWith("/handled") || url.includes("/replies/")) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -1061,7 +1068,12 @@ describe("local access", () => {
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
-            .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")}`,
+            .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
+            .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
+            .replace(
+              /\/attention\/[^/]+\/replies\/[^/]+\/post$/,
+              "/attention/:key/replies/:replyId/post",
+            )}`,
       ),
     );
     const registered = apiRoutes.filter((r) => !r.startsWith("HEAD "));
@@ -1424,6 +1436,7 @@ describe("agent stream", () => {
     const s = await stream("/api/agents/shop-app-ta/stream");
     expect(s).toEqual({
       runId: "r1",
+      tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "hello" }],
       truncated: false,
       lastOutputAt: NOW - 60e3,
@@ -1449,6 +1462,7 @@ describe("agent stream", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({
       runId: "r1",
+      tasks: [],
       events: [],
       truncated: false,
       lastOutputAt: NOW - 5 * 60e3,
@@ -3792,6 +3806,7 @@ describe("seat ids in the agent routes", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json<AgentStream>()).toEqual({
       runId: "c1",
+      tasks: [],
       events: [{ id: "0:0", at: NOW - 2 * 60e3, kind: "msg", text: "brief read" }],
       truncated: false,
       lastOutputAt: NOW - 60e3,
@@ -3849,9 +3864,9 @@ describe("seat ids in the agent routes", () => {
       expect(body.note).toBeNull();
       expect(body.sha).toBe(gitIn(wt, "rev-parse", "HEAD").trim());
       expect([...body.files].sort((x, y) => x.path.localeCompare(y.path))).toEqual([
-        { path: "a.txt", add: 1, del: 1, state: "uncommitted" },
-        { path: "done.txt", add: 1, del: 0, state: "committed" },
-        { path: "new.txt", add: null, del: null, state: "untracked" },
+        { path: "a.txt", add: 1, del: 1, state: "uncommitted", commitSha: null },
+        { path: "done.txt", add: 1, del: 0, state: "committed", commitSha: body.sha },
+        { path: "new.txt", add: null, del: null, state: "untracked", commitSha: null },
       ]);
       const diff = await get("/api/agents/guido-1/files/diff?path=a.txt");
       expect(diff.statusCode).toBe(200);
@@ -4092,6 +4107,46 @@ describe("the first loop's engine", () => {
     });
     await a.close();
     expect((await get("/api/crew/status")).json()).toEqual({ enabled: true, note: null });
+  });
+
+  it("serves measured attempts including review usage, and keeps a new run's tasks empty", async () => {
+    store.upsertRun(run({ id: "measured", agentId: "guido-1", loop }));
+    store.addLoopEvent("measure-report", "measured", "reported; pushing", NOW - 3000);
+    store.addLoopEvent("measure-ci", "measured", "CI passed on abc1234", NOW - 2000);
+    const tasks = [{ id: "verify", text: "Verify measurements", status: "in_progress" as const }];
+    store.setDigest(
+      "measured",
+      digest({ tasks, attemptUsage: [{ id: "author", at: NOW - 4000, tokens: 0 }] }),
+    );
+    const reviewId = store.requestReview({
+      authorRunId: "measured",
+      repoId: "shop-app",
+      seatId: "retro-1",
+      prNumber: 1,
+      sha: "abc1234",
+      epoch: loop.epoch,
+      attempt: 1,
+      round: 1,
+      at: NOW - 2000,
+    });
+    expect(reviewId).not.toBeNull();
+    store.setReviewState(reviewId as number, ["queued"], "running", {
+      at: NOW - 2000,
+      runId: "review-measured",
+    });
+    store.upsertRun(run({ id: "review-measured", agentId: "retro-1" }));
+    store.setDigest(
+      "review-measured",
+      digest({ attemptUsage: [{ id: "review", at: NOW - 1000, tokens: 17 }] }),
+    );
+    const view = (await get("/api/runs/measured/loop")).json();
+    expect(view.tries.map((t: { tokens: number | null }) => t.tokens)).toEqual([0, null, 17]);
+    expect((await get("/api/agents/guido-1/stream")).json().tasks).toEqual(tasks);
+    expect(
+      (await get("/api/crew")).json<Crew>().rows.find((r) => r.id === "guido-1")?.digest?.tasks,
+    ).toEqual(tasks);
+    store.upsertRun(run({ id: "fresh-measured", agentId: "guido-1", startedAt: NOW + 1 }));
+    expect((await get("/api/agents/guido-1/stream")).json().tasks).toEqual([]);
   });
 
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {

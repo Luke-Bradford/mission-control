@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { quotaWarnings, timeToFull } from "../src/quota.ts";
+import { firstWindow, quotaWarnings, timeToFull } from "../src/quota.ts";
 import { HOUR, limit5h, limit7d, NOW } from "./fixtures.ts";
 
 const DAY = 24 * HOUR;
@@ -75,5 +75,18 @@ describe("quotaWarnings", () => {
     expect(
       quotaWarnings([limit7d({ accountId: "a", fullAt: NOW + 60_000 })], NOW, TZ)[0]?.text,
     ).toBe("a 7d full in ~0h01 at this rate (resets Sun 19:00)");
+  });
+});
+
+describe("firstWindow", () => {
+  it("prefers 5h, falls back to 7d, else null", () => {
+    const rows = [
+      limit7d({ accountId: "a", used: 10 }),
+      limit5h({ accountId: "a", used: 20 }),
+      limit7d({ accountId: "b", used: 30 }),
+    ];
+    expect(firstWindow(rows, "a")?.window).toBe("5h");
+    expect(firstWindow(rows, "b")?.window).toBe("7d");
+    expect(firstWindow(rows, "c")).toBeNull();
   });
 });

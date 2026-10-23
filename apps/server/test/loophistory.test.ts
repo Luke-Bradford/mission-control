@@ -228,3 +228,13 @@ describe("loopTries", () => {
     expect(tries.at(-1)).toMatchObject({ outcome: "parked", reason: "stuck", endedAt: at(3) });
   });
 });
+
+it("attributes measured zero and usage at retry boundaries, without run totals", () => {
+  const events = evs(REPORTED, "CI failed on abc1234");
+  const usage = [
+    { id: "zero", at: T0, tokens: 0 },
+    { id: "next", at: at(1), tokens: 12 },
+  ];
+  expect(loopTries(run(), events, null, usage).map((t) => t.tokens)).toEqual([0, null, 12]);
+  expect(loopTries(run(), events, null, []).map((t) => t.tokens)).toEqual([null, null, null]);
+});

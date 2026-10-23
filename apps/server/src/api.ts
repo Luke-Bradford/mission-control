@@ -73,10 +73,15 @@ import { z } from "zod";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
+  makeRest,
   NO_OPEN_THREAD,
   type NotificationsView,
+  notificationOpen,
   notificationsView,
   parsePersonKey,
+  type Rest,
+  sourceMessage,
+  sourceReadUrl,
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
@@ -102,10 +107,17 @@ import {
 import type { CrewReloader } from "./crew-apply.ts";
 import type { Engine } from "./engine/engine.ts";
 import { changedFiles, fileDiff, type GitExec, GitFailed, NO_WORKTREE_NOTE } from "./files.ts";
-import { flightBriefView, flightView } from "./flight/state.ts";
+import { flightBriefView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import type { TestLock } from "./guard/lock.ts";
-import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
+import {
+  attentionItems,
+  attentionVersion,
+  CREW_ERROR_KEY,
+  crew,
+  NO_LOCK,
+  NOTE_KEY,
+} from "./hud.ts";
 import { loopTries } from "./loophistory.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -191,6 +203,8 @@ export interface AppDeps {
   profilesPath?: string;
   /** The GitHub client for board setup; default: a token from `gh auth token`, read on each use. */
   githubGql?: () => Promise<Gql>;
+  /** Read-only source revalidation before approving a person reply. */
+  notificationRest?: Rest;
   /** Asked to refresh the boards after a setup that changed GitHub; default: a "boards" change. */
   refreshBoards?: () => void;
   /** The built web app (apps/web/dist), served for unmatched GET/HEAD outside /api; absent: none. */
@@ -535,6 +549,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const lastEventAt = store.digest(run.id)?.lastEventAt ?? null;
           const missing = (): AgentStream => ({
             runId: run.id,
+            tasks: store.digest(run.id)?.tasks ?? [],
             events: [],
             truncated: false,
             lastOutputAt: lastOutputAt(lastEventAt, null),
@@ -564,6 +579,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           return {
             runId: run.id,
+            tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
             truncated: entry.result.truncated,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
@@ -1345,15 +1361,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
       api.get("/drafts", async () => store.drafts());
       const postingDrafts = new Set<number>();
-      // Reader: apps/web/src/flight/Drafts.tsx (operator approval only)
-      api.post<{ Params: { id: string } }>("/drafts/:id/post", async (req, reply) => {
-        const id = Number(req.params.id);
+      const postingItems = new Set<string>();
+      const postDraft = async (id: number, input: unknown, reply: FastifyReply) => {
+        const source = store.draftSource(id);
+        if (source?.state === "posted") return { ok: true };
         const draft = store.drafts().find((d) => d.id === id);
         if (!draft) return reply.code(404).send({ error: "No pending draft." });
-        if (postingDrafts.has(id)) return reply.code(409).send({ error: "Draft is being posted." });
+        if (postingDrafts.has(id) || (source && postingItems.has(source.itemKey)))
+          return reply.code(409).send({ error: "Draft is being posted." });
         const parsed = z
           .strictObject({ text: z.string().trim().min(1).max(MC_TEXT_MAX).optional() })
-          .safeParse(req.body);
+          .safeParse(input);
         if (!parsed.success) return reply.code(400).send({ error: "Invalid draft text." });
         const match = /^([^#]+)#([1-9][0-9]*)$/.exec(draft.target);
         const repo = config.repos.find((r) => r.id === match?.[1]);
@@ -1366,10 +1384,74 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ) {
           return reply.code(400).send({ error: DRAFT_BAD_TARGET });
         }
+        const thread = source ? parsePersonKey(source.itemKey) : null;
+        if (source) {
+          const n = thread ? store.notification(thread.id) : null;
+          if (
+            !n ||
+            !notificationOpen(n) ||
+            n.updatedAt !== thread?.updatedAt ||
+            source.source.kind !== "github" ||
+            !n.message ||
+            JSON.stringify(source.source) !== JSON.stringify(n.message.source) ||
+            draft.target !== `${n.repoId}#${n.number}` ||
+            draft.kind !== (n.subjectType === "PullRequest" ? "pr" : "issue")
+          )
+            return reply
+              .code(409)
+              .send({ error: "Source changed; refresh the item before posting." });
+        }
         const body = parsed.data.text ?? draft.text;
         postingDrafts.add(id);
+        if (source) postingItems.add(source.itemKey);
         const file = crewPrBodyPath(store.path);
+        let wroteBody = false;
         try {
+          if (source && thread) {
+            try {
+              const rest = deps.notificationRest ?? makeRest(await githubToken());
+              const { body: current } = await rest(
+                `https://api.github.com/notifications/threads/${thread.id}`,
+              );
+              const parsedThread = z
+                .object({
+                  updated_at: z.string(),
+                  subject: z.object({ url: z.string(), latest_comment_url: z.string().nullable() }),
+                })
+                .safeParse(current);
+              const expected = `https://api.github.com/repos/${repo.github}/${draft.kind === "pr" ? "pulls" : "issues"}/${n}`;
+              if (
+                !parsedThread.success ||
+                Date.parse(parsedThread.data.updated_at) !== thread.updatedAt ||
+                !sourceReadUrl(repo.github, parsedThread.data.subject.url) ||
+                parsedThread.data.subject.url.split("/").slice(6).join("/") !==
+                  expected.split("/").slice(6).join("/")
+              )
+                return reply
+                  .code(409)
+                  .send({ error: "Source changed; refresh the item before posting." });
+              const url = parsedThread.data.subject.latest_comment_url ?? expected;
+              if (!sourceReadUrl(repo.github, url))
+                return reply.code(409).send({ error: "Invalid source target." });
+              const currentMessage = sourceMessage((await rest(url)).body, "", thread.updatedAt);
+              if (
+                !currentMessage ||
+                JSON.stringify(currentMessage.source) !== JSON.stringify(source.source)
+              )
+                return reply
+                  .code(409)
+                  .send({ error: "Source changed; refresh the item before posting." });
+              const latest = store.notification(thread.id);
+              if (!latest || !notificationOpen(latest) || latest.updatedAt !== thread.updatedAt)
+                return reply
+                  .code(409)
+                  .send({ error: "Source changed; refresh the item before posting." });
+            } catch {
+              return reply
+                .code(502)
+                .send({ error: "Could not verify the source. Nothing was posted." });
+            }
+          }
           const known = await readKnown(
             { knownSecrets: deps.knownSecrets ?? (async () => [await githubToken()]) },
             "post_draft",
@@ -1384,6 +1466,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
           await writeFile(file, body, { mode: 0o600, flag: "wx" });
+          wroteBody = true;
           const result = await (deps.gh ?? createGh())(
             [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
             { cwd: crewDir(store.path) },
@@ -1391,13 +1474,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (result.code !== 0)
             return reply.code(502).send({ error: "GitHub refused the comment." });
           store.finishDraft(id, "posted", body);
+          if (thread) {
+            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
+            bus.emit("attention");
+          }
           bus.emit("flight");
           return { ok: true };
         } finally {
           postingDrafts.delete(id);
-          await rm(file, { force: true });
+          if (source) postingItems.delete(source.itemKey);
+          if (wroteBody) await rm(file, { force: true });
         }
-      });
+      };
+      // Reader: apps/web/src/flight/Drafts.tsx (operator approval only)
+      api.post<{ Params: { id: string } }>("/drafts/:id/post", async (req, reply) =>
+        postDraft(Number(req.params.id), req.body, reply),
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx (explicit Post on GitHub approval)
+      api.post<{ Params: { key: string; replyId: string } }>(
+        "/attention/:key/replies/:replyId/post",
+        async (req, reply) => {
+          const draft = store
+            .briefs()
+            .get(req.params.key)
+            ?.person?.replies?.find((r) => r.id === req.params.replyId);
+          if (!draft?.draftId) return reply.code(404).send({ error: "No suggested GitHub reply." });
+          const source = store.draftSource(draft.draftId);
+          if (source?.itemKey !== req.params.key || source.replyId !== req.params.replyId)
+            return reply.code(409).send({ error: "Reply target changed." });
+          return postDraft(draft.draftId, req.body, reply);
+        },
+      );
       // Reader: apps/web/src/flight/Drafts.tsx
       api.post<{ Params: { id: string } }>("/drafts/:id/discard", async (req, reply) => {
         const id = Number(req.params.id);
@@ -1446,7 +1553,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           runId: run.id,
           loop,
           events,
-          tries: loopTries(run, events, review),
+          tries: loopTries(run, events, review, [
+            ...(store.digest(run.id)?.attemptUsage ?? []),
+            ...store
+              .reviewsOfRun(run.id)
+              .flatMap((r) =>
+                r.runId === null ? [] : (store.digest(r.runId)?.attemptUsage ?? []),
+              ),
+          ]),
           round: loop
             ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
             : null,
@@ -1553,6 +1667,94 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
       );
 
+      const discussionSends = new Set<string>();
+      const currentDiscussionItem = (key: string) => {
+        const item = attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          undefined,
+          deps.hubLogin?.() ?? null,
+        ).find((item) => item.key === key && !item.acked);
+        return item ? { ...item, version: attentionVersion(item) } : undefined;
+      };
+      const openDiscussion = (item: AttentionItem & { version: string }) => {
+        const brief = item.brief;
+        const recommended = brief?.recommendedOptionId
+          ? brief.options.find((o) => o.id === brief.recommendedOptionId)
+          : undefined;
+        const text = recommended?.description
+          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description}. What would help you decide? I can pull the Teams thread or the code.`
+          : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
+        return store.ensureDiscussion(item.key, item.version, { text, at: now() });
+      };
+      // Reader: apps/web/src/shell/ItemPanel.tsx
+      api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
+        "/attention/:key/discussion",
+        async (req, reply) => {
+          const { key } = req.params;
+          if (req.query.id) {
+            const thread = store.discussion(key, req.query.id);
+            return thread ?? reply.code(404).send({ error: "Unknown discussion." });
+          }
+          const item = currentDiscussionItem(key);
+          if (!item?.version) return reply.code(404).send({ error: "No current item." });
+          return openDiscussion({ ...item, version: item.version });
+        },
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/discussion", async (req, reply) => {
+        const body = z
+          .strictObject({
+            version: z.string().min(1).max(100),
+            messageId: z.string().regex(/^[a-zA-Z0-9:_-]{1,100}$/),
+            text: z.string().trim().min(1).max(4000),
+          })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const item = currentDiscussionItem(req.params.key);
+        if (!item || item.version !== body.data.version)
+          return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
+        const thread = openDiscussion({ ...item, version: body.data.version });
+        const { messageId, text } = body.data;
+        try {
+          store.askDiscussion(thread.id, messageId, text, now());
+        } catch {
+          return reply.code(409).send({ error: "Message id already used." });
+        }
+        if (store.discussionSent(thread.id, messageId))
+          return store.discussion(item.key, thread.id);
+        const flight = flightSeat(config);
+        if (!flight || !supervisor || !crewGate(flight.seat.id, reply))
+          return reply.sent ? reply : reply.code(503).send({ error: "FLIGHT is unavailable." });
+        const sendKey = `${thread.id}:${messageId}`;
+        if (discussionSends.has(sendKey))
+          return reply.code(409).send({ error: "Message is being sent." });
+        discussionSends.add(sendKey);
+        try {
+          await supervisor.message(
+            flight.seat.id,
+            JSON.stringify({
+              kind: "item-discussion",
+              discussion: { id: thread.id, replyTo: messageId },
+              item,
+              question: text,
+              instruction:
+                "Reply using log_decision with discussion.id, discussion.replyTo and a stable discussion.messageId. Discussion is chat only; do not execute a choice.",
+            }),
+            { interrupt: false, questions: "none" },
+          );
+          store.markDiscussionSent(thread.id, messageId);
+          bus.emit("attention");
+          return store.discussion(item.key, thread.id);
+        } catch {
+          return reply.code(503).send({ error: "Could not send to FLIGHT. Retry this message." });
+        } finally {
+          discussionSends.delete(sendKey);
+        }
+      });
+
       api.post("/attention/ack", async (req, reply) => {
         const body = AckBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -1589,19 +1791,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled; the web side is its own ticket)
       api.post<{ Params: { key: string } }>("/attention/:key/handled", async (req, reply) => {
-        const body = NoBody.safeParse(req.body);
+        const body = z
+          .strictObject({
+            how: z.enum(["marked", "copied", "flight"]).optional(),
+            replyId: z.string().max(100).optional(),
+          })
+          .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
+        const how = body.data.how ?? "marked";
+        const person = store.briefs().get(key)?.person;
+        if (
+          how === "copied" &&
+          (person?.source.kind !== "teams" ||
+            !person.replies?.some((r) => r.id === body.data.replyId))
+        )
+          return reply.code(400).send({ error: "No suggested Teams reply." });
         const thread = key.length > 200 ? null : parsePersonKey(key);
         // Local only: the thread stays unread on GitHub.
         if (
           thread === null ||
-          !store.markNotificationHandled(thread.id, thread.updatedAt, "marked", now())
+          !store.markNotificationHandled(thread.id, thread.updatedAt, how, now())
         ) {
           return reply.code(404).send({ error: NO_OPEN_THREAD });
         }
         bus.emit("attention");
-        return { handled: key };
+        return {
+          handled: key,
+          ...(how === "flight"
+            ? {
+                message: `I will handle ${store.notification(thread.id)?.author ?? "Someone"}'s message: I will check what is needed, draft a reply and bring it back to you before anything is sent.`,
+              }
+            : {}),
+        };
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => {

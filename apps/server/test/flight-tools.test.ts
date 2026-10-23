@@ -2032,6 +2032,7 @@ describe("flight_state", () => {
       atStop: false,
     };
     expect(await state()).toEqual({
+      discussions: [],
       time: "13:00",
       repo: "mc",
       lane: null,
@@ -2935,6 +2936,78 @@ describe("brief_item", () => {
     expect(decisions()).toEqual([]);
   });
 
+  it("stores structured evidence and recommends an option by stable identity", async () => {
+    const fields = {
+      catchUp: {
+        kind: "follow-up",
+        line: "A decision remains",
+        story: ["Parked"],
+        aware: ["No action taken"],
+      },
+      checked: [{ source: "GitHub", finding: "Still parked" }],
+      options: [
+        { id: "go", label: "Un-park", answer: "go", description: "Resume work" },
+        { id: "wait", label: "Leave", answer: "wait", description: "Stay parked" },
+      ],
+      recommendedOptionId: "go",
+    };
+    expect(await call("brief_item", B(fields))).toEqual({ text: BRIEFED_TEXT });
+    expect(store.briefs().get(KEY)).toMatchObject(fields);
+    expect(
+      (await call("brief_item", B({ ...fields, recommendedOptionId: "missing" }))).isError,
+    ).toBe(true);
+  });
+
+  it("binds person replies to the exact source and rejects a draft against an edited message", async () => {
+    const source = { kind: "github" as const, messageId: "555", revision: "source-v1" };
+    store.upsertNotifications(
+      [
+        {
+          id: "101",
+          repoId: "mc",
+          subjectType: "Issue",
+          title: "Review the plan",
+          number: 7,
+          reason: "mention",
+          url: "https://github.com/o/mc/issues/7#issuecomment-555",
+          author: "catalogue-helper",
+          snippet: "Please review",
+          updatedAt: NOW,
+          lastReadAt: null,
+          message: {
+            source,
+            author: "catalogue-helper",
+            at: NOW,
+            text: "Please review",
+            url: "https://github.com/o/mc/issues/7#issuecomment-555",
+          },
+        },
+      ],
+      false,
+      NOW,
+    );
+    const state = JSON.parse((await call("flight_state", {})).text);
+    expect(
+      state.items.find((i: { key: string }) => i.key === `person:101:${NOW}`)?.person,
+    ).toMatchObject({ message: { source, text: "Please review" } });
+    const person = {
+      source,
+      assessment: ["Review needed"],
+      replies: [{ id: "review", label: "Review", text: "I will review." }],
+    };
+    const args = B({ key: `person:101:${NOW}`, person });
+    expect(await call("brief_item", args)).toEqual({ text: BRIEFED_TEXT });
+    expect(store.drafts()).toHaveLength(1);
+    expect(ghCalls).toEqual([]);
+    const edited = {
+      ...args,
+      person: { ...person, source: { ...source, revision: "wrong" } },
+    };
+    expect((await call("brief_item", edited)).isError).toBe(true);
+    expect(store.drafts()).toHaveLength(1);
+    expect(ghCalls).toEqual([]);
+  });
+
   it("takes no options, and cuts long texts at MC_TEXT_MAX", async () => {
     const long = "x".repeat(MC_TEXT_MAX + 50);
     await call("brief_item", B({ context: long, options: undefined }));
@@ -3554,5 +3627,28 @@ describe("draft_reply", () => {
     ).toBe(true);
     expect(store.drafts()).toEqual([]);
     expect(ghCalls).toEqual([]);
+  });
+});
+
+describe("correlated discussion replies", () => {
+  it("returns tagged replies only to their original item, including late replies", async () => {
+    const a = store.ensureDiscussion("note:a", "v1");
+    const b = store.ensureDiscussion("note:b", "v1");
+    store.askDiscussion(a.id, "ask-a", "Why?", NOW);
+    store.askDiscussion(b.id, "ask-b", "Which?", NOW);
+    const args = {
+      about: "Item discussion",
+      decision: "Checked the code.",
+      basis: "Code",
+      discussion: { id: a.id, replyTo: "ask-a", messageId: "reply-a" },
+    };
+    expect((await call("log_decision", args)).isError).toBeUndefined();
+    expect(store.discussion("note:a", a.id)?.messages.at(-1)?.text).toBe(args.decision);
+    expect(store.discussion("note:b", b.id)?.messages).toHaveLength(1);
+    expect(
+      (await call("log_decision", { ...args, discussion: { ...args.discussion, id: b.id } }))
+        .isError,
+    ).toBe(true);
+    expect(decisions()).toEqual([]);
   });
 });

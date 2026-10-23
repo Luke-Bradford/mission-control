@@ -1383,6 +1383,21 @@ main > section {
   border-radius: 2px;
   display: inline-block;
 }
+.slots {
+  display: flex;
+  gap: 4px;
+}
+.slots i {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid var(--line-2);
+  display: inline-block;
+}
+.slots i.used {
+  background: var(--fg-2);
+  border-color: var(--fg-2);
+}
 .lock {
   border: 1px solid var(--line-2);
   border-radius: var(--r);
@@ -3492,4 +3507,22 @@ details.guard > summary {
 
 button.nrow.thread.tagged {
   background: var(--warn-soft);
+}
+
+.person-choices {
+  display: grid;
+  overflow: auto;
+  min-height: 0;
+}
+.person-choices .optlist,
+.person-choices textarea {
+  width: 100%;
+  min-width: 0;
+}
+.person-choices .opt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.person-choices textarea {
+  min-height: 6em;
 }
