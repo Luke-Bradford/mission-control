@@ -171,6 +171,9 @@ describe("leadSentence", () => {
     expect(leadSentence("## Summary")).toBe("Summary");
     expect(leadSentence("**Plan:** edit a.ts first.")).toBe("Plan: edit a.ts first.");
     expect(leadSentence("# Done\n\nAll tests pass.")).toBe("All tests pass.");
+    expect(leadSentence("# Done\n\n## Summary\n\nAll tests pass.")).toBe("All tests pass.");
+    expect(leadSentence("**DONE**\n\n**Summary**\nall good.")).toBe("All good.");
+    expect(leadSentence("## Plan\n```\ncode\n```")).toBe("Plan");
   });
   it("skips a DONE marker like the summary does", () => {
     expect(leadSentence("DONE. the checks pass. More.")).toBe("The checks pass.");

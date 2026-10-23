@@ -157,6 +157,9 @@ function skipHeadings(text: string): string {
  * Leading heading lines (`## Summary`, `**Plan**`) are skipped when text follows them.
  */
 export function leadSentence(text: string): string | null {
-  const body = skipDone(text).skipped ? text : skipHeadings(text);
-  return describe(body, LAST_TEXT_MAX, 1);
+  const { body, skipped } = skipDone(text);
+  const rest = skipHeadings(skipped ? body : text);
+  const out = describe(rest, LAST_TEXT_MAX, 1) ?? describe(text, LAST_TEXT_MAX, 1);
+  if (!skipped || out === null || STARTS_IN_CODE.test(rest)) return out;
+  return out.charAt(0).toUpperCase() + out.slice(1);
 }
