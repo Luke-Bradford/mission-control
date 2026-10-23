@@ -76,6 +76,7 @@ import type {
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
 import { MERGE_HEAD_MOVED } from "../src/engine/publish.ts";
+import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -3098,6 +3099,15 @@ describe("the engine runs reviews", () => {
       expect(store.seatSession(SEAT)?.runId).toBeNull();
       expect(loopTexts()).toContain(asideInCiEventText("GUIDO-1"));
       await vi.waitFor(() => expect(h.taken).toEqual([SEAT]));
+    });
+
+    it("the first CI failure is re-run: the seat is not held", async () => {
+      await inCi();
+      setPr({ ci: "failing" });
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().rerun?.sha).toBe(SHA);
+      expect(loopOf().aside?.wake).toBe(false);
+      expect(seatMayTake(store, SEAT)).toBe(true);
     });
 
     it("CI passes while set aside: in review, still set aside", async () => {

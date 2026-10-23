@@ -885,7 +885,13 @@ describe("takeNext", () => {
         id: "r-ci",
         agentId: SERVER,
         ticket: `${REPO}#9`,
-        loop: { ...NEW_LOOP, phase: "ci", prNumber: 12, aside: { worktree: "/w/x", wake: false } },
+        loop: {
+          ...NEW_LOOP,
+          phase: "ci",
+          prNumber: 12,
+          aside: { worktree: "/w/x", wake: false },
+          rerun: { sha: SHA, at: NOW - 1, runs: [] },
+        },
       }),
     );
     store.setRunPush({ runId: "r-ci", sha: SHA, at: NOW });
