@@ -1,12 +1,10 @@
 import {
   type ConfigView,
-  ENGINE_NOT_RUNNING,
   LIVE_MINUTES,
-  NO_REVIEWS,
   TELEMETRY_POINTS,
   type Telemetry as TelemetryData,
 } from "@mc/core";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RESOURCES } from "../src/data.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
@@ -336,6 +334,9 @@ const Q = {
   prs: 16,
   reviewRoundsPerPr: 1.5,
   firstPassReviewPct: 50,
+  retroFindingsPerPr: 0.8,
+  sentBackPrs: 2,
+  humanReviewWaitMs: 120000,
   reviewedPrs: 2,
   commitsPerRun: 2,
 };
@@ -360,18 +361,20 @@ const quality = () =>
   ]);
 
 describe("KPI tiles", () => {
-  it("Commits shows commits per run when the hub stores it", async () => {
-    const a = await loaded(tel({ quality: Q }));
+  it("Commits shows today’s count with commits per run in its title", async () => {
+    const a = await loaded(tel({ today: { ...tel().today, commits: 7 }, quality: Q }));
     expect(kpi(a.container, "Commits")).toEqual({
-      value: "2.0",
-      detail: "per run, last 14 days",
-      title: null,
+      value: "7",
+      detail: "today",
+      title: "2.0 per run, last 14 days",
       nt: false,
     });
     a.unmount();
-    const b = await loaded(tel({ quality: { ...Q, commitsPerRun: null } }));
+    const b = await loaded(
+      tel({ today: { ...tel().today, commits: 0 }, quality: { ...Q, commitsPerRun: null } }),
+    );
     expect(kpi(b.container, "Commits")).toMatchObject({
-      value: "—",
+      value: "0",
       title: "No finished crew runs in the last 14 days.",
     });
   });
@@ -423,6 +426,24 @@ describe("KPI tiles", () => {
       // the stub serves no guard routes: both read — until the hub answers
       { label: "Guard", value: "—", detail: "", title: null },
       { label: "Test lock", value: "—", detail: "", title: null },
+    ]);
+  });
+
+  it("Commits, Lock wait and Your response read — until the hub answers", async () => {
+    const fetch = stub();
+    const answer = fetch.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetch.mockImplementation(async (...a: unknown[]) => {
+      const url = String(a[0]);
+      if (url.startsWith("/api/telemetry") || url === "/api/test-lock/history")
+        await new Promise(() => {});
+      return answer(...a);
+    });
+    const { container } = render(<Telemetry />);
+    await waitFor(() => expect(container.querySelector(".kpi")).toBeTruthy());
+    expect(["Commits", "Lock wait", "Your response"].map((l) => kpi(container, l).value)).toEqual([
+      "—",
+      "—",
+      "—",
     ]);
   });
 });
@@ -485,9 +506,9 @@ describe("Flow of work", () => {
     expect(stats).toEqual([
       ["verify passed first try", NOT_TRACKED, NOT_TRACKED_TITLE],
       ["review rounds per PR", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["passed the first review round", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["median wait for a human review", NOT_TRACKED, NO_REVIEWS],
-      ["PRs sent back by reviewers", NOT_TRACKED, NO_REVIEWS],
+      ["RETRO findings per PR", NOT_TRACKED, NOT_TRACKED_TITLE],
+      ["median wait for a human review", NOT_TRACKED, NOT_TRACKED_TITLE],
+      ["PRs sent back by reviewers", NOT_TRACKED, NOT_TRACKED_TITLE],
       ["CI green on first push", "94%", "16 merged PRs with a known first-push CI result"],
     ]);
   });
@@ -497,28 +518,37 @@ describe("Flow of work", () => {
     expect(quality()).toEqual(
       expect.arrayContaining([
         ["review rounds per PR", "1.5", "2 merged PRs with a review"],
-        ["passed the first review round", "50%", "2 merged PRs with a review"],
+        ["RETRO findings per PR", "0.8", "2 merged PRs with a review"],
       ]),
     );
     a.unmount();
-    await loaded(tel({ quality: { ...Q, reviewRoundsPerPr: null, firstPassReviewPct: null } }));
+    await loaded(
+      tel({
+        quality: {
+          ...Q,
+          reviewRoundsPerPr: null,
+          firstPassReviewPct: null,
+          retroFindingsPerPr: null,
+        },
+      }),
+    );
     const none = "No merged PRs with a review in the last 14 days.";
     expect(quality()).toEqual(
       expect.arrayContaining([
         ["review rounds per PR", "—", none],
-        ["passed the first review round", "—", none],
+        ["RETRO findings per PR", "—", none],
       ]),
     );
   });
 
-  it("You as CAPCOM: four — tiles, phase 3", async () => {
+  it("You as CAPCOM: omitted fields are not tracked", async () => {
     await loaded();
     const stats = [...panel("tCapcom").querySelectorAll(".stat2")];
     expect(stats.map((s) => s.querySelector("span")?.textContent)).toEqual([
       "decisions today",
       "median response",
       "slowest 10%",
-      "runs you stopped or interrupted",
+      "runs you stopped",
     ]);
     for (const s of stats) {
       expect(s.querySelector("b")?.textContent).toBe(NOT_TRACKED);
@@ -651,15 +681,16 @@ describe("Capacity and cost", () => {
     ]);
   });
 
-  it("machine: CPU and Memory lines; test lock and loop steps wait for the engine", async () => {
+  it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
     await loaded();
     expect(panel("tMach").querySelectorAll("path.line")).toHaveLength(2);
     expect([...panel("tMach").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
       "CPU",
       "Memory",
+      "test lock held",
     ]);
-    within(panel("tLock")).getByText(ENGINE_NOT_RUNNING);
-    within(panel("tStepBars")).getByText(ENGINE_NOT_RUNNING);
+    within(panel("tLock")).getByText(NOT_TRACKED);
+    within(panel("tStepBars")).getByText(NOT_TRACKED);
   });
 
   it("tokens by ticket and totals", async () => {
@@ -729,5 +760,133 @@ describe("empty and failing telemetry", () => {
     stubFetch({ "/api/config": CFG });
     render(<Telemetry />);
     await screen.findByText(/^Could not load telemetry:/);
+  });
+});
+
+describe("engine telemetry", () => {
+  it("shows seeded review, CAPCOM, commits and loop-step figures", async () => {
+    const { container } = await loaded(
+      tel({
+        today: { ...tel().today, commits: 7 },
+        quality: Q,
+        capcom: {
+          answered: 11,
+          medianMs: 240000,
+          p90Ms: 1320000,
+          stopped: 2,
+          longest: { agentId: "inco-1", ms: 2280000 },
+          agentWaitMs: 4320000,
+        },
+        tokensByStep: ["plan", "build", "review"].map((step) => ({
+          step: step as "plan" | "build" | "review",
+          tokens: 1000,
+          costUsd: 0.5,
+          runs: 3,
+        })),
+      }),
+    );
+    expect(kpi(container, "Your response").value).toBe("4m 00s");
+    expect(kpi(container, "Commits").value).toBe("7");
+    expect(quality()).toEqual(
+      expect.arrayContaining([
+        ["RETRO findings per PR", "0.8", "2 merged PRs with a review"],
+        ["PRs sent back by reviewers", "2", "50% passed the first review round"],
+        [
+          "median wait for a human review",
+          "2m 00s",
+          "How long a finished PR waited for your review, median, last 14 days.",
+        ],
+      ]),
+    );
+    expect([...panel("tCapcom").querySelectorAll("b")].map((x) => x.textContent)).toEqual([
+      "11",
+      "4m 00s",
+      "22m 00s",
+      "2",
+    ]);
+    within(panel("tCapcom")).getByText(
+      "Longest wait today: INCO-1's question, 38m 00s. Agent time spent waiting on you today: 1h 12m.",
+    );
+    expect([...panel("tStepBars").querySelectorAll(".hrow")].map((x) => x.textContent)).toEqual([
+      "plan1.0k~$0.50 · 3 runs",
+      "build1.0k~$0.50 · 3 runs",
+      "review1.0k~$0.50 · 3 runs",
+    ]);
+  });
+  it.each(["running", "stalled"])("shows stored runs and a %s live holder", async (state) => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    const fetch = stub();
+    const answer = fetch.getMockImplementation() as (
+      ...args: Parameters<typeof fetch>
+    ) => Promise<Response>;
+    fetch.mockImplementation(async (...args) => {
+      const data =
+        args[0] === "/api/test-lock/history"
+          ? {
+              runs: [
+                {
+                  runId: "old",
+                  seatId: "guido-1",
+                  command: "pnpm test",
+                  queuedAt: NOW - 660000,
+                  startedAt: NOW - 600000,
+                  endedAt: NOW - 120000,
+                  outcome: "freed",
+                  ticket: null,
+                },
+              ],
+              today: { runs: 1, waitMs: 60000 },
+              usualMs: {},
+            }
+          : args[0] === "/api/test-lock"
+            ? {
+                holder: {
+                  runId: "live",
+                  seatId: "inco-1",
+                  command: "just test",
+                  since: NOW - 60000,
+                },
+                waiting: [],
+              }
+            : args[0] === "/api/crew"
+              ? { rows: [{ id: "inco-1", hudState: state }] }
+              : null;
+      return data ? new Response(JSON.stringify(data)) : answer(...args);
+    });
+    const { container } = render(<Telemetry />);
+    await within(panel("tLock")).findByText("freed with its run");
+    expect([...panel("tLock").querySelectorAll("th")].map((x) => x.textContent)).toEqual([
+      "Started",
+      "Agent",
+      "Run",
+      "Waited",
+      "Took",
+      "Result",
+    ]);
+    const row = within(panel("tLock"))
+      .getByText("freed with its run")
+      .closest("tr") as HTMLTableRowElement;
+    expect([...row.querySelectorAll("td")].map((x) => x.textContent)).toEqual([
+      "12:50",
+      "guido-1",
+      "pnpm test",
+      "1:00",
+      "8:00",
+      "freed with its run",
+    ]);
+    expect(row.querySelector(".warn-t")).toBeTruthy();
+    within(panel("tLock")).getByText(state === "stalled" ? "no output" : "running");
+    expect(kpi(container, "Lock wait")).toMatchObject({ value: "1:00", detail: "today · 1 runs" });
+    expect(panel("tMach").querySelectorAll("rect.band")).toHaveLength(2);
+    const live = within(panel("tLock"))
+      .getByText(state === "stalled" ? "no output" : "running")
+      .closest("tr") as HTMLTableRowElement;
+    expect(live.querySelectorAll("td")[4]?.textContent).toBe("1:00");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(live.querySelectorAll("td")[4]?.textContent).toBe("1:02");
   });
 });

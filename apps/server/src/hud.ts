@@ -746,6 +746,8 @@ function crewItems(
   const item = (
     i: Pick<AttentionItem, "key" | "kind" | "agentId" | "repoId" | "text" | "at"> & {
       owner?: AttentionOwner;
+      path?: string | null;
+      sessionId?: string | null;
     },
   ): OwnedItem => ({
     ...i,
@@ -785,6 +787,8 @@ function crewItems(
         kind: "stray",
         agentId: s.agentId,
         repoId: session?.repoId ?? null,
+        path: s.path,
+        sessionId: s.sessionId,
         text: strayText(s.path, s.sessionId, owner === null ? null : seatCallSign(owner.id)),
         at: s.at,
       }),

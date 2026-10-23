@@ -1,8 +1,10 @@
 import {
   LOCK_FREE_TEXT,
   lockHolderText,
+  lockUsualText,
   lockWaitingLine,
   seatCallSign,
+  type TestLockHistory,
   type TestLockState,
 } from "@mc/core";
 import { useSecond } from "../clock.ts";
@@ -12,6 +14,27 @@ import { mss } from "../fmt.ts";
 /** The test lock as `/api/test-lock` last said it; undefined until the first answer. */
 export function useTestLock(): TestLockState | undefined {
   return useResource<TestLockState>(RESOURCES.testLock).data;
+}
+
+/** The usual length of this command, once enough completed holds are recorded. */
+export function LockUsual({
+  command,
+  since,
+  prefix = "",
+}: {
+  command: string;
+  since: number;
+  prefix?: string;
+}) {
+  const history = useResource<TestLockHistory>(RESOURCES.testLockHistory).data;
+  const now = useSecond();
+  const usual = history?.usualMs[command];
+  return usual === undefined ? null : (
+    <span className={now - since > usual ? "warn-t" : undefined}>
+      {prefix}
+      {lockUsualText(Math.round(usual / 60_000), now - since > usual)}
+    </span>
+  );
 }
 
 /**
@@ -30,6 +53,11 @@ export function LockLines({ lock }: { lock: TestLockState | undefined }) {
           ? LOCK_FREE_TEXT
           : lockHolderText(seatCallSign(h.seatId), h.command, mss(now - h.since))}
       </div>
+      {h && (
+        <div className="s fg2">
+          <LockUsual command={h.command} since={h.since} />
+        </div>
+      )}
       {lock.waiting.map((w) => {
         // one run can wait with two calls at once (parallel Bash): its run id alone repeats, so
         // each row is keyed by its run and its place among that run's waits

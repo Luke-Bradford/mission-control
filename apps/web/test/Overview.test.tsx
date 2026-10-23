@@ -521,7 +521,12 @@ describe("Agents panel", () => {
   it("a run in line for the test lock says how long, in amber", async () => {
     stub({
       rows: [seatRow({ loop: { ...loopOf("working", "Working on the ticket"), wait: "lock" } })],
-      lock: { holder: null, waiting: [{ runId: "r-12", seatId: "guido-1", since: NOW - 65_000 }] },
+      lock: {
+        holder: null,
+        waiting: [
+          { runId: "r-12", seatId: "guido-1", command: "pnpm -s test", since: NOW - 65_000 },
+        ],
+      },
     });
     render(<Overview />);
     const el = await screen.findByText("in line for the test lock · 1:05");
@@ -574,8 +579,8 @@ describe("Agents panel", () => {
             since: NOW - 12 * MIN,
           },
           waiting: [
-            { runId: "r-2", seatId: "guido-2", since: NOW - MIN },
-            { runId: "r-3", seatId: "guido-3", since: NOW - MIN },
+            { runId: "r-2", seatId: "guido-2", command: "pnpm -s test", since: NOW - MIN },
+            { runId: "r-3", seatId: "guido-3", command: "pnpm -s test", since: NOW - MIN },
           ],
         },
         extra: interrupts(),
@@ -821,6 +826,44 @@ describe("Agents panel", () => {
     expect(row.textContent).toContain("5h —");
     expect(row.textContent).toContain("Idle since");
     expect(row.querySelector(".spark")).toBeNull();
+  });
+
+  it("a loop cell shows the live tool and elapsed time once, beneath the step bar", async () => {
+    const detail = "x".repeat(60);
+    const row = crewRow({
+      loop: { phase: "working", text: "Implement cache", prNumber: null, parked: null },
+    });
+    stub({
+      rows: [
+        {
+          ...row,
+          digest: {
+            lastText: "Implement cache",
+            toolCalls: 1,
+            turns: 1,
+            lastEventAt: NOW,
+            model: null,
+            contextTokens: null,
+            contextWindow: null,
+            tools: {},
+            subagents: [],
+            minuteTokens: [],
+            turnUsage: [],
+            background: [],
+            compactions: 0,
+            liveTool: { name: "Bash", detail, since: NOW - 65_000 },
+          },
+        } as CrewRow,
+      ],
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("Quote cache");
+    const agent = agentRows(container)[0] as HTMLElement;
+    const cell = agent.querySelector(".loopstep") as HTMLElement;
+    expect(cell.textContent).toContain(`Bash ${"x".repeat(40)}… · 1:05`);
+    expect(cell.querySelector(".stepbar")?.nextElementSibling?.textContent).toContain("1:05");
+    expect(agent.querySelector(".doing")?.textContent).toBe("Implement cache");
+    expect(agent.querySelector(".doing")?.textContent).not.toContain("Bash");
   });
 
   it("a running seat's row says its tool, what it touches and for how long, on one line", async () => {
@@ -1250,7 +1293,7 @@ describe("Machine panel: the test lock box", () => {
 
   const HELD = {
     holder: { runId: "r-1", seatId: "guido-2", command: "pnpm -s test", since: NOW - 83_000 },
-    waiting: [{ runId: "r-2", seatId: "guido-3", since: NOW - 12_000 }],
+    waiting: [{ runId: "r-2", seatId: "guido-3", command: "pnpm -s test", since: NOW - 12_000 }],
   };
   const holder = (over: Partial<CrewRow> = {}) =>
     seatRow({ id: "guido-2", index: 1, ticket: "shop-app#3349", ...over });

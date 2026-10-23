@@ -136,6 +136,39 @@ describe("Setup tabs", () => {
     expect(window.location.pathname).toBe("/setup/roles");
   });
 
+  it("Sessions marks stray folder tiles with file and time for this session", async () => {
+    load({
+      "/api/config": SESSIONS_CFG,
+      "/api/crew/sessions": sessionsOf([
+        { name: "docs", owners: [] },
+        { name: "apps", owners: [] },
+      ]),
+      "/api/attention": [
+        {
+          kind: "stray",
+          key: "stray:a",
+          text: "docs/guide.md changed in s/s1 outside every agent's area",
+          path: "docs/guide.md",
+          sessionId: "s1",
+          at: NOW,
+        },
+        {
+          kind: "stray",
+          key: "stray:b",
+          text: "apps/other.ts changed in s/s2 outside every agent's area",
+          path: "apps/other.ts",
+          sessionId: "s2",
+          at: NOW,
+        },
+      ],
+    });
+    at("sessions");
+    const p = await screen.findByRole("region", { name: "s/s1" });
+    const stray = await within(p).findByText("Stray change");
+    expect(stray.closest("li")?.textContent).toContain("docs/guide.md · 13:00");
+    expect(p.textContent).not.toContain("apps/other.ts");
+  });
+
   it("Sessions: a panel per repo with the crew and the branch, filtered by session", async () => {
     load();
     at("sessions");
@@ -205,6 +238,40 @@ describe("Setup tabs", () => {
     error: null,
     checkedAt: NOW,
   };
+
+  it("Sessions: stray tiles use the path and session, independent of display text", async () => {
+    load({
+      "/api/config": SESSIONS_CFG,
+      "/api/crew/sessions": sessionsOf([
+        { name: "apps", owners: [] },
+        { name: "docs", owners: [] },
+      ]),
+      "/api/attention": [
+        {
+          key: "stray:1",
+          kind: "stray",
+          path: "apps/a.ts",
+          sessionId: "s1",
+          text: "unrelated display text",
+          at: NOW,
+        },
+        {
+          key: "stray:2",
+          kind: "stray",
+          path: "docs/b.md",
+          sessionId: "other",
+          text: "docs/b.md changed in s/s1 outside every agent's area",
+          at: NOW,
+        },
+      ],
+    });
+    at("sessions");
+    const p = await screen.findByRole("region", { name: "s/s1" });
+    expect(await within(p).findByText("Stray change")).toBeTruthy();
+    expect(within(p).getByText(/apps\/a.ts ·/)).toBeTruthy();
+    expect(within(p).queryByText(/docs\/b.md/)).toBeNull();
+    expect(within(p).getAllByText("Stray change")).toHaveLength(1);
+  });
 
   it("a scratch seat's area says scratch review copy", async () => {
     const session = CREW_CONFIG.crew?.sessions[0];
@@ -551,8 +618,8 @@ describe("Setup tabs", () => {
       "/api/test-lock": {
         holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW - 83_000 },
         waiting: [
-          { runId: "r-2", seatId: "guido-3", since: NOW - 12_000 },
-          { runId: "r-3", seatId: "network-1", since: NOW - 4_000 },
+          { runId: "r-2", seatId: "guido-3", command: "pnpm -s test", since: NOW - 12_000 },
+          { runId: "r-3", seatId: "network-1", command: "pnpm -s test", since: NOW - 4_000 },
         ],
       } satisfies TestLockState,
       "/api/guard/hits?days=7": NO_HITS,
