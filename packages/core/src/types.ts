@@ -1004,6 +1004,7 @@ export type NotificationCategory =
 
 /** Notify me about, on every signed-in device (catalogue §2.7.6). */
 export interface NotificationPreferences {
+  enabled?: boolean;
   categories: Record<NotificationCategory, boolean>;
   quietHours: {
     start: string;
@@ -1015,6 +1016,8 @@ export interface NotificationPreferences {
 }
 
 export interface NotificationEvent {
+  test?: boolean;
+  softChime?: boolean;
   id: string;
   category: NotificationCategory;
   at: number;
