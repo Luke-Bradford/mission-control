@@ -123,7 +123,7 @@ const succeeds = (p: Promise<unknown>) =>
   );
 
 /** The clone's `.git` (real path), once the checkout is a clean git top level. */
-async function cloneGitDir(checkout: string): Promise<string> {
+export async function cloneGitDir(checkout: string): Promise<string> {
   try {
     const common = await realpath(join(checkout, ".git"));
     const o = { gitDir: common };
