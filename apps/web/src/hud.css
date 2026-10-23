@@ -2010,26 +2010,37 @@ pre.diff .h {
 .dmsg.flight .md-txt .md strong {
   color: var(--accent);
 }
-.dtabs {
-  display: flex;
-  gap: 2px;
-  padding: 6px 14px 0;
+.dwait {
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
+  background: var(--warn-soft);
+  display: grid;
+  gap: 4px;
 }
-.dtabs button {
-  display: inline-flex;
+.dwait .dwh {
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.dask {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  border: 0;
-  background: none;
-  color: var(--fg-2);
-  padding: 4px 10px;
-  border-radius: 6px 6px 0 0;
-  font-weight: 500;
+  gap: 8px;
+  min-width: 0;
 }
-.dtabs button.on {
-  color: var(--fg);
-  background: var(--surface-2);
+.briefgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.briefsec {
+  display: grid;
+  gap: 4px;
+}
+.briefsec h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
 .dock-unread {
   background: var(--accent);
