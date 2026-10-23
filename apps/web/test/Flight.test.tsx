@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   type CrewLoop,
   FLIGHT_BRIEF_SECTIONS,
@@ -11,7 +12,7 @@ import { hub } from "../src/data.ts";
 import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
-import { postedText } from "../src/flight/Drafts.tsx";
+import { Drafts, postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
 import { NO_INCOMING } from "../src/flight/Incoming.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
@@ -28,6 +29,7 @@ import { stubFetch as fetchStub } from "./fetchStub.ts";
 const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
   fetchStub({
     "/api/drafts": [],
+    "/api/drafts/history": [],
     "/api/flight/incoming": { entries: [] },
     "/api/flight/brief": { session: null, sections: [] },
     ...routes,
@@ -1294,6 +1296,252 @@ describe("FLIGHT's brief", () => {
 });
 
 describe("Draft replies", () => {
+  it("wraps long destinations and preserves multiline draft text on narrow screens", () => {
+    const css = readFileSync(new globalThis.URL("../src/hud.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.draft-row \.chipref\s*\{[^}]*white-space: normal/);
+    expect(css).toMatch(/\.draft-row \.pre\s*\{[^}]*white-space: pre-wrap/);
+    expect(css).toMatch(/\.draft-row\s*\{[^}]*overflow-wrap: anywhere/);
+    expect(css).toMatch(/\.row\s*\{[^}]*flex-wrap: wrap/);
+  });
+
+  it("shows loading until both resources arrive, then the empty state", async () => {
+    let resolveHistory!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        path === "/api/drafts/history"
+          ? new Promise<Response>((resolve) => {
+              resolveHistory = resolve;
+            })
+          : new Response("[]"),
+      ),
+    );
+    render(<Drafts />);
+    expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.queryByText("No drafts to send.")).toBeNull();
+    await act(async () => resolveHistory(new Response("[]")));
+    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
+  });
+
+  it.each(["/api/drafts", "/api/drafts/history"])(
+    "shows failed %s responses while retaining available rows",
+    async (path) => {
+      let failed = false;
+      stubFetch({
+        "/api/drafts": () =>
+          failed && path === "/api/drafts"
+            ? { status: 503, body: { error: "Drafts unavailable" } }
+            : {
+                status: 200,
+                body: [
+                  {
+                    id: 12,
+                    target: "garden#12",
+                    kind: "issue",
+                    text: "Retained reply",
+                    state: "pending",
+                    createdAt: NOW,
+                  },
+                ],
+              },
+        "/api/drafts/history": () =>
+          failed && path === "/api/drafts/history"
+            ? { status: 503, body: { error: "Drafts unavailable" } }
+            : { status: 200, body: [] },
+      });
+      render(<Drafts />);
+      expect(await screen.findByText("Retained reply")).toBeTruthy();
+      failed = true;
+      act(() => hub.refetchTopic("flight"));
+      expect((await screen.findByRole("alert")).textContent).toBe("Drafts unavailable");
+      expect(screen.getByText("Retained reply")).toBeTruthy();
+    },
+  );
+
+  it("renders recipient, context and faded history without active controls", async () => {
+    stubFetch({
+      "/api/drafts": [
+        {
+          id: 8,
+          target: "garden#8",
+          kind: "issue",
+          text: "Pending reply",
+          state: "pending",
+          createdAt: NOW,
+          to: "Garden reviewer",
+          via: "GitHub",
+          where: "garden#8",
+          context: "Asked about the seed cache",
+        },
+      ],
+      "/api/drafts/history": [
+        {
+          id: 9,
+          target: "garden#9",
+          kind: "pr",
+          text: "Sent reply",
+          state: "posted",
+          createdAt: NOW,
+        },
+        {
+          id: 10,
+          target: "garden#10",
+          kind: "issue",
+          text: "Dropped reply",
+          state: "discarded",
+          createdAt: NOW,
+        },
+      ],
+    });
+    const { container } = render(<Flight />);
+    expect(await screen.findByText("To Garden reviewer")).toBeTruthy();
+    expect(screen.getByText("GitHub · garden#8")).toBeTruthy();
+    expect(screen.getByText("Asked about the seed cache")).toBeTruthy();
+    expect(await screen.findByText("Posted")).toBeTruthy();
+    expect(screen.getByText("Discarded")).toBeTruthy();
+    expect(screen.getByText("PR garden#9")).toBeTruthy();
+    for (const row of container.querySelectorAll(".draft-row.acked")) {
+      expect(row.querySelector("button, textarea")).toBeNull();
+    }
+    expect(container.querySelectorAll(".draft-row.acked")).toHaveLength(2);
+    expect(container.querySelector(".sitstats")?.textContent).toContain("1 drafts to send");
+  });
+
+  it.each([false, true])(
+    "Teams copies only and retains Copied after refresh (blocked: %s)",
+    async (blocked) => {
+      const writeText = vi.fn().mockImplementation(async () => {
+        if (blocked) throw new Error("blocked");
+      });
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      let recorded = false;
+      const fn = stubFetch({
+        "POST /api/drafts/11/copied": () => {
+          recorded = true;
+          return { status: 200, body: { ok: true } };
+        },
+        "/api/drafts": () => ({
+          status: 200,
+          body: recorded
+            ? []
+            : [
+                {
+                  id: 11,
+                  target: "garden#11",
+                  kind: "issue",
+                  text: "Teams reply",
+                  state: "pending",
+                  createdAt: NOW,
+                  to: "Garden team",
+                  via: "Teams",
+                  where: "Seed channel",
+                },
+              ],
+        }),
+        "/api/drafts/history": () => ({
+          status: 200,
+          body: recorded
+            ? [
+                {
+                  id: 11,
+                  target: "garden#11",
+                  kind: "issue",
+                  text: "Teams reply",
+                  state: "copied",
+                  createdAt: NOW,
+                  via: "Teams",
+                },
+              ]
+            : [],
+        }),
+      });
+      render(
+        <>
+          <Flight />
+          <Toast />
+        </>,
+      );
+      const button = await screen.findByRole("button", { name: "Copy for Teams" });
+      button.focus();
+      expect(document.activeElement).toBe(button);
+      expect(screen.queryByRole("button", { name: "Post on GitHub" })).toBeNull();
+      fireEvent.click(button);
+      expect(
+        await screen.findByText(
+          blocked
+            ? "Copy was blocked here; select the text and copy it."
+            : "Copied. Paste it into Teams.",
+        ),
+      ).toBeTruthy();
+      expect(writeText).toHaveBeenCalledWith("Teams reply");
+      if (!blocked) {
+        expect(await screen.findByText("Copied", { selector: ".pill" })).toBeTruthy();
+        act(() => hub.refetchTopic("flight"));
+        await waitFor(() =>
+          expect(fn.mock.calls.filter(([p]) => p === "/api/drafts").length).toBeGreaterThan(1),
+        );
+        expect(screen.queryByRole("button", { name: "Copy for Teams" })).toBeNull();
+      }
+      expect(
+        fn.mock.calls.filter(([, init]) => init?.method === "POST").map(([path]) => path),
+      ).toEqual(blocked ? [] : ["/api/drafts/11/copied"]);
+    },
+  );
+
+  it.each([false, true])(
+    "records Teams copies and refreshes history and Situation (failure: %s)",
+    async (failed) => {
+      const draft = {
+        id: 21,
+        target: "garden#21",
+        kind: "issue",
+        text: "Copy me",
+        state: "pending",
+        createdAt: NOW,
+        via: "Teams",
+      };
+      let copied = false;
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      const fn = stubFetch({
+        "/api/drafts": () => ({ status: 200, body: copied ? [] : [draft] }),
+        "/api/drafts/history": () => ({
+          status: 200,
+          body: copied
+            ? [{ ...draft, state: "copied", text: "History copy", completedAt: NOW }]
+            : [],
+        }),
+        "POST /api/drafts/21/copied": () => {
+          expect(writeText).toHaveBeenCalledWith("Copy me");
+          copied = !failed;
+          return {
+            status: failed ? 500 : 200,
+            body: failed ? { error: "record failed" } : { ok: true },
+          };
+        },
+      });
+      const { container } = render(<Flight />);
+      fireEvent.click(await screen.findByRole("button", { name: "Copy for Teams" }));
+      if (failed) {
+        expect(await screen.findByRole("alert")).toHaveProperty(
+          "textContent",
+          expect.stringContaining("Copy worked but couldn't be recorded"),
+        );
+        expect(screen.getByRole("button", { name: "Copy for Teams" })).toBeTruthy();
+      } else {
+        expect(await screen.findByText("History copy")).toBeTruthy();
+        expect(container.querySelector(".draft-row.acked")?.textContent).toContain("Copied");
+        await waitFor(() =>
+          expect(container.querySelector(".sitstats")?.textContent).toContain("0 drafts to send"),
+        );
+        expect(screen.queryByRole("button", { name: "Copy for Teams" })).toBeNull();
+      }
+      expect(
+        fn.mock.calls.filter(([, init]) => init?.method === "POST").map(([path]) => path),
+      ).toEqual(["/api/drafts/21/copied"]);
+    },
+  );
+
   it("shows the panel and count, and posts edited text only after Post", async () => {
     let drafts = [
       {
@@ -1321,14 +1569,16 @@ describe("Draft replies", () => {
     );
     expect(await screen.findByText("Prepared reply")).toBeTruthy();
     expect(container.querySelector(".sitstats")?.textContent).toContain("1 drafts to send");
-    expect(screen.getByText("shop-app#12")).toBeTruthy();
+    expect(screen.getByText("To shop-app#12")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Draft for shop-app#12" }), {
       target: { value: "Approved reply" },
     });
     expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Post on GitHub" }));
-    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
+    expect(await screen.findByText("Posted", { selector: ".pill" })).toBeTruthy();
+    expect(screen.getByText("Approved reply")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Post on GitHub" })).toBeNull();
     expect(screen.getByText(postedText("shop-app#12"))).toBeTruthy();
     const post = fn.mock.calls.find(([p]) => p === "/api/drafts/1/post");
     expect(JSON.parse(post?.[1]?.body as string)).toEqual({ text: "Approved reply" });
@@ -1358,6 +1608,8 @@ describe("Draft replies", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Post on GitHub" }));
     expect((await screen.findByRole("alert")).textContent).toBe("mentions are refused");
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-    expect(await screen.findByText("No drafts to send.")).toBeTruthy();
+    expect(await screen.findByText("Discarded", { selector: ".pill" })).toBeTruthy();
+    expect(screen.getByText("PR reply")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull();
   });
 });

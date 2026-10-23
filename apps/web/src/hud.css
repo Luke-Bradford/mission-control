@@ -3601,6 +3601,23 @@ button.nrow.thread.tagged {
   max-width: 100%;
 }
 
+.draft-row {
+  overflow-wrap: anywhere;
+}
+.draft-row.acked {
+  opacity: 0.6;
+}
+.draft-row textarea {
+  width: 100%;
+  min-width: 0;
+}
+.draft-row .chipref {
+  white-space: normal;
+}
+.draft-row .pre {
+  white-space: pre-wrap;
+}
+
 .teams-sources {
   min-width: 0;
   overflow-wrap: anywhere;

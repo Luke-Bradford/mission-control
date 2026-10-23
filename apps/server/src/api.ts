@@ -1726,6 +1726,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/flight/Drafts.tsx
+      api.post<{ Params: { id: string } }>("/drafts/:id/copied", async (req, reply) => {
+        const id = Number(req.params.id);
+        const draft = store.draft(id);
+        if (!draft) return reply.code(404).send({ error: "No draft." });
+        if (draft.via !== "Teams" || draft.state !== "pending")
+          return reply.code(409).send({ error: "Only pending Teams drafts can be copied." });
+        store.finishDraft(id, "copied");
+        bus.emit("flight");
+        return { ok: true };
+      });
+      // Reader: apps/web/src/flight/Drafts.tsx
       api.post<{ Params: { id: string } }>("/drafts/:id/discard", async (req, reply) => {
         const id = Number(req.params.id);
         if (postingDrafts.has(id)) return reply.code(409).send({ error: "Draft is being posted." });

@@ -57,6 +57,7 @@ export const RESOURCES = {
   // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
   flight: { path: "/api/flight", topic: "agents" },
   drafts: { path: "/api/drafts", topic: "flight" },
+  draftHistory: { path: "/api/drafts/history", topic: "flight" },
   flightSchedule: { path: "/api/flight/schedule", topic: "flight" },
   flightIncoming: { path: "/api/flight/incoming", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
@@ -151,6 +152,7 @@ export const ACTIONS = {
   addAccount: "/api/accounts",
   checkAccount: (id: string) => `/api/accounts/${enc(id)}/check`,
   postDraft: (id: string) => `/api/drafts/${enc(id)}/post`,
+  copyDraft: (id: string) => `/api/drafts/${enc(id)}/copied`,
   discardDraft: (id: string) => `/api/drafts/${enc(id)}/discard`,
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
