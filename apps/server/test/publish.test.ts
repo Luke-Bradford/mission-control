@@ -1359,6 +1359,25 @@ describe("merge steps", () => {
       expect(await publisher().deleteRemoteBranch(R, SHA)).toEqual({ ok: true });
     });
 
+    it("keeps the push's refusal when the re-check cannot read origin", async () => {
+      let asked = 0;
+      gitAnswers = {
+        "ls-remote": () => {
+          if (++asked === 1) return lsRemote(MAIN, SHA);
+          throw new Error("fatal: unable to access origin");
+        },
+        push: Object.assign(new Error("Command failed: git push"), {
+          code: 1,
+          stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
+        }),
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+      expect(asked).toBe(2);
+    });
+
     it("still refuses finally when the branch is still there after a refused push", async () => {
       gitAnswers = {
         "ls-remote": lsRemote(MAIN, SHA),
