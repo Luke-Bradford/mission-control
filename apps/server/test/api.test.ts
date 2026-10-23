@@ -894,7 +894,11 @@ describe("local access", () => {
 
   it("refuses a cross-site request under /api (403) before its handler runs", async () => {
     const headers = { "sec-fetch-site": "cross-site" };
-    for (const url of ["/api/boards/shop-app/setup", "/api/boards/shop-app/items/1"]) {
+    for (const url of [
+      "/api/boards/shop-app/setup",
+      "/api/boards/shop-app/items/1",
+      "/%61pi/boards/shop-app/setup",
+    ]) {
       const r = await app.inject({ method: "GET", url, headers });
       expect(r.statusCode, url).toBe(403);
       expect(r.json()).toEqual({ error: "cross-site request refused" });
