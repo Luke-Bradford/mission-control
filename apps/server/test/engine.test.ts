@@ -259,7 +259,7 @@ interface Harness {
   reruns: string[];
   /** Runs inside rerunFailed (a poll landing mid-call). */
   duringRerun: (() => void) | null;
-  rerunRuns: { id: number; name: string }[] | null;
+  rerunRuns: { id: number; name: string }[] | null | "running";
   busy: boolean;
   facts: SeatFacts | null;
   /** The review seat's process facts. */
@@ -784,6 +784,20 @@ describe("CI and review", () => {
     expect(h.reruns).toEqual([SHA]);
     expect(h.sent).toHaveLength(1);
     expect(loopTexts()).toContain("CI failed on aaaaaaa; no run could be re-run");
+  });
+
+  it("a failure seen while the run still has jobs going spends no re-run", async () => {
+    h.rerunRuns = "running";
+    await inCi();
+    await failCi();
+    expect(loopOf().rerun).toBeNull();
+    expect(h.sent).toEqual([]);
+    h.rerunRuns = [{ id: 77, name: "CI" }];
+    clock += 1000;
+    setPr({ ci: "failing" });
+    await h.engine.reconcileRun(RUN);
+    expect(h.reruns).toEqual([SHA, SHA]);
+    expect(h.sent).toEqual([]);
   });
 
   it("a seat in a turn is not written to", async () => {
