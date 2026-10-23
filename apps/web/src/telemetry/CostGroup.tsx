@@ -73,7 +73,6 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
           </div>
         )}
       </Panel>
-      {/* Decision: no Lines column; lines changed per run arrive with the engine's commits. */}
       <Panel id="tTotals" title="Totals" sub="selected range" className="wide">
         {!t ? (
           <p className="pb s muted">{scope.wait}</p>
@@ -93,6 +92,7 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
                   <th className="r">Cache hit</th>
                   <th className="r">Turns</th>
                   <th className="r">Tool calls</th>
+                  <th className="r">Lines (+/−)</th>
                   <th className="r">~Cost</th>
                 </tr>
               </thead>
@@ -112,6 +112,10 @@ export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope
                     </td>
                     <td className="r num">{r.turns}</td>
                     <td className="r num">{r.toolCalls}</td>
+                    <td className="r num">
+                      <span className="add">{r.additions == null ? DASH : `+${r.additions}`}</span>{" "}
+                      <span className="del">{r.deletions == null ? DASH : `−${r.deletions}`}</span>
+                    </td>
                     <td className="r num muted">{cost(r.costUsd)}</td>
                   </tr>
                 ))}
