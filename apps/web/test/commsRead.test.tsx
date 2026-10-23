@@ -1,8 +1,9 @@
 import type { CommsThreadMessage } from "@mc/core";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { Comms } from "../src/pages/Comms.tsx";
+import { setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, item, NOW, seatRow } from "./fixtures.ts";
 
@@ -17,6 +18,44 @@ const message = (id: string): CommsThreadMessage => ({
   direct: true,
   seen: false,
 });
+
+it.each(["tag", "message"] as const)(
+  "Read opens a %s outside the crew session filter without widening the thread list",
+  async (kind) => {
+    const fetch = stubFetch({
+      "/api/config": CONFIG,
+      "/api/crew": {
+        rows: [seatRow({ sessionId: "alpha" }), seatRow({ id: "retro-1", sessionId: "beta" })],
+        firstRunToday: null,
+      },
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/attention": [
+        item({ key: `${kind}:one`, kind, agentId: "guido-1", text: "Unread report" }),
+      ],
+      "/api/comms/guido-1": { messages: [message("one")] },
+      "POST /api/comms/guido-1/read": { ok: true },
+    });
+    render(<Comms item={null} />);
+    const need = (await screen.findByText("Unread report")).closest(".nrow") as HTMLElement;
+    const threads = document.querySelector("#chanList") as HTMLElement;
+    act(() => setSession("beta"));
+    expect(within(threads).queryByRole("button", { name: /^guido-1/ })).toBeNull();
+    expect(within(threads).getByRole("button", { name: /^retro-1/ })).toBeTruthy();
+    expect(fetch.mock.calls.some(([p]) => p.endsWith("/read"))).toBe(false);
+    fireEvent.click(within(need).getByRole("button", { name: "Read" }));
+    await waitFor(() => {
+      const reads = fetch.mock.calls.filter(([p]) => p.endsWith("/read"));
+      expect(reads).toHaveLength(1);
+      expect(reads[0]?.[0]).toBe("/api/comms/guido-1/read");
+      expect(JSON.parse(String(reads[0]?.[1]?.body))).toEqual({ messageIds: ["one"] });
+    });
+    expect(document.querySelector("#convo")?.textContent).toContain("Report one @CAPCOM");
+    expect(within(threads).queryByRole("button", { name: /^guido-1/ })).toBeNull();
+    expect(within(threads).getByRole("button", { name: /^retro-1/ })).toBeTruthy();
+    fireEvent.click(within(threads).getAllByRole("button")[0] as HTMLElement);
+    expect(document.querySelector("#convo")).toBeNull();
+  },
+);
 
 it("Read clears only the displayed snapshot, keeps other threads and concurrent replies, and reads new visible arrivals", async () => {
   let messages = [message("one")];

@@ -24,7 +24,7 @@ import { DoingLine } from "../hud/DoingLine.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink } from "../router.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 
 const DASH = "—";
 export const NO_CREW_RUNS = "No crew runs. Start a seat from a ticket on the Board.";
@@ -121,13 +121,13 @@ export function WorkInFlight() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const now = useSecond();
   const tz = useTz();
-  const [session] = useSession();
+  const { inView: matchesSession } = useSessionScope();
   const active = (crew?.rows ?? []).filter(
     (r) =>
       r.kind === "crew" &&
       r.ticket !== null &&
       (hasActiveRun(r) || isLoopInFlight(r)) &&
-      inSession(session, r.repoId),
+      matchesSession(r),
   );
   if (active.length === 0) return <p className="pb note">{crew ? NO_CREW_RUNS : DASH}</p>;
   return (

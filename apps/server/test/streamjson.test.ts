@@ -439,6 +439,8 @@ describe("foldTranscript digest", () => {
 
   it("returns an empty digest for no lines", () => {
     expect(foldTranscript(null, [], 1).digest).toEqual({
+      tasks: [],
+      attemptUsage: [],
       toolCalls: 0,
       turns: 0,
       lastEventAt: null,
@@ -454,7 +456,7 @@ describe("foldTranscript digest", () => {
       background: [],
       compactions: 0,
       costTokens: null,
-      speed: { tokensPerSec: null, turnMs: null },
+      speed: { tokensPerSec: null, turnMs: null, firstTokenMs: null },
     });
   });
 });
@@ -805,15 +807,15 @@ describe("foldTranscript: reply speed and the cost's token count", () => {
 
   it("is null with no ask, and a result line clears the ask", () => {
     const none = foldTranscript(null, [reply("m1", 1, 50)], 1).digest;
-    expect(none.speed).toEqual({ tokensPerSec: null, turnMs: null });
+    expect(none.speed).toEqual({ tokensPerSec: null, turnMs: null, firstTokenMs: null });
     const cleared = foldTranscript(null, [ask("t1", 3), result(), reply("m2", 5, 100)], 1).digest;
-    expect(cleared.speed).toEqual({ tokensPerSec: null, turnMs: null });
+    expect(cleared.speed).toEqual({ tokensPerSec: null, turnMs: null, firstTokenMs: null });
   });
 
   it("ignores a subagent's frames, and folds the same in chunks", () => {
     const all = [ask("t1", 3), ask("tx", 4, "toolu_sub"), reply("m2", 6, 90)];
     const whole = foldTranscript(null, all, 1);
-    expect(whole.digest.speed).toEqual({ tokensPerSec: 30, turnMs: 3000 });
+    expect(whole.digest.speed).toEqual({ tokensPerSec: 30, turnMs: 3000, firstTokenMs: null });
     const chunked = foldTranscript(foldTranscript(null, all.slice(0, 2), 1), all.slice(2), 1);
     expect(chunked.digest.speed).toEqual(whole.digest.speed);
   });

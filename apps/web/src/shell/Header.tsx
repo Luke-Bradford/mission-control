@@ -1,14 +1,14 @@
 import {
   type AttentionItem,
   type AwaySettings,
+  type ConfigView,
   type Crew,
   LOCK_HEADER_TITLE,
   lockHeaderText,
   type MachineSample,
-  type RepoView,
   seatCallSign,
 } from "@mc/core";
-import { type ReactNode, useMemo, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
 import { operatorItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
@@ -21,14 +21,13 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { openAway, useDock } from "./overlays.ts";
-import { SESSION_ALL, useSession } from "./session.ts";
+import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
 const TABS: readonly { page: Page; label: string; needs?: (i: AttentionItem) => boolean }[] = [
   { page: "overview", label: "Overview" },
   { page: "flight", label: "FLIGHT", needs: (i) => i.kind === "decision" || i.kind === "person" },
-  // Escalations are board issues: they stand in for the mockup's `pr` kind.
-  { page: "board", label: "Board", needs: (i) => i.escalationId !== null },
+  { page: "board", label: "Board", needs: (i) => i.kind === "pr" || i.escalationId !== null },
   { page: "agent", label: "Agent" },
   { page: "comms", label: "Comms", needs: () => true },
   { page: "telemetry", label: "Telemetry" },
@@ -111,8 +110,15 @@ function NeedsLamp({ items }: { items: AttentionItem[] }) {
 }
 
 function SessionSelect() {
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? [];
+  const sessions = useSessions();
   const [session, setSession] = useSession();
+  const configLoaded = useResource<ConfigView>(RESOURCES.config).data !== undefined;
+  // A chosen session that has since been removed falls back to all sessions, not empty pages.
+  useEffect(() => {
+    if (configLoaded && session !== SESSION_ALL && !sessions.some((s) => s.id === session)) {
+      resetSession();
+    }
+  }, [configLoaded, session, sessions]);
   return (
     <select
       id="sess"
@@ -121,7 +127,7 @@ function SessionSelect() {
       onChange={(e) => setSession(e.target.value)}
     >
       <option value={SESSION_ALL}>All sessions</option>
-      {repos.map((r) => (
+      {sessions.map((r) => (
         <option key={r.id} value={r.id}>
           {`s/${r.id}`}
         </option>

@@ -345,6 +345,37 @@ async function readChanged(
     raw.set(path, r.path);
   }
   const all = [...byPath.values()];
+  const visible = all.slice(0, FILES_MAX);
+  const commits = new Map<string, string>();
+  if (visible.some((row) => row.state === "committed")) {
+    try {
+      const log = await exec([
+        ...base,
+        "log",
+        "--no-show-signature",
+        "--format=%x00%H",
+        "--name-only",
+        "-z",
+        "origin/HEAD..HEAD",
+      ]);
+      // The extra NUL before each header separates commits from literal path records.
+      // Git emits one newline between the header's NUL and the first path.
+      for (const commit of log.split("\0\0")) {
+        const [header, ...paths] = commit.replace(/^\0/, "").split("\0");
+        if (!header || !/^[a-f0-9]{40,64}$/.test(header)) continue;
+        for (const [i, record] of paths.entries()) {
+          const path = i === 0 ? record.replace(/^\n/, "") : record;
+          if (path && !commits.has(path)) commits.set(path, header);
+        }
+      }
+    } catch {
+      notes.push("git could not read a file commit");
+    }
+  }
+  for (const row of visible) {
+    row.commitSha =
+      row.state === "committed" ? (commits.get(raw.get(row.path) ?? "") ?? null) : null;
+  }
   if (all.length > FILES_MAX) notes.push(`showing the first ${FILES_MAX} of ${all.length} files`);
   const note = notes.length > 0 ? notes.join(" · ") : null;
   return { list: { files: all.slice(0, FILES_MAX), note }, raw };

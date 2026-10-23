@@ -6,6 +6,7 @@ import {
   REVIEW_STATUS_RUNNING,
   type ReviewStatus,
   type Run,
+  type RunDigest,
   reviewEventKey,
 } from "@mc/core";
 
@@ -48,7 +49,12 @@ function impliedStep(runId: string, e: LoopEvent): Step | null {
  * The run's tries at each step, oldest first. `events` come by `at`, then key; `review` is the
  * QA status of the pushed commit, which says whether an open In review try is being worked on.
  */
-export function loopTries(run: Run, events: LoopEvent[], review: ReviewStatus | null): LoopTry[] {
+export function loopTries(
+  run: Run,
+  events: LoopEvent[],
+  review: ReviewStatus | null,
+  usage?: RunDigest["attemptUsage"],
+): LoopTry[] {
   const loop = run.loop ?? null;
   if (loop === null) return [];
   const tries: LoopTry[] = [];
@@ -130,6 +136,14 @@ export function loopTries(run: Run, events: LoopEvent[], review: ReviewStatus | 
           ? "running"
           : "waiting"
         : "running";
+  }
+  if (usage !== undefined) {
+    for (const t of tries) {
+      const samples = usage.filter(
+        (u) => u.at !== null && u.at >= t.startedAt && (t.endedAt === null || u.at < t.endedAt),
+      );
+      t.tokens = samples.length === 0 ? null : samples.reduce((n, u) => n + u.tokens, 0);
+    }
   }
   return tries;
 }

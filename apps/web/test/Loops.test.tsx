@@ -142,7 +142,8 @@ describe("Setup › Loops templates", () => {
     expect(screen.queryByText(unsafeId)).toBeNull();
   });
 
-  it.each(["shop-app", "s1"])("filters template counts and occupants for %s", async (session) => {
+  // Sessions are crew sessions (#387); a repo id is not a session.
+  it.each(["s1"])("filters template counts and occupants for %s", async (session) => {
     const fetchFn = stubFetch({
       "/api/crew": {
         ...crew,

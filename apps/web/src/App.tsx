@@ -36,7 +36,7 @@ import {
 } from "./shell/overlays.ts";
 import { PopoutContext } from "./shell/popout.ts";
 import { getSelectedAgent, nextAgent, setSelectedAgent } from "./shell/selection.ts";
-import { getSession } from "./shell/session.ts";
+import { getSession, useSessionScope } from "./shell/session.ts";
 import { Toast, toast } from "./shell/Toast.tsx";
 
 /** The document title (index.html's); a popped-out agent is `{id} · Mission Control`. */
@@ -169,12 +169,20 @@ function PageView({ route: r }: { route: Route }) {
 function useShellKeys(current: Route, popout: boolean) {
   const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const latest = useRef({ current, rows, items, popout });
-  latest.current = { current, rows, items, popout };
+  const { repo } = useSessionScope();
+  const latest = useRef({ current, rows, items, popout, repo });
+  latest.current = { current, rows, items, popout, repo };
   useEffect(() => {
     const select = (dir: 1 | -1) => {
       const { current: on, rows: r, items: i } = latest.current;
-      const id = nextAgent(r ?? [], i ?? [], getSession(), getSelectedAgent(), dir);
+      const id = nextAgent(
+        r ?? [],
+        i ?? [],
+        getSession(),
+        getSelectedAgent(),
+        dir,
+        latest.current.repo,
+      );
       if (id === null) return;
       setSelectedAgent(id);
       if (on.page === "agent") navigate(agentPath(id)); // the URL follows the selection

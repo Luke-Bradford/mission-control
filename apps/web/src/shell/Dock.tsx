@@ -8,10 +8,10 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { useTz } from "../clock.ts";
+import { useNow, useTz } from "../clock.ts";
 import { Markdown } from "../components/Markdown.tsx";
-import { contextPct } from "../crew.ts";
-import { ACTIONS, RESOURCES, useResource } from "../data.ts";
+import { contextPct, doingLine } from "../crew.ts";
+import { ACTIONS, RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import {
   chatRows,
   type DockRow,
@@ -167,6 +167,7 @@ export function FlightChat({ where }: { where: ChatPlace }) {
   const tz = useTz();
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const crew = useResource<Crew>(RESOURCES.crew).data;
   const decisions = flight?.decisions;
   const asks = useMemo(() => waitingAsks(attention ?? [], decisions ?? []), [attention, decisions]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
@@ -217,18 +218,24 @@ export function FlightChat({ where }: { where: ChatPlace }) {
       {seat && asks.length > 0 && (
         <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
           <div className="dwh">Waiting on you · {asks.length}</div>
-          {asks.map((i) => (
-            <div className="dask" key={i.key} data-testid="waiting-ask">
-              <Pill tone={i.kind === "decision" ? "warn" : "plain"}>{ATTENTION_LABEL[i.kind]}</Pill>
-              <span className="min0 ellip" title={i.text}>
-                {i.text}
-              </span>
-              <span className="spacer" />
-              <button type="button" className="sm" onClick={() => openItem(i.key)}>
-                Open
-              </button>
-            </div>
-          ))}
+          {asks.map((i) => {
+            const agent = crew?.rows.find((r) => r.id === i.agentId);
+            return (
+              <div className="dask" key={i.key} data-testid="waiting-ask">
+                <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
+                  {ATTENTION_LABEL[i.kind]}
+                </Pill>
+                <span className="min0 ellip" title={i.text}>
+                  {i.text}
+                </span>
+                {agent ? <AgentTag bare sm id={agent.id} index={agent.index} /> : i.agentId}
+                <span className="spacer" />
+                <button type="button" className="sm" onClick={() => openItem(i.key)}>
+                  Open
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
       <div
@@ -269,7 +276,10 @@ export function Dock() {
   const seat = flight?.seat ?? null;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const row = crew?.rows.find((r) => r.id === seat?.id);
+  const repoPrs = useReviewPrs(row);
   const ctx = row ? contextPct(row) : null;
+  const now = useNow();
+  const tz = useTz();
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
   const [busy, setBusy] = useState(false);
@@ -358,7 +368,7 @@ export function Dock() {
                       seat.model,
                       seat.turns && flightTurnText(seat.turns.n, seat.turns.max),
                       ctx !== null && `context ${ctx}%`,
-                      stateWord(seat),
+                      row ? doingLine(row, now, tz, repoPrs) : stateWord(seat),
                     ]
                       .filter(Boolean)
                       .join(" · ")

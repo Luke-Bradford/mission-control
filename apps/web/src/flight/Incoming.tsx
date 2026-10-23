@@ -6,7 +6,7 @@ import { rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { type NotificationsView, type PersonThreadView, whoOf } from "../notifications.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 
 const DASH = "—";
 const NO_REPOS: RepoView[] = [];
@@ -47,7 +47,7 @@ export function Incoming() {
   const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const notes = useResource<NotificationsView>(RESOURCES.notifications);
-  const [session] = useSession();
+  const { inRepo } = useSessionScope();
   const now = useSecond();
   const tz = useTz();
   const loaded =
@@ -56,11 +56,11 @@ export function Incoming() {
     (notes.data !== undefined || notes.error !== null);
   if (!loaded) return <p className="pb note">{DASH}</p>;
   const cards = incomingCards(
-    boards.flatMap((b) => b.data ?? []).filter((i) => inSession(session, i.repoId)),
+    boards.flatMap((b) => b.data ?? []).filter((i) => inRepo(i.repoId)),
     now,
   );
   const threads = incomingThreads(
-    (notes.data?.open ?? []).filter((t) => inSession(session, t.repoId)),
+    (notes.data?.open ?? []).filter((t) => inRepo(t.repoId)),
     now,
   );
   const rows: Row[] = [

@@ -535,6 +535,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const lastEventAt = store.digest(run.id)?.lastEventAt ?? null;
           const missing = (): AgentStream => ({
             runId: run.id,
+            tasks: store.digest(run.id)?.tasks ?? [],
             events: [],
             truncated: false,
             lastOutputAt: lastOutputAt(lastEventAt, null),
@@ -564,6 +565,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           return {
             runId: run.id,
+            tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
             truncated: entry.result.truncated,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
@@ -1446,7 +1448,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           runId: run.id,
           loop,
           events,
-          tries: loopTries(run, events, review),
+          tries: loopTries(run, events, review, [
+            ...(store.digest(run.id)?.attemptUsage ?? []),
+            ...store
+              .reviewsOfRun(run.id)
+              .flatMap((r) =>
+                r.runId === null ? [] : (store.digest(r.runId)?.attemptUsage ?? []),
+              ),
+          ]),
           round: loop
             ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
             : null,

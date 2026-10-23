@@ -12,7 +12,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const hook = (row: CrewRow) => renderHook(() => useReviewPrs(row));
+const hook = (row?: CrewRow) => renderHook(() => useReviewPrs(row));
 
 describe("useReviewPrs", () => {
   it("is undefined while the repo's PRs load, then the PRs", async () => {
@@ -29,9 +29,10 @@ describe("useReviewPrs", () => {
     await waitFor(() => expect(result.current).toEqual([]));
   });
 
-  it("fetches nothing for a seat with a note, without a review, or for a loop", async () => {
+  it("fetches nothing without a row, for a seat with a note, without a review, or for a loop", async () => {
     const f = stubFetch({ [PRS]: [prView()] });
     const rows = [
+      undefined,
       seatRow({ hudState: "idle", note: "Rate limited", review }),
       seatRow({ hudState: "idle", review: null }),
       seatRow({ kind: "loop", hudState: "idle", review }),

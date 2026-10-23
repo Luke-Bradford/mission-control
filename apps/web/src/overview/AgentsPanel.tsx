@@ -50,7 +50,7 @@ import { firstWindow } from "../quota.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 import { LoopStep } from "./LoopStep.tsx";
 
 const DASH = "—";
@@ -170,7 +170,10 @@ function AgentRow({
     shownLoop && row.digest?.liveTool ? { ...row, digest: { ...row.digest, liveTool: null } } : row;
   const doing = doingLine(doingRow, now, tz, repoPrs);
   const parts = needLine(row, items, now, lock);
-  const lamp = needsLamp(mine, true);
+  const lamp = needsLamp(
+    mine,
+    mine.some((i) => !i.acked),
+  );
   const running = row.hudState === "running";
   const go = () => navigate(agentPath(row.id));
   const quota = firstWindow(limits, row.accountId);
@@ -316,7 +319,7 @@ export function AgentsPanel() {
   const lock = useTestLock();
   const tz = useTz();
   const now = useSecond();
-  const [session] = useSession();
+  const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
   const configRes = useResource<ConfigView>(RESOURCES.config);
   const config = configRes.data;
@@ -326,7 +329,7 @@ export function AgentsPanel() {
   const flight = crew.data?.rows.find((r) => r.id === flightId) ?? null;
   const rows = crew.data
     ? crewOrder(
-        crew.data.rows.filter((r) => r !== flight && inSession(session, r.repoId)),
+        crew.data.rows.filter((r) => r !== flight && matchesSession(r)),
         items,
       )
     : null;

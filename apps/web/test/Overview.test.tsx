@@ -41,6 +41,7 @@ import {
   MIN,
   NOW,
   prView,
+  SESSION_CONFIG,
   seatRow,
   stoppedSeat,
 } from "./fixtures.ts";
@@ -1182,6 +1183,7 @@ describe("Agents panel", () => {
 
   it("clicking a row or its link opens the Agent page; the session filter hides other repos", async () => {
     stub({
+      config: SESSION_CONFIG,
       rows: [
         crewRow({ id: "shop-app-ta" }),
         crewRow({ id: "studio", index: 1, repoId: "site-builder" }),
@@ -1196,7 +1198,7 @@ describe("Agents panel", () => {
     act(() => window.history.pushState(null, "", "/"));
     fireEvent.click(within(agentRows(container)[0] as HTMLElement).getByText("Running"));
     expect(window.location.pathname).toBe("/agent/shop-app-ta");
-    act(() => setSession("shop-app"));
+    act(() => setSession("shop-app-session"));
     expect(agentRows(container).map((r) => r.querySelector(".ag")?.textContent)).toEqual([
       "shop-app-ta",
     ]);
@@ -2055,7 +2057,7 @@ describe("Activity panel", () => {
     stub({
       rows: [
         ...rows,
-        seatRow({ id: "inco-1", index: 2, repoId: "site-builder" }),
+        seatRow({ id: "inco-1", index: 2, repoId: "site-builder", sessionId: "s2" }),
         seatRow({ index: 3 }),
       ],
       activity: [
@@ -2070,7 +2072,7 @@ describe("Activity panel", () => {
     const act_ = container.querySelector("#actP") as HTMLElement;
     fireEvent.click(within(act_).getByRole("button", { name: "Messages" }));
     await within(act_).findByText("site talk");
-    act(() => setSession("shop-app"));
+    act(() => setSession("s1"));
     expect(within(act_).getByText("shop talk")).toBeTruthy();
     expect(within(act_).getByText("hub talk")).toBeTruthy();
     expect(within(act_).queryByText("site talk")).toBeNull();
@@ -2088,11 +2090,11 @@ describe("Activity panel", () => {
   });
 
   it("hides other repos' rows under a session filter", async () => {
-    stub({ rows, activity: events });
+    stub({ rows, activity: events, config: SESSION_CONFIG });
     const { container } = render(<Overview />);
     const act_ = container.querySelector("#actP") as HTMLElement;
     await within(act_).findByText("run #11 failed");
-    act(() => setSession("shop-app"));
+    act(() => setSession("shop-app-session"));
     expect(within(act_).queryByText("studio run")).toBeNull();
     expect(within(act_).getByText("run #11 started")).toBeTruthy();
     expect(within(act_).getByText("github failed")).toBeTruthy(); // names the repo, so it is shop-app's
