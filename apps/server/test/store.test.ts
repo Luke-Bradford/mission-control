@@ -2070,43 +2070,17 @@ describe("hub retention", () => {
     expect(store.run(old.id)).not.toBeNull();
   });
 
-  it("prunes plan owners and their readers with all children in one transaction", async () => {
-    const db = new DatabaseSync(join(dir, "mc.sqlite"));
-    try {
-      for (const id of ["planner", "reader"]) {
-        store.upsertRun(run({ id, ticket: "repo#494", endedAt: 1 }));
-        store.addLoopEvent(`${id}:plan`, id, "Plan landed", 1);
-        store.claimLine(`fix:${id}:0:1`, {
-          runId: id,
-          seatId: "seat",
-          origin: "engine",
-          text: "fix",
-          at: 1,
-        });
-        db.prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, 'note', 1)").run(id);
-      }
-      // The first run deletion must already see the entire ticket's children removed.
-      db.exec(`CREATE TRIGGER atomic_ticket_prune BEFORE DELETE ON runs BEGIN
-        SELECT CASE WHEN EXISTS (SELECT 1 FROM loop_events)
-          OR EXISTS (SELECT 1 FROM seat_lines) OR EXISTS (SELECT 1 FROM run_evidence)
-          THEN RAISE(ABORT, 'partial ticket prune') END;
-      END`);
-      await store.pruneHistory(100 * 86_400_000);
-      expect(store.run("planner")).toBeNull();
-      expect(store.run("reader")).toBeNull();
-      for (const table of ["loop_events", "seat_lines", "run_evidence"]) {
-        expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
-      }
-    } finally {
-      db.close();
-    }
-  });
-
-  it("keeps an oversized run intact when its children exceed the sweep budget", async () => {
+  it("keeps claim keys after their run has expired", async () => {
     store.upsertRun(run({ endedAt: 1 }));
-    for (let i = 0; i < 5001; i++) store.addLoopEvent(String(i), "r1", "event", 1);
+    store.claimLine("fix:r1:0:1", {
+      runId: "r1",
+      seatId: "seat",
+      origin: "engine",
+      text: "fix",
+      at: 1,
+    });
     await store.pruneHistory(100 * 86_400_000);
-    expect(store.loopEventsOfRun("r1")).toHaveLength(5001);
+    expect(store.claimedKeys("r1")).toEqual({ "fix:r1:0:1": 1 });
     expect(store.run("r1")).not.toBeNull();
   });
 
@@ -2176,7 +2150,7 @@ describe("hub retention", () => {
         const owner = table === "review_findings" ? "author_run_id" : "run_id";
         expect(db.prepare(`SELECT ${owner} AS owner FROM ${table} ORDER BY owner`).all()).toEqual(
           owners
-            .filter((id) => id !== "expired")
+            .filter((id) => !["expired", "question", "draft", "attention"].includes(id))
             .sort()
             .map((owner) => ({ owner })),
         );
@@ -2190,10 +2164,12 @@ describe("hub retention", () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
     try {
       const insert = db.prepare("INSERT INTO loop_events VALUES (?, ?, 'text', 0)");
+      store.upsertRun(run({ id: "blocked" }));
+      insert.run("blocked", "blocked");
+      store.upsertRun(run({ endedAt: 1 }));
       for (let i = 0; i < 5501; i++) {
         const id = String(i);
-        store.upsertRun(run({ id, endedAt: 1 }));
-        insert.run(id, id);
+        insert.run(id, "r1");
       }
       let during = -1;
       const observe = setImmediate(() => {
@@ -2201,10 +2177,10 @@ describe("hub retention", () => {
       });
       try {
         await store.pruneHistory(100 * 86_400_000);
-        expect(during).toBe(5001);
-        expect(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()).toEqual({ n: 501 });
+        expect(during).toBe(5002);
+        expect(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()).toEqual({ n: 502 });
         await store.pruneHistory(100 * 86_400_000);
-        expect(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()).toEqual({ n: 0 });
+        expect(db.prepare("SELECT COUNT(*) AS n FROM loop_events").get()).toEqual({ n: 1 });
       } finally {
         clearImmediate(observe);
       }
@@ -2216,7 +2192,7 @@ describe("hub retention", () => {
   it("prunes past each window, keeping boundary and newer rows and review history", async () => {
     const db = new DatabaseSync(join(dir, "mc.sqlite"));
     const now = 40 * 86_400_000;
-    const seatCutoff = now - 30 * 86_400_000;
+    const seatCutoff = now - 7 * 86_400_000;
     const month = now - 30 * 86_400_000;
     store.upsertRun(run());
     for (const [i, offset] of [-1, 0, 1].entries()) {
@@ -2268,7 +2244,7 @@ describe("hub retention", () => {
         { review_id: 3 },
       ]);
       expect(db.prepare("SELECT COUNT(*) AS n FROM reviews").get()).toEqual({ n: 3 });
-      expect(store.run("r1")).not.toBeNull();
+      expect(db.prepare("SELECT COUNT(*) AS n FROM runs").get()).toEqual({ n: 7 });
       expect(db.prepare("SELECT COUNT(*) AS n FROM flight_decisions").get()).toEqual({ n: 1 });
     } finally {
       db.close();

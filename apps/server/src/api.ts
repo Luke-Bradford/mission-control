@@ -817,16 +817,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           try {
             return await worktreeFiles(worktree, exec);
           } catch (e) {
-            // Only the command, exit code and signal: git's message and any path stay out of the log.
+            captureError(reply, e);
             const git = e instanceof GitFailed ? e : null;
-            reply.log.warn(
-              {
-                command: git?.command ?? null,
-                exitCode: git?.exitCode ?? null,
-                signal: git?.signal ?? null,
-              },
-              `file list failed for ${req.params.id}`,
-            );
             // The filter check's fixed note survives a total failure, unless git never ran at all
             // because the checkout's git dir is not the clone's.
             return reply
@@ -871,9 +863,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           try {
             diff = await worktreeDiff(worktree, path.data, exec);
           } catch (e) {
-            // GitFailed's message is git's own, the worktree path already taken out
-            const git = e instanceof GitFailed ? e.message : "not git";
-            reply.log.warn({ git }, `file diff failed for ${req.params.id}`);
+            captureError(reply, e);
             return reply.code(502).send({ error: "git failed" });
           }
           if (diff === null) return reply.code(404).send({ error: "unknown file" });
