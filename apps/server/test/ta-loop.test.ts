@@ -198,6 +198,21 @@ describe("collectTaLoop", () => {
     });
   });
 
+  it("does not give an ended run the worktree HEAD branch when its transcript has none", async () => {
+    const T9 = "iteration-20261017T032442Z-7522.9.log";
+    const lines = readFileSync(join(stateDir, T11), "utf8")
+      .split("\n")
+      .filter((l) => !l.includes("vcs_state_changed"));
+    writeFileSync(join(stateDir, T9), lines.join("\n"));
+    mkdirSync(join(loop.worktree, ".git"), { recursive: true });
+    writeFileSync(join(loop.worktree, ".git", "HEAD"), "ref: refs/heads/docs/3714-spec\n");
+    await collectTaLoop(loop, store, NOW, newTaState(), alive);
+    const r = byId().get("shop-app-ta:7522.9");
+    expect(r?.status).toBe("ok");
+    expect(r?.branch).not.toBe("docs/3714-spec");
+    expect(r?.ticket).not.toBe("shop-app#3714");
+  });
+
   // #26 A3: a re-fold from a transcript that names no branch must not null what was known.
   it("keeps a stored run's branch, ticket, session and model when its transcript names none", async () => {
     const T9 = "iteration-20261017T032442Z-7522.9.log";
