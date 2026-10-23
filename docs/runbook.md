@@ -756,15 +756,23 @@ ever. Mission Control checks:
 
 - **TA:** the `status.md` IN FLIGHT iteration is `running` only while its `pid` (the
   `ta_loop.sh` process) is alive (`kill -0`).
-- **Studio:** the latest fire with no `exited` line is `running` only while a live Claude
-  session in `~/.claude/sessions/` has the loop's `worktree` as its cwd. The sessions collector's
-  15 s read is reused, and a fire younger than 60 s is given grace while its CLI registers.
+- **Studio:** liveness comes from the loop's launchd job, read with `launchctl print`. The latest
+  fire with no `exited` line is `running` while the job has a process (`state = running`). With
+  the job loaded but no process it is `unknown` and the collector reports
+  `loop process not running (launchd job <label> has no process)`, even with a Claude session
+  open in the worktree. Only when launchctl's answer cannot be read does the old check apply: a
+  live Claude session in `~/.claude/sessions/` with the loop's `worktree` as its cwd (the
+  sessions collector's 15 s read, with 60 s of grace for a young fire), else
+  `loop process not running (no live Claude session in its worktree)`. Between fires a job with no
+  process is normal after a `STOP:` line in `driver.log`; with no `STOP:` since the last fire the
+  collector reports `studio driver not running (no STOP logged)`. Only the `state` and `pid` lines
+  of the `launchctl print` output are read; the rest (which can hold the job's environment) is
+  discarded.
 
 Otherwise the run is shown as `unknown` and the loop's collector reports
-`loop process not running (pid N)` (TA) or
-`loop process not running (no live Claude session in its worktree)` (studio), so the card shows
-an error. If the session registry cannot be read, the studio check is skipped (the `sessions`
-row in health says why). A driver that dies *between* fires is not detected yet.
+`loop process not running (pid N)` (TA) or one of the studio errors above, so the card shows
+an error. If the session registry cannot be read, the session check is skipped (the `sessions`
+row in health says why).
 
 ### Staleness
 

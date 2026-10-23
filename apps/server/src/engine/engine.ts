@@ -581,6 +581,11 @@ export function createEngine(deps: EngineDeps): Engine {
       case "rerun-ci": {
         // once per sha: the loop marked it before this ran, so a refusal is not tried again
         const runs = await publisher.rerunFailed(repo?.github ?? "", a.sha);
+        // jobs still going: no re-run spent, no event; the next failing poll asks again
+        if (runs === "running") {
+          if (cur.rerun?.sha === a.sha) cur.rerun = null;
+          return;
+        }
         // stamped once gh has answered: a poll taken during the call still shows the old failure
         if (cur.rerun?.sha === a.sha) {
           cur.rerun.runs = runs ?? [];

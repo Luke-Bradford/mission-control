@@ -16,7 +16,7 @@ import {
   readAllLines,
 } from "./common.ts";
 import { currentBranch } from "./git-head.ts";
-import { type LaunchctlRunner, launchdNote } from "./launchd.ts";
+import { type LaunchctlRunner, type LaunchdJob, launchdJob } from "./launchd.ts";
 import { type LiveSession, sessionForLoop } from "./sessions.ts";
 
 export type DriverEvent =
@@ -124,16 +124,23 @@ interface Fire {
 /**
  * The parsed driver.log: fires in file order, the latest non-signal STOP note, and the driver's
  * own stop (the latest non-signal STOP, until a fire starts) with the quota reset time seen since
- * the last fire.
+ * the last fire. `stoppedLast` is true when the latest parsed driver event is a STOP line (signal or not).
  */
 interface FireModel {
   fires: Fire[];
   note: string | null;
   stop: DriverStop | null;
   resetsAt: number | null;
+  stoppedLast: boolean;
 }
 
-const emptyModel = (): FireModel => ({ fires: [], note: null, stop: null, resetsAt: null });
+const emptyModel = (): FireModel => ({
+  fires: [],
+  note: null,
+  stop: null,
+  resetsAt: null,
+  stoppedLast: false,
+});
 
 function driverStop(e: { at: number; reason: string }, resetsAt: number | null): DriverStop {
   if (!QUOTA_STOP_REASON.test(e.reason)) {
@@ -186,6 +193,9 @@ const defaultState = newStudioState();
  */
 export const SESSION_GRACE_MS = 60_000;
 export const NO_SESSION_ERROR = "loop process not running (no live Claude session in its worktree)";
+export const jobNotRunningError = (label: string): string =>
+  `loop process not running (launchd job ${label} has no process)`;
+export const NO_STOP_ERROR = "studio driver not running (no STOP logged)";
 
 /** Max gap between a FIRE line's timestamp and its fire log's (local-time) name. */
 const PAIR_TOLERANCE_S = 5;
@@ -203,6 +213,7 @@ const RECENT_FIRES = 500;
 function applyEvents(model: FireModel, events: DriverEvent[], touched: Set<Fire>): void {
   const { fires } = model;
   for (const e of events) {
+    model.stoppedLast = e.kind === "stop";
     if (e.kind === "fire-start") {
       const f: Fire = { fire: e.fire, startAt: e.at, exitAt: null, rc: null, blocked: false };
       fires.push(f);
@@ -248,10 +259,14 @@ const sig = ({ reviewId: _reviewId, ...r }: Run): string => JSON.stringify(r);
  * folded (facts kept in `state`) only for the running fire and fires started in the last 24h
  * (FOLD_WINDOW_MS).
  *
- * The latest open fire is `running` only while a live Claude session (`sessions`, the scheduler's
- * latest read of the session registry) has the loop's worktree as its cwd, or within
- * SESSION_GRACE_MS of its start. Otherwise it is `unknown` and the collector records ok=false,
- * NO_SESSION_ERROR. `sessions` null means "not known" (e.g. the registry read failed): no check.
+ * Liveness comes from the launchd job's own process. The latest open fire is `running` while the
+ * job has one. With the job loaded but no process it is `unknown` and the collector records ok=false,
+ * `jobNotRunningError`, even with a live Claude session in the worktree. Only when launchd's answer is
+ * unknown does the session check apply: `running` while a live Claude session (`sessions`, the
+ * scheduler's latest read of the session registry) has the loop's worktree as its cwd, or within
+ * SESSION_GRACE_MS of the fire's start, else `unknown` with NO_SESSION_ERROR (`sessions` null means
+ * "not known", e.g. the registry read failed: no check). With no open fire, a job with no process
+ * and no STOP line since the last fire records NO_STOP_ERROR; after a STOP no process is normal.
  */
 export async function collectStudioLoop(
   loop: AdoptedLoop,
@@ -273,17 +288,9 @@ export async function collectStudioLoop(
       store.setStatus(noteRow, true, null);
       return;
     }
-    missing = await launchdNote(loop, launchctl);
-    const { note, liveness } = collect(
-      loop,
-      dir,
-      store,
-      tz,
-      now,
-      state,
-      sessions,
-      missing !== null,
-    );
+    const job = await launchdJob(loop, launchctl);
+    missing = job.kind === "missing" ? job.note : null;
+    const { note, liveness } = collect(loop, dir, store, tz, now, state, sessions, job);
     store.setStatus(collector, (liveness ?? missing) === null, liveness ?? missing);
     store.setStatus(
       noteRow,
@@ -326,7 +333,7 @@ function collect(
   now: number,
   state: StudioCollectorState,
   sessions: LiveSession[] | null,
-  jobMissing: boolean,
+  job: LaunchdJob,
 ): { note: string | null; liveness: string | null } {
   const errors: string[] = [];
   const prevDriver = state.drivers.get(loop.id);
@@ -364,16 +371,22 @@ function collect(
   const stored = new Map(store.runs(loop.id, RECENT_FIRES).map((r) => [r.id, r]));
   const latestIdx = fires.length - 1;
   const latest = fires[latestIdx];
+  const open = latest !== undefined && latest.exitAt === null;
   const latestLive =
-    !jobMissing &&
-    (sessions === null ||
-      sessionForLoop(sessions, loop) !== null ||
-      (latest !== undefined && now - latest.startAt < SESSION_GRACE_MS));
+    job.kind === "running" ||
+    (job.kind === "unknown" &&
+      (sessions === null ||
+        sessionForLoop(sessions, loop) !== null ||
+        (latest !== undefined && now - latest.startAt < SESSION_GRACE_MS)));
   // With the job missing the unexited fire is unknown, but its liveness text is the missing note's.
-  const liveness =
-    latest !== undefined && latest.exitAt === null && !latestLive && !jobMissing
-      ? NO_SESSION_ERROR
-      : null;
+  let liveness: string | null = null;
+  if (job.kind === "missing") liveness = null;
+  else if (open && !latestLive) {
+    liveness =
+      job.kind === "not running" ? jobNotRunningError(loop.launchdLabel) : NO_SESSION_ERROR;
+  } else if (!open && job.kind === "not running" && fires.length > 0 && !driver.model.stoppedLast) {
+    liveness = NO_STOP_ERROR;
+  }
 
   fires.forEach((f, i) => {
     if (i < latestIdx - RECENT_FIRES && !touched.has(f)) return;
