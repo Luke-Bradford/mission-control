@@ -3,6 +3,7 @@ import {
   type AttentionItem,
   type BriefOption,
   type Crew,
+  type ItemDiscussion as Discussion,
   type Escalation,
   type FlightView,
   type TicketView,
@@ -11,12 +12,13 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answer.ts";
 import { BriefOptions, ItemBrief, PersonChoices, PersonStory } from "../comms/ItemBrief.tsx";
+import { ItemDiscussion } from "../comms/ItemDiscussion.tsx";
 import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { flightOffText } from "../flight/flightTypes.ts";
-import { dayMonth, rel } from "../fmt.ts";
+import { dayMonth, hhmm, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
@@ -31,6 +33,7 @@ import {
 import { agentPath, followLink } from "../router.ts";
 import { BuildChips } from "./buildStatus.tsx";
 import { closeItem, trapTab, useItem, useOverlay, useReturnFocus } from "./overlays.ts";
+import { toast } from "./Toast.tsx";
 
 /** An escalation opened less than this long ago is New, an older one a Follow-up. */
 const NEW_MS = 24 * 3_600_000;
@@ -41,7 +44,7 @@ export const BODY_LINES = 40;
 /**
  * The Item panel (catalogue §2.9.1): a 540px fly-out for one thing that needs the operator. An escalation
  * shows the loop's question, its reasoning and its options (all inert text), and sends the answer
- * to GitHub; FLIGHT's chat is switched off until it runs.
+ * to GitHub. Item discussion uses its own persisted history.
  */
 export function ItemPanel() {
   const key = useItem();
@@ -57,6 +60,11 @@ export function ItemPanel() {
     null,
   );
   const currentItem = items?.find((i) => i.key === key);
+  const [savedAsk, setSavedAsk] = useState<AttentionItem | null>(null);
+  useEffect(() => {
+    if (currentItem && currentItem.kind !== "person") setSavedAsk(currentItem);
+    else if (savedAsk?.key !== key) setSavedAsk(null);
+  }, [key, currentItem, savedAsk?.key]);
   const currentThread = notes?.open.find((t) => t.key === key);
   useEffect(() => {
     if (currentItem?.kind === "person" && currentThread) {
@@ -69,18 +77,28 @@ export function ItemPanel() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [justHandled, setJustHandled] = useState<Record<string, string>>({});
+  const [chosen, setChosen] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
   const now = useNow();
   const head = useId();
   const close = useRef<HTMLButtonElement>(null);
+  const activeKey = useRef(key);
+  activeKey.current = key;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the composer when its item changes
+  useEffect(() => {
+    if (!currentItem || currentItem.kind === "person") return;
+    setText("");
+    setBusy(false);
+    setErr(null);
+  }, [key]);
   useReturnFocus(key !== null);
   useEffect(() => {
     if (key !== null) close.current?.focus();
   }, [key]);
   if (key === null) return null;
 
-  const item = currentItem ?? savedPerson?.item;
+  const item = currentItem ?? savedPerson?.item ?? (savedAsk?.key === key ? savedAsk : undefined);
   const esc = item?.escalationId ? escalations?.find((e) => e.id === item.escalationId) : undefined;
   // An escalation item waits for its escalations rather than flash the generic view.
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
@@ -95,6 +113,7 @@ export function ItemPanel() {
     setBusy(true);
     setErr(null);
     const failed = await run();
+    if (item?.kind !== "person" && activeKey.current !== key) return;
     setBusy(false);
     if (failed === null) done?.();
     else setErr(failed);
@@ -112,13 +131,35 @@ export function ItemPanel() {
     const body = text.trim();
     if (!item || body === "") return;
     void act(
-      () => askFlight(seat, item, about, body),
+      () => sendAnswer({ to: "flight" }, seat, item, about, body),
       () => setText(""),
     );
   };
   const pick = (o: BriefOption) => {
     if (!item || !target) return;
-    void act(() => sendAnswer(target, seat, item, about, o.answer));
+    if (item.kind === "person") {
+      void act(() => sendAnswer(target, seat, item, about, o.answer));
+      return;
+    }
+    if (item.kind === "approval" && o.label === "Edit") {
+      toast("Opens the draft so you can change it before approving.");
+      return;
+    }
+    void act(
+      () => sendAnswer(target, seat, item, about, o.answer),
+      () => {
+        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+        const resource = RESOURCES.discussion(item.key);
+        const discussion = hub.snapshot(resource.path, resource.topic).data as
+          | Discussion
+          | undefined;
+        if (discussion && live) {
+          void askFlight(item.key, discussion.version, crypto.randomUUID(), `You chose: ${o.label}`)
+            .catch(() => toast("Answer sent. Could not add it to the item discussion."))
+            .finally(() => hub.refetch(RESOURCES.discussion(item.key, discussion.id).path));
+        }
+      },
+    );
   };
   const dismiss = () => {
     if (!item) return;
@@ -135,7 +176,12 @@ export function ItemPanel() {
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
   return (
-    <aside className="flyout" id="discuss" aria-labelledby={head} onKeyDown={trapTab}>
+    <aside
+      className={item?.kind === "person" ? "flyout person-item" : "flyout decision-item"}
+      id="discuss"
+      aria-labelledby={head}
+      onKeyDown={trapTab}
+    >
       <div className="panel">
         <div className="ph" id="dsHead">
           <h2 id={head}>{item ? ATTENTION_LABEL[item.kind] : "Item"}</h2>
@@ -145,9 +191,11 @@ export function ItemPanel() {
             <span className="sub">
               {thread
                 ? `${item?.brief?.person?.source.kind === "teams" ? "Teams" : "GitHub"} · ${whereOf(thread).replace(/^GitHub · /, "")} · ${when(thread.updatedAt)}`
-                : esc
-                  ? `opened ${when(esc.openedAt)}`
-                  : when(item.at)}
+                : item.kind !== "person" && item.brief
+                  ? `raised by FLIGHT at ${tz ? hhmm(item.brief.at, tz) : "—"}`
+                  : esc
+                    ? `opened ${when(esc.openedAt)}`
+                    : when(item.at)}
             </span>
           )}
           <BuildChips panel="discuss" />
@@ -181,9 +229,11 @@ export function ItemPanel() {
             </p>
           ) : (
             <>
-              {item.brief && !item.brief.person && <ItemBrief brief={item.brief} />}
+              {item.brief && !item.brief.person && (
+                <ItemBrief brief={item.brief} approval={item.kind === "approval"} />
+              )}
               {esc ? (
-                <EscalationBrief esc={esc} tz={tz} now={now} />
+                <EscalationBrief esc={esc} tz={tz} now={now} hasBrief={Boolean(item.brief)} />
               ) : thread ? (
                 item.brief?.person ? (
                   <PersonStory
@@ -229,18 +279,27 @@ export function ItemPanel() {
           <div className="composer" id="dsOpts">
             {options.length > 0 && (
               <>
-                <div className="bsec">Options</div>
+                <div className="bsec">{item.kind === "approval" ? "Your call:" : "Options"}</div>
+                {chosen[key] && (
+                  <p>
+                    You chose: <b>{chosen[key]}</b>
+                  </p>
+                )}
                 <BriefOptions
                   options={options}
+                  recommendedOptionId={
+                    item.kind === "person" ? undefined : item.brief?.recommendedOptionId
+                  }
                   live={target?.to !== "github"}
-                  disabled={busy || !replyOk}
+                  disabled={busy || !replyOk || (item.kind !== "person" && Boolean(chosen[key]))}
                   title={target?.to === "flight" ? flightTitle : undefined}
-                  variant="panel"
+                  variant={item.kind === "approval" ? "row" : "panel"}
+                  primaryFirst={item.kind === "approval"}
                   onPick={pick}
                 />
               </>
             )}
-            {esc?.question && (
+            {esc?.question && (item.kind === "person" || options.length === 0) && (
               <div className="optlist">
                 {esc.question.answers.map((a, i) => (
                   <div
@@ -292,36 +351,48 @@ export function ItemPanel() {
             )}
           </div>
         )}
-        <form className="composer" id="dsForm" onSubmit={submit}>
-          <input
-            id="dsInput"
-            autoComplete="off"
-            aria-label="Reply, or ask FLIGHT about this"
-            placeholder="Reply, or ask FLIGHT about this…"
-            title={!replyOk && !live ? flightOffText(seat) : undefined}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            disabled={!replyOk && !live}
-          />
-          {target?.to !== "github" && (
-            <button
-              type="submit"
-              className="primary"
-              title={target?.to === "flight" ? flightTitle : undefined}
-              disabled={!replyOk || busy}
-            >
-              Reply
-            </button>
-          )}
-          <button type="button" title={flightTitle} disabled={!live || busy} onClick={ask}>
-            Ask FLIGHT
-          </button>
-          {err !== null && (
-            <p className="note err" role="alert">
-              {err}
-            </p>
-          )}
-        </form>
+        {item && item.kind !== "person" && !holding && (
+          <ItemDiscussion itemKey={item.key} live={live} title={flightTitle} />
+        )}
+        {(target?.to !== "github" || item?.kind === "person") && (
+          <form className="composer" id="dsForm" onSubmit={submit}>
+            <input
+              id="dsInput"
+              autoComplete="off"
+              aria-label="Reply, or ask FLIGHT about this"
+              placeholder="Reply, or ask FLIGHT about this…"
+              title={!replyOk && !live ? flightOffText(seat) : undefined}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              disabled={!replyOk && !live}
+            />
+            {target?.to !== "github" && (
+              <button
+                type="submit"
+                className="primary"
+                title={target?.to === "flight" ? flightTitle : undefined}
+                disabled={!replyOk || busy}
+              >
+                Reply
+              </button>
+            )}
+            {item?.kind === "person" && (
+              <button type="button" title={flightTitle} disabled={!live || busy} onClick={ask}>
+                Ask FLIGHT
+              </button>
+            )}
+            {item?.kind === "person" && err !== null && (
+              <p className="note err" role="alert">
+                {err}
+              </p>
+            )}
+          </form>
+        )}
+        {item?.kind !== "person" && err !== null && (
+          <p className="note err" role="alert">
+            {err}
+          </p>
+        )}
       </div>
     </aside>
   );
@@ -366,21 +437,43 @@ function PersonBrief({
   );
 }
 
-function EscalationBrief({ esc, tz, now }: { esc: Escalation; tz: string | null; now: number }) {
+function EscalationBrief({
+  esc,
+  tz,
+  now,
+  hasBrief,
+}: {
+  esc: Escalation;
+  tz: string | null;
+  now: number;
+  hasBrief: boolean;
+}) {
   const fresh = now - esc.openedAt < NEW_MS;
   const q = esc.question;
   return (
     <div className="brief">
-      <div className="ctx">
-        <span className="bsec">Catch-up</span>
-        <div className="ctxline">
-          <Pill tone={fresh ? "plain" : "warn"}>{fresh ? "New" : "Follow-up"}</Pill>
-          <span>
-            Opened {tz ? dayMonth(esc.openedAt, tz) : "—"} on{" "}
-            <RepoRef repoId={esc.repoId} number={esc.issueNumber} url={esc.url} />
-          </span>
+      {!hasBrief && (
+        <div className="ctx">
+          <span className="bsec">Catch-up</span>
+          <div className="ctxline">
+            <Pill tone={fresh ? "plain" : "warn"}>{fresh ? "New" : "Follow-up"}</Pill>
+            <span>
+              Opened {tz ? dayMonth(esc.openedAt, tz) : "—"} on{" "}
+              <RepoRef repoId={esc.repoId} number={esc.issueNumber} url={esc.url} />
+            </span>
+          </div>
         </div>
-      </div>
+      )}
+      {!hasBrief && (
+        <>
+          <div className="bsec">So far</div>
+          <p className="note">Catch-up unavailable.</p>
+          <div className="bsec">Be aware</div>
+          <p className="note">Awareness unavailable.</p>
+          <div className="bsec">What FLIGHT checked</div>
+          <p className="note">Checked sources unavailable.</p>
+        </>
+      )}
       <b className="btitle qtext">
         <MarkdownInline text={esc.title} />
       </b>

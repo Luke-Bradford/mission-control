@@ -1,4 +1,4 @@
-import type { AttentionItem, CrewRow } from "@mc/core";
+import type { AttentionItem, CrewRow, ItemDiscussion } from "@mc/core";
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { type FlightSeat, flightOffText } from "../flight/flightTypes.ts";
@@ -58,13 +58,13 @@ export async function sendAnswer(
   }
 }
 
-/** Opens a chat with FLIGHT about the item, in the dock. */
+/** Item chat is persisted separately from the global FLIGHT conversation. */
 export const askFlight = (
-  flight: FlightSeat | null,
-  item: AttentionItem,
-  about: string,
-  body: string,
-): Promise<string | null> => sendAnswer({ to: "flight" }, flight, item, about, body);
+  key: string,
+  version: string,
+  messageId: string,
+  text: string,
+): Promise<ItemDiscussion> => apiPost(RESOURCES.discussion(key).path, { version, messageId, text });
 
 /** Sets the item aside. Resolves to the server's refusal text to show, or null on success. */
 export async function dismissItem(key: string): Promise<string | null> {

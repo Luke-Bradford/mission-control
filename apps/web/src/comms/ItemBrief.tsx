@@ -16,17 +16,85 @@ import { openItem } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 
 /** FLIGHT's brief on an item: what it is and what FLIGHT recommends (all inert text). */
-export function ItemBrief({ brief }: { brief: AttentionBrief }) {
+export function ItemBrief({
+  brief,
+  approval = false,
+}: {
+  brief: AttentionBrief;
+  approval?: boolean;
+}) {
+  const recommended = brief.options.find(
+    (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
+  );
   return (
     <div className="brief">
+      <div className="ctx">
+        <div className="bsec">Catch-up</div>
+        {brief.catchUp ? (
+          <>
+            <div className="ctxline">
+              <span className={`pill ${brief.catchUp.kind === "new" ? "plain" : "warn"}`}>
+                {brief.catchUp.kind === "new"
+                  ? "New"
+                  : brief.catchUp.kind === "old"
+                    ? "Old thread"
+                    : "Follow-up"}
+              </span>
+              {brief.catchUp.line}
+            </div>
+            <div className="bsec">So far</div>
+            <ul className="checked">
+              {brief.catchUp.story.map((line, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: repeated lines have no identity
+                <li key={`${i}:${line}`}>{line}</li>
+              ))}
+            </ul>
+            <div className="bsec">Be aware</div>
+            <ul className="checked">
+              {brief.catchUp.aware.map((line, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: repeated lines have no identity
+                <li key={`${i}:${line}`}>{line}</li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>
+            <div className="bsec">So far</div>
+            <p className="note">Catch-up unavailable.</p>
+            <div className="bsec">Be aware</div>
+            <p className="note">Awareness unavailable.</p>
+          </>
+        )}
+      </div>
       <div className="bsec">FLIGHT's brief</div>
       <div className="s qtext">
         <Markdown text={brief.context} />
       </div>
-      <div className="bsec">FLIGHT recommends</div>
+      <div className="bsec">{approval ? "If you approve" : "Why it came to you"}</div>
       <div className="s qtext">
-        <Markdown text={brief.recommendation} />
+        {approval || recommended ? <Markdown text={brief.recommendation} /> : "Reason unavailable."}
       </div>
+      {!approval && (
+        <>
+          <div className="bsec">What FLIGHT checked</div>
+          {brief.checked?.length ? (
+            <ul className="checked">
+              {brief.checked.map((check, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: repeated sources have no identity
+                <li key={`${i}:${check.source}`}>
+                  <span className="chipref">{check.source}</span> {check.finding}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="note">Checked sources unavailable.</p>
+          )}
+          <div className="bsec">FLIGHT recommends</div>
+          <div className="s qtext">
+            {recommended ? recommended.label : <Markdown text={brief.recommendation} />}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -37,6 +105,8 @@ export function ItemBrief({ brief }: { brief: AttentionBrief }) {
  */
 export function BriefOptions(p: {
   options: BriefOption[];
+  recommendedOptionId?: string;
+  primaryFirst?: boolean;
   live: boolean;
   disabled: boolean;
   title?: string;
@@ -50,7 +120,7 @@ export function BriefOptions(p: {
         {p.options.map((o, i) => (
           <button
             type="button"
-            className="sm"
+            className={p.primaryFirst && i === 0 ? "sm primary" : "sm"}
             // Labels can repeat, so the text is no key; the list never reorders.
             // biome-ignore lint/suspicious/noArrayIndexKey: position is the only id, see above
             key={i}
@@ -68,8 +138,12 @@ export function BriefOptions(p: {
     <div className="optlist">
       {p.options.map((o, i) => (
         // Labels can repeat, so the text is no key; the list never reorders.
-        // biome-ignore lint/suspicious/noArrayIndexKey: position is the only id, see above
-        <OptionCard key={i} option={o} {...p} />
+        <OptionCard
+          key={o.id ?? i}
+          option={o}
+          recommended={o.id !== undefined && o.id === p.recommendedOptionId}
+          {...p}
+        />
       ))}
     </div>
   );
@@ -77,6 +151,7 @@ export function BriefOptions(p: {
 
 function OptionCard(p: {
   option: BriefOption;
+  recommended: boolean;
   live: boolean;
   disabled: boolean;
   title?: string;
@@ -84,15 +159,18 @@ function OptionCard(p: {
 }) {
   const content = (
     <>
-      <b className="qtext">{p.option.label}</b>
-      <span className="xs fg2">{p.option.answer}</span>
+      <span className="row">
+        <b className="qtext">{p.option.label}</b>
+        {p.recommended && <span className="pill plain">FLIGHT recommends</span>}
+      </span>
+      <span className="xs fg2">{p.option.description ?? p.option.answer}</span>
     </>
   );
-  if (!p.live) return <div className="opt">{content}</div>;
+  if (!p.live) return <div className={p.recommended ? "opt rec" : "opt"}>{content}</div>;
   return (
     <button
       type="button"
-      className="opt"
+      className={p.recommended ? "opt rec" : "opt"}
       aria-label={p.option.label}
       title={p.title}
       disabled={p.disabled}
