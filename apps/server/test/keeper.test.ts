@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -6,36 +7,58 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   endKeeper,
+  HUB_ABSENT_TEXT,
   KEEPER_EXIT_FILE,
   KEEPER_PROTOCOL_VERSION,
   KEEPER_SOCKET,
   KEEPER_SPEC_FILE,
   type KeeperSpec,
+  NO_SECRET_TEXT,
+  parsePsLine,
   readKeeperExit,
   readPidFile,
   runKeeper,
 } from "../src/runtime/keeper.ts";
+import { expectNoLeftovers } from "./leftovers.ts";
 
 let dir: string;
 let transcript: string;
 let folders = 0;
 const running: Promise<void>[] = [];
+const SECRET = "ab".repeat(32);
+const CLI_ID = "11111111-2222-4333-8444-555555555555";
+
+/** One tmp root for every folder this file makes: `afterAll` looks for processes that name it. */
+let root: string;
+beforeAll(() => {
+  root = realpathSync(mkdtempSync(join(tmpdir(), "mc-kp-")));
+});
+afterAll(async () => {
+  try {
+    await expectNoLeftovers(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-keeper-")));
+  dir = realpathSync(mkdtempSync(join(root, "t-")));
   transcript = join(dir, "seat.jsonl");
   folders = 0;
 });
 afterEach(async () => {
+  // whatever a test left running: no CLI outlives it, a failed test included
+  for (let n = 1; n <= folders; n++) await endKeeper(join(dir, `k${n}`), 100);
   await Promise.all(running.splice(0));
   rmSync(dir, { recursive: true, force: true });
 });
@@ -51,7 +74,11 @@ function folderFor(script: string, over: Partial<KeeperSpec> = {}): string {
     runId: "run",
     spawn: "spawn-1",
     command: process.execPath,
-    args: ["-e", script],
+    // the session id is a trailing argument: the CLI's command line carries it, as the real one does
+    // the folder is the last argument, so the leftover check finds a CLI that outlives its test
+    args: ["-e", script, CLI_ID, dir],
+    secret: SECRET,
+    cliSessionId: CLI_ID,
     cwd: dir,
     env: { PATH: process.env.PATH ?? "" },
     transcriptPath: transcript,
@@ -91,7 +118,11 @@ async function client(folder: string) {
   });
   sock.on("error", () => {});
   const closed = new Promise<void>((r) => sock.on("close", () => r()));
-  const say = (m: Msg) => sock.write(`${JSON.stringify(m)}\n`);
+  // a hello carries the spec's secret unless the test gives its own
+  const say = (m: Msg) =>
+    sock.write(
+      `${JSON.stringify(m.t === "hello" && !("secret" in m) ? { ...m, secret: SECRET } : m)}\n`,
+    );
   const outs = () => msgs.filter((m) => m.t === "out").map((m) => [m.n, m.line]);
   await until(() => expect(msgs[0]?.t).toBe("hello"));
   return { sock, msgs, closed, say, outs };
@@ -206,9 +237,9 @@ describe("the keeper", () => {
     ]);
     // a second hub connects: the first one is let go, and the second is read from line 2
     const b = await client(folder);
-    await a.closed;
     expect(b.msgs[0]).toMatchObject({ t: "hello", lines: expect.any(Number) });
     b.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 2 });
+    await a.closed;
     await until(() => expect(b.outs()).toHaveLength(3));
     expect(b.outs()).toEqual([
       [2, "l2"],
@@ -217,8 +248,8 @@ describe("the keeper", () => {
     ]);
     // a line number past the end is clamped to it: nothing to replay, then the exit
     const c = await client(folder);
-    await b.closed;
     c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 99 });
+    await b.closed;
     c.say({ t: "close", graceMs: 300 });
     await k.done;
     await c.closed;
@@ -260,8 +291,6 @@ describe("the keeper", () => {
     );
     const k = keep(folder);
     const c = await client(folder);
-    // a line sent before the hello does not count
-    c.say({ t: "in", line: "ignored", user: true });
     c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
     c.say({ t: "in", line: "hi", user: true });
     await until(() => expect(c.outs()).toHaveLength(2));
@@ -364,7 +393,163 @@ describe("the keeper", () => {
   });
 });
 
+describe("the keeper's hub secret", () => {
+  it("a client without the secret cannot drive the keeper or drop the hub", async () => {
+    const folder = folderFor(
+      `require("node:readline").createInterface({ input: process.stdin }).on("line", (l) => {
+         console.log(JSON.stringify({ echo: l }));
+       });`,
+    );
+    const k = keep(folder);
+    const hub = await client(folder);
+    hub.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    const wrong = await client(folder);
+    wrong.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0, secret: "cd".repeat(32) });
+    await wrong.closed;
+    const silent = await client(folder);
+    silent.say({ t: "in", line: "evil", user: true }); // a first line that is not a hello
+    await silent.closed;
+    const noSecret = await client(folder);
+    noSecret.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0, secret: 7 });
+    await noSecret.closed;
+    // the real hub was never dropped, and only its line reaches the CLI
+    expect(hub.sock.destroyed).toBe(false);
+    hub.say({ t: "in", line: "mine", user: true });
+    await until(() => expect(hub.outs()).toEqual([[0, '{"echo":"mine"}']]));
+    expect(lines()).toEqual(['{"echo":"mine"}']);
+    hub.say({ t: "close", graceMs: 300 });
+    await k.done;
+  });
+
+  it("a spec with no secret starts no CLI", async () => {
+    const folder = folderFor(`setInterval(() => {}, 1000);`, { secret: "not-hex" });
+    const k = keep(folder);
+    await k.done;
+    expect(readKeeperExit(folder)).toMatchObject({ code: null, lastStderr: NO_SECRET_TEXT });
+    expect(existsSync(join(folder, "cli.pid"))).toBe(false);
+  });
+});
+
+describe("the CLI's process group", () => {
+  it("a CLI's child process ends with it", async () => {
+    const folder = folderFor(
+      `const c = require("node:child_process").spawn("sleep", ["30"], { stdio: "ignore" });
+       console.log(c.pid);
+       process.stdin.resume(); process.stdin.on("end", () => process.exit(0));`,
+    );
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    await until(() => expect(lines()).toHaveLength(1));
+    const childPid = Number(lines()[0]);
+    expect(() => process.kill(childPid, 0)).not.toThrow();
+    c.say({ t: "close", graceMs: 300 });
+    await k.done;
+    await until(() => expect(() => process.kill(childPid, 0)).toThrow());
+  });
+});
+
+describe("the hub-absent limit", () => {
+  it("an idle keeper ends its CLI after the limit, and an attached hub holds it off", async () => {
+    const stays = `process.stdin.resume(); setInterval(() => {}, 1000);`;
+    const alone = folderFor(stays, { hubAbsentMs: 200 });
+    const first = keep(alone);
+    await first.done;
+    expect(readKeeperExit(alone)).toEqual({
+      code: null,
+      signal: "SIGTERM",
+      at: expect.any(Number),
+      lastStderr: HUB_ABSENT_TEXT,
+    });
+
+    const folder = folderFor(stays, { hubAbsentMs: 200 });
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(readKeeperExit(folder)).toBeNull();
+    c.sock.destroy(); // the hub leaves: the limit starts again
+    await k.done;
+    expect(readKeeperExit(folder)).toMatchObject({
+      signal: "SIGTERM",
+      lastStderr: HUB_ABSENT_TEXT,
+    });
+  });
+});
+
+describe("parsePsLine", () => {
+  it("reads ps's lstart and command", () => {
+    expect(parsePsLine("Thu Oct 23 12:34:56 2026 /usr/bin/node keeper-cli.ts /x/k1\n")).toEqual({
+      startedAt: new Date(2026, 9, 23, 12, 34, 56).getTime(),
+      command: "/usr/bin/node keeper-cli.ts /x/k1",
+    });
+    expect(parsePsLine("  Fri Oct  3 01:02:03 2026 sleep 30")).toEqual({
+      startedAt: new Date(2026, 9, 3, 1, 2, 3).getTime(),
+      command: "sleep 30",
+    });
+    expect(parsePsLine("")).toBeNull();
+    expect(parsePsLine("not a ps line")).toBeNull();
+    expect(parsePsLine("Thu Xxx 23 12:34:56 2026 sleep")).toBeNull();
+  });
+});
+
 describe("endKeeper", () => {
+  it("does not signal a live pid whose command is not the keeper's", async () => {
+    const folder = folderFor(`setInterval(() => {}, 1000);`);
+    const sleeper = spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      // a pid file that names a live process that is neither the run's keeper nor its CLI
+      writeFileSync(join(folder, "keeper.pid"), `${sleeper.pid}\n`);
+      writeFileSync(join(folder, "cli.pid"), `${sleeper.pid}\n`);
+      const said: string[] = [];
+      expect(await endKeeper(folder, 200, (m) => said.push(m))).toBe(true);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(() => process.kill(sleeper.pid as number, 0)).not.toThrow();
+      expect(sleeper.exitCode).toBeNull();
+      expect(said).toHaveLength(2);
+      expect(said[0]).toContain(`pid ${sleeper.pid} in keeper.pid is not the run's keeper`);
+      expect(said[1]).toContain(`pid ${sleeper.pid} in cli.pid is not the run's CLI`);
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+  });
+
+  it("is false, and signals nothing, for a live pid it cannot identify (a spec with no cliSessionId)", async () => {
+    const folder = folderFor(`setInterval(() => {}, 1000);`);
+    // a keeper of before the session id was in the spec
+    const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+    delete spec.cliSessionId;
+    writeFileSync(join(folder, KEEPER_SPEC_FILE), JSON.stringify(spec));
+    const sleeper = spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      writeFileSync(join(folder, "cli.pid"), `${sleeper.pid}\n`);
+      const said: string[] = [];
+      expect(await endKeeper(folder, 200, (m) => said.push(m))).toBe(false);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(() => process.kill(sleeper.pid as number, 0)).not.toThrow();
+      expect(sleeper.exitCode).toBeNull();
+      expect(said).toHaveLength(1);
+    } finally {
+      sleeper.kill("SIGKILL");
+    }
+  });
+
+  it("does not signal a process that started after its pid file was written", async () => {
+    const folder = folderFor(`setInterval(() => {}, 1000);`);
+    const k = keep(folder);
+    await until(() => expect(readPidFile(folder, "cli.pid")).not.toBeNull());
+    const cliPid = readPidFile(folder, "cli.pid") as number;
+    // the file is older than the process: the pid has been reused since it was written
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(join(folder, "cli.pid"), old, old);
+    writeFileSync(join(folder, "keeper.pid"), "99999999\n");
+    expect(await endKeeper(folder, 100)).toBe(true);
+    expect(() => process.kill(cliPid, 0)).not.toThrow();
+    utimesSync(join(folder, "cli.pid"), new Date(), new Date());
+    expect(await endKeeper(folder, 200)).toBe(true);
+    await k.done;
+  });
+
   it("is true at once for a folder with no live pids", async () => {
     const folder = join(dir, "empty");
     mkdirSync(folder);

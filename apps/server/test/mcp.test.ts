@@ -9,7 +9,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { McpCalls, type McTool, type McToolContext, registerMcp } from "../src/mcp/server.ts";
+import {
+  MCP_RESTARTING_TEXT,
+  McpCalls,
+  type McTool,
+  type McToolContext,
+  registerMcp,
+} from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { Store } from "../src/store.ts";
 
@@ -585,6 +591,57 @@ describe("McpCalls", () => {
     a.reject(new Error("tool failed"));
     await expect(tracked).rejects.toThrow("tool failed");
     expect(await settled(idle)).toBe(true);
+  });
+
+  it("a tools/call that comes once the drain has started is answered restarting, and its tool is not run", async () => {
+    const mcpCalls = new McpCalls();
+    let ran = 0;
+    const a = buildApp({
+      config: {
+        operator: { id: "o", timezone: "Europe/London" },
+        accounts: [],
+        repos: [],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      bus: new ChangeBus(),
+      tokens,
+      mcpCalls,
+      mcpTools: () => [
+        {
+          name: "count",
+          description: "counts",
+          inputSchema: { type: "object" },
+          modes: ["writer"],
+          call: async () => {
+            ran++;
+            return { text: "done" };
+          },
+        },
+      ],
+      seatMode: () => "writer",
+    });
+    await a.ready();
+    try {
+      const call = () =>
+        a.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          payload: JSON.stringify(msg(1, "tools/call", { name: "count", arguments: {} })),
+        });
+      expect(JSON.parse((await call()).body).result.content[0].text).toBe("done");
+      expect(mcpCalls.draining).toBe(false);
+      await mcpCalls.drain();
+      expect(mcpCalls.draining).toBe(true);
+      const r = JSON.parse((await call()).body);
+      expect(r.result.isError).toBe(true);
+      expect(r.result.content[0].text).toBe(MCP_RESTARTING_TEXT);
+      expect(ran).toBe(1);
+    } finally {
+      await a.close();
+    }
   });
 
   it("a tools/call is in flight until its tool answers", async () => {

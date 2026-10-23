@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ControlSubtype, type SessionEvent, STDERR_TEXT_MAX } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { endKeeper } from "../src/runtime/keeper.ts";
 import { type CrewSession, startSession } from "../src/runtime/session.ts";
+import { expectNoLeftovers } from "./leftovers.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const KEEPER = fileURLToPath(new URL("../src/runtime/keeper-cli.ts", import.meta.url));
@@ -21,16 +23,32 @@ const keeperInput = () => ({
   entry: KEEPER,
   dir: join(dir, `k${++keeperDirs}`),
   spawn: `spawn-${keeperDirs}`,
+  cliSessionId: SID,
+});
+
+/** One tmp root for every folder this file makes: `afterAll` looks for processes that name it. */
+let root: string;
+beforeAll(() => {
+  root = realpathSync(mkdtempSync(join(tmpdir(), "mc-ss-")));
+});
+afterAll(async () => {
+  try {
+    await expectNoLeftovers(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 beforeEach(() => {
-  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-session-")));
+  dir = realpathSync(mkdtempSync(join(root, "t-")));
   transcript = join(dir, "seat.jsonl");
   keeperDirs = 0;
 });
 afterEach(async () => {
   // Never leave a fake running: close politely, and the short grace below ends a HANG one.
   await Promise.all(sessions.splice(0).map((s) => s.close()));
+  // and no keeper (or CLI under it) outlives its test, whatever the test did
+  for (let n = 1; n <= keeperDirs; n++) await endKeeper(join(dir, `k${n}`), 500);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -44,6 +62,9 @@ function start(
       FAKE,
       "--session-id",
       SID,
+      // names the test's folder, so the leftover check finds a fake that outlives its test
+      "--record",
+      join(dir, "record.jsonl"),
       ...(bootDelayMs ? ["--boot-delay", String(bootDelayMs)] : []),
     ],
     cwd: dir,
@@ -328,6 +349,21 @@ describe("startSession against the fake CLI", () => {
     expect(Date.now() - t0).toBeLessThan(2500);
   });
 
+  it("closeSent resolves once close() has handed its line to the socket", async () => {
+    const { s, until } = start();
+    await s.ready;
+    let sent = false;
+    void s.closeSent.then(() => {
+      sent = true;
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toBe(false); // nothing has been closed yet
+    const exited = s.close();
+    await s.closeSent;
+    await until(isExit);
+    expect(await exited).toBe(0);
+  });
+
   it("an error control response rejects with its message", async () => {
     const { s } = start();
     await expect(s.control("bogus" as ControlSubtype)).rejects.toThrow("unknown subtype bogus");
@@ -404,7 +440,10 @@ describe("startSession against the fake CLI", () => {
   });
 
   describe("bounded output", () => {
-    const raw = (script: string, extra: Partial<Parameters<typeof startSession>[0]> = {}) => {
+    const raw = (
+      script: string,
+      extra: Partial<Omit<Parameters<typeof startSession>[0], "cliSessionId">> = {},
+    ) => {
       const s = startSession({
         command: process.execPath,
         args: ["-e", script],

@@ -16,12 +16,16 @@
  * is its place in this keeper's output, whatever the transcript held before). The wire is newline
  * JSON. Keeper to hub: `hello` (always first; its shape is frozen so an older or newer hub can read
  * it), `{t:"out",n,line}`, `{t:"err",text}`, `{t:"exit",code,signal}`. Hub to keeper:
- * `{t:"hello",version,from}` (the first line wanted), `{t:"in",line,user}` (a line for the CLI's
- * stdin; `user`: it starts a turn) and `{t:"close",graceMs}` (end stdin). One hub at a time: the
- * newest replaces the old. A hub that was away gets every line from the one it asks for, replayed
- * 500 at a time, then the live ones, in order, with `exit` after the last.
+ * `{t:"hello",version,from,secret}` (the first line wanted, and the secret from `spec.json`; a
+ * connection whose first line is anything else is closed, and so is one silent for 5 s),
+ * `{t:"in",line,user}` (a line for the CLI's stdin; `user`: it starts a turn) and
+ * `{t:"close",graceMs}` (end stdin). One hub at a time: the newest to authenticate replaces the old.
+ * A hub that was away gets every line from the one it asks for, replayed 500 at a time, then the
+ * live ones, in order, with `exit` after the last. The CLI runs in its own process group, which the
+ * keeper signals, and a keeper with no hub attached for 6 h ends the CLI and exits.
  */
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { timingSafeEqual } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -63,6 +67,16 @@ const FIRST_HUB_WAIT_MS = 3000;
 const EARLY_ERR_MAX = 100;
 /** After the CLI exits, how long its pipes may stay open (a grandchild holding them). */
 const EXIT_DRAIN_MS = 1000;
+/** How long a connection may go without a valid hello, and how much it may send with no newline. */
+const AUTH_WAIT_MS = 5000;
+const AUTH_LINE_MAX = 4096;
+/** A keeper that no hub has been attached to for this long ends its CLI and exits. */
+export const KEEPER_HUB_ABSENT_MS = 6 * 60 * 60 * 1000;
+/** The exit's reason when the hub-absent limit ended the CLI. */
+export const HUB_ABSENT_TEXT = "the keeper ended the CLI: no hub was attached for 6 h";
+/** The exit's reason when the spec's secret is not the 64 hex characters the hub writes. */
+export const NO_SECRET_TEXT = "could not start the CLI: the keeper's spec has no secret";
+const SECRET_FORMAT = /^[0-9a-f]{64}$/;
 /** A turn ends with this line (the CLI prints `type` first). */
 const RESULT_PREFIX = '{"type":"result"';
 const DROPPED_TEXT = "a CLI output line over 64 MiB was dropped";
@@ -79,8 +93,14 @@ export interface KeeperSpec {
   stdoutLineMax: number;
   stderrLineMax: number;
   stopGraceMs: number;
+  /** 32 random bytes as hex: only a hub that says it in its hello drives this keeper. */
+  secret: string;
+  /** The CLI's own session id, which its command line carries: `endKeeper` knows the CLI by it. */
+  cliSessionId: string;
   /** Default FIRST_HUB_WAIT_MS; tests that have no hub shorten it. */
   firstHubWaitMs?: number;
+  /** Default KEEPER_HUB_ABSENT_MS; tests shorten it. */
+  hubAbsentMs?: number;
 }
 
 export interface KeeperExit {
@@ -115,14 +135,76 @@ export const pidAlive = (pid: number): boolean => {
   }
 };
 
-/** The pid in `dir/name`; null when the file is missing, not a pid, or older than the boot (a stale pid). */
-export function readPidFile(dir: string, name: string): number | null {
+/** The pid in `dir/name` and its file's mtime; null when the file is missing, not a pid, or older than the boot (a stale pid). */
+export function readPidStamp(dir: string, name: string): { pid: number; mtimeMs: number } | null {
   try {
     const path = join(dir, name);
     const pid = Number.parseInt(readFileSync(path, "utf8"), 10);
     if (!Number.isSafeInteger(pid) || pid <= 0) return null;
     const bootedAt = Date.now() - uptime() * 1000;
-    return statSync(path).mtimeMs < bootedAt - 2000 ? null : pid;
+    const { mtimeMs } = statSync(path);
+    return mtimeMs < bootedAt - 2000 ? null : { pid, mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+/** The pid in `dir/name`; null when the file is missing, not a pid, or older than the boot (a stale pid). */
+export function readPidFile(dir: string, name: string): number | null {
+  return readPidStamp(dir, name)?.pid ?? null;
+}
+
+/** The hub secret in the run folder's spec; null when the spec is unreadable or its secret is not 64 hex characters. */
+export function readKeeperSecret(dir: string): string | null {
+  try {
+    const v: unknown = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"));
+    const secret = (v as { secret?: unknown } | null)?.secret;
+    return typeof secret === "string" && SECRET_FORMAT.test(secret) ? secret : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a pid file of the run folder names a live process (`kill -0`: not a check of whose). */
+export function keeperAlive(dir: string): boolean {
+  return [KEEPER_PID_FILE, CLI_PID_FILE].some((n) => {
+    const pid = readPidFile(dir, n);
+    return pid !== null && pidAlive(pid);
+  });
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** One line of `ps -o lstart=,command=`: the process's start (local time, whole seconds) and its command. */
+export function parsePsLine(text: string): { startedAt: number; command: string } | null {
+  const m = /^\s*\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})\s+(.*)$/s.exec(
+    text,
+  );
+  if (m === null) return null;
+  const month = MONTHS.indexOf(m[1] as string);
+  if (month < 0) return null;
+  const startedAt = new Date(
+    Number(m[6]),
+    month,
+    Number(m[2]),
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+  ).getTime();
+  const command = (m[7] as string).trim();
+  return Number.isFinite(startedAt) && command !== "" ? { startedAt, command } : null;
+}
+
+/** What `ps` says of a pid; null when it cannot say (no such process, no `ps`, a line it cannot read). */
+export function processInfo(pid: number): { startedAt: number; command: string } | null {
+  try {
+    const out = execFileSync("ps", ["-ww", "-o", "lstart=,command=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return parsePsLine(out);
   } catch {
     return null;
   }
@@ -148,38 +230,110 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * Ends the run folder's keeper and CLI by their pids: SIGTERM, then SIGKILL after `waitMs`, and a
- * wait of up to 2 s for that. Resolves whether both are dead. Never throws.
+ * wait of up to 2 s for that. Resolves whether they are all dead. Never throws. A pid is signalled
+ * only when `ps` says it is this run's own process: the keeper's command names `keeper-cli` and the
+ * folder, the CLI's names the spec's `cliSessionId`, and each started no later than its pid file
+ * was written (a pid reused since is none of these). Any other pid is logged and left alone. A live
+ * pid that cannot be identified (`ps` cannot read it, or the spec has no `cliSessionId` to know
+ * the CLI by) is left alone too, and makes the result false while it lives: it may be the run's
+ * own process, so the caller must not treat the run as ended. The CLI is signalled as its process group, so its
+ * children go with it.
  */
-export async function endKeeper(dir: string, waitMs: number): Promise<boolean> {
-  const live = () =>
-    [readPidFile(dir, KEEPER_PID_FILE), readPidFile(dir, CLI_PID_FILE)].filter(
-      (p): p is number => p !== null && pidAlive(p),
-    );
-  const signal = (sig: NodeJS.Signals) => {
-    for (const pid of live()) {
+export async function endKeeper(
+  dir: string,
+  waitMs: number,
+  log: (msg: string) => void = () => {},
+): Promise<boolean> {
+  type Role = "keeper" | "CLI";
+  type Target = { pid: number; role: Role };
+  const cliSessionId = (): string | null => {
+    try {
+      const v: unknown = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"));
+      const id = (v as { cliSessionId?: unknown } | null)?.cliSessionId;
+      return typeof id === "string" && id !== "" ? id : null;
+    } catch {
+      return null;
+    }
+  };
+  const fits = (role: Role, command: string): boolean => {
+    if (role === "keeper") return command.includes("keeper-cli") && command.includes(dir);
+    const id = cliSessionId();
+    return id !== null && command.includes(id);
+  };
+  /**
+   * The live pids of the pid files, as `ps` says now: `found` are this run's own; `unknown` are
+   * ones that could not be identified (ps said nothing, or the CLI's session id is not in the
+   * spec), which might be this run's and are left alone. A pid ps read and that does not fit is
+   * neither: it belongs to someone else.
+   */
+  const targets = (quiet: boolean): { found: Target[]; unknown: Target[] } => {
+    const found: Target[] = [];
+    const unknown: Target[] = [];
+    for (const [name, role] of [
+      [KEEPER_PID_FILE, "keeper"],
+      [CLI_PID_FILE, "CLI"],
+    ] as const) {
+      const stamp = readPidStamp(dir, name);
+      if (stamp === null || !pidAlive(stamp.pid)) continue;
+      const info = processInfo(stamp.pid);
+      if (info !== null && info.startedAt <= stamp.mtimeMs && fits(role, info.command)) {
+        found.push({ pid: stamp.pid, role });
+        continue;
+      }
+      if (info === null || (role === "CLI" && cliSessionId() === null)) {
+        unknown.push({ pid: stamp.pid, role });
+      }
+      if (!quiet) {
+        log(
+          `${dir}: pid ${stamp.pid} in ${name} is not the run's ${role}, or ps could not say; not signalled`,
+        );
+      }
+    }
+    return { found, unknown };
+  };
+  const signal = (list: Target[], sig: NodeJS.Signals) => {
+    for (const { pid, role } of list) {
       try {
+        if (role === "CLI") {
+          try {
+            process.kill(-pid, sig);
+            continue;
+          } catch {
+            // not a group leader (an older keeper's CLI): the pid alone
+          }
+        }
         process.kill(pid, sig);
       } catch {
         // gone already
       }
     }
   };
-  const waitDead = async (ms: number) => {
-    for (const t0 = Date.now(); live().length > 0 && Date.now() - t0 < ms; ) await sleep(100);
+  const waitDead = async (list: Target[], ms: number) => {
+    for (const t0 = Date.now(); list.some((t) => pidAlive(t.pid)) && Date.now() - t0 < ms; ) {
+      await sleep(100);
+    }
   };
-  if (live().length === 0) return true;
-  signal("SIGTERM");
-  await waitDead(waitMs);
-  if (live().length === 0) return true;
-  signal("SIGKILL");
-  await waitDead(2000);
-  return live().length === 0;
+  const { found: first, unknown } = targets(false);
+  // A pid that could not be identified is never signalled, but while it lives it may be this run's
+  // CLI: the run is not ended. (An older keeper's SIGTERM ends its own CLI, so that one goes.)
+  const allEnded = () => !unknown.some((t) => pidAlive(t.pid));
+  if (first.length === 0) return allEnded();
+  signal(first, "SIGTERM");
+  await waitDead(first, waitMs);
+  // checked again: a pid that went and was reused during the wait is not ours to kill
+  const left = targets(true).found.filter((t) => first.some((f) => f.pid === t.pid));
+  if (left.length === 0) return allEnded();
+  signal(left, "SIGKILL");
+  await waitDead(left, 2000);
+  return !left.some((t) => pidAlive(t.pid)) && allEnded();
 }
 
 type Json = Record<string, unknown>;
 
 interface Client {
   sock: Socket;
+  /** Its first line was a hello with the hub secret: it is the client, and its lines count. */
+  authed: boolean;
   /** The client's hello came: its `in` and `close` lines count, and lines are sent to it. */
   ready: boolean;
   /** The next line to send it. */
@@ -211,8 +365,10 @@ export function runKeeper(
     resolveDone = r;
   });
   let lastStderr: string | null = null;
+  /** Why the keeper ended the CLI itself (the hub-absent limit): it outranks the CLI's last stderr line. */
+  let endReason: string | null = null;
   const writeExit = (code: number | null, signal: string | null) => {
-    const exit: KeeperExit = { code, signal, at: Date.now(), lastStderr };
+    const exit: KeeperExit = { code, signal, at: Date.now(), lastStderr: endReason ?? lastStderr };
     try {
       secret(KEEPER_EXIT_FILE, JSON.stringify(exit));
     } catch (e) {
@@ -220,14 +376,27 @@ export function runKeeper(
     }
   };
 
+  // a keeper no hub can authenticate to would run unreachable: it starts nothing
+  const hubSecret =
+    typeof spec.secret === "string" && SECRET_FORMAT.test(spec.secret) ? spec.secret : null;
+  if (hubSecret === null) {
+    lastStderr = NO_SECRET_TEXT;
+    writeExit(null, null);
+    resolveDone();
+    return { done, terminate: () => {} };
+  }
+  const expectedSecret = Buffer.from(hubSecret);
+
   let fd = -1;
   let child: ChildProcess;
   try {
     fd = openSync(spec.transcriptPath, "a", 0o600);
+    // its own process group: the keeper ends the CLI's children with it (`killCli`)
     child = spawn(spec.command, spec.args, {
       cwd: spec.cwd,
       env: spec.env,
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
   } catch (e) {
     if (fd >= 0) closeSync(fd);
@@ -253,6 +422,18 @@ export function runKeeper(
   const cliPid = child.pid;
   secret(CLI_PID_FILE, `${cliPid}\n`);
   secret(KEEPER_PID_FILE, `${process.pid}\n`);
+  /** Signals the CLI's whole process group (it leads one), or the CLI alone when that fails. */
+  const killCli = (sig: NodeJS.Signals) => {
+    try {
+      process.kill(-cliPid, sig);
+    } catch {
+      try {
+        cli.kill(sig);
+      } catch {
+        // gone already
+      }
+    }
+  };
 
   // --- the transcript and the numbered lines -------------------------------------------------
   /** Byte offset of line n in the transcript, for the lines it holds; line 0 starts at its size now. */
@@ -416,7 +597,19 @@ export function runKeeper(
 
   // --- the hub ---------------------------------------------------------------------------------
   let stopTimer: NodeJS.Timeout | undefined;
+  let absentTimer: NodeJS.Timeout | undefined;
   let alive = true;
+  /** (Re)starts the limit on how long the CLI runs with no hub attached; a hub's hello clears it. */
+  const armHubAbsent = () => {
+    clearTimeout(absentTimer);
+    if (!alive || finished) return;
+    absentTimer = setTimeout(() => {
+      if (!alive) return;
+      endReason = HUB_ABSENT_TEXT;
+      terminate();
+    }, spec.hubAbsentMs ?? KEEPER_HUB_ABSENT_MS);
+    absentTimer.unref();
+  };
   let stdinEnded = false;
   const closeStdin = (graceMs: number) => {
     if (stdinEnded) return;
@@ -424,9 +617,9 @@ export function runKeeper(
     stdin.end();
     stopTimer = setTimeout(() => {
       if (!alive) return;
-      cli.kill("SIGTERM");
+      killCli("SIGTERM");
       stopTimer = setTimeout(() => {
-        if (alive) cli.kill("SIGKILL");
+        if (alive) killCli("SIGKILL");
       }, graceMs);
     }, graceMs);
   };
@@ -461,15 +654,43 @@ export function runKeeper(
     }
   };
 
-  const server: Server = createServer((sock) => {
+  /** A connection's first line must be a hello with the spec's secret; only then does it replace the client. */
+  const authenticate = (c: Client, text: string): boolean => {
+    let ok = false;
+    try {
+      const m: unknown = JSON.parse(text);
+      const given = (m as { t?: unknown; secret?: unknown } | null)?.secret;
+      if ((m as { t?: unknown } | null)?.t === "hello" && typeof given === "string") {
+        const got = Buffer.from(given);
+        ok = got.length === expectedSecret.length && timingSafeEqual(got, expectedSecret);
+      }
+    } catch {
+      // not JSON
+    }
+    if (!ok) {
+      c.sock.destroy();
+      return false;
+    }
+    c.authed = true;
     if (client !== null) client.sock.destroy();
-    const c: Client = { sock, ready: false, next: 0, pumping: false, buf: "" };
     client = c;
+    clearTimeout(absentTimer);
+    return true;
+  };
+
+  const server: Server = createServer((sock) => {
+    const c: Client = { sock, authed: false, ready: false, next: 0, pumping: false, buf: "" };
     sock.setEncoding("utf8");
     sock.on("error", () => {});
+    const authTimer = setTimeout(() => {
+      if (!c.authed) sock.destroy();
+    }, AUTH_WAIT_MS);
+    authTimer.unref();
     sock.on("close", () => {
+      clearTimeout(authTimer);
       if (client !== c) return;
       client = null;
+      armHubAbsent();
       // the CLI has gone and the hub with it, before it had everything: exit.json tells the next one
       if (closed !== null) finish();
     });
@@ -479,9 +700,11 @@ export function runKeeper(
       while (nl >= 0) {
         const text = c.buf.slice(0, nl);
         c.buf = c.buf.slice(nl + 1);
+        if (!c.authed && !authenticate(c, text)) return;
         onClientLine(c, text);
         nl = c.buf.indexOf("\n");
       }
+      if (!c.authed && c.buf.length > AUTH_LINE_MAX) sock.destroy();
     });
     const hello: KeeperHello = {
       t: "hello",
@@ -532,6 +755,7 @@ export function runKeeper(
     if (finished) return;
     finished = true;
     clearTimeout(helloTimer);
+    clearTimeout(absentTimer);
     server.close();
     rmSync(socketPath, { force: true });
     resolveDone();
@@ -540,7 +764,11 @@ export function runKeeper(
   cli.on("exit", (code, signal) => {
     alive = false;
     exited = { code, signal };
+    // what the CLI's Bash calls left running goes with it, so a test-lock hold freed at the exit
+    // is not still in use
+    killCli("SIGTERM");
     drainTimer = setTimeout(() => {
+      killCli("SIGKILL");
       stdout.destroy();
       stderr.destroy();
     }, EXIT_DRAIN_MS);
@@ -550,6 +778,7 @@ export function runKeeper(
     alive = false;
     clearTimeout(stopTimer);
     clearTimeout(drainTimer);
+    clearTimeout(absentTimer);
     // a line cut off by the exit is kept in the transcript, but never numbered or sent
     if (outBuf !== "") record(outBuf);
     outBuf = "";
@@ -576,12 +805,13 @@ export function runKeeper(
 
   const terminate = () => {
     if (!alive) return;
-    cli.kill("SIGTERM");
+    killCli("SIGTERM");
     const t = setTimeout(() => {
-      if (alive) cli.kill("SIGKILL");
+      if (alive) killCli("SIGKILL");
     }, spec.stopGraceMs);
     t.unref();
   };
 
+  armHubAbsent();
   return { done, terminate };
 }
