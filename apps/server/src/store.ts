@@ -238,9 +238,62 @@ CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
   updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
 );
+-- The operator's GitHub notification threads (read-only copy); handled_* closes a thread here.
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, subject_type TEXT NOT NULL, title TEXT NOT NULL,
+  number INTEGER, reason TEXT NOT NULL, url TEXT NOT NULL, author TEXT, snippet TEXT,
+  updated_at INTEGER NOT NULL, last_read_at INTEGER, unread INTEGER NOT NULL,
+  first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT, handled_through INTEGER
+);
 `;
 
 type Row = Record<string, SQLInputValue>;
+
+/** One notification thread, as stored. */
+export interface NotificationRow {
+  id: string;
+  repoId: RepoId;
+  subjectType: string;
+  title: string;
+  number: number | null;
+  reason: string;
+  url: string;
+  author: string | null;
+  snippet: string | null;
+  updatedAt: number;
+  lastReadAt: number | null;
+  unread: boolean;
+  firstSeenAt: number;
+  handledAt: number | null;
+  handledHow: "marked" | "read" | null;
+  /** The `updatedAt` that was handled: a thread updated after it is open again. */
+  handledThrough: number | null;
+}
+
+/** What a GitHub read gives for a thread: the stored row less the bookkeeping the store owns. */
+export type NotificationRead = Omit<
+  NotificationRow,
+  "unread" | "firstSeenAt" | "handledAt" | "handledHow" | "handledThrough"
+>;
+
+const notificationRow = (r: Row): NotificationRow => ({
+  id: r.id as string,
+  repoId: r.repo_id as string,
+  subjectType: r.subject_type as string,
+  title: r.title as string,
+  number: r.number as number | null,
+  reason: r.reason as string,
+  url: r.url as string,
+  author: r.author as string | null,
+  snippet: r.snippet as string | null,
+  updatedAt: r.updated_at as number,
+  lastReadAt: r.last_read_at as number | null,
+  unread: r.unread === 1,
+  firstSeenAt: r.first_seen_at as number,
+  handledAt: r.handled_at as number | null,
+  handledHow: r.handled_how as NotificationRow["handledHow"],
+  handledThrough: r.handled_through as number | null,
+});
 
 /** One section of FLIGHT's brief, as stored. */
 export interface FlightBriefRow {
@@ -1636,6 +1689,114 @@ export class Store {
         }
       }
     });
+  }
+
+  /**
+   * Merges the unread threads `rows` into the table: a new row is first seen `now`; an existing one
+   * is unread again, keeping `first_seen_at` and its handled fields. `complete` (`rows` is the whole
+   * unread list): every other unread row is read on GitHub, and closes as `read` if it was open.
+   * True when any row changed.
+   */
+  upsertNotifications(rows: NotificationRead[], complete: boolean, now: number): boolean {
+    let changed = false;
+    this.transaction(() => {
+      const before = this.notificationsJson();
+      const ins = this.db.prepare(
+        `INSERT INTO notifications (id, repo_id, subject_type, title, number, reason, url, author,
+           snippet, updated_at, last_read_at, unread, first_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+         ON CONFLICT(id) DO UPDATE SET repo_id = excluded.repo_id,
+           subject_type = excluded.subject_type, title = excluded.title, number = excluded.number,
+           reason = excluded.reason, url = excluded.url, author = excluded.author,
+           snippet = excluded.snippet, updated_at = excluded.updated_at,
+           last_read_at = excluded.last_read_at, unread = 1`,
+      );
+      for (const n of rows) {
+        ins.run(
+          n.id,
+          n.repoId,
+          n.subjectType,
+          n.title,
+          n.number,
+          n.reason,
+          n.url,
+          n.author,
+          n.snippet,
+          n.updatedAt,
+          n.lastReadAt,
+          now,
+        );
+      }
+      if (complete) {
+        const seen = new Set(rows.map((n) => n.id));
+        const close = this.db.prepare(
+          `UPDATE notifications SET unread = 0,
+             handled_at = CASE WHEN handled_through IS NULL OR updated_at > handled_through THEN ? ELSE handled_at END,
+             handled_how = CASE WHEN handled_through IS NULL OR updated_at > handled_through THEN 'read' ELSE handled_how END,
+             handled_through = CASE WHEN handled_through IS NULL OR updated_at > handled_through THEN updated_at ELSE handled_through END
+           WHERE id = ?`,
+        );
+        const unread = this.db.prepare("SELECT id FROM notifications WHERE unread = 1").all() as {
+          id: string;
+        }[];
+        for (const { id } of unread) if (!seen.has(id)) close.run(now, id);
+      }
+      changed = this.notificationsJson() !== before;
+    });
+    return changed;
+  }
+
+  private notificationsJson(): string {
+    return JSON.stringify(this.db.prepare("SELECT * FROM notifications ORDER BY id").all());
+  }
+
+  /** Every stored thread, newest first. */
+  notifications(): NotificationRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM notifications ORDER BY updated_at DESC, id DESC")
+      .all() as Row[];
+    return rows.map(notificationRow);
+  }
+
+  notification(id: string): NotificationRow | null {
+    const r = this.db.prepare("SELECT * FROM notifications WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return r === undefined ? null : notificationRow(r);
+  }
+
+  /**
+   * Closes the thread as handled at `at`, when it is open and still at `updatedAt` (a newer comment
+   * is never hidden by an old key). `handled_through` records the version handled, so a comment
+   * that lands before `at` but after `updatedAt` still reopens it. True when it did.
+   */
+  markNotificationHandled(
+    id: string,
+    updatedAt: number,
+    how: "marked" | "read",
+    at: number,
+  ): boolean {
+    const r = this.db
+      .prepare(
+        `UPDATE notifications SET handled_at = ?, handled_how = ?, handled_through = ?
+         WHERE id = ? AND updated_at = ? AND unread = 1
+           AND (handled_through IS NULL OR updated_at > handled_through)`,
+      )
+      .run(at, how, updatedAt, id, updatedAt);
+    return Number(r.changes) > 0;
+  }
+
+  /**
+   * Deletes the threads closed before `before` that GitHub no longer lists as unread. A thread
+   * handled here but still unread on GitHub stays, or the next read would bring it back.
+   */
+  pruneNotifications(before: number): void {
+    this.db
+      .prepare(
+        `DELETE FROM notifications
+         WHERE unread = 0 AND handled_at IS NOT NULL AND handled_at < ? AND updated_at <= handled_through`,
+      )
+      .run(before);
   }
 
   getSetting(key: string): string | null {

@@ -187,8 +187,19 @@ function seatHint(row: CrewRow): string {
   }
 }
 
-/** Message a crew seat; an observed loop keeps the disabled composer and its fixed line. */
-function Composer({ row }: { row: CrewRow }) {
+/**
+ * Message a crew seat; an observed loop keeps the disabled composer and its fixed line.
+ * `onSent` runs once the hub has taken the message.
+ */
+export function SeatComposer({
+  row,
+  placeholder,
+  onSent,
+}: {
+  row: CrewRow;
+  placeholder?: string;
+  onSent?: () => void;
+}) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -206,6 +217,7 @@ function Composer({ row }: { row: CrewRow }) {
       await messageSeat(row, text, interrupt);
       setText("");
       toast(`Delivered to ${call}.`);
+      onSent?.();
     } catch (e) {
       setError(seatError(e));
     } finally {
@@ -224,7 +236,7 @@ function Composer({ row }: { row: CrewRow }) {
         autoComplete="off"
         aria-label="Message this agent"
         aria-describedby={HINT_ID}
-        placeholder={`Message ${call}…`}
+        placeholder={placeholder ?? `Message ${call}…`}
         disabled={!crew}
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -334,7 +346,7 @@ export function StreamPanel({ row, now, tz }: { row: CrewRow; now: number; tz: s
           ))
         )}
       </div>
-      <Composer row={row} />
+      <SeatComposer row={row} />
     </Panel>
   );
 }

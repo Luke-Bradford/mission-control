@@ -58,6 +58,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, CHECK_FAILED, CONFIG_WRITES_UNAVAILABLE, NO_OPEN_NOTE } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
+import {
+  NO_OPEN_THREAD,
+  type NotificationsView,
+  personKey,
+} from "../src/collectors/notifications.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
@@ -65,7 +70,7 @@ import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
-import { Store } from "../src/store.ts";
+import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 
@@ -471,6 +476,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/attention"],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
+  ["GET", "/api/notifications"],
+  ["POST", "/api/attention/person:101:1/handled", {}],
   ["GET", "/api/settings/away"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
@@ -861,7 +868,7 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
-      if (url.endsWith("/dismiss")) {
+      if (url.endsWith("/dismiss") || url.endsWith("/handled")) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -995,7 +1002,8 @@ describe("local access", () => {
             .replace("/guido-1/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
-            .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")}`,
+            .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
+            .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")}`,
       ),
     );
     const registered = apiRoutes.filter((r) => !r.startsWith("HEAD "));
@@ -1790,6 +1798,84 @@ describe("crew and attention", () => {
     repoId: "shop-app",
     text: "shop-app#7 parked",
     at: NOW,
+  });
+
+  const seedThread = (over: Partial<NotificationRead> = {}) =>
+    store.upsertNotifications(
+      [
+        {
+          id: "101",
+          repoId: "shop-app",
+          subjectType: "Issue",
+          title: "Fix the stop race",
+          number: 12,
+          reason: "mention",
+          url: "https://github.com/o/shop-app/issues/12",
+          author: "alice",
+          snippet: "can you look?",
+          updatedAt: NOW - 60_000,
+          lastReadAt: null,
+          ...over,
+        },
+      ],
+      false,
+      NOW,
+    );
+
+  it("POST /api/attention/:key/handled closes the thread locally, emits attention, and calls no GitHub", async () => {
+    seedThread();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const key = personKey({ id: "101", updatedAt: NOW - 60_000 });
+    const before = (await get("/api/attention")).json() as AttentionItem[];
+    expect(before.some((i) => i.key === key)).toBe(true);
+    const events: string[] = [];
+    bus.subscribe((t) => events.push(t));
+    const r = await postBody(`/api/attention/${encodeURIComponent(key)}/handled`, {});
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ handled: key });
+    expect(events).toEqual(["attention"]);
+    const items = (await get("/api/attention")).json() as AttentionItem[];
+    expect(items.find((i) => i.kind === "person")).toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/attention/:key/handled answers 404 for a stale or unknown key", async () => {
+    seedThread();
+    const events: string[] = [];
+    bus.subscribe((t) => events.push(t));
+    const stale = personKey({ id: "101", updatedAt: NOW - 120_000 });
+    const keys = [
+      stale,
+      "person:999:1",
+      "person:x:1",
+      "esc:shop-app#9",
+      `person:101:${"9".repeat(30)}`,
+    ];
+    for (const key of keys) {
+      const r = await postBody(`/api/attention/${encodeURIComponent(key)}/handled`, {});
+      expect(r.statusCode, key).toBe(404);
+      expect(r.json(), key).toEqual({ error: NO_OPEN_THREAD });
+    }
+    expect(events).toEqual([]);
+    const live = encodeURIComponent(personKey({ id: "101", updatedAt: NOW - 60_000 }));
+    expect((await postBody(`/api/attention/${live}/handled`, {})).statusCode).toBe(200);
+    // already closed
+    expect((await postBody(`/api/attention/${live}/handled`, {})).statusCode).toBe(404);
+  });
+
+  it("GET /api/notifications lists open threads and the ones handled today", async () => {
+    seedThread();
+    seedThread({ id: "102", number: 13, title: "Other", updatedAt: NOW - 30_000 });
+    store.markNotificationHandled("102", NOW - 30_000, "marked", NOW);
+    const v = (await get("/api/notifications")).json() as NotificationsView;
+    expect(v.open.map((n) => n.id)).toEqual(["101"]);
+    expect(v.open[0]).toMatchObject({
+      repoId: "shop-app",
+      number: 12,
+      author: "alice",
+      reason: "mention",
+    });
+    expect(v.handledToday.map((n) => [n.id, n.how])).toEqual([["102", "marked handled"]]);
   });
 
   it("POST /api/attention/:key/dismiss dismisses an open parked note, emits attention, and the next GET leaves it out", async () => {
@@ -3173,8 +3259,36 @@ describe("crew routes", () => {
         model: "opus",
         state: null,
         live: false,
+        turns: null,
       });
       expect(body.decisions.map((x) => x.about)).toEqual(["second", "first"]);
+    });
+
+    it("counts the wakes of FLIGHT's current run as its turn", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "rf", agentId: "flight-1", startedAt: NOW - 3600e3 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "rf",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const claim = (key: string, runId: string) =>
+        store.claimLine(key, { runId, seatId: "flight-1", origin: "engine", text: "w", at: NOW });
+      for (const k of [1, 2, 3]) claim(`flight:wake:rf:${k}`, "rf");
+      claim("flight:wake:other:1", "other");
+      claim("flight:note:rf:1", "rf");
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.seat?.turns).toEqual({ n: 4, max: 41 });
     });
   });
 

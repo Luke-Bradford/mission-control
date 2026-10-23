@@ -11,6 +11,7 @@ import {
   FLIGHT_BRIEF_TITLES,
   FLIGHT_HOUR_MS,
   FLIGHT_ITEMS_LISTED,
+  FLIGHT_MAX_WAKES,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_RECENT_LISTED,
   FLIGHT_STARTABLE,
@@ -34,6 +35,7 @@ import {
   type Run,
   seatCallSign,
   seatDef,
+  wakeKeyPrefix,
 } from "@mc/core";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -104,8 +106,15 @@ export function flightLive(config: CcConfig, store: Store): boolean {
   return store.run(row.runId)?.endedAt === null;
 }
 
+/** The wakes a FLIGHT run has had: its claimed wake keys. */
+export function flightWakes(store: Store, runId: string): number {
+  const prefix = wakeKeyPrefix(runId);
+  return Object.keys(store.claimedKeys(runId)).filter((k) => k.startsWith(prefix)).length;
+}
+
 export function flightView(config: CcConfig, store: Store, now: number): FlightView {
   const found = flightSeat(config);
+  const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
   return {
     seat:
       found === null
@@ -116,6 +125,10 @@ export function flightView(config: CcConfig, store: Store, now: number): FlightV
             model: found.seat.model,
             state: store.seatSession(found.seat.id)?.state ?? null,
             live: flightLive(config, store),
+            turns:
+              runId === null
+                ? null
+                : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
           },
     decisions: store.flightDecisions(now - FLIGHT_VIEW_MS, FLIGHT_VIEW_LIMIT),
   };

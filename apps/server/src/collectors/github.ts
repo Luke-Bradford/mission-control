@@ -50,7 +50,7 @@ export const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 export const DEFAULT_NEEDS_YOU_LABELS = ["needs-design"];
 /** Done items stay on the board this long after their last update. */
 export const DONE_VISIBLE_MS = BOARD_KEEP_DONE_MS;
-const HTTP_TIMEOUT_MS = 20_000;
+export const HTTP_TIMEOUT_MS = 20_000;
 const MAX_BOARD_PAGES = 50;
 
 export type Gql = (query: string, vars: Record<string, unknown>) => Promise<unknown>;
