@@ -4,6 +4,7 @@ import {
   type CrewRow,
   HUD_STATE_LABEL,
   HUD_STATE_TONE,
+  type HudColumn,
   type PullRequestView,
   prPill,
   STATUS_OUT_OF_DATE,
@@ -14,23 +15,36 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, followLink, navigate, ticketPath } from "../router.ts";
-import { cardColumn, firstBlocker, ticketRef } from "./cards.ts";
+import {
+  type CardSeat,
+  cardColumn,
+  checksText,
+  firstBlocker,
+  NO_PR_YET,
+  NO_REVIEWER,
+  NOT_QUEUED,
+  ticketRef,
+} from "./cards.ts";
 
 /** Tests count card renders through this (#26 A1); null outside tests. */
 export const cardRenderProbe: { onRender: ((ref: string) => void) | null } = { onRender: null };
 
 const MAX_LABELS = 3;
 const MILESTONE_SPLIT = " — ";
+/** Columns where a card should have a PR already. */
+const PR_EXPECTED: readonly HudColumn[] = ["In progress", "In review", "Ready for QA"];
 
 /** The card's PR; the card's own header names the repo, so the PR does not. */
 function PrLine({ pr }: { pr: PullRequestView }) {
   const showState = pr.state !== "open" || pr.isDraft || pr.review !== null;
   const ci = pr.ci === null ? null : CI_PILL[pr.ci];
   const state = prPill(pr);
+  const checks = checksText(pr.checks);
   return (
     <>
       <RepoRef repoId={pr.repoId} number={pr.number} kind="pr" bare url={pr.url} />
       {ci && <Pill tone={ci.tone}>{ci.label}</Pill>}
+      {checks && <span className="xs muted">{checks}</span>}
       {showState && <Pill tone={state.tone}>{state.label}</Pill>}
     </>
   );
@@ -42,6 +56,12 @@ export interface CardProps {
   showRepo: boolean;
   /** The agent whose run is on this ticket. */
   agent: CrewRow | null;
+  /** The agent's template, step and try (`cardStep`); null without an agent. */
+  step: string | null;
+  /** The seat a Ready card is queued for and its place; null when not queued. */
+  queued: (CardSeat & { pos: number }) | null;
+  /** The seat reviewing the card's PR; null when none is. */
+  reviewer: CardSeat | null;
   /** The PR the card shows. */
   pr: PullRequestView | null;
   /** Something on this card waits on you. */
@@ -74,6 +94,9 @@ export const Card = memo(function Card({
   item,
   showRepo,
   agent,
+  step,
+  queued,
+  reviewer,
   pr,
   mine,
   outcome,
@@ -98,15 +121,45 @@ export const Card = memo(function Card({
       <span key="agent" className="row">
         <AgentTag id={agent.id} index={agent.index} sm />
         <Pill tone={HUD_STATE_TONE[agent.hudState]}>{HUD_STATE_LABEL[agent.hudState]}</Pill>
-        {agent.run && <span className="xs">run #{agent.run.seq}</span>}
+        {step && <span className="xs">{step}</span>}
       </span>
     ),
-    !agent && col === "Ready" && (
-      <span key="un" className="xs muted">
-        Unassigned
-      </span>
-    ),
-    col !== "Done" && pr && <PrLine key="pr" pr={pr} />,
+    !agent &&
+      col === "Ready" &&
+      (queued ? (
+        <span key="queue" className="row">
+          <span className="xs">Next for</span>
+          <AgentTag id={queued.id} index={queued.index} sm />
+          <span className="xs muted">{`· #${queued.pos} in its queue`}</span>
+        </span>
+      ) : (
+        <span key="un" className="xs muted">
+          {NOT_QUEUED}
+        </span>
+      )),
+    col !== "Done" &&
+      (reviewer ? (
+        <span key="rev" className="row">
+          <span className="xs">Reviewing:</span>
+          <AgentTag id={reviewer.id} index={reviewer.index} sm />
+        </span>
+      ) : (
+        col === "In review" && (
+          <span key="rev" className="xs muted">
+            {NO_REVIEWER}
+          </span>
+        )
+      )),
+    col !== "Done" &&
+      (pr ? (
+        <PrLine key="pr" pr={pr} />
+      ) : (
+        PR_EXPECTED.includes(col) && (
+          <span key="nopr" className="xs muted">
+            {NO_PR_YET}
+          </span>
+        )
+      )),
     col === "Done" && (
       <span key="done" className="row">
         <Pill tone={outcome === "Merged" ? "ok" : "plain"}>{outcome}</Pill>

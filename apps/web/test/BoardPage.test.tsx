@@ -1,7 +1,14 @@
-import type { BoardItem, PullRequestView, RepoProfile } from "@mc/core";
+import type { BoardItem, PrCheck, PullRequestView, RepoProfile } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cardRenderProbe } from "../src/board/Card.tsx";
+import {
+  NO_PR_YET,
+  NO_REVIEWER,
+  NOT_QUEUED,
+  type QueueRow,
+  ticketRef,
+} from "../src/board/cards.ts";
 import { Kanban } from "../src/board/Kanban.tsx";
 import { hub } from "../src/data.ts";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
@@ -413,13 +420,69 @@ describe("cards", () => {
     );
   });
 
-  it("a Ready card with no agent says Unassigned", async () => {
+  it("a Ready card with no agent says it is not queued", async () => {
     stub({ shopApp: [todo(1)] });
     const { container } = await open();
     await screen.findByText("Ticket 1");
-    expect(
-      within(card(container, "shop-app#1") as HTMLElement).getByText("Unassigned"),
-    ).toBeTruthy();
+    expect(within(card(container, "shop-app#1") as HTMLElement).getByText(NOT_QUEUED)).toBeTruthy();
+  });
+
+  it("a queued Ready card says which seat takes it and its place", async () => {
+    const guido: QueueRow = {
+      ...crewRow({ id: "GUIDO-1", index: 2, kind: "crew", run: null, ticket: null }),
+      queue: [{ ref: ticketRef(todo(1)), issue: 1, pos: 2 }],
+    };
+    stub({ shopApp: [todo(1)], crew: [guido] });
+    const { container } = await open();
+    await screen.findByText("Ticket 1");
+    const c = card(container, "shop-app#1") as HTMLElement;
+    expect(within(c).getByText("Next for")).toBeTruthy();
+    expect(within(c).getByText("GUIDO-1")).toBeTruthy();
+    expect(within(c).getByText(`· #${2} in its queue`)).toBeTruthy();
+  });
+
+  it("a card in review names its reviewer", async () => {
+    const check = (name: string): PrCheck => ({
+      name,
+      kind: "check",
+      state: name === "mc/review" ? "pending" : "passing",
+      conclusion: "",
+      attempt: null,
+      url: null,
+    });
+    const retro = crewRow({
+      id: "RETRO-1",
+      index: 3,
+      kind: "crew",
+      run: null,
+      ticket: null,
+      reviewing: { prNumber: 40, sha: "c".repeat(40), ref: null },
+    });
+    stub({
+      shopApp: [todo(3349, { status: "In review", state: "review" })],
+      prs: [pr({ ci: "passing", checks: [check("check"), check("mc/review")] })],
+      crew: [retro],
+    });
+    const { container } = await open();
+    await screen.findByText("Ticket 3349");
+    const c = card(container, "shop-app#3349") as HTMLElement;
+    expect(within(c).getByText("Reviewing:")).toBeTruthy();
+    expect(within(c).getByText("RETRO-1")).toBeTruthy();
+    expect(within(c).getByText("check passing")).toBeTruthy();
+    expect(within(c).queryByText(NO_REVIEWER)).toBeNull();
+  });
+
+  it("a card with none of these says so in words", async () => {
+    stub({ shopApp: [todo(1), todo(2, { status: "In review", state: "review" })] });
+    const { container } = await open();
+    await screen.findByText("Ticket 1");
+    const one = card(container, "shop-app#1") as HTMLElement;
+    const two = card(container, "shop-app#2") as HTMLElement;
+    expect(within(one).getByText("Unassigned · not queued")).toBeTruthy();
+    expect(within(two).getByText("No reviewer on it now")).toBeTruthy();
+    expect(within(two).getByText(NO_PR_YET)).toBeTruthy();
+    expect(one.textContent).not.toContain("—");
+    expect(two.textContent).not.toContain("—");
   });
 
   it("PR line: CI pill from CI_PILL, no review pill on a plain open PR", async () => {
@@ -667,11 +730,28 @@ describe("agent overlay and click", () => {
     const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
     expect(within(c).getByText("shop-app-ta")).toBeTruthy();
     expect(within(c).getByText("Running").className).toBe("pill ok");
-    expect(within(c).getByText("run #12")).toBeTruthy();
+    expect(within(c).getByText(`run #${crewRow().run?.seq} · no template step`)).toBeTruthy();
     expect(c.className).toContain("pulse-ok");
     expect(c.title).toBe("Being worked on or looked at now");
     fireEvent.click(c);
     expect(window.location.pathname).toBe("/agent/shop-app-ta");
+  });
+
+  it("a worked card shows its template, step and try", async () => {
+    const loop = {
+      phase: "working",
+      text: "Working",
+      prNumber: null,
+      parked: null,
+      profile: "feature",
+      step: "implement",
+      tries: { n: 1, max: 3 },
+    } as const;
+    stub({ shopApp: working(), crew: [crewRow({ loop })] });
+    await open();
+    const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+    expect(within(c).getByText("feature › implement · try 1 of 3")).toBeTruthy();
+    expect(within(c).queryByText(`run #${crewRow().run?.seq}`)).toBeNull();
   });
 
   it("a finished run never marks a card", async () => {

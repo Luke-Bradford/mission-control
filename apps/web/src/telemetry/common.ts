@@ -3,6 +3,10 @@ import type { AccountId, AgentId, TelemetryRange } from "@mc/core";
 
 export const DASH = "—";
 
+/** A tile whose figure Mission Control does not store. */
+export const NOT_TRACKED = "not tracked yet";
+export const NOT_TRACKED_TITLE = "Mission Control does not store this figure yet.";
+
 export interface AgentInfo {
   id: AgentId;
   /** Config order: the agent's colour. */
