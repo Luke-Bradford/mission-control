@@ -1,6 +1,7 @@
 import type { Owner, Stage } from "./board.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { RunProfile } from "./profiles.ts";
+import type { ReviewStatus } from "./review.ts";
 import type { CrewMode, CrewRole, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
@@ -134,6 +135,43 @@ export interface RunLoop {
    * (not `rerun`, the hub's own re-run of a first failure).
    */
   rulingRerun?: CiRerun | null;
+}
+
+/** One `loop_events` row. */
+export interface LoopEvent {
+  key: string;
+  runId: string;
+  text: string;
+  at: number;
+}
+
+/** One try at a step of a looped run, oldest first. */
+export interface LoopTry {
+  step: Exclude<LoopPhase, "parked">;
+  /** Rework after a review's blocking findings; shown as "fix" on the review step. */
+  fix: boolean;
+  /** 1-based among this step's tries of the same kind (fix or not). */
+  n: number;
+  startedAt: number;
+  /** null while the try is open. */
+  endedAt: number | null;
+  outcome: "running" | "waiting" | "pass" | "fail" | "parked" | "stopped";
+  /** Why it failed, parked or stopped; else null. */
+  reason: string | null;
+}
+
+/** `GET /api/runs/:id/loop`. */
+export interface RunLoopView {
+  runId: string;
+  loop: RunLoop | null;
+  events: LoopEvent[];
+  tries: LoopTry[];
+  /** 1 + the fix lines sent in the loop's epoch, at most REVIEW_ROUNDS. null without a loop. */
+  round: number | null;
+  /** crew.runTokenBudget + loop.budgetExtra. null without a loop or a crew section. */
+  budget: number | null;
+  /** reviewStatusOf for the pushed sha in the loop's epoch, else null. */
+  review: ReviewStatus | null;
 }
 
 /** A run's PR joined to the stored PR row; title/state/ticket null when the row is unknown. */
