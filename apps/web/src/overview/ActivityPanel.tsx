@@ -4,6 +4,8 @@ import {
   type ConfigView,
   type Crew,
   HUD_STATE_LABEL,
+  SEAT_TURN_END_TEXT,
+  SEAT_TURN_START_TEXT,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { useTz } from "../clock.ts";
@@ -163,7 +165,14 @@ export function ActivityPanel() {
 
   const source = frozen ?? events.data ?? [];
   const rows = source
-    .filter((e) => (filter === "all" ? true : filter === "comms" ? isComms(e) : !isComms(e)))
+    .filter((e) => {
+      if (filter === "all") return true;
+      if (filter === "comms") return isComms(e);
+      return (
+        !isComms(e) &&
+        !(e.kind === "state" && (e.text === SEAT_TURN_START_TEXT || e.text === SEAT_TURN_END_TEXT))
+      );
+    })
     .filter((e) => {
       if (isComms(e)) {
         const ends = [e.who, e.to].flatMap((id) => agents.get(id) ?? []);

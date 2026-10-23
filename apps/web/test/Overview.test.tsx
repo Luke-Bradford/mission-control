@@ -14,6 +14,8 @@ import {
   LOCK_NOBODY_WAITING,
   type MachineSample,
   type PullRequestView,
+  SEAT_TURN_END_TEXT,
+  SEAT_TURN_START_TEXT,
   type TestLockState,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -1723,6 +1725,48 @@ describe("Activity panel", () => {
     expect(arows[2]?.querySelector(".g")?.className).not.toContain("crit-t");
     expect(arows[2]?.textContent).toContain("shop-app #3349");
     expect(act_.textContent).toContain("high-level steps from every agent");
+  });
+
+  it("Steps hides turn state rows but keeps stalled and commit rows; Everything shows all four", async () => {
+    const base = { ref: null, url: null, status: null, prs: [], summary: null, who: "shop-app-ta" };
+    const stalled = "Running → Stalled: no output for 10 min";
+    const commit = "Committed abc1234: Cache quotes";
+    const activity: ActivityEvent[] = [
+      { ...base, at: NOW, kind: "state", text: SEAT_TURN_END_TEXT },
+      { ...base, at: NOW - MIN, kind: "state", text: SEAT_TURN_START_TEXT },
+      { ...base, at: NOW - 2 * MIN, kind: "state", text: stalled },
+      { ...base, at: NOW - 3 * MIN, kind: "push", text: commit },
+    ];
+    stub({ rows, activity });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText(stalled);
+    expect(within(act_).getByText(commit)).toBeTruthy();
+    expect(within(act_).queryByText(SEAT_TURN_START_TEXT)).toBeNull();
+    expect(within(act_).queryByText(SEAT_TURN_END_TEXT)).toBeNull();
+    expect(act_.querySelectorAll(".arow")).toHaveLength(2);
+
+    fireEvent.click(within(act_).getByRole("button", { name: "Everything" }));
+    for (const { text } of activity) expect(within(act_).getByText(text)).toBeTruthy();
+    expect(act_.querySelectorAll(".arow")).toHaveLength(4);
+  });
+
+  // A regression guard: these pass without the turn-line filter too, and fail only if it widens.
+  it("Steps keeps parked, error and woken state rows", async () => {
+    const texts = ["Running → Parked", "Running → Error: exit 1", "Error → Idle (run #3 woken)"];
+    const activity: ActivityEvent[] = texts.map((text, i) => ({
+      ...(events[0] as ActivityEvent),
+      at: NOW - i * MIN,
+      kind: "state",
+      status: null,
+      text,
+    }));
+    stub({ rows, activity });
+    const { container } = render(<Overview />);
+    const act_ = container.querySelector("#actP") as HTMLElement;
+    await within(act_).findByText(texts[0] as string);
+    for (const text of texts) expect(within(act_).getByText(text)).toBeTruthy();
+    expect(act_.querySelectorAll(".arow")).toHaveLength(3);
   });
 
   it("a run-end row ends with its summary and shows its PR chips after the ref", async () => {

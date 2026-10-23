@@ -152,6 +152,8 @@ describe("the route table", () => {
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
     expect(routes).toContain("POST /api/seats/:id/start");
+    expect(routes).toContain("GET /api/comms/:id");
+    expect(routes).toContain("POST /api/comms/:id/read");
     expect(orphans(routes, webReads(), readerComments())).toEqual([]);
   });
 
