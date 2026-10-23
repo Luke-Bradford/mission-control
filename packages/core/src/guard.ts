@@ -1339,8 +1339,12 @@ function diffGitNewPath(rest: string): string {
     const open = rest.lastIndexOf(' "', rest.length - 2);
     return stripPrefix(unquotePath(open < 0 ? rest : rest.slice(open + 1)));
   }
-  const at = rest.lastIndexOf(" b/");
-  return stripPrefix(unquotePath(at < 0 ? rest : rest.slice(at + 1)));
+  // With --no-renames both halves are one path, which may itself hold " b/".
+  const half = (rest.length - 1) / 2;
+  if (rest.startsWith("a/") && rest.slice(half, half + 3) === " b/") {
+    if (rest.slice(2, half) === rest.slice(half + 3)) return rest.slice(half + 3);
+  }
+  return rest;
 }
 
 /**

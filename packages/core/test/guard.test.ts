@@ -298,6 +298,16 @@ describe("scanSecrets", () => {
     const found = [{ where: "a.ts", line: 2, kind: "GitHub token" }];
     expect(scanSecrets(log(`${sha}\nmsg\n\n${body}`), [])).toEqual(found);
     expect(scanSecrets(log(`staged\n${body}`), [])).toEqual(found);
+    for (const fake of [`x\0commit staged${TOKEN}`, `x\0commit ${sha}${TOKEN}`]) {
+      expect(scanSecrets(log(`${sha}\nmsg\n\n${diff("a.ts", [fake])}`), [])).toEqual(found);
+    }
+  });
+  it("finds a token in a header-only file whose name holds ' b/'", () => {
+    const name = `${TOKEN} b/x.empty`;
+    const empty = `diff --git a/${name} b/${name}\nnew file mode 100644\nindex 0000000..e69de29\n`;
+    expect(scanSecrets(log(`${sha}\nmsg\n\n${empty}`), [])).toEqual([
+      { where: "(name withheld)", line: 0, kind: "GitHub token" },
+    ]);
   });
   it("finds a token used as an added file's name", () => {
     const out = scanSecrets(log(`${sha}\nmsg\n\n${diff(`d/${TOKEN}`, ["hi"])}`), []);
