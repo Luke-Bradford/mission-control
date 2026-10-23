@@ -6,13 +6,14 @@ import {
   COMMS_CAPCOM,
   COMMS_MC,
   type CommsEvent,
+  type CommsThreadMessage,
   GUARD_NONE_TEXT,
   type GuardHitsView,
   guardSummary,
 } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hub, RESOURCES } from "../src/data.ts";
+import { hub } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Dock } from "../src/shell/Dock.tsx";
@@ -691,18 +692,73 @@ describe("Threads and conversation", () => {
     summary: null,
     ...over,
   });
-  const stubMessages = (activity?: ActivityRow[], extra: Record<string, unknown> = {}) =>
-    stubFetch({
-      "/api/attention": [],
+  const stubMessages = (activity: ActivityRow[] = [], extra: Record<string, unknown> = {}) => {
+    const read = new Set<string>();
+    const messages = (id: string): CommsThreadMessage[] =>
+      activity
+        .map((m, index) => ({ m, index }))
+        .filter(
+          (entry): entry is { m: CommsEvent; index: number } =>
+            entry.m.kind === "comms" && (entry.m.who === id || entry.m.to === id),
+        )
+        .sort((a, b) => a.m.at - b.m.at)
+        .map(({ m, index }) => ({
+          id: String(index),
+          at: m.at,
+          from: m.who,
+          to: m.to,
+          ticket: null,
+          text: m.text,
+          tagged: m.who === id && m.text.includes(TAG),
+          direct: m.who === id && m.to === COMMS_CAPCOM,
+          seen: read.has(`${id}:${index}`),
+        }));
+    return stubFetch({
+      "/api/attention": () => ({
+        status: 200,
+        body: ["guido-1", "retro-1"].flatMap((id) => {
+          const unread = messages(id).filter((m) => !m.seen);
+          return (["tag", "message"] as const).flatMap((kind) => {
+            const matching = unread.filter((m) => (kind === "tag" ? m.tagged : m.direct));
+            const last = matching.at(-1);
+            return last
+              ? [
+                  item({
+                    key: `${kind}:${id}:${last.id}`,
+                    kind,
+                    agentId: id,
+                    escalationId: null,
+                    text: kind === "tag" ? last.text : `${matching.length} new on your direct line`,
+                    at: last.at ?? 0,
+                  }),
+                ]
+              : [];
+          });
+        }),
+      }),
       "/api/crew": {
         rows: [seatRow(), seatRow({ id: "retro-1", index: 1 })],
         firstRunToday: null,
       },
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
-      ...(activity ? { "/api/activity": activity } : {}),
+      "/api/activity": activity,
+      ...Object.fromEntries(
+        ["guido-1", "retro-1"].flatMap((id) => [
+          [`/api/comms/${id}`, () => ({ status: 200, body: { messages: messages(id) } })],
+          [
+            `POST /api/comms/${id}/read`,
+            (init: RequestInit | undefined) => {
+              const { messageIds } = JSON.parse(String(init?.body)) as { messageIds: string[] };
+              for (const messageId of messageIds) read.add(`${id}:${messageId}`);
+              return { status: 200, body: { ok: true } };
+            },
+          ],
+        ]),
+      ),
       ...extra,
     });
+  };
   const MESSAGES = [
     comms({ at: NOW - MIN, who: "guido-1", to: "retro-1", text: `Draft PR is up ${TAG}` }),
     comms({ at: NOW - 2 * MIN, who: "MC", to: "guido-1", text: "CI failed on lint" }),
@@ -742,7 +798,10 @@ describe("Threads and conversation", () => {
     render(<Comms item={null} />);
     expect(needs().querySelector(".nrow")).toBeNull();
     messages.push(comms({ text: "A fresh reply", at: NOW + MIN }));
-    act(() => hub.refetch(RESOURCES.activity.path));
+    act(() => {
+      hub.refetchTopic("agents");
+      hub.refetchTopic("attention");
+    });
     await within(needs()).findByText("1 new on your direct line");
   });
 
@@ -755,7 +814,10 @@ describe("Threads and conversation", () => {
     const list = document.querySelector("#chanList") as HTMLElement;
     fireEvent.click(within(list).getByRole("button", { name: /retro-1/ }));
     messages.push(comms({ text: "Same-time reply" }));
-    act(() => hub.refetch(RESOURCES.activity.path));
+    act(() => {
+      hub.refetchTopic("agents");
+      hub.refetchTopic("attention");
+    });
     await within(needs()).findByText("1 new on your direct line");
     fireEvent.click(within(needs()).getByRole("button", { name: "Read" }));
     await screen.findByText("nothing waiting");
@@ -780,9 +842,15 @@ describe("Threads and conversation", () => {
     stubMessages(messages);
     render(<Comms item={null} />);
     fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));
+    await within(document.querySelector("#chatP") as HTMLElement).findByText("First reply");
+    await screen.findByText("nothing waiting");
     messages.push(comms({ text: "Live reply", at: NOW }));
-    act(() => hub.refetch(RESOURCES.activity.path));
+    act(() => {
+      hub.refetchTopic("agents");
+      hub.refetchTopic("attention");
+    });
     await within(document.querySelector("#convo") as HTMLElement).findByText("Live reply");
+    await screen.findByText("nothing waiting");
     const list = document.querySelector("#chanList") as HTMLElement;
     fireEvent.click(within(list).getByRole("button", { name: /retro-1/ }));
     expect(needs().querySelector(".nrow")).toBeNull();
@@ -791,15 +859,25 @@ describe("Threads and conversation", () => {
   it.each(["tag", "message"] as const)(
     "Read on a server %s item selects and clears its thread",
     async (kind) => {
-      stubMessages([], {
-        "/api/attention": [
-          item({
-            kind,
-            agentId: "guido-1",
-            escalationId: null,
-            text: "Read this thread",
-          }),
-        ],
+      let read = false;
+      stubMessages([comms({ text: "Read this thread" })], {
+        "/api/attention": () => ({
+          status: 200,
+          body: read
+            ? []
+            : [
+                item({
+                  kind,
+                  agentId: "guido-1",
+                  escalationId: null,
+                  text: "Read this thread",
+                }),
+              ],
+        }),
+        "POST /api/comms/guido-1/read": () => {
+          read = true;
+          return { status: 200, body: { ok: true } };
+        },
       });
       render(<Comms item={null} />);
       fireEvent.click(await within(needs()).findByRole("button", { name: "Read" }));

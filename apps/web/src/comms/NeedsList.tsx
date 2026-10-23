@@ -134,8 +134,8 @@ export function NeedsList({
   const list = sortNeeds((items ?? []).filter(isOperatorItem));
   const handled = sortNeeds((items ?? []).filter((i) => !isOperatorItem(i)));
   const unacked = list.filter((i) => !i.acked);
-  // Channel attention clears on Read, like FLIGHT's unread replies.
-  const ackable = unacked.filter((i) => !isChannelItem(i)).map((i) => i.key);
+  // Acknowledging a channel item does not mark its messages read.
+  const ackable = unacked.map((i) => i.key);
 
   const ack = async (keys: string[]) => {
     setBusy(true);
@@ -243,7 +243,7 @@ export function NeedsList({
               </div>
               <div className="acts">
                 {isChannelItem(i) && agentId !== null && (
-                  <button type="button" className="sm" onClick={() => onRead(agentId)}>
+                  <button type="button" className="sm primary" onClick={() => onRead(agentId)}>
                     Read
                   </button>
                 )}
@@ -313,7 +313,7 @@ export function NeedsList({
                     </button>
                   )
                 )}
-                {!i.acked && !isChannelItem(i) && (
+                {!i.acked && (
                   <button
                     type="button"
                     className="sm ghost"

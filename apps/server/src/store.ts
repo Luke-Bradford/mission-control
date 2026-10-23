@@ -156,6 +156,12 @@ CREATE TABLE IF NOT EXISTS comms (
   to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
+CREATE INDEX IF NOT EXISTS comms_from_id ON comms(from_id, id);
+CREATE INDEX IF NOT EXISTS comms_to_id ON comms(to_id, id);
+CREATE TABLE IF NOT EXISTS comms_reads (
+  thread_id TEXT NOT NULL, source_id TEXT NOT NULL, offset INTEGER NOT NULL, block INTEGER NOT NULL,
+  PRIMARY KEY (thread_id, source_id)
+);
 -- The Activity page's hub rows (an automatic update); the primary key keeps a line landing once.
 CREATE TABLE IF NOT EXISTS hub_events (
   at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (at, text)
@@ -492,6 +498,21 @@ export interface CommsRow {
   to: string;
   ticket: string | null;
   text: string;
+}
+
+export const THREAD_COMMS_LIMIT = 500;
+
+/** The source and position of a stable Comms/transcript message ID. */
+export function commsPosition(
+  id: string,
+): { source: string; offset: number; block: number } | null {
+  const match = /^(comms):(\d+)$|^(stream:.+):(\d+):(\d+)$/.exec(id);
+  if (!match) return null;
+  const offset = Number(match[2] ?? match[4]);
+  const block = Number(match[5] ?? 0);
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(block)) return null;
+  const source = match[1] ?? match[3];
+  return source === undefined ? null : { source, offset, block };
 }
 
 export type SeatLineOrigin = "operator" | "engine";
@@ -2193,6 +2214,63 @@ export class Store {
       ticket: r.ticket as string | null,
       text: r.text as string,
     }));
+  }
+
+  /** Stable stored message IDs for one thread, in insertion order. */
+  threadComms(id: string): (CommsRow & { id: string })[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM comms WHERE id IN (
+          SELECT id FROM (SELECT id FROM comms WHERE from_id = ? ORDER BY id DESC LIMIT ?)
+          UNION
+          SELECT id FROM (SELECT id FROM comms WHERE to_id = ? ORDER BY id DESC LIMIT ?)
+        ) ORDER BY id DESC LIMIT ?`)
+      .all(id, THREAD_COMMS_LIMIT, id, THREAD_COMMS_LIMIT, THREAD_COMMS_LIMIT) as Row[];
+    return rows.reverse().map((r) => ({
+      id: `comms:${r.id}`,
+      at: r.at as number,
+      from: r.from_id as string,
+      to: r.to_id as string,
+      ticket: r.ticket as string | null,
+      text: r.text as string,
+    }));
+  }
+
+  threadReadCursors(id: string): Map<string, { offset: number; block: number }> {
+    const rows = this.db.prepare("SELECT * FROM comms_reads WHERE thread_id = ?").all(id) as Row[];
+    return new Map(
+      rows.map((r) => [
+        r.source_id as string,
+        { offset: r.offset as number, block: r.block as number },
+      ]),
+    );
+  }
+
+  /** Validates ownership without re-reading a transcript window that may have moved on. */
+  threadOwnsMessage(id: string, messageId: string): boolean {
+    const position = commsPosition(messageId);
+    if (!position) return false;
+    if (position.source === "comms") {
+      return (
+        this.db
+          .prepare("SELECT 1 FROM comms WHERE id = ? AND (from_id = ? OR to_id = ?)")
+          .get(position.offset, id, id) !== undefined
+      );
+    }
+    return this.run(position.source.slice("stream:".length))?.agentId === id;
+  }
+
+  /** Advance only through the opened snapshot, atomically; stale reads never move backwards. */
+  markThreadRead(id: string, messageIds: string[]): void {
+    this.transaction(() => {
+      const update =
+        this.db.prepare(`INSERT INTO comms_reads (thread_id, source_id, offset, block) VALUES (?, ?, ?, ?)
+        ON CONFLICT(thread_id, source_id) DO UPDATE SET offset = excluded.offset, block = excluded.block
+        WHERE excluded.offset > comms_reads.offset OR (excluded.offset = comms_reads.offset AND excluded.block > comms_reads.block)`);
+      for (const messageId of messageIds) {
+        const p = commsPosition(messageId);
+        if (p) update.run(id, p.source, p.offset, p.block);
+      }
+    });
   }
 
   /** Records a hub event (a line on the Activity page). */

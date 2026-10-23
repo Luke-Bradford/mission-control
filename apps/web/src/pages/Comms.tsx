@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { Conversation } from "../comms/Conversation.tsx";
 import { NeedsList } from "../comms/NeedsList.tsx";
 import { FLIGHT_THREAD, Threads } from "../comms/Threads.tsx";
-import { useThreadAttention } from "../comms/unread.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
@@ -50,21 +49,20 @@ export function Comms({ item }: { item: string | null }) {
   const rows = crew?.rows ?? [];
   const inView = rows.filter((r) => inSession(session, r.repoId));
   const row = inView.find((r) => r.id === selected) ?? null;
-  const attention = useThreadAttention(items, rows, row?.id);
 
   return (
     <section id="page-comms">
       <div className="cgrid">
         <div className="col">
           <NeedsList
-            items={attention}
+            items={items}
             rows={rows}
             onAskFlight={() => select(FLIGHT_THREAD)}
             onRead={select}
           />
           <Threads
             rows={inView}
-            items={attention ?? []}
+            items={items ?? []}
             selected={row?.id ?? FLIGHT_THREAD}
             onSelect={select}
           />

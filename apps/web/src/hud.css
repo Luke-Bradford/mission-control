@@ -3432,3 +3432,7 @@ details.guard > summary {
   font-size: var(--fs-s);
   color: var(--muted);
 }
+
+button.nrow.thread.tagged {
+  background: var(--warn-soft);
+}
