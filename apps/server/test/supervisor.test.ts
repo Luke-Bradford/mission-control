@@ -2017,6 +2017,7 @@ describe("startWatch", () => {
       "mcp__mc__end_run",
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",
+      "mcp__mc__brief_item",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });

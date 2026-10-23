@@ -1,4 +1,4 @@
-import { type HudColumn, TICKET_SIZES } from "./hud.ts";
+import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
 
@@ -70,6 +70,20 @@ export const notInSessionText = (seat: string): string =>
   `Not done: ${seat} is not a seat in your session.`;
 export const capText = (what: string, n: number): string =>
   `Not done: you ${what} ${n} times in the last hour, the most allowed. Wait, or ask the operator.`;
+/** The briefs FLIGHT may write in an hour, and the shape of one. */
+export const FLIGHT_BRIEFS_PER_HOUR = 20;
+export const BRIEF_OPTIONS_MIN = 2;
+export const BRIEF_OPTIONS_MAX = 4;
+export const BRIEF_LABEL_MAX = 80;
+/** The longest text `brief_item` takes; it is stored cut to MC_TEXT_MAX (a label to BRIEF_LABEL_MAX). */
+export const BRIEF_INPUT_MAX = 8000;
+export const BRIEF_KEY_MAX = 500;
+export const briefNoItemText = (key: string): string =>
+  `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
+export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
+export const BRIEF_ITEM_DESCRIPTION = `Brief one of the operator's Needs-you items (its key from your digest's items): two or three sentences of context (what it is, why it waits, since when), your recommendation, and two to four options when it is a choice. A new brief on a key replaces the old one. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
+export const READ_OTHER_REPO =
+  "Not read: you read only your session's repo, or the issue of an open loop escalation in another configured repo.";
 export const FLIGHT_NOTED = "Noted in Decided without you.";
 
 export const READY_LABEL = "ready";
@@ -340,11 +354,20 @@ export interface FlightState {
     readAt: string;
     stale: boolean;
   }[];
+  /** The operator's Needs-you items that have no brief yet, oldest first. */
+  items: {
+    key: string;
+    kind: AttentionKind;
+    ticket: string | null;
+    text: string;
+    ageMin: number;
+  }[];
   recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
 }
 
 export const FLIGHT_TICKETS_LISTED = 30;
+export const FLIGHT_ITEMS_LISTED = 20;
 export const FLIGHT_RECENT_LISTED = 10;
 /** How long Needs you holds a seat's question back while FLIGHT runs. */
 export const FLIGHT_ANSWER_WAIT_MS = 20 * 60_000;
@@ -377,6 +400,7 @@ export function wakeSummary(s: FlightState): string {
     stopped > 0 ? `${stopped} stopped` : "",
     parked > 0 ? `${parked} parked` : "",
     inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
+    s.items.length > 0 ? `${counted(s.items.length, "item", "items")} to brief` : "",
   ].filter((p) => p !== "");
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }
