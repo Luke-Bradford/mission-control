@@ -1,10 +1,17 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { NEW_LOOP, type Run, type Topic } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import { type CcConfig, ConfigError, type CrewSeatConfig } from "../src/config.ts";
+import {
+  type CcConfig,
+  ConfigError,
+  type CrewSeatConfig,
+  loadConfig,
+  seatInput,
+} from "../src/config.ts";
+import { setSessionSeats } from "../src/config-write.ts";
 import {
   accountNewText,
   areaWaitText,
@@ -18,6 +25,7 @@ import {
   seatMovingText,
   watchWaitText,
 } from "../src/crew-apply.ts";
+import { crew } from "../src/hud.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
@@ -514,6 +522,106 @@ describe("the reloader", () => {
     expect(applied.crew?.sessions[0]?.seats[0]?.model).toBe("opus");
     r.stop();
   });
+
+  it.each([true, false])(
+    "renames a seat immediately, preserving history and queue (busy: %s)",
+    async (running) => {
+      writeFileSync(
+        path,
+        readFileSync(resolve(import.meta.dirname, "../../../config.example.yaml"), "utf8").replace(
+          "\ncrew:\n",
+          `\ncrew:\n  node: ${process.execPath}\n`,
+        ),
+      );
+      applied = loadConfig(path);
+      const before = structuredClone(applied);
+      const run: Run = {
+        id: "guido-1:1",
+        agentId: "guido-1",
+        repoId: "shop-app",
+        seq: 1,
+        startedAt: 1000,
+        endedAt: null,
+        status: "running",
+        sessionId: "session-one",
+        model: "sonnet",
+        branch: "work/one",
+        ticket: "shop-app#1",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: join(dir, "transcript.jsonl"),
+        prs: [],
+        summary: null,
+      };
+      store.upsertRun(run);
+      store.replaceQueue("guido-1", [
+        { repoId: "shop-app", issue: 1 },
+        { repoId: "shop-app", issue: 2 },
+      ]);
+      store.addComms({
+        at: 1000,
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: "shop-app#1",
+        text: "Check the orbit",
+      });
+      if (running) {
+        busy.add("guido-1");
+        store.takeQueued("guido-1", 1000);
+      }
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: run.id,
+        cliSessionId: "session-one",
+        state: "running",
+        reason: null,
+        worktree: join(dir, "worktree"),
+        updatedAt: 1000,
+      });
+      const session = store.seatSession("guido-1");
+      const runs = store.runs("guido-1", 10);
+      const queue = store.queue("guido-1");
+      const messages = store.threadComms("guido-1");
+      const base = applied.crew?.sessions[0]?.seats.map(seatInput) ?? [];
+      await setSessionSeats(
+        path,
+        "mission-control",
+        base,
+        base.map((s) => (s.id === "guido-1" ? { ...s, displayCallSign: "Orbit One" } : s)),
+        2000,
+      );
+      const r = createCrewReloader({
+        configPath: path,
+        config: applied,
+        store,
+        bus,
+        supervisor: supervisor(),
+      });
+      const out = await r.reload();
+      expect(out.pending).toEqual([]);
+      expect(applied.crew?.sessions[0]?.seats[0]).toMatchObject({
+        id: "guido-1",
+        displayCallSign: "Orbit One",
+      });
+      const renamed = structuredClone(before);
+      const renamedSeat = renamed.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1");
+      if (!renamedSeat) throw new Error("missing fixture seat");
+      renamedSeat.displayCallSign = "Orbit One";
+      expect(applied).toEqual(renamed);
+      expect(store.runs("guido-1", 10)).toEqual(runs);
+      expect(store.seatSession("guido-1")).toEqual(session);
+      expect(store.queue("guido-1")).toEqual(queue);
+      expect(store.threadComms("guido-1")).toEqual(messages);
+      expect(
+        crew(applied, store, 2000, undefined, () => null).rows.find((row) => row.id === "guido-1"),
+      ).toMatchObject({ id: "guido-1", displayCallSign: "Orbit One" });
+      busy.clear();
+      await r.reload();
+      expect(store.seatSession("guido-1")).toEqual(session);
+      expect(store.queue("guido-1")).toEqual(queue);
+      expect(store.threadComms("Orbit One")).toEqual([]);
+    },
+  );
 
   it("a retiring seat's untaken queue rows go; a taken row keeps it busy", async () => {
     applied = config([{ id: "s1", seats: [seat("guido-1"), seat("guido-2")] }]);

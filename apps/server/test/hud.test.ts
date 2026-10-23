@@ -1382,9 +1382,8 @@ describe("crew seats in the rows", () => {
         note("ready:c1:abc");
         expect(waitOf(withCrew())).toBe("operator");
       });
-      it("main: a review with an open behind note", () => {
-        start({ phase: "review" });
-        note("behind:c1:abc");
+      it.each(["working", "ci", "review"] as const)("main: a %s run updating main", (phase) => {
+        start({ phase, mainMerge: { mainSha: "abc", files: ["a.ts"] } });
         expect(waitOf(withCrew())).toBe("main");
       });
       /** A run in review at epoch 1, pushed at abc123, with a queued review of it; its id. */

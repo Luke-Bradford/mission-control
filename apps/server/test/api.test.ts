@@ -452,6 +452,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
+  ["GET", "/api/drafts/history"],
   ["POST", "/api/drafts/guido-1/post"],
   ["POST", "/api/drafts/guido-1/discard"],
   ["POST", "/api/attention/person:101:1/replies/review/post"],
@@ -486,6 +487,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/interrupt"],
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
+  ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
   ["GET", "/api/attention/example/discussion"],
@@ -945,7 +947,7 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
-      if (url.startsWith("/api/drafts/")) {
+      if (url.startsWith("/api/drafts/") && method === "POST") {
         // the fixture has no such draft: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -3072,6 +3074,26 @@ describe("set a session's seats (POST /api/crew/sessions/:sessionId/seats)", () 
     await a.close();
   });
 
+  it("saves a display call sign through the guarded seat editor", async () => {
+    const { a, reload } = reloading();
+    const base = seats();
+    const renamed = base.map((s) =>
+      s.id === "guido-1" ? { ...s, displayCallSign: "Orbit One" } : s,
+    );
+    expect((await send(a, { base, seats: renamed })).statusCode).toBe(200);
+    expect(seats()).toEqual(renamed);
+    expect(reload).toHaveBeenCalledTimes(1);
+    const saved = readFileSync(configPath, "utf8");
+    expect((await send(a, { base, seats: base })).statusCode).toBe(409);
+    for (const displayCallSign of ["", "  ", "x".repeat(65), "INCO-1"]) {
+      const invalid = renamed.map((s) => (s.id === "guido-1" ? { ...s, displayCallSign } : s));
+      expect((await send(a, { base: renamed, seats: invalid })).statusCode).toBe(400);
+      expect(readFileSync(configPath, "utf8")).toBe(saved);
+    }
+    expect(reload).toHaveBeenCalledTimes(1);
+    await a.close();
+  });
+
   it("writes, then reloads once", async () => {
     const { a, reload } = reloading();
     const base = seats();
@@ -4308,6 +4330,72 @@ describe("the first loop's engine", () => {
     expect((await message(none.a)).statusCode).toBe(200);
     expect(none.told).toEqual([]);
     await none.a.close();
+  });
+
+  it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const { a, told } = engineApp(null);
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(told).toEqual(["aside"]);
+    expect(r.statusCode).toBe(409);
+    expect(
+      (await a.inject({ method: "POST", url: "/api/runs/nope/resume", headers: json, payload: {} }))
+        .statusCode,
+    ).toBe(404);
+    await a.close();
+  });
+
+  it.each([
+    ["a body", { x: 1 }, true, "aside", 400],
+    ["no engine", {}, false, "aside", 409],
+    ["an unlooped run", {}, true, "plain-run", 404],
+  ] as const)("refuses %s", async (_what, payload, withEngine, id, code) => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    store.upsertRun(run({ id: "plain-run", agentId: "guido-1" }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      ...(withEngine
+        ? {
+            engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+          }
+        : {}),
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: `/api/runs/${id}/resume`,
+      headers: json,
+      payload,
+    });
+    expect(r.statusCode).toBe(code);
+    await a.close();
+  });
+
+  it("answers ok when the engine lifts the park", async () => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/runs/aside/resume",
+      headers: json,
+      payload: {},
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ok: true });
+    await a.close();
   });
 
   it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {

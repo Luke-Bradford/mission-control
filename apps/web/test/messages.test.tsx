@@ -21,7 +21,7 @@ describe("MentionText", () => {
   );
 
   it("does not highlight email addresses or mentions preceded by a word or dot", async () => {
-    stubFetch({ "/api/config": CONFIG });
+    stubFetch({ "/api/config": { ...CONFIG, githubLogin: "octocat" } });
     const text = "hi@CAPCOM.com hi@octocat.com .@CAPCOM _@CAPCOM (@octocat),@CAPCOM";
     const { container } = render(<MentionText text={text} />);
     await waitFor(() =>

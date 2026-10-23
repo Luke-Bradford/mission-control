@@ -2000,7 +2000,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     },
     {
       name: MC_TOOL_NAMES.syncMain,
-      description: `Merge main into a developer run's branch now (behind main, or parked on a conflict). ${FLIGHT_SYNCS_PER_HOUR} an hour.`,
+      description: `Merge main into a developer run's branch now (its PR conflicts with main, or the run is parked on a conflict). ${FLIGHT_SYNCS_PER_HOUR} an hour.`,
       inputSchema: objectSchema({ runId: RUN_ID_SCHEMA, basis: BASIS_SCHEMA }, ["runId", "basis"]),
       modes: [],
       grantable: ["read-only"],
@@ -2129,6 +2129,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           target: { type: "string" },
           kind: { type: "string", enum: ["issue", "pr"] },
           text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
+          to: { type: "string", minLength: 1, maxLength: 200 },
+          via: { type: "string", enum: ["GitHub", "Teams"] },
+          where: { type: "string", minLength: 1, maxLength: 200 },
+          context: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
         },
         ["target", "kind", "text"],
       ),
@@ -2142,16 +2146,25 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             target: z.string().max(200),
             kind: z.enum(["issue", "pr"]),
             text: text(MC_TEXT_MAX),
+            to: text(200).optional(),
+            via: z.enum(["GitHub", "Teams"]).optional(),
+            where: text(200).optional(),
+            context: text(MC_TEXT_MAX).optional(),
           }),
           args,
         );
         if (!c.ok) return c.result;
-        const { target, kind, text: body } = c.args;
+        const { target, kind, text: body, to, via, where, context } = c.args;
         const match = /^([^#]+)#([1-9][0-9]*)$/.exec(target);
         if (!match || Number(match[2]) > MAX_ISSUE || !config.repos.some((r) => r.id === match[1]))
           return fail(DRAFT_BAD_TARGET);
         const at = now();
-        const id = store.addDraft(target, kind, body, at);
+        const id = store.addDraft(target, kind, body, at, {
+          ...(to === undefined ? {} : { to }),
+          ...(via === undefined ? {} : { via }),
+          ...(where === undefined ? {} : { where }),
+          ...(context === undefined ? {} : { context }),
+        });
         const card = store
           .board(match[1] as string)
           .find((c) => c.issueNumber === Number(match[2]));

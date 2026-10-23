@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DEFAULT_SEAT_COMMANDS, type NewRepo, type SeatInput } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, seatInput } from "../src/config.ts";
+import { type ConfigSeatInput, loadConfig, seatInput } from "../src/config.ts";
 import {
   addAccount,
   addRepo,
@@ -450,10 +450,51 @@ describe("setSessionSeats", () => {
     model: "sonnet",
     area: ["apps/docs/**"],
   };
-  const set = (seats: SeatInput[], base = read()) =>
+  const set = (seats: (SeatInput & { displayCallSign?: string | null })[], base = read()) =>
     setSessionSeats(path, SESSION, base, seats, NOW);
-  const change = (id: string, over: Partial<SeatInput>) =>
+  const change = (id: string, over: Partial<ConfigSeatInput>) =>
     set(read().map((s) => (s.id === id ? { ...s, ...over } : s)));
+
+  it("persists and clears a display call sign with a stale rename check", async () => {
+    const base = read();
+    const renamed = base.map((s) =>
+      s.id === "guido-1" ? { ...s, displayCallSign: "Orbit One" } : s,
+    );
+    const { backup } = await set(renamed, base);
+    expect(read()).toEqual(renamed);
+    expect(readFileSync(backup, "utf8")).toBe(COMMENTED);
+    const saved = readFileSync(path, "utf8");
+    expect((await writeError(set(base, base))).kind).toBe("conflict");
+    expect(readFileSync(path, "utf8")).toBe(saved);
+    expect(backups()).toHaveLength(1);
+    await set(base.map((s) => (s.id === "guido-1" ? { ...s, displayCallSign: null } : s)));
+    expect(read()).toEqual(base);
+    expect(readFileSync(path, "utf8")).not.toContain("display_call_sign");
+  });
+
+  it("keeps a renamed seat's display call sign when an edit omits the field", async () => {
+    await change("guido-1", { displayCallSign: "Orbit One" });
+    const base = read();
+    const edited = base.map(({ displayCallSign: _name, ...s }) =>
+      s.id === "guido-1" ? { ...s, model: "sonnet" } : s,
+    );
+    const { config } = await set(edited, base);
+    const expected = base.map((s) => (s.id === "guido-1" ? { ...s, model: "sonnet" } : s));
+    expect(read()).toEqual(expected);
+    expect(config.crew?.sessions[0]?.seats.map(seatInput)).toEqual(expected);
+    expect(readFileSync(path, "utf8")).toContain("display_call_sign: Orbit One");
+  });
+
+  it.each(["", "   ", "x".repeat(65), "Orbit\nOne", "INCO-1", "inco-1"])(
+    "refuses invalid or duplicate display call sign %j without writing",
+    async (displayCallSign) => {
+      const base = read();
+      const renamed = base.map((s) => (s.id === "guido-1" ? { ...s, displayCallSign } : s));
+      expect((await writeError(set(renamed))).kind).toBe("invalid");
+      expect(readFileSync(path, "utf8")).toBe(COMMENTED);
+      expect(backups()).toEqual([]);
+    },
+  );
 
   it("adds a seat", async () => {
     const before = readFileSync(path);

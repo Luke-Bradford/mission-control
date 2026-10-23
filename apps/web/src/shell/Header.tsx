@@ -6,7 +6,6 @@ import {
   LOCK_HEADER_TITLE,
   lockHeaderText,
   type MachineSample,
-  seatCallSign,
 } from "@mc/core";
 import { type ReactNode, useEffect, useMemo, useSyncExternalStore } from "react";
 import { operatorItems } from "../attention.ts";
@@ -19,6 +18,7 @@ import type { FlightView } from "../flight/flightTypes.ts";
 import { hms, MONTHS } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
+import { useSeatName } from "../seatName.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
@@ -152,6 +152,7 @@ const LOCK_STALLED_TITLE = "The run holding the lock is stalled";
 const pct = (n: number | null): string => (n === null ? "—" : `${Math.round(n)}%`);
 
 function MachineButton() {
+  const nameOf = useSeatName();
   const m = useResource<{ latest: MachineSample | null }>(RESOURCES.machine).data?.latest ?? null;
   const lock = useTestLock();
   const crew = useResource<Crew>(RESOURCES.crew).data;
@@ -164,7 +165,7 @@ function MachineButton() {
     lock === undefined
       ? "Lock: —"
       : lockHeaderText(
-          lock.holder === null ? null : seatCallSign(lock.holder.seatId),
+          lock.holder === null ? null : nameOf(lock.holder.seatId),
           lock.waiting.length,
         );
   const ram =
