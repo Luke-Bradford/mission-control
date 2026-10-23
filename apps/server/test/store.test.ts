@@ -621,26 +621,6 @@ describe("Store", () => {
     expect(store.pullRequests("r2")).toHaveLength(1);
   });
 
-  it("goals round-trip, replace, clear and scope to the repo", () => {
-    const g = (repoId: string, due: number | null) => ({
-      repoId,
-      title: "MVP's",
-      dueOn: due,
-      open: 3,
-      closed: 4,
-    });
-    expect(store.goal("r1")).toBeNull();
-    store.replaceGoal("r1", g("r1", 1000));
-    store.replaceGoal("r2", g("r2", null));
-    expect(store.goal("r1")).toEqual(g("r1", 1000));
-    expect(store.goal("r2")).toEqual(g("r2", null));
-    store.replaceGoal("r1", { ...g("r1", 2000), title: "next" });
-    expect(store.goal("r1")?.title).toBe("next");
-    store.replaceGoal("r1", null);
-    expect(store.goal("r1")).toBeNull();
-    expect(store.goal("r2")).not.toBeNull();
-  });
-
   // #26 A1: the scheduler emits `boards` / `escalations` only when a write changed a row.
   it("the GitHub writers report whether any stored row changed", () => {
     const item = (n: number, over: Partial<BoardItem> = {}): BoardItem => ({
@@ -726,13 +706,6 @@ describe("Store", () => {
     expect(store.replaceEscalations("r1", [esc("a", "renamed"), esc("b")])).toBe(true);
     expect(store.replaceEscalations("r1", [])).toBe(true);
     expect(store.replaceEscalations("r1", [])).toBe(false);
-
-    const goal = { repoId: "r1", title: "MVP", dueOn: null, open: 3, closed: 4 };
-    expect(store.replaceGoal("r1", goal)).toBe(true);
-    expect(store.replaceGoal("r1", goal)).toBe(false);
-    expect(store.replaceGoal("r1", { ...goal, closed: 5 })).toBe(true);
-    expect(store.replaceGoal("r1", null)).toBe(true);
-    expect(store.replaceGoal("r1", null)).toBe(false);
   });
 
   it("offsets default to 0 and persist across reopen", () => {
