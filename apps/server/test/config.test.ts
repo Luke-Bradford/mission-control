@@ -265,10 +265,13 @@ describe("crew", () => {
     checkout?: string;
     worktrees?: string;
     repo?: string;
+    sessionId?: string;
     maxSeats?: number;
     node?: string;
     denyRead?: string[];
     budget?: string;
+    lane?: string;
+    laneDefault?: string;
     /** `crew.roles` entries, one `NAME: {…}` per line. */
     roles?: string[];
   }): string {
@@ -283,9 +286,11 @@ crew:
   ${opts.maxSeats === undefined ? "" : `max_seats: ${opts.maxSeats}`}
   ${opts.denyRead === undefined ? "" : `deny_read: ${JSON.stringify(opts.denyRead)}`}
   ${opts.budget === undefined ? "" : `run_token_budget: ${opts.budget}`}
+  ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
+  ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
-    - id: shop-app
+    - id: ${opts.sessionId ?? "shop-app"}
       repo_id: ${opts.repo ?? "shop-app"}
       checkout: ${opts.checkout ?? "~/code/mc-crew/shop-app"}
       seats:
@@ -324,6 +329,23 @@ ${seats.join("\n")}
     for (const bad of ["0", "-5", "1.5", '"lots"']) {
       expect(fails(crewText({ budget: bad })).path).toBe("crew.runTokenBudget");
     }
+  });
+
+  it.each(["../x", "Shop", "a/b", ""])("refuses the session id %j (it is a folder name)", (id) => {
+    expect(fails(crewText({ sessionId: JSON.stringify(id) })).path).toBe("crew.sessions[0].id");
+  });
+
+  it("takes lane home or work only, and defaults lane_default to false", () => {
+    const none = load(crewText({})).crew;
+    expect(none?.lane).toBeUndefined();
+    expect(none?.laneDefault).toBe(false);
+    expect(load(crewText({ lane: "home" })).crew?.lane).toBe("home");
+    expect(load(crewText({ lane: "work", laneDefault: "true" })).crew).toMatchObject({
+      lane: "work",
+      laneDefault: true,
+    });
+    expect(fails(crewText({ lane: "other" })).path).toBe("crew.lane");
+    expect(fails(crewText({ laneDefault: '"yes"' })).path).toBe("crew.laneDefault");
   });
 
   it("rejects overlapping writer areas", () => {
@@ -540,6 +562,17 @@ ${modelless("flight-2", "FLIGHT")}
         }),
       );
       expect(cfg.crew?.roles?.FAO?.tools).toEqual(["report_plan", "read_ticket"]);
+    });
+
+    it("a watch role may hold read_ticket", () => {
+      const cfg = load(
+        crewText({
+          roles: [
+            "WATCHER: { prompt: roles/SCOUT.md, model: opus, mode: read-only, loop: watch, tools: [read_ticket] }",
+          ],
+        }),
+      );
+      expect(cfg.crew?.roles?.WATCHER?.tools).toEqual(["read_ticket"]);
     });
 
     it("a plan role may not hold another FLIGHT tool", () => {

@@ -14,7 +14,16 @@ import { toggleDock, useItem } from "../src/shell/overlays.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, crewRow, item, NOW, prView, seatRow, stoppedSeat } from "./fixtures.ts";
+import {
+  CONFIG,
+  crewRow,
+  item,
+  itemWithoutOwner,
+  NOW,
+  prView,
+  seatRow,
+  stoppedSeat,
+} from "./fixtures.ts";
 
 function Probe() {
   return <span data-testid="item">{useItem() ?? "none"}</span>;
@@ -125,6 +134,36 @@ describe("Needs you", () => {
     const link = within(decision).getByRole("link", { name: "Open on GitHub ↗" });
     expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/issues/4001");
     expect(decision.className).not.toContain("acked");
+  });
+
+  it("counts only the operator's items and lists the rest, labelled, under Being handled", async () => {
+    stub([
+      item({ key: "a", text: "Mine" }),
+      itemWithoutOwner({ key: "b", text: "Old hub" }),
+      item({ key: "c", text: "F item", owner: "flight" }),
+      item({ key: "d", text: "C item", owner: "controller" }),
+      item({ key: "e", text: "L item", owner: "lane:octo" }),
+      item({ key: "f", text: "P item", owner: "loop" }),
+    ]);
+    render(<Comms item={null} />);
+    await screen.findByText("Mine");
+    expect(needs().querySelectorAll(".nrow")).toHaveLength(2);
+    expect(screen.getByText("2 · 2 not acknowledged")).toBeTruthy();
+    const drawer = document.querySelector<HTMLDetailsElement>("#cHandled") as HTMLDetailsElement;
+    expect(drawer.open).toBe(false);
+    expect(within(drawer).getByText("Being handled · 4")).toBeTruthy();
+    const rows = [...drawer.querySelectorAll<HTMLElement>(".nrow")];
+    const labels = rows.map((r) => r.querySelector(".xs")?.textContent).sort();
+    expect(labels).toEqual(["FLIGHT", "controller", "loop", "work lane"]);
+    expect(within(drawer).getByText("F item").closest(".nrow")?.textContent).toContain("FLIGHT");
+    expect(within(drawer).getByText("L item").closest(".nrow")?.textContent).toContain("work lane");
+  });
+
+  it("has no Being handled section when every item is the operator's", async () => {
+    stub();
+    render(<Comms item={null} />);
+    await screen.findByText("Pick a policy");
+    expect(document.querySelector("#cHandled")).toBeNull();
   });
 
   it("a row's text renders its Markdown", async () => {
