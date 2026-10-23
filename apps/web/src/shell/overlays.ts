@@ -260,8 +260,27 @@ export function useDock(): DockState & { toggle: () => void } {
   return { ...s, toggle: () => toggleDock() };
 }
 
+/** FLIGHT's replies the operator has not seen on the dock's Chat tab; the header badges it. */
+const flightUnread = store(0);
+export const setFlightUnread = (n: number): void => flightUnread.set(n);
+export const useFlightUnread = (): number => useStore(flightUnread);
+
+/** The dock's open tab: the conversation, or FLIGHT's decision and activity feed. */
+export type DockTab = "chat" | "feed";
+const dockTab = store<DockTab>("chat");
+export const setDockTab = (tab: DockTab): void => dockTab.set(tab);
+export const useDockTab = (): DockTab => useStore(dockTab);
+
+/** Show the dock on its Chat tab (the Needs-you "FLIGHT replied" row). */
+export function openDockChat(): void {
+  dockTab.set("chat");
+  toggleDock(true);
+}
+
 /** Forget every overlay (the tests' reset: these are module singletons). */
 export function resetOverlays(): void {
+  flightUnread.set(0);
+  dockTab.set("chat");
   stack.length = 0;
   help.set(false);
   away.set(false);

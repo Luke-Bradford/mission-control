@@ -71,6 +71,8 @@ export interface CrewSeatConfig {
   def?: SeatDef;
   accountId: AccountId;
   model: string;
+  /** A review seat's model for small changes (`reviewDepth` light); unset: `model` reviews every change. */
+  lightModel?: string;
   /** Unset: the CLI's default. */
   effort?: CrewEffort;
   /** Set only to run a read-only role as a scratch reviewer. */
@@ -422,6 +424,7 @@ const fileSchema = z
                 role: z.string(),
                 account_id: nonEmpty,
                 model: modelName.optional(),
+                light_model: modelName.optional(),
                 effort: z.enum(CREW_EFFORTS).optional(),
                 mode: z.enum(CONFIG_SEAT_MODES).optional(),
                 area: z.array(areaGlob).optional(),
@@ -499,6 +502,7 @@ const fileSchema = z
                   accountId: seat.account_id,
                   // the role's model when the seat names none; `checkCrew` fills it in
                   model: seat.model ?? "",
+                  ...(seat.light_model === undefined ? {} : { lightModel: seat.light_model }),
                   ...(seat.effort === undefined ? {} : { effort: seat.effort }),
                   ...(seat.mode === undefined ? {} : { mode: seat.mode }),
                   area: seat.area ?? [],
