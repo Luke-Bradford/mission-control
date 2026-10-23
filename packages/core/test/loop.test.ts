@@ -325,14 +325,17 @@ describe("state step", () => {
   it("8: a push or PR that never shows up parks after ten minutes", () => {
     const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
     const msg = "the push or PR for aaaaaaa has not shown up on GitHub after 10 minutes";
-    for (const over of [
-      { pushed: null },
-      { pr: null },
-      { pr: pr({ headSha: SHA2 }) },
-      { pushed: { sha: SHA2, at: NOW } },
-    ] as Partial<LoopSnapshot>[]) {
+    const cases: [Partial<LoopSnapshot>, string][] = [
+      [{ pushed: null }, "no push is recorded for the run"],
+      [{ pr: null }, "no PR of the run has been read from GitHub"],
+      [{ pr: pr({ headSha: SHA2 }) }, `PR #${pr().number} has head bbbbbbb, not aaaaaaa`],
+      [{ pushed: { sha: SHA2, at: NOW } }, "the push is bbbbbbb, not the newest commit aaaaaaa"],
+      [{ headCommit: null }, "no commit is recorded for the run, but aaaaaaa is pushed"],
+      [{ pr: pr({ headSha: null }) }, `PR #${pr().number} has no head, not aaaaaaa`],
+    ];
+    for (const [over, why] of cases) {
       const r = reconcile(inCi(over, late));
-      expect(r.loop.parked).toEqual({ kind: "stuck", reason: msg, ended: false });
+      expect(r.loop.parked).toEqual({ kind: "stuck", reason: `${msg}: ${why}`, ended: false });
     }
   });
 
@@ -1291,7 +1294,7 @@ describe("review round", () => {
       ),
     );
     expect(r.loop.parked?.reason).toBe(
-      "the push or PR has not shown up on GitHub after 10 minutes",
+      "the push or PR has not shown up on GitHub after 10 minutes: no push is recorded for the run",
     );
   });
 
