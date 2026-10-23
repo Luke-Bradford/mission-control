@@ -4176,6 +4176,34 @@ describe("the first loop's engine", () => {
     await a.close();
   });
 
+  it.each([
+    ["a body", { x: 1 }, true, "aside", 400],
+    ["no engine", {}, false, "aside", 409],
+    ["an unlooped run", {}, true, "plain-run", 404],
+  ] as const)("refuses %s", async (_what, payload, withEngine, id, code) => {
+    store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
+    store.upsertRun(run({ id: "plain-run", agentId: "guido-1" }));
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: stubSupervisor(),
+      ...(withEngine
+        ? {
+            engine: { onOperatorMessage: async () => true, status: () => ({ on: true, note: "" }) },
+          }
+        : {}),
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: `/api/runs/${id}/resume`,
+      headers: json,
+      payload,
+    });
+    expect(r.statusCode).toBe(code);
+    await a.close();
+  });
+
   it("answers ok when the engine lifts the park", async () => {
     store.upsertRun(run({ id: "aside", agentId: "guido-1", loop }));
     const a = buildApp({
