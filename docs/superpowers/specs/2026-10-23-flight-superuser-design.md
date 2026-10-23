@@ -2,188 +2,151 @@
 
 **Status:** design, 2026-10-23.
 
-This replaces three things in older documents:
-- in `2026-10-20-build-loop-flight-design.md`, §8.1's list of things FLIGHT never does (merge, comment, start or stop a seat), §8.5's asks, and §12's tool limits;
-- the "no merge tool" and "For the controller" steps in `roles/FLIGHT.md`.
+This changes four earlier texts, as set out below:
+- §8.1 of `2026-10-20-build-loop-flight-design.md` (what FLIGHT never does);
+- §8.2 and §8.5 of the same spec (its tools and its asks);
+- the "no merge tool" and "For the controller" steps in `roles/FLIGHT.md`;
+- the hard-rule merge line in `CLAUDE.md`.
 
-Where this design and older text differ, this design wins.
+§8b.1 of that spec (crew isolation from the operator's environment) still stands. Where this design and older text differ, this design wins.
 
 ## Why
 
 The operator's words:
 - **2026-10-22:** "FLIGHT must be able to do anything needed to keep everything moving, as the controller does."
-- **2026-10-23:** "flight needs to be a super user". Also: "it's the head, the main agent, should be elevated and override anything, help out and do anything. Should have its set of skills, understanding, know what it should or shouldn't do but still know ultimately what their role is. If it needs to merge things, it should make that judgement. If it needs better research, skills, tools, it should get those. It has its own page, to use for recording its notes, knowing what's going on, taking some ownership of progress and steering work in the right direction and assisting where needed. Being able to respond to questions from me or any agent."
+- **2026-10-23:** "flight needs to be a super user"
+- **Also 2026-10-23:** "it's the head, the main agent, should be elevated and override anything, help out and do anything … If it needs to merge things, it should make that judgement. If it needs better research, skills, tools, it should get those. It has its own page, to use for recording its notes … taking some ownership of progress and steering work … Being able to respond to questions from me or any agent."
 
-What happened on 22–23 Oct:
-- **FLIGHT wrote 220 log notes in the 24 hours to 20:00 on the 23rd, and 114 of them begin "For the controller:".**
-  - It saw each problem but had no power to act, so a person-side controller acted instead.
-  - By topic, the notes asked for merges, mostly of hard-rule PRs (98), CI re-runs and rulings (92), review and ruling parks (62), and board fields (15).
-- **It is boxed in by design.**
-  - Its Bash is read-only, with no network and no `gh`.
-  - Every action has to go through a single-purpose mc tool, and each new power costs a ticket.
-- **Its memory is the brief.** That is nine sections of at most 4,000 characters each, rewritten about 150 times that day. Lessons don't accumulate, so the same faults were found again and handed back: the flaky keeper test, the stuck park after a push, PRs chasing main.
-- **Nothing orders merges.**
-  - The ruleset on `main` requires branches to be up to date.
-  - GitHub's merge queue isn't available for a personal account's repo.
-  - The engine updates every PR that falls behind (`branchUpdateDue`), so PRs chase main.
+The evidence from 22–23 Oct:
+- **FLIGHT handed most of its work to the controller.** In the 24 hours to 20:00 on 23 Oct it logged 220 notes, and 114 of them begin "For the controller:". By topic: merges, mostly of hard-rule PRs (98); CI re-runs and rulings (92); review and ruling parks (62); board fields (15).
+- **Its memory doesn't accumulate.** The brief has nine sections, at most 4,000 characters each, and was rewritten about 150 times a day. So known faults keep being found again.
+- **Nothing orders merges.** The `main` ruleset requires branches to be up to date, there is no GitHub merge queue on a personal account, and the engine updates every PR that falls behind. So PRs chase main.
 
 ## The principle
 
-**FLIGHT acts with the operator's authority on the repos it is raised on, and uses its own judgement.**
-- **What it can do.** It can do what the operator can do from the HUD and from a terminal: merge, settle a park or ruling, edit the board, start, stop and restart seats, research on the web, write code and open PRs, and get itself better tools and skills.
-- **How it decides.** It decides with judgement, using the role, the repo's rules and its memory. It is not boxed in by a tool list.
-- **What it reports.** It records what it did and why, owns the progress, and brings the operator only what is truly theirs.
-- **What still binds it.** The hub enforces only a short **floor** of actions that can't be undone or that remove the last safety net (see below). Everything else rests on FLIGHT's judgement and the log. The repo's rules, such as `hard_rules` and `always_ask`, become guidance FLIGHT weighs, not gates that stop it.
+FLIGHT acts with the operator's authority and its own judgement on the repos it is raised on.
+- **Its judgement covers everything its tools reach,** including merges (hard-rule PRs and changes to its own powers too), accepting a ruling or a review, board fields and clearing items.
+- **Its powers are hub tools, not a general shell.** Each tool covers a whole kind of work FLIGHT has needed, is pinned to a repo FLIGHT is raised on, and logs a basis. The hub enforces a short **floor**. FLIGHT's Bash keeps its sandbox: no network, no credentials, no writes. A general instrument, such as raw `gh`, any HUD route, or the operator's skills, can't be fenced reliably, so FLIGHT doesn't get one.
+- **When FLIGHT lacks a power, it names it.** A "For the controller" note now means a missing power. The retrospective counts these notes and files each gap as a ticket for a new tool.
+- **Code is written by the crew.** FLIGHT gets code changed by filing a ticket and starting a writer seat. It doesn't write code itself.
+- **Questions reach FLIGHT through what exists.** The operator uses the dock. Seats use seat questions (`answer_question`). Loops' escalations reach FLIGHT as Needs-you items it briefs.
 
-Elevation is set per repo, in the user config only. No repo's `mc:` block can raise it, and a code change to it (or to the floor) takes effect only when the operator runs Update (see slice 2).
+Elevation is set per repo, in the user config only:
 
 ```yaml
 # ~/.config/mission-control/config.yaml
 repos:
   - id: mission-control
     autonomy: merge
-    flight_powers: superuser   # observe | standard | superuser; default standard
+    flight_powers: superuser   # standard | superuser; default standard
 ```
 
-- **The default is `standard`:** FLIGHT keeps today's tools.
-- **Where it is raised:** `mission-control` is set to `superuser`. The observed loops' repos stay at `standard` until the operator raises them.
-- **When a change applies:** each check reads the current value, so lowering it takes effect at FLIGHT's next call.
+- **Where it can be set.** No repo's `mc:` block can raise it, and `POST /api/repos` doesn't accept it.
+- **When a change applies.** It reloads live, without a restart. FLIGHT's seat restarts when the value changes, and the guard checks it on every tool call.
+- **Where it is raised.** It is set to `superuser` on `mission-control` only. The observed loops' repos stay `standard`.
 
 ## The floor
 
-The hub enforces these even for a `superuser` FLIGHT. They are a recommendation: the operator can strike any line.
-1. **No force-pushing or rewriting the history of a default branch,** and no deleting a repo or a branch that hasn't been merged.
-2. **No changes to branch protection, rulesets, secrets, collaborators, deploy keys or repo settings.** These are the last safety net under any mistake. FLIGHT drafts the change, with its reason, for the operator.
-3. **No merging a PR from a fork whose author isn't a collaborator.** The repo is public, so that is untrusted code and untrusted text. FLIGHT may review it and recommend.
-4. **The operator's stop, hold or answer given in the moment wins.** So do money budgets and account stops; FLIGHT never routes around one.
-5. **FLIGHT doesn't change its own `flight_powers`,** or the user config. It drafts the change for the operator.
+The hub enforces these even for a `superuser` FLIGHT. They are a recommendation; the operator can strike any line.
+1. **The default branch.** No force-push, history rewrite or direct push to it. No deleting a repo, or a branch that hasn't been merged.
+2. **The safety net.** No changes to branch protection, rulesets, secrets, collaborators, keys, repo settings or the CI workflow. That means FLIGHT doesn't merge a PR that touches `.github/workflows/**`; it gives the operator its recommendation instead.
+3. **Untrusted code.** No merging a PR from a fork whose author isn't a collaborator, and no approving a fork's workflow runs.
+4. **The operator's decisions.** An operator's pause, stop, hold, away mode or answer wins. So do money budgets and account stops. The hub knows who set each one, and FLIGHT's tools refuse to undo one the operator set.
+5. **Its own powers.** FLIGHT can't change `flight_powers`, the user config, or anything the operator approves.
+6. **Going live.** A merge doesn't make floor-carrying code live without a person. Auto-Update skips any range that touches the hub's code. This is a fixed list in the hub, not the repo's `hard_rules`: `apps/server/**`, `packages/**`, `package.json`, `pnpm-lock.yaml`, the build config and `.github/**`. The operator, or the operator's delegate on this repo, runs those Updates. Web-only and docs-only ranges still auto-Update.
 
-Everything else is FLIGHT's call, including:
-- merging hard-rule PRs;
-- merging PRs that change FLIGHT's own role, tools or guard;
-- accepting a ruling;
-- overriding a review.
-
-For changes to its own powers, the role asks FLIGHT to get a RETRO review first and to post its reasoning on the PR. That is the role's guidance to FLIGHT, which FLIGHT weighs; the hub doesn't enforce it.
-
-**Tradeoff, stated plainly.** FLIGHT can merge changes to its own guard. By mistake, or through text injected into a ticket or PR, it could widen what it may do. That change only goes live when a person runs Update, and protection, the history of `main` and the config stay out of its reach. The log and the operator's ability to lower `flight_powers` are the remedy. The operator has chosen judgement over gates.
+**Tradeoff, stated plainly.** FLIGHT can merge changes to its own guard and tools. By mistake, or through text injected into a ticket or PR, it could widen what it may do. That change only goes live when a person runs Update. Protection, the history of `main`, CI and the config stay out of its reach.
 
 ## Slices
 
-Each slice is one ticket. Build order:
-- 1 and 2 together;
-- then 3 to 5;
-- then 6.
+Each slice is one ticket, with `Depends on` lines enforcing this order:
+1. #262 and #198 first.
+2. Then #449.
+3. Then the merge, board and research tickets.
+4. Then #176 and #450.
 
-### 1. The hub's merge queue
+### #262: evidence in the digest (S; in progress)
 
-This is for repos in `merge` autonomy.
+For each PR in review, the digest carries RETRO's verdict, the blocking-finding count, the head and the failing check names. A ruling park carries the seat's report.
 
-- **Who joins.**
-  - Run PRs join on their own, once they are mergeable apart from being behind main: review clean or carried, and CI green on their head.
-  - FLIGHT can add any PR within the floor, remove one, or move one to the front, each with a basis.
-- **Order and storage.** The order is oldest join first, kept in a table `merge_queue (repo_id, pr, run_id, joined_at, state, added_by)` that survives a restart.
-- **Updating.**
-  - Only the front PR is brought up to date: by the engine's worktree merge of main for run PRs, as `sync_main` does, and by `update-branch` for others.
-  - `branchUpdateDue` stops updating queued PRs that aren't at the front.
-  - The review is carried when the PR's own diff is unchanged.
-- **Merging.** A green front PR merges with `--match-head-commit` and is recorded as a `loop_events` row, and the queue moves on.
-- **Leaving.** A conflict, red CI or no CI result in 45 minutes takes the PR out of the queue and back to its author or to FLIGHT, and the queue moves on.
-- **Visibility.** The queue shows in `flight_state` and at `GET /api/merge-queue`. This slice adds no HUD screen.
+### #198: powers foundation (M)
 
-### 2. Elevation
+- **The `flight_powers` key.** Add it, with a `requirePowers` helper, live reload, a FLIGHT seat restart when it changes, and a guard check per call (`GuardContext.repo`).
+- **The fixed list for auto-Update.** An auto-only check in `createAutoUpdate`. A manual Update is unaffected. When the check skips a range, it raises a Needs-you item.
+- **The role and repo rules.** Rewrite `roles/FLIGHT.md` around the principle. Change `CLAUDE.md`'s hard-rule merge line to "on a `superuser` repo, FLIGHT merges by its judgement". The operator merges these, since they are hard-rule files.
+- **The hard-rule merger setting.** Reconcile `hard_rules_by` (`engine/rules.ts`): on a `superuser` repo the merger is FLIGHT.
 
-This is the core of the change.
+### #449: the merge queue (M; replan after this spec merges)
 
-- **The `flight_powers` key** goes in the user config, with a `requirePowers` helper and an entry in `config.example.yaml`.
-- **How the powers reach FLIGHT: through the hub, not through its shell.** FLIGHT's Bash sandbox stays as it is: no network, no credentials, and no git writes. Everything elevated runs in the hub, where the floor can be enforced and every call carries a basis:
-  - **Research:** the built-in WebFetch and WebSearch tools, and subagents, are allowed for FLIGHT's seat. Network from Bash is not.
-  - **GitHub:** `mc gh { args, basis }` runs the hub's own `gh` with FLIGHT's arguments. Any subcommand is allowed except the floor's. Flags that read local files (`-F`/`--body-file`, `--input`, `@file` values) and `gh gist` are refused, so nothing on disk can be posted.
-  - **Code:** FLIGHT edits files in its own worktree and commits and pushes through `mc commit` and `mc push`, as developer seats do, to its own branches. It opens PRs with `mc draft_pr`.
-  - **Skills:** the operator's installed skills load for FLIGHT's seat.
-- **The floor is enforced in the hub's tools.** That covers default-branch pushes, protection, rulesets, secrets, collaborators, keys, repo settings, deletes, and merging a non-collaborator's fork PR. FLIGHT's shell can't reach GitHub or the hub's port, and a test proves it.
-- **Auto-Update stops at the floor.** When the range an auto-Update would pull touches a hard-rule file (as `CLAUDE.md` already says), the hub leaves the Update to the operator, or the operator's delegate, and raises a Needs-you item. A merge FLIGHT makes can't change the floor or its own powers without a person running Update.
-- **Operator actions.** The tool `operator_action { route, body, basis }` lets FLIGHT call any of the hub's operator routes the HUD uses, for example:
-  - pausing and resuming;
-  - dismissing and answering;
-  - messaging, interrupting and ending;
-  - stopping, starting and restarting seats;
-  - settling parks, including accepting a ruling or a review.
+- **What joins.** Run PRs only, per hub. Run PRs join once their review is clean (or carried, or accepted) and CI is green.
+- **Hard-rule PRs.** On a `superuser` repo they join as well. At the front they are brought up to date and then held as `awaiting-flight` until FLIGHT's `merge_pr` (same timeout). On other repos they keep today's path to the operator or delegate.
+- **Bringing the front up to date.** Only the front PR is brought up to date, by the engine's worktree merge of main. `branchUpdateDue` returns null for queued PRs behind the front.
+- **Leaving the queue.** A PR leaves on a conflict, on red CI, or after 45 minutes at the front without merging. The queue then moves on.
+- **Lanes.** It refuses other-lane PRs. A merge to main by another hub or a person just moves main.
 
-  Each call is logged with its basis. It refuses routes that write the user config, `/api/update` and `/api/version/check`, and anything on the floor.
-- **Merging.** `merge_pr { pr, basis }` merges by FLIGHT's judgement within the floor. It goes through the queue when the repo has one, or straight away with `--match-head-commit` when FLIGHT says it is urgent. The hub posts FLIGHT's basis on the PR.
-- **Asking FLIGHT.** Any agent (seats, loops, Codex, the controller) can ask FLIGHT a question through `mc ask_flight { text }`, or `POST /api/flight/ask` for agents outside the crew, and FLIGHT answers on its next wake. The operator's dock stays as it is.
-- **The role.** `roles/FLIGHT.md` is rewritten around the principle: what FLIGHT owns, how it judges (evidence, the repo's rules, reversibility, the operator's standing preferences), what is the operator's (taste and product calls, money, the floor), and how it records what it did. The "For the controller" path goes.
+### FLIGHT merges and settles (new; depends on #198 and #449)
 
-### 3. Evidence in the digest (#262)
+- **`merge_pr { pr, basis }`.** It clears a run PR in FLIGHT's lane at the front of the queue, hard-rule included, within the floor. The hub posts the basis on the PR, after `scanSecrets` and the notifier check. "Urgent" means FLIGHT moves the PR to the front.
+- **`settle_park { runId, action, basis }`.** The actions are:
+  - `lift`: a stuck park whose head descends from the push;
+  - `rereview`: a fresh RETRO review;
+  - `accept`: accepts a ruling or a review by FLIGHT's judgement;
+  - `rework`: sends the findings back to the seat.
+- **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, 4 an hour.
 
-This is cheaper than a `gh` call every wake.
+### FLIGHT runs the board and Needs you (new; depends on #198)
 
-- **Each PR in review** carries:
-  - RETRO's verdict and blocking-finding count, from `reviews`;
-  - the head commit;
-  - the failing check names.
-- **A ruling park** carries the seat's report, capped at 1,500 characters.
-- **The merge queue** is included once slice 1 has landed.
+- **`edit_card { issue, size?, priority?, lane?, assignees?, labels?, basis }`.** Assignees are limited to configured logins. On a `superuser` repo, priority swaps skip #402's approval. Status moves stay with `promote`.
+- **`dismiss_item { key, basis }`.** It clears any item that isn't operator-owned, plus items whose subject has resolved. It never clears guard acks, budget or account items, approvals, or the auto-Update hold.
+- **`restart_seat { seat, basis }`.** It restarts a crew seat stopped on an error. It never restarts a seat the operator, an account or a budget stopped, and never FLIGHT itself or an observed loop.
 
-### 4. Ops signals and triage (#176, which folds #284)
+### FLIGHT reads GitHub and the web (new; depends on #198 and #203)
 
-- **Signals.** The hub derives them, and each one wakes FLIGHT once per key: `flaky_test`, `repeat_park`, `queue_stall`, `idle_seat`, `github_budget` and `hub_error`.
+- **`gh_read { path }`.** GET only, on fixed path templates, for the repo FLIGHT is raised on. It runs from an empty folder with its own `GH_CONFIG_DIR`. The output goes through `scanSecrets`, and it is capped per hour.
+- **WebFetch and WebSearch** are allowed for a `superuser` FLIGHT seat.
+  - Loopback and private address ranges are denied, and a test proves it.
+  - It depends on #203, so that nothing outside the deny list in the home folder is readable first.
+  - The CLI's subagent tool name is checked by experiment before it is granted.
+- **Untrusted text is marked.** Text written by people who aren't collaborators is marked as such in `read_ticket` and in the digest. The role doesn't act on it without the operator.
 
-  | Signal | Source | Key |
-  |---|---|---|
-  | `flaky_test` | `flake:` records, and re-runs that passed on the same head, twice in 7 days | the check or test |
-  | `repeat_park` | the same park reason on the same ticket, twice | the ticket and the reason |
-  | `queue_stall` | a timeout, or the same PR leaving the queue twice | the PR |
-  | `idle_seat` | 15 minutes idle while `eligibleToStart` finds work | the seat |
-  | `github_budget` | under 25% of the hour's allowance | the hour |
-  | `hub_error` | a watch resume failing (#317), a run ending without its report (#244), or a loop that has stopped reporting | the source |
+### #176: ops signals and triage (depends on #449 and #198)
 
-- **Triage wakes:** a new Backlog or Refinement ticket, a finished plan, or a dependency that has just resolved.
-- **The PR list** comes from the stored open PRs, so a phase change alone no longer wakes FLIGHT.
-- **The role:** triage every signal with evidence, then fix it directly or get it fixed.
+- **The signals:** `flaky_test`, `repeat_park`, `queue_stall`, `idle_seat`, `github_budget` and `hub_error`. Each wakes FLIGHT once per key.
+- **Triage wakes:** new Backlog tickets, finished plans and resolved dependencies.
+- **No wake on a phase change:** the PR list doesn't change when only a phase changes.
 
-### 5. Memory, skills and the FLIGHT page (folds #172)
+### #450: memory and the retrospective (depends on #449)
 
-- **Memory.** `flight_memory (repo_id, topic, kind, body, source, updated_at)`.
-  - **Kinds:** `lesson`, `repo` (stack, checks, conventions, quirks), `crew` (what trips each seat) and `playbook` (FLIGHT's own skills: how it handles a recurring situation).
-  - **Limits:** a body is at most 4,000 characters, and a repo holds at most 300 topics.
-  - **Tools:** `remember`, `forget` and `recall`.
-  - **In each wake's digest:** the topic titles, plus the bodies linked to the wake's signals and questions.
-- **Notes are evidence, not authority.** A note never records an approval or a grant; those come from the operator.
-- **Skills.** FLIGHT may write playbooks, and on a `superuser` repo it may also add skills for itself or the crew as PRs, which it merges by its own judgement.
-- **The daily retrospective.** It runs at the first quiet wake after 03:00 local and covers the last 24 hours:
-  - merged PRs, and the share that changed a screen;
-  - median time from Ready to merged;
-  - review fail rate and park reasons;
-  - re-runs and queue waits;
-  - FLIGHT's own wakes and cost;
-  - its "For the controller" count;
-  - the most costly runs (this is #172).
+- **The memory store:** a store per repo of lessons, the repo profile, the crew and playbooks.
+  - Notes are evidence, never authority.
+  - The operator can edit and delete them. `operator_action` can't reach those routes, because there is no such tool.
+- **The retrospective:** the hub schedules a wake for it once a day.
+- **The FLIGHT page panel** is a follow-on web ticket.
 
-  FLIGHT then writes its lessons and files or fixes its top one to three items.
-- **The FLIGHT page** shows FLIGHT's notes and playbooks, its retrospective, and what it owns and is steering. The operator can edit or delete a note there. The server half ships in this slice and the page in a follow-on web ticket.
+### Later
 
-### 6. Ownership across repos (#175)
-
-- **One session per repo.** Each configured repo gets its own FLIGHT session, with its own memory and its own `flight_powers`.
-- **First sight of a repo.** FLIGHT writes the repo's profile to memory and drafts any missing configuration for the operator.
-- **Related:** #173 and #174.
+- **The hub's loopback API needs an operator token on its mutating routes.** Today the HUD bundle and anything on the machine can call them. This is a security follow-up, and it comes before any power is widened further.
+- **Repo skills as a readable index** (#174). The operator's own skills and plugins never reach the crew (§8b.1).
+- **Ownership across repos** (#175).
+- **Away mode overriding these tools** (#340).
 
 ## Security model
 
-- **New GitHub writes,** under the operator's account, on `superuser` repos only. FLIGHT may make any write the operator could make through `gh`, except the floor's.
-  - **In practice:** merges, branch updates, CI re-runs, comments, labels, project fields, assignees, issues, and pushes to non-default branches.
-  - **The floor's exclusions** are protection, rulesets, secrets, collaborators, keys, repo settings and deletion, force-pushes to the default branch, and merging a non-collaborator's fork PR.
-- **Network.** WebFetch and WebSearch are opened for FLIGHT's seat only. Its Bash has no network and no credentials, and GitHub writes go through the hub's `mc gh`. Developer seats are unchanged.
-- **The hub's API.** Its loopback routes are unauthenticated, and FLIGHT's shell can't reach them. Requiring an operator token on those routes is a follow-up.
-- **Untrusted text.** Tickets, PRs, comments, web pages and memory notes stay evidence, never instructions. Approval comes only from the operator.
-- **Audit.** Every elevated action is logged with its basis and shows in the FLIGHT log. The operator lowers `flight_powers` to take powers back, with effect from the next call.
+- **New GitHub writes,** all under the operator's account, only on `superuser` repos, and only through typed hub tools that log a basis:
+  - merges of run PRs in FLIGHT's lane;
+  - the engine's worktree merges of main (already made today, now in order);
+  - CI re-runs (capped);
+  - PR comments carrying FLIGHT's basis, after secret and notifier checks;
+  - project fields, labels and configured-login assignees.
+- **New reads:** `gh_read` (GET only, fixed templates, one repo, capped), and WebFetch and WebSearch for FLIGHT's seat, with private ranges denied.
+- **No general instruments.** FLIGHT's Bash keeps its sandbox. FLIGHT has no raw `gh`, no general HUD-route tool, none of the operator's skills or plugins, and no code writing.
+- **The floor** is enforced in the hub's tools and the guard. Floor 6 keeps any merged change to the hub's code from going live without a person.
+- **Audit.** Every elevated call is logged with its basis. Lowering `flight_powers` takes effect at the next call and restarts FLIGHT's seat.
 
-## Done when (measured once slices 1 to 5 have merged)
+## Done when (measured once these slices have merged)
 
 - FLIGHT's "For the controller" notes fall to near zero, and the retrospective reports the count.
-- Crew PRs on `mission-control`, hard-rule ones included, merge without a person-side controller.
+- Crew PRs on `mission-control`, hard-rule ones included, merge without a person-side controller. Hub-code Updates still need a person.
 - No queued PR is brought up to date with main while it is behind the front.
 - A flaky check seen twice becomes a ticket with evidence, or gets fixed, before a person notices it.
-- FLIGHT's memory for `mission-control` holds the week's lessons and playbooks, and its wakes cite them.
+- FLIGHT's memory holds the week's lessons, and its wakes cite them.
