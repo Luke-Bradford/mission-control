@@ -2255,6 +2255,11 @@ describe("boards, escalations, health", () => {
       ["site-builder", null],
     ]);
     const boardGql: Gql = async (query) => {
+      if (query.includes("OpenIssues")) {
+        return {
+          repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+        };
+      }
       if (!query.includes("projectV2")) throw new Error("not a board read");
       return {
         repositoryOwner: {

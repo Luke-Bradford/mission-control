@@ -236,6 +236,10 @@ interface Call {
 /** Routes by whether the document is the board or the search query. */
 function stub(opts: {
   pages?: unknown[];
+  /** The repo's open issues, each with its own project cards. */
+  issues?: unknown[];
+  /** The open issues page by page; overrides `issues`. */
+  issuePages?: unknown[][];
   search?: (v: Record<string, unknown>) => unknown[];
   boardError?: Error;
   searchError?: Error;
@@ -247,6 +251,7 @@ function stub(opts: {
   const calls: Call[] = [];
   let p = 0;
   let pr = 0;
+  let ip = 0;
   const gql: Gql = async (q, v) => {
     calls.push({ q, v });
     if (q.includes("pullRequests")) {
@@ -256,6 +261,16 @@ function stub(opts: {
     if (q.includes("projectV2")) {
       if (opts.boardError) throw opts.boardError;
       return opts.pages?.[p++] ?? page([]);
+    }
+    if (q.includes("OpenIssues")) {
+      const nodes = opts.issuePages?.[ip] ?? opts.issues ?? [];
+      const more = opts.issuePages !== undefined && ip < opts.issuePages.length - 1;
+      ip++;
+      return {
+        repository: {
+          issues: { pageInfo: { hasNextPage: more, endCursor: more ? `ic${ip}` : null }, nodes },
+        },
+      };
     }
     if (q.includes("milestones")) {
       if (opts.milestoneError) throw opts.milestoneError;
@@ -319,6 +334,109 @@ describe("collectGithub board, an empty answer", () => {
     expect(statusOf()).toMatchObject({ ok: true, error: null });
     await collectGithub(repo, store, empty(), NOW + 2 * MIN + EMPTY_BOARD_GRACE_MS - 1);
     expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([3]);
+  });
+});
+
+describe("collectGithub board, a stale project item list", () => {
+  /** An open issue as the issues query returns it, with cards on the given projects. */
+  const issue = (n: number, cards: { project: number; status: string | null }[]) => ({
+    ...item(n, null).content,
+    projectItems: {
+      nodes: cards.map((c) => ({
+        ...item(n, c.status, { priority: "P1" }),
+        content: undefined,
+        project: { id: `PVT_${c.project}`, number: c.project },
+      })),
+    },
+  });
+  const MISSED = "project list missed 1 items; read them from the issues";
+
+  it("puts an issue the item list left out on the board with its Status", async () => {
+    const { gql } = stub({
+      pages: [page([item(1, "Todo")])],
+      issues: [
+        issue(1, [{ project: 2, status: "Todo" }]),
+        issue(5, [{ project: 2, status: "In Progress" }]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    const added = store.board("shop-app").find((i) => i.issueNumber === 5);
+    expect(added).toMatchObject({ status: "In Progress", state: "in progress", priority: "P1" });
+    expect(added?.itemId).toBe("PVTI_5");
+    expect(statusOf()).toMatchObject({ ok: true, error: MISSED });
+  });
+
+  it("leaves out an issue whose cards are all on another project", async () => {
+    const { gql } = stub({
+      pages: [page([item(1, "Todo")])],
+      issues: [issue(6, [{ project: 9, status: "Todo" }]), issue(7, [])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1]);
+  });
+
+  it("adds nothing twice when both sources return an issue, and says nothing", async () => {
+    const { gql } = stub({
+      pages: [page([item(1, "Todo"), item(2, "Todo")])],
+      issues: [
+        issue(1, [{ project: 2, status: "Todo" }]),
+        issue(2, [{ project: 2, status: "Todo" }]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 2]);
+    expect(statusOf()).toMatchObject({ ok: true, error: null });
+  });
+
+  it("recovers an issue whose number another repo's card on the list shares", async () => {
+    const { gql } = stub({
+      pages: [
+        page([
+          item(1, "Todo"),
+          item(5, "Todo", {
+            extra: { repository: { name: "other", owner: { login: "octo-org" } } },
+          }),
+        ]),
+      ],
+      issues: [issue(5, [{ project: 2, status: "Todo" }])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 5]);
+  });
+
+  it("pages the open issues by cursor", async () => {
+    const { gql, calls } = stub({
+      pages: [page([item(1, "Todo")])],
+      issuePages: [
+        [issue(5, [{ project: 2, status: "Todo" }])],
+        [issue(6, [{ project: 2, status: "Todo" }])],
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([1, 5, 6]);
+    expect(calls.filter((c) => c.q.includes("OpenIssues")).map((c) => c.v.after)).toEqual([
+      null,
+      "ic1",
+    ]);
+  });
+
+  it("counts an unmapped item once when both sources return it", async () => {
+    const { gql } = stub({
+      pages: [page([item(1, "Weird")])],
+      issues: [issue(1, [{ project: 2, status: "Weird" }])],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(statusOf()?.error).toBe("skipped 1 board item(s) with unmapped status");
+  });
+
+  it("counts recovered items towards the empty-board guard", async () => {
+    await collectGithub(repo, store, stub({ pages: [page([item(1, "Todo")])] }).gql, NOW);
+    const { gql } = stub({
+      pages: [page([])],
+      issues: [issue(5, [{ project: 2, status: "Todo" }])],
+    });
+    await collectGithub(repo, store, gql, NOW + 60_000);
+    expect(store.board("shop-app").map((i) => i.issueNumber)).toEqual([5]);
   });
 });
 
