@@ -358,6 +358,7 @@ describe("restartNeeded", () => {
     // not restart keys: the note is prose, max_seats applies live
     expect(changed((_c, k) => void Object.assign(k, { nodeNote: "old node" }))).toEqual([]);
     expect(changed((_c, k) => void Object.assign(k, { maxSeats: 2 }))).toEqual([]);
+    expect(changed((_c, k) => void Object.assign(k, { maxOpenRunsPerSeat: 5 }))).toEqual([]);
   });
 
   it("a changed checkout is crew.sessions; no crew on one side is crew", () => {
@@ -599,11 +600,14 @@ describe("the reloader", () => {
     expect(applied.poll.githubSeconds).toBe(60);
   });
 
-  it("roles and max_seats apply", async () => {
+  it("roles, max_seats and max_open_runs_per_seat apply", async () => {
     const r = make();
     loaded = config([{ id: "s1", seats: [seat("guido-1")] }], { maxSeats: 3 });
+    if (loaded.crew === undefined) throw new Error("no crew");
+    loaded.crew.maxOpenRunsPerSeat = 4;
     await r.reload();
     expect(applied.crew?.maxSeats).toBe(3);
+    expect(applied.crew?.maxOpenRunsPerSeat).toBe(4);
   });
 
   it("lane and lane_default apply live, and unsetting the lane clears it", async () => {

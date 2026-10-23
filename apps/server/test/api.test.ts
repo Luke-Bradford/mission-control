@@ -3590,6 +3590,32 @@ describe("the first loop's engine", () => {
     await none.a.close();
   });
 
+  it("records the operator's message as CAPCOM to the seat, about its run's ticket", async () => {
+    store.upsertRun(run({ id: "plain", agentId: "guido-1", ticket: "shop-app#9" }));
+    const { a } = engineApp("plain");
+    expect((await message(a)).statusCode).toBe(200);
+    expect(store.comms(0)).toEqual([
+      {
+        at: expect.any(Number),
+        from: "CAPCOM",
+        to: "guido-1",
+        ticket: "shop-app#9",
+        text: "go on",
+      },
+    ]);
+    await a.close();
+  });
+
+  it("records a message to a seat with no run against no ticket, and a refused one not at all", async () => {
+    const none = engineApp(null);
+    expect((await message(none.a)).statusCode).toBe(200);
+    expect(store.comms(0).map((c) => c.ticket)).toEqual([null]);
+    supervisorFail = new SupervisorError(409, "GUIDO-1 has no live session");
+    expect((await message(none.a)).statusCode).toBe(409);
+    expect(store.comms(0)).toHaveLength(1);
+    await none.a.close();
+  });
+
   it("does not when the message is refused", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     const { a, told } = engineApp("looped");

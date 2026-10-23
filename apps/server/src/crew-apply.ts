@@ -285,6 +285,7 @@ export function createCrewReloader(deps: {
       if (config.crew !== undefined && target.crew !== undefined) {
         config.crew.roles = target.crew.roles;
         config.crew.maxSeats = target.crew.maxSeats;
+        config.crew.maxOpenRunsPerSeat = target.crew.maxOpenRunsPerSeat;
         if (target.crew.lane === undefined) delete config.crew.lane;
         else config.crew.lane = target.crew.lane;
         config.crew.laneDefault = target.crew.laneDefault ?? false;
