@@ -29,6 +29,14 @@ export class RunTokens {
     return token;
   }
 
+  /** Registers a token an earlier hub issued for this run; true when adopted. */
+  adopt(seatId: string, runId: string, token: string): boolean {
+    if (!/^[0-9a-f]{64}$/.test(token)) return false;
+    const hash = sha256(token);
+    this.byHash.set(hash.toString("hex"), { seatId, runId, hash });
+    return true;
+  }
+
   resolve(token: unknown): RunIdentity | null {
     if (typeof token !== "string" || token === "") return null;
     const hash = sha256(token);

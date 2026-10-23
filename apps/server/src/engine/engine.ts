@@ -1543,8 +1543,9 @@ export function createEngine(deps: EngineDeps): Engine {
           next.reviewWaivedSha = store.runPush(run.id)?.sha ?? null;
         } else if (kind === "ruling" || kind === "review-failed") {
           next.phase = "review";
-        } else if (head !== null && pushed?.sha === head && pr?.state === "open") {
-          // re-judged on the next pass; its clocks run from now
+        } else if (head !== null && pushed?.sha === head && (pr === null || pr.state === "open")) {
+          // re-judged on the next pass (an open PR is read, a missing one is opened again);
+          // its clocks run from now
           next.phase = "ci";
           next.pushStartedAt = at;
           next.pushFor = head;

@@ -204,6 +204,11 @@ CREATE TABLE IF NOT EXISTS flight_decisions (
   basis TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS flight_decisions_at ON flight_decisions(at);
+-- The test lock's held calls (one row per tool call of the holding run), so a restart restores them.
+CREATE TABLE IF NOT EXISTS test_lock_holds (
+  run_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, seat_id TEXT NOT NULL, command TEXT NOT NULL,
+  since INTEGER NOT NULL, PRIMARY KEY (run_id, tool_use_id)
+);
 -- FLIGHT's briefs on Needs-you items (the newest row per key shows); options is JSON.
 CREATE TABLE IF NOT EXISTS briefs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, context TEXT NOT NULL,
@@ -316,6 +321,15 @@ export function crewPromptPath(dbPath: string, runId: string): string {
  * supervisor writes it at 0600 for the run's process and removes it when that process exits; the
  * sandbox read-denies the whole directory.
  */
+/** One held call of the test lock, as stored. */
+export interface LockHoldRow {
+  runId: string;
+  toolUseId: string;
+  seatId: string;
+  command: string;
+  since: number;
+}
+
 export function crewTokenPath(dbPath: string, runId: string): string {
   return join(dirname(crewTranscriptPath(dbPath, runId)), `${runId}.token`);
 }
@@ -2194,6 +2208,39 @@ export class Store {
     this.db
       .prepare("UPDATE seat_sessions SET last_turn_ended_at = ? WHERE seat_id = ?")
       .run(at, seatId);
+  }
+
+  addLockHold(h: LockHoldRow): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO test_lock_holds (run_id, tool_use_id, seat_id, command, since)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(h.runId, h.toolUseId, h.seatId, h.command, h.since);
+  }
+
+  deleteLockHold(runId: string, toolUseId: string): void {
+    this.db
+      .prepare("DELETE FROM test_lock_holds WHERE run_id = ? AND tool_use_id = ?")
+      .run(runId, toolUseId);
+  }
+
+  /** Every held call of the run. */
+  deleteLockHolds(runId: string): void {
+    this.db.prepare("DELETE FROM test_lock_holds WHERE run_id = ?").run(runId);
+  }
+
+  lockHolds(): LockHoldRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM test_lock_holds ORDER BY since, run_id, tool_use_id")
+      .all() as Row[];
+    return rows.map((r) => ({
+      runId: r.run_id as string,
+      toolUseId: r.tool_use_id as string,
+      seatId: r.seat_id as string,
+      command: r.command as string,
+      since: r.since as number,
+    }));
   }
 
   /** Sessions that hold a run and are not stopped or in error. */
