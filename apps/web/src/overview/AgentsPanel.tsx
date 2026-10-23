@@ -20,6 +20,7 @@ import {
   needLine,
   needsLamp,
   SEAT_LAST_TICKET,
+  seatItems,
   seatStatus,
   sparkValues,
   tokensPerMinute,
@@ -135,7 +136,7 @@ function AgentRow({
   tz: string | null;
   selected: boolean;
 }) {
-  const mine = items.filter((i) => i.agentId === row.id);
+  const mine = seatItems(row, items);
   const repoPrs = useReviewPrs(row);
   const doing = doingLine(row, now, tz, repoPrs);
   const parts = needLine(row, items, now);
