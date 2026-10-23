@@ -3691,8 +3691,11 @@ describe("startReview", () => {
   });
 
   describe("model", () => {
-    async function modelOf(over: Parameters<typeof make>[0]) {
-      const r = reviewOfPush();
+    async function modelOf(
+      over: Parameters<typeof make>[0],
+      reviewOver?: Parameters<typeof reviewOfPush>[0],
+    ) {
+      const r = reviewOfPush(reviewOver);
       const { sup } = make({ scratchRetro: true, ...over });
       // the CLI's init later replaces the run's model with the one it reports
       const upsert = vi.spyOn(store, "upsertRun");
@@ -3723,6 +3726,25 @@ describe("startReview", () => {
           fetchTicket: async () => ({ ...TICKET, labels: ["bug"] }),
         }),
       ).toEqual(["haiku", "haiku"]);
+    });
+
+    it("a full-depth profile keeps the full-depth model over the light model", async () => {
+      store.replaceBoard("mc", [boardCard(42)]);
+      expect(
+        await modelOf(
+          { retroLightModel: "sonnet" },
+          {
+            profile: {
+              profile: {
+                ...(DEFAULT_PROFILES[0] as Profile),
+                reviewer: { role: "RETRO", depth: "full" },
+              },
+              route: { by: "size", size: "S" },
+              hash: "h",
+            },
+          },
+        ),
+      ).toEqual([REVIEW_FULL_MODEL, REVIEW_FULL_MODEL]);
     });
 
     it("no light model: the seat's model", async () => {
