@@ -47,6 +47,7 @@ import {
   readyRuledText,
   readyText,
   readyWaivedText,
+  reviewCarriedText,
   reviewDroppedText,
   reviewFailedText,
   reviewQueuedText,
@@ -2142,7 +2143,7 @@ describe("the engine runs reviews", () => {
 
       it("a clean update moves the run to ci, pushes the merge, and reviews the new sha", async () => {
         behindMain();
-        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B }];
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
         await gateOpen();
         await vi.waitFor(() => expect(h.pushes.length).toBeGreaterThanOrEqual(2));
         expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
@@ -2158,6 +2159,100 @@ describe("the engine runs reviews", () => {
         expect(reviewRows().map((r) => r.sha)).toContain(SHA_B);
         // nothing is merged into the branch twice
         expect(h.updates).toHaveLength(1);
+      });
+
+      it("a clean update that leaves the PR's diff as it was carries the review", async () => {
+        behindMain();
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
+        await gateOpen();
+        await vi.waitFor(() => expect(h.pushes.length).toBeGreaterThanOrEqual(2));
+        h.gate = { ...need(h.gate), containsMain: true };
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        await h.engine.reconcileRun(RUN);
+        expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
+        expect(loopOf().carry).toEqual({ from: SHA, to: SHA_B });
+        expect(loopTexts()).toContain(reviewCarriedText(SHA, SHA_B));
+        expect(h.statusCalls).toContainEqual({
+          sha: SHA_B,
+          state: "success",
+          description: "QA review passed (carried from aaaaaaa, main merged)",
+        });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
+      it("a second clean update carries the first review on", async () => {
+        const SHA_C = "f".repeat(40);
+        behindMain();
+        h.updateResults = [
+          { ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true },
+          { ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame: true },
+        ];
+        await gateOpen();
+        await vi.waitFor(() => expect(store.runPush(RUN)?.sha).toBe(SHA_B));
+        setPr({ ci: "passing", headSha: SHA_B });
+        // main moves again before the first merge is judged
+        h.gate = { ...need(h.gate), mainSha: "9".repeat(40), containsMain: false };
+        await vi.waitFor(async () => {
+          await h.engine.reconcileRun(RUN);
+          expect(h.updates).toHaveLength(2);
+          expect(store.runPush(RUN)?.sha).toBe(SHA_C);
+        });
+        expect(loopOf().carry).toEqual({ from: SHA, to: SHA_C });
+        expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
+        expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_C);
+        expect(loopTexts()).toContain(reviewCarriedText(SHA, SHA_C));
+      });
+
+      it("a queued review of the reviewed sha survives a carried update and starts", async () => {
+        h.busyList = [{ seatId: RETRO, state: "running" }];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        expect(first().sha).toBe(SHA);
+        // a PR GitHub calls conflicting is brought up to date while its review waits
+        setPr({ ci: "passing", mergeable: "CONFLICTING" });
+        behindMain();
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
+        await vi.waitFor(async () => {
+          await h.engine.reconcileRun(RUN);
+          expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+        });
+        h.gate = { ...need(h.gate), containsMain: true };
+        setPr({ ci: "passing", headSha: SHA_B });
+        // the reviewer comes free: the queued review is wanted still, and starts
+        h.busyList = [];
+        await h.engine.tick();
+        expect(first().state).not.toBe("superseded");
+        expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
+        expect(h.statusCalls).toContainEqual({
+          sha: SHA_B,
+          state: "pending",
+          description: `${REVIEW_STATUS_QUEUED} (carried from aaaaaaa, main merged)`,
+        });
+      });
+
+      it("a carried blocking review sends its findings in the fix line", async () => {
+        h.busyList = [{ seatId: RETRO, state: "running" }];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", mergeable: "CONFLICTING" });
+        behindMain();
+        h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
+        await vi.waitFor(async () => {
+          await h.engine.reconcileRun(RUN);
+          expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+        });
+        h.gate = { ...need(h.gate), containsMain: true };
+        setPr({ ci: "passing", headSha: SHA_B });
+        h.busyList = [];
+        await h.engine.tick();
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(reviewRows().map((r) => r.sha)).not.toContain(SHA_B);
+        expect(h.steps).not.toContain("merge");
+        await vi.waitFor(() =>
+          expect(h.sent.some((s) => s.text.includes("a Important thing"))).toBe(true),
+        );
       });
 
       it("a conflict is left for the seat, and the line goes once", async () => {

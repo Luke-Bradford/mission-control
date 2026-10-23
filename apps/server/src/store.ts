@@ -838,6 +838,17 @@ export class Store {
     return new Set(rows.map((r) => r.ticket as string));
   }
 
+  /** Whether this hub has a run (ended or not) on `branch`. */
+  hasRunOnBranch(repoId: RepoId, branch: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM runs WHERE repo_id = ? AND branch = ? AND review_id IS NULL LIMIT 1",
+        )
+        .get(repoId, branch) !== undefined
+    );
+  }
+
   /** Whether another run on the same ticket started after this one. */
   hasNewerRunOnTicket(run: Run): boolean {
     if (run.ticket === null) return false;
