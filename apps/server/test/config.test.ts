@@ -1191,6 +1191,15 @@ describe("repo commands and protected files", () => {
   const writer = (c: string) =>
     withRepo0(`    commands:\n      writer: [${JSON.stringify(c)}]\n      review: []\n`);
 
+  it("loads required_checks, [] by default, and refuses mc/review", () => {
+    expect(parse(withRepo0("    required_checks: [check]\n")).repos[0]?.requiredChecks).toEqual([
+      "check",
+    ]);
+    expect(parse(text).repos[0]?.requiredChecks).toEqual([]);
+    const e = errorOf(() => parse(withRepo0('    required_checks: ["mc/review"]\n')));
+    expect(e.path).toBe("repos[0].requiredChecks[0]");
+  });
+
   it("a repo with neither key loads with the default commands and no extra protected files", () => {
     const r = parse(text).repos[0];
     expect(r?.commands).toEqual(DEFAULT_SEAT_COMMANDS);
