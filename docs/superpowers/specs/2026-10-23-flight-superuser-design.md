@@ -43,7 +43,7 @@ repos:
 
 - **Where it can be set.** No repo's `mc:` block can raise it, and `POST /api/repos` doesn't accept it.
 - **When a change applies.** It reloads live, without a restart. FLIGHT's seat restarts when the value changes, and the guard checks it on every tool call.
-- **Where it is raised.** It is set to `superuser` on `mission-control` only. The observed loops' repos stay `standard`.
+- **Where it is raised.** It is set to `superuser` on `mission-control` only, and only once the merge ticket (#457) has landed, so hard-rule PRs are never stranded. The observed loops' repos stay `standard`.
 
 ## The floor
 
@@ -51,11 +51,15 @@ The hub enforces these even for a `superuser` FLIGHT. They are a recommendation;
 1. **The default branch.** No force-push, history rewrite or direct push to it. No deleting a repo, or a branch that hasn't been merged.
 2. **The safety net.** No changes to branch protection, rulesets, secrets, collaborators, keys, repo settings or the CI workflow. That means FLIGHT doesn't merge a PR that touches `.github/workflows/**`; it gives the operator its recommendation instead.
 3. **Untrusted code.** No merging a PR from a fork whose author isn't a collaborator, and no approving a fork's workflow runs.
-4. **The operator's decisions.** An operator's pause, stop, hold, away mode or answer wins. So do money budgets and account stops. The hub knows who set each one, and FLIGHT's tools refuse to undo one the operator set.
+4. **The operator's decisions.** An operator's pause, stop, hold or answer wins. So do money budgets and account stops. Each tool names the record it checks: seat state `stopped` versus `error`, budget and account parks, and the operator's holds. Away mode joins this list with #340.
 5. **Its own powers.** FLIGHT can't change `flight_powers`, the user config, or anything the operator approves.
-6. **Going live.** A merge doesn't make floor-carrying code live without a person. Auto-Update skips any range that touches the hub's code. This is a fixed list in the hub, not the repo's `hard_rules`: `apps/server/**`, `packages/**`, `package.json`, `pnpm-lock.yaml`, the build config and `.github/**`. The operator, or the operator's delegate on this repo, runs those Updates. Web-only and docs-only ranges still auto-Update.
+6. **Going live.**
+   - **Auto-Update is an allowlist.** It applies only ranges whose every path is under `apps/web/src/**`, `apps/web/public/**`, `apps/web/index.html` or `docs/**`.
+   - **Everything else waits:** server, packages, roles, any `package.json`, lockfiles, workspace and npm config, and build config. The operator, or the controller session on this repo, runs that Update after reading the held range, never FLIGHT. While a range is held, later web-only commits wait behind it.
+   - **The check runs inside `update()` after its own fetch,** and it pulls exactly the SHA it checked.
+7. **The repo's own rules.** On a `superuser` repo, FLIGHT never clears a PR that changes the `## Mission Control` block in `CLAUDE.md` or `.github/workflows/**`. That block is read live at `origin/HEAD`, so a merge alone would change the rules. The engine enforces this at its merge step, from a fixed list in code. The effective hard-rule list there is the repo's list plus `DEFAULT_HARD_RULES`.
 
-**Tradeoff, stated plainly.** FLIGHT can merge changes to its own guard and tools. By mistake, or through text injected into a ticket or PR, it could widen what it may do. That change only goes live when a person runs Update. Protection, the history of `main`, CI and the config stay out of its reach.
+**Tradeoff, stated plainly.** FLIGHT can merge changes to its own guard and tools. By mistake, or through text injected into a ticket or PR, it could widen what it may do. That change only goes live when the operator or the controller session runs Update, and FLIGHT can't clear a change to the repo's rules or CI. Protection, the history of `main`, CI and the config stay out of its reach.
 
 ## Slices
 
@@ -119,7 +123,7 @@ For each PR in review, the digest carries RETRO's verdict, the blocking-finding 
 
 - **The memory store:** a store per repo of lessons, the repo profile, the crew and playbooks.
   - Notes are evidence, never authority.
-  - The operator can edit and delete them. `operator_action` can't reach those routes, because there is no such tool.
+  - The operator can edit and delete them.
 - **The retrospective:** the hub schedules a wake for it once a day.
 - **The FLIGHT page panel** is a follow-on web ticket.
 
@@ -140,13 +144,13 @@ For each PR in review, the digest carries RETRO's verdict, the blocking-finding 
   - project fields, labels and configured-login assignees.
 - **New reads:** `gh_read` (GET only, fixed templates, one repo, capped), and WebFetch and WebSearch for FLIGHT's seat, with private ranges denied.
 - **No general instruments.** FLIGHT's Bash keeps its sandbox. FLIGHT has no raw `gh`, no general HUD-route tool, none of the operator's skills or plugins, and no code writing.
-- **The floor** is enforced in the hub's tools and the guard. Floor 6 keeps any merged change to the hub's code from going live without a person.
+- **The floor** is enforced in the hub's tools and the guard. Floors 6 and 7 keep any merged change to the hub's code from going live without the operator or the controller session, and keep FLIGHT from changing the repo's rules or CI.
 - **Audit.** Every elevated call is logged with its basis. Lowering `flight_powers` takes effect at the next call and restarts FLIGHT's seat.
 
 ## Done when (measured once these slices have merged)
 
 - FLIGHT's "For the controller" notes fall to near zero, and the retrospective reports the count.
-- Crew PRs on `mission-control`, hard-rule ones included, merge without a person-side controller. Hub-code Updates still need a person.
+- Crew PRs on `mission-control`, hard-rule ones included, merge without a person-side controller. Hub-code Updates are still run by the operator or the controller session.
 - No queued PR is brought up to date with main while it is behind the front.
 - A flaky check seen twice becomes a ticket with evidence, or gets fixed, before a person notices it.
 - FLIGHT's memory holds the week's lessons, and its wakes cite them.
