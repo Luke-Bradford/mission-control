@@ -1,8 +1,16 @@
-import { type AgentStream, ATTENTION_LABEL, type AttentionItem, clockHm } from "@mc/core";
+import {
+  type AgentStream,
+  ATTENTION_LABEL,
+  type AttentionItem,
+  type Crew,
+  clockHm,
+  flightTurnText,
+} from "@mc/core";
 import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { Markdown } from "../components/Markdown.tsx";
+import { contextPct } from "../crew.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import {
   chatRows,
@@ -259,6 +267,9 @@ export function Dock() {
   }, [drawer]);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
+  const crew = useResource<Crew>(RESOURCES.crew).data;
+  const row = crew?.rows.find((r) => r.id === seat?.id);
+  const ctx = row ? contextPct(row) : null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
   const [busy, setBusy] = useState(false);
@@ -342,7 +353,15 @@ export function Dock() {
               {flight === undefined
                 ? "Loading…"
                 : seat
-                  ? `${seat.call} · ${seat.model} · ${stateWord(seat)}`
+                  ? [
+                      row?.accountId,
+                      seat.model,
+                      seat.turns && flightTurnText(seat.turns.n, seat.turns.max),
+                      ctx !== null && `context ${ctx}%`,
+                      stateWord(seat),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
                   : FLIGHT_NO_SEAT}
             </div>
           </div>

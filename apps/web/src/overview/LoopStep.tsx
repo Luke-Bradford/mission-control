@@ -1,12 +1,12 @@
 import type { CrewLoop, HudState } from "@mc/core";
 import {
-  LOOP_PATH,
-  LOOP_PATH_TITLE,
-  loopMarks,
+  loopPathTitle,
   loopStepLabel,
+  loopSteps,
   loopTemplate,
   loopTryText,
   type StepMark,
+  stepMarks,
   WAIT_WARN,
 } from "../crew.ts";
 
@@ -30,7 +30,8 @@ export function LoopStep({
   hudState: HudState;
   wait: string | null;
 }) {
-  const marks = loopMarks(loop, hudState);
+  const marks = stepMarks(loop, hudState);
+  const steps = loopSteps(loop);
   const warn = loop.wait != null && WAIT_WARN.includes(loop.wait);
   return (
     <>
@@ -38,9 +39,10 @@ export function LoopStep({
         {loopTemplate(loop)} › <b>{loopStepLabel(loop)}</b>
         {loopTryText(loop)}
       </span>
-      <span className="stepbar" title={LOOP_PATH_TITLE} aria-hidden="true">
+      <span className="stepbar" title={loopPathTitle(loop)} aria-hidden="true">
         {marks.map((m, i) => (
-          <i key={LOOP_PATH[i]} className={MARK_CLASS[m]} />
+          // biome-ignore lint/suspicious/noArrayIndexKey: Profile step order is fixed; names may repeat.
+          <i key={`${i}:${steps[i]?.name}`} className={MARK_CLASS[m]} />
         ))}
       </span>
       {wait !== null && (

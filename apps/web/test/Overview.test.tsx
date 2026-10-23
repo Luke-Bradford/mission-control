@@ -5,6 +5,7 @@ import {
   type CommsEvent,
   type CrewLoop,
   type CrewRow,
+  DEFAULT_PROFILES,
   GITHUB_SLOWED_PREFIX,
   type GithubRateState,
   type HealthRow,
@@ -208,6 +209,35 @@ describe("Agents panel", () => {
     },
   });
 
+  it("shows FLIGHT's turns and explains what it does under the doing line", async () => {
+    stub({
+      config: flightConfig([{ id: "flight-1" }]),
+      rows: [crewRow({ id: "flight-1", hudState: "error" })],
+      extra: {
+        "/api/flight": {
+          seat: {
+            id: "flight-1",
+            call: "FLIGHT-1",
+            model: "opus",
+            live: true,
+            state: "idle",
+            turns: { n: 4, max: 41 },
+          },
+          decisions: [],
+        },
+      },
+    });
+    const { container } = render(<Overview />);
+    const flight = container.querySelector(".trow.flight") as HTMLElement;
+    const loop = await within(flight).findByText("turn 4 of 41");
+    expect(flight.children[3]).toBe(loop);
+    const line = within(flight).getByText("coordinates the crew and brings you decisions");
+    expect(line.className).toBe("xs muted block");
+    expect(line.previousElementSibling).toBe(flight.querySelector(".doing"));
+    expect(within(flight).getByText("Head")).toBeTruthy();
+    expect(within(flight).getByText("Error", { selector: ".pill" })).toBeTruthy();
+  });
+
   it("the FLIGHT row is the seat the server treats as FLIGHT: a retiring one lists as an agent", async () => {
     const seat = (over: Partial<CrewRow>) =>
       crewRow({ kind: "crew", role: "FLIGHT", mode: "read-only", loopKind: "crew", ...over });
@@ -317,6 +347,24 @@ describe("Agents panel", () => {
     );
   const bar = (row: HTMLElement | undefined) =>
     [...(row?.querySelectorAll(".loopstep .stepbar i") ?? [])].map((i) => i.className);
+
+  it("the step bar follows the run's profile steps", async () => {
+    const loop: CrewLoop = {
+      ...loopOf("ci", "CI is running"),
+      profile: "feature",
+      step: "verify",
+      steps: DEFAULT_PROFILES.find((p) => p.name === "feature")?.steps,
+      planned: true,
+    };
+    stub({ rows: [crewRow({ loop })] });
+    const { container } = render(<Overview />);
+    await stepLabel("feature › verify");
+    const row = agentRows(container)[0];
+    expect(bar(row)).toEqual(["d", "", "d", "c", "", ""]);
+    expect(row?.querySelector(".stepbar")?.getAttribute("title")).toBe(
+      "plan → go/no-go → implement → verify → review → draft PR",
+    );
+  });
 
   it("the Loop step column shows the loop type, step and a step bar; a dash without a loop", async () => {
     const loop = loopOf("review", "In review · PR #9", 9);
