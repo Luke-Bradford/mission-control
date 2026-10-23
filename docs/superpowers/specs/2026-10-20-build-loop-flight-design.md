@@ -359,6 +359,19 @@ comments (drafts only), changes templates or rules (a PR), or starts a new seat 
 Its `start_seat` (FLIGHT 2) starts a ticket's run on a seat that is already configured and free, in
 a `draft` repo only; adding a seat stays an ask.
 
+FLIGHT does clear three stalls itself (#196), each a tool that takes the run's id and a basis, records
+a decision, and refuses a run that is not a developer's own:
+- `accept_ruling` settles a run parked on a CI ruling. Its first call has the hub re-run the failed
+  Actions jobs on the ruled commit (`gh run rerun --failed` on the run's own PR head; once per commit,
+  at most 4 an hour). A later call reads the result: a pass moves the run to review and clears the CI
+  failure; a failure sends the author the failing output, and the ruling goes to the operator if the
+  author rules on that commit again.
+- `sync_main` has the engine merge main into the run's branch now (a `merge` repo only; the run in CI
+  or review, or parked on a conflict; at most 6 an hour). The commit is the hub's own, made by the same
+  path as the engine's update of a branch behind main, never FLIGHT's or the seat's.
+- `end_run` ends a parked or stalled run, on its seat or set aside in review. It refuses a run with
+  uncommitted work (or a worktree it cannot read), and is capped at 4 an hour.
+
 ### 8.3 Triage (the `watch` loop)
 
 Every 10 minutes, or on a board event, the engine runs the `watch` template: `poll` (hub: new or
