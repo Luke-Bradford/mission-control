@@ -1,7 +1,7 @@
 import { type ConfigProfile, type ConfigView, RETRY_NOTE, SMALL_SIZES } from "@mc/core";
 import { useState } from "react";
 import { Panel } from "../hud/Panel.tsx";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 
 /** What picks a profile: its labels, then what it catches when a ticket carries no template label. */
 export function profileTrigger(p: ConfigProfile): string {
@@ -103,8 +103,8 @@ const TEMPLATES_NOTE =
 
 /** Setup › Loops (catalogue 2.7.2), read-only: the observed loops, and the template profiles. */
 export function Loops({ config }: { config: ConfigView }) {
-  const [session] = useSession();
-  const loops = config.loops.filter((l) => inSession(session, l.repoId));
+  const { inRepo } = useSessionScope(config);
+  const loops = config.loops.filter((l) => inRepo(l.repoId));
   return (
     <>
       <Panel title="Observed loops" sub="read from config.yaml">

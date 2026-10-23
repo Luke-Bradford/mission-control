@@ -1867,7 +1867,7 @@ describe("Activity panel", () => {
     stub({
       rows: [
         ...rows,
-        seatRow({ id: "inco-1", index: 2, repoId: "site-builder" }),
+        seatRow({ id: "inco-1", index: 2, repoId: "site-builder", sessionId: "s2" }),
         seatRow({ index: 3 }),
       ],
       activity: [
@@ -1882,7 +1882,7 @@ describe("Activity panel", () => {
     const act_ = container.querySelector("#actP") as HTMLElement;
     fireEvent.click(within(act_).getByRole("button", { name: "Messages" }));
     await within(act_).findByText("site talk");
-    act(() => setSession("shop-app"));
+    act(() => setSession("s1"));
     expect(within(act_).getByText("shop talk")).toBeTruthy();
     expect(within(act_).getByText("hub talk")).toBeTruthy();
     expect(within(act_).queryByText("site talk")).toBeNull();

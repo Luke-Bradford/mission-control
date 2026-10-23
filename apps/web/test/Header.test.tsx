@@ -13,6 +13,7 @@ import { stubFetch } from "./fetchStub.ts";
 import {
   brief,
   CONFIG,
+  CREW_CONFIG,
   crewRow,
   HOUR,
   item,
@@ -31,6 +32,7 @@ const crew = (over: Partial<Crew> = {}): Crew => ({
 
 function routes(
   over: {
+    config?: typeof CONFIG;
     attention?: AttentionItem[];
     crew?: Crew;
     away?: AwaySettings;
@@ -45,7 +47,7 @@ function routes(
     "/api/settings/away": over.away ?? DEFAULT_AWAY,
     "/api/machine": over.machine ?? { latest: null },
     "/api/repos": REPOS,
-    "/api/config": CONFIG,
+    "/api/config": over.config ?? CONFIG,
     "/api/flight": { seat: null, decisions: [] },
   });
 }
@@ -167,7 +169,7 @@ describe("Header", () => {
     expect(within(tab(/^Overview/)).queryByRole("img")).toBeNull();
   });
 
-  it("FLIGHT lights for decisions and people, Board only for escalations; acked items hold still", async () => {
+  it("FLIGHT lights for decisions and people, Board for escalations; acked items hold still", async () => {
     routes({
       attention: [
         item({ key: "stall:a:r", kind: "stalled", escalationId: null, acked: true }),
@@ -390,8 +392,8 @@ describe("Header", () => {
     expect(screen.getByRole("button", { name: "Theme: light. Click to change." })).toBeTruthy();
   });
 
-  it("offers All sessions and one per repo, and sets the session filter", async () => {
-    routes();
+  it("offers All sessions and each configured crew session, and sets the session filter", async () => {
+    routes({ config: CREW_CONFIG });
     let seen = "";
     function Probe() {
       seen = useSession()[0];
@@ -405,17 +407,13 @@ describe("Header", () => {
     );
     const select = screen.getByRole("combobox", { name: "Session" }) as HTMLSelectElement;
     await vi.waitFor(() =>
-      expect([...select.options].map((o) => o.textContent)).toEqual([
-        "All sessions",
-        "s/shop-app",
-        "s/site-builder",
-      ]),
+      expect([...select.options].map((o) => o.textContent)).toEqual(["All sessions", "s/s1"]),
     );
     expect(seen).toBe("all");
     act(() => {
-      fireEvent.change(select, { target: { value: "shop-app" } });
+      fireEvent.change(select, { target: { value: "s1" } });
     });
-    expect(seen).toBe("shop-app");
+    expect(seen).toBe("s1");
   });
 
   it("Setup is a button, on while on Setup; the FLIGHT chat button has no badge", () => {

@@ -15,7 +15,7 @@ import {
   whoOf,
 } from "../notifications.ts";
 import { openItem } from "../shell/overlays.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 
 const DASH = "—";
 export const NOBODY_WAITING = "Nobody is waiting on you.";
@@ -29,19 +29,16 @@ export function AskedOfYou() {
   const notes = useResource<NotificationsView>(RESOURCES.notifications);
   const now = useSecond();
   const tz = useTz();
-  const [session] = useSession();
+  const { inRepo } = useSessionScope();
   // A failed load counts as no threads, so the rest of the list still shows.
   if (attention === undefined || (notes.data === undefined && notes.error === null))
     return <p className="pb note">{DASH}</p>;
-  const threads = (notes.data?.open ?? []).filter((t) => inSession(session, t.repoId));
-  const handled = (notes.data?.handledToday ?? []).filter((h) => inSession(session, h.repoId));
+  const threads = (notes.data?.open ?? []).filter((t) => inRepo(t.repoId));
+  const handled = (notes.data?.handledToday ?? []).filter((h) => inRepo(h.repoId));
   // An item with no repo belongs to no session, so it stays in view (as in Situation).
   const items = sortNeeds(
     attention.filter(
-      (i) =>
-        i.kind !== "person" &&
-        isOperatorItem(i) &&
-        (i.repoId === null || inSession(session, i.repoId)),
+      (i) => i.kind !== "person" && isOperatorItem(i) && (i.repoId === null || inRepo(i.repoId)),
     ),
   );
   const footer = handled.length > 0 && (

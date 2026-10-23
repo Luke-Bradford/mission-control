@@ -16,7 +16,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 
 type Filter = "steps" | "comms" | "all";
 const FILTERS: { value: Filter; label: string }[] = [
@@ -147,7 +147,7 @@ export function ActivityPanel() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const tz = useTz();
-  const [session] = useSession();
+  const { inView, inRepo } = useSessionScope();
   const [filter, setFilter] = useState<Filter>("steps");
   const [frozen, setFrozen] = useState<ActivityRow[] | null>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -167,10 +167,12 @@ export function ActivityPanel() {
     .filter((e) => {
       if (isComms(e)) {
         const ends = [e.who, e.to].flatMap((id) => agents.get(id) ?? []);
-        return ends.length === 0 || ends.some((a) => inSession(session, a.repoId));
+        return ends.length === 0 || ends.some(inView);
       }
+      const agent = agents.get(e.who);
+      if (agent) return inView(agent);
       const repo = repoOf(e.who);
-      return repo === null || inSession(session, repo);
+      return repo === null || inRepo(repo);
     })
     .slice(0, SHOWN)
     .reverse();

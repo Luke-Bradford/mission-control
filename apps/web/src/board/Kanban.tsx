@@ -63,6 +63,11 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     reviewer: col === "Done" ? null : cardReviewer(item, pr, ctx.crew),
     pr,
     mine: needsMe(item, ctx.attention, ctx.crew),
+    unacked: needsMe(
+      item,
+      ctx.attention.filter((i) => !i.acked),
+      ctx.crew,
+    ),
     outcome: doneOutcome(item, prs),
     when,
     statusOutOfDate: statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,

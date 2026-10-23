@@ -4,7 +4,7 @@ import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { navigate, PAGE_PATHS } from "../router.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 import { SituationText } from "./Brief.tsx";
 import { answersToday } from "./conversation.ts";
 import type { FlightView } from "./flightTypes.ts";
@@ -24,13 +24,13 @@ export function Situation() {
   const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  const [session] = useSession();
+  const { inRepo } = useSessionScope();
   const loaded = repos.length > 0 && boards.every((b) => b.data !== undefined);
-  const all = boards.flatMap((b) => b.data ?? []).filter((i) => inSession(session, i.repoId));
+  const all = boards.flatMap((b) => b.data ?? []).filter((i) => inRepo(i.repoId));
   const inColumn = (...cols: string[]): string =>
     loaded ? String(all.filter((i) => cols.includes(cardColumn(i))).length) : "—";
   // An item with no repo belongs to no session, so it stays in view (as on the Activity panel).
-  const items = (attention ?? []).filter((i) => i.repoId === null || inSession(session, i.repoId));
+  const items = (attention ?? []).filter((i) => i.repoId === null || inRepo(i.repoId));
   const known = attention !== undefined;
   const num = (n: number): string => (known ? String(n) : "—");
   const decisions = count(items, ["decision"]);

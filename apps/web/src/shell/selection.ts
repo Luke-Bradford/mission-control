@@ -4,7 +4,7 @@
  */
 import type { AgentId, AttentionItem, CrewRow } from "@mc/core";
 import { crewOrder } from "../crew.ts";
-import { inSession } from "./session.ts";
+import { inCrewSession } from "./session.ts";
 import { store, useStore } from "./store.ts";
 
 const selected = store<AgentId | null>(null);
@@ -26,9 +26,10 @@ export function nextAgent(
   session: string,
   current: AgentId | null,
   dir: 1 | -1,
+  repo: string = session,
 ): AgentId | null {
   const order = crewOrder(
-    rows.filter((r) => inSession(session, r.repoId)),
+    rows.filter((r) => inCrewSession(session, r, repo)),
     items,
   );
   const n = order.length;

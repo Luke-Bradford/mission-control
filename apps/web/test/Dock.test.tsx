@@ -282,7 +282,7 @@ const bodyOf = (fn: ReturnType<typeof stubFetch>, path: string) => {
 };
 
 describe("live FLIGHT", () => {
-  it("shows the account, model, turns, context and state in its meta line", async () => {
+  it("shows the account, model, turns, context and doing line in its meta line", async () => {
     stubFlight(
       { seat: flightSeat({ turns: { n: 4, max: 41 } }), decisions: [] },
       {
@@ -316,7 +316,7 @@ describe("live FLIGHT", () => {
     const { container } = render(<Dock />);
     await waitFor(() =>
       expect(container.querySelector(".meta")?.textContent).toBe(
-        "claude-main · opus · turn 4 of 41, then a fresh session · context 25% · waiting for a wake",
+        "claude-main · opus · turn 4 of 41, then a fresh session · context 25% · run #12",
       ),
     );
   });

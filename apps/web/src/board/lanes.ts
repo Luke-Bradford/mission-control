@@ -1,5 +1,4 @@
 import type { BoardItem, RepoView } from "@mc/core";
-import { SESSION_ALL } from "../shell/session.ts";
 
 /** A saved view: which tickets, and the GitHub query and project that show the same set. */
 export type Lane = {
@@ -14,10 +13,10 @@ export type Lane = {
 export const ALL_LANE = "*";
 
 /**
- * GitHub ORs repeated `repo:` qualifiers, so one query covers every repo. Under a session only
- * that repo's lane is offered (an unknown session id offers them all; the page hides the cards).
+ * GitHub ORs repeated `repo:` qualifiers, so one query covers every repo.
+ * Lanes are independent of the session filter, which follows a card's assigned agent.
  */
-export function lanesFor(repos: RepoView[], session: string = SESSION_ALL): Lane[] {
+export function lanesFor(repos: RepoView[]): Lane[] {
   const all: Lane = {
     id: ALL_LANE,
     name: "All repos",
@@ -38,14 +37,13 @@ export function lanesFor(repos: RepoView[], session: string = SESSION_ALL): Lane
       match: (i) => i.repoId === r.id,
     }),
   );
-  const own = session === SESSION_ALL ? undefined : repoLanes.find((l) => l.id === session);
-  return own ? [own] : [all, ...repoLanes];
+  return [all, ...repoLanes];
 }
 
 /**
  * The route's repo wins over the stored lane, except on a ticket route (`/board/:repo/:n`), where
  * the repo only names the ticket and the stored lane picks the lane. An unknown id falls back to
- * All repos. A single offered lane (a session) is every lane's answer.
+ * All repos.
  */
 export function resolveLane(
   lanes: Lane[],

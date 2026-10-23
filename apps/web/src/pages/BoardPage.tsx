@@ -21,7 +21,7 @@ import { useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
 import { boardPath, followLink, navigate, setupPath } from "../router.ts";
-import { inSession, SESSION_ALL, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 import { BOARD_LAYOUT_KEY, LANE_KEY, readKey, writeKey } from "../storage.ts";
 
 const NO_REPOS: RepoView[] = [];
@@ -56,7 +56,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const tz = useTz();
   const now = useNow();
-  const [session] = useSession();
+  const { inView } = useSessionScope();
   const profiles = useResource<RepoProfile[]>(RESOURCES.repoProfiles).data ?? NO_PROFILES;
 
   const [stored, setStored] = useState(() => readKey(LANE_KEY));
@@ -68,7 +68,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const [storedLayout, setStoredLayout] = useState(() => readKey(BOARD_LAYOUT_KEY));
 
   const ticketRoute = repoId !== null && ticket !== null;
-  const lanes = useMemo(() => lanesFor(repos, session), [repos, session]);
+  const lanes = useMemo(() => lanesFor(repos), [repos]);
   const lane = resolveLane(lanes, repoId, stored, ticketRoute);
   // /board/:repo selects that repo's lane and is then remembered; a ticket route does not.
   useEffect(() => {
@@ -77,17 +77,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
       setStored(repoId);
     }
   }, [ticketRoute, repoId, lane.id]);
-  // Under a session the lane is the session's; say so when the route or stored lane names another.
-  const named = repoId ?? stored;
-  const otherRepo =
-    session !== SESSION_ALL &&
-    named !== null &&
-    named !== ALL_LANE &&
-    named !== session &&
-    repos.some((r) => r.id === named)
-      ? named
-      : null;
-  // The layout applies only to All repos with two or more repos (never under a session).
+  // The layout applies to All repos with two or more repos.
   const layoutOn = lane.id === ALL_LANE && repos.length >= 2;
   const layout: BoardLayout = storedLayout === "apart" ? "apart" : "together";
   const pickLayout = (l: BoardLayout) => {
@@ -108,9 +98,10 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   // Once per render, not once per card (#26 A1).
   const todayStart = tz === null ? null : startOfLocalDay(now, tz);
   const inLane = all.filter((i) => {
-    if (!lane.match(i) || !inSession(session, i.repoId)) return false;
+    if (!lane.match(i)) return false;
     if (cardColumn(i) === "Done") return daysAgo(i.updatedAt, now, tz, todayStart) <= doneDays;
-    return true;
+    const agent = cardAgent(i, rows);
+    return agent === null || inView(agent);
   });
   const shown = inLane.filter(
     (i) =>
@@ -179,11 +170,6 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
           Could not load the board — {e}
         </p>
       ))}
-      {otherRepo !== null && (
-        <p className="s muted">
-          Showing s/{session}. Choose All sessions to see {otherRepo}.
-        </p>
-      )}
       <div className={`boardsplit${ticketRoute ? " withdetail" : ""}`}>
         {layoutOn && layout === "apart" ? (
           <div className="repokanbans">

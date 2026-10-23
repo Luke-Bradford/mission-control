@@ -6,7 +6,7 @@ import { FLIGHT_THREAD, Threads } from "../comms/Threads.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { useSessionScope } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 /** Where `.cgrid` stacks to one column (hud.css). */
@@ -18,7 +18,7 @@ export const ITEM_GONE = "That item is no longer waiting.";
 export function Comms({ item }: { item: string | null }) {
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
-  const [session] = useSession();
+  const { inView: matchesSession } = useSessionScope();
   const [selected, setSelected] = useState(FLIGHT_THREAD);
 
   // A link to one item opens its panel once the list is known; a key that has gone opens nothing.
@@ -45,7 +45,7 @@ export function Comms({ item }: { item: string | null }) {
   };
 
   const rows = crew?.rows ?? [];
-  const inView = rows.filter((r) => inSession(session, r.repoId));
+  const inView = rows.filter((r) => matchesSession(r));
   const row = inView.find((r) => r.id === selected) ?? null;
 
   return (

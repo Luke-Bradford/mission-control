@@ -66,6 +66,7 @@ export interface CardProps {
   pr: PullRequestView | null;
   /** Something on this card waits on you. */
   mine: boolean;
+  unacked: boolean;
   /** A Done card's outcome. */
   outcome: "Merged" | "Closed";
   /** A Done card's age, already formatted (`today`, `3d ago`, `—`); "" on other cards. */
@@ -99,6 +100,7 @@ export const Card = memo(function Card({
   reviewer,
   pr,
   mine,
+  unacked,
   outcome,
   when,
   statusOutOfDate,
@@ -197,13 +199,13 @@ export const Card = memo(function Card({
     // biome-ignore lint/a11y/useKeyWithClickEvents: the title link is the keyboard route
     // biome-ignore lint/a11y/noStaticElementInteractions: as above; the card is a container
     <div
-      className={`kcard${mine ? " pulse-warn" : worked ? " pulse-ok" : ""}`}
+      className={`kcard${unacked ? " pulse-warn" : worked ? " pulse-ok" : ""}`}
       title={title}
       data-card={ticketRef(item)}
       onClick={click}
     >
       <div className="kref">
-        {mine && <Lamp kind="warn" pulse label="Needs you" />}
+        {mine && <Lamp kind="warn" pulse={unacked} label="Needs you" />}
         {worked && <Lamp kind="ok" pulse label="Being worked on" />}
         <RepoRef repoId={item.repoId} number={item.issueNumber} bare={!showRepo} url={item.url} />
         {item.priority && <span className="p">{item.priority}</span>}

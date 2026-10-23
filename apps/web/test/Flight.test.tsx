@@ -542,7 +542,7 @@ describe("FLIGHT page", () => {
     await screen.findByRole("list", { name: "Crew runs" });
     act(() => setSession("site-builder"));
     expect(await screen.findByText(NO_CREW_RUNS)).toBeTruthy();
-    act(() => setSession("shop-app"));
+    act(() => setSession("s1"));
     expect(await screen.findByRole("list", { name: "Crew runs" })).toBeTruthy();
   });
 
