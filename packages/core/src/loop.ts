@@ -216,6 +216,9 @@ export const NEW_LOOP: RunLoop = {
 /** A run in review leaves its seat when the session has a review seat. */
 export const asideEventText = (call: string): string =>
   `in review; ${call} is free for its next ticket`;
+/** A run in CI leaves its seat once its PR is open and its turn has ended. */
+export const asideInCiEventText = (call: string): string =>
+  `in CI; ${call} is free for its next ticket`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
@@ -248,7 +251,7 @@ export interface LoopSnapshot {
     /** The seat row holds this unended run. */
     holdsRun: boolean;
   };
-  /** The run's session has a review seat, so the run may leave its seat in review. */
+  /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean } | null;
@@ -803,14 +806,14 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
   );
 }
 
-/** Whether the run in review may leave its seat now. */
+/** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat, pushed, pr } = s;
   return (
     s.asideOk &&
     !loop.aside &&
     s.ended === null &&
-    loop.phase === "review" &&
+    (loop.phase === "review" || loop.phase === "ci") &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn &&
