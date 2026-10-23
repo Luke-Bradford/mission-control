@@ -14,6 +14,7 @@ import {
   BLOCKING_SEVERITIES,
   blockedNoteKey,
   CI_FAILED_TEXT,
+  CI_RERUN_FAILED_TEXT,
   cardMark,
   carriedFrom,
   cleanupBranchNoteKey,
@@ -49,10 +50,12 @@ import {
   type RepoRules,
   type ReviewFact,
   type ReviewRow,
+  RULING_PARK,
   type Run,
   type RunLoop,
   readyMarkedText,
   reconcile,
+  rerunFailedKey,
   reviewCarriedText,
   reviewDroppedText,
   reviewEventKey,
@@ -81,6 +84,7 @@ import {
   MERGE_HEAD_MOVED,
   NO_FAILED_RUN,
   type Publisher,
+  type UpdateBranchResult,
 } from "./publish.ts";
 import { accountAtStop, isTransientStart, seatMayTake } from "./queue.ts";
 import type { RepoRulesError } from "./rules.ts";
@@ -151,10 +155,35 @@ export interface Engine {
     by?: "CAPCOM" | "FLIGHT",
     opts?: { kinds?: readonly string[] },
   ): Promise<boolean>;
+  /**
+   * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
+   * on the ruled sha (once per sha; `mayRerun` false: not now, FLIGHT's hourly cap is used); later
+   * calls read the result: a pass accepts the ruling and the run goes to review, a fail sends the
+   * author the failure.
+   */
+  acceptRuling(runId: string, opts: { mayRerun: boolean }): Promise<AcceptRulingResult>;
+  /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
+  syncMain(runId: string): Promise<SyncMainResult>;
+  /** The paths the run's worktree holds uncommitted; null when it has no worktree or it cannot be read. */
+  uncommitted(runId: string): Promise<string[] | null>;
   status(): { on: boolean; note: string | null };
   /** How many CI excerpts are held for a busy seat (a test seam). */
   excerptsHeld(): number;
 }
+
+export type AcceptRulingResult =
+  | { kind: "rerun"; sha: string }
+  | { kind: "pending"; sha: string }
+  | { kind: "accepted"; sha: string }
+  | { kind: "refused"; sha: string }
+  | { kind: "capped" }
+  | { kind: "not"; text: string };
+
+export type SyncMainResult =
+  | { kind: "merged"; sha: string; mainSha: string }
+  | { kind: "conflict"; files: string[] }
+  | { kind: "current"; mainSha: string }
+  | { kind: "refused"; text: string };
 
 /** onChain key for superviseReviews (never a run id). */
 const REVIEWS_CHAIN = "\0reviews";
@@ -235,6 +264,20 @@ export function createEngine(deps: EngineDeps): Engine {
       if (chains.get(runId) === p) chains.delete(runId);
     });
     return p;
+  }
+
+  /** Like `onChain`, resolving to what `fn` returned (`fallback` when it threw). */
+  function onChainResult<T>(runId: string, fallback: T, fn: () => Promise<T>): Promise<T> {
+    let result = fallback;
+    return onChain(runId, async () => {
+      result = await fn();
+    }).then(() => result);
+  }
+
+  /** The run's own worktree: the aside run's, or its seat's while the seat holds it. */
+  function worktreeOf(run: Run, loop: RunLoop): string | null {
+    const seatRow = supervisor.seat(run.agentId);
+    return loop.aside?.worktree ?? (seatRow?.runId === run.id ? (seatRow.worktree ?? null) : null);
   }
 
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
@@ -421,6 +464,48 @@ export function createEngine(deps: EngineDeps): Engine {
     parked: boolean;
   }
 
+  /**
+   * What a merge of main into the run's branch (`r`, from `updateBranch`) changed, stored in `cur`
+   * with its Activity rows: a merge moves the run to ci, a conflict back to the author.
+   */
+  function branchUpdated(
+    run: Run,
+    cur: RunLoop,
+    mainSha: string,
+    r: Extract<UpdateBranchResult, { ok: true; kind: "merged" | "conflict" }>,
+    at: number,
+  ): void {
+    if (r.kind === "merged") {
+      // as a report moves the run to ci: the new commit is pushed, then judged afresh
+      cur.phase = "ci";
+      cur.pushFor = r.sha;
+      cur.pushStartedAt = at;
+      // a chain of merges collapses to the sha that was reviewed
+      cur.carry = r.prSame
+        ? { from: cur.carry?.to === r.parent ? cur.carry.from : r.parent, to: r.sha }
+        : null;
+      store.setRunLoop(run.id, cur);
+      store.addLoopEvent(`${run.id}:update:${r.sha}`, run.id, mergedMainText(mainSha), at);
+      const from = carriedFrom(cur.carry, cur.reviewWaivedSha, r.sha);
+      if (
+        from !== null &&
+        reviewFor(store.reviewsOfRun(run.id).map(reviewFact), cur.epoch, r.sha, from) !== null
+      ) {
+        store.addLoopEvent(`${run.id}:carry:${r.sha}`, run.id, reviewCarriedText(from, r.sha), at);
+      }
+    } else {
+      cur.phase = "working";
+      cur.mainMerge = { mainSha, files: r.files };
+      store.setRunLoop(run.id, cur);
+      store.addLoopEvent(
+        `${run.id}:update-conflict:${mainSha}`,
+        run.id,
+        mainConflictText(mainSha, r.files.length),
+        at,
+      );
+    }
+  }
+
   /** The actions only a `merge` workspace takes, whatever the loop planned. */
   const MERGE_STEP_KINDS: ReadonlySet<string> = new Set([
     "mark-ready",
@@ -552,7 +637,8 @@ export function createEngine(deps: EngineDeps): Engine {
         const excerpt = held ?? (await publisher.ciExcerpt(repo?.github ?? "", a.sha));
         // only a real excerpt is kept: a failed read or an empty answer is asked for again
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
-        const text = fillLoopText(CI_FAILED_TEXT, { sha7: a.sha.slice(0, 7) }) + excerpt;
+        const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
+        const text = fillLoopText(head, { sha7: a.sha.slice(0, 7) }) + excerpt;
         const sent = await supervisor.send(run.id, a.key, text);
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
@@ -704,11 +790,8 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "update-branch": {
-        // the run's own worktree: the aside run's, or its seat's while the seat holds it
-        const seatRow = supervisor.seat(run.agentId);
-        const worktree =
-          cur.aside?.worktree ?? (seatRow?.runId === run.id ? seatRow.worktree : null);
-        if (worktree === null || worktree === undefined) return;
+        const worktree = worktreeOf(run, cur);
+        if (worktree === null) return;
         const r = await publisher.updateBranch(live(), a.mainSha, worktree);
         if (!r.ok) return refused(r);
         if (r.kind === "wait") return;
@@ -716,40 +799,7 @@ export function createEngine(deps: EngineDeps): Engine {
         cur.lastRefusal = null;
         lastTransient.delete(run.id);
         out.again = true;
-        if (r.kind === "merged") {
-          // as a report moves the run to ci: the new commit is pushed, then judged afresh
-          cur.phase = "ci";
-          cur.pushFor = r.sha;
-          cur.pushStartedAt = at;
-          // a chain of merges collapses to the sha that was reviewed
-          cur.carry = r.prSame
-            ? { from: cur.carry?.to === r.parent ? cur.carry.from : r.parent, to: r.sha }
-            : null;
-          store.setRunLoop(run.id, cur);
-          store.addLoopEvent(`${run.id}:update:${r.sha}`, run.id, mergedMainText(a.mainSha), at);
-          const from = carriedFrom(cur.carry, cur.reviewWaivedSha, r.sha);
-          if (
-            from !== null &&
-            reviewFor(store.reviewsOfRun(run.id).map(reviewFact), cur.epoch, r.sha, from) !== null
-          ) {
-            store.addLoopEvent(
-              `${run.id}:carry:${r.sha}`,
-              run.id,
-              reviewCarriedText(from, r.sha),
-              at,
-            );
-          }
-        } else {
-          cur.phase = "working";
-          cur.mainMerge = { mainSha: a.mainSha, files: r.files };
-          store.setRunLoop(run.id, cur);
-          store.addLoopEvent(
-            `${run.id}:update-conflict:${a.mainSha}`,
-            run.id,
-            mainConflictText(a.mainSha, r.files.length),
-            at,
-          );
-        }
+        branchUpdated(run, cur, a.mainSha, r, at);
         return;
       }
       case "mark-ready": {
@@ -971,8 +1021,10 @@ export function createEngine(deps: EngineDeps): Engine {
     if (cur.pushFor !== stored.pushFor) lastTransient.delete(run.id);
     // a run's held excerpts are for its current failure only, and none once it has ended
     for (const key of [...excerpts.keys()]) {
-      if (!key.startsWith(`ci:${run.id}:`)) continue;
-      const current = key === `ci:${run.id}:${cur.ciFailedSha}`;
+      if (!key.startsWith(`ci:${run.id}:`) && !key.startsWith(`rerun:${run.id}:`)) continue;
+      const current =
+        key === `ci:${run.id}:${cur.ciFailedSha}` ||
+        key === rerunFailedKey(run.id, cur.ciFailedSha ?? "");
       // (in ci, a new report is in flight: the line about the old failure is moot)
       if (run.endedAt !== null || cur.phase === "ci" || !current) excerpts.delete(key);
     }
@@ -1449,6 +1501,153 @@ export function createEngine(deps: EngineDeps): Engine {
         lifted = true;
         await pass(run.id);
       }).then(() => lifted);
+    },
+
+    acceptRuling(runId, opts) {
+      const not = (text: string): AcceptRulingResult => ({ kind: "not", text });
+      return onChainResult(runId, not("the loop engine is off"), async () => {
+        if (!live()) return not("the loop engine is off");
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (
+          run == null ||
+          loop == null ||
+          run.endedAt !== null ||
+          loop.phase !== "parked" ||
+          loop.parked?.kind !== RULING_PARK ||
+          loop.parked.ended
+        ) {
+          return not("the run is not parked on a CI ruling");
+        }
+        const sha = loop.ciFailedSha;
+        const pr = findPr(run, loop);
+        if (
+          sha === null ||
+          store.runPush(run.id)?.sha !== sha ||
+          pr?.state !== "open" ||
+          pr.headSha !== sha
+        ) {
+          return not("the ruled commit is no longer its open PR's head");
+        }
+        const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
+        const at = now();
+        const rerun = loop.rerun?.sha === sha ? loop.rerun : null;
+        if (rerun === null) {
+          if (!opts.mayRerun) return { kind: "capped" };
+          const r = await publisher.rerunFailed(github, sha);
+          if (!r.ok) return not(r.text);
+          store.setRunLoop(run.id, { ...loop, rerun: { sha, runs: r.runs, outcome: "pending" } });
+          store.addLoopEvent(
+            `${run.id}:rerun:${sha}`,
+            run.id,
+            `FLIGHT re-ran the failed CI jobs on ${sha.slice(0, 7)}`,
+            at,
+          );
+          bus.emit("agents");
+          return { kind: "rerun", sha };
+        }
+        if (rerun.outcome !== "pending") {
+          return not(
+            `${sha.slice(0, 7)} was already re-run once; pass this ruling to the operator`,
+          );
+        }
+        const state = await publisher.rerunState(github, sha, rerun.runs);
+        if (!state.ok) return not(state.text);
+        if (state.outcome === "pending") return { kind: "pending", sha };
+        const passed = state.outcome === "passed";
+        const next: RunLoop = {
+          ...loop,
+          epoch: loop.epoch + 1,
+          parked: null,
+          // review, though the stored poll may still say failing: only the author's failure is cleared
+          phase: passed ? "review" : "working",
+          ciFails: 0,
+          ciFailedSha: passed ? null : sha,
+          transient: 0,
+          lastRefusal: null,
+          unparkedAt: at,
+          rerun: { ...rerun, outcome: state.outcome },
+        };
+        store.setRunLoop(run.id, next);
+        store.addLoopEvent(
+          `${run.id}:rerun:${sha}:${state.outcome}`,
+          run.id,
+          passed
+            ? `CI passed on the re-run of ${sha.slice(0, 7)}; FLIGHT accepted the ruling`
+            : `CI failed again on the re-run of ${sha.slice(0, 7)}`,
+          at,
+        );
+        bus.emit("agents");
+        if (passed) deps.pollGithub?.();
+        await pass(run.id);
+        return { kind: passed ? "accepted" : "refused", sha };
+      });
+    },
+
+    syncMain(runId) {
+      const refused = (text: string): SyncMainResult => ({ kind: "refused", text });
+      return onChainResult(runId, refused("the loop engine is off"), async () => {
+        if (!live()) return refused("the loop engine is off");
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (run == null || loop == null || run.endedAt !== null) {
+          return refused("Mission Control is not driving this run");
+        }
+        if (config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge") {
+          return refused("its repo is a draft workspace");
+        }
+        const parkedOnConflict =
+          loop.phase === "parked" && loop.parked?.kind === "conflict" && !loop.parked.ended;
+        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict) {
+          return refused("the run is not in CI or review, or parked on a conflict");
+        }
+        if (loop.mainMerge) return refused("a merge of main already waits on the seat");
+        const pushed = store.runPush(run.id);
+        if (pushed === null || store.newestRunCommit(run.id)?.sha !== pushed.sha) {
+          return refused("the branch has unpushed commits");
+        }
+        const worktree = worktreeOf(run, loop);
+        if (worktree === null) return refused("the run has no worktree");
+        const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
+        if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) {
+          return refused("its seat is in a turn");
+        }
+        const g = await publisher.gateFacts(run, pushed.sha, null);
+        if (!g.ok) return refused(g.text);
+        const mainSha = g.facts.mainSha;
+        if (g.facts.containsMain) return { kind: "current", mainSha };
+        const at = now();
+        const cur: RunLoop = { ...loop };
+        const r = await publisher.updateBranch({ ...run, loop: cur }, mainSha, worktree);
+        if (!r.ok) return refused(r.text);
+        if (r.kind === "wait") return refused("the worktree has uncommitted changes");
+        if (parkedOnConflict) {
+          cur.epoch += 1;
+          cur.parked = null;
+          cur.unparkedAt = at;
+          store.addLoopEvent(`${run.id}:resumed:${cur.epoch}`, run.id, "resumed by FLIGHT", at);
+        }
+        cur.transient = 0;
+        cur.lastRefusal = null;
+        lastTransient.delete(run.id);
+        branchUpdated(run, cur, mainSha, r, at);
+        bus.emit("agents");
+        await pass(run.id);
+        return r.kind === "merged"
+          ? { kind: "merged", sha: r.sha, mainSha }
+          : { kind: "conflict", files: r.files };
+      });
+    },
+
+    uncommitted(runId) {
+      return onChainResult<string[] | null>(runId, null, async () => {
+        const run = store.run(runId);
+        if (run == null || run.endedAt !== null) return null;
+        const worktree = worktreeOf(run, run.loop ?? NEW_LOOP);
+        if (worktree === null) return null;
+        const paths = await publisher.worktreeChanges(run, worktree);
+        return Array.isArray(paths) ? paths : null;
+      });
     },
 
     excerptsHeld: () => excerpts.size,

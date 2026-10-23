@@ -474,6 +474,119 @@ describe("ciExcerpt", () => {
   });
 });
 
+describe("rerunFailed and rerunState", () => {
+  type R = { databaseId: number; conclusion: string; attempt: number; status?: string };
+  const runs =
+    (...r: R[]) =>
+    () => ({ code: 0, stdout: JSON.stringify(r) });
+
+  it("re-runs only the failed runs, and returns each one's attempt from before", async () => {
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "failure", attempt: 1 },
+        { databaseId: 12, conclusion: "success", attempt: 1 },
+        { databaseId: 13, conclusion: "timed_out", attempt: 2 },
+      ),
+      () => ({ code: 0, stdout: "" }),
+      () => ({ code: 0, stdout: "" }),
+    ];
+    const r = await createPublisher(deps()).rerunFailed("o/mc", SHA);
+    expect(r).toEqual({
+      ok: true,
+      runs: [
+        { id: 11, attempt: 1 },
+        { id: 13, attempt: 2 },
+      ],
+    });
+    expect(ghCalls[0]).toEqual([
+      "run",
+      "list",
+      "--repo=o/mc",
+      `--commit=${SHA}`,
+      "--json=databaseId,conclusion,attempt",
+    ]);
+    expect(ghCalls.slice(1)).toEqual([
+      ["run", "rerun", "--repo=o/mc", "11", "--failed"],
+      ["run", "rerun", "--repo=o/mc", "13", "--failed"],
+    ]);
+  });
+
+  it("refuses when no run failed, and when gh cannot list", async () => {
+    ghAnswers = [runs({ databaseId: 12, conclusion: "success", attempt: 1 })];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toMatchObject({
+      ok: false,
+      text: NO_FAILED_RUN,
+    });
+    ghAnswers = [() => ({ code: 1, stdout: "", stderr: "boom" })];
+    expect(await createPublisher(deps()).rerunFailed("o/mc", SHA)).toMatchObject({
+      ok: false,
+      transient: true,
+    });
+    expect(ghCalls).toHaveLength(2);
+  });
+
+  it("reads a re-run as pending until its attempt is higher and it is completed", async () => {
+    const saved = [{ id: 11, attempt: 1 }];
+    const state = async (...r: R[]) => {
+      ghAnswers = [runs(...r)];
+      return createPublisher(deps()).rerunState("o/mc", SHA, saved);
+    };
+    expect(
+      await state({ databaseId: 11, conclusion: "failure", attempt: 1, status: "completed" }),
+    ).toEqual({
+      ok: true,
+      outcome: "pending",
+    });
+    expect(
+      await state({ databaseId: 11, conclusion: "", attempt: 2, status: "in_progress" }),
+    ).toEqual({
+      ok: true,
+      outcome: "pending",
+    });
+    expect(
+      await state({ databaseId: 11, conclusion: "success", attempt: 2, status: "completed" }),
+    ).toEqual({
+      ok: true,
+      outcome: "passed",
+    });
+    expect(
+      await state({ databaseId: 11, conclusion: "failure", attempt: 2, status: "completed" }),
+    ).toEqual({
+      ok: true,
+      outcome: "failed",
+    });
+    expect(ghCalls[0]).toEqual([
+      "run",
+      "list",
+      "--repo=o/mc",
+      `--commit=${SHA}`,
+      "--json=databaseId,status,conclusion,attempt",
+    ]);
+  });
+
+  it("is failed if any run failed, and a run that cannot be found is a transient refusal", async () => {
+    const saved = [
+      { id: 11, attempt: 1 },
+      { id: 13, attempt: 1 },
+    ];
+    ghAnswers = [
+      runs(
+        { databaseId: 11, conclusion: "skipped", attempt: 2, status: "completed" },
+        { databaseId: 13, conclusion: "cancelled", attempt: 2, status: "completed" },
+      ),
+    ];
+    expect(await createPublisher(deps()).rerunState("o/mc", SHA, saved)).toEqual({
+      ok: true,
+      outcome: "failed",
+    });
+    ghAnswers = [runs({ databaseId: 11, conclusion: "success", attempt: 2, status: "completed" })];
+    expect(await createPublisher(deps()).rerunState("o/mc", SHA, saved)).toMatchObject({
+      ok: false,
+      transient: true,
+    });
+  });
+});
+
 describe("gh maxBuffer", () => {
   const emit = ["-e", "process.stdout.write('x'.repeat(2_000_000))"];
 

@@ -235,6 +235,7 @@ describe("FLIGHT's PR list", () => {
         ref: "mc#7",
         pr: 7,
         seat: "",
+        runId: "",
         ready: false,
         state: "open",
         headSha: "sha7",
@@ -750,6 +751,7 @@ describe("the FLIGHT watcher", () => {
 describe("wakeSummary", () => {
   const s = (over: Partial<FlightSeatState>): FlightSeatState => ({
     id: "guido-1",
+    runId: null,
     call: "GUIDO-1",
     role: "GUIDO",
     loop: "build",
@@ -772,6 +774,7 @@ describe("wakeSummary", () => {
     ref: "mc#1",
     pr: 1,
     seat: "guido-1",
+    runId: "r-1",
     ready: false,
     state: "open" as const,
     headSha: null,
@@ -782,6 +785,7 @@ describe("wakeSummary", () => {
     time: "12:00",
     repo: "mc",
     seats: [],
+    aside: [],
     questions: [],
     tickets: [],
     prs: [],

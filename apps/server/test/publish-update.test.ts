@@ -133,6 +133,29 @@ describe("prDiffKey", () => {
   });
 });
 
+describe("worktreeChanges (real git)", () => {
+  it("is [] for a clean worktree, and lists changed, staged and new files", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    expect(await publisher().worktreeChanges(run(), worktree)).toEqual([]);
+    write(worktree, "apps/a.ts", "edited\n");
+    write(worktree, "apps/new.ts", "new\n");
+    git(worktree, "add", "apps/new.ts");
+    write(worktree, "apps/deep/loose.ts", "loose\n");
+    expect(((await publisher().worktreeChanges(run(), worktree)) as string[]).sort()).toEqual([
+      "apps/a.ts",
+      "apps/deep/loose.ts",
+      "apps/new.ts",
+    ]);
+  });
+
+  it("refuses a path that is not one of the clone's worktrees", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    const r = await publisher().worktreeChanges(run(), join(dir, "elsewhere"));
+    expect(r).toMatchObject({ ok: false });
+  });
+});
+
 describe("updateBranch (real git)", () => {
   it("a clean merge makes an engine commit with both parents, and records it", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
