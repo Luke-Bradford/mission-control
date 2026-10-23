@@ -4,6 +4,9 @@
  * useSyncExternalStore.
  */
 import {
+  ACTIVITY_LIMIT,
+  ACTIVITY_WINDOW_MS,
+  type ActivityRow,
   type CrewRow,
   GUARD_WINDOW_DAYS,
   type PullRequestView,
@@ -244,7 +247,19 @@ class Hub {
     this.set(e, { ...e.snap, loading: true });
     let next: Resource<unknown>;
     try {
-      next = { data: await apiGet<unknown>(e.path), error: null, loading: false };
+      const previous =
+        e.path === RESOURCES.activity.path ? (e.snap.data as ActivityRow[] | undefined) : undefined;
+      // Re-read the newest millisecond as well: several rows can share a timestamp.
+      const since = previous === undefined ? undefined : (previous[0]?.at ?? 1);
+      const path = since === undefined ? e.path : `${e.path}?since=${Math.max(0, since - 1)}`;
+      let data = await apiGet<unknown>(path);
+      if (previous && since !== undefined) {
+        data = [...(data as ActivityRow[]), ...previous.filter((r) => r.at < since)]
+          .filter((r) => r.at >= Date.now() - ACTIVITY_WINDOW_MS)
+          .sort((a, b) => b.at - a.at)
+          .slice(0, ACTIVITY_LIMIT);
+      }
+      next = { data, error: null, loading: false };
     } catch (err) {
       // Keep the last good data on screen; show the error beside it.
       const error = err instanceof Error ? err : new Error(String(err));

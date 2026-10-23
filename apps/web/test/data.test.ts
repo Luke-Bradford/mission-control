@@ -355,3 +355,55 @@ describe("browser notification resources", () => {
     off();
   });
 });
+
+it("merges activity deltas and replaces timestamp ties without duplicating rows", async () => {
+  hub.clear();
+  const at = Date.now();
+  const row = (time: number, text: string) => ({ at: time, kind: "state", who: "seat", text });
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify([row(at, "one"), row(at - 1, "old")])))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify([row(at + 1, "new"), row(at, "one"), row(at, "tie")])),
+    )
+    .mockResolvedValueOnce(new Response(JSON.stringify([row(at + 1, "new")])));
+  vi.stubGlobal("fetch", fetchMock);
+  const off = hub.subscribe(RESOURCES.activity.path, "agents", () => {});
+  try {
+    await settle();
+    hub.refetchTopic("agents");
+    await settle();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/activity?since=${at - 1}`);
+    expect(hub.snapshot(RESOURCES.activity.path, "agents").data).toEqual([
+      row(at + 1, "new"),
+      row(at, "one"),
+      row(at, "tie"),
+      row(at - 1, "old"),
+    ]);
+    hub.refetchAll();
+    await settle();
+    expect(hub.snapshot(RESOURCES.activity.path, "agents").data).toHaveLength(4);
+  } finally {
+    off();
+    hub.clear();
+  }
+});
+
+it("requests a delta even when the first activity load is empty", async () => {
+  hub.clear();
+  const fetchMock = vi.fn(async () => new Response("[]"));
+  vi.stubGlobal("fetch", fetchMock);
+  const off = hub.subscribe(RESOURCES.activity.path, "agents", () => {});
+  try {
+    await settle();
+    hub.refetchTopic("agents");
+    await settle();
+    expect(fetchMock.mock.calls.map((c) => (c as unknown[])[0])).toEqual([
+      "/api/activity",
+      "/api/activity?since=0",
+    ]);
+  } finally {
+    off();
+    hub.clear();
+  }
+});

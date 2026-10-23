@@ -163,7 +163,12 @@ export function lockLabel(config: CcConfig, seatId: string, command: string): st
  * board Status moves that finished, CI checks, commits, test-lock turns and guard denials.
  * Test-lock turns only include holds started in the window, even if an older hold ended in it.
  */
-export function activity(config: CcConfig, store: Store, now: number): ActivityRow[] {
+export function activity(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  options: { since?: number; limit?: number } = {},
+): ActivityRow[] {
   const since = now - ACTIVITY_WINDOW_MS;
   const known = new Set<AgentId>(agentIds(config));
   const events: ActivityRow[] = [];
@@ -342,7 +347,10 @@ export function activity(config: CcConfig, store: Store, now: number): ActivityR
       }
     }
   }
-  return events.sort((a, b) => b.at - a.at).slice(0, ACTIVITY_LIMIT);
+  return events
+    .filter((e) => options.since === undefined || e.at > options.since)
+    .sort((a, b) => b.at - a.at)
+    .slice(0, options.limit ?? (options.since === undefined ? ACTIVITY_LIMIT : undefined));
 }
 
 /**

@@ -9,6 +9,8 @@ import { itemParam, withItemParam } from "../router.ts";
 import { BUILD_STATUS_KEY, DOCK_KEY, readBool, writeBool } from "../storage.ts";
 import { store, useStore } from "./store.ts";
 
+export const ITEM_GONE = "That item is no longer waiting.";
+
 // ---------- overlay stack ----------
 
 const stack: { id: string; close: () => void }[] = [];
