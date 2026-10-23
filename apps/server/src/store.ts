@@ -1116,6 +1116,18 @@ export class Store {
     );
   }
 
+  /** Whether a run is still going on the ticket (`repo#number`); a review run does not count. */
+  hasLiveRunOnTicket(repoId: RepoId, ticket: string): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM runs WHERE repo_id = ? AND ticket = ? AND status = 'running'
+             AND ended_at IS NULL AND review_id IS NULL LIMIT 1`,
+        )
+        .get(repoId, ticket) !== undefined
+    );
+  }
+
   /** Whether another run on the same ticket started after this one. */
   hasNewerRunOnTicket(run: Run): boolean {
     if (run.ticket === null) return false;

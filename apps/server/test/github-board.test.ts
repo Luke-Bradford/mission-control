@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { BoardItem, PullRequestView, Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gql, GqlError, GqlTransportError } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
-import { BOARD_IDS_TTL_MS, clearBoardIds, moveCard } from "../src/github-board.ts";
+import { BOARD_IDS_TTL_MS, clearBoardIds, followPrs, moveCard } from "../src/github-board.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = 1_000_000_000;
@@ -345,5 +346,127 @@ describe("moveCard", () => {
     now += BOARD_IDS_TTL_MS + 1;
     await move(b.gql, { column: "In progress" });
     expect(b.of("projectV2(number")).toHaveLength(3);
+  });
+});
+
+describe("followPrs", () => {
+  const card = (status: string): BoardItem => ({
+    repoId: "mc",
+    issueNumber: 7,
+    title: "t",
+    status,
+    state: (STATUS_MAP as Record<string, BoardItem["state"]>)[status] ?? "planned",
+    labels: [],
+    assignees: [],
+    priority: null,
+    updatedAt: NOW,
+    url: "u",
+    stage: null,
+    owner: null,
+    parent: null,
+    subIssues: null,
+    blockedBy: [],
+    milestone: null,
+    size: null,
+    closed: false,
+    prioritySource: null,
+    createdAt: 1,
+    itemId: null,
+    projectId: null,
+  });
+  const pr = (over: Partial<PullRequestView> = {}): PullRequestView => ({
+    repoId: "mc",
+    number: 91,
+    title: "t",
+    url: "u",
+    branch: "work/7-x",
+    ticket: "mc#7",
+    state: "open",
+    isDraft: false,
+    review: null,
+    ci: null,
+    createdAt: 1,
+    updatedAt: 1,
+    mergedAt: null,
+    headSha: null,
+    mergeable: null,
+    ...over,
+  });
+  const run = (over: Partial<Run> = {}): Run => ({
+    id: "r1",
+    agentId: "a1",
+    repoId: "mc",
+    seq: 1,
+    startedAt: 1000,
+    endedAt: null,
+    status: "running",
+    sessionId: null,
+    model: null,
+    branch: null,
+    ticket: "mc#7",
+    costUsd: null,
+    tokens: null,
+    transcriptPath: "/x/y.log",
+    prs: [],
+    summary: null,
+    reviewId: null,
+    ...over,
+  });
+  /** A board with one card in `status` and the fake GitHub to match, then one follow. */
+  async function follow(status: string, optionId: string, prs: PullRequestView[]) {
+    const b = fakeBoard({ itemStatus: optionId });
+    store.replaceBoard("mc", [card(status)]);
+    store.upsertPullRequests("mc", prs, NOW);
+    await followPrs({ gql: b.gql, store, config, now: () => now }, "mc");
+    return b;
+  }
+
+  it("moves a Backlog card to In review for an open PR no run owns", async () => {
+    const b = await follow("", "O_todo", [pr()]);
+    expect(b.state.card).toBe("O_review");
+    expect(store.boardMoves(0)).toMatchObject([
+      { runId: "pr:mc#91", issue: 7, column: "In review", state: "done" },
+    ]);
+  });
+
+  it("leaves a card that is already later alone", async () => {
+    const b = await follow("Ready for QA", "O_qa", [pr()]);
+    expect(b.mutations()).toHaveLength(0);
+    const done = await follow("Done", "O_done", [pr()]);
+    expect(done.mutations()).toHaveLength(0);
+  });
+
+  it("moves the card to Done when the PR merged", async () => {
+    const b = await follow("In Review", "O_review", [pr({ state: "merged", mergedAt: 5 })]);
+    expect(b.state.card).toBe("O_done");
+  });
+
+  it("moves an In review card back to Ready when the PR closed unmerged", async () => {
+    const b = await follow("In Review", "O_review", [pr({ state: "closed" })]);
+    expect(b.state.card).toBe("O_todo");
+    const other = await follow("Blocked", "O_blocked", [pr({ state: "closed" })]);
+    expect(other.mutations()).toHaveLength(0);
+  });
+
+  it("does not send a closed PR's card back while another PR on the ticket is open", async () => {
+    const b = await follow("In Review", "O_review", [
+      pr({ number: 90, state: "closed" }),
+      pr({ number: 91 }),
+    ]);
+    expect(b.mutations()).toHaveLength(0);
+  });
+
+  it("leaves a card whose run is live to the engine", async () => {
+    store.upsertRun(run());
+    const b = await follow("", "O_todo", [pr()]);
+    expect(b.mutations()).toHaveLength(0);
+  });
+
+  it("moves nothing in a draft repo", async () => {
+    const b = fakeBoard();
+    store.replaceBoard("dr", [{ ...card(""), repoId: "dr" }]);
+    store.upsertPullRequests("dr", [pr({ repoId: "dr", ticket: "dr#7" })], NOW);
+    await followPrs({ gql: b.gql, store, config, now: () => now }, "dr");
+    expect(b.mutations()).toHaveLength(0);
   });
 });
