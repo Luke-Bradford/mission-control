@@ -4,6 +4,7 @@ import {
   type AttentionItem,
   type ChangedFiles,
   type CommsEvent,
+  type CrewChanges,
   type CrewLoop,
   type CrewRow,
   DEFAULT_PROFILES,
@@ -33,6 +34,7 @@ import { settled, stubFetch } from "./fetchStub.ts";
 import {
   boardItem,
   CONFIG,
+  CREW_CONFIG,
   crewRow,
   HOUR,
   item,
@@ -2506,7 +2508,7 @@ describe("Agent page: side tabs", () => {
       "✓#3349 ",
     ]);
     expect(side.textContent).toContain(
-      "Each ticket starts as a fresh run on its own branch. Earlier tickets' conversations aren't carried over.",
+      "Each ticket starts as a fresh run on its own branch, with the ticket, the repo's docs and this lane's notes. Earlier tickets' conversations aren't carried over.",
     );
   });
 
@@ -2737,6 +2739,292 @@ const bodyOf = (fn: ReturnType<typeof stub>, path: string) => {
 };
 const seatLoaded = () => screen.findByText("GUIDO-1");
 const idleSeat = () => seat({ hudState: "idle" });
+
+describe("Agent page: header and tile mockup", () => {
+  const changes: CrewChanges = {
+    sessions: [
+      {
+        id: "s1",
+        seats: [
+          {
+            id: "guido-1",
+            role: "GUIDO",
+            accountId: "claude-main",
+            model: "sonnet",
+            area: ["apps/web/**"],
+          },
+          {
+            id: "inco-2",
+            role: "INCO",
+            accountId: "codex-main",
+            model: "codex",
+            effort: "high",
+            area: ["docs/**"],
+          },
+        ],
+      },
+    ],
+    pending: [],
+    restartNeeded: [],
+    error: null,
+    checkedAt: NOW,
+  };
+  const removalRoutes = {
+    // Applied config still has RETRO-1; config.yaml has INCO-2 and GUIDO-1's new area.
+    "/api/config": CREW_CONFIG,
+    "/api/crew/changes": changes,
+    "POST /api/crew/sessions/s1/seats": { backup: "/tmp/config.bak", changes },
+  };
+
+  it.each(["idle", "stopped"] as const)(
+    "Remove confirms for a %s seat and preserves the other seat's settings",
+    async (hudState) => {
+      const f = stub({ rows: [seat({ hudState })], extra: SEAT_ROUTES(removalRoutes) });
+      const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+      render(<Agent id="guido-1" />);
+      const remove = await screen.findByRole("button", { name: "Remove" });
+      await settled(f, "/api/crew/changes");
+      expect(screen.queryByText("Not in config.yaml")).toBeNull();
+      fireEvent.click(remove);
+      expect(ask).toHaveBeenCalledWith(
+        "Remove GUIDO-1 from s/s1? Its area will be freed when its run ends.",
+      );
+      expect(bodyOf(f, "/api/crew/sessions/s1/seats")).toBeUndefined();
+      fireEvent.click(remove);
+      await vi.waitFor(() =>
+        expect(JSON.parse(bodyOf(f, "/api/crew/sessions/s1/seats") as string)).toEqual({
+          base: changes.sessions[0]?.seats,
+          seats: [changes.sessions[0]?.seats[1]],
+        }),
+      );
+      ask.mockRestore();
+    },
+  );
+
+  it.each([
+    ["idle", true],
+    ["stopped", true],
+    ["running", false],
+    ["stalled", false],
+    ["blocked", false],
+    ["waiting", false],
+    ["parked", false],
+    ["error", false],
+  ] as const)("Remove visibility for a %s seat", async (hudState, visible) => {
+    stub({ rows: [seat({ hudState })], extra: SEAT_ROUTES(removalRoutes) });
+    render(<Agent id="guido-1" />);
+    await seatLoaded();
+    expect(screen.queryByRole("button", { name: "Remove" }) !== null).toBe(visible);
+  });
+
+  it.each([
+    { id: "s1", seats: [] },
+    { id: "other-session", seats: changes.sessions[0]?.seats ?? [] },
+  ])("Remove explains when the seat is absent from config.yaml (%j)", async (session) => {
+    const f = stub({
+      rows: [idleSeat()],
+      extra: SEAT_ROUTES({
+        ...removalRoutes,
+        "/api/crew/changes": { ...changes, sessions: [session] },
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    await settled(f, "/api/crew/changes");
+    const remove = screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement;
+    expect(remove.disabled).toBe(true);
+    const note = screen.getByText("Not in config.yaml");
+    expect(note.classList.contains("muted")).toBe(true);
+    expect(remove.nextElementSibling).toBe(note);
+  });
+
+  it("observed loops have neither Remove nor Rename", async () => {
+    stub({ rows: [studio()] });
+    render(<Agent id="studio-builder" />);
+    await screen.findByText(/is an observed loop: Mission Control watches it/);
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+  });
+
+  it("Rename explains fixed call signs and how to add a new name", async () => {
+    stub({ rows: [seat()], extra: SEAT_ROUTES() });
+    render(
+      <>
+        <Agent id="guido-1" />
+        <Toast />
+      </>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    expect(
+      await screen.findByText(
+        "Rename GUIDO-1: call signs are fixed. In Setup › Sessions, remove this seat and use Add agent to choose a new call sign.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("Now shows the template, step, attempt and elapsed time of the latest matching try", async () => {
+    const loop: CrewLoop = {
+      phase: "ci",
+      text: "CI is running",
+      prNumber: 77,
+      parked: null,
+      profile: "bugfix",
+      step: "verify",
+      tries: { n: 2, max: 3 },
+      steps: DEFAULT_PROFILES.find((p) => p.name === "bugfix")?.steps,
+    };
+    const attempt: LoopTry = {
+      step: "ci",
+      fix: false,
+      n: 1,
+      startedAt: NOW - 10 * MIN,
+      endedAt: NOW - 5 * MIN,
+      outcome: "fail",
+      reason: "Check failed",
+    };
+    const view: RunLoopView = {
+      runId: "r-12",
+      loop: null,
+      events: [],
+      round: 1,
+      budget: null,
+      review: null,
+      tries: [
+        attempt,
+        { ...attempt, n: 2, startedAt: NOW - 92_000, endedAt: null, outcome: "running" },
+      ],
+    };
+    const f = stub({ rows: [seat({ loop })], extra: SEAT_ROUTES({ "/api/runs/r-12/loop": view }) });
+    const { container } = render(<Agent id="guido-1" />);
+    await settled(f, "/api/runs/r-12/loop");
+    const tile = $(container, ".tile2.now") as HTMLElement;
+    expect(tile.textContent).toContain("bugfix › verify · try 2 of 3 · 1:32 in this step");
+    expect(tile.textContent).not.toContain("in this run");
+    expect(tile.querySelector(".stepbar")?.getAttribute("title")).toBe(
+      "reproduce → fix → verify → review → draft PR",
+    );
+    expect([...tile.querySelectorAll(".stepbar i")].map((i) => i.className)).toEqual([
+      "",
+      "d",
+      "c",
+      "",
+      "d",
+    ]);
+  });
+
+  it("Now shows a dash for parked step time even with an earlier CI try", async () => {
+    const view: RunLoopView = {
+      runId: "r-12",
+      loop: null,
+      events: [],
+      round: 1,
+      budget: null,
+      review: null,
+      tries: [
+        {
+          step: "ci",
+          fix: false,
+          n: 1,
+          startedAt: NOW - 10 * MIN,
+          endedAt: NOW - MIN,
+          outcome: "parked",
+          reason: "Check failed",
+        },
+      ],
+    };
+    const f = stub({
+      rows: [
+        seat({
+          hudState: "parked",
+          loop: {
+            phase: "parked",
+            text: "Held: Check failed",
+            parked: "Check failed",
+            prNumber: 77,
+          },
+        }),
+      ],
+      extra: SEAT_ROUTES({ "/api/runs/r-12/loop": view }),
+    });
+    const { container } = render(<Agent id="guido-1" />);
+    await settled(f, "/api/runs/r-12/loop");
+    const tile = $(container, ".tile2.now") as HTMLElement;
+    expect(tile.textContent).toContain("— in this step");
+    expect(tile.textContent).not.toContain("in this run");
+  });
+
+  it.each([
+    null,
+    { categories: [{ name: "Messages", tokens: 100_000 }], total: 100_000, window: 200_000 },
+  ])("Codex context uses a single bar and explains total-only reporting (%j)", async (usage) => {
+    stub({
+      rows: [seat({ accountId: "provider-account", contextWindow: 200_000, digest: digest() })],
+      extra: SEAT_ROUTES({
+        "/api/config": { ...CONFIG, accounts: [{ ...CONFIG.accounts[1], id: "provider-account" }] },
+        "/api/seats/guido-1/context": usage,
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    const note = await screen.findByText(/Codex reports the total, not a breakdown/);
+    expect(note.textContent).toContain("0 compactions");
+    expect(note.closest(".tile2")?.querySelectorAll(".ctxbar i")).toHaveLength(1);
+    expect(note.closest(".tile2")?.textContent).not.toContain("msgs");
+  });
+
+  it("Queue Done lists successful completed tickets once, as inert text", async () => {
+    const completed = rv({
+      id: "done",
+      status: "ok",
+      endedAt: NOW - MIN,
+      ticket: "shop-app#2",
+      ticketTitle: "<img src=x onerror=alert(1)>",
+    });
+    stub({
+      rows: [seat()],
+      extra: SEAT_ROUTES(),
+      runs: [
+        rv(),
+        completed,
+        { ...completed, id: "duplicate" },
+        rv({ id: "failed", status: "failed", endedAt: NOW - MIN, ticket: "shop-app#3" }),
+        rv({ id: "unticketed", status: "ok", endedAt: NOW - MIN, ticket: null }),
+      ],
+    });
+    const { container } = render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
+    const side = $(container, "#sideP") as HTMLElement;
+    expect(await within(side).findByText("Done", { exact: true })).toBeTruthy();
+    expect(within(side).getAllByRole("link", { name: "shop-app #2" })).toHaveLength(1);
+    expect(within(side).queryByRole("link", { name: "shop-app #3" })).toBeNull();
+    expect(within(side).getByText(completed.ticketTitle as string)).toBeTruthy();
+    expect(side.querySelector("img")).toBeNull();
+  });
+
+  it("Queue Done says None yet when there are no completed tickets", async () => {
+    stub({ rows: [seat()], runs: [rv()], extra: SEAT_ROUTES() });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
+    expect(await screen.findByText("None yet.")).toBeTruthy();
+  });
+
+  it.each([49, 50])(
+    "Queue Done hints at the limit only for a full page of %i runs",
+    async (count) => {
+      const f = stub({
+        rows: [seat()],
+        runs: Array.from({ length: count }, (_, i) =>
+          rv({ id: `r-${i}`, status: "ok", endedAt: NOW - MIN, ticket: "shop-app#2" }),
+        ),
+        extra: SEAT_ROUTES(),
+      });
+      const { container } = render(<Agent id="guido-1" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
+      await settled(f, "/api/agents/guido-1/runs?limit=50");
+      const side = $(container, "#sideP") as HTMLElement;
+      expect(within(side).getAllByRole("link", { name: "shop-app #2" })).toHaveLength(1);
+      expect(side.textContent?.includes("latest 50")).toBe(count === 50);
+    },
+  );
+});
 
 describe("Agent page: driving a crew seat", () => {
   it("a crew writer's Files tab lists its changed files", async () => {
@@ -2979,19 +3267,19 @@ describe("Agent page: driving a crew seat", () => {
     );
   });
 
-  it("End the run confirms, then posts {}", async () => {
+  it("Stop confirms, then posts {hold:true} to keep the area reserved", async () => {
     const f = stub({ rows: [seat()], extra: SEAT_ROUTES() });
     const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(<Agent id="guido-1" />);
     await seatLoaded();
-    const end = screen.getByRole("button", { name: "End the run" });
+    const end = screen.getByRole("button", { name: "Stop" });
     fireEvent.click(end);
     expect(ask).toHaveBeenCalledWith(
-      "End GUIDO-1's run? The checkout and branch stay; nothing is pushed.",
+      "Stop GUIDO-1's run? Its area stays reserved until you remove it. The checkout and branch stay; nothing is pushed.",
     );
     expect(bodyOf(f, "/api/seats/guido-1/end")).toBeUndefined();
     fireEvent.click(end);
-    await vi.waitFor(() => expect(bodyOf(f, "/api/seats/guido-1/end")).toBe("{}"));
+    await vi.waitFor(() => expect(bodyOf(f, "/api/seats/guido-1/end")).toBe('{"hold":true}'));
     ask.mockRestore();
   });
 
