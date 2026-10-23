@@ -1,8 +1,7 @@
 /**
  * What is open over the pages: FLIGHT's dock, the help, Away mode, the Item panel, and the build
  * status toggle. Each overlay pushes itself on one stack while open, and `Esc` closes the topmost
- * (catalogue §1.6). The components are Task 9's; until then the dock, Away and Item panel render
- * nothing, but the header buttons and keys already drive these stores.
+ * (catalogue §1.6).
  */
 import { type KeyboardEvent, useEffect, useRef, useSyncExternalStore } from "react";
 import { itemParam, withItemParam } from "../router.ts";

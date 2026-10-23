@@ -45,7 +45,7 @@ export interface Run {
   prs: { repo: string; number: number }[];
   /** The first sentences of the run's latest result text, DONE skipped (see workSummary), else null. */
   summary: string | null;
-  /** The first loop's state (Plan 7a); absent or null on a run no loop drives. */
+  /** The first loop's state; absent or null on a run no loop drives. */
   loop?: RunLoop | null;
   /** The template profile the run started with, as it was then; absent on a run without one. */
   profile?: RunProfile | null;
@@ -648,7 +648,7 @@ export interface HealthRow {
 }
 
 /**
- * Where a crew row's latest run is in its loop, as the HUD shows it (Plan 7a Task 8). The server
+ * Where a crew row's latest run is in its loop, as the HUD shows it. The server
  * writes `text` (`working` → `Working on {ref}`; `ci` → `CI on {sha7}`; `review` →
  * `In review · PR #{n}`; `parked` → `Blocked: {reason}`); the web shows it as given.
  */

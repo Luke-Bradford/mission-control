@@ -22,6 +22,7 @@ import { spawn } from "node:child_process";
 import { access, appendFile, chmod, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  errorText as errText,
   PREVIEW_SERVER,
   type SeatSessionRow,
   seatCallSign,
@@ -320,7 +321,6 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
   };
 }
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 // no credential prompt: a remote that wants one fails instead of hanging until the timeout
 const gitEnvironment = () => ({ ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0" });
 

@@ -25,9 +25,6 @@ export function isUsable(r: WindowReading, now: number, maxAgeMs: number): boole
   );
 }
 
-export const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-
 /**
  * Per window, take the first usable reading from the ordered sources. Each source is only run
  * if some window is still missing; a throwing source is reported and skipped. Never throws.
@@ -63,3 +60,5 @@ export async function collect(
   }
   return WINDOWS.flatMap((w) => got.get(w) ?? []);
 }
+
+export { isObj } from "@mc/core";

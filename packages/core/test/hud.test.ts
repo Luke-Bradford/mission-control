@@ -27,7 +27,6 @@ import {
   hudState,
   LOCK_FREE_TEXT,
   LOCK_HEADER_TITLE,
-  LOCK_HISTORY_NOTE,
   LOCK_NOBODY_WAITING,
   LOCK_OUTCOME_TEXT,
   lockHeaderText,
@@ -581,7 +580,6 @@ describe("guard and test lock copy", () => {
     expect(guardSummary(3, 2)).toBe("Guard: 3 blocked commands, 2 new (for information)");
     expect(LOCK_FREE_TEXT).toBe("No full-suite run in progress.");
     expect(LOCK_NOBODY_WAITING).toBe("Nobody waiting.");
-    expect(LOCK_HISTORY_NOTE).toBe("History arrives with run records (phase 2c).");
     expect(lockHolderText("GUIDO-2", "pnpm test", "1:23")).toBe(
       "GUIDO-2 holds it: pnpm test · 1:23",
     );

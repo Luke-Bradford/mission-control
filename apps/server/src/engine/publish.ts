@@ -1,6 +1,6 @@
 /**
  * What the engine does to GitHub and the session clone for a looped run: the push, the draft PR
- * (Plan 6's `pushRun` and `openDraftPr`, called directly), a failed CI run's log excerpt, and the
+ * (`pushRun` and `openDraftPr`, called directly), a failed CI run's log excerpt, and the
  * hard-rule files a pushed sha touches. Nothing here throws for a refusal; it answers.
  */
 import { realpath } from "node:fs/promises";

@@ -2,7 +2,7 @@ import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
 import { pathsText, RULING_PARK } from "./loop.ts";
 import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
-import type { AttentionBrief, LoopPhase } from "./types.ts";
+import type { LoopPhase } from "./types.ts";
 
 // The FLIGHT seat: the head agent that runs the crew. It is the one `watch` seat, started with no
 // ticket, and it keeps a log of what it decided (`flight_decisions`).
@@ -684,7 +684,6 @@ export const draftedReplyText = (id: number): string =>
 
 export const FLIGHT_WATCH_LIMIT = 100;
 export const FLIGHT_INCOMING_LIMIT = 100;
-export const FLIGHT_PLANNED_LIMIT = 100;
 export const FLIGHT_ARRIVAL_OUTCOMES = [
   "Asked of you",
   "Assigned",
@@ -781,27 +780,4 @@ export interface FlightArrivalOperation {
   version: string;
   outcome: "No action" | "Queued";
   detail: string;
-}
-/** Additive fields on update_brief; actions are recorded only after their existing tools succeed. */
-export interface FlightBriefOperation {
-  section: FlightBriefSectionKey;
-  text: string;
-  basis: string;
-  watch?: FlightWatchOperation;
-  planned?: FlightPlanOperation;
-  arrival?: FlightArrivalOperation;
-}
-
-/** Structured evidence accepted by brief_item in addition to its legacy context and options. */
-export type FlightBriefItemOperation = Pick<
-  AttentionBrief,
-  "catchUp" | "checked" | "person" | "recommendedOptionId"
->;
-
-/** Optional guard on the existing seat end action when invoked from a watch item. */
-export interface FlightWatchStopOperation {
-  id: string;
-  runId: string;
-  toolUseId: string;
-  since: number;
 }

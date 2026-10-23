@@ -255,7 +255,7 @@ export interface AppDeps {
   tokens?: RunTokens;
   /** The `/mcp` calls in flight, which a restart waits for; default: not counted. */
   mcpCalls?: McpCalls;
-  /** The mc tools `/mcp` serves; default: none (the tools arrive with their tasks). */
+  /** The mc tools `/mcp` serves; default: none. */
   mcpTools?: () => McTool[];
   /** A seat's mode, which decides the mc tools it is offered; default: read-only. */
   seatMode?: (seatId: string) => CrewMode;
@@ -701,7 +701,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot; web wiring is a separate ticket)
+      // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot)
       api.get<{ Params: { id: string } }>("/comms/:id", async (req, reply) => {
         if (!agentById(req.params.id)) return reply.code(404).send({ error: "unknown agent" });
         return {
@@ -709,7 +709,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
 
-      // Reader: apps/web/src/comms/Conversation.tsx (opening a thread; web wiring is a separate ticket)
+      // Reader: apps/web/src/comms/Conversation.tsx (opening a thread)
       api.post<{ Params: { id: string } }>("/comms/:id/read", async (req, reply) => {
         const id = req.params.id;
         if (!agentById(id)) return reply.code(404).send({ error: "unknown agent" });
@@ -948,7 +948,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               // `finish` means the answer was handed to the kernel, not that the hook received it.
               // On a real socket this release only catches an async gap between the send and the
               // end (the hook hung up after the grant, before the answer went out). A peer that dies
-              // after `finish` is not seen here: Task 6's `releaseRun` covers it.
+              // after `finish` is not seen here: `releaseRun` covers it.
               let delivered = false;
               res.once("finish", () => {
                 delivered = true;
@@ -1021,17 +1021,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: apps/web/src/setup/Accounts.tsx (account status; UI integration follows)
+      // Reader: apps/web/src/setup/Accounts.tsx (account status)
       api.get("/accounts/status", async () =>
         Promise.all(config.accounts.map((account) => accountStatus(account))),
       );
-      // Reader: apps/web/src/setup/Accounts.tsx (Check; UI integration follows)
+      // Reader: apps/web/src/setup/Accounts.tsx (Check)
       api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
         const account = config.accounts.find((a) => a.id === req.params.id);
         if (!account) return reply.code(404).send({ error: "account not found" });
         return accountStatus(account, true);
       });
-      // Reader: apps/web/src/setup/Accounts.tsx (Add account; UI integration follows)
+      // Reader: apps/web/src/setup/Accounts.tsx (Add account)
       api.post("/accounts", async (req, reply) => {
         if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         const body = NewAccountBody.safeParse(req.body);
@@ -1072,7 +1072,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/repos/profiles", async (): Promise<RepoProfile[]> => repoProfiles(config, store));
 
-      // Reader: docs/runbook.md#what-it-observes (by hand until the HUD's refresh button reads it)
+      // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
         return reply.code(202).send({ ok: true });
@@ -1227,7 +1227,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const fields = await ensureFields(gql, repo.github.split("/")[0] ?? "", repo.project);
             // Refresh now: the fields exist even if a label below fails.
             if (fields.created.length > 0) refreshBoards();
-            // area labels: plan 7a Task 3
             const labelsCreated = await ensureLabels(gql, repo.github, TYPE_LABELS);
             return { ...fields, labelsCreated };
           });
@@ -1264,7 +1263,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Re-reads the config.yaml the server started with now (no request names a path); a file that
       // does not load changes nothing.
-      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup › Sessions, #22, reads it)
+      // Reader: docs/runbook.md#reloading-the-config
       api.post("/config/reload", async (_req, reply) => {
         if (deps.crewReloader === undefined) {
           return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
@@ -1274,7 +1273,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return result;
       });
 
-      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup's seat editor reads it)
+      // Reader: docs/runbook.md#reloading-the-config
       // Replaces one session's seats in the config.yaml the server started with (no request names a
       // path), then reloads so the change applies live. A POST so the CSRF hook covers it.
       api.post<{ Params: { sessionId: string } }>(
@@ -1315,7 +1314,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: docs/runbook.md#reloading-the-config (by hand until Setup › Sessions, #22, reads it)
+      // Reader: docs/runbook.md#reloading-the-config
       api.get("/crew/changes", async (): Promise<CrewChanges> => {
         return (
           deps.crewReloader?.status() ?? {
@@ -1577,15 +1576,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
-      // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT ticket 4)
+      // Reader: apps/web/src/shell/Dock.tsx#Dock
       api.get("/flight", async () => flightView(config, store, Date.now()));
-      // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief, web follow-up of #225)
+      // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
         flightBriefView(config, store, deps.lock?.state() ?? NO_LOCK, now()),
       );
-      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes, web follow-up)
+      // Reader: apps/web/src/flight/Incoming.tsx (recorded outcomes)
       api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
-      // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline, web follow-up)
+      // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline)
       api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
 
       api.get("/crew/status", async () => ({
@@ -1594,7 +1593,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }));
       // Reader: apps/web/src/flight/Drafts.tsx and Situation.tsx
       api.get("/drafts", async () => store.drafts());
-      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history; web part follows in #415)
+      // Reader: apps/web/src/flight/Drafts.tsx (finished draft history)
       api.get("/drafts/history", async () => store.draftHistory());
       const postingDrafts = new Set<number>();
       const postingItems = new Set<string>();
@@ -1766,7 +1765,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // The operator ends a run set aside in review, without waking it.
-      // Reader: apps/web/src/agent/LoopSteps.tsx (the End action on a set-aside run; the web part follows)
+      // Reader: apps/web/src/agent/LoopSteps.tsx (the End action on a set-aside run)
       api.post<{ Params: { id: string } }>("/runs/:id/end", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null || !supervisor) return reply.code(404).send({ error: "unknown run" });
@@ -1785,7 +1784,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
       // review or review-ruling park waives that head's findings, as the message does. The answer
       // waits for the engine's pass, so "ok" means the park was lifted.
-      // Reader: docs/runbook.md#resume-a-parked-run (by hand; a HUD Resume action is a follow-up web ticket)
+      // Reader: docs/runbook.md#resume-a-parked-run
       api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null) return reply.code(404).send({ error: "unknown run" });
@@ -1804,7 +1803,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
       // A looped run's state and its Activity rows, on demand.
-      // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view; it reads this once Plan 7a Task 8 lands)
+      // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view)
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null) return reply.code(404).send({ error: "unknown run" });
@@ -2044,7 +2043,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { acked: keys.length };
       });
 
-      // Reader: apps/web/src/comms/NeedsList.tsx (the Needs-you Dismiss button; the web side is its own ticket)
+      // Reader: apps/web/src/comms/NeedsList.tsx (the Needs-you Dismiss button)
       api.post<{ Params: { key: string } }>("/attention/:key/dismiss", async (req, reply) => {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -2057,10 +2056,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { dismissed: key };
       });
 
-      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      // Reader: apps/web/src/data.ts (notification settings)
       api.get("/notification-preferences", async () => notifications.preferences());
 
-      // Reader: apps/web/src/data.ts (notification settings; web wiring is a separate ticket)
+      // Reader: apps/web/src/data.ts (notification settings)
       api.post("/notification-preferences", async (req, reply) => {
         const body = NotificationPreferencesBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
@@ -2068,22 +2067,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return notifications.preferences();
       });
 
-      // Reader: apps/web/src/notifications.ts (local notification feed; web wiring is a separate ticket)
+      // Reader: apps/web/src/notifications.ts (local notification feed)
       api.get("/notifications/events", async () => {
         return notifications.events();
       });
 
-      // Reader: apps/web/src/notifications.ts (Send a test notification; web wiring is a separate ticket)
+      // Reader: apps/web/src/notifications.ts (Send a test notification)
       api.post("/notifications/test", async (req, reply) => {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         return notifications.test();
       });
 
-      // Reader: apps/web/src/data.ts (Sources status; web wiring is a separate ticket)
+      // Reader: apps/web/src/data.ts (Sources status)
       api.get("/sources/teams", async () => teamsStatus(config, store));
 
-      // Reader: apps/web/src/data.ts (Sources selection; web wiring is a separate ticket)
+      // Reader: apps/web/src/data.ts (Sources selection)
       api.post("/sources/teams/selection", async (req, reply) => {
         const body = z.strictObject({ selected: TeamsSelection }).safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: "Invalid Teams selection" });
@@ -2107,13 +2106,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards; the web side is its own ticket)
+      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards)
       api.get(
         "/notifications",
         async (): Promise<NotificationsView> => notificationsView(config, store, now()),
       );
 
-      // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled; the web side is its own ticket)
+      // Reader: apps/web/src/shell/ItemPanel.tsx (the person variant's Mark handled)
       api.post<{ Params: { key: string } }>("/attention/:key/handled", async (req, reply) => {
         const body = z
           .strictObject({
