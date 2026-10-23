@@ -2378,7 +2378,12 @@ pre.diff .h {
   overflow-y: auto;
 }
 .ticket-bar-title {
-  display: block;
+  /* two lines at most; the row's title attribute carries the full text */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   white-space: normal;
   overflow-wrap: anywhere;
 }
