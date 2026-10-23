@@ -584,6 +584,21 @@ export interface Crew {
   firstRunToday: number | null;
 }
 
+/** One answer FLIGHT suggests for an item that is a choice. */
+export interface BriefOption {
+  label: string;
+  answer: string;
+}
+
+/** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
+export interface AttentionBrief {
+  context: string;
+  recommendation: string;
+  options: BriefOption[];
+  basis: string;
+  at: number;
+}
+
 export interface AttentionItem {
   key: string;
   kind: AttentionKind;
@@ -602,6 +617,8 @@ export interface AttentionItem {
    * until every client that builds an item sets it.
    */
   owner?: AttentionOwner;
+  /** FLIGHT's brief, once it has written one. */
+  brief?: AttentionBrief;
   acked: boolean;
 }
 

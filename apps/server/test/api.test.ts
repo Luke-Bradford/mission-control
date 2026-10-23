@@ -1699,6 +1699,25 @@ describe("crew and attention", () => {
     expect(store.acks().has("esc:gone")).toBe(true);
   });
 
+  it("GET /api/attention includes an item's brief, and no brief field without one", async () => {
+    store.replaceEscalations("shop-app", [escalation({})]);
+    const first = (await get("/api/attention")).json() as AttentionItem[];
+    expect(first[0]).not.toHaveProperty("brief");
+    const brief = {
+      context: "Waiting since yesterday.",
+      recommendation: "Pick A.",
+      options: [
+        { label: "A", answer: "a" },
+        { label: "B", answer: "b" },
+      ],
+      basis: "read the issue",
+      at: NOW,
+    };
+    store.addBrief({ key: "esc:shop-app#9", ...brief });
+    const items = (await get("/api/attention")).json() as AttentionItem[];
+    expect(items[0]?.brief).toEqual(brief);
+  });
+
   it("POST /api/attention/ack acks the keys, emits attention, and the next GET shows them acked", async () => {
     store.replaceEscalations("shop-app", [escalation({})]);
     const events: string[] = [];
