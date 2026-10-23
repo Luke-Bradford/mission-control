@@ -1,4 +1,5 @@
 import {
+  type AgentStream,
   type BoardItem,
   type ChangedFiles,
   type CrewRow,
@@ -7,12 +8,9 @@ import {
   READONLY_FILES_NOTE,
   type RunView,
   SUBAGENT_PILL,
-  type TicketView,
 } from "@mc/core";
 import { useState } from "react";
 import { errorNote } from "../api.ts";
-import { ExternalLink } from "../components/ExternalLink.tsx";
-import { Markdown } from "../components/Markdown.tsx";
 import { LOOP_PHASE_LABEL } from "../crew.ts";
 import { RESOURCES, type Resource, RUNS_LIMIT, useResource, useResources } from "../data.ts";
 import { dur, kTokens } from "../fmt.ts";
@@ -20,37 +18,61 @@ import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
-import { ticketPlan } from "./ticketPlan.ts";
 
 const DASH = "—";
 
 type Tab = "plan" | "queue" | "subs" | "files";
 
-/** The ticket's `## Plan` section: nothing records the agent's own task list, so this is the plan it builds from. */
-function Plan({ row }: { row: CrewRow }) {
-  const ticket = row.ticket ? parseTicket(row.ticket) : null;
-  const res = useResource<TicketView>(
-    ticket ? RESOURCES.ticket(ticket.repoId, ticket.number) : null,
-  );
-  if (!row.ticket || !ticket) return <p className="s muted">No ticket on this run.</p>;
-  if (!res.data) {
-    return res.error ? (
-      <p className="s crit-t">Could not load the ticket: {res.error.message}</p>
+/** The run's own checklist, replayed from its stream. */
+function Plan({
+  stream,
+  tasks,
+  hasRun,
+}: {
+  stream: Resource<AgentStream>;
+  tasks: NonNullable<AgentStream["tasks"]>;
+  hasRun: boolean;
+}) {
+  if (hasRun && !stream.data) {
+    return stream.error ? (
+      <p className="s crit-t">Could not load the task list: {stream.error.message}</p>
     ) : (
       <p className="s muted">Loading…</p>
     );
   }
-  const plan = ticketPlan(res.data.body);
-  if (plan === null) return <p className="s muted">{row.ticket} has no ## Plan yet.</p>;
   return (
     <>
-      <div className="tbody">
-        <Markdown text={plan} />
-      </div>
-      <p className="note xs">From the ## Plan section of {row.ticket}.</p>
-      {res.data.bodyTruncated && (
-        <p className="s">
-          <ExternalLink url={res.data.url}>Continue on GitHub ↗</ExternalLink>
+      {hasRun && stream.error && (
+        <>
+          <p className="s crit-t">Could not refresh the task list: {stream.error.message}</p>
+          <p className="note xs">Last known task list.</p>
+        </>
+      )}
+      {tasks.length === 0 && <p className="s muted">No task list yet.</p>}
+      {tasks.map((task) => (
+        <div className="check" key={task.id}>
+          <span
+            className={
+              task.status === "done"
+                ? "ck-pass"
+                : task.status === "in_progress"
+                  ? "ck-run"
+                  : "ck-wait"
+            }
+          >
+            {task.status === "done"
+              ? "✓ done"
+              : task.status === "in_progress"
+                ? "◌ doing"
+                : "· to do"}
+          </span>
+          <span className={task.status === "done" ? "fg2" : undefined}>{task.text}</span>
+        </div>
+      ))}
+      {tasks.length > 0 && (
+        <p className="note xs">
+          The agent's own task list: Claude's task tools or Codex plan updates, replayed from its
+          stream.
         </p>
       )}
     </>
@@ -274,7 +296,9 @@ function Files({ agentId, files }: { agentId: string; files: Resource<ChangedFil
               </>
             )}
           </span>
-          <span className={f.state === "committed" ? "num xs fg2" : "num xs muted"}>{f.state}</span>
+          <span className={f.state === "committed" ? "num xs fg2" : "num xs muted"}>
+            {f.state === "committed" ? (f.commitSha?.slice(0, 7) ?? DASH) : "uncommitted"}
+          </span>
         </button>
       ))}
       {note !== null && <p className="note xs">{note}</p>}
@@ -288,8 +312,13 @@ export function SideTabs({ row }: { row: CrewRow }) {
   const [tab, setTab] = useState<Tab>("plan");
   const files = useResource<ChangedFiles>(RESOURCES.files(row.id));
   const nFiles = files.data?.note === READONLY_FILES_NOTE ? undefined : files.data?.files.length;
+  const stream = useResource<AgentStream>(row.run ? RESOURCES.stream(row.id) : null);
+  const tasks = row.run && stream.data?.runId === row.run.id ? (stream.data.tasks ?? []) : [];
+  const tasksKnown =
+    row.run !== null && stream.data?.runId === row.run.id && !stream.loading && !stream.error;
+  const done = tasks.filter((task) => task.status === "done").length;
   const options = [
-    { value: "plan", label: "Plan" },
+    { value: "plan", label: tasksKnown ? `Plan ${done}/${tasks.length}` : "Plan" },
     { value: "queue", label: "Queue" },
     { value: "subs", label: `Subagents ${row.digest?.subagents.length ?? 0}` },
     { value: "files", label: nFiles === undefined ? "Files" : `Files ${nFiles}` },
@@ -301,7 +330,7 @@ export function SideTabs({ row }: { row: CrewRow }) {
         <BuildChips panel="sideP" />
       </div>
       <div className="pb scroll" id="sideBody">
-        {tab === "plan" && <Plan row={row} />}
+        {tab === "plan" && <Plan stream={stream} tasks={tasks} hasRun={row.run !== null} />}
         {tab === "queue" && <Queue row={row} />}
         {tab === "subs" && <Subagents row={row} />}
         {tab === "files" && <Files agentId={row.id} files={files} />}
