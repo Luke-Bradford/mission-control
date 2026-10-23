@@ -7,6 +7,7 @@ import {
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
+  type CliAccountStatus,
   COMMS_CAPCOM,
   type ContextUsage,
   CREW_DISABLED,
@@ -70,6 +71,7 @@ import {
 } from "@mc/core";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { readAccountStatus } from "./accounts.ts";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
@@ -96,9 +98,12 @@ import {
   DEFAULT_MAX_SEATS,
 } from "./config.ts";
 import {
+  accountDuplicateReason,
+  addAccount,
   addRepo,
   ConfigWriteError,
   duplicateReason,
+  NewAccountBody,
   NewRepoBody,
   RepoLocation,
   SeatsBody,
@@ -395,9 +400,29 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
   return Number(raw);
 }
 
+export const ACCOUNT_STATUS_CACHE_MS = 60_000;
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const accountReads = new Map<string, Promise<CliAccountStatus>>();
+  const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
+    const key = `${account.vendor}:${account.id}`;
+    const pending = accountReads.get(key);
+    if (pending) return pending;
+    const cached = accountStatuses.get(key);
+    if (!refresh && cached && now() < cached.expiresAt) return Promise.resolve(cached.status);
+    const read = readAccountStatus(account, now())
+      .then((status) => {
+        accountStatuses.set(key, { status, expiresAt: now() + ACCOUNT_STATUS_CACHE_MS });
+        return status;
+      })
+      .finally(() => accountReads.delete(key));
+    accountReads.set(key, read);
+    return read;
+  };
+
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
   const githubGql = deps.githubGql ?? (async () => makeGql(await githubToken()));
   // The login the hub acts as: kept once read; null when it cannot be, and not tried again for
@@ -924,6 +949,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
         },
       );
+
+      // Reader: apps/web/src/setup/Accounts.tsx (account status; UI integration follows)
+      api.get("/accounts/status", async () =>
+        Promise.all(config.accounts.map((account) => accountStatus(account))),
+      );
+      // Reader: apps/web/src/setup/Accounts.tsx (Check; UI integration follows)
+      api.post<{ Params: { id: string } }>("/accounts/:id/check", async (req, reply) => {
+        const account = config.accounts.find((a) => a.id === req.params.id);
+        if (!account) return reply.code(404).send({ error: "account not found" });
+        return accountStatus(account, true);
+      });
+      // Reader: apps/web/src/setup/Accounts.tsx (Add account; UI integration follows)
+      api.post("/accounts", async (req, reply) => {
+        if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = NewAccountBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const duplicate = accountDuplicateReason(config.accounts, body.data);
+        if (duplicate) return reply.code(409).send({ error: duplicate });
+        try {
+          const result = await addAccount(deps.configPath, body.data, now());
+          const added = result.config.accounts.find((a) => a.id === body.data.name);
+          if (added) config.accounts.push(added);
+          bus.emit("config");
+          return { account: added };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
+              .send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
 
       api.get("/limits", async () => limitRows(config, store, now()));
       // Reader: apps/web/src/data.ts#RESOURCES (the Limits view's GitHub row)

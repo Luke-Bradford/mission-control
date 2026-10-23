@@ -9,6 +9,21 @@ import { DEFAULT_MAX_AGE_MS, isObj } from "./usage-common.ts";
 
 const execFileAsync = promisify(execFile);
 
+/** Claude usage uses the default Keychain login; Codex usage inherits its CLI environment. */
+export function usageProviderEnv(provider: "claude" | "codex"): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (provider === "claude") {
+    for (const key of [
+      "CLAUDE_CONFIG_DIR",
+      "ANTHROPIC_API_KEY",
+      "ANTHROPIC_AUTH_TOKEN",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+    ])
+      delete env[key];
+  }
+  return env;
+}
+
 /** Keychain service holding Claude Code's OAuth credentials (see docs/spikes/2026-10-usage-readers.md). */
 export const KEYCHAIN_SERVICE = "Claude Code-credentials";
 export const OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -236,7 +251,10 @@ export function appServer(deps: AppServerDeps = {}): Promise<unknown> {
   const spawnFn = deps.spawn ?? spawn;
   const maxBuffer = deps.maxBufferBytes ?? MAX_APP_SERVER_BUFFER;
   return new Promise((resolve, reject) => {
-    const p = spawnFn("codex", ["app-server"], { stdio: ["pipe", "pipe", "ignore"] });
+    const p = spawnFn("codex", ["app-server"], {
+      stdio: ["pipe", "pipe", "ignore"],
+      env: usageProviderEnv("codex"),
+    });
     let buf = "";
     let done = false;
     const finish = (err: Error | null, value?: unknown) => {
