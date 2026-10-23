@@ -77,11 +77,11 @@ export function sourceMessage(
 
 /** Only a configured thread's issue/PR or comment endpoint can be used for source reads. */
 export function sourceReadUrl(repo: string, url: string): boolean {
-  const prefix = `${API_ORIGIN}repos/${repo}/`;
-  return (
-    url.startsWith(prefix) &&
-    /^(?:issues|pulls)\/(?:comments\/)?[1-9]\d*$/.test(url.slice(prefix.length))
-  );
+  const match =
+    /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/((?:issues|pulls)\/(?:comments\/)?[1-9]\d*)$/.exec(
+      url,
+    );
+  return match !== null && match[1]?.toLowerCase() === repo.toLowerCase();
 }
 
 export type CatchUpKind = "new" | "follow-up" | "old";
@@ -390,26 +390,31 @@ export async function collectNotifications(
         if (message && k.number !== null) {
           history = [];
           const latest = message;
-          try {
-            const repo = repos.find((r) => r.id === k.repoId);
-            if (!repo) throw new Error("unknown repo");
-            const listUrl = `${API_ORIGIN}repos/${repo.github}/issues/${k.number}/comments?per_page=100`;
-            let page = await rest(listUrl);
-            const last = /<([^>]+)>;\s*rel="last"/.exec(page.headers.get("link") ?? "")?.[1];
-            if (last?.startsWith(`${listUrl}&page=`)) page = await rest(last);
-            if (Array.isArray(page.body))
-              history = page.body
-                .map((b) => sourceMessage(b, k.fallbackUrl, k.updatedAt))
-                .filter(
-                  (m): m is PersonMessage =>
-                    m !== undefined &&
-                    m.source.messageId !== latest.source.messageId &&
-                    m.at <= latest.at,
-                )
-                .slice(-20);
-          } catch {
-            // Latest-message data remains usable when earlier comments cannot be fetched.
+          const repo = repos.find((r) => r.id === k.repoId);
+          const kinds = k.subjectType === "PullRequest" ? ["issues", "pulls"] : ["issues"];
+          for (const kind of kinds) {
+            try {
+              if (!repo) throw new Error("unknown repo");
+              const listUrl = `${API_ORIGIN}repos/${repo.github}/${kind}/${k.number}/comments?per_page=100`;
+              let page = await rest(listUrl);
+              const last = /<([^>]+)>;\s*rel="last"/.exec(page.headers.get("link") ?? "")?.[1];
+              if (last?.startsWith(`${listUrl}&page=`)) page = await rest(last);
+              if (Array.isArray(page.body))
+                history.push(
+                  ...page.body
+                    .map((b) => sourceMessage(b, k.fallbackUrl, k.updatedAt))
+                    .filter(
+                      (m): m is PersonMessage =>
+                        m !== undefined &&
+                        m.source.messageId !== latest.source.messageId &&
+                        m.at <= latest.at,
+                    ),
+                );
+            } catch {
+              // Latest-message data remains usable when earlier comments cannot be fetched.
+            }
           }
+          history = history.sort((a, b) => a.at - b.at).slice(-20);
         }
       }
       rows.push({

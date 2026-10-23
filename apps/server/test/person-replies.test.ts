@@ -7,8 +7,10 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import {
   collectNotifications,
+  makeRest,
   notificationsView,
   type Rest,
+  sourceReadUrl,
 } from "../src/collectors/notifications.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
@@ -377,4 +379,95 @@ it("Let FLIGHT handle it records a local handoff with the catalogue promise", as
   } finally {
     await app.close();
   }
+});
+
+it("hydrates and approves a reply when configured owner/repo casing differs", async () => {
+  const mixedConfig = { ...config, repos: config.repos.map((r) => ({ ...r, github: "O/Shop" })) };
+  await collectNotifications(mixedConfig.repos, store, rest, NOW);
+  expect(store.notification("101")?.message?.text).toBe(body);
+  store.addBrief({ key: KEY, ...brief() });
+  const gh = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+  const app = buildApp({
+    config: mixedConfig,
+    store,
+    bus: new ChangeBus(),
+    gh,
+    notificationRest: rest,
+    knownSecrets: async () => [],
+  });
+  try {
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/api/attention/${KEY}/replies/review/post`,
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(gh).toHaveBeenCalledTimes(1);
+    expect(sourceReadUrl("O/Shop", `${ROOT}/comments/555`)).toBe(true);
+    for (const url of [
+      "http://api.github.com/repos/o/shop/issues/12",
+      "https://API.github.com/repos/o/shop/issues/12",
+      "https://api.github.com/Repos/o/shop/issues/12",
+      "https://api.github.com/repos/o/shop/Issues/12",
+      "https://api.github.com/repos/o/shop/issues/0",
+      "https://api.github.com/repos/o/shop/issues/12?x=1",
+      "https://api.github.com/repos/o/other/issues/12",
+    ])
+      expect(sourceReadUrl("O/Shop", url)).toBe(false);
+  } finally {
+    await app.close();
+  }
+});
+
+it("merges bounded issue and review comment history in time order using GET only", async () => {
+  const pullRoot = "https://api.github.com/repos/o/shop/pulls";
+  const doFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    expect(init?.method).toBe("GET");
+    const url = String(input);
+    let result: unknown;
+    let headers = {};
+    const timed = (id: number) => ({
+      ...comment(id, `Earlier ${id}`),
+      created_at: new Date(UPDATED - (100 - id) * 1000).toISOString(),
+    });
+    if (url.includes("/notifications?"))
+      result = [
+        {
+          id: "101",
+          reason: "mention",
+          updated_at: new Date(UPDATED).toISOString(),
+          repository: { full_name: "o/shop" },
+          subject: {
+            type: "PullRequest",
+            title: "Review",
+            url: `${pullRoot}/12`,
+            latest_comment_url: `${pullRoot}/comments/555`,
+          },
+        },
+      ];
+    else if (url === `${pullRoot}/comments/555`) result = comment(555, body);
+    else if (url.endsWith("&page=3")) {
+      result = [
+        ...Array.from({ length: 25 }, (_, i) => timed(i * 2 + 1)),
+        comment(555, body),
+        { ...timed(99), created_at: new Date(NOW).toISOString() },
+      ];
+    } else if (url === `${pullRoot}/12/comments?per_page=100`) {
+      result = [timed(0)];
+      headers = { link: `<${url}&page=3>; rel="last"` };
+    } else if (url === `${ROOT}/12/comments?per_page=100`)
+      result = Array.from({ length: 25 }, (_, i) => timed(i * 2));
+    else throw new Error(`Unexpected URL: ${url}`);
+    return new Response(JSON.stringify(result), { headers });
+  });
+  await collectNotifications(config.repos, store, makeRest("token", doFetch as typeof fetch), NOW);
+  expect(store.notification("101")?.history?.map((m) => m.source.messageId)).toEqual(
+    Array.from({ length: 20 }, (_, i) => String(30 + i)),
+  );
+  expect(doFetch.mock.calls.map(([url]) => String(url))).toContain(
+    `${pullRoot}/12/comments?per_page=100&page=3`,
+  );
 });

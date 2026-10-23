@@ -1380,7 +1380,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               if (
                 !parsedThread.success ||
                 Date.parse(parsedThread.data.updated_at) !== thread.updatedAt ||
-                parsedThread.data.subject.url !== expected
+                !sourceReadUrl(repo.github, parsedThread.data.subject.url) ||
+                parsedThread.data.subject.url.split("/").slice(6).join("/") !==
+                  expected.split("/").slice(6).join("/")
               )
                 return reply
                   .code(409)
