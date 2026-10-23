@@ -3,6 +3,7 @@ import {
   type AgentStream,
   type AttentionItem,
   type ChangedFiles,
+  type CommsEvent,
   CREW_FILES_NOTE,
   type CrewLoop,
   type CrewRow,
@@ -56,6 +57,20 @@ export function digest(over: Partial<RunDigest> = {}): RunDigest {
     ...over,
   };
 }
+
+const comms = (over: Partial<CommsEvent> = {}): CommsEvent => ({
+  at: NOW,
+  kind: "comms",
+  who: "guido-1",
+  to: "CAPCOM",
+  text: "x",
+  ref: null,
+  url: null,
+  status: null,
+  prs: [],
+  summary: null,
+  ...over,
+});
 
 const STREAM: AgentStream = {
   runId: "r-12",
@@ -1062,14 +1077,60 @@ describe("Agent page: activity stream", () => {
     expect(txt.textContent).toContain("<img src=x onerror=alert(1)>");
   });
 
-  it("filters: Messages (prompt, to you, system), Thinking, Tools, and Guard's placeholder", async () => {
-    stub();
+  it("a seat's messages since its run started are agents rows under All and Messages", async () => {
+    const TAG = "@" + "CAPCOM";
+    stub({
+      rows: [seatRow({ digest: digest() })],
+      extra: {
+        "/api/activity": [
+          comms({ at: NOW - 5 * MIN, who: "guido-1", text: `Should the cache expire? ${TAG}` }),
+          comms({
+            at: NOW - 20 * MIN,
+            who: "flight",
+            to: "guido-1",
+            text: "Assigned the quote cache ticket",
+          }),
+          comms({ at: NOW - 30 * MIN, who: "flight", to: "guido-1", text: "Old line" }),
+        ],
+      },
+    });
+    const { container } = render(<Agent id="guido-1" />);
+    await loaded();
+    const rows = () => [...container.querySelectorAll<HTMLElement>("#stream .ev")];
+    const who = () => rows().map((r) => r.querySelector(".who")?.textContent);
+    await waitFor(() => expect(who()).toContain("agents"));
+    expect(who()).toEqual(["agents", "prompt", "thinking", "tool", "to you", "system", "agents"]);
+    expect(rows()[0]?.querySelector(".txt")?.textContent).toBe(
+      "← FLIGHT: Assigned the quote cache ticket",
+    );
+    const last = rows().at(-1)?.querySelector(".txt") as HTMLElement;
+    expect(last.textContent).toContain("→ You: Should the cache expire?");
+    expect($(last, ".mention")?.textContent).toBe(TAG);
+    expect(container.textContent).not.toContain("Old line");
+    const seg = screen.getByRole("group", { name: "Activity filter" });
+    fireEvent.click(within(seg).getByRole("button", { name: "Messages" }));
+    expect(who()).toEqual(["agents", "prompt", "to you", "system", "agents"]);
+    fireEvent.click(within(seg).getByRole("button", { name: "Thinking" }));
+    expect(who()).toEqual(["thinking"]);
+    fireEvent.click(within(seg).getByRole("button", { name: "Tools" }));
+    expect(who()).toEqual(["tool"]);
+  });
+
+  it("filters: Messages (prompt, to you, agents, system), Thinking, Tools, and Guard's placeholder", async () => {
+    stub({
+      extra: {
+        "/api/activity": [
+          comms({ at: NOW - 5 * MIN, who: "flight", to: "shop-app-ta", text: "Report status" }),
+        ],
+      },
+    });
     const { container } = render(<Agent id="shop-app-ta" />);
     await loaded();
     const who = () => [...container.querySelectorAll("#stream .ev .who")].map((w) => w.textContent);
+    await waitFor(() => expect(who()).toContain("agents"));
     const seg = screen.getByRole("group", { name: "Activity filter" });
     fireEvent.click(within(seg).getByRole("button", { name: "Messages" }));
-    expect(who()).toEqual(["prompt", "to you", "system"]);
+    expect(who()).toEqual(["prompt", "to you", "system", "agents"]);
     fireEvent.click(within(seg).getByRole("button", { name: "Thinking" }));
     expect(who()).toEqual(["thinking"]);
     fireEvent.click(within(seg).getByRole("button", { name: "Tools" }));
@@ -1078,7 +1139,7 @@ describe("Agent page: activity stream", () => {
     expect(who()).toEqual([]);
     expect($(container, "#stream")?.textContent).toContain(ENGINE_NOT_RUNNING);
     fireEvent.click(within(seg).getByRole("button", { name: "All" }));
-    expect(who()).toHaveLength(5);
+    expect(who()).toHaveLength(6);
   });
 
   it("an open tool call stays open on its own event when the window drops events from the front", async () => {
