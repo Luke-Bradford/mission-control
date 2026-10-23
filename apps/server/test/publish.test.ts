@@ -1336,6 +1336,43 @@ describe("merge steps", () => {
       });
     });
 
+    it("counts a branch deleted between the check and the push as success", async () => {
+      let asked = 0;
+      const rejected = Object.assign(new Error("Command failed: git push"), {
+        code: 1,
+        stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
+      });
+      gitAnswers = {
+        "ls-remote": () => lsRemote(MAIN, ++asked === 1 ? SHA : null),
+        push: rejected,
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toEqual({ ok: true });
+      expect(asked).toBe(2);
+    });
+
+    it("counts a push that fails because the branch has gone as success", async () => {
+      let asked = 0;
+      gitAnswers = {
+        "ls-remote": () => lsRemote(MAIN, ++asked === 1 ? SHA : null),
+        push: new Error("error: unable to delete: remote ref does not exist"),
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toEqual({ ok: true });
+    });
+
+    it("still refuses finally when the branch is still there after a refused push", async () => {
+      gitAnswers = {
+        "ls-remote": lsRemote(MAIN, SHA),
+        push: Object.assign(new Error("Command failed: git push"), {
+          code: 1,
+          stdout: `!\trefs/heads/${BRANCH}:refs/heads/${BRANCH}\t[rejected] (stale info)\n`,
+        }),
+      };
+      expect(await publisher().deleteRemoteBranch(R, SHA)).toMatchObject({
+        ok: false,
+        transient: false,
+      });
+    });
+
     it("refuses a branch that is not of the run's shape, or is another issue's", async () => {
       const p = publisher();
       for (const branch of ["main", "feature/8-other", "release/7-x", null]) {
