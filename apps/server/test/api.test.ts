@@ -453,6 +453,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/drafts"],
   ["POST", "/api/drafts/guido-1/post"],
   ["POST", "/api/drafts/guido-1/discard"],
+  ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/flight/brief"],
   ["GET", "/api/health"],
@@ -923,7 +924,7 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
-      if (url.endsWith("/dismiss") || url.endsWith("/handled")) {
+      if (url.endsWith("/dismiss") || url.endsWith("/handled") || url.includes("/replies/")) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -1070,7 +1071,11 @@ describe("local access", () => {
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
-            .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")}`,
+            .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
+            .replace(
+              /\/attention\/[^/]+\/replies\/[^/]+\/post$/,
+              "/attention/:key/replies/:replyId/post",
+            )}`,
       ),
     );
     const registered = apiRoutes.filter((r) => !r.startsWith("HEAD "));

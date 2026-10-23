@@ -1,5 +1,5 @@
 /** Quota windows as the Overview and (later) Setup show them. */
-import { type LimitRow, MIN_PACE_5H_MINUTES } from "@mc/core";
+import { type AccountId, type LimitRow, MIN_PACE_5H_MINUTES } from "@mc/core";
 import { dayMonth, hhmm, isoDay, wkdTime } from "./fmt.ts";
 
 const MINUTE = 60_000;
@@ -9,6 +9,12 @@ const FIVE_HOURS = 5 * HOUR;
 
 /** What a 5h window too young for a pace says, whether the hub or the clock found it so. */
 const TOO_YOUNG = "too little history for a pace";
+
+/** The account's first quota window: its 5h row, else its 7d row; null when it has neither. */
+export function firstWindow(limits: LimitRow[], accountId: AccountId): LimitRow | null {
+  const mine = limits.filter((l) => l.accountId === accountId);
+  return mine.find((l) => l.window === "5h") ?? mine.find((l) => l.window === "7d") ?? null;
+}
 
 /** Time until a window is full at the current pace. */
 export function timeToFull(row: LimitRow, now: number): string {
