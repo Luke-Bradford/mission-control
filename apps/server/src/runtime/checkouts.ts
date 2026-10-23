@@ -21,8 +21,8 @@ import {
   scratchName,
 } from "@mc/core";
 import { SEAT_ID } from "../config.ts";
-import { gitEnv } from "../files.ts";
-import { crewGit, crewGitBytes } from "./git.ts";
+import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import { crewGit, crewGitBytes, SAFE_CONFIG } from "./git.ts";
 
 const execFileP = promisify(execFile);
 
@@ -85,6 +85,13 @@ export class CheckoutError extends Error {
   }
 }
 
+/** A folder whose git repository the crew clone must not share: the hub's checkout, a loop's worktree. */
+export interface RepoPeer {
+  /** How a refusal names it: `the hub's checkout`, `loop <id> worktree`. */
+  label: string;
+  dir: string;
+}
+
 export interface CheckoutInput {
   /** Mission Control's clone of the repo (a session's `checkout`). */
   checkout: string;
@@ -95,6 +102,8 @@ export interface CheckoutInput {
   seatId: string;
   issue: number;
   title: string;
+  /** Checked at this start against the clone's git repository; none given, none checked. */
+  peers?: readonly RepoPeer[];
 }
 
 export interface Checkout {
@@ -122,18 +131,66 @@ const succeeds = (p: Promise<unknown>) =>
     () => false,
   );
 
-/** The clone's `.git` (real path), once the checkout is a clean git top level. */
-export async function cloneGitDir(checkout: string): Promise<string> {
+/**
+ * The real path of `dir`'s git common directory, or null when git cannot say (a missing folder).
+ * Read-only, as `gitCommonDir` in config.ts: hooks and fsmonitor off, no optional locks, no prompt
+ * and none of the server's `GIT_*` settings. It runs in a live loop's worktree too.
+ */
+async function peerCommonDir(dir: string): Promise<string | null> {
   try {
-    const common = await realpath(join(checkout, ".git"));
+    const r = await execFileP(
+      "git",
+      [
+        ...SAFE_CONFIG,
+        "--no-optional-locks",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: GIT_TIMEOUT_MS,
+        env: { ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0" },
+      },
+    );
+    return await realpath(r.stdout.trim());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The clone's `.git` (real path), once the checkout is a clean git top level and shares its git
+ * repository with none of `peers`. A peer git cannot read is skipped, and checked again at the next
+ * start. Nothing is written before this returns.
+ */
+export async function cloneGitDir(
+  checkout: string,
+  peers: readonly RepoPeer[] = [],
+): Promise<string> {
+  let common: string;
+  try {
+    common = await realpath(join(checkout, ".git"));
     const o = { gitDir: common };
     const top = (await crewGit(checkout, ["rev-parse", "--show-toplevel"], common, o)).trim();
     const status = await crewGit(checkout, ["status", "--porcelain"], common, o);
-    if ((await realpath(top)) === (await realpath(checkout)) && status === "") return common;
+    if ((await realpath(top)) !== (await realpath(checkout)) || status !== "") {
+      throw new CheckoutError("checkout", CHECKOUT_TEXT);
+    }
   } catch {
     // missing, not a repo, redirected: all the same to the operator
+    throw new CheckoutError("checkout", CHECKOUT_TEXT);
   }
-  throw new CheckoutError("checkout", CHECKOUT_TEXT);
+  for (const peer of peers) {
+    if ((await peerCommonDir(peer.dir)) === common) {
+      throw new CheckoutError(
+        "checkout",
+        `the crew clone shares its git repository with ${peer.label}`,
+      );
+    }
+  }
+  return common;
 }
 
 /**
@@ -429,7 +486,12 @@ async function fetchBase(i: Omit<CheckoutInput, "title">) {
 
 /** `fetchBase` for a checkout named `name` (already checked); the root must be absolute. */
 async function fetchBaseAs(
-  i: { checkout: string; worktreesRoot: string; sessionId: string },
+  i: {
+    checkout: string;
+    worktreesRoot: string;
+    sessionId: string;
+    peers?: readonly RepoPeer[];
+  },
   name: string,
 ) {
   if (!isAbsolute(i.worktreesRoot)) {
@@ -439,7 +501,7 @@ async function fetchBaseAs(
     throw new CheckoutError("path", `${i.sessionId} is not a session id`);
   }
   const path = join(i.worktreesRoot, i.sessionId, name);
-  const common = await cloneGitDir(i.checkout);
+  const common = await cloneGitDir(i.checkout, i.peers);
   const inClone = (args: string[], timeoutMs?: number) =>
     crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
   const baseSha = await fetchOriginBase(inClone);
@@ -481,6 +543,7 @@ export async function preparePlanCheckout(i: Omit<CheckoutInput, "title">): Prom
     worktreesRoot: i.worktreesRoot,
     sessionId: i.sessionId,
     name,
+    peers: i.peers,
   });
 }
 
@@ -496,6 +559,7 @@ export async function prepareDetachedCheckout(i: {
   worktreesRoot: string;
   sessionId: string;
   name: string;
+  peers?: readonly RepoPeer[];
 }): Promise<Checkout> {
   if (!CHECKOUT_NAME.test(i.name)) {
     throw new CheckoutError("path", `${i.name} is not a seat checkout name`);
@@ -702,6 +766,7 @@ export interface ScratchInput {
   seatId: string;
   reviewId: number;
   sha: string;
+  peers?: readonly RepoPeer[];
 }
 
 export interface Scratch {
@@ -734,7 +799,7 @@ export async function prepareScratch(i: ScratchInput): Promise<Scratch> {
   }
   const subject = `the PR head ${i.sha.slice(0, 7)}`;
   const path = join(i.worktreesRoot, i.sessionId, name);
-  const common = await cloneGitDir(i.checkout);
+  const common = await cloneGitDir(i.checkout, i.peers);
   const inClone = (args: string[], timeoutMs?: number) =>
     crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
   const baseSha = await fetchOriginBase(inClone);

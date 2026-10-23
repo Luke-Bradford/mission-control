@@ -120,6 +120,7 @@ import {
   prepareDetachedCheckout,
   preparePlanCheckout,
   prepareScratch,
+  type RepoPeer,
   removeCheckout,
   writeReviewInputs,
 } from "./checkouts.ts";
@@ -196,6 +197,14 @@ export function seatDenyRead(
     ...extra,
   ];
   return [...new Set(paths.map(realish))];
+}
+
+/** The folders whose git repository a crew clone must not share: the hub's checkout and each loop's worktree. */
+export function clonePeers(config: CcConfig, hubRoot: string): RepoPeer[] {
+  return [
+    { label: "the hub's checkout", dir: hubRoot },
+    ...config.loops.map((l) => ({ label: `loop ${l.id} worktree`, dir: l.worktree })),
+  ];
 }
 
 /**
@@ -1297,6 +1306,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           sessionId: info.session.id,
           seatId,
           issue,
+          peers: clonePeers(deps.config, deps.hubRoot),
         };
         const c = planner
           ? await preparePlanCheckout(where)
@@ -1433,6 +1443,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           worktreesRoot: crew?.worktrees ?? "",
           sessionId: info.session.id,
           name: watchCheckoutName(seatId),
+          peers: clonePeers(deps.config, deps.hubRoot),
         });
         return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
       });
@@ -1574,6 +1585,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           seatId,
           reviewId,
           sha: review.sha,
+          peers: clonePeers(deps.config, deps.hubRoot),
         });
         try {
           return {
