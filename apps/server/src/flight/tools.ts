@@ -245,6 +245,7 @@ import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { crewDir, type Store } from "../store.ts";
 import {
+  flightArrivalSource,
   flightSeat,
   flightStartCap,
   flightState,
@@ -365,7 +366,43 @@ const BriefItemArgs = z.strictObject({
   options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
   basis: basisArg,
 });
+const WatchEntryArgs = z.strictObject({
+  id: BriefIdentity,
+  state: z.enum(["warn", "info", "ok"]),
+  title: text(BRIEF_LABEL_MAX),
+  detail: text(MC_TEXT_MAX),
+  catchUp: z.strictObject({ kind: z.enum(["new", "follow-up", "old"]), line: text(MC_TEXT_MAX) }),
+  next: text(MC_TEXT_MAX),
+  action: z
+    .discriminatedUnion("kind", [
+      z.strictObject({
+        kind: z.literal("lock-hold"),
+        runId: text(200),
+        toolUseId: text(200),
+        since: z.number().int().nonnegative(),
+      }),
+      z.strictObject({
+        kind: z.literal("draft"),
+        draftId: z.number().int().positive(),
+        target: text(200),
+      }),
+    ])
+    .optional(),
+});
+const WatchOperationArgs = z.strictObject({
+  upsert: z.array(WatchEntryArgs).max(100).optional(),
+  remove: z.array(BriefIdentity).max(100).optional(),
+});
+const ArrivalOperationArgs = z.strictObject({
+  source: z.enum(["GitHub", "Teams", "Board"]),
+  arrivalId: text(200),
+  version: text(200),
+  outcome: z.enum(["No action", "Queued"]),
+  detail: text(MC_TEXT_MAX),
+});
 const UpdateBriefArgs = z.strictObject({
+  watch: WatchOperationArgs.optional(),
+  arrival: ArrivalOperationArgs.optional(),
   section: z.enum(FLIGHT_BRIEF_SECTIONS),
   text: z.string().max(FLIGHT_BRIEF_INPUT_MAX),
   basis: basisArg,
@@ -893,6 +930,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       about: `${ref}: ${card.title}`,
       decision: planner ? plannerStartedDecision(call) : startedDecision(call),
       basis,
+    });
+    store.recordFlightArrival({
+      source: "Board",
+      arrivalId: ref,
+      version: String(card.createdAt),
+      arrivedAt: card.createdAt,
+      at,
+      text: card.title,
+      outcome: "Assigned",
+      detail: `${call}: ${basis}`,
     });
     bus.emit("agents");
     bus.emit("flight");
@@ -1484,6 +1531,26 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     } catch {
       return fail("Source changed; refresh the item before drafting.");
     }
+    if (structured.person) {
+      const match = /^person:(\d+):(\d+)$/.exec(key);
+      const n = match ? store.notification(match[1] as string) : null;
+      const drafted = store
+        .briefs()
+        .get(key)
+        ?.person?.replies?.some((r) => r.draftId !== undefined);
+      if (n)
+        store.recordFlightArrival({
+          source: structured.person.source.kind === "teams" ? "Teams" : "GitHub",
+          arrivalId: n.id,
+          version: structured.person.source.revision,
+          arrivedAt: n.updatedAt,
+          at,
+          text: n.title,
+          outcome: drafted ? "Reply drafted" : "Asked of you",
+          detail: recommendation,
+        });
+      bus.emit("flight");
+    }
     bus.emit("attention");
     return { text: BRIEFED_TEXT };
   }
@@ -1737,13 +1804,30 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const at = now();
     const n = lastHour(["brief"], at);
     if (n >= FLIGHT_BRIEF_EDITS_PER_HOUR) return fail(capText("updated your brief", n));
-    store.setFlightBriefSection({
-      sessionId: session,
-      section,
-      text: body,
-      updatedAt: at,
-      updatedBy: ctx.seatId,
-    });
+    const arrival = c.args.arrival;
+    const source = arrival ? flightArrivalSource(config, store, arrival) : null;
+    if (arrival && !source)
+      return fail("Source changed; refresh the arrival before recording an outcome.");
+    if (arrival?.outcome === "Queued") {
+      const queued = (flightSeat(config)?.session.seats ?? []).some((s) =>
+        store.queue(s.id).some((q) => `${q.repoId}#${q.issue}` === arrival.arrivalId),
+      );
+      if (arrival.source !== "Board" || !queued)
+        return fail("Not recorded: this arrival is not queued.");
+    }
+    try {
+      if (c.args.watch) store.setFlightWatch(session, c.args.watch, at);
+      if (arrival && source) store.recordFlightArrival({ ...arrival, ...source, at });
+      store.setFlightBriefSection({
+        sessionId: session,
+        section,
+        text: body,
+        updatedAt: at,
+        updatedBy: ctx.seatId,
+      });
+    } catch {
+      return fail("Not saved: at most 100 watch entries are allowed.");
+    }
     record(at, {
       kind: "brief",
       about: briefAboutText(title),
@@ -1993,6 +2077,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       description: UPDATE_BRIEF_DESCRIPTION,
       inputSchema: objectSchema(
         {
+          watch: z.toJSONSchema(WatchOperationArgs),
+          arrival: z.toJSONSchema(ArrivalOperationArgs),
           section: { type: "string", enum: FLIGHT_BRIEF_SECTIONS },
           text: { type: "string", maxLength: FLIGHT_BRIEF_SECTION_MAX },
           basis: BASIS_SCHEMA,
@@ -2032,7 +2118,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const match = /^([^#]+)#([1-9][0-9]*)$/.exec(target);
         if (!match || Number(match[2]) > MAX_ISSUE || !config.repos.some((r) => r.id === match[1]))
           return fail(DRAFT_BAD_TARGET);
-        const id = store.addDraft(target, kind, body, now());
+        const at = now();
+        const id = store.addDraft(target, kind, body, at);
+        const card = store
+          .board(match[1] as string)
+          .find((c) => c.issueNumber === Number(match[2]));
+        if (card)
+          store.recordFlightArrival({
+            source: "Board",
+            arrivalId: target,
+            version: String(card.createdAt),
+            arrivedAt: card.createdAt,
+            at,
+            text: card.title,
+            outcome: "Reply drafted",
+            detail: `Draft ${id} prepared for the operator.`,
+          });
         bus.emit("flight");
         return { text: draftedReplyText(id) };
       },

@@ -15,10 +15,15 @@ import {
   COMMS_CAPCOM,
   COMMS_TEXT_MAX,
   type Escalation,
+  FLIGHT_INCOMING_LIMIT,
+  FLIGHT_WATCH_LIMIT,
+  type FlightArrivalDisposition,
   type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
+  type FlightWatchEntry,
+  type FlightWatchOperation,
   type FlowIssue,
   type FlowPr,
   GUARD_HITS_LIMIT,
@@ -282,6 +287,14 @@ CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
   updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
+);
+CREATE TABLE IF NOT EXISTS flight_watch (
+  session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
+  PRIMARY KEY (session_id, id)
+);
+CREATE TABLE IF NOT EXISTS flight_incoming (
+  id TEXT PRIMARY KEY, source TEXT NOT NULL, arrival_id TEXT NOT NULL, version TEXT NOT NULL,
+  at INTEGER NOT NULL, entry TEXT NOT NULL, UNIQUE (source, arrival_id, version)
 );
 -- The operator's GitHub notification threads (read-only copy); handled_* closes a thread here.
 CREATE TABLE IF NOT EXISTS notifications (
@@ -789,6 +802,8 @@ export class Store {
     this.addColumn("notifications", "source_content", "TEXT");
     this.addColumn("briefs", "structured", "TEXT");
     this.addColumn("drafts", "source", "TEXT");
+    this.addColumn("drafts", "metadata", "TEXT");
+    this.addColumn("drafts", "completed_at", "INTEGER");
     // An ok row last succeeded when it was recorded; a failing row's last success is unknown.
     this.whenColumnMissing("collector_status", "last_ok_at", () => {
       this.db.exec("ALTER TABLE collector_status ADD COLUMN last_ok_at INTEGER");
@@ -3008,11 +3023,19 @@ export class Store {
     this.db.prepare("UPDATE crew_errors SET acked = 1 WHERE id = ?").run(id);
   }
 
-  addDraft(target: string, kind: ReplyDraft["kind"], text: string, at: number): number {
+  addDraft(
+    target: string,
+    kind: ReplyDraft["kind"],
+    text: string,
+    at: number,
+    metadata?: Pick<ReplyDraft, "to" | "via" | "where" | "context">,
+  ): number {
     return Number(
       this.db
-        .prepare("INSERT INTO drafts (target, kind, text, created_at) VALUES (?, ?, ?, ?)")
-        .run(target, kind, text, at).lastInsertRowid,
+        .prepare(
+          "INSERT INTO drafts (target, kind, text, created_at, metadata) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(target, kind, text, at, metadata ? JSON.stringify(metadata) : null).lastInsertRowid,
     );
   }
 
@@ -3022,8 +3045,9 @@ export class Store {
     text: string,
     at: number,
     source: { itemKey: string; replyId: string; source: PersonSource },
+    metadata?: Pick<ReplyDraft, "to" | "via" | "where" | "context">,
   ): number {
-    const id = this.addDraft(target, kind, text, at);
+    const id = this.addDraft(target, kind, text, at, metadata);
     this.db.prepare("UPDATE drafts SET source = ? WHERE id = ?").run(JSON.stringify(source), id);
     return id;
   }
@@ -3037,20 +3061,92 @@ export class Store {
     return row?.source ? { ...JSON.parse(row.source as string), state: row.state as string } : null;
   }
 
-  drafts(): ReplyDraft[] {
-    return this.db
+  drafts(includeDone = false): ReplyDraft[] {
+    const rows = this.db
       .prepare(
-        "SELECT id, target, kind, text, created_at AS createdAt, state FROM drafts WHERE state = 'pending' ORDER BY created_at, id",
+        `SELECT id, target, kind, text, created_at AS createdAt, state, metadata, completed_at AS completedAt
+       FROM drafts ${includeDone ? "ORDER BY created_at DESC, id DESC LIMIT 100" : "WHERE state = 'pending' ORDER BY created_at, id"}`,
       )
-      .all() as unknown as ReplyDraft[];
+      .all() as Row[];
+    return rows.map(({ metadata, completedAt, ...r }) => ({
+      ...r,
+      ...(metadata ? JSON.parse(metadata as string) : {}),
+      ...(completedAt === null ? {} : { completedAt }),
+    })) as ReplyDraft[];
   }
 
-  finishDraft(id: number, state: "posted" | "discarded", text?: string): void {
-    if (state === "discarded") this.db.prepare("DELETE FROM drafts WHERE id = ?").run(id);
-    else
+  finishDraft(
+    id: number,
+    state: "posted" | "copied" | "discarded",
+    text?: string,
+    at = Date.now(),
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE drafts SET state = ?, text = COALESCE(?, text), completed_at = ? WHERE id = ? AND state = 'pending'",
+      )
+      .run(state, text ?? null, at, id);
+  }
+
+  setFlightWatch(session: string, operation: FlightWatchOperation, at: number): void {
+    this.transaction(() => {
+      for (const id of operation.remove ?? [])
+        this.db
+          .prepare("DELETE FROM flight_watch WHERE session_id = ? AND id = ?")
+          .run(session, id);
+      for (const entry of operation.upsert ?? [])
+        this.db
+          .prepare("INSERT OR REPLACE INTO flight_watch (session_id, id, entry) VALUES (?, ?, ?)")
+          .run(session, entry.id, JSON.stringify({ ...entry, updatedAt: at }));
+      if (this.flightWatch(session).length > FLIGHT_WATCH_LIMIT)
+        throw new Error("Too many watch entries.");
+    });
+  }
+
+  flightWatch(session: string): FlightWatchEntry[] {
+    return (
       this.db
-        .prepare("UPDATE drafts SET state = ?, text = COALESCE(?, text) WHERE id = ?")
-        .run(state, text ?? null, id);
+        .prepare("SELECT entry FROM flight_watch WHERE session_id = ? ORDER BY id")
+        .all(session) as Row[]
+    ).map((r) => JSON.parse(r.entry as string) as FlightWatchEntry);
+  }
+
+  recordFlightArrival(entry: Omit<FlightArrivalDisposition, "id">): void {
+    const id = JSON.stringify([entry.source, entry.arrivalId, entry.version]);
+    this.transaction(() => {
+      const previous = this.db.prepare("SELECT entry FROM flight_incoming WHERE id = ?").get(id) as
+        | Row
+        | undefined;
+      const saved = previous
+        ? (JSON.parse(previous.entry as string) as FlightArrivalDisposition)
+        : null;
+      if (saved?.outcome === entry.outcome && saved.detail === entry.detail) return;
+      this.db
+        .prepare(
+          "INSERT OR REPLACE INTO flight_incoming (id, source, arrival_id, version, at, entry) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          id,
+          entry.source,
+          entry.arrivalId,
+          entry.version,
+          entry.at,
+          JSON.stringify({ ...entry, id }),
+        );
+      this.db
+        .prepare(
+          "DELETE FROM flight_incoming WHERE id NOT IN (SELECT id FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?)",
+        )
+        .run(FLIGHT_INCOMING_LIMIT);
+    });
+  }
+
+  flightIncoming(): FlightArrivalDisposition[] {
+    return (
+      this.db
+        .prepare("SELECT entry FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?")
+        .all(FLIGHT_INCOMING_LIMIT) as Row[]
+    ).map((r) => JSON.parse(r.entry as string) as FlightArrivalDisposition);
   }
 
   /** Records one of FLIGHT's decisions; returns its id. */
@@ -3289,6 +3385,12 @@ export class Store {
                     r.text,
                     at,
                     { itemKey: key, replyId: r.id, source },
+                    {
+                      ...(n.author === null ? {} : { to: n.author }),
+                      via: "GitHub",
+                      where: `${n.repoId}#${n.number}`,
+                      context: n.title,
+                    },
                   ),
                 }
               : {}),
