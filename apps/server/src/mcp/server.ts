@@ -33,8 +33,35 @@ export interface McTool {
   call(ctx: McToolContext, args: unknown): Promise<{ text: string; isError?: boolean }>;
 }
 
+/**
+ * The `/mcp` tool calls in flight. A restart lets them finish (`idle`) before the hub exits: a seat
+ * keeps working through the restart, and a call cut off would be answered with a connection error
+ * for a call that had already run.
+ */
+export class McpCalls {
+  private readonly calls = new Set<Promise<unknown>>();
+
+  /** Counts `p` as in flight until it settles; returns it as it is. */
+  track<T>(p: Promise<T>): Promise<T> {
+    const done = p.then(
+      () => {},
+      () => {},
+    );
+    this.calls.add(done);
+    void done.then(() => this.calls.delete(done));
+    return p;
+  }
+
+  /** Resolves once no call is in flight (calls that start meanwhile are waited for too). */
+  async idle(): Promise<void> {
+    while (this.calls.size > 0) await Promise.all([...this.calls]);
+  }
+}
+
 export interface McpDeps {
   tokens: RunTokens;
+  /** The calls in flight, for a restart to wait on; default: not counted. */
+  calls?: McpCalls;
   mcpTools: () => McTool[];
   seatMode: (seatId: string) => CrewMode;
   /** The extra tools a seat's role holds; default: none. */
@@ -173,8 +200,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
             })),
           },
         };
-      case "tools/call":
-        return callTool(who, id, msg.params);
+      case "tools/call": {
+        const call = callTool(who, id, msg.params);
+        return deps.calls === undefined ? call : deps.calls.track(call);
+      }
       default:
         // includes `server/discover`, which makes the CLI fall back to `initialize`
         return rpcError(id, JSONRPC_METHOD_NOT_FOUND, "method not found");

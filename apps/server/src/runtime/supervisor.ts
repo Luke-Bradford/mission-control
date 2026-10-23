@@ -8,11 +8,15 @@
  * own. Only one process may run crew: `start()` takes `<crew.worktrees>/.mc-crew.lock`, and a
  * server that cannot (or runs with `enabled: false`) answers every action with a 409.
  *
- * On hub shutdown (`stopAll`) processes are ended but their runs stay active, so the next start
- * resumes them rather than marking them failed.
+ * Each seat's `claude` runs under a keeper (`keeper.ts`), a detached process that outlives the hub.
+ * On hub shutdown (`stopAll`) the hub only lets go of the keepers' sockets: seats keep working, their
+ * runs stay active, and the next start attaches to each keeper and replays the lines it missed
+ * (`reattach`). A run whose keeper is gone (a reboot) is resumed with `--resume`; one whose CLI
+ * exited meanwhile is recorded as ended; one whose keeper speaks another version is ended, then
+ * resumed, so two CLIs never run one session.
  *
  * Each process gets the mc tools (`--mcp-config`) and the guard hook, both keyed to a per-run token
- * issued at its spawn (a resume gets a new one; a hub restart first restores each active run's token and test-lock holds (`restoreRuns`), and `start()` drops those of every run it does not reattach). The token lives in hub memory and in two 0600
+ * issued at its spawn (a resume gets a new one; a hub restart first restores each active run's token and test-lock holds (`restoreRuns`), which an attached run keeps and `start()` drops for every run it does not reattach). The token lives in hub memory and in two 0600
  * files in `{DB dir}/crew/`, which only the hub and the hook (outside the sandbox) read; argv, env
  * and settings carry the files' paths only. When the process exits, for any reason, the token is
  * revoked, the run's test-lock hold freed and both files removed.
@@ -73,6 +77,8 @@ import {
   type SeatSessionRow,
   type SeatState,
   START_NO_RULES,
+  STDERR_TEXT_MAX,
+  STOP_GRACE_MS,
   scratchStartRefusedText,
   seatBusyText,
   seatCallSign,
@@ -83,6 +89,7 @@ import {
   watchStartRefusedText,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
+import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli-update.ts";
 import { probeClaudeVersion } from "../cli-version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
@@ -105,12 +112,15 @@ import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.t
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
   ACTIVE_SEAT_STATES,
+  CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
   crewDir,
+  crewKeeperDir,
   crewMcpPath,
   crewPromptPath,
   crewTokenPath,
   crewTranscriptPath,
+  type KeeperCursor,
   type Store,
 } from "../store.ts";
 import { readRepoClaudeMd, reviewBrief, rolePrompt, ticketBrief, watchBrief } from "./brief.ts";
@@ -125,12 +135,19 @@ import {
   removeCheckout,
   writeReviewInputs,
 } from "./checkouts.ts";
-import { type CrewSession, type SessionEvent, startSession } from "./session.ts";
+import {
+  CLI_PID_FILE,
+  endKeeper,
+  KEEPER_ENTRY,
+  KEEPER_PID_FILE,
+  type KeeperHello,
+  pidAlive,
+  readPidFile,
+} from "./keeper.ts";
+import { attachSession, type CrewSession, type SessionEvent, startSession } from "./session.ts";
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
-/** How long hub shutdown waits for crew processes to exit: half its whole allowance. */
-export const CREW_STOP_WAIT_MS = SHUTDOWN_TIMEOUT_MS / 2;
 /** A running seat's transcript is folded at most this often while it writes. */
 export const CREW_FOLD_EVERY_MS = 1000;
 /** The only variables a crew process inherits from the hub (no tokens, no `ANTHROPIC_*`). */
@@ -483,20 +500,13 @@ interface Live {
   off: () => void;
   /** The process's last stderr line (cleaned), for the reason when it crashes. */
   lastStderr: string | null;
+  /** The keeper's id: the stored cursor counts the lines of this one keeper only. */
+  spawn: string;
+  /** Attached to a keeper that is still replaying the lines the hub missed: no line goes out yet. */
+  attaching: boolean;
 }
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-const pidAlive = (pid: number): boolean => {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    // EPERM: alive, owned by someone else
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
 
 /** `get_context_usage`'s answer, or null when it is not the shape the CLI sends (spike). */
 function toContextUsage(v: unknown): ContextUsage | null {
@@ -734,17 +744,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         fold(l);
         if (l.parkedTurn) {
           l.parkedTurn = false; // parked stays until the next line starts a turn
-          break;
+        } else {
+          // An interrupted turn ends `is_error` (error_during_execution): that is the interrupt.
+          setState(l, "idle", e.isError && !interrupted ? LAST_TURN_ERROR : null);
+          store.setSeatTurnEnded(l.info.seat.id, now());
+          // a run being ended is no one's to nudge; nor is one still replaying (`onAttached` says)
+          if (l.ending === null && !l.attaching) {
+            emit({ kind: "idle", seatId: l.info.seat.id, runId: l.run.id, resumed: false });
+          }
         }
-        // An interrupted turn ends `is_error` (error_during_execution): that is the interrupt.
-        setState(l, "idle", e.isError && !interrupted ? LAST_TURN_ERROR : null);
-        store.setSeatTurnEnded(l.info.seat.id, now());
-        // a run being ended is no one's to nudge
-        if (l.ending === null) {
-          emit({ kind: "idle", seatId: l.info.seat.id, runId: l.run.id, resumed: false });
-        }
+        // after the result's effects, which a replay of it applies again without harm
+        saveCursor(l);
         break;
       }
+      case "attached":
+        onAttached(l, e.awaiting);
+        break;
       case "rate-limit":
         if (e.status === "rejected") {
           l.parkedTurn = true;
@@ -856,9 +871,25 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    */
   function sweepRunFiles(): void {
     try {
-      const active = new Set(store.activeSeatSessions().map((r) => r.runId));
+      const activeRows = store.activeSeatSessions();
+      const active = new Set(activeRows.map((r) => r.runId));
+      const keeping = new Set(
+        activeRows.flatMap((r) =>
+          r.runId === null ? [] : [basename(crewKeeperDir(deps.dbPath, r.runId))],
+        ),
+      );
       const dir = crewDir(deps.dbPath);
       for (const name of readdirSync(dir)) {
+        // a keeper's folder of a run that is no longer active, once its keeper and CLI are gone
+        if (CREW_KEEPER_DIR.test(name)) {
+          const folder = join(dir, name);
+          const alive = [KEEPER_PID_FILE, CLI_PID_FILE].some((f) => {
+            const pid = readPidFile(folder, f);
+            return pid !== null && pidAlive(pid);
+          });
+          if (!keeping.has(name) && !alive) rmSync(folder, { recursive: true, force: true });
+          continue;
+        }
         // a PR body file left by a hub that died during `gh pr create`: no draft_pr runs before
         // this start, since every older process's token died with that hub
         const stale =
@@ -923,31 +954,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         mode: 0o600,
       });
     }
-    const spawn = {};
-    spawns.set(run.id, spawn);
+    const keeperSpawn = randomUUID();
+    const release = grant(info, run);
     // A resume's earlier token (its process gone) is dropped before the new one is issued.
     deps.tokens.revoke(run.id);
     const token = deps.tokens.issue(info.seat.id, run.id);
-    /**
-     * Undoes this spawn's grant: unless a later spawn of the run has taken it over. Defensive, and
-     * untested: the supervisor never runs two processes for one run, so a later spawn cannot exist
-     * while this one lives (it would take overlapping processes no code path makes).
-     */
-    const release = () => {
-      if (spawns.get(run.id) !== spawn) return;
-      spawns.delete(run.id);
-      deps.tokens.revoke(run.id);
-      deps.lock.releaseRun(run.id);
-      for (const p of [tokenPath, mcpPath]) {
-        try {
-          rmSync(p, { force: true });
-        } catch (e) {
-          log(`${info.seat.id}: could not remove ${p}: ${errText(e)}`);
-        }
-      }
-    };
     let session: CrewSession;
     try {
+      // the cursor of an earlier keeper counts that keeper's lines, not this one's
+      store.deleteKeeperCursor(run.id);
       writePrivate(tokenPath, token);
       writePrivate(mcpPath, crewMcpConfig(`${hub}${MCP_PATH}`, token));
       const cwd = realpathSync(checkout.path);
@@ -995,6 +1010,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         cwd,
         transcriptPath: run.transcriptPath,
         env: crewEnv(info.seat.id),
+        node: crew?.node ?? DEFAULT_CREW_NODE,
+        entry: join(deps.hubRoot, KEEPER_ENTRY),
+        dir: crewKeeperDir(deps.dbPath, run.id),
+        spawn: keeperSpawn,
         controlTimeoutMs: deps.controlTimeoutMs,
         stopGraceMs: deps.stopGraceMs,
       });
@@ -1002,6 +1021,63 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       release();
       throw e;
     }
+    const l = track(info, run, session, release, {
+      spawn: keeperSpawn,
+      resumedAt: resume ? Date.now() : null,
+      spawnedAt: resume ? Date.now() : null,
+    });
+    // the resume window runs from the CLI's start, not from the keeper's: its own boot is not the CLI's
+    if (resume) {
+      void session.ready.then(() => {
+        if (l.spawnedAt !== null) l.spawnedAt = Date.now();
+      });
+    }
+    return l;
+  }
+
+  /**
+   * One spawn's grant on a run: it owns the run's token, files, keeper folder and test-lock hold.
+   * The returned release undoes it, unless a later spawn of the run has taken it over. Defensive, and
+   * untested: the supervisor never runs two processes for one run, so a later spawn cannot exist
+   * while this one lives (it would take overlapping processes no code path makes).
+   */
+  function grant(info: SeatInfo, run: Run): () => void {
+    const spawn = {};
+    spawns.set(run.id, spawn);
+    return () => {
+      if (spawns.get(run.id) !== spawn) return;
+      spawns.delete(run.id);
+      deps.tokens.revoke(run.id);
+      deps.lock.releaseRun(run.id);
+      for (const p of [crewTokenPath(deps.dbPath, run.id), crewMcpPath(deps.dbPath, run.id)]) {
+        try {
+          rmSync(p, { force: true });
+        } catch (e) {
+          log(`${info.seat.id}: could not remove ${p}: ${errText(e)}`);
+        }
+      }
+      removeKeeper(info.seat.id, run.id);
+    };
+  }
+
+  /** Removes a run's keeper folder and its cursor. Never throws. */
+  function removeKeeper(seatId: string, runId: string): void {
+    try {
+      rmSync(crewKeeperDir(deps.dbPath, runId), { recursive: true, force: true });
+      store.deleteKeeperCursor(runId);
+    } catch (e) {
+      log(`${seatId}: could not remove the keeper folder of ${runId}: ${errText(e)}`);
+    }
+  }
+
+  /** Registers a seat's process: its exit releases the grant, and its events reach `onEvent`. */
+  function track(
+    info: SeatInfo,
+    run: Run,
+    session: CrewSession,
+    release: () => void,
+    init: Partial<Live> & { spawn: string },
+  ): Live {
     // First, so it runs before the seat's own exit handling: never removed, unlike `l.off`, so a
     // discarded process still revokes its token when it exits.
     session.on((e) => {
@@ -1021,10 +1097,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       rateLimitedUntil: null,
       lastFoldAt: 0,
       foldTimer: undefined,
-      resumedAt: resume ? Date.now() : null,
-      spawnedAt: resume ? Date.now() : null,
+      resumedAt: null,
+      spawnedAt: null,
       off: () => {},
       lastStderr: null,
+      attaching: false,
+      ...init,
     };
     live.set(info.seat.id, l);
     l.off = session.on((e) => onEvent(l, e));
@@ -1041,6 +1119,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.setRunEnded(run.id, at, "failed", "exit");
     }
     setSeat(row.seatId, { state: "error", reason });
+    if (row.runId !== null) removeKeeper(row.seatId, row.runId);
     const info = findSeat(row.seatId);
     if (info) closeRunItems(info);
     if (open) emit({ kind: "run-ended", seatId: row.seatId, runId: run.id, endedBy: "exit" });
@@ -1149,24 +1228,57 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /**
-   * Resumes every active run once, after the lock is taken (spec §8b.2): its process is respawned
-   * with `--resume` in its own worktree, and the seat waits idle for the operator's next message. A run
-   * that cannot be resumed is failed with the reason. One row's failure never stops the others;
-   * a store that cannot list the runs is logged (the caller catches it, so no rejection escapes).
+   * Revokes the token and frees the test-lock holds of a run whose process the hub does not
+   * reattach, and removes its token files. Never throws.
+   */
+  function dropGrant(seatId: string, runId: string): void {
+    try {
+      deps.tokens.revoke(runId);
+      deps.lock.releaseRun(runId);
+      for (const p of [crewTokenPath(deps.dbPath, runId), crewMcpPath(deps.dbPath, runId)]) {
+        rmSync(p, { force: true });
+      }
+    } catch (e) {
+      log(`${seatId}: could not drop the grant of ${runId}: ${errText(e)}`);
+    }
+  }
+
+  /**
+   * Folds a run's transcript into its (still open) row, as Stop does for a run with no process, so
+   * the end that follows keeps what the seat did while no hub was watching. Never throws a fold's
+   * failure: the next read of the transcript (the backfill) has it.
+   */
+  function foldOpenRun(run: Run): void {
+    const r: Run = { ...run };
+    let facts: ReturnType<typeof foldPath> = null;
+    try {
+      facts = foldPath(new Map(), run.transcriptPath);
+      if (facts) applyFacts(r, facts);
+      store.upsertRun(r, facts !== null);
+      if (facts) persistDigest(store, digests, run.id, facts.digest);
+    } catch (e) {
+      log(`${run.agentId}: could not fold run ${run.id}: ${errText(e)}`);
+    }
+  }
+
+  /**
+   * Takes each active run's seat back after the lock is taken (spec §8b.2), once, in order. A seat
+   * still running under its keeper is attached to: the lines it wrote meanwhile are replayed and
+   * nothing is respawned or sent. A run whose CLI exited while no hub was attached is ended
+   * `failed`. A run with no keeper (a reboot) is resumed with `--resume` in its own worktree; one
+   * whose keeper speaks another version has the keeper ended first, so two CLIs never run one
+   * session. A run that cannot be taken back is failed with the reason. One row's failure never
+   * stops the others; a store that cannot list the runs is logged (the caller catches it, so no
+   * rejection escapes).
    */
   async function reattach(): Promise<void> {
     for (const row of store.activeSeatSessions()) {
       if (stopping) return;
-      // a seat with a process, or a start under way, has nothing to resume
+      // a seat with a process, or a start under way, has nothing to take back
       if (starting.has(row.seatId) || live.has(row.seatId)) continue;
-      if (deps.cliHold?.reason != null) {
-        // the run stays active; the release of the hold resumes it
-        log(`${row.seatId}: resume held: ${deps.cliHold.reason}`);
-        continue;
-      }
       starting.add(row.seatId);
       try {
-        await resumeOne(row);
+        await takeBack(row);
       } catch (e) {
         log(`${row.seatId}: could not resume: ${errText(e)}`);
         try {
@@ -1177,6 +1289,156 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       } finally {
         starting.delete(row.seatId);
       }
+    }
+  }
+
+  /** One active run's seat after a restart: attach to its keeper, record its end, or resume it. */
+  async function takeBack(row: SeatSessionRow): Promise<void> {
+    const runId = row.runId;
+    if (runId === null) return;
+    const dir = crewKeeperDir(deps.dbPath, runId);
+    const cursor = store.keeperCursor(runId);
+    const found = await attachSession({
+      dir,
+      // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
+      from: (h) => (cursor?.spawn === h.spawn ? cursor.line : 0),
+      controlTimeoutMs: deps.controlTimeoutMs,
+      stopGraceMs: deps.stopGraceMs,
+    });
+    // The attach awaited: the operator or the engine may have ended the run meanwhile. Whoever did
+    // recorded the end and set the seat; nothing here may overwrite it.
+    const moved = () => store.seatSession(row.seatId)?.runId !== runId;
+    if (moved()) {
+      if (found.kind === "attached") {
+        dropGrant(row.seatId, runId);
+        await found.session.close();
+        removeKeeper(row.seatId, runId);
+      }
+      return;
+    }
+    if (found.kind === "attached") {
+      if (stopping) return found.session.detach();
+      // no await before the seat is tracked: the replay's first line must find its listeners
+      return attachOne(row, runId, found.session, found.hello, cursor);
+    }
+    if (stopping) return;
+    if (found.kind === "exited") {
+      // The CLI exited while no hub was attached: the end is recorded as the exit path would.
+      dropGrant(row.seatId, runId);
+      const run = store.run(runId);
+      if (run !== null && run.endedAt === null) foldOpenRun(run);
+      const how = found.exit.code ?? found.exit.signal;
+      const said =
+        found.exit.lastStderr === null
+          ? ""
+          : cleanText(found.exit.lastStderr, STDERR_TEXT_MAX).trim();
+      return failResume(
+        row,
+        how === null ? CANNOT_START : `process exited ${how}${said === "" ? "" : `: ${said}`}`,
+      );
+    }
+    // No keeper to attach to: a reboot took it, or it speaks a version this hub does not.
+    if (found.version !== null) {
+      log(`${row.seatId}: keeper speaks version ${found.version}; ending it before the resume`);
+    }
+    dropGrant(row.seatId, runId);
+    if (deps.cliHold?.reason != null) {
+      // the run stays active; the release of the hold resumes it
+      log(`${row.seatId}: resume held: ${deps.cliHold.reason}`);
+      return;
+    }
+    // Two CLIs must never run one session: the old keeper and its CLI are gone before the resume.
+    const ended = await endKeeper(dir, 2 * (deps.stopGraceMs ?? STOP_GRACE_MS) + 5000);
+    if (moved()) return;
+    if (!ended) {
+      log(`${row.seatId}: could not end the old keeper`);
+      return failResume(row, RESUME_FAILED);
+    }
+    return resumeOne(row);
+  }
+
+  /**
+   * Takes over a seat whose CLI kept running under its keeper: no spawn, no resume and no "Carry
+   * on" line (`resumedAt` stays null). The seat's turn state comes from the replay and the keeper's
+   * `awaiting`; nothing is sent until the replay is in (`attached`).
+   */
+  async function attachOne(
+    row: SeatSessionRow,
+    runId: string,
+    session: CrewSession,
+    hello: KeeperHello,
+    cursor: KeeperCursor | null,
+  ): Promise<void> {
+    const info = findSeat(row.seatId);
+    const run = store.run(runId);
+    let refusal: string | null = null;
+    if (info === undefined) refusal = "could not resume: seat removed";
+    else if (run === null || run.endedAt !== null || row.cliSessionId === null) {
+      // no branch is needed: nothing is checked out again (a watch or plan run has none)
+      refusal = RESUME_FAILED;
+    } else if ((modeOfSeat(info.seat) === "scratch") !== (run.reviewId != null)) {
+      refusal = RESUME_MODE_CHANGED; // a scratch seat takes back only review runs
+    }
+    if (refusal !== null || info === undefined || run === null) {
+      dropGrant(row.seatId, runId);
+      await session.close();
+      return failResume(row, refusal ?? RESUME_FAILED);
+    }
+    // restoreRuns has put the token back; this makes sure of it for a hub that did not run it
+    try {
+      deps.tokens.adopt(row.seatId, runId, readFileSync(crewTokenPath(deps.dbPath, runId), "utf8"));
+    } catch (e) {
+      log(`${row.seatId}: could not read the token of ${runId}: ${errText(e)}`);
+    }
+    let unblock = () => {};
+    const chain = new Promise<void>((r) => {
+      unblock = r;
+    });
+    track(info, run, session, grant(info, run), {
+      spawn: hello.spawn,
+      attaching: true,
+      inTurn: hello.awaiting,
+      parkedTurn: hello.awaiting && row.state === "parked",
+      rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,
+      chain,
+    });
+    const off = session.on((e) => {
+      if (e.kind !== "attached" && e.kind !== "exit") return;
+      off();
+      unblock();
+    });
+  }
+
+  /** The replay is in: the seat's state is what the keeper's lines say. */
+  function onAttached(l: Live, awaiting: boolean): void {
+    const seatId = l.info.seat.id;
+    l.attaching = false;
+    l.inTurn ||= awaiting;
+    fold(l, true);
+    saveCursor(l);
+    const row = store.seatSession(seatId);
+    if (row === null) return;
+    if (row.state === "starting" && !awaiting && l.session.lines === 0) {
+      // The hub went down before the brief was sent: the CLI has no conversation to continue.
+      l.off();
+      if (live.get(seatId) === l) live.delete(seatId);
+      void l.session.close().then(() => failResume(row, RESUME_FAILED));
+      return;
+    }
+    if (!l.inTurn) emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
+  }
+
+  /** Records where in its keeper's output the hub has got to, for the next hub to replay from. */
+  function saveCursor(l: Live): void {
+    try {
+      store.setKeeperCursor({
+        runId: l.run.id,
+        spawn: l.spawn,
+        line: l.session.lines,
+        rateLimitedUntil: l.rateLimitedUntil,
+      });
+    } catch (e) {
+      log(`could not save the keeper cursor of ${l.run.id}: ${errText(e)}`);
     }
   }
 
@@ -1439,9 +1701,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
+      // The keeper starts the CLI and reports a failure (no such command, a bad cwd) once it has
+      // answered: wait for that, so the exit that marks the run failed and the seat in error
+      // comes before a start is claimed.
+      await session.ready;
       if (!session.alive) {
-        // The spawn failed (no such command, a bad cwd): it reports asynchronously, so wait for
-        // its exit, which marks the run failed and the seat in error, rather than claim a start.
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
       }
@@ -1548,6 +1812,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await enqueue(l, () =>
         writeLine(l, first !== undefined && first.trim() !== "" ? `${brief}\n\n${first}` : brief),
       ).catch(() => {});
+      await session.ready;
       if (!session.alive) {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
@@ -1728,6 +1993,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         commands: info.repo.commands?.review ?? [],
       });
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
+      await session.ready;
       if (!session.alive) {
         await session.close();
         throw new SupervisorError(500, CANNOT_START);
@@ -2009,7 +2275,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = run.agentId;
     if (runGone(runId, seatId)) return "gone";
     const l = live.get(seatId);
-    if (!l?.session.alive || l.ending !== null || l.run.id !== runId) return "busy";
+    if (!l?.session.alive || l.ending !== null || l.run.id !== runId || l.attaching) return "busy";
     return enqueue(l, (): SendResult => {
       // the run may have ended while this waited its turn in the chain
       if (runGone(runId, seatId)) return "gone";
@@ -2108,8 +2374,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         return;
       }
       sweepRunFiles();
-      // until a seat outlives a restart, no run is reattached, so every run's are dropped
-      dropRestored();
+      // each run's restored token and holds are kept for a seat that is attached to, and dropped
+      // (`dropGrant`) for every run that is not
       void sweepScratch();
       // runs whose resume was held back go once the CLI passes its smoke test again
       unholdResume = deps.cliHold?.onRelease(() => {
@@ -2124,17 +2390,31 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!holdsLock) return;
       stopping = true;
       unholdResume?.();
-      // stdin's end lets an idle CLI exit at once; one mid-turn may finish the turn first. The
-      // wait is bounded so the rest of shutdown runs; a process still going then gets EOF'd stdin
-      // and ends with the hub's process group (launchd), and its run is resumed on the next start.
-      let timer: NodeJS.Timeout | undefined;
-      await Promise.race([
-        Promise.all([...live.values()].map((l) => l.session.close())),
-        new Promise<void>((r) => {
-          timer = setTimeout(r, CREW_STOP_WAIT_MS);
-        }),
-      ]);
-      clearTimeout(timer);
+      // The seats and their keepers keep running: the hub lets go of their sockets, with the lines
+      // it has acted on stored, and keeps their tokens, files and holds for the next hub.
+      // A seat whose Stop or engine end is under way finishes it first, so `onExit` records the end
+      // as it always did: a detach would cut its close off. The wait is bounded.
+      const ending = [...live.values()].flatMap((l) =>
+        l.ending === null ? [] : [l.ending.catch(() => {})],
+      );
+      if (ending.length > 0) {
+        let t: NodeJS.Timeout | undefined;
+        await Promise.race([
+          Promise.all(ending),
+          new Promise<void>((r) => {
+            t = setTimeout(r, SHUTDOWN_TIMEOUT_MS / 2);
+          }),
+        ]);
+        clearTimeout(t);
+      }
+      for (const l of [...live.values()]) {
+        if (l.ending !== null) continue; // still ending: its socket stays, so the close goes through
+        fold(l);
+        saveCursor(l);
+        l.off();
+        l.session.detach();
+      }
+      live.clear();
       try {
         if (readFileSync(lockPath(), "utf8").trim() === String(process.pid)) unlinkSync(lockPath());
       } catch {

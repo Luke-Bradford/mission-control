@@ -94,7 +94,7 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import type { TestLock } from "./guard/lock.ts";
 import { attentionItems, CREW_ERROR_KEY, crew, NO_LOCK, NOTE_KEY } from "./hud.ts";
 import { loopTries } from "./loophistory.ts";
-import { bearer, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
+import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
 import { profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
@@ -199,6 +199,8 @@ export interface AppDeps {
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
   tokens?: RunTokens;
+  /** The `/mcp` calls in flight, which a restart waits for; default: not counted. */
+  mcpCalls?: McpCalls;
   /** The mc tools `/mcp` serves; default: none (the tools arrive with their tasks). */
   mcpTools?: () => McTool[];
   /** A seat's mode, which decides the mc tools it is offered; default: read-only. */
@@ -425,6 +427,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   if (deps.tokens) {
     registerMcp(app, {
       tokens: deps.tokens,
+      ...(deps.mcpCalls === undefined ? {} : { calls: deps.mcpCalls }),
       mcpTools: deps.mcpTools ?? (() => []),
       seatMode: deps.seatMode ?? (() => "read-only"),
       ...(deps.seatGrants === undefined ? {} : { seatGrants: deps.seatGrants }),

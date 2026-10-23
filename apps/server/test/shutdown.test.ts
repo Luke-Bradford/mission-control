@@ -5,6 +5,7 @@ function harness(
   stop: () => Promise<void>,
   close: () => Promise<void> = async () => {},
   stopCrew: () => Promise<void> = async () => {},
+  drain: (calls: string[]) => Promise<void> = async () => {},
 ) {
   const calls: string[] = [];
   const log = {
@@ -13,6 +14,7 @@ function harness(
   };
   const exit = vi.fn((code: number) => calls.push(`exit ${code}`));
   const shutdown = onSignal({
+    drain: () => drain(calls),
     stopCrew: async () => {
       calls.push("stopCrew");
       await stopCrew();
@@ -87,6 +89,52 @@ describe("onSignal", () => {
     expect(h.calls).toEqual([
       "info SIGTERM: shutting down",
       "stopCrew",
+      expect.stringMatching(/^warn /),
+      "exit 0",
+    ]);
+  });
+
+  it("drains in-flight mc calls before stopping the crew", async () => {
+    let finishCall: () => void = () => {};
+    const h = harness(
+      async () => {},
+      async () => {},
+      async () => {},
+      async (calls) => {
+        calls.push("drain start");
+        await new Promise<void>((r) => {
+          finishCall = r;
+        });
+        calls.push("drain end");
+      },
+    );
+    const done = h.shutdown("SIGTERM");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.calls).toEqual(["info SIGTERM: shutting down", "drain start"]);
+    finishCall();
+    await done;
+    expect(h.calls).toEqual([
+      "info SIGTERM: shutting down",
+      "drain start",
+      "drain end",
+      "stopCrew",
+      "stop",
+      "close",
+      "exit 0",
+    ]);
+  });
+
+  it("exits within the limit when an mc call never ends", async () => {
+    const h = harness(
+      async () => {},
+      async () => {},
+      async () => {},
+      () => new Promise<void>(() => {}), // a call that never ends
+    );
+    void h.shutdown("SIGTERM");
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_TIMEOUT_MS);
+    expect(h.calls).toEqual([
+      "info SIGTERM: shutting down",
       expect.stringMatching(/^warn /),
       "exit 0",
     ]);

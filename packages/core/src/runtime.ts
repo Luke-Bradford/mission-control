@@ -961,7 +961,9 @@ export type SessionEvent =
   | { kind: "tool-result"; toolUseId: string }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null };
+  | { kind: "exit"; code: number | null; signal: string | null }
+  /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
+  | { kind: "attached"; awaiting: boolean };
 
 /** Where a crew process's stderr line is cut. */
 export const STDERR_TEXT_MAX = 500;
