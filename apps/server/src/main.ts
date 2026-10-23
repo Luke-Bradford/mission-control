@@ -255,6 +255,7 @@ async function main(): Promise<void> {
     bus,
     supervisor,
     enabled: engineOn,
+    login: hubLogin,
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
       cliHold.reason !== null || crewReloader.status().pending.some((p) => p.seatId === seatId),

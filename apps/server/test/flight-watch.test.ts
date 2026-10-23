@@ -313,6 +313,47 @@ describe("FLIGHT's PR list", () => {
   });
 });
 
+const raiseBlocked = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
+  store.raiseNote({
+    key,
+    kind: "blocked",
+    runId: null,
+    seatId: "guido-1",
+    repoId: "mc",
+    text: "mc#7 parked",
+    at: T0,
+    ...over,
+  });
+
+describe("FLIGHT's items to brief", () => {
+  const items = () => flightState({ config, store, busy: [], now: T0 + 5 * MIN }).items;
+
+  it("lists the operator's items with no brief, not a briefed or controller one", () => {
+    live("flight-1", "r-flight");
+    raiseBlocked();
+    raiseBlocked("cleanup-branch:x");
+    expect(items()).toEqual([
+      { key: "note:blocked:r1:0", kind: "blocked", ticket: null, text: "mc#7 parked", ageMin: 5 },
+    ]);
+    store.addBrief({
+      key: "note:blocked:r1:0",
+      context: "c",
+      recommendation: "r",
+      options: [],
+      basis: "b",
+      at: T0,
+    });
+    expect(items()).toEqual([]);
+  });
+
+  it("lists nothing without a FLIGHT seat", () => {
+    raiseBlocked();
+    const cfg = structuredClone(config);
+    for (const s of cfg.crew?.sessions[0]?.seats ?? []) if (s.id === "flight-1") s.retiring = true;
+    expect(flightState({ config: cfg, store, busy: [], now: T0 }).items).toEqual([]);
+  });
+});
+
 describe("the FLIGHT watcher", () => {
   it("starts FLIGHT with the digest", async () => {
     await watch.check();
@@ -505,6 +546,39 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("wakes on a new Needs-you item, once", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 1 item to brief`)).toBe(true);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("a second Needs-you item wakes again", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + MIN;
+    raiseBlocked("blocked:r1:1", { at: nowMs });
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 2 items to brief`)).toBe(true);
+  });
+
+  it("an unbriefed item re-wakes hourly", async () => {
+    liveCrew();
+    raiseBlocked();
+    await watch.check();
+    nowMs = T0 + 59 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + 61 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+
   it("a question that goes away and comes back wakes again", async () => {
     liveCrew();
     ask();
@@ -533,6 +607,15 @@ describe("the FLIGHT watcher", () => {
   it("re-wakes hourly while something waits, and not otherwise", async () => {
     liveCrew();
     ask();
+    // the question is the operator's item after the 20-minute hold; briefed, it wakes nothing new
+    store.addBrief({
+      key: "ask:1",
+      context: "c",
+      recommendation: "r",
+      options: [],
+      basis: "b",
+      at: T0,
+    });
     await watch.check();
     nowMs = T0 + 59 * MIN;
     await watch.check();
@@ -702,9 +785,16 @@ describe("wakeSummary", () => {
     questions: [],
     tickets: [],
     prs: [],
+    items: [],
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
     ...over,
+  });
+
+  it("counts the items to brief", () => {
+    const item = { key: "a", kind: "blocked" as const, ticket: null, text: "t", ageMin: 0 };
+    expect(wakeSummary(state({ items: [item] }))).toBe("1 item to brief");
+    expect(wakeSummary(state({ items: [item, { ...item, key: "b" }] }))).toBe("2 items to brief");
   });
 
   it("says nothing new, then each part with its singular", () => {
