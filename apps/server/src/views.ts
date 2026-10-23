@@ -356,9 +356,14 @@ export function metrics(config: CcConfig, store: Store, now: number): Metrics {
 }
 
 /** The loaded config, field by field: only the fields the Settings page shows are copied. */
-export function configView(config: CcConfig, profiles?: ConfigView["profiles"]): ConfigView {
+export function configView(
+  config: CcConfig,
+  profiles?: ConfigView["profiles"],
+  githubLogin: string | null = null,
+): ConfigView {
   return {
     operator: { id: config.operator.id, timezone: config.operator.timezone },
+    githubLogin,
     accounts: config.accounts.map((a) => ({
       id: a.id,
       vendor: a.vendor,

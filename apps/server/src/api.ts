@@ -169,6 +169,8 @@ export const LOG_REDACT = {
   censor: "[redacted]",
 };
 
+const VIEWER_QUERY = "query { viewer { login } }";
+
 export interface AppDeps {
   config: CcConfig;
   gh?: GhRunner;
@@ -380,6 +382,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const now = deps.now ?? Date.now;
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
   const githubGql = deps.githubGql ?? (async () => makeGql(await githubToken()));
+  // The login the hub acts as: kept once read; null (and read again next time) when it cannot be.
+  let githubLogin: string | null = null;
+  const readGithubLogin = async (): Promise<string | null> => {
+    if (githubLogin !== null) return githubLogin;
+    try {
+      const gql = await githubGql();
+      const data = (await gql(VIEWER_QUERY, {})) as { viewer?: { login?: unknown } };
+      const login = data?.viewer?.login;
+      if (typeof login === "string" && login !== "") githubLogin = login;
+    } catch {
+      // not signed in to gh, or GitHub unreachable: the view says null
+    }
+    return githubLogin;
+  };
   const refreshBoards = deps.refreshBoards ?? (() => bus.emit("boards"));
   const machine = deps.machine ?? (() => null);
   const readTranscript = deps.readStream ?? readStream;
@@ -1007,6 +1023,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         configView(
           config,
           deps.profilesPath === undefined ? undefined : profilesView(deps.profilesPath),
+          await readGithubLogin(),
         ),
       );
 
