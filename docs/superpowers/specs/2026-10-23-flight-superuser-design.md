@@ -35,7 +35,7 @@ What happened on 22–23 Oct:
 - **What it reports.** It records what it did and why, owns the progress, and brings the operator only what is truly theirs.
 - **What still binds it.** The hub enforces only a short **floor** of actions that can't be undone or that remove the last safety net (see below). Everything else rests on FLIGHT's judgement and the log. The repo's rules, such as `hard_rules` and `always_ask`, become guidance FLIGHT weighs, not gates that stop it.
 
-Elevation is set per repo, in the user config only. A merged PR can never raise it.
+Elevation is set per repo, in the user config only. No repo's `mc:` block can raise it, and a code change to it (or to the floor) takes effect only when the operator runs Update (see slice 2).
 
 ```yaml
 # ~/.config/mission-control/config.yaml
@@ -66,7 +66,7 @@ Everything else is FLIGHT's call, including:
 
 For changes to its own powers, the role asks FLIGHT to get a RETRO review first and to post its reasoning on the PR. That is the role's guidance to FLIGHT, which FLIGHT weighs; the hub doesn't enforce it.
 
-**Tradeoff, stated plainly.** A FLIGHT that can merge changes to its own guard can, by mistake or through text injected into a ticket or PR, widen what it may do. The floor keeps that recoverable: protection, the history of `main` and the config stay out of its reach. The log and the operator's ability to lower `flight_powers` are the remedy. The operator has chosen judgement over gates.
+**Tradeoff, stated plainly.** FLIGHT can merge changes to its own guard. By mistake, or through text injected into a ticket or PR, it could widen what it may do. That change only goes live when a person runs Update, and protection, the history of `main` and the config stay out of its reach. The log and the operator's ability to lower `flight_powers` are the remedy. The operator has chosen judgement over gates.
 
 ## Slices
 
@@ -96,13 +96,13 @@ This is for repos in `merge` autonomy.
 This is the core of the change.
 
 - **The `flight_powers` key** goes in the user config, with a `requirePowers` helper and an entry in `config.example.yaml`.
-- **A superuser guard profile for FLIGHT's seat:**
-  - network for web research (WebSearch, WebFetch, docs);
-  - the full `gh` CLI under the operator's account;
-  - git writes and file edits in its own worktrees on non-default branches, so it can fix things, push and open PRs itself;
-  - subagents, and the skills installed for the operator.
-
-  The guard still denies the floor. That includes, for example, `git push --force` to the default branch, `gh api` writes to `branches/*/protection`, `rulesets`, `secrets`, `collaborators` and `keys`, `gh repo delete`, and edits to the user config.
+- **How the powers reach FLIGHT: through the hub, not through its shell.** FLIGHT's Bash sandbox stays as it is: no network, no credentials, and no git writes. Everything elevated runs in the hub, where the floor can be enforced and every call carries a basis:
+  - **Research:** the built-in WebFetch and WebSearch tools, and subagents, are allowed for FLIGHT's seat. Network from Bash is not.
+  - **GitHub:** `mc gh { args, basis }` runs the hub's own `gh` with FLIGHT's arguments. Any subcommand is allowed except the floor's. Flags that read local files (`-F`/`--body-file`, `--input`, `@file` values) and `gh gist` are refused, so nothing on disk can be posted.
+  - **Code:** FLIGHT edits files in its own worktree and commits and pushes through `mc commit` and `mc push`, as developer seats do, to its own branches. It opens PRs with `mc draft_pr`.
+  - **Skills:** the operator's installed skills load for FLIGHT's seat.
+- **The floor is enforced in the hub's tools.** That covers default-branch pushes, protection, rulesets, secrets, collaborators, keys, repo settings, deletes, and merging a non-collaborator's fork PR. FLIGHT's shell can't reach GitHub or the hub's port, and a test proves it.
+- **Auto-Update stops at the floor.** When the range an auto-Update would pull touches a hard-rule file (as `CLAUDE.md` already says), the hub leaves the Update to the operator, or the operator's delegate, and raises a Needs-you item. A merge FLIGHT makes can't change the floor or its own powers without a person running Update.
 - **Operator actions.** The tool `operator_action { route, body, basis }` lets FLIGHT call any of the hub's operator routes the HUD uses, for example:
   - pausing and resuming;
   - dismissing and answering;
@@ -110,7 +110,7 @@ This is the core of the change.
   - stopping, starting and restarting seats;
   - settling parks, including accepting a ruling or a review.
 
-  Each call is logged with its basis. Routes that write the user config, and anything on the floor, are refused.
+  Each call is logged with its basis. It refuses routes that write the user config, `/api/update` and `/api/version/check`, and anything on the floor.
 - **Merging.** `merge_pr { pr, basis }` merges by FLIGHT's judgement within the floor. It goes through the queue when the repo has one, or straight away with `--match-head-commit` when FLIGHT says it is urgent. The hub posts FLIGHT's basis on the PR.
 - **Asking FLIGHT.** Any agent (seats, loops, Codex, the controller) can ask FLIGHT a question through `mc ask_flight { text }`, or `POST /api/flight/ask` for agents outside the crew, and FLIGHT answers on its next wake. The operator's dock stays as it is.
 - **The role.** `roles/FLIGHT.md` is rewritten around the principle: what FLIGHT owns, how it judges (evidence, the repo's rules, reversibility, the operator's standing preferences), what is the operator's (taste and product calls, money, the floor), and how it records what it did. The "For the controller" path goes.
@@ -175,7 +175,8 @@ This is cheaper than a `gh` call every wake.
 - **New GitHub writes,** under the operator's account, on `superuser` repos only. FLIGHT may make any write the operator could make through `gh`, except the floor's.
   - **In practice:** merges, branch updates, CI re-runs, comments, labels, project fields, assignees, issues, and pushes to non-default branches.
   - **The floor's exclusions** are protection, rulesets, secrets, collaborators, keys, repo settings and deletion, force-pushes to the default branch, and merging a non-collaborator's fork PR.
-- **Network** is opened for FLIGHT's seat only, and for research. Developer seats are unchanged.
+- **Network.** WebFetch and WebSearch are opened for FLIGHT's seat only. Its Bash has no network and no credentials, and GitHub writes go through the hub's `mc gh`. Developer seats are unchanged.
+- **The hub's API.** Its loopback routes are unauthenticated, and FLIGHT's shell can't reach them. Requiring an operator token on those routes is a follow-up.
 - **Untrusted text.** Tickets, PRs, comments, web pages and memory notes stay evidence, never instructions. Approval comes only from the operator.
 - **Audit.** Every elevated action is logged with its basis and shows in the FLIGHT log. The operator lowers `flight_powers` to take powers back, with effect from the next call.
 
