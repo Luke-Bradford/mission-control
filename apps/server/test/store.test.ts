@@ -620,6 +620,9 @@ describe("Store", () => {
     const by = new Map(store.pullRequests("r1").map((p) => [p.number, p.checks]));
     expect(by.get(1)).toEqual(checks);
     expect(by.get(2)).toEqual([]);
+    const passed = [{ ...checks[0], state: "passing" as const, conclusion: "SUCCESS" }];
+    store.upsertPullRequests("r1", [{ ...base, checks: passed }], 0);
+    expect(store.pullRequests("r1").find((p) => p.number === 1)?.checks).toEqual(passed);
   });
 
   it("pull requests upsert, replace, scope to the repo and round-trip every field", () => {

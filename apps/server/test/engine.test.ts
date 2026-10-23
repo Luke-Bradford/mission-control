@@ -2517,6 +2517,28 @@ describe("the engine runs reviews", () => {
       expect(noteKeys().some((k) => k.startsWith("behind:"))).toBe(true);
     });
 
+    it("mc/review not passing on GitHub is not merged", async () => {
+      report();
+      await h.engine.reconcileRun(RUN);
+      setPr({
+        ci: "passing",
+        checks: [
+          {
+            name: "mc/review",
+            kind: "status",
+            state: "pending",
+            conclusion: "PENDING",
+            attempt: null,
+            url: null,
+          },
+        ],
+      });
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
+    });
+
     describe("main moves", () => {
       const MAIN = "d".repeat(40);
       const behindMain = () => {
