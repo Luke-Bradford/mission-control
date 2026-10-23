@@ -89,6 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks(); // a spy on hud must not outlive its test
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -493,6 +494,10 @@ describe("scheduler", () => {
     expect(await s.tick("maintenance")).toBe("ran");
     expect(prune).toHaveBeenCalledWith(NOW - 30 * 24 * 60 * 60_000);
 
+    // An hour of fake time runs the 15 s loop ticks 240 times each; with the real crew read and
+    // ack sweep behind them that took seconds, and under CI load past the test's timeout.
+    vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+    vi.spyOn(hud, "attentionItems").mockReturnValue([]);
     vi.useFakeTimers();
     prune.mockClear();
     const t = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
