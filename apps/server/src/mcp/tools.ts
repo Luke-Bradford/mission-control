@@ -14,6 +14,7 @@ import {
   ASKED_OPERATOR,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
+  COMMS_CAPCOM,
   clashText,
   closesIssue,
   commitMarkersText,
@@ -1526,14 +1527,24 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function askOperator(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = AskArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    if (liveRun(ctx) === null) return { text: MC_RUN_ENDED, isError: true };
+    const live = liveRun(ctx);
+    if (live === null) return { text: MC_RUN_ENDED, isError: true };
+    const at = now();
     store.addQuestion({
       agentId: ctx.seatId,
       runId: ctx.runId,
       text: parsed.data.question,
-      at: now(),
+      at,
+    });
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      to: COMMS_CAPCOM,
+      ticket: live.run.ticket ?? null,
+      text: parsed.data.question,
     });
     bus.emit("attention");
+    bus.emit("agents");
     return { text: ASKED_OPERATOR };
   }
 
@@ -1778,8 +1789,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: MC_PLAN_WRITTEN };
     });
     if (written.isError === true) return written;
-    if (override !== undefined) store.setProfileOverride(run.repoId, issue, override, now());
-    store.addLoopEvent(`${run.id}:plan`, run.id, planWrittenText(run.ticket ?? run.id), now());
+    const at = now();
+    if (override !== undefined) store.setProfileOverride(run.repoId, issue, override, at);
+    const planned = planWrittenText(run.ticket ?? run.id);
+    store.addLoopEvent(`${run.id}:plan`, run.id, planned, at);
+    const watcher = place.session.seats.find((s) => !s.retiring && seatDef(s).loop === "watch");
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      to: watcher?.id ?? COMMS_CAPCOM,
+      ticket: run.ticket ?? null,
+      text: planned,
+    });
     bus.emit("agents");
     deps.onPlanned?.(ctx.seatId, ctx.runId);
     return written;

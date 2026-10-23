@@ -62,6 +62,7 @@ import {
   planNoProfilesText,
   planTooLongText,
   planUnknownProfileText,
+  planWrittenText,
   prNamedRefText,
   prNotifyText,
   prSecretText,
@@ -894,6 +895,14 @@ describe("ask_operator", () => {
     expect(emitted).toContain("attention");
   });
 
+  it("records the question as the seat to CAPCOM, about its run's ticket", async () => {
+    await ask({ question: "Lanes per customer?" });
+    expect(store.comms(0)).toEqual([
+      { at: NOW, from: "guido-1", to: "CAPCOM", ticket: "mc#42", text: "Lanes per customer?" },
+    ]);
+    expect(emitted).toContain("agents");
+  });
+
   it("closes a seat's open questions when it is answered, and only that seat's", async () => {
     await ask({ question: "one?" });
     liveSeat("retro", "retro:1");
@@ -911,6 +920,7 @@ describe("ask_operator", () => {
     );
     expect(other).toEqual({ text: "This run has ended.", isError: true });
     expect(store.openQuestions()).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
   });
 
   it("validates the question: 1 to 2000 characters, not blank", async () => {
@@ -3091,6 +3101,45 @@ describe("report_plan", () => {
     ]);
     expect(emitted).toContain("agents");
     expect(bodyFiles()).toEqual([]);
+  });
+
+  it("records the plan landing as the planner to CAPCOM when the session has no FLIGHT seat", async () => {
+    await plan();
+    expect(store.comms(0)).toEqual([
+      {
+        at: NOW,
+        from: "fao-1",
+        to: "CAPCOM",
+        ticket: "mc#7",
+        text: planWrittenText("mc#7"),
+      },
+    ]);
+  });
+
+  it("records it to the session's FLIGHT seat, skipping a retiring one", async () => {
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push(
+      { id: "fao-1", role: "FAO", accountId: "claude-main", model: "haiku", area: [] },
+      {
+        id: "flight-0",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "haiku",
+        area: [],
+        retiring: true,
+      },
+      { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "haiku", area: [] },
+    );
+    const withFlight = createMcTools(deps({ config: cfg, gh: createGh(join(ghDir, "gh")) }));
+    await tool("report_plan", withFlight).call(FAO_CTX, { plan: PLAN });
+    expect(store.comms(0).map((c) => [c.from, c.to, c.ticket])).toEqual([
+      ["fao-1", "flight-1", "mc#7"],
+    ]);
+  });
+
+  it("records nothing when the plan is refused", async () => {
+    await plan("ask @someone");
+    expect(store.comms(0)).toEqual([]);
   });
 
   it("starts the body with the plan when the ticket body is blank", async () => {

@@ -16,7 +16,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
-import { DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
+import { COMMS_TEXT_MAX, DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -1651,5 +1651,47 @@ describe("flight decisions", () => {
     expect(count({ ref: "mc#6" })).toBe(1);
     expect(count({ targetRunId: "r1" })).toBe(1);
     expect(count({ kinds: [] })).toBe(0);
+  });
+});
+
+describe("comms", () => {
+  const row = (text: string, at = 100) => ({
+    at,
+    from: "CAPCOM",
+    to: "guido-1",
+    ticket: null,
+    text,
+  });
+
+  it("keeps a text of COMMS_TEXT_MAX characters whole", () => {
+    const text = "x".repeat(COMMS_TEXT_MAX);
+    store.addComms(row(text));
+    expect(store.comms(0)[0]?.text).toBe(text);
+  });
+
+  it("cuts a longer text to that length, ending with an ellipsis", () => {
+    store.addComms(row("y".repeat(COMMS_TEXT_MAX + 50)));
+    const text = store.comms(0)[0]?.text ?? "";
+    expect(Array.from(text)).toHaveLength(COMMS_TEXT_MAX);
+    expect(text.endsWith("…")).toBe(true);
+  });
+
+  it("makes whitespace runs one space and trims", () => {
+    store.addComms(row("  a \n\n b\t\tc  "));
+    expect(store.comms(0)[0]?.text).toBe("a b c");
+  });
+
+  it("returns the rows at or after since, oldest first", () => {
+    store.addComms({ ...row("late"), at: 300, ticket: "mc#1" });
+    store.addComms(row("early", 100));
+    expect(store.comms(100).map((c) => c.text)).toEqual(["early", "late"]);
+    expect(store.comms(101).map((c) => c.text)).toEqual(["late"]);
+    expect(store.comms(300)[0]).toEqual({
+      at: 300,
+      from: "CAPCOM",
+      to: "guido-1",
+      ticket: "mc#1",
+      text: "late",
+    });
   });
 });
