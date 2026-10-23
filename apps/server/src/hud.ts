@@ -372,6 +372,8 @@ export function crew(
             ? {
                 profile: run.profile.profile.name,
                 step: profileStep(run.profile.profile, run.loop.phase),
+                steps: run.profile.profile.steps.map((s) => ({ name: s.name, phase: s.phase })),
+                planned: store.planLanded(run),
               }
             : {}),
         }
