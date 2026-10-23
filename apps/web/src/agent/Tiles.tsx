@@ -1,4 +1,10 @@
-import { type ContextUsage, type CrewRow, cacheHitPct, type LimitRow } from "@mc/core";
+import {
+  type ChangedFiles,
+  type ContextUsage,
+  type CrewRow,
+  cacheHitPct,
+  type LimitRow,
+} from "@mc/core";
 import { type ReactNode, useEffect, useRef } from "react";
 import { useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -19,7 +25,6 @@ import { TicketRef } from "../hud/RepoRef.tsx";
 const DASH = "—";
 /** The mockup's `m:ss` reads badly past an hour (`160:48`); from there it is `2h 41m`. */
 const HOUR_MS = 3_600_000;
-const SPEED_PHASE = "Arrives with the agent runtime (phase 2).";
 
 function Tile({
   label,
@@ -121,7 +126,6 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
   const pct = contextPct(row);
   const t = run?.tokens ?? null;
   const hit = t ? cacheHitPct(t) : null;
-  const subs = d?.subagents.length ?? 0;
   const quota = limits.filter((l) => l.accountId === row.accountId);
   const elapsed = run ? runElapsed(run, now) : null;
   const tz = useTz();
@@ -129,6 +133,15 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
   /** The Now line's hover text: the ticket's title, else (no ticket, not running) the run's summary. */
   const nowTitle = row.ticket ? row.ticketTitle : running ? null : row.summary;
   const activity = seatActivity(row, now);
+  const files = useResource<ChangedFiles>(RESOURCES.files(row.id)).data ?? null;
+  const speed = d?.speed ?? null;
+  const counted = files?.files.filter((f) => f.add !== null || f.del !== null) ?? null;
+  const add = counted === null ? DASH : counted.reduce((n, f) => n + (f.add ?? 0), 0);
+  const del = counted === null ? DASH : counted.reduce((n, f) => n + (f.del ?? 0), 0);
+  const work = row.work;
+  const commits = work
+    ? `${work.commits} commit${work.commits === 1 ? "" : "s"}`
+    : `${DASH} commits`;
 
   return (
     <div className="tiles2">
@@ -200,15 +213,19 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
         </span>
       </Tile>
       <Tile label="~Cost">
-        <span className="v num">{cost(run?.costUsd ?? null)}</span>
+        <span className="v num">
+          {cost(running ? (run?.costEstimateUsd ?? run?.costUsd ?? null) : (run?.costUsd ?? null))}
+        </span>
         <span className="d">API-equivalent, this run</span>
       </Tile>
       <Tile label="Speed">
-        <span className="v num" title={SPEED_PHASE}>
-          {DASH}
+        <span className="v num">
+          {typeof speed?.tokensPerSec === "number" ? Math.round(speed.tokensPerSec) : DASH}
           <small>tokens/s</small>
         </span>
-        <span className="d">{SPEED_PHASE}</span>
+        <span className="d">
+          {typeof speed?.turnMs === "number" ? `turn ${dur(speed.turnMs)}` : DASH}
+        </span>
       </Tile>
       <Tile label="Work">
         <span className="v num">
@@ -216,7 +233,14 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
           <small>tool calls</small>
         </span>
         <span className="d">
-          {d ? `${d.turns} turns · ${subs} subagent${subs === 1 ? "" : "s"}` : DASH}
+          {d || work ? (
+            <>
+              {d ? d.turns : DASH} turns · {commits} · <span className="add">+{add}</span>{" "}
+              <span className="del">−{del}</span> · ⊘{work ? work.denials : DASH}
+            </>
+          ) : (
+            DASH
+          )}
         </span>
       </Tile>
       <Tile label={`Quota · ${row.accountId}`}>

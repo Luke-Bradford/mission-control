@@ -4,7 +4,6 @@ import {
   type AttentionItem,
   type ChangedFiles,
   type CommsEvent,
-  CREW_FILES_NOTE,
   type CrewLoop,
   type CrewRow,
   DEFAULT_PROFILES,
@@ -13,6 +12,7 @@ import {
   type LoopTry,
   METER_FULL_PCT,
   METER_WARN_PCT,
+  READONLY_FILES_NOTE,
   type ReviewStatus,
   type RunDigest,
   type RunLoop,
@@ -820,6 +820,7 @@ describe("Agent page: header and tiles", () => {
             ],
           }),
           contextWindow: 200_000,
+          work: { commits: 1, denials: 0 },
         }),
       ],
     });
@@ -847,11 +848,97 @@ describe("Agent page: header and tiles", () => {
     );
     expect($(tile("~Cost"), ".v")?.textContent).toBe("~$2.47");
     expect($(tile("~Cost"), ".d")?.textContent).toBe("API-equivalent, this run");
-    expect($(tile("Speed"), ".v")?.textContent).toContain("—");
-    expect($(tile("Speed"), ".v")?.title).toContain("phase 2");
+    expect($(tile("Speed"), ".v")?.textContent).toBe("—tokens/s");
     expect($(tile("Work"), ".v")?.textContent).toBe("37tool calls");
-    expect($(tile("Work"), ".d")?.textContent).toBe("21 turns · 1 subagent");
+    await waitFor(() =>
+      expect($(tile("Work"), ".d")?.textContent).toBe("21 turns · 1 commit · +0 −0 · ⊘0"),
+    );
     expect(tile("Quota · claude-main").textContent).toContain("5h 41%");
+  });
+
+  const tileOf = (container: HTMLElement, label: string) =>
+    [...container.querySelectorAll<HTMLElement>(".tile2")].find((t) =>
+      t.querySelector(".lbl")?.textContent?.startsWith(label),
+    ) as HTMLElement;
+
+  it("~Cost shows the live estimate while running and costUsd once the run has ended", async () => {
+    const base = crewRow().run as NonNullable<CrewRow["run"]>;
+    const cases = [
+      [{ ...base, costEstimateUsd: 3.1 }, "running", "~$3.10"],
+      [
+        { ...base, status: "ok", endedAt: NOW - MIN, costEstimateUsd: 3.1, costUsd: 2.4712 },
+        "idle",
+        "~$2.47",
+      ],
+      [{ ...base, costEstimateUsd: null }, "running", "~$2.47"],
+    ] as const;
+    for (const [r, hudState, want] of cases) {
+      hub.clear();
+      stub({
+        rows: [crewRow({ digest: digest(), contextWindow: 200_000, run: r, hudState })],
+      });
+      const { container, unmount } = render(<Agent id="shop-app-ta" />);
+      await screen.findByText(/Quote cache/);
+      expect($(tileOf(container, "~Cost"), ".v")?.textContent).toBe(want);
+      unmount();
+    }
+  });
+
+  it("Speed shows tokens/s and the mean turn from digest.speed, — without it", async () => {
+    stub({
+      rows: [
+        crewRow({
+          digest: digest({ speed: { tokensPerSec: 64.4, turnMs: 160_000 } }),
+          contextWindow: 200_000,
+        }),
+      ],
+    });
+    const first = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const speed = tileOf(first.container, "Speed");
+    expect($(speed, ".v")?.textContent).toBe("64tokens/s");
+    expect($(speed, ".d")?.textContent).toBe("turn 2m 40s");
+    expect(speed.textContent).not.toContain("phase 2");
+    first.unmount();
+    hub.clear();
+    cleanup();
+    stub({ rows: [crewRow({ digest: digest(), contextWindow: 200_000 })] });
+    const second = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    expect($(tileOf(second.container, "Speed"), ".v")?.textContent).toBe("—tokens/s");
+    expect($(tileOf(second.container, "Speed"), ".d")?.textContent).toBe("—");
+  });
+
+  it("Work sums +add −del from the Files list and shows commits and ⊘denials from row.work", async () => {
+    stub({
+      rows: [
+        crewRow({ digest: digest(), contextWindow: 200_000, work: { commits: 2, denials: 3 } }),
+      ],
+      files: {
+        files: [
+          { path: "a.ts", add: 10, del: 2, state: "uncommitted" },
+          { path: "b.ts", add: 5, del: null, state: "committed" },
+          { path: "logo.png", add: null, del: null, state: "committed" },
+        ],
+        note: null,
+        sha: null,
+      },
+    });
+    const first = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const work = () => tileOf(first.container, "Work");
+    await waitFor(() =>
+      expect($(work(), ".d")?.textContent).toBe("21 turns · 2 commits · +15 −2 · ⊘3"),
+    );
+    expect($(work(), ".add")?.textContent).toBe("+15");
+    expect($(work(), ".del")?.textContent).toBe("−2");
+    first.unmount();
+    hub.clear();
+    cleanup();
+    stub({ rows: [crewRow({ digest: null, contextWindow: 200_000 })] });
+    const second = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    expect($(tileOf(second.container, "Work"), ".d")?.textContent).toBe("—");
   });
 
   it("context tile counts compactions, singular for one", async () => {
@@ -2563,10 +2650,14 @@ const seatLoaded = () => screen.findByText("GUIDO-1");
 const idleSeat = () => seat({ hudState: "idle" });
 
 describe("Agent page: driving a crew seat", () => {
-  it("a crew seat's Activity panel shows its run's events, and Files a plain note", async () => {
+  it("a crew writer's Files tab lists its changed files", async () => {
     stub({
       rows: [seat(), studio()],
-      files: { files: [], note: CREW_FILES_NOTE, sha: null },
+      files: {
+        files: [{ path: "src/a.ts", add: 3, del: 1, state: "uncommitted" }],
+        note: null,
+        sha: null,
+      },
       extra: SEAT_ROUTES(),
     });
     const { container } = render(<Agent id="guido-1" />);
@@ -2576,11 +2667,29 @@ describe("Agent page: driving a crew seat", () => {
     expect(within(activity).getByText("The cache is in")).toBeTruthy();
     expect(activity.textContent).not.toContain("Could not load the activity");
     const side = $(container, "#sideP") as HTMLElement;
+    fireEvent.click(await within(side).findByRole("button", { name: "Files 1" }));
+    await waitFor(() =>
+      expect([...side.querySelectorAll(".f")].map((e) => e.textContent)).toEqual([
+        "src/a.ts+3 −1uncommitted",
+      ]),
+    );
+  });
+
+  it("a read-only seat's Files tab shows only its note", async () => {
+    stub({
+      rows: [seat({ mode: "read-only" }), studio()],
+      files: { files: [], note: READONLY_FILES_NOTE, sha: null },
+      extra: SEAT_ROUTES(),
+    });
+    const { container } = render(<Agent id="guido-1" />);
+    await seatLoaded();
+    const side = $(container, "#sideP") as HTMLElement;
     const tab = within(side).getByRole("button", { name: /^Files/ });
     expect(tab.textContent).toBe("Files");
     fireEvent.click(tab);
-    const note = await within(side).findByText(CREW_FILES_NOTE);
+    const note = await within(side).findByText(READONLY_FILES_NOTE);
     expect(note.className).toContain("note");
+    expect($(container, "#sideBody")?.textContent).toBe(READONLY_FILES_NOTE);
     expect(side.querySelector(".crit-t")).toBeNull();
     expect(side.textContent).not.toContain("No file changes yet.");
   });

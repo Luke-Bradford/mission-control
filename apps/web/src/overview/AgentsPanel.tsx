@@ -173,9 +173,11 @@ function AgentRow({
   const tpm = tokensPerMinute(row.digest, now);
   const spark = sparkValues(row.digest);
   const tokens = row.run?.tokens ? row.run.tokens.input + row.run.tokens.output : null;
+  const runCost =
+    row.run?.status === "running" ? (row.run.costEstimateUsd ?? row.run.costUsd) : row.run?.costUsd;
   const rate = [
     tpm === null ? null : `${kTokens(tpm)}/min`,
-    row.run?.costUsd == null ? null : cost(row.run.costUsd),
+    runCost == null ? null : cost(runCost),
   ].filter((x) => x !== null);
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
