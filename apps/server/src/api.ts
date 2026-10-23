@@ -1714,7 +1714,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // CI or review) too: the same un-park their message gives through a live seat (#477). Lifting a
       // review or review-ruling park waives that head's findings, as the message does. The answer
       // waits for the engine's pass, so "ok" means the park was lifted.
-      // Reader: the operator by hand (and the controller); the HUD's Resume action is a follow-up web ticket
+      // Reader: docs/runbook.md#resume-a-parked-run (by hand; a HUD Resume action is a follow-up web ticket)
       api.post<{ Params: { id: string } }>("/runs/:id/resume", async (req, reply) => {
         const run = store.run(req.params.id);
         if (run === null) return reply.code(404).send({ error: "unknown run" });
