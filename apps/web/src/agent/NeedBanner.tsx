@@ -2,7 +2,7 @@ import type { AttentionItem, CrewRow } from "@mc/core";
 import { useState } from "react";
 import { ackKeys } from "../ack.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
-import { needLine } from "../crew.ts";
+import { needLine, seatItems } from "../crew.ts";
 import { openItem } from "../shell/overlays.ts";
 
 /**
@@ -21,7 +21,9 @@ export function NeedBanner({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parts = needLine(row, items, now);
-  const unacked = items.filter((i) => i.agentId === row.id && !i.acked).map((i) => i.key);
+  const unacked = seatItems(row, items)
+    .filter((i) => !i.acked)
+    .map((i) => i.key);
 
   const ack = async () => {
     setBusy(true);
