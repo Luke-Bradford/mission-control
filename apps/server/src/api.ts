@@ -80,6 +80,7 @@ import {
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
+import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
 import {
   agentIds,
   type CcConfig,
@@ -116,7 +117,7 @@ import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { type BoardTitleCache, type PrCache, runView } from "./runview.ts";
-import { crewDir, crewPrBodyPath, type Store } from "./store.ts";
+import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { median, telemetry } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
@@ -170,6 +171,9 @@ export const LOG_REDACT = {
   ],
   censor: "[redacted]",
 };
+
+const VIEWER_QUERY = "query { viewer { login } }";
+const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
   config: CcConfig;
@@ -382,6 +386,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const now = deps.now ?? Date.now;
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
   const githubGql = deps.githubGql ?? (async () => makeGql(await githubToken()));
+  // The login the hub acts as: kept once read; null when it cannot be, and not tried again for
+  // GITHUB_LOGIN_RETRY_MS. Concurrent requests share one read.
+  let githubLogin: string | null = null;
+  let loginRead: Promise<string | null> | null = null;
+  let loginFailedAt = Number.NEGATIVE_INFINITY;
+  const readGithubLogin = (): Promise<string | null> | string | null => {
+    if (githubLogin !== null) return githubLogin;
+    if (loginRead) return loginRead;
+    if (now() - loginFailedAt < GITHUB_LOGIN_RETRY_MS) return null;
+    loginRead = (async () => {
+      try {
+        const gql = await githubGql();
+        const data = (await gql(VIEWER_QUERY, {})) as { viewer?: { login?: unknown } };
+        const login = data?.viewer?.login;
+        if (typeof login === "string" && login !== "") githubLogin = login;
+      } catch {
+        // not signed in to gh, or GitHub unreachable: the view says null
+      }
+      if (githubLogin === null) loginFailedAt = now();
+      loginRead = null;
+      return githubLogin;
+    })();
+    return loginRead;
+  };
   const refreshBoards = deps.refreshBoards ?? (() => bus.emit("boards"));
   const machine = deps.machine ?? (() => null);
   const readTranscript = deps.readStream ?? readStream;
@@ -543,6 +571,61 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
         },
       );
+
+      // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot; web wiring is a separate ticket)
+      api.get<{ Params: { id: string } }>("/comms/:id", async (req, reply) => {
+        if (!agentById(req.params.id)) return reply.code(404).send({ error: "unknown agent" });
+        return {
+          messages: threadMessages(store, req.params.id, agentById(req.params.id)?.kind === "crew"),
+        };
+      });
+
+      // Reader: apps/web/src/comms/Conversation.tsx (opening a thread; web wiring is a separate ticket)
+      api.post<{ Params: { id: string } }>("/comms/:id/read", async (req, reply) => {
+        const id = req.params.id;
+        if (!agentById(id)) return reply.code(404).send({ error: "unknown agent" });
+        const body = z
+          .object({ messageIds: z.array(z.string().max(300)).max(COMMS_SNAPSHOT_LIMIT) })
+          .strict()
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const latest = new Map<string, { offset: number; block: number }>();
+        for (const message of threadMessages(store, id, agentById(id)?.kind === "crew")) {
+          const p = commsPosition(message.id);
+          if (!p) continue;
+          const prev = latest.get(p.source);
+          if (!prev || p.offset > prev.offset || (p.offset === prev.offset && p.block > prev.block))
+            latest.set(p.source, p);
+        }
+        const valid = body.data.messageIds.every((key) => {
+          if (!store.threadOwnsMessage(id, key)) return false;
+          const p = commsPosition(key);
+          const last = p && latest.get(p.source);
+          if (p && !last && p.source.startsWith("stream:")) {
+            const run = store.run(p.source.slice("stream:".length));
+            if (!run?.transcriptPath) return false;
+            try {
+              // With no messages left, only positions before the current event window
+              // may be stale snapshot IDs. Future offsets must still be rejected.
+              const first = readStream(run.transcriptPath, 200).events[0];
+              const boundary = first && commsPosition(`stream:${run.id}:${first.id}`);
+              return boundary !== null && boundary !== undefined && p.offset < boundary.offset;
+            } catch {
+              return false;
+            }
+          }
+          return (
+            p &&
+            last &&
+            (p.offset < last.offset || (p.offset === last.offset && p.block <= last.block))
+          );
+        });
+        if (!valid) return reply.code(400).send({ error: "unknown thread message" });
+        store.markThreadRead(id, body.data.messageIds);
+        bus.emit("attention");
+        bus.emit("agents");
+        return { ok: true };
+      });
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 
@@ -1024,6 +1107,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         configView(
           config,
           deps.profilesPath === undefined ? undefined : profilesView(deps.profilesPath),
+          await readGithubLogin(),
         ),
       );
 

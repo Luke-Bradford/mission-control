@@ -3,6 +3,7 @@ import {
   ATTENTION_LABEL,
   type AttentionItem,
   type AttentionKind,
+  type BoardItem,
   type CrewRow,
   clockHm,
   type FlightView,
@@ -24,7 +25,7 @@ import { MarkdownInline } from "../components/Markdown.tsx";
 import { needsLamp } from "../crew.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 import { flightOffText } from "../flight/flightTypes.ts";
-import { mss } from "../fmt.ts";
+import { cutText, dur, mss } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -34,6 +35,9 @@ import { openDockChat, openItem, useFlightUnread } from "../shell/overlays.ts";
 import { GUARD_DRAWER_ID } from "../telemetry/guardCopy.ts";
 import { type AnswerTarget, answerTarget, sendAnswer } from "./answer.ts";
 import { BriefOptions } from "./ItemBrief.tsx";
+
+/** Attention raised by the crew's messages (an @CAPCOM tag or an unread direct reply), cleared by Read. */
+const isChannelItem = (i: AttentionItem): boolean => i.kind === "tag" || i.kind === "message";
 
 /** Rows are cut here (catalogue 2.5.1). */
 export const NEED_TEXT_MAX = 170;
@@ -47,8 +51,32 @@ export function needText(i: AttentionItem, now: number): string {
 /** The server words a PR item `PR #n · You: …`; the number becomes a link to the PR's repo. */
 const PR_TEXT = /^PR #(\d+)( · .*)$/s;
 
-function NeedText({ item, now }: { item: AttentionItem; now: number }) {
-  const text = needText(item, now);
+function NeedText({ item, now, lock }: { item: AttentionItem; now: number; lock?: TestLockState }) {
+  const board = useResource<BoardItem[]>(
+    item.kind === "pr" && item.repoId !== null ? RESOURCES.boards(item.repoId) : null,
+  ).data;
+  const ticket = board?.find((b) => `${b.repoId}#${b.issueNumber}` === item.ticket);
+  let text = needText(item, now);
+  if (item.kind === "stalled" && lock?.holder) {
+    // Only a seat that is actually queued for the lock is waiting on it; another stall is unrelated.
+    if (holdsLock(item, lock)) text += ` · holds the test lock (${lock.holder.seatId})`;
+    else if (lock.waiting.some((w) => w.seatId === item.agentId)) {
+      text += ` · waiting on the test lock (${lock.holder.seatId})`;
+    }
+  }
+  const pr = /^PR #(\d+) · You: (.*)$/s.exec(item.text);
+  if (item.kind === "pr" && ticket && pr) {
+    return (
+      <span>
+        {item.ticket} ·{" "}
+        <RepoRef repoId={ticket.repoId} number={Number(pr[1])} kind="pr" url={item.url} bare />
+        {cutText(
+          ` · ${ticket.title}: waiting ${dur(Math.max(0, now - item.at))} for you to ${pr[2]}`,
+          NEED_TEXT_MAX - `${item.ticket} · PR #${pr[1]}`.length,
+        )}
+      </span>
+    );
+  }
   const m = item.kind === "pr" && item.repoId !== null ? PR_TEXT.exec(text) : null;
   // inline only, cut after parsing: a row stays one run of text and never ends in half a marker
   if (!m || item.repoId === null) {
@@ -92,10 +120,12 @@ export function NeedsList({
   items,
   rows,
   onAskFlight,
+  onRead,
 }: {
   items: AttentionItem[] | undefined;
   rows: CrewRow[];
   onAskFlight: () => void;
+  onRead: (id: string) => void;
 }) {
   const now = useSecond();
   const replies = useFlightUnread();
@@ -105,7 +135,9 @@ export function NeedsList({
   const [error, setError] = useState<string | null>(null);
   const list = sortNeeds((items ?? []).filter(isOperatorItem));
   const handled = sortNeeds((items ?? []).filter((i) => !isOperatorItem(i)));
-  const unacked = list.filter((i) => !i.acked).map((i) => i.key);
+  const unacked = list.filter((i) => !i.acked);
+  // Acknowledging a channel item does not mark its messages read.
+  const ackable = unacked.map((i) => i.key);
 
   const ack = async (keys: string[]) => {
     setBusy(true);
@@ -150,8 +182,8 @@ export function NeedsList({
           type="button"
           className="sm ghost"
           id="ackAll"
-          disabled={busy || unacked.length === 0}
-          onClick={() => ack(unacked)}
+          disabled={busy || ackable.length === 0}
+          onClick={() => ack(ackable)}
         >
           Acknowledge all
         </button>
@@ -187,7 +219,7 @@ export function NeedsList({
               <div>
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
                 {agentId !== null && <AgentTag id={agentId} index={row?.index ?? 0} sm />}{" "}
-                <NeedText item={i} now={now} />
+                <NeedText item={i} now={now} lock={lock} />
                 {i.brief && (
                   <>
                     <div className="xs fg2">
@@ -212,11 +244,19 @@ export function NeedsList({
                 )}
               </div>
               <div className="acts">
-                {i.escalationId === null && (
+                {isChannelItem(i) && agentId !== null && (
+                  <button type="button" className="sm primary" onClick={() => onRead(agentId)}>
+                    Read
+                  </button>
+                )}
+                {i.kind === "person" && i.url && (
+                  <ExternalLink url={i.url}>Open in GitHub ↗</ExternalLink>
+                )}
+                {i.escalationId === null && !isChannelItem(i) && (
                   <button type="button" className="sm primary" onClick={() => openItem(i.key)}>
                     {ANSWERED_HERE.includes(i.kind)
                       ? "Answer"
-                      : i.brief
+                      : i.brief || i.kind === "person"
                         ? "Read the brief"
                         : "Discuss"}
                   </button>
@@ -264,6 +304,7 @@ export function NeedsList({
                 ) : (
                   // a stray is only acknowledged: the commit tool already set it aside
                   i.kind !== "stray" &&
+                  !isChannelItem(i) &&
                   agentId !== null && (
                     <button
                       type="button"
@@ -297,7 +338,7 @@ export function NeedsList({
               <div>
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
                 <span className="xs muted">{ownerLabel(itemOwner(i))}</span>{" "}
-                <NeedText item={i} now={now} />
+                <NeedText item={i} now={now} lock={lock} />
               </div>
             </div>
           ))}

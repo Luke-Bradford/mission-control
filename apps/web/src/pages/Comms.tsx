@@ -6,7 +6,7 @@ import { FLIGHT_THREAD, Threads } from "../comms/Threads.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
-import { inSession, useSession } from "../shell/session.ts";
+import { inSession, setSession, useSession } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 /** Where `.cgrid` stacks to one column (hud.css). */
@@ -38,6 +38,8 @@ export function Comms({ item }: { item: string | null }) {
 
   // Below 1000 px the conversation stacks under the list: bring it into view.
   const select = (id: string) => {
+    const target = crew?.rows.find((r) => r.id === id);
+    if (target && !inSession(session, target.repoId)) setSession(target.repoId);
     setSelected(id);
     if (window.matchMedia?.(STACKED_QUERY).matches) {
       document.getElementById("chatP")?.scrollIntoView?.({ block: "start" });
@@ -52,7 +54,12 @@ export function Comms({ item }: { item: string | null }) {
     <section id="page-comms">
       <div className="cgrid">
         <div className="col">
-          <NeedsList items={items} rows={rows} onAskFlight={() => select(FLIGHT_THREAD)} />
+          <NeedsList
+            items={items}
+            rows={rows}
+            onAskFlight={() => select(FLIGHT_THREAD)}
+            onRead={select}
+          />
           <Threads
             rows={inView}
             items={items ?? []}
