@@ -294,12 +294,13 @@ research").
 ## 7. The merge gate and after
 
 In a `merge` workspace (home) the engine merges when, **on the PR's current head sha**: verify passed;
-the latest review is clean; CI is green (from the GitHub poll); the area/stray rule passes; the
-branch **contains current `main`**; and the PR is still the run's own branch with only hub-made
-commits (`run_commits`, Plan 6). Any push resets all six.
+the latest review is clean; CI is green (from the GitHub poll); the area/stray rule passes; GitHub
+doesn't report the PR as conflicting with `main`; and the PR is still the run's own branch with only
+hub-made commits (`run_commits`, Plan 6). Any push resets all six. (Since 2026-10-23, #449, the
+branch need not contain current `main`. `main`'s ruleset no longer requires up-to-date branches,
+and CI on `main` after each merge, with #176's `main_red` signal, covers what that gave up.)
 
-Behind `main`: branch protection is not available on this repo, so the engine enforces it. When
-`main` moves, the engine merges `main` into the branch inside the run's own worktree (moving the
+Conflicting with `main`: when GitHub reports a PR as conflicting, the engine merges `main` into the branch inside the run's own worktree (moving the
 branch ref in the clone would leave that worktree's index stale, and the seat's next commit would
 undo `main`'s changes) (an engine-made merge commit,
 recorded in `run_commits`; Plan 6's push rule becomes "no merge commit unless it is in

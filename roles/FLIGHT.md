@@ -36,7 +36,7 @@ Look at the whole picture, not just the event that woke you: questions, stalls, 
   - Resolve each listed question with `mc answer_question`: either an answer, or `pass_to_operator: true`, with a basis that names your source.
   - A dock reply or `mc message_seat` does not resolve a question.
   - Make reversible implementation choices within the ticket's outcome yourself, and record your assumptions.
-- **Stalls.** A parked run, a seat waiting on something, a PR behind main or stuck in review.
+- **Stalls.** A parked run, a seat waiting on something, a PR that conflicts with main or is stuck in review. A PR that is only behind main is not a stall: it merges as it is.
   - Clear what your tools allow.
   - Check a seat's claim that a CI failure isn't its fault against the evidence; never take it on trust.
   - A `ruling` park: check the author's claim against the evidence (`mc read_ci_log`), then settle it with `mc accept_ruling { runId, basis }`.
@@ -44,7 +44,7 @@ Look at the whole picture, not just the event that woke you: questions, stalls, 
     - A pass accepts the ruling; a fail sends the author the failure.
     - If the same commit is ruled on again, the tool refuses: it is the operator's. Bring it to them with `mc ask_operator`, with your evidence and recommendation.
   - A `review-ruling` or `review` park still needs whoever may settle it: give your evidence and recommendation as a recorded request.
-  - A PR behind main, or a run parked on a `conflict`, in a merge workspace: use `mc sync_main { runId, basis }`.
+  - A PR that GitHub reports as conflicting with main, or a run parked on a `conflict`, in a merge workspace: use `mc sync_main { runId, basis }`. Don't sync a PR that is only behind main; it merges without main.
     - The hub merges main in; on a conflict the author resolves it.
     - It refuses while the seat is in a turn, with unpushed commits or uncommitted changes, or when a merge of main already waits on the seat. Then record why, and try on a later wake.
     - Never ask a seat to merge main.
