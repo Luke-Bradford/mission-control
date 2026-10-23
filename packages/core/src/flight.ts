@@ -54,7 +54,15 @@ export interface FlightDecision {
 
 /** `GET /api/flight`: the watch seat (null when none is configured) and the last day's decisions. */
 export interface FlightView {
-  seat: { id: string; call: string; model: string; state: SeatState | null; live: boolean } | null;
+  seat: {
+    id: string;
+    call: string;
+    model: string;
+    state: SeatState | null;
+    live: boolean;
+    /** The turn FLIGHT's session is on, and the last before a fresh one; null when it has no run. */
+    turns?: { n: number; max: number } | null;
+  } | null;
   decisions: FlightDecision[];
 }
 
@@ -579,7 +587,12 @@ export const FLIGHT_MAX_WAKES = 40;
 /** Starts of FLIGHT itself per hour, rotations not counted. */
 export const FLIGHT_STARTS_MAX = 3;
 export const FLIGHT_WAKE_HEAD = "[Mission Control] Wake:";
-export const wakeKey = (runId: string, n: number): string => `flight:wake:${runId}:${n}`;
+export const wakeKeyPrefix = (runId: string): string => `flight:wake:${runId}:`;
+export const wakeKey = (runId: string, n: number): string => `${wakeKeyPrefix(runId)}${n}`;
+/** Turn 1 is the start brief; wake k is turn k + 1, so a run's last turn is FLIGHT_MAX_WAKES + 1. */
+export const flightTurnText = (n: number, max: number): string =>
+  `turn ${n} of ${max}, then a fresh session`;
+export const flightTurnShort = (n: number, max: number): string => `turn ${n} of ${max}`;
 export const FLIGHT_NOTE_KEY = "flight:start-failed";
 export const flightStartFailedText = (reason: string): string =>
   `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
