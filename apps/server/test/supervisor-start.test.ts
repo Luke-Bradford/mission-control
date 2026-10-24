@@ -93,6 +93,7 @@ import {
   recorded,
   recordFile,
   refusal,
+  reopenStore,
   root,
   seatState,
   store,
@@ -409,6 +410,81 @@ describe("startRun", () => {
     expect(userLines()[0]).toContain(
       "[The ticket body was cut at 20,000 characters; 25,000 more are missing. Do not guess them; ask with mc ask_operator.]",
     );
+  });
+
+  it("a read-only seat starts detached at the ticket's branch while a writer's worktree has it", async () => {
+    const claim = vi.fn(async () => {});
+    const { sup } = make({ claim });
+    sup.start();
+    const writer = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const out = await sup.startRun("retro", 42);
+    expect(store.run(writer.runId)?.endedAt).toBeNull();
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(out.branch).toBe(BRANCH);
+    expect(store.run(out.runId)).toMatchObject({ branch: null, ticket: "mc" + "#" + "42" });
+    const wt = join(root, "mc-crew", "retro-42");
+    expect(git(wt, "rev-parse", "HEAD")).toBe(git(clone, "rev-parse", BRANCH));
+    expect(() => git(wt, "symbolic-ref", "--quiet", "HEAD")).toThrow();
+    await until(() => expect(userLines()).toHaveLength(2));
+    expect(userLines()[1]).toContain(`checkout of branch ${BRANCH}.`);
+  });
+
+  it("a read-only start on a ticket with no branch creates none", async () => {
+    const { sup } = make();
+    sup.start();
+    const out = await sup.startRun("retro", 42);
+    expect(out.branch).toBe("");
+    expect(store.run(out.runId)?.branch).toBeNull();
+    expect(git(clone, "for-each-ref", "refs/heads/feature")).toBe("");
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("(none yet: a detached copy of origin's default branch)");
+  });
+
+  it("a read-only ticket start ignores another hub's claim", async () => {
+    store.replaceBoard("mc", [{ ...boardCard(42), assignees: ["other"] }]);
+    const claim = vi.fn(async () => {});
+    const { sup } = make({ claim });
+    sup.start();
+    await sup.startRun("retro", 42);
+    expect(claim).not.toHaveBeenCalled();
+    await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
+      message: ticketHasRunText("mc#42"),
+    });
+  });
+
+  it("remakes a worktree recorded before a store restart, clearing only after installation", async () => {
+    const wt = join(root, "mc-crew", "guido-1-42");
+    writeFileSync(join(clone, "package.json"), '{"name":"x","private":true}\n');
+    writeFileSync(join(clone, "pnpm-lock.yaml"), "garbage\n");
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "install inputs");
+    git(clone, "push", "-q", "origin", "main");
+    git(clone, "worktree", "add", "-b", BRANCH, wt);
+    writeFileSync(join(wt, "stale.txt"), "stale");
+    store.markCheckoutPending(wt, 1);
+    reopenStore();
+    expect(store.checkoutPending(wt)).toBe(true);
+    const { sup } = make();
+    sup.start();
+    await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({ code: "install" });
+    expect(store.checkoutPending(wt)).toBe(true);
+    writeFileSync(
+      join(clone, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    );
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "valid lockfile");
+    git(clone, "push", "-q", "origin", "main");
+    git(clone, "branch", "-f", BRANCH, "main");
+    const clear = store.clearCheckoutPending.bind(store);
+    vi.spyOn(store, "clearCheckoutPending").mockImplementation((path) => {
+      expect(existsSync(join(path, "node_modules"))).toBe(true);
+      clear(path);
+    });
+    await sup.startRun("guido-1", 42);
+    expect(existsSync(join(wt, "stale.txt"))).toBe(false);
+    expect(store.checkoutPending(wt)).toBe(false);
   });
 
   it("makes the branch and worktree, spawns with --session-id and sends the brief first", async () => {
@@ -1142,7 +1218,7 @@ describe("startRun", () => {
     const [a, b] = await Promise.all([sup.startRun("guido-1", 42), sup.startRun("retro", 43)]);
     expect(prep.maxInFlight).toBe(1);
     expect(a.branch).toBe(BRANCH);
-    expect(b.branch).toBe("feature/43-other-ticket-43");
+    expect(b.branch).toBe("");
     expect(existsSync(join(root, "mc-crew", "retro-43", "README.md"))).toBe(true);
   });
 });

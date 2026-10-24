@@ -92,6 +92,18 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
         prep.inFlight--;
       }
     },
+    prepareReadOnlyCheckout: async (i: Parameters<typeof real.prepareReadOnlyCheckout>[0]) => {
+      prep.peers.push(i.peers);
+      prep.inFlight++;
+      prep.maxInFlight = Math.max(prep.maxInFlight, prep.inFlight);
+      try {
+        await new Promise<void>((r) => setImmediate(r));
+        if (prep.gate) await prep.gate;
+        return await real.prepareReadOnlyCheckout(i);
+      } finally {
+        prep.inFlight--;
+      }
+    },
   };
 });
 
@@ -425,6 +437,11 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+function reopenStore(): void {
+  store.close();
+  store = new Store(dbPath);
+}
+
 const live = () => new AbortController().signal;
 
 export {
@@ -450,6 +467,7 @@ export {
   recorded,
   recordFile,
   refusal,
+  reopenStore,
   root,
   START_RULES,
   seatState,

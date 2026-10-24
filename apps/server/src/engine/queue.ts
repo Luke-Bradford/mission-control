@@ -365,7 +365,8 @@ export function takeReason(e: unknown): string {
 /** Whether a refused start is the card's own: a stray worktree path, a protected branch, an issue GitHub doesn't have. */
 const isCardsOwn = (e: unknown): boolean =>
   (e instanceof SupervisorError && (e.status === 404 || e.status === 422)) ||
-  (e instanceof CheckoutError && (e.code === "path" || e.code === "protected"));
+  (e instanceof CheckoutError &&
+    (e.code === "path" || e.code === "protected" || e.code === "branch"));
 
 /**
  * Whether a refused review start is retried unchanged: the seat is busy or the hub is stopping
