@@ -1127,8 +1127,18 @@ main > section {
   background: var(--ok);
 }
 .trow .rowlink {
+  display: block;
+  max-width: 100%;
   color: inherit;
   text-decoration: none;
+}
+.trow .ag {
+  max-width: 100%;
+}
+.trow .ag > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .trow button.rowlink {
   font: inherit;
@@ -1158,26 +1168,87 @@ main > section {
   align-items: center;
   gap: 6px;
 }
-/* A seat's set-aside run: its own line across the row, under the cells. */
+/* Set-aside work inherits the seat's columns, including at narrow widths. */
 .trow .asideline {
   grid-column: 1 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: subgrid;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
   color: var(--fg-2);
   font-size: var(--fs-xs);
 }
+.trow > *,
 .trow .asideline > * {
-  flex: none;
-}
-.trow .asideline > .ellip {
-  flex: 0 1 auto;
   min-width: 0;
 }
-.trow .asideline .stepbar {
-  width: 48px;
+.agent-group-title {
   margin: 0;
+  padding: 8px 14px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+summary.agent-group-title,
+.agent-metadata summary {
+  cursor: pointer;
+}
+.agent-metadata,
+.flight-coverage {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-metadata > div {
+  padding-top: 6px;
+}
+.agent-quota {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-quota .meter {
+  width: auto;
+}
+.state-cell .pill {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  flex-wrap: wrap;
+}
+.agent-activity {
+  min-width: 0;
+  width: 100%;
+}
+.agent-activity .spark {
+  width: 100%;
+  height: 22px;
+}
+.heartbeat {
+  position: relative;
+  width: 100%;
+  height: 10px;
+  border-bottom: 1px solid var(--line-2);
+}
+.heartbeat-tick {
+  position: absolute;
+  width: 2px;
+  height: 8px;
+  bottom: 0;
+  transform: translateX(-100%);
+  background: var(--accent);
+}
+.heartbeat-tick.event-test,
+.heartbeat-tick.event-review {
+  background: var(--ok);
+}
+.heartbeat-tick.event-park {
+  background: var(--warn-mark);
 }
 /* The doing line takes two lines here, so about 40 characters show in the ticket column at 1440. */
 .trow .doing {
@@ -1298,6 +1369,21 @@ main > section {
     grid-row: 2;
   }
   .app:not(.dock-hidden) .trow > :nth-child(6) {
+    grid-column: 5;
+    grid-row: 2;
+  }
+  .app:not(.dock-hidden) .asideline > :nth-child(3) {
+    grid-column: 3 / -1;
+  }
+  .app:not(.dock-hidden) .asideline > :nth-child(4) {
+    grid-column: 1 / 4;
+    grid-row: 2;
+  }
+  .app:not(.dock-hidden) .asideline > :nth-child(5) {
+    grid-column: 4;
+    grid-row: 2;
+  }
+  .app:not(.dock-hidden) .asideline > :nth-child(6) {
     grid-column: 5;
     grid-row: 2;
   }
@@ -3673,4 +3759,27 @@ button.nrow.thread.tagged {
 }
 .dmsg:has(.expandable) {
   grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 760px) {
+  #agentsP .ph,
+  #agentsP .ph .act {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  #agentsList .trow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  #agentsList .agent-activity,
+  #agentsList .agent-metadata {
+    display: none;
+  }
+  #agentsList .asideline > :nth-child(3),
+  #agentsList .asideline > :nth-child(4),
+  #agentsList .meters2 {
+    grid-column: 1 / -1;
+  }
+  #agentsList .trow > span:first-child {
+    overflow-wrap: anywhere;
+  }
 }

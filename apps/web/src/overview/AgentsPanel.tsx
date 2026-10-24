@@ -2,8 +2,11 @@ import {
   type AttentionItem,
   type ConfigView,
   type Crew,
+  FLIGHT_TICK_MS,
+  type FlightBriefView,
   flightTurnShort,
   type LimitRow,
+  startOfLocalDay,
   type TestLockState,
 } from "@mc/core";
 import { SeatControls } from "../agent/Header.tsx";
@@ -14,7 +17,6 @@ import { NeedButton } from "../components/NeedButton.tsx";
 import {
   callSign,
   contextPct,
-  crewOrder,
   doingLine,
   isFinishedWork,
   isLoopInFlight,
@@ -30,14 +32,11 @@ import {
   seatItems,
   seatRoleTitle,
   seatStatus,
-  sparkValues,
-  tokensPerMinute,
   waitText,
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
-import { cost, kTokens } from "../fmt.ts";
-import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
+import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -45,12 +44,14 @@ import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
-import { Sparkline } from "../hud/Sparkline.tsx";
 import { firstWindow } from "../quota.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { toggleDock } from "../shell/overlays.ts";
 import { useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
+import { AgentActivity } from "./AgentActivity.tsx";
+import { AgentMetadata } from "./AgentMetadata.tsx";
+import { activityValues, age, attentionOrder } from "./agentActivity.ts";
 import { LoopStep } from "./LoopStep.tsx";
 
 const DASH = "—";
@@ -67,75 +68,101 @@ function flightSeatId(config: ConfigView | undefined): string | null {
 /** The head agent's row: the live FLIGHT seat, or the placeholder while there is none. */
 function FlightRow({
   row,
-  limits,
   now,
   tz,
   configPending,
+  items,
+  max,
 }: {
   row: Crew["rows"][number] | null;
-  /** The config that names the FLIGHT seat is still loading (no data, no error). */
   configPending: boolean;
-  limits: LimitRow[];
   now: number;
   tz: string | null;
+  items: AttentionItem[];
+  max: number;
 }) {
   const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const brief = useResource<FlightBriefView>(RESOURCES.flightBrief).data;
   const turns = flight?.seat?.turns ?? null;
-  const go = () => toggleDock(true);
+  const last = flight?.decisions.reduce<FlightView["decisions"][number] | null>(
+    (a, b) => (!a || b.at > a.at ? b : a),
+    null,
+  );
   const status = row ? seatStatus(row) : null;
-  const quota = row ? firstWindow(limits, row.accountId) : null;
-  const tpm = row ? tokensPerMinute(row.digest, now) : null;
-  const tokens = row?.run?.tokens ? row.run.tokens.input + row.run.tokens.output : null;
+  const crewStatus = useResource<{ enabled: boolean }>(RESOURCES.crewStatus).data;
+  const label =
+    row?.hudState === "stopped"
+      ? "Stopped"
+      : row?.paused || (row && crewStatus?.enabled === false)
+        ? "Held"
+        : row?.hudState === "idle"
+          ? "Watching"
+          : row?.hudState === "running" || row?.hudState === "stalled"
+            ? "Thinking"
+            : row?.hudState === "parked"
+              ? "Held"
+              : status?.label;
+  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${last.kind})` : "no action recorded"} · ${label === "Held" || label === "Stopped" ? "next check paused" : `next check within ${FLIGHT_TICK_MS / 60_000}m`}`;
+  const wakes =
+    turns && row?.run && tz && row.run.startedAt >= startOfLocalDay(now, tz)
+      ? `Wakes today: at least ${Math.max(0, turns.n - 1)} (this session)`
+      : "Wakes today: unavailable";
+  const go = () => toggleDock(true);
   return (
-    // As the agent rows: the call sign is the control, a click elsewhere on the row a mouse shortcut.
     // biome-ignore lint/a11y/useKeyWithClickEvents: the call-sign button is the keyboard route
-    // biome-ignore lint/a11y/noStaticElementInteractions: as above; the row is a container
-    <div className="trow flight" onClick={go}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: the row is a container
+    <div
+      className="trow flight"
+      onClick={(e) => {
+        if (!(e.target as Element).closest("a, .agent-metadata, button")) go();
+      }}
+    >
       <span>
-        <button
-          type="button"
-          className="rowlink"
-          aria-label="FLIGHT, open the dock"
-          onClick={(e) => {
-            e.stopPropagation();
-            go();
-          }}
-        >
+        <button type="button" className="rowlink" aria-label="FLIGHT, open the dock" onClick={go}>
           <AgentTag bare id="FLIGHT" index="flight" />
         </button>
         <span className="xs muted block">head agent</span>
       </span>
-      <span>
+      <span className={row ? "state-cell" : undefined}>
         <Pill tone="neutral">Head</Pill>
-        {status && <Pill tone={status.tone}>{status.label}</Pill>}
+        {label && (
+          <Pill tone={label === "Watching" ? "ok" : (status?.tone ?? "neutral")}>
+            <span>{label}</span>
+            {row && row.stateSince > 0 && <span> · {age(row.stateSince, now)}</span>}
+          </Pill>
+        )}
       </span>
       <span className="min0">
         {row ? (
           <span className="ellip xs fg2 doing" title={doingLine(row, now, tz, undefined)}>
             <DoingLine row={row} now={now} tz={tz} repoPrs={undefined} />
           </span>
-        ) : configPending ? (
-          <span className="ellip s muted">Loading…</span>
         ) : (
-          <span className="ellip s">{FLIGHT_NO_SEAT}</span>
+          <span className="ellip s muted">{configPending ? "Loading…" : FLIGHT_NO_SEAT}</span>
         )}
         <span className="xs muted block">coordinates the crew and brings you decisions</span>
       </span>
       <span className="xs fg2">{turns ? flightTurnShort(turns.n, turns.max) : DASH}</span>
-      <span className="tok">
-        <span className="num s">{tokens === null ? DASH : kTokens(tokens)}</span>
-        {tpm !== null && <span className="xs muted num">{kTokens(tpm)}/min</span>}
+      {row ? <AgentActivity row={row} now={now} max={max} /> : <span>{DASH}</span>}
+      <span className="meters2" title="how full this agent's context window is">
+        {row ? <Meter label="Context" pct={contextPct(row)} /> : DASH}
       </span>
-      <span className="meters2">
-        {row ? (
-          <>
-            <Meter label="ctx" pct={contextPct(row)} />
-            <Meter label={quota?.window ?? "5h"} pct={quota ? quota.used : null} />
-          </>
-        ) : (
-          <span className="xs fg2">{DASH}</span>
-        )}
-      </span>
+      {row && (
+        <div className="flight-coverage xs fg2">
+          <span className="block" title={coverage}>
+            {coverage}
+          </span>
+          <a
+            className="ellip block"
+            href="/flight"
+            onClick={(e) => followLink(e, "/flight")}
+            title={last?.decision ?? "Open FLIGHT"}
+          >
+            {last?.decision ?? "Open FLIGHT"}
+          </a>
+        </div>
+      )}
+      {row && <AgentMetadata row={row} wakeCount={wakes} />}
     </div>
   );
 }
@@ -146,7 +173,7 @@ const stopsTheTurn = (p: NeedPart): boolean => p.action === "interrupt" || p.act
 function AgentRow({
   row,
   items,
-  limits,
+  max,
   now,
   tz,
   selected,
@@ -154,7 +181,7 @@ function AgentRow({
 }: {
   row: Crew["rows"][number];
   items: AttentionItem[];
-  limits: LimitRow[];
+  max: number;
   now: number;
   tz: string | null;
   selected: boolean;
@@ -176,16 +203,14 @@ function AgentRow({
   );
   const running = row.hudState === "running";
   const go = () => navigate(agentPath(row.id));
-  const quota = firstWindow(limits, row.accountId);
-  const tpm = tokensPerMinute(row.digest, now);
-  const spark = sparkValues(row.digest);
-  const tokens = row.run?.tokens ? row.run.tokens.input + row.run.tokens.output : null;
-  const runCost =
-    row.run?.status === "running" ? (row.run.costEstimateUsd ?? row.run.costUsd) : row.run?.costUsd;
-  const rate = [
-    tpm === null ? null : `${kTokens(tpm)}/min`,
-    runCost == null ? null : cost(runCost),
-  ].filter((x) => x !== null);
+  const crewStatus = useResource<{ enabled: boolean }>(RESOURCES.crewStatus).data;
+  const status = seatStatus(row);
+  const statusLabel =
+    lockSince(lock, row.run?.id) !== null
+      ? "Waiting on lock"
+      : status.label === "Free" && crewStatus?.enabled === false
+        ? "Idle (crew paused)"
+        : status.label;
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
   const to = agentPath(row.id);
@@ -198,12 +223,13 @@ function AgentRow({
       className={cls.filter(Boolean).join(" ")}
       onClick={(e) => {
         // a link in the row (a ticket on GitHub) goes where it points, not to the Agent page
-        if (!(e.target as Element).closest("a")) go();
+        if (!(e.target as Element).closest("a, .agent-metadata, button")) go();
       }}
     >
       <span>
         <a
           className="rowlink"
+          title={callSign(row)}
           href={to}
           onClick={(e) => {
             e.stopPropagation();
@@ -218,8 +244,11 @@ function AgentRow({
             : `observed loop · ${row.loopKind}`}
         </span>
       </span>
-      <span>
-        <Pill tone={seatStatus(row).tone}>{seatStatus(row).label}</Pill>
+      <span className="state-cell">
+        <Pill tone={status.tone}>
+          <span>{statusLabel}</span>
+          {row.stateSince > 0 && <span> · {age(row.stateSince, now)}</span>}
+        </Pill>
       </span>
       <span className="min0">
         <span className="ellip s" title={row.ticket ? (row.ticketTitle ?? undefined) : undefined}>
@@ -235,8 +264,15 @@ function AgentRow({
             <span className="muted">No ticket</span>
           )}
         </span>
-        <span className="ellip xs fg2 doing" title={doing}>
-          <DoingLine row={doingRow} now={now} tz={tz} repoPrs={repoPrs} />
+        <span
+          className="ellip xs fg2 doing"
+          title={statusLabel === "Idle (crew paused)" ? "Crew is paused" : doing}
+        >
+          {statusLabel === "Idle (crew paused)" ? (
+            "Crew is paused"
+          ) : (
+            <DoingLine row={doingRow} now={now} tz={tz} repoPrs={repoPrs} />
+          )}
         </span>
       </span>
       <span className="min0 loopstep">
@@ -254,17 +290,11 @@ function AgentRow({
           </span>
         )}
       </span>
-      <span className="tok">
-        <span className="row">
-          <span className="num s">{tokens === null ? DASH : kTokens(tokens)}</span>
-          <Sparkline values={spark} color={agentColor(row.index)} />
-        </span>
-        <span className="xs muted num">{rate.length > 0 ? rate.join(" · ") : DASH}</span>
+      <AgentActivity row={row} now={now} max={max} />
+      <span className="meters2" title="how full this agent's context window is">
+        <Meter label="Context" pct={contextPct(row)} />
       </span>
-      <span className="meters2">
-        <Meter label="ctx" pct={contextPct(row)} />
-        <Meter label={quota?.window ?? "5h"} pct={quota ? quota.used : null} />
-      </span>
+      <AgentMetadata row={row} />
       {parts.length > 0 && (
         <div className="need">
           {lamp && <Lamp {...lamp} />}
@@ -293,25 +323,32 @@ function AgentRow({
       )}
       {(row.asideRuns ?? []).map((a) => (
         <div key={a.runId} className="asideline">
-          <span className="muted">{SET_ASIDE_LABEL}</span>
-          {a.ticket && <TicketRef ticket={a.ticket} />}
-          {a.ticketTitle && (
-            <span className="ellip" title={a.ticketTitle}>
-              {a.ticketTitle}
-            </span>
-          )}
-          <LoopStep
-            loop={a.loop}
-            hudState="idle"
-            wait={waitText(a.loop, callSign(row), lockSince(lock, a.runId), now)}
+          <span className="muted">↳ {SET_ASIDE_LABEL}</span>
+          <span className="xs muted">{a.stateSince ? age(a.stateSince, now) : DASH}</span>
+          <span className="min0 ellip" title={a.ticketTitle ?? undefined}>
+            {a.ticket && <TicketRef ticket={a.ticket} />} {a.ticketTitle}
+          </span>
+          <span className="min0 loopstep">
+            <LoopStep
+              loop={a.loop}
+              hudState="idle"
+              wait={waitText(a.loop, callSign(row), lockSince(lock, a.runId), now)}
+            />
+          </span>
+          <AgentActivity
+            row={{ ...row, events: a.events, digest: null }}
+            now={now}
+            max={max}
+            eventsOnly
           />
+          <span />
         </div>
       ))}
     </div>
   );
 }
 
-/** The crew (catalogue 2.1.2): FLIGHT first, then each observed loop. */
+/** FLIGHT heads the crew, observed loops and stopped seats. */
 export function AgentsPanel() {
   const crew = useResource<Crew>(RESOURCES.crew);
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
@@ -328,61 +365,99 @@ export function AgentsPanel() {
   const flightId = flightSeatId(config);
   const flight = crew.data?.rows.find((r) => r.id === flightId) ?? null;
   const rows = crew.data
-    ? crewOrder(
+    ? attentionOrder(
         crew.data.rows.filter((r) => r !== flight && matchesSession(r)),
         items,
       )
     : null;
   const working = rows?.filter((r) => r.hudState === "running").length ?? 0;
 
+  const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
+  const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
+  const off = (r: Crew["rows"][number]) => r.hudState === "stopped" || r.paused;
+  const groups = [
+    { name: "Crew", rows: rows?.filter((r) => r.kind === "crew" && !off(r)) ?? [] },
+    { name: "Observed loops", rows: rows?.filter((r) => r.kind === "loop" && !off(r)) ?? [] },
+    { name: "Off", rows: rows?.filter(off) ?? [] },
+  ];
+  const accounts = [...new Set(allRows.map((r) => r.accountId))];
   return (
     <Panel
       id="agentsP"
       title="Agents"
       sub={rows ? `${working} working · ${rows.length} agents · FLIGHT not counted` : undefined}
       actions={
-        <button
-          type="button"
-          className="sm"
-          disabled={!firstSession}
-          onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
-        >
-          Add agent
-        </button>
+        <>
+          {accounts.map((account) => {
+            const quota = firstWindow(limits, account);
+            return (
+              <span className="agent-quota xs" key={account} title={`Account quota: ${account}`}>
+                <span>{account}</span>
+                <Meter label={quota?.window ?? "5h"} pct={quota?.used ?? null} />
+              </span>
+            );
+          })}
+          <button
+            type="button"
+            className="sm"
+            disabled={!firstSession}
+            onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
+          >
+            Add agent
+          </button>
+        </>
       }
     >
-      <div
-        className={rows && !rows.some((r) => r.loop) ? "scroll noloop" : "scroll"}
-        id="agentsList"
-      >
+      <div className="scroll" id="agentsList">
         <div className="trow head">
           <span>Agent</span>
           <span>State</span>
           <span>Ticket and what it's doing</span>
           <span>Loop step</span>
-          <span className="right">Tokens · ~cost</span>
-          <span>Context · quota</span>
+          <span className="right">Progress · last 2h</span>
+          <span>Context</span>
         </div>
         <FlightRow
           row={flight}
           configPending={!config && !configRes.error}
-          limits={limits}
+          items={items}
+          max={max}
           now={now}
           tz={tz}
         />
         <CrewOff className="pb muted s" />
-        {rows?.map((row) => (
-          <AgentRow
-            key={row.id}
-            row={row}
-            items={items}
-            limits={limits}
-            now={now}
-            tz={tz}
-            selected={row.id === selected}
-            lock={lock}
-          />
-        ))}
+        {groups.map((group) => {
+          const children = group.rows.map((row) => (
+            <AgentRow
+              key={row.id}
+              row={row}
+              items={items}
+              max={max}
+              now={now}
+              tz={tz}
+              selected={row.id === selected}
+              lock={lock}
+            />
+          ));
+          return group.name === "Crew" ? (
+            <section className="agent-group" aria-label={group.name} key={group.name}>
+              <h3 className="agent-group-title">Crew · {group.rows.length}</h3>
+              {children}
+            </section>
+          ) : (
+            <details
+              className="agent-group"
+              aria-label={group.name}
+              key={group.name}
+              open={group.name === "Observed loops"}
+            >
+              <summary className="agent-group-title">
+                {group.name} · {group.rows.length}
+              </summary>
+              {children}
+            </details>
+          );
+        })}
         {crew.error && !rows && <div className="pb crit-t">Could not load the crew.</div>}
         {!rows && !crew.error && <div className="pb muted">Loading…</div>}
       </div>

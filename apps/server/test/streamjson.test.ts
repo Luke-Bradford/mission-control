@@ -172,20 +172,20 @@ describe("foldTranscript digest", () => {
     for (const [at] of d.minuteTokens) expect(at % MIN).toBe(0);
   });
 
-  it("drops minute buckets that end 60 minutes or more before the newest event", () => {
+  it("drops minute buckets that end 120 minutes or more before the newest event", () => {
     const later = JSON.stringify({
       type: "assistant",
       message: { id: "msg_late", content: [], usage: { input_tokens: 1, output_tokens: 1 } },
       parent_tool_use_id: null,
-      timestamp: "2026-10-18T11:01:30.000Z",
+      timestamp: "2026-10-18T12:01:30.000Z",
     });
     const f = foldTranscript(null, [...agentLines, later], 1).digest;
-    // The window is (10:01:30, 11:01:30]: 10:00 ends before it, 10:01 overlaps it.
+    // The window is (10:01:30, 12:01:30]: 10:00 ends before it, 10:01 overlaps it.
     expect(f.minuteTokens).toEqual([
       [T("2026-10-18T10:01:00Z"), 25],
       [T("2026-10-18T10:02:00Z"), 173],
       [T("2026-10-18T10:05:00Z"), 17],
-      [T("2026-10-18T11:01:00Z"), 2],
+      [T("2026-10-18T12:01:00Z"), 2],
     ]);
   });
 
@@ -874,4 +874,23 @@ it("retains the maximum timed command across chunks and the bounded duration win
   expect(result.digest.tools.Bash?.slowest).toEqual({ detail: "just test", durationMs: 60000 });
   expect(result.digest.tools.Bash?.durationsMs).toHaveLength(50);
   expect(first.digest.tools.Bash?.slowest).toBeUndefined();
+});
+
+it("retains two hours of token buckets for the shared Overview axis", () => {
+  const now = Date.parse("2026-10-24T12:00:00Z");
+  const lines = [121, 100, 90, 0].map((minutes) =>
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(now - minutes * 60_000).toISOString(),
+      message: {
+        id: `m${minutes}`,
+        role: "assistant",
+        content: [],
+        usage: { input_tokens: 100, output_tokens: 20 },
+      },
+    }),
+  );
+  expect(
+    foldTranscript(null, lines, now).digest.minuteTokens.map(([at]) => (now - at) / 60_000),
+  ).toEqual([100, 90, 0]);
 });

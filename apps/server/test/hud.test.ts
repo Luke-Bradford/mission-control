@@ -192,6 +192,7 @@ describe("crew", () => {
       index: 0,
       hudState: "idle",
       stateSince: 0,
+      events: [],
       accountId: "claude-main",
       kind: "loop",
       role: null,
@@ -1858,7 +1859,11 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     };
     store.setDigest("c1", digest({ lastEventAt: NOW - MIN }));
     const row = crew(c, store, NOW, lock).rows.find((r) => r.id === "GUIDO-2");
-    expect(row).toMatchObject({ hudState: "waiting", note: "waiting for the test lock" });
+    expect(row).toMatchObject({
+      hudState: "waiting",
+      note: "waiting for the test lock",
+      stateSince: NOW - 20 * MIN,
+    });
     expect(items(c, lock)).toEqual([]);
     // without the lock's word it is an ordinary stall
     expect(crew(c, store, NOW).rows.find((r) => r.id === "GUIDO-2")?.hudState).toBe("stalled");
@@ -2123,4 +2128,71 @@ describe("the engine's notes in Needs you", () => {
       [KEY, "shop-app#7 parked: Push refused."],
     ]);
   });
+});
+
+describe("crew heartbeat", () => {
+  it("uses real run events, clips the window and does not mix runs", () => {
+    store.upsertRun(run({}));
+    store.upsertRun(run({ id: "other", agentId: "studio-builder" }));
+    store.addRunCommit({
+      runId: "r1",
+      repoId: "shop-app",
+      branch: "work",
+      sha: "abc",
+      at: NOW - MIN,
+    });
+    store.setRunPush({ runId: "r1", sha: "abc", at: NOW - 2 * MIN });
+    store.addLoopEvent("test", "r1", "CI passed on abc", NOW - 3 * MIN);
+    store.addLoopEvent("pr", "r1", "PR #9 opened", NOW - 4 * MIN);
+    store.addLoopEvent("park", "r1", "Parked: needs input", NOW - 5 * MIN);
+    store.addLoopEvent("old", "r1", "PR #8 opened", NOW - 121 * MIN);
+    store.addLoopEvent("future", "r1", "PR #10 opened", NOW + MIN);
+    store.addLoopEvent("other", "other", "PR #11 opened", NOW - MIN);
+    const row = rowOf("shop-app-ta");
+    expect(row?.events).toEqual([
+      { kind: "park", at: NOW - 5 * MIN },
+      { kind: "pr-opened", at: NOW - 4 * MIN },
+      { kind: "test", at: NOW - 3 * MIN },
+      { kind: "push", at: NOW - 2 * MIN },
+      { kind: "commit", at: NOW - MIN },
+    ]);
+    expect(row?.stateSince).toBe(NOW - HOUR);
+  });
+});
+
+it("heartbeat includes completed reviews and sent messages, without counting requests as reviews", () => {
+  store.upsertRun(run({}));
+  const request = {
+    authorRunId: "r1",
+    repoId: "shop-app",
+    seatId: "retro",
+    prNumber: 9,
+    sha: "abc",
+    epoch: 0,
+    attempt: 1,
+    round: 1,
+    at: NOW - 10 * MIN,
+  };
+  const id = store.requestReview(request);
+  if (id === null) throw new Error("no review");
+  store.setReviewState(id, ["queued"], "reported", { at: NOW - 4 * MIN });
+  store.requestReview({ ...request, attempt: 2 });
+  store.addComms({
+    from: "shop-app-ta",
+    to: "CAPCOM",
+    ticket: null,
+    text: "Tests passed",
+    at: NOW - 3 * MIN,
+  });
+  store.addComms({
+    from: "CAPCOM",
+    to: "shop-app-ta",
+    ticket: null,
+    text: "Please check",
+    at: NOW - 2 * MIN,
+  });
+  expect(rowOf("shop-app-ta")?.events).toEqual([
+    { kind: "review", at: NOW - 4 * MIN },
+    { kind: "message", at: NOW - 3 * MIN },
+  ]);
 });

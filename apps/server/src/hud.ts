@@ -73,6 +73,7 @@ import { flightLive, flightOwnSeatIds } from "./flight/state.ts";
 import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
+import { runEvents } from "./views.ts";
 
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
 export const CREW_ERROR_KEY = "crew-error:";
@@ -425,7 +426,9 @@ export function crew(
               stallStart(silentSince, agent.kind === "loop" && backgroundInFlight),
               view.stateSince,
             )
-          : view.stateSince;
+          : state === "waiting" && latest
+            ? (lock.waiting.find((w) => w.runId === latest.id)?.since ?? view.stateSince)
+            : view.stateSince;
       return {
         id: agent.id,
         ...(agent.kind === "crew" && agent.seat.displayCallSign !== undefined
@@ -434,6 +437,7 @@ export function crew(
         repoId: agent.repoId,
         index,
         hudState: state,
+        events: latest ? runEvents(store, latest, now) : [],
         stateSince,
         accountId: agent.accountId,
         kind: view.kind,
@@ -470,6 +474,9 @@ export function crew(
                     ? [
                         {
                           runId: r.id,
+                          events: runEvents(store, r, now),
+                          stateSince:
+                            store.loopEventsOfRun(r.id).at(-1)?.at ?? r.endedAt ?? r.startedAt,
                           ticket: t,
                           ticketTitle: runTicketTitle(r, t, ticketTitle(t)),
                           loop: l,

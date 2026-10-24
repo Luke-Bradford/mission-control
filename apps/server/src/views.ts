@@ -13,6 +13,7 @@ import {
   BUILTIN_ROLES,
   CHECK_EVENT,
   type ConfigView,
+  type CrewEvent,
   type Metrics,
   type MetricsDay,
   modeOfSeat,
@@ -485,4 +486,48 @@ export function configView(
       : null,
     ...(profiles === undefined ? {} : { profiles }),
   };
+}
+
+/** Progress for a run, using recorded evidence rather than token activity. */
+export function runEvents(store: Store, run: Run, now: number): CrewEvent[] {
+  const since = now - 2 * 60 * 60_000;
+  const events: CrewEvent[] = [];
+  for (const e of store.loopEventsOfRun(run.id)) {
+    const kind = CHECK_EVENT.test(e.text)
+      ? "test"
+      : /^PR #\d+ opened/.test(e.text)
+        ? "pr-opened"
+        : /^pushed /i.test(e.text)
+          ? "push"
+          : /:parked:/.test(e.key) || /^Parked:/i.test(e.text)
+            ? "park"
+            : null;
+    if (kind) events.push({ kind, at: e.at });
+  }
+  for (const c of store.runCommitsSince(since)) {
+    if (c.runId === run.id) events.push({ kind: "commit", at: c.at });
+  }
+  const push = store.runPush(run.id);
+  if (push && !events.some((e) => e.kind === "push" && e.at === push.at))
+    events.push({ kind: "push", at: push.at });
+  const reviews = [...store.reviewsOfRun(run.id)];
+  const performed = store.reviewOfRun(run.id);
+  if (performed) reviews.push(performed);
+  for (const review of reviews) {
+    if (review.state === "reported" && review.endedAt !== null)
+      events.push({ kind: "review", at: review.endedAt });
+  }
+  for (const test of store.lockRuns(since)) {
+    if (test.runId === run.id) events.push({ kind: "test", at: test.startedAt });
+  }
+  for (const msg of store.comms(since)) {
+    if (
+      msg.from === run.agentId &&
+      msg.at >= run.startedAt &&
+      (run.endedAt === null || msg.at <= run.endedAt) &&
+      msg.ticket === run.ticket
+    )
+      events.push({ kind: "message", at: msg.at });
+  }
+  return events.filter((e) => e.at >= since && e.at <= now).sort((a, b) => a.at - b.at);
 }
