@@ -167,6 +167,7 @@ import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./
 import type { RunTokens } from "./mcp/tokens.ts";
 import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
+import { overviewSummary } from "./overview.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
@@ -676,18 +677,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
 
+  let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
+  const sharedAttention = (): AttentionItem[] => {
+    const at = now();
+    if (!attentionMemo || at - attentionMemo.at >= 2_000) {
+      attentionMemo = {
+        at,
+        items: attentionItems(
+          config,
+          store,
+          at,
+          deps.lock?.state() ?? NO_LOCK,
+          undefined,
+          deps.hubLogin?.() ?? null,
+        ),
+      };
+    }
+    return attentionMemo.items;
+  };
   const notifications = new LocalNotifications(store, config, bus, now);
-  const reconcileNotifications = () =>
-    notifications.reconcile(
-      attentionItems(
-        config,
-        store,
-        now(),
-        deps.lock?.state() ?? NO_LOCK,
-        undefined,
-        deps.hubLogin?.() ?? null,
-      ),
-    );
+  const reconcileNotifications = () => notifications.reconcile(sharedAttention());
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
   const scheduleNotifications = () => {
@@ -707,6 +716,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (topic !== "machine") {
       responseRevision++;
       responseCache.clear();
+      attentionMemo = undefined;
     }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
@@ -2196,6 +2206,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         async (): Promise<Crew> => crew(config, store, now(), deps.lock?.state() ?? NO_LOCK),
       );
 
+      api.get<{ Querystring: { session?: string } }>("/overview", (req, reply) => {
+        const selected = req.query.session;
+        const session = config.crew?.sessions.find((s) => s.id === selected);
+        if (selected !== undefined && session === undefined)
+          return reply.code(404).send({ error: "unknown session" });
+        const at = now();
+        const repoIds = session ? [session.repoId] : config.repos.map((r) => r.id);
+        return overviewSummary(store, at, {
+          repoIds,
+          pipelineRepoIds: session
+            ? [session.repoId]
+            : [...new Set(config.crew?.sessions.map((s) => s.repoId))],
+          seatIds: configuredAgents(config)
+            .filter(
+              (a) => a.kind === "crew" && (session === undefined || a.sessionId === session.id),
+            )
+            .map((a) => a.id),
+          timezone: config.operator.timezone,
+          attention: sharedAttention(),
+        });
+      });
+
       // The Update button. Texts are fixed; the commands' output goes to update.log only.
       const updater = deps.updater;
       const unavailableVersion: VersionInfo = {
@@ -2248,18 +2280,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      api.get(
-        "/attention",
-        async (): Promise<AttentionItem[]> =>
-          attentionItems(
-            config,
-            store,
-            now(),
-            deps.lock?.state() ?? NO_LOCK,
-            undefined,
-            deps.hubLogin?.() ?? null,
-          ),
-      );
+      api.get("/attention", async (): Promise<AttentionItem[]> => sharedAttention());
 
       const discussionSends = new Set<string>();
       const currentDiscussionItem = (key: string) => {

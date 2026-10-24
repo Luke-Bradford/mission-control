@@ -609,3 +609,42 @@ it("refetches the Overview timeline on agents and guard changes", async () => {
     off();
   }
 });
+
+it("overview refetches on every dependency topic and preserves its session", async () => {
+  const fetchMock = vi.fn(async () => Response.json({ at: 1 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const ref = RESOURCES.overview("session/one");
+  expect(ref.path).toBe("/api/overview?session=session%2Fone");
+  expect(RESOURCES.overview("session/one").topic).toBe(ref.topic);
+  expect(ref.topic).toEqual(["agents", "boards", "limits", "attention", "machine"]);
+  const off = hub.subscribe(ref.path, ref.topic, () => {});
+  await settle();
+  for (const topic of ["agents", "boards", "limits", "attention", "machine"] as const) {
+    fetchMock.mockClear();
+    hub.refetchTopic(topic);
+    await settle();
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  }
+  fetchMock.mockClear();
+  hub.refetchTopic("health");
+  await settle();
+  expect(fetchMock).not.toHaveBeenCalled();
+  off();
+});
+
+it("coalesces overview topics within one macrotask and omits the All session filter", async () => {
+  expect(RESOURCES.overview("all").path).toBe("/api/overview");
+  expect(RESOURCES.overview().path).toBe("/api/overview");
+  const fetchMock = vi.fn(async () => Response.json({ at: 1 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const ref = RESOURCES.overview();
+  const off = hub.subscribe(ref.path, ref.topic, () => {});
+  await settle();
+  fetchMock.mockClear();
+  hub.refetchTopic("agents");
+  hub.refetchTopic("attention");
+  await settle();
+  await settle();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  off();
+});

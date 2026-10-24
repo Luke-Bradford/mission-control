@@ -24,12 +24,12 @@ export interface Resource<T> {
 }
 
 /**
- * An API resource: its path, and the SSE topic that invalidates it (null: no topic; static, or
+ * An API resource: its path, and the SSE topics that invalidate it (null: no topic; static, or
  * refreshed by its component).
  */
 export interface ResourceRef {
   path: string;
-  topic: Topic | null;
+  topic: Topic | readonly Topic[] | null;
 }
 
 export const RUNS_LIMIT = 50;
@@ -38,6 +38,7 @@ export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 // Full loads reconcile mutable activity rows and arrivals older than the delta cursor.
 const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
+const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 /** The one place the web app names API paths and their topics. */
@@ -46,6 +47,10 @@ export const RESOURCES = {
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
   overviewTimeline: { path: "/api/overview/timeline", topic: "agents" },
+  overview: (session = ""): ResourceRef => ({
+    path: `/api/overview${session && session !== "all" ? `?session=${enc(session)}` : ""}`,
+    topic: OVERVIEW_TOPICS,
+  }),
   crew: { path: "/api/crew", topic: "agents" },
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
   crewSessions: { path: "/api/crew/sessions", topic: null },
@@ -214,11 +219,12 @@ export const ACTIONS = {
 
 interface Entry {
   path: string;
-  topic: Topic | null;
+  topic: Topic | readonly Topic[] | null;
   snap: Resource<unknown>;
   listeners: Set<() => void>;
   inflight: boolean;
   again: boolean;
+  queued?: boolean;
   fullAgain?: boolean;
   activityFullAt?: number;
   activityTimer?: ReturnType<typeof setTimeout>;
@@ -231,7 +237,7 @@ class Hub {
   /** Bumped by clear(): a response to a request from an older generation is dropped. */
   private generation = 0;
 
-  private entry(path: string, topic: Topic | null): Entry {
+  private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
     if (!e) {
       e = { path, topic, snap: IDLE, listeners: new Set(), inflight: false, again: false };
@@ -245,11 +251,11 @@ class Hub {
     for (const fn of [...e.listeners]) fn();
   }
 
-  snapshot(path: string, topic: Topic | null): Resource<unknown> {
+  snapshot(path: string, topic: Topic | readonly Topic[] | null): Resource<unknown> {
     return this.entry(path, topic).snap;
   }
 
-  subscribe(path: string, topic: Topic | null, fn: () => void): () => void {
+  subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
     const e = this.entry(path, topic);
     e.listeners.add(fn);
     if (e.listeners.size === 1) void this.fetch(e);
@@ -358,14 +364,23 @@ class Hub {
         e.path === RESOURCES.flightSummary.path &&
         (topic === "agents" || topic === "boards" || topic === "attention" || topic === "guard");
       if (
-        (e.topic === topic ||
+        ((Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
           timelineChanged ||
           briefChanged ||
           notificationSettingsChanged ||
           summaryChanged) &&
         e.listeners.size > 0
-      )
-        void this.fetch(e);
+      ) {
+        if (Array.isArray(e.topic)) {
+          if (!e.queued) {
+            e.queued = true;
+            setTimeout(() => {
+              e.queued = false;
+              if (e.listeners.size) void this.fetch(e);
+            }, 0);
+          }
+        } else void this.fetch(e);
+      }
     }
   }
 

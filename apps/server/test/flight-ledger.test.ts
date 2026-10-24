@@ -333,8 +333,9 @@ describe("flightMetrics", () => {
     ["ruling-rerun:sha", "FLIGHT re-ran the failed CI jobs on sha", 1, 0],
     ["ruling-rerun:sha:failed", "CI failed again on the re-run of sha", 0, 1],
     ["ruling-rerun:sha:passed", "CI passed on the re-run of sha; FLIGHT accepted the ruling", 0, 0],
-    ["rerun:sha", "CI failed on sha; no run could be re-run", 0, 1],
+    ["rerun:sha", "CI failed on sha; no run could be re-run", 0, 0],
     ["rerun:sha", "CI failed on sha; re-ran lint", 1, 1],
+    ["flake:sha", "CI flaked on sha: passed on re-run", 0, 1],
   ])("counts rerun activity %s (%s)", (key, text, reruns, ciFailures) => {
     const id = "dev:with:colons";
     store.upsertRun(run(id, "guido-1"));

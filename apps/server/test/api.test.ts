@@ -504,6 +504,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/agents/shop-app-ta/resume"],
   ["GET", "/api/crew"],
   ["GET", "/api/overview/timeline"],
+  ["GET", "/api/overview"],
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
@@ -1908,6 +1909,7 @@ describe("crew and attention", () => {
       at: NOW,
     };
     store.addBrief({ key: "esc:shop-app#9", ...brief });
+    bus.emit("attention");
     const items = (await get("/api/attention")).json() as AttentionItem[];
     expect(items[0]?.brief).toEqual(brief);
   });
@@ -5241,5 +5243,85 @@ describe("FLIGHT ledger views", () => {
     );
     for (const query of [`limit=${FLIGHT_LIST_MAX + 1}`, "offset=-1", "offset=nope", "status=bad"])
       expect((await get(`/api/flight/ledger?${query}`)).statusCode).toBe(400);
+  });
+});
+
+describe("overview", () => {
+  it("limits the All pipeline to repos with crew sessions", async () => {
+    for (const repoId of ["shop-app", "site-builder"])
+      store.upsertRun(run({ id: repoId, repoId, ticket: `${repoId}#1`, loop: { ...NEW_LOOP } }));
+    expect((await get("/api/overview")).json().kpis.inFlight.count).toBe(0);
+    withCrew();
+    const result = (await get("/api/overview")).json();
+    expect(result.kpis.inFlight.count).toBe(1);
+    expect(
+      result.pipeline
+        .flatMap((p: { cards: { repoId: string }[] }) => p.cards)
+        .map((c: { repoId: string }) => c.repoId),
+    ).toEqual(["shop-app"]);
+  });
+
+  it("shares attention for two seconds and invalidates on non-machine topics", async () => {
+    const reads = vi.spyOn(store, "acks");
+    await get("/api/overview");
+    const initial = reads.mock.calls.length;
+    expect(initial).toBeGreaterThan(0);
+    clock += 1_999;
+    await get("/api/attention");
+    bus.emit("machine");
+    await get("/api/overview");
+    expect(reads).toHaveBeenCalledTimes(initial);
+    clock++;
+    await get("/api/overview");
+    expect(reads).toHaveBeenCalledTimes(initial + 1);
+    bus.emit("boards");
+    await get("/api/overview");
+    expect(reads).toHaveBeenCalledTimes(initial + 2);
+    reads.mockRestore();
+  });
+
+  it("scopes seats by session even when sessions share a repo", async () => {
+    withCrew();
+    const first = config.crew?.sessions[0];
+    const seat = first?.seats[0];
+    if (!first || !seat) throw new Error("missing crew fixture");
+    config.crew?.sessions.push({
+      ...first,
+      id: "s2",
+      seats: [{ ...seat, id: "guido-2" }],
+    });
+    store.addAgentEvent({ agentId: "guido-2", at: NOW, from: "idle", to: "running", text: "turn" });
+    expect((await get("/api/overview?session=s1")).json().kpis.working).toMatchObject({
+      now: 0,
+      of: 1,
+    });
+    expect((await get("/api/overview?session=s2")).json().kpis.working).toMatchObject({
+      now: 1,
+      of: 1,
+    });
+    expect((await get("/api/overview")).json().kpis.working).toMatchObject({ now: 1, of: 2 });
+  });
+
+  it("serves live figures and validates the selected session", async () => {
+    withCrew();
+    store.raiseNote({
+      key: "overview-question",
+      kind: "question",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "shop-app",
+      text: "Choose",
+      at: NOW - 2 * HOUR,
+    });
+    const first = await get("/api/overview?session=s1");
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      at: NOW,
+      kpis: { working: { now: 0, of: 1 }, needsYou: { count: 1, overHour: 1 } },
+    });
+    store.addAgentEvent({ agentId: "guido-1", at: NOW, from: "idle", to: "running", text: "turn" });
+    expect((await get("/api/overview?session=s1")).json().kpis.working.now).toBe(1);
+    expect((await get("/api/overview?session=missing")).statusCode).toBe(404);
+    expect((await get("/api/overview")).statusCode).toBe(200);
   });
 });
