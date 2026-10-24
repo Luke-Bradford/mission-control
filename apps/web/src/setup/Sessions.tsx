@@ -25,7 +25,13 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { addAgentParam, agentPath, navigate, withoutAddAgentParam } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
-import { inSession, useSessionScope } from "../shell/session.ts";
+import {
+  getSession,
+  inSession,
+  resetSession,
+  setSession,
+  useSessionScope,
+} from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
 
 const DASH = "—";
@@ -311,6 +317,7 @@ function CrewSession({
   busy,
   error,
   save,
+  close,
 }: {
   session: SessionView;
   config: ConfigView;
@@ -322,6 +329,7 @@ function CrewSession({
   busy: boolean;
   error: string | null;
   save: SaveSeats;
+  close: () => void;
 }) {
   const nameOf = useSeatName();
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
@@ -373,16 +381,21 @@ function CrewSession({
       title={`s/${session.id}`}
       sub={`${session.checkout} · ${repo?.github ?? session.repoId}`}
       actions={
-        changes && (
-          <button
-            type="button"
-            disabled={roles.length === 0 || busy}
-            title={roles.length === 0 ? NO_ROLES : undefined}
-            onClick={() => open(null)}
-          >
-            Add agent
+        <>
+          <button type="button" disabled={busy} onClick={close}>
+            Close
           </button>
-        )
+          {changes && (
+            <button
+              type="button"
+              disabled={roles.length === 0 || busy}
+              title={roles.length === 0 ? NO_ROLES : undefined}
+              onClick={() => open(null)}
+            >
+              Add agent
+            </button>
+          )}
+        </>
       }
     >
       <div className="pb">
@@ -565,6 +578,41 @@ export function Sessions({ config }: { config: ConfigView }) {
   const folders = useResource<CrewSessionFolders[]>(RESOURCES.crewSessions).data;
   const changes = useResource<CrewChanges>(RESOURCES.crewChanges).data;
   const { session, inRepo } = useSessionScope(config);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState({
+    repoId: config.repos[0]?.id ?? "",
+    source: "",
+    branch: "feat/new-work",
+    checkoutStrategy: "shared",
+    id: "",
+  });
+  const [created, setCreated] = useState<SessionView[]>([]);
+  const [returnedFolders, setReturnedFolders] = useState<CrewSessionFolders[]>([]);
+  const [closed, setClosed] = useState<string[]>([]);
+  const allSessions = [
+    ...(config.crew?.sessions ?? []),
+    ...created.filter((s) => !config.crew?.sessions.some((c) => c.id === s.id)),
+  ];
+  const currentConfig = {
+    ...config,
+    crew: config.crew && { ...config.crew, sessions: allSessions },
+  };
+  const name =
+    draft.id.trim() ||
+    draft.source
+      .trim()
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop()
+      ?.toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "") ||
+    "";
+  const validSession =
+    /^[a-z][a-z0-9-]{0,30}$/.test(name) &&
+    draft.source.trim() !== "" &&
+    draft.branch.trim() !== "" &&
+    draft.repoId !== "";
   // Read once on mount: Overview's Add agent arrives from another page, so Setup mounts fresh.
   const [requestedSessionId] = useState(() => addAgentParam(window.location.search));
   const [form, setForm] = useState<FormState | null>(() => {
@@ -583,14 +631,89 @@ export function Sessions({ config }: { config: ConfigView }) {
   const [busy, setBusy] = useState(false);
   // Where a refusal shows: a session's panel, or (null) the page, for a reload.
   const [failure, setFailure] = useState<{ sessionId: string | null; text: string } | null>(null);
-  const crewSessions =
-    config.crew?.sessions.filter((s) => inSession(session, s.id) || s.id === requestedSessionId) ??
-    [];
+  const crewSessions = allSessions.filter(
+    (s) => !closed.includes(s.id) && (inSession(session, s.id) || s.id === requestedSessionId),
+  );
 
   const refetch = () => {
     hub.refetch(RESOURCES.crewChanges.path);
     hub.refetch(RESOURCES.config.path);
+    hub.refetch(RESOURCES.crewSessions.path);
+    hub.refetch(RESOURCES.crew.path);
   };
+
+  async function addSession() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const done = await apiPost<{ id: string; folders: string[] }>(ACTIONS.addSession, {
+        ...draft,
+        id: name,
+        source: draft.source.trim(),
+        branch: draft.branch.trim(),
+      });
+      const added: SessionView = {
+        id: done.id,
+        repoId: draft.repoId,
+        checkout:
+          draft.checkoutStrategy === "separate" ? "Checkout details loading…" : draft.source.trim(),
+        seats: [],
+      };
+      setClosed((s) => s.filter((id) => id !== done.id));
+      setCreated((s) => [...s.filter((session) => session.id !== done.id), added]);
+      setReturnedFolders((s) => [
+        ...s,
+        {
+          id: done.id,
+          readable: true,
+          folders: done.folders.map((name) => ({ name, owners: [] })),
+        },
+      ]);
+      setSession(done.id);
+      setForm(seatForm(currentConfig, done.id));
+      setAdding(false);
+      toast(
+        `s/${done.id} added${draft.checkoutStrategy === "separate" ? " with its own checkout" : ""}. Now add its first agent.`,
+      );
+      refetch();
+    } catch (err) {
+      const text = errorText(err);
+      setFailure({ sessionId: null, text });
+      toast(text);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeSession(id: string) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const done = await apiPost<{
+        id: string;
+        checkout: string;
+        retainedPath: string | null;
+        outcome?: string;
+      }>(ACTIONS.closeSession(id), {});
+      const reason =
+        done.checkout === "retained-dirty"
+          ? "The branch has uncommitted changes."
+          : done.checkout === "retained-unpushed"
+            ? "The branch has unpushed commits."
+            : (done.outcome ?? "Safe removal could not be proved.");
+      toast(
+        `s/${done.id} closed${done.checkout === "removed" ? "; its separate checkout is removed." : done.checkout === "unmanaged" ? `; repo folder retained: ${done.retainedPath}.` : `; checkout retained: ${done.retainedPath}. ${reason}`}`,
+      );
+      setClosed((s) => [...s, done.id]);
+      if (getSession() === done.id) resetSession();
+      setForm(null);
+      refetch();
+    } catch (err) {
+      toast(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const save: SaveSeats = async (s, base, seats, toastOf) => {
     setBusy(true);
@@ -629,6 +752,93 @@ export function Sessions({ config }: { config: ConfigView }) {
   return (
     <>
       <p className="note wide">{SESSIONS_NOTE}</p>
+      <div className="wide">
+        {!adding ? (
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || config.repos.length === 0}
+            onClick={() => {
+              setAdding(true);
+              setFailure(null);
+            }}
+          >
+            Add session
+          </button>
+        ) : (
+          <form
+            className="seatform sessionform"
+            aria-label="Add session"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !busy) setAdding(false);
+            }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (validSession && !busy) void addSession();
+            }}
+          >
+            <fieldset disabled={busy} className="frow">
+              <label className="s fg2">
+                Repo profile
+                <select
+                  value={draft.repoId}
+                  onChange={(e) => setDraft({ ...draft, repoId: e.target.value })}
+                >
+                  {config.repos.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="s fg2">
+                Repo
+                <input
+                  value={draft.source}
+                  onChange={(e) => setDraft({ ...draft, source: e.target.value })}
+                />
+              </label>
+              <label className="s fg2">
+                Branch
+                <input
+                  value={draft.branch}
+                  onChange={(e) => setDraft({ ...draft, branch: e.target.value })}
+                />
+              </label>
+              <label className="s fg2">
+                Checkout
+                <select
+                  value={draft.checkoutStrategy}
+                  onChange={(e) => setDraft({ ...draft, checkoutStrategy: e.target.value })}
+                >
+                  <option value="shared">use the repo folder (nothing else on it)</option>
+                  <option value="separate">make a separate checkout for this branch</option>
+                </select>
+              </label>
+              <label className="s fg2">
+                Name
+                <input
+                  value={draft.id}
+                  placeholder={name}
+                  onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+                />
+              </label>
+              <button type="submit" className="primary" disabled={!validSession || busy}>
+                {busy ? "Adding session…" : "Add session"}
+              </button>
+              <button type="button" onClick={() => setAdding(false)}>
+                Cancel
+              </button>
+            </fieldset>
+            <p className="note s">
+              Mission Control checks it's a git checkout on that branch and lists its top folders
+              for areas. The repo profile adds that repo's guard rules, test commands and which of
+              them count as a full suite.
+            </p>
+          </form>
+        )}
+        {config.repos.length === 0 && <p className="note s">Add a repo in Setup first.</p>}
+      </div>
       {changes?.error && (
         <p role="alert" className="crit-t s">
           {loadErrorText(changes.error)}
@@ -680,15 +890,18 @@ export function Sessions({ config }: { config: ConfigView }) {
         <CrewSession
           key={s.id}
           session={s}
-          config={config}
+          config={currentConfig}
           crew={crew}
-          folders={folders?.find((f) => f.id === s.id)}
+          folders={
+            folders?.find((f) => f.id === s.id) ?? returnedFolders.find((f) => f.id === s.id)
+          }
           changes={changes}
           form={form}
           setForm={setForm}
           busy={busy}
           error={failure?.sessionId === s.id ? failure.text : null}
           save={save}
+          close={() => void closeSession(s.id)}
         />
       ))}
     </>
