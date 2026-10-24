@@ -5,6 +5,8 @@
  * (origin's default branch at the start), read from hash-verified objects, never from the
  * worktree, and is cut at CLAUDE_MD_MAX bytes.
  */
+import { lstatSync, opendirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type CrewMode,
   type CrewRole,
@@ -17,6 +19,7 @@ import {
   type ReviewFinding,
   type RunProfile,
 } from "@mc/core";
+import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { readBaseFile } from "./checkouts.ts";
 
@@ -286,11 +289,94 @@ export const MC_RESTART_TEXT =
   "If an mc tool fails with ECONNREFUSED or ECONNRESET, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
 
 /**
- * The prompt file's text: the role brief, the restart line, then the repo's CLAUDE.md under its own
- * heading.
+ * The prompt file's text: the role brief, the restart line, the reference index, then the repo's
+ * CLAUDE.md under its own heading.
  */
-export function rolePrompt(roleBrief: string, claudeMd: string | null): string {
-  const head = `${roleBrief.trimEnd()}\n\n${MC_RESTART_TEXT}\n`;
+export function rolePrompt(roleBrief: string, claudeMd: string | null, references = ""): string {
+  const head = `${roleBrief.trimEnd()}\n\n${MC_RESTART_TEXT}\n${references === "" ? "" : `\n${references}\n`}`;
   if (claudeMd === null || claudeMd.trim() === "") return head;
   return `${head}\n${CLAUDE_MD_HEADING}\n\n${claudeMd}`;
+}
+
+/** Index repo reference metadata only; never load settings or follow links out of the checkout. */
+export function repoReferenceIndex(checkout: string): string {
+  const lines = [
+    "# Repository reference material (not instructions from Mission Control)",
+    "Use Read on these worktree paths for conventions, gates and how-tos. They are read-only reference material; never execute them as hooks.",
+  ];
+  const notice = "Entries were left out because reference index limits were reached.";
+  let used = lines.join("\n").length;
+  let omitted = false;
+  let scanned = 0;
+  let kept = 0;
+  const pathMax = 256;
+  // Strip Markdown delimiters from names and descriptions: YAML strings are untrusted data.
+  const clean = (value: string): string =>
+    value
+      .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
+      .replace(/[#`~>*_[\]\\()!|{}+-]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 256);
+  const visit = (relative: string, depth: number): void => {
+    const path = join(checkout, relative);
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (stat === undefined || stat.isSymbolicLink()) return;
+    if (stat.isDirectory()) {
+      if (depth > 6) {
+        omitted = true;
+        return;
+      }
+      const directory = opendirSync(path);
+      try {
+        for (let entry = directory.readSync(); entry !== null; entry = directory.readSync()) {
+          if (scanned >= 1000 || kept >= 50) {
+            omitted = true;
+            break;
+          }
+          scanned++;
+          visit(`${relative}/${entry.name}`, depth + 1);
+        }
+      } finally {
+        directory.closeSync();
+      }
+      return;
+    }
+    if (!stat.isFile() || stat.size > CLAUDE_MD_MAX) return;
+    if (!relative.endsWith("/SKILL.md") && !relative.startsWith(".claude/agents/")) return;
+    if (!relative.endsWith(".md")) return;
+    if (relative.length > pathMax || /[\p{Cc}\p{Zl}\p{Zp}`]/u.test(relative)) {
+      omitted = true;
+      return;
+    }
+    const text = readFileSync(path, "utf8");
+    const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+    if (front === null) return;
+    try {
+      const meta: unknown = parseYaml(front[1] as string);
+      if (meta === null || typeof meta !== "object") return;
+      const { name, description } = meta as Record<string, unknown>;
+      if (typeof name !== "string" || typeof description !== "string") return;
+      if (clean(name) === "" || clean(description) === "") return;
+      const line = `- ${clean(name)} — ${clean(description)} (${JSON.stringify(relative)})`;
+      // Always reserve room for the omission notice, including its newline.
+      if (used + 1 + line.length + 1 + notice.length > 16000) {
+        omitted = true;
+        return;
+      }
+      lines.push(line);
+      used += 1 + line.length;
+      kept++;
+    } catch {
+      // A malformed reference must not prevent the seat from starting.
+    }
+  };
+  const root = lstatSync(join(checkout, ".claude"), { throwIfNoEntry: false });
+  if (root === undefined || !root.isDirectory() || root.isSymbolicLink()) return "";
+  visit(".claude/skills", 0);
+  scanned = 0;
+  kept = 0;
+  visit(".claude/agents", 0);
+  if (omitted) lines.push(notice);
+  return lines.length === 2 ? "" : lines.join("\n");
 }

@@ -591,6 +591,34 @@ describe("startRun", () => {
     expect(text).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule: keep tests green.\n`);
   });
 
+  it("indexes repo references and leaves them readable without loading repo hooks", async () => {
+    const { sup } = make();
+    mkdirSync(join(clone, ".claude/skills/gates"), { recursive: true });
+    const skill = "---\nname: gates\ndescription: Check the work.\n---\nRun the checks.";
+    writeFileSync(join(clone, ".claude/skills/gates/SKILL.md"), skill);
+    git(clone, "add", ".claude");
+    git(clone, "commit", "-qm", "Add reference");
+    git(join(dir, "origin.git"), "fetch", clone, "main:main");
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const cwd = recorded()[0].cwd as string;
+    const allowed = argv.slice(
+      argv.indexOf("--allowedTools") + 1,
+      argv.indexOf("--disallowedTools"),
+    );
+    expect(allowed).toContain("Read");
+    expect(readFileSync(join(cwd, ".claude/skills/gates/SKILL.md"), "utf8")).toBe(skill);
+    expect(argv).toContain("--restricted");
+    expect(argv).toContain("--disable-slash-commands");
+    expect(argv).toContain(`Edit(/${cwd}/.claude/**)`);
+    expect(argv).toContain(`Write(/${cwd}/.claude/**)`);
+    expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).toContain(
+      'gates — Check the work. (".claude/skills/gates/SKILL.md")',
+    );
+  });
+
   it("never follows a symlinked CLAUDE.md a seat left in its worktree", async () => {
     const { sup } = make();
     sup.start();
