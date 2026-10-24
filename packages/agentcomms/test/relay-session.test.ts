@@ -1,5 +1,5 @@
 import { beforeEach, expect, it } from "vitest";
-import { rotate, wrapRoomKey } from "../src/membership.ts";
+import { rotate, wrapMemberKeys } from "../src/membership.ts";
 import type { RelayMessage } from "../src/protocol.ts";
 import { createRoomCore, type RoomCore } from "../src/relay-core.ts";
 import { createRelaySession, type RelayPeer, roomHttp } from "../src/relay-session.ts";
@@ -16,7 +16,7 @@ beforeEach(async () => {
   core = createRoomCore({ room: "test-room", owner: f.a.member, now: () => now });
   const token = core.issueToken(f.a.identity.id);
   core.requestJoin(token, f.b.member);
-  core.approve(f.a.identity.id, f.b.identity.id, [await wrapRoomKey(f.key, 0, f.b.member)]);
+  core.approve(f.a.identity.id, f.b.identity.id, await wrapMemberKeys(f.key, 0, f.b.member));
   session = createRelaySession("test-room", core, () => now);
 });
 function client() {
@@ -50,6 +50,28 @@ async function auth(c: ReturnType<typeof client>, identity = f.a.identity, at = 
   c.send(hello);
   return hello;
 }
+it("sends the public directory only after authentication and addresses grants to the hello identity", async () => {
+  const anonymous = client();
+  expect(anonymous.messages).toEqual([]);
+  for (const identity of [f.b.identity, f.b.agent]) {
+    const peer = client();
+    await auth(peer, identity);
+    expect(peer.messages.find((m) => m.t === "directory")).toMatchObject({
+      members: [f.a.member, f.b.member],
+      keyEpoch: 0,
+      activeMemberIds: [f.a.identity.id, f.b.identity.id],
+    });
+    expect(peer.messages.find((m) => m.t === "grants")).toEqual({
+      t: "grants",
+      grants: core.grantsFor(identity.id),
+    });
+    expect(core.grantsFor(identity.id)[0].memberId).toBe(identity.id);
+    expect(peer.messages.some((m) => m.t === "pending")).toBe(false);
+  }
+  const owner = client();
+  await auth(owner);
+  expect(owner.messages).toContainEqual({ t: "pending", members: [] });
+});
 it("replays gaps in order before live delivery, without duplicate sequences", async () => {
   const a = client();
   await auth(a);
@@ -98,7 +120,10 @@ it("closes removed peers, distributes grants and refuses stale epochs", async ()
   const { grants } = await rotate(core.members(), f.b.identity.id, 1);
   a.send({ t: "remove", memberId: f.b.identity.id, grants });
   expect(b.closed()).toBe(true);
-  expect(a.messages.filter((m) => m.t === "grants").at(-1)).toEqual({ t: "grants", grants });
+  expect(a.messages.filter((m) => m.t === "grants").at(-1)).toEqual({
+    t: "grants",
+    grants: grants.filter((g) => g.memberId === f.a.identity.id),
+  });
   a.send({ t: "post", sealed: await f.post(1) });
   expect(a.messages.at(-1)).toEqual({ t: "refused", reason: "stale-epoch" });
   a.send({ t: "post", sealed: await f.post(2, f.a.identity, 1) });

@@ -91,6 +91,9 @@ export function createRelaySession(room: string, core: RoomCore, now = Date.now)
             return;
           }
           auth.id = msg.memberId;
+          send(peer, { t: "directory", ...core.directory() });
+          if (auth.id === core.members()[0]?.id)
+            send(peer, { t: "pending", members: core.pending() });
           send(peer, { t: "grants", grants: core.grantsFor(auth.id) });
           send(peer, { t: "presence", map: core.presence() });
           return;
@@ -148,6 +151,9 @@ export function createRelaySession(room: string, core: RoomCore, now = Date.now)
             refuse(recipient, "removed", true);
             continue;
           }
+          send(recipient, { t: "directory", ...core.directory() });
+          if (state.id === core.members()[0]?.id)
+            send(recipient, { t: "pending", members: core.pending() });
           send(recipient, { t: "grants", grants: core.grantsFor(state.id) });
         }
         broadcast({ t: "presence", map: core.presence() });
@@ -184,11 +190,11 @@ export function roomHttp(opts: {
     if (opts.core) return { status: 409, body: { error: "Room already exists" } };
     const parsed = createRoomSchema.safeParse(opts.body);
     if (!parsed.success) return { status: 400, body: { error: "Invalid room" } };
-    const { owner, hello } = parsed.data;
+    const { owner, hello, grants } = parsed.data;
     if (hello.memberId !== owner.id || !verifyHello(hello, opts.room, [owner], now()))
       return { status: 403, body: { error: "bad-hello" } };
     try {
-      const core = createRoomCore({ room: opts.room, owner, now, storage: opts.storage });
+      const core = createRoomCore({ room: opts.room, owner, now, storage: opts.storage, grants });
       return { status: 201, body: { room: opts.room }, core };
     } catch {
       return { status: 400, body: { error: "Invalid owner" } };

@@ -1,3 +1,5 @@
+export { startApi } from "./api.ts";
+export { type Daemon, type Draft, type SendResult, startDaemon } from "./daemon.ts";
 export {
   BadCiphertext,
   BadSignature,
@@ -14,6 +16,8 @@ export {
   verifySealed,
   WrongSender,
 } from "./envelope.ts";
+export { mayAutoReply, outgoingRate, similarOpen } from "./guards.ts";
+export { type Inbox, type InboxEntry, openInbox, type Thread } from "./inbox.ts";
 export {
   type Delegation,
   delegate,
@@ -24,6 +28,7 @@ export {
   saveIdentity,
   verifyDelegation,
 } from "./keys.ts";
+export { mcpRequest, runMcp } from "./mcp.ts";
 export {
   BadInvite,
   decodeInvite,
@@ -34,6 +39,7 @@ export {
   newRoomKey,
   rotate,
   unwrapRoomKey,
+  wrapMemberKeys,
   wrapRoomKey,
 } from "./membership.ts";
 export {

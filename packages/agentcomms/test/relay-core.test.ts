@@ -1,5 +1,5 @@
 import { beforeEach, expect, it } from "vitest";
-import { rotate, wrapRoomKey } from "../src/membership.ts";
+import { rotate, wrapMemberKeys } from "../src/membership.ts";
 import {
   createRoomCore,
   type RoomCore,
@@ -29,9 +29,28 @@ async function approve() {
   const token = core.issueToken(f.a.identity.id);
   expect(Buffer.from(token, "base64url")).toHaveLength(32);
   expect(core.requestJoin(token, f.b.member)).toBe("pending");
-  core.approve(f.a.identity.id, f.b.identity.id, [await wrapRoomKey(f.key, 0, f.b.member)]);
+  core.approve(f.a.identity.id, f.b.identity.id, await wrapMemberKeys(f.key, 0, f.b.member));
   return token;
 }
+it("requires every recipient grant and persists agent grants across restart and removal", async () => {
+  core.requestJoin(core.issueToken(f.a.identity.id), f.b.member);
+  const grants = await wrapMemberKeys(f.key, 0, f.b.member);
+  expect(() => core.approve(f.a.identity.id, f.b.identity.id, grants.slice(0, 1))).toThrow(
+    "Invalid key grants",
+  );
+  core.approve(f.a.identity.id, f.b.identity.id, grants);
+  const rebuilt = createRoomCore({ room: "test-room", owner: f.a.member, now: () => now, storage });
+  expect(rebuilt.grantsFor(f.b.agent.id)).toEqual([grants[1]]);
+  expect(rebuilt.grantsFor(f.b.identity.id)).toEqual([grants[0]]);
+  const rotation = await rotate(rebuilt.members(), f.b.identity.id, 1);
+  expect(() =>
+    rebuilt.remove(f.a.identity.id, f.b.identity.id, rotation.grants.slice(0, 1)),
+  ).toThrow("Invalid key grants");
+  rebuilt.remove(f.a.identity.id, f.b.identity.id, rotation.grants);
+  expect(rebuilt.grantsFor(f.a.agent.id)).toEqual([rotation.grants[1]]);
+  expect(rebuilt.grantsFor(f.b.agent.id)).toEqual([]);
+  expect(storage.load()?.grants.some((g) => g.memberId === f.b.agent.id)).toBe(false);
+});
 it("refuses unapproved senders and makes invite tokens single use", async () => {
   expect(core.post(await f.post(1, f.b.identity))).toEqual({ refused: "unknown-sender" });
   const token = await approve();
@@ -82,7 +101,9 @@ it("rotates epochs and revokes history, grants and presence on removal", async (
   expect(core.since(f.b.identity.id, 0)).toEqual([]);
   expect(core.grantsFor(f.b.identity.id)).toEqual([]);
   expect(core.presence()[f.b.agent.id]).toBeUndefined();
-  expect(core.grantsFor(f.a.identity.id)).toEqual(rotation.grants);
+  expect(core.grantsFor(f.a.identity.id)).toEqual(
+    rotation.grants.filter((g) => g.memberId === f.a.identity.id),
+  );
 });
 it("orders by relay sequence despite skewed clocks and resumes after restart", async () => {
   for (let i = 1; i <= 7; i++)

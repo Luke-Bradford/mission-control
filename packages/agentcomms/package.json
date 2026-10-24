@@ -18,5 +18,8 @@
     "libsodium-wrappers-sumo": "^0.8.4",
     "ws": "^8.22.0",
     "zod": "^4.6.7"
+  },
+  "bin": {
+    "agentcomms": "bin/agentcomms"
   }
 }

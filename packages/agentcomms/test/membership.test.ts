@@ -10,9 +10,26 @@ import {
   newRoomKey,
   rotate,
   unwrapRoomKey,
+  wrapMemberKeys,
   wrapRoomKey,
 } from "../src/membership.ts";
 import { ready } from "../src/sodium.ts";
+import { fixture } from "./relay-fixtures.ts";
+
+it("wraps approval and rotation keys to members and each agent independently", async () => {
+  const f = await fixture();
+  const grants = await wrapMemberKeys(f.key, 0, f.b.member);
+  expect(grants.map((g) => g.memberId)).toEqual([f.b.identity.id, f.b.agent.id]);
+  for (const identity of [f.b.identity, f.b.agent]) {
+    const grant = grants.find((g) => g.memberId === identity.id);
+    if (!grant) throw new Error("Missing grant");
+    expect(await unwrapRoomKey(grant, identity)).toEqual(f.key);
+    await expect(unwrapRoomKey(grant, f.a.agent)).rejects.toThrow();
+  }
+  const rotated = await rotate([f.a.member, f.b.member], f.b.identity.id, 1);
+  expect(rotated.grants.map((g) => g.memberId)).toEqual([f.a.identity.id, f.a.agent.id]);
+  expect(await unwrapRoomKey(rotated.grants[1], f.a.agent)).toEqual(rotated.roomKey);
+});
 
 let alice: Identity;
 let bob: Identity;

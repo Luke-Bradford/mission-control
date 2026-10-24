@@ -13,7 +13,14 @@ export async function person(label: string) {
     signPublicKey: identity.id,
     boxPublicKey: Buffer.from(identity.box.publicKey).toString("base64url"),
     agents: [
-      { id: agent.id, name: agent.label, subscription: label, signPublicKey: agent.id, delegation },
+      {
+        id: agent.id,
+        name: agent.label,
+        subscription: label,
+        signPublicKey: agent.id,
+        boxPublicKey: Buffer.from(agent.box.publicKey).toString("base64url"),
+        delegation,
+      },
     ],
   };
   return { identity, agent, member, delegation };

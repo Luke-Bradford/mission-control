@@ -13,6 +13,8 @@ export type RoomState = {
   seq: number;
   owner: Member;
   members: Member[];
+  // Retain public identities after removal so offline clients can verify older ciphertext.
+  directory?: Member[];
   pending: Member[];
   tokens: Record<string, "unused" | "used">;
   grants: KeyGrant[];
@@ -35,8 +37,9 @@ export interface RoomCore {
   remove(by: string, memberId: string, grants: KeyGrant[]): void;
   post(s: Sealed): PostResult;
   since(memberId: string, seq: number): Entry[];
-  grantsFor(memberId: string): KeyGrant[];
+  grantsFor(recipientId: string): KeyGrant[];
   members(): Member[];
+  directory(): { members: Member[]; activeMemberIds: string[]; keyEpoch: number };
   pending(): Member[];
   setPresence(id: string, status: "online" | "busy" | "away"): void;
   presence(): Presence;
@@ -57,6 +60,7 @@ export function validateMember(member: Member): void {
   const names = new Set<string>();
   for (const agent of member.agents) {
     key(agent.signPublicKey);
+    key(agent.boxPublicKey);
     const { sig, ...payload } = agent.delegation;
     const name = JSON.stringify([agent.subscription, agent.name]);
     if (
@@ -86,6 +90,7 @@ export function createRoomCore(opts: {
   now: () => number;
   maxPerMinute?: number;
   storage?: RoomStorage;
+  grants?: KeyGrant[];
 }): RoomCore {
   validateMember(opts.owner);
   const loaded = opts.storage?.load();
@@ -98,13 +103,14 @@ export function createRoomCore(opts: {
       members: [opts.owner],
       pending: [],
       tokens: {},
-      grants: [],
+      grants: opts.grants ?? [],
       log: [],
       presence: {},
     },
   );
   if (state.room !== opts.room || state.owner.id !== opts.owner.id)
     throw new Error("Room storage mismatch");
+  state.directory ??= structuredClone(state.members);
   const rates = new Map<string, number[]>();
   const save = () => opts.storage?.save(structuredClone(state));
   const ownerOnly = (by: string) => {
@@ -131,16 +137,18 @@ export function createRoomCore(opts: {
     }
   };
   const checkGrants = (grants: KeyGrant[], members: Member[], epoch: number) => {
+    const recipients = members.flatMap((m) => [m.id, ...m.agents.map((a) => a.id)]);
     if (
-      grants.length !== members.length ||
-      new Set(grants.map((g) => g.memberId)).size !== members.length ||
-      grants.some(
-        (g) => g.keyEpoch !== epoch || !members.some((m) => m.id === g.memberId) || !g.wrapped,
-      )
+      grants.length !== recipients.length ||
+      new Set(grants.map((g) => g.memberId)).size !== recipients.length ||
+      grants.some((g) => g.keyEpoch !== epoch || !recipients.includes(g.memberId) || !g.wrapped)
     )
       throw new Error("Invalid key grants");
   };
-  if (!loaded) save();
+  if (!loaded) {
+    if (opts.grants) checkGrants(opts.grants, [opts.owner], 0);
+    save();
+  }
   return {
     issueToken(by) {
       ownerOnly(by);
@@ -165,6 +173,7 @@ export function createRoomCore(opts: {
       checkGrants(grants, [member], state.keyEpoch);
       state.pending = state.pending.filter((m) => m.id !== memberId);
       state.members.push(member);
+      state.directory?.push(structuredClone(member));
       state.grants.push(...structuredClone(grants));
       save();
     },
@@ -177,7 +186,7 @@ export function createRoomCore(opts: {
       state.members = remaining;
       state.keyEpoch++;
       state.grants = [
-        ...state.grants.filter((g) => g.memberId !== memberId),
+        ...state.grants.filter((g) => memberOf(g.memberId)),
         ...structuredClone(grants),
       ];
       for (const id of Object.keys(state.presence)) if (!memberOf(id)) delete state.presence[id];
@@ -218,11 +227,17 @@ export function createRoomCore(opts: {
     since(memberId, seq) {
       return memberOf(memberId) ? structuredClone(state.log.filter((m) => m.seq > seq)) : [];
     },
-    grantsFor(memberId) {
-      const member = memberOf(memberId);
-      return member ? structuredClone(state.grants.filter((g) => g.memberId === member.id)) : [];
+    grantsFor(recipientId) {
+      return memberOf(recipientId)
+        ? structuredClone(state.grants.filter((g) => g.memberId === recipientId))
+        : [];
     },
     members: () => structuredClone(state.members),
+    directory: () => ({
+      members: structuredClone(state.directory ?? state.members),
+      activeMemberIds: state.members.map((m) => m.id),
+      keyEpoch: state.keyEpoch,
+    }),
     pending: () => structuredClone(state.pending),
     setPresence(id, status) {
       if (!memberOf(id)) throw new Error("Unknown member");

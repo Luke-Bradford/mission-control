@@ -20,10 +20,12 @@ export type Member = {
     name: string;
     subscription: string;
     signPublicKey: string;
+    boxPublicKey: string;
     delegation: Delegation;
   }[];
 };
 
+// memberId is the wire recipient id: either a member or an approved agent.
 export type KeyGrant = { memberId: string; keyEpoch: number; wrapped: string };
 
 export class BadInvite extends Error {
@@ -87,7 +89,7 @@ export async function newRoomKey(): Promise<Uint8Array> {
 export async function wrapRoomKey(
   roomKey: Uint8Array,
   keyEpoch: number,
-  member: Member,
+  member: Pick<Member, "id" | "boxPublicKey">,
 ): Promise<KeyGrant> {
   checkEpoch(keyEpoch);
   if (!(roomKey instanceof Uint8Array)) throw new Error("Invalid room key");
@@ -119,6 +121,16 @@ export async function unwrapRoomKey(g: KeyGrant, me: Identity): Promise<Uint8Arr
   return key;
 }
 
+export async function wrapMemberKeys(
+  roomKey: Uint8Array,
+  keyEpoch: number,
+  member: Member,
+): Promise<KeyGrant[]> {
+  return Promise.all(
+    [member, ...member.agents].map((recipient) => wrapRoomKey(roomKey, keyEpoch, recipient)),
+  );
+}
+
 export async function rotate(
   members: Member[],
   removedId: string,
@@ -130,7 +142,7 @@ export async function rotate(
     .map((member) => ({ ...member }));
   const roomKey = await newRoomKey();
   const grants = await Promise.all(
-    remaining.map((member) => wrapRoomKey(roomKey, nextEpoch, member)),
+    remaining.map((member) => wrapMemberKeys(roomKey, nextEpoch, member)),
   );
-  return { roomKey, grants };
+  return { roomKey, grants: grants.flat() };
 }

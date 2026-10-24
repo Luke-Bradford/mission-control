@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { Identity } from "../src/keys.ts";
-import { rotate, wrapRoomKey } from "../src/membership.ts";
+import { rotate, unwrapRoomKey, wrapMemberKeys } from "../src/membership.ts";
 import { type ClientMessage, type RelayMessage, relayMessageSchema } from "../src/protocol.ts";
 import { startNodeRelay } from "../src/relay-node.ts";
 import { ready } from "../src/sodium.ts";
@@ -80,7 +80,7 @@ async function joinBob() {
   a.send({
     t: "approve",
     memberId: f.b.identity.id,
-    grants: [await wrapRoomKey(f.key, 0, f.b.member)],
+    grants: await wrapMemberKeys(f.key, 0, f.b.member),
   });
   await a.wait("grants", 2);
   b.send(await hello(f.b.identity));
@@ -177,7 +177,7 @@ it("revokes connected members and sends rotated grants to remaining clients", as
   await a.wait("msg");
   expect(b.messages.filter((m) => m.t === "msg")).toEqual([]);
   expect(a.messages.filter((m) => m.t === "grants").at(-1)).toMatchObject({
-    grants: rotation.grants,
+    grants: rotation.grants.filter((g) => g.memberId === f.a.identity.id),
   });
 });
 it("does not overwrite an existing room or accept unsigned provisioning", async () => {
@@ -194,4 +194,19 @@ it("does not overwrite an existing room or accept unsigned provisioning", async 
     body: JSON.stringify(invalid),
   });
   expect(token.status).toBe(403);
+});
+
+it("restores agent-addressed grants and the authenticated directory over Node sockets", async () => {
+  await joinBob();
+  await relay.close();
+  relay = await startNodeRelay({ port: 0, dataDir: dir });
+  for (const identity of [f.b.identity, f.b.agent]) {
+    const client = await connect(identity);
+    const directory = client.messages.find((m) => m.t === "directory");
+    expect(directory).toMatchObject({ members: [f.a.member, f.b.member], keyEpoch: 0 });
+    const message = client.messages.find((m) => m.t === "grants");
+    if (message?.t !== "grants") throw new Error("Missing grants");
+    expect(message.grants.map((g) => g.memberId)).toEqual([identity.id]);
+    expect(await unwrapRoomKey(message.grants[0], identity)).toEqual(f.key);
+  }
 });

@@ -22,6 +22,7 @@ export const memberSchema = z.strictObject({
       name: z.string(),
       subscription: z.string(),
       signPublicKey: id,
+      boxPublicKey: id,
       delegation: delegationSchema,
     }),
   ),
@@ -57,6 +58,13 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({ t: z.literal("remove"), memberId: id, grants }),
 ]);
 export const relayMessageSchema = z.discriminatedUnion("t", [
+  z.strictObject({
+    t: z.literal("directory"),
+    members: z.array(memberSchema),
+    activeMemberIds: z.array(id),
+    keyEpoch: epoch,
+  }),
+  z.strictObject({ t: z.literal("pending"), members: z.array(memberSchema) }),
   z.strictObject({ t: z.literal("msg"), seq: epoch, sealed: sealedSchema }),
   z.strictObject({ t: z.literal("grants"), grants }),
   z.strictObject({ t: z.literal("refused"), reason: z.string() }),
@@ -65,7 +73,11 @@ export const relayMessageSchema = z.discriminatedUnion("t", [
     map: z.record(z.string(), z.strictObject({ status: z.string(), seenAt: epoch })),
   }),
 ]);
-export const createRoomSchema = z.strictObject({ owner: memberSchema, hello: helloSchema });
+export const createRoomSchema = z.strictObject({
+  owner: memberSchema,
+  hello: helloSchema,
+  grants: grants.optional(),
+});
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export type RelayMessage = z.infer<typeof relayMessageSchema>;
 export type Hello = z.infer<typeof helloSchema>;
