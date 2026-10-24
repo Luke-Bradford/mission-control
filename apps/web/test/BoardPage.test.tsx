@@ -23,6 +23,7 @@ import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { closeTopOverlay } from "../src/shell/overlays.ts";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
+import { LANE_KEY, writeKey } from "../src/storage.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, crewRow, HOUR, item, NOW, REPOS } from "./fixtures.ts";
 
@@ -60,11 +61,13 @@ interface Data {
   prs?: PullRequestView[];
   crew?: ReturnType<typeof crewRow>[];
   attention?: ReturnType<typeof item>[];
+  extra?: Record<string, unknown>;
   profiles?: RepoProfile[] | (() => { status: number; body: unknown });
 }
 
 function stub(d: Data = {}) {
   return stubFetch({
+    ...d.extra,
     "/api/repos": REPOS,
     "/api/config": d.config ?? CONFIG,
     "/api/boards/shop-app": d.shopApp ?? [],
@@ -1508,4 +1511,63 @@ describe("repos together or apart", () => {
     const h = view.container.querySelectorAll(".repokanban h3")[1]?.textContent;
     expect(h).toBe(`site-builder \u00b7 Priority from ${expected}`);
   });
+});
+
+describe("Pipeline stage links", () => {
+  it.each(["ready", "building", "checks", "review", "merging", "merged"])(
+    "filters the full Board to %s",
+    async (stage) => {
+      writeKey(LANE_KEY, "site-builder");
+      window.history.replaceState(null, "", `/board?stage=${stage}`);
+      const phase = stage === "checks" ? "ci" : stage === "review" ? "review" : "working";
+      const active = ["building", "checks", "review", "merging"].includes(stage);
+      stub({
+        extra:
+          stage === "merging"
+            ? {
+                "/api/runs/r-12/loop": {
+                  runId: "r-12",
+                  loop: { phase: "working", merging: { sha: "abc", done: [] } },
+                },
+              }
+            : {},
+        config: { ...CONFIG, operator: { ...CONFIG.operator, timezone: "UTC" } },
+        shopApp: Array.from({ length: 8 }, (_, i) =>
+          todo(i + 1, {
+            status: stage === "ready" ? "Ready" : stage === "merged" ? "Done" : "In progress",
+            closed: stage === "merged",
+          }),
+        ).concat(todo(99, { status: "Backlog" })),
+        crew: active
+          ? Array.from({ length: 8 }, (_, i) =>
+              crewRow({
+                id: `seat-${i}`,
+                ticket: `shop-app#${i + 1}`,
+                loop: {
+                  phase,
+                  text: "Working",
+                  prNumber: null,
+                  parked: null,
+                },
+              }),
+            )
+          : [],
+        prs:
+          stage === "merged"
+            ? Array.from({ length: 8 }, (_, i) =>
+                pr({
+                  number: i + 20,
+                  ticket: `shop-app#${i + 1}`,
+                  state: "merged",
+                  mergedAt: Date.now(),
+                }),
+              )
+            : [],
+      });
+      render(<BoardPage repoId={null} ticket={null} />);
+      await screen.findByText("Ticket 8");
+      expect(screen.queryByText("Ticket 99")).toBeNull();
+      expect(screen.getByText("Ticket 7")).toBeTruthy();
+    },
+  );
 });

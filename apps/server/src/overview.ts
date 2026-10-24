@@ -12,9 +12,9 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { parseTicket } from "./runview.ts";
+import { runSpend } from "./spend.ts";
 import type { Store } from "./store.ts";
 import { median } from "./telemetry.ts";
-import { endOf } from "./views.ts";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -63,26 +63,8 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
       const i = Math.floor((at - since) / MINUTE_MS);
       if (i >= 0 && i < MINUTES) tokens[i] = (tokens[i] ?? 0) + n;
     }
-    const usage = digests.get(run.id)?.attemptUsage;
-    const totalTokens = usage?.reduce((sum, u) => sum + u.tokens, 0) ?? 0;
-    if (usage && totalTokens > 0) {
-      for (const u of usage) {
-        if (u.at === null || u.at < midnight || u.at > now) continue;
-        const hour = Math.floor((u.at - midnight) / HOUR_MS);
-        spend[hour] = (spend[hour] ?? 0) + ((run.costUsd ?? 0) * u.tokens) / totalTokens;
-      }
-      continue;
-    }
-    const until = endOf(run, now);
-    const wall = until - run.startedAt;
-    const cost = (a: number, b: number) =>
-      (run.costUsd ?? 0) *
-      (wall <= 0
-        ? Number(run.startedAt >= a && run.startedAt < b)
-        : Math.max(0, Math.min(until, b) - Math.max(run.startedAt, a)) / wall);
-    for (let i = 0; i < spend.length; i++)
-      spend[i] =
-        (spend[i] ?? 0) + cost(midnight + i * HOUR_MS, Math.min(now, midnight + (i + 1) * HOUR_MS));
+    const costs = runSpend(run, digests.get(run.id), midnight, now, HOUR_MS);
+    for (let i = 0; i < spend.length; i++) spend[i] = (spend[i] ?? 0) + (costs[i] ?? 0);
   }
 
   const working = zeros();

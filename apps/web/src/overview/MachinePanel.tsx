@@ -104,7 +104,7 @@ export function MachinePanel() {
         >
           <div className="resrow">
             <span className="s fg2">CPU</span>
-            {summary ? (
+            {summary?.machine?.cpu?.length ? (
               <Sparkline
                 label="CPU history"
                 values={summary.machine.cpu}
@@ -144,7 +144,7 @@ export function MachinePanel() {
           </div>
           <div className="resrow">
             <span className="s fg2">Memory</span>
-            {summary ? (
+            {summary?.machine?.mem?.length ? (
               <Sparkline
                 label="Memory history"
                 values={summary.machine.mem}

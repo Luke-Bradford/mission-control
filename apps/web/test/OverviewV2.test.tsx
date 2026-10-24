@@ -2,10 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
+import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
+import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
-import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, limit7d, NOW } from "./fixtures.ts";
+import { settled, stubFetch } from "./fetchStub.ts";
+import { CONFIG, limit7d, NOW, OVERVIEW } from "./fixtures.ts";
 
 afterEach(() => {
   cleanup();
@@ -54,7 +56,7 @@ it("filters each live log chip and remembers the selection", async () => {
 it("shows machine history as CPU and memory graphs", async () => {
   stubFetch({
     "/api/machine": { latest: null },
-    "/api/overview": { machine: { cpu: [10, 30], mem: [40, 50], diskFreeGb: 80 } },
+    "/api/overview": { ...OVERVIEW, machine: { cpu: [10, 30], mem: [40, 50], diskFreeGb: 80 } },
     "/api/test-lock": { holder: null, waiting: [] },
   });
   render(<MachinePanel />);
@@ -180,4 +182,32 @@ it("reconciles ticketless attention by key without collapsing matching text", as
   expect(view.container.querySelectorAll(".arow")).toHaveLength(2);
   fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
   expect(view.container.querySelectorAll(".arow")).toHaveLength(2);
+});
+
+it.each([
+  {},
+  { pipeline: [] },
+  { machine: {}, kpis: {}, pipeline: [{ stage: "ready" }] },
+  { machine: { cpu: [10, 20] }, kpis: { working: {}, spendToday: {} } },
+])("renders overview panels safely with missing or partial sections: %j", async (overview) => {
+  const fetch = stubFetch({
+    "/api/overview": overview,
+    "/api/machine": { latest: null },
+    "/api/test-lock": { holder: null, waiting: [] },
+  });
+  const { container } = render(
+    <>
+      <MachinePanel />
+      <KpiStrip />
+      <PipelinePanel />
+    </>,
+  );
+  await settled(fetch, "/api/overview");
+  expect(container.querySelector("#machP")).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "Memory history" })).toBeNull();
+  expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
+    Array(8).fill("—"),
+  );
+  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(6);
+  expect(container.querySelectorAll(".pipeline-card")).toHaveLength(0);
 });

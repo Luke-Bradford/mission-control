@@ -60,6 +60,7 @@ import {
   type RunView,
   stopForecast,
   type Telemetry,
+  TOPICS,
   TYPE_LABELS,
   type UsageSample,
   type VersionInfo,
@@ -5259,6 +5260,45 @@ describe("overview", () => {
         .flatMap((p: { cards: { repoId: string }[] }) => p.cards)
         .map((c: { repoId: string }) => c.repoId),
     ).toEqual(["shop-app"]);
+  });
+
+  it("shares crew across crew, attention and Overview, expiring at the next two-second bucket", async () => {
+    const reads = vi.spyOn(store, "asideRuns");
+    clock = Math.floor(clock / 2_000) * 2_000;
+    await get("/api/crew");
+    expect(reads).toHaveBeenCalledTimes(1);
+    await get("/api/attention");
+    await get("/api/overview");
+    expect(reads).toHaveBeenCalledTimes(1);
+    clock += 1_999;
+    bus.emit("machine");
+    await get("/api/crew");
+    expect(reads).toHaveBeenCalledTimes(1);
+    clock++;
+    await get("/api/crew");
+    expect(reads).toHaveBeenCalledTimes(2);
+    reads.mockRestore();
+  });
+
+  it.each(TOPICS.filter((topic) => topic !== "machine"))(
+    "invalidates shared crew on %s",
+    async (topic) => {
+      const reads = vi.spyOn(store, "asideRuns");
+      await get("/api/crew");
+      bus.emit(topic);
+      await get("/api/overview");
+      await get("/api/crew");
+      expect(reads).toHaveBeenCalledTimes(2);
+      reads.mockRestore();
+    },
+  );
+
+  it("rebuilds shared crew when the configured selection changes", async () => {
+    await get("/api/crew");
+    withCrew();
+    expect((await get("/api/crew")).json<Crew>().rows.some((row) => row.id === "guido-1")).toBe(
+      true,
+    );
   });
 
   it("shares attention for two seconds and invalidates on non-machine topics", async () => {

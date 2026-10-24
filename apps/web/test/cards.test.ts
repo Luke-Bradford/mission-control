@@ -20,6 +20,7 @@ import {
   doneOutcome,
   NOT_QUEUED,
   needsMe,
+  pipelineStage,
   priorityRank,
   type QueueRow,
   sortCards,
@@ -314,5 +315,27 @@ describe("checksText", () => {
 describe("NOT_QUEUED", () => {
   it("tells an unassigned Ready card that FLIGHT will offer it to an agent", () => {
     expect(NOT_QUEUED).toBe("Unassigned · FLIGHT will offer it to an agent");
+  });
+});
+
+describe("pipelineStage", () => {
+  const today = NOW - HOUR;
+  it("uses the Overview merged ticket: explicit ticket or first closing reference in the PR repo", () => {
+    const merged = pr({ ticket: null, closingIssues: [3349, 3350], mergedAt: NOW - 1000 });
+    const stage = (over: Partial<PullRequestView>) =>
+      pipelineStage(boardItem({ closed: true }), [], [{ ...merged, ...over }], NOW, today, []);
+    expect(stage({})).toBe("merged");
+    expect(stage({ ticket: "shop-app#1" })).toBeNull();
+    expect(stage({ closingIssues: [3350, 3349] })).toBeNull();
+    expect(stage({ repoId: "other" })).toBeNull();
+    expect(stage({ mergedAt: today - 1 })).toBeNull();
+    expect(stage({ mergedAt: NOW + 1 })).toBeNull();
+  });
+
+  it("includes a building ticket in both its active stage and merged today", () => {
+    const agent = crewRow({ loop: L });
+    const prs = [pr({ mergedAt: NOW - 1000 })];
+    expect(pipelineStage(boardItem(), [agent], prs, NOW, today, [])).toBe("building");
+    expect(pipelineStage(boardItem(), [agent], prs, NOW, today, [], "merged")).toBe("merged");
   });
 });
