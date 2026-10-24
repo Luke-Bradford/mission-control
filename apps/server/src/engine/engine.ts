@@ -27,6 +27,7 @@ import {
   deletedRemoteText,
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
+  effectiveHardRules,
   fillLoopText,
   fixSentText,
   hardRulesBySettingKey,
@@ -77,7 +78,7 @@ import {
   wokenEventText,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
-import type { CcConfig, CrewSeatConfig } from "../config.ts";
+import { type CcConfig, type CrewSeatConfig, flightPowersOf } from "../config.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
@@ -1061,12 +1062,22 @@ export function createEngine(deps: EngineDeps): Engine {
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
     const pushed = store.runPush(run.id);
-    if (run.endedAt === null && pushed !== null && input.touches?.sha !== pushed.sha) {
+    const flightPowers = flightPowersOf(config, run.repoId);
+    if (
+      run.endedAt === null &&
+      pushed !== null &&
+      (input.touches?.sha !== pushed.sha || input.touches.flightPowers !== flightPowers)
+    ) {
+      input.touches = null; // an unreadable new floor must not reuse the old clearance
       const rules = await rulesFor(run.repoId);
       if (rules !== null) {
         try {
-          const paths = await publisher.hardRuleTouches(run, pushed.sha, rules.hardRules);
-          input.touches = { sha: pushed.sha, paths };
+          const paths = await publisher.hardRuleTouches(
+            run,
+            pushed.sha,
+            effectiveHardRules(rules, flightPowers),
+          );
+          input.touches = { sha: pushed.sha, paths, flightPowers };
         } catch (e) {
           log(
             `${runId}: could not read the hard-rule files: ${e instanceof Error ? e.message : String(e)}`,

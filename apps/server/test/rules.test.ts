@@ -83,6 +83,15 @@ describe("parseRepoRules", () => {
     expect(() => parseRepoRules(block("mc:\n  needs: [owner]\n"))).toThrow(/mc\.needs/);
   });
 
+  it("refuses flight_powers in a repo's block, and hard_rules_by: flight", () => {
+    expect(() => parseRepoRules(block("mc:\n  flight_powers: superuser\n"))).toThrow(
+      /unknown key "flight_powers"/,
+    );
+    expect(() => parseRepoRules(block("mc:\n  hard_rules_by: flight\n"))).toThrow(
+      /^RepoRulesError: mc\.hard_rules_by:|^mc\.hard_rules_by:/,
+    );
+  });
+
   it("names an unknown key", () => {
     expect(() => parseRepoRules(block("mc:\n  foo: 1\n"))).toThrow(RepoRulesError);
     expect(() => parseRepoRules(block("mc:\n  foo: 1\n"))).toThrow(/foo/);

@@ -33,7 +33,6 @@ import {
   GUARD_WINDOW_DAYS,
   type GuardHitsView,
   guardAckKey,
-  guardDecision,
   guardDenyOutput,
   ISSUE_REQUIRED,
   type LimitRow,
@@ -127,6 +126,7 @@ import {
 } from "./files.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import {
   attentionItems,
@@ -211,6 +211,8 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
   config: CcConfig;
+  /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
+  superuserTools?: readonly McToolName[];
   gh?: GhRunner;
   knownSecrets?: McToolsDeps["knownSecrets"];
   store: Store;
@@ -963,13 +965,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             lock?.release(key);
             return answer();
           }
-          const verdict = guardDecision(
+          const verdict = crewGuardDecision(
+            config,
+            seat.repoId,
+            seatMode(who.seatId),
             { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
-            {
-              mode: seatMode(who.seatId),
-              repo: "dev",
-              fullSuite: config.repos.find((r) => r.id === seat.repoId)?.fullSuite ?? [],
-            },
+            deps.superuserTools,
           );
           if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {

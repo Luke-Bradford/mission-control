@@ -1351,6 +1351,7 @@ describe("guard hits", () => {
       "git-write": 2,
       "github-write": 0,
       "merge-push": 0,
+      "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
       network: 1,

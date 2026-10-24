@@ -7,6 +7,7 @@ import {
   ConfigError,
   type CrewSeatConfig,
   type CrewSessionConfig,
+  flightPowersOf,
   loadConfig,
   seatInput,
   writerAreaConflict,
@@ -186,7 +187,10 @@ const lists = (c: CcConfig["crew"]) => c?.sessions.map((s) => [s.id, s.repoId, s
 export function restartNeeded(applied: CcConfig, target: CcConfig): string[] {
   const out: string[] = [];
   for (const key of ["operator", "accounts", "repos", "loops", "poll"] as const) {
-    if (!isDeepStrictEqual(applied[key], target[key])) out.push(key);
+    // `flight_powers` reloads live (`settle` copies it), so it never asks for a restart
+    const strip = (c: CcConfig) =>
+      key === "repos" ? c.repos.map(({ flightPowers: _p, ...rest }) => rest) : c[key];
+    if (!isDeepStrictEqual(strip(applied), strip(target))) out.push(key);
   }
   const a = applied.crew;
   const b = target.crew;
@@ -224,6 +228,8 @@ export function createCrewReloader(deps: {
   store: Store;
   bus: ChangeBus;
   supervisor: Pick<Supervisor, "on" | "seatBusy">;
+  /** The watch rotates FLIGHT between turns, outside its crash restart limit. */
+  rotateFlight?: () => void;
   now?: () => number;
   log?: (line: string) => void;
   /** Default `loadConfig`. */
@@ -281,6 +287,20 @@ export function createCrewReloader(deps: {
   };
 
   function settle(): string[] {
+    // Guards read powers per call. Apply them even if unrelated crew edits cannot settle.
+    const powersApplied: string[] = [];
+    for (const repo of config.repos) {
+      const next = flightPowersOf(target, repo.id);
+      if ((repo.flightPowers ?? "standard") === next) continue;
+      repo.flightPowers = next;
+      powersApplied.push(`repo ${repo.id} flight_powers ${next}`);
+    }
+    if (powersApplied.length > 0) {
+      // Refresh the session's context after its turn; permissions already changed above.
+      deps.rotateFlight?.();
+      bus.emit("config");
+      bus.emit("agents");
+    }
     try {
       const plan = planCrew(config, target, busy);
       const nextRestart = restartNeeded(config, target);
@@ -310,10 +330,10 @@ export function createCrewReloader(deps: {
         bus.emit("config");
         bus.emit("agents");
       }
-      return plan.applied;
+      return [...powersApplied, ...plan.applied];
     } catch (e) {
       log(`could not apply config.yaml: ${e instanceof Error ? e.message : String(e)}`);
-      return [];
+      return powersApplied;
     }
   }
 

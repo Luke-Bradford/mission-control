@@ -1554,7 +1554,7 @@ describe("amendments from the reviews of Task 5", () => {
   });
 
   it("the returned loop shares no parked or touches object with the input", () => {
-    const touches = { sha: SHA, paths: ["a.yml"] };
+    const touches = { sha: SHA, paths: ["a.yml"], flightPowers: "superuser" as const };
     const parked = { kind: "ci", reason: "r", ended: false };
     const s = snap({}, { phase: "parked", parked, touches, cardFor: "parked:0" });
     const r = reconcile(s);

@@ -43,6 +43,7 @@ import {
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
   NOT_ON_BOARD,
+  needsSuperuserText,
   PROFILE_PAIR_TEXT,
   READ_NO_GITHUB,
   READ_NO_PR,
@@ -74,7 +75,7 @@ import {
 } from "../src/config.ts";
 import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
 import { flightBriefView } from "../src/flight/state.ts";
-import { createFlightTools, seatFree } from "../src/flight/tools.ts";
+import { createFlightTools, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
@@ -490,6 +491,31 @@ describe("seat schema", () => {
       ).properties;
       expect(props.seat?.pattern).toBe(SEAT_ID.source);
     }
+  });
+});
+
+describe("requirePowers", () => {
+  it.each(["standard", "superuser"] as const)("allows standard powers on a %s repo", (powers) => {
+    const cfg = {
+      repos: [{ id: "r", flightPowers: powers }],
+    } as CcConfig;
+    expect(requirePowers(cfg, "r", "standard")).toBeNull();
+  });
+
+  it("refuses a standard repo, passes a superuser one, and reads the config each call", () => {
+    const cfg = {
+      repos: [{ id: "r", github: "o/r", project: 1, statusMap: {}, autonomy: "draft" }],
+    } as unknown as CcConfig;
+    const refusal = { text: needsSuperuserText("o/r"), isError: true };
+    expect(requirePowers(cfg, "r", "superuser")).toEqual(refusal);
+    for (const r of cfg.repos) r.flightPowers = "superuser";
+    expect(requirePowers(cfg, "r", "superuser")).toBeNull();
+    for (const r of cfg.repos) r.flightPowers = "standard";
+    expect(requirePowers(cfg, "r", "superuser")).toEqual(refusal);
+    expect(requirePowers(cfg, "nobody", "superuser")).toEqual({
+      text: needsSuperuserText("nobody"),
+      isError: true,
+    });
   });
 });
 
