@@ -6,6 +6,7 @@ import {
   type BoardItem,
   type CrewRow,
   clockHm,
+  FLIGHT_TRIAGE_LABEL,
   type FlightView,
   GUARD_NONE_TEXT,
   type GuardHitsView,
@@ -148,7 +149,11 @@ export function NeedsList({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const list = sortNeeds((items ?? []).filter(isOperatorItem));
-  const handled = sortNeeds((items ?? []).filter((i) => !isOperatorItem(i)));
+  const handled = sortNeeds(
+    (items ?? []).filter(
+      (i) => !isOperatorItem(i) && i.flightTriage !== "waiting" && i.flightTriage !== "handling",
+    ),
+  );
   const unacked = list.filter((i) => !i.acked);
   // Acknowledging a channel item does not mark its messages read.
   const ackable = unacked.map((i) => i.key);
@@ -234,6 +239,9 @@ export function NeedsList({
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
                 {agentId !== null && <AgentTag id={agentId} index={row?.index ?? 0} sm />}{" "}
                 <NeedText item={i} now={now} lock={lock} />
+                {i.flightTriage === "missed" && (
+                  <div className="xs muted">{FLIGHT_TRIAGE_LABEL.missed}</div>
+                )}
                 {i.brief && (
                   <>
                     <div className="xs fg2">

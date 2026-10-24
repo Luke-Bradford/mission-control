@@ -89,17 +89,17 @@ export const notInSessionText = (seat: string): string =>
 export const capText = (what: string, n: number): string =>
   `Not done: you ${what} ${n} times in the last hour, the most allowed. Wait, or ask the operator.`;
 /** The briefs FLIGHT may write in an hour, and the shape of one. */
-export const FLIGHT_BRIEFS_PER_HOUR = 20;
+export const FLIGHT_BRIEFS_PER_HOUR = 240;
 export const BRIEF_OPTIONS_MIN = 2;
 export const BRIEF_OPTIONS_MAX = 4;
 export const BRIEF_LABEL_MAX = 80;
-/** The longest text `brief_item` takes; it is stored cut to MC_TEXT_MAX (a label to BRIEF_LABEL_MAX). */
+/** The longest text `brief_item` takes; stored whole; labels are limited separately to BRIEF_LABEL_MAX. */
 export const BRIEF_INPUT_MAX = 8000;
 export const BRIEF_KEY_MAX = 500;
 export const briefNoItemText = (key: string): string =>
   `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
-export const BRIEF_ITEM_DESCRIPTION = `Brief one of the operator's Needs-you items (its key from your digest's items): two or three sentences of context (what it is, why it waits, since when), your recommendation, and two to four options when it is a choice. A new brief on a key replaces the old one. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
+export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling for at most 24 hours. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original in full. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. Texts accept ${BRIEF_INPUT_MAX} characters without truncation. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
 export const FLIGHT_BRIEF_SECTIONS = [
@@ -578,13 +578,14 @@ export interface FlightState {
     /** The names of the checks failing on the stored head. */
     failingChecks: string[];
   }[];
-  /** The operator's Needs-you items that have no brief yet, oldest first. */
+  /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {
     key: string;
     kind: AttentionKind;
     ticket: string | null;
     text: string;
     ageMin: number;
+    triageRemainingMs: number;
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
@@ -611,8 +612,12 @@ export interface FlightState {
 export const FLIGHT_TICKETS_LISTED = 30;
 export const FLIGHT_ITEMS_LISTED = 20;
 export const FLIGHT_RECENT_LISTED = 10;
-/** How long Needs you holds a seat's question back while FLIGHT runs. */
-export const FLIGHT_ANSWER_WAIT_MS = 20 * 60_000;
+/** How long Needs you gives FLIGHT to triage an operator-owned item. */
+export const FLIGHT_TRIAGE_WAIT_MS = 20 * 60_000;
+/** How long FLIGHT may keep an item after briefing it as handling. */
+export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
+/** Compatibility for callers of the former question-only hold. */
+export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
 export const FLIGHT_REWAKE_MS = 60 * 60_000;
