@@ -65,6 +65,7 @@ import {
   endedDecision,
   endedText,
   endFailedText,
+  FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_ABOUT_MAX,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_BASIS_MAX,
@@ -346,8 +347,10 @@ export interface FlightToolsDeps {
 type Result = { text: string; isError?: boolean };
 
 /** A decision text stored cut to `max`, ending `…` when it was cut. */
-export const cut = (s: string, max: number): string =>
-  s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+export const cut = (s: string, max: number): string => {
+  const chars = Array.from(s);
+  return chars.length <= max ? s : `${chars.slice(0, max - 1).join("")}…`;
+};
 
 const MAX_ISSUE = 2 ** 31 - 1;
 const issueNumber = z.number().int().min(1).max(MAX_ISSUE);
@@ -361,7 +364,7 @@ const DiscussionReplyArgs = z.strictObject({
 const LogDecisionArgs = z.strictObject({
   discussion: DiscussionReplyArgs.optional(),
   seat: z.string().regex(SEAT_ID).optional(),
-  about: text(FLIGHT_ABOUT_MAX),
+  about: text(FLIGHT_ABOUT_ARG_MAX),
   decision: text(FLIGHT_DECISION_MAX),
   basis: basisArg,
 });
@@ -1532,7 +1535,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       record(at, {
         kind: "ticket",
         ref,
-        about: cut(`${ref}: ${title}`, FLIGHT_ABOUT_MAX),
+        about: `${ref}: ${title}`,
         decision: createdDecision(issue),
         basis,
       });
@@ -2488,7 +2491,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             type: "string",
             description: "The seat the decision is about, if one (e.g. guido-1).",
           },
-          about: { type: "string", minLength: 1, maxLength: FLIGHT_ABOUT_MAX },
+          about: { type: "string", minLength: 1, maxLength: FLIGHT_ABOUT_ARG_MAX },
           decision: { type: "string", minLength: 1, maxLength: FLIGHT_DECISION_MAX },
           basis: { type: "string", minLength: 1, maxLength: FLIGHT_BASIS_MAX },
         },

@@ -7,7 +7,6 @@ import { createHash } from "node:crypto";
 import {
   type AttentionItem,
   clockHm,
-  FLIGHT_ABOUT_MAX,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
   FLIGHT_HEADLINE,
@@ -23,6 +22,8 @@ import {
   FLIGHT_REPORT_PARKS,
   FLIGHT_STARTABLE,
   FLIGHT_STARTS_PER_HOUR,
+  FLIGHT_STATE_DECISION_MAX,
+  FLIGHT_STATE_TEXT_MAX,
   FLIGHT_TICKETS_LISTED,
   FLIGHT_TRIAGE_WAIT_MS,
   FLIGHT_UNPARK_KINDS,
@@ -390,8 +391,8 @@ export function flightState(i: {
       id: d.id,
       time: clockHm(d.at, tz),
       kind: d.kind,
-      about: d.about,
-      decision: d.decision,
+      about: cut(d.about, FLIGHT_STATE_TEXT_MAX),
+      decision: cut(d.decision, FLIGHT_STATE_DECISION_MAX),
     }));
   const headline =
     found === null
@@ -660,7 +661,7 @@ export function flightState(i: {
     }
     return [
       {
-        text: cut(message.text, FLIGHT_ABOUT_MAX),
+        text: cut(message.text, FLIGHT_STATE_TEXT_MAX),
         url: message.url,
         arrival: {
           source: "Teams" as const,
@@ -693,7 +694,7 @@ export function flightState(i: {
       key: x.key,
       kind: x.kind,
       ticket: x.ticket,
-      text: cut(x.text, FLIGHT_ABOUT_MAX),
+      text: cut(x.text, FLIGHT_STATE_TEXT_MAX),
       ageMin: Math.floor((now - x.at) / 60_000),
       triageRemainingMs: Math.max(
         0,

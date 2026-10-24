@@ -11,6 +11,8 @@ import {
   type ChangedFiles,
   type CliAccountStatus,
   COMMS_CAPCOM,
+  COMMS_MESSAGE_BODY_LIMIT,
+  COMMS_MESSAGE_MAX,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -18,6 +20,7 @@ import {
   type CrewMode,
   type CrewSessionFolders,
   DEFAULT_AWAY,
+  DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
   type FileDiff,
   fixesSent,
@@ -325,7 +328,7 @@ const StartBody = z.strictObject({
 const MessageBody = z.strictObject({
   text: z
     .string()
-    .max(8000)
+    .max(COMMS_MESSAGE_MAX)
     .refine((t) => t.trim() !== "", "must not be blank"),
   interrupt: z.boolean().optional(),
 });
@@ -1623,8 +1626,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         path: string,
         schema: z.ZodType<B>,
         act: (sup: Supervisor, id: string, body: B) => Promise<unknown>,
+        options: { bodyLimit?: number } = {},
       ) =>
-        api.post<{ Params: { id: string } }>(path, async (req, reply) => {
+        api.post<{ Params: { id: string } }>(path, options, async (req, reply) => {
           const id = req.params.id;
           if (!crewGate(id, reply) || !supervisor) return reply;
           const body = schema.safeParse(req.body);
@@ -1653,15 +1657,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ? sup.startRun(id, b.issue, { loop: NEW_LOOP })
           : sup.startRun(id, b.issue);
       });
-      seatAction("/seats/:id/message", MessageBody, async (sup, id, b) => {
-        const runId = sup.seat(id)?.runId ?? null;
-        const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
-        await sup.message(id, b.text, { interrupt: b.interrupt === true });
-        store.addComms({ at: now(), from: COMMS_CAPCOM, to: id, ticket, text: b.text });
-        // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
-        if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
-        return { ok: true };
-      });
+      seatAction(
+        "/seats/:id/message",
+        MessageBody,
+        async (sup, id, b) => {
+          const runId = sup.seat(id)?.runId ?? null;
+          const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
+          await sup.message(id, b.text, { interrupt: b.interrupt === true });
+          store.addComms({ at: now(), from: COMMS_CAPCOM, to: id, ticket, text: b.text });
+          // The operator's word to a parked, looped run's seat un-parks it; the engine decides whether it may
+          if (runId !== null && store.run(runId)?.loop) void deps.engine?.onOperatorMessage(runId);
+          return { ok: true };
+        },
+        // Bound the encoded request before parsing; accepted messages stay whole.
+        { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
+      );
       seatAction("/seats/:id/interrupt", NoBody, async (sup, id) => {
         await sup.interrupt(id);
         return { ok: true };
@@ -2109,7 +2119,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .strictObject({
             version: z.string().min(1).max(100),
             messageId: z.string().regex(/^[a-zA-Z0-9:_-]{1,100}$/),
-            text: z.string().trim().min(1).max(4000),
+            text: z.string().trim().min(1).max(DISCUSSION_TEXT_MAX),
           })
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });

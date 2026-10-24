@@ -25,6 +25,7 @@ import {
   minorMoreLine,
   prEditedText,
   type Run,
+  STDERR_TEXT_MAX,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
@@ -605,6 +606,16 @@ describe("rerunRuling and rerunState", () => {
     expect(ghCalls).toHaveLength(2);
   });
 
+  it("keeps a 1000-character CI refusal whole", async () => {
+    const stderr = "x".repeat(1000);
+    ghAnswers = [() => ({ code: 1, stdout: "", stderr })];
+    expect(await createPublisher(deps()).rerunRuling("o/mc", SHA)).toEqual({
+      ok: false,
+      text: `gh run list failed: ${stderr}`,
+      transient: true,
+    });
+  });
+
   it("reads a re-run as pending until its attempt is higher and it is completed", async () => {
     const saved = [{ id: 11, attempt: 1 }];
     const state = async (...r: R[]) => {
@@ -946,7 +957,7 @@ describe("setReviewStatus", () => {
       () => ({
         code: 1,
         stdout: "",
-        stderr: `\u001b[31mHTTP 403: forbidden\u001b[0m\n${"x".repeat(400)}`,
+        stderr: `\u001b[31mHTTP 403: forbidden\u001b[0m\n${"x".repeat(STDERR_TEXT_MAX)}`,
       }),
     ];
     const r = await createPublisher(deps()).setReviewStatus(run(), SHA, "pending", "x");
@@ -954,7 +965,17 @@ describe("setReviewStatus", () => {
     const text = r.ok ? "" : r.text;
     expect(text.startsWith(`${REVIEW_STATUS_FAILED}: HTTP 403: forbidden\n`)).toBe(true);
     expect(text).not.toContain("\u001b");
-    expect(text.length).toBe(REVIEW_STATUS_FAILED.length + 2 + 300);
+    expect(text.length).toBe(REVIEW_STATUS_FAILED.length + 2 + STDERR_TEXT_MAX);
+  });
+
+  it("cuts stderr by code points without splitting non-ASCII characters", async () => {
+    ghAnswers = [() => ({ code: 1, stdout: "", stderr: "🚀".repeat(STDERR_TEXT_MAX + 1) })];
+    const r = await createPublisher(deps()).setReviewStatus(run(), SHA, "pending", "x");
+    expect(r).toEqual({
+      ok: false,
+      text: `${REVIEW_STATUS_FAILED}: ${"🚀".repeat(STDERR_TEXT_MAX)}`,
+      transient: true,
+    });
   });
 
   it("no repo or a bad sha: no call", async () => {

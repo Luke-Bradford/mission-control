@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { CcConfig, TeamsConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import { isObj } from "./github.ts";
+import { snippetOf } from "./notifications.ts";
 
 export const TEAMS_COLLECTOR = "teams";
 const GRAPH = "https://graph.microsoft.com/v1.0/";
@@ -411,7 +412,7 @@ export async function collectTeams(
                 reason: needsYou ? "mentioned you" : "Teams match",
                 url: web.href,
                 author,
-                snippet: text.slice(0, 280),
+                snippet: snippetOf(text),
                 updatedAt: at,
                 lastReadAt: null,
                 message: {

@@ -83,8 +83,15 @@ export const FLIGHT_VIEW_LIMIT = 100;
 export const FLIGHT_NOTES_PER_HOUR = 60;
 export const FLIGHT_HOUR_MS = 60 * 60_000;
 
-export const FLIGHT_ABOUT_MAX = 300;
-export const FLIGHT_DECISION_MAX = 1000;
+/** Text shown to FLIGHT in state items and arrivals. */
+export const FLIGHT_STATE_TEXT_MAX = 300;
+/** How much of a recent decision FLIGHT's state shows; the stored decision may be longer. */
+export const FLIGHT_STATE_DECISION_MAX = 1000;
+/** Model-supplied about text; hub-assembled descriptions can be longer. */
+export const FLIGHT_ABOUT_ARG_MAX = 300;
+export const DISCUSSION_TEXT_MAX = 4000;
+export const FLIGHT_ABOUT_MAX = 4000;
+export const FLIGHT_DECISION_MAX = 4000;
 export const FLIGHT_BASIS_MAX = 500;
 
 export const MC_FLIGHT_ONLY = "Not done: this tool is for the FLIGHT seat.";

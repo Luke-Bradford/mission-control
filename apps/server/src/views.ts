@@ -12,8 +12,10 @@ import {
   type BoardItem,
   BUILTIN_ROLES,
   CHECK_EVENT,
+  COMMS_PREVIEW_MAX,
   type ConfigView,
   type CrewEvent,
+  cutAtWord,
   type Metrics,
   type MetricsDay,
   modeOfSeat,
@@ -314,7 +316,7 @@ export function activity(
       who: c.from,
       to: c.to,
       kind: "comms",
-      text: c.text,
+      text: cutAtWord(c.text.replace(/\s+/g, " ").trim(), COMMS_PREVIEW_MAX),
       ref: c.ticket,
     });
   }
@@ -504,7 +506,7 @@ export function runEventsIndex(store: Store, now: number) {
   return {
     commits: group(store.runCommitsSince(since), (c) => c.runId),
     locks: group(store.lockRuns(since), (l) => l.runId),
-    comms: group(store.comms(since), (m) => m.from),
+    comms: group(store.commsEvidence(since), (m) => m.from),
   };
 }
 

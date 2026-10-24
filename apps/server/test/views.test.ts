@@ -1,11 +1,19 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUILTIN_ROLES, type PullRequestView, type Run } from "@mc/core";
+import {
+  BUILTIN_ROLES,
+  COMMS_PREVIEW_MAX,
+  COMMS_TEXT_MAX,
+  commsCutMarker,
+  type PullRequestView,
+  type Run,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { threadMessages } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
-import { activity, configView, overview } from "../src/views.ts";
+import { activity, configView, overview, runEventsIndex } from "../src/views.ts";
 
 let dir: string;
 let store: Store;
@@ -200,6 +208,39 @@ describe("activity: board moves", () => {
 });
 
 describe("activity: comms", () => {
+  it("serves a 3000-character message whole in its conversation and cuts only Activity", () => {
+    const text = "x".repeat(3000);
+    store.addComms({ at: NOW - 100, from: "CAPCOM", to: "guido-1", ticket: "mc#7", text });
+    expect(store.comms(0)[0]?.text).toBe(text);
+    expect(threadMessages(store, "guido-1", true)[0]?.text).toBe(text);
+    expect(activity(config, store, NOW).find((e) => e.kind === "comms")?.text).toBe(
+      `${"x".repeat(COMMS_PREVIEW_MAX - 1)}…`,
+    );
+  });
+
+  it("keeps the storage marker in a conversation but out of its Activity preview", () => {
+    const text = "x".repeat(COMMS_TEXT_MAX + 1);
+    store.addComms({ at: NOW, from: "a1", to: "CAPCOM", ticket: "mc#7", text });
+    expect(threadMessages(store, "a1", true)[0]?.text).toBe(
+      `${"x".repeat(COMMS_TEXT_MAX)}${commsCutMarker(COMMS_TEXT_MAX, text.length)}`,
+    );
+    expect(activity(config, store, NOW).find((e) => e.kind === "comms")?.text).toBe(
+      `${"x".repeat(COMMS_PREVIEW_MAX - 1)}…`,
+    );
+    expect(runEventsIndex(store, NOW).comms.get("a1")).toEqual([
+      { at: NOW, from: "a1", ticket: "mc#7" },
+    ]);
+  });
+
+  it("makes an Activity preview one line without changing the conversation", () => {
+    const text = "  first\n\n  second\tthird  ";
+    store.addComms({ at: NOW, from: "CAPCOM", to: "guido-1", ticket: null, text });
+    expect(activity(config, store, NOW).find((e) => e.kind === "comms")?.text).toBe(
+      "first second third",
+    );
+    expect(threadMessages(store, "guido-1", true)[0]?.text).toBe(text);
+  });
+
   it("serves a hand-off inside the window as a comms row, and leaves out an older one", () => {
     store.addComms({ at: NOW - 100, from: "CAPCOM", to: "guido-1", ticket: "mc#7", text: "go" });
     store.addComms({ at: 1, from: "MC", to: "guido-1", ticket: null, text: "old" });

@@ -78,6 +78,7 @@ import {
   reviewRunStep,
   reviewStartedText,
   reviewStatusOf,
+  STDERR_TEXT_MAX,
   seatCallSign,
   seatDef,
   TAKE_STALE_MS,
@@ -887,7 +888,7 @@ export function createEngine(deps: EngineDeps): Engine {
           store.addLoopEvent(
             `${run.id}:wake-failed:${at}`,
             run.id,
-            wakeFailedText(message.slice(0, 300)),
+            wakeFailedText(Array.from(message).slice(0, STDERR_TEXT_MAX).join("")),
             at,
           );
           out.again = true;
@@ -1477,7 +1478,7 @@ export function createEngine(deps: EngineDeps): Engine {
           if (isTransientStart(e)) {
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
           } else {
-            const failure = message.slice(0, 300);
+            const failure = Array.from(message).slice(0, STDERR_TEXT_MAX).join("");
             if (store.setReviewState(row.id, ["starting"], "failed", { at: now(), failure })) {
               store.addLoopEvent(
                 reviewEventKey(row.authorRunId, row.id, "failed"),

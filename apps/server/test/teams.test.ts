@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { SNIPPET_MAX } from "../src/collectors/notifications.ts";
 import { collectTeams, teamsStatus } from "../src/collectors/teams.ts";
 import type { CcConfig, TeamsConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
@@ -78,6 +79,20 @@ it("collects selected chat/channel mentions, refs and area keywords, excluding n
   read.mockClear();
   await collectTeams(config, store, 100_000, { fetch: read, token });
   expect(read).toHaveBeenCalledTimes(1);
+  store.close();
+});
+
+it("marks a cut snippet with an ellipsis, leaving one at the limit whole", async () => {
+  const { config, store } = setup();
+  config.sources.teams.selected.splice(1);
+  const text = `#42 ${"🚀".repeat(SNIPPET_MAX - 4)}`;
+  await collectTeams(config, store, 1_000, {
+    token: async () => "secret",
+    fetch: async () => response([message("1", text), message("2", `${text}tail`)]),
+  });
+  expect(store.notifications().map((n) => n.snippet)).toEqual(
+    expect.arrayContaining([text, `${Array.from(text).slice(0, -1).join("")}…`]),
+  );
   store.close();
 });
 

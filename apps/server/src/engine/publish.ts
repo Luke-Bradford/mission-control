@@ -29,6 +29,7 @@ import {
   REVIEW_STATUS_CONTEXT,
   type ReviewStatusState,
   type Run,
+  STDERR_TEXT_MAX,
 } from "@mc/core";
 import {
   COMMIT_ADD_PATHSPEC,
@@ -61,8 +62,6 @@ export const EMPTY_LOG = "(the failed run's log was empty)";
 export const EARLIER_PR_OPEN = "an earlier PR is open on this branch";
 /** Why setReviewStatus did not set the status. */
 export const REVIEW_STATUS_FAILED = "the mc/review status could not be set";
-/** The most of gh's stderr a failed status write's log line carries, in characters. */
-const STATUS_STDERR_MAX = 300;
 /** `gh run view --log-failed` may print this much. */
 export const CI_LOG_MAX_BUFFER = 16 * 1024 * 1024;
 
@@ -87,8 +86,6 @@ export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
 /** The author and committer of the merge commit the engine makes. */
 export const MC_MERGE_AUTHOR = "Mission Control";
-/** The most of gh's or git's stderr a refusal's text carries, in characters. */
-const STEP_STDERR_MAX = 300;
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
@@ -301,9 +298,9 @@ type Refusal = { ok: false; text: string; transient: boolean };
 const final = (text: string): Refusal => ({ ok: false, text, transient: false });
 const transient = (text: string): Refusal => ({ ok: false, text, transient: true });
 const errText = (e: unknown): string =>
-  cleanLog(e instanceof Error ? e.message : String(e))
-    .trim()
-    .slice(0, STEP_STDERR_MAX);
+  Array.from(cleanLog(e instanceof Error ? e.message : String(e)).trim())
+    .slice(0, STDERR_TEXT_MAX)
+    .join("");
 
 export function createPublisher(deps: McToolsDeps): Publisher {
   const cwd = () => crewDir(deps.dbPath);
@@ -334,7 +331,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   const ghFailed = (what: string, stderr: string): Refusal => {
-    const why = cleanLog(stderr).trim().slice(0, STEP_STDERR_MAX);
+    const why = Array.from(cleanLog(stderr).trim()).slice(0, STDERR_TEXT_MAX).join("");
     return transient(why === "" ? `gh ${what} failed` : `gh ${what} failed: ${why}`);
   };
 
@@ -628,7 +625,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         { cwd: cwd() },
       );
       if (r.code !== 0) {
-        const why = cleanLog(r.stderr).trim().slice(0, STATUS_STDERR_MAX);
+        const why = Array.from(cleanLog(r.stderr).trim()).slice(0, STDERR_TEXT_MAX).join("");
         return {
           ok: false,
           text: why === "" ? REVIEW_STATUS_FAILED : `${REVIEW_STATUS_FAILED}: ${why}`,
