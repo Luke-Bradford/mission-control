@@ -1,6 +1,7 @@
 import type { OverviewTimeline } from "@mc/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { hub } from "../src/data.ts";
 import { TimelinePanel } from "../src/overview/TimelinePanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { HOUR, MIN, NOW } from "./fixtures.ts";
@@ -85,4 +86,31 @@ it("slides every second between fetches", async () => {
   expect(Number.parseFloat(span?.style.left ?? "")).toBeCloseTo(50 - 100 / 3600);
   expect(Number.parseFloat(span?.style.width ?? "")).toBeCloseTo(50 + 100 / 3600);
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("caps cached open spans at the last good data time and reports failed refetches", async () => {
+  const fetch = stub([
+    { agentId: "dev-1", spans: [{ kind: "turn", from: NOW - 30 * MIN, to: null }], ticks: [] },
+  ]);
+  const { container } = render(<TimelinePanel />);
+  await screen.findByRole("link", { name: "dev-1" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(MIN);
+  });
+  fetch.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => hub.refetchTopic("agents"));
+  const span = () => container.querySelector<HTMLElement>(".overview-span");
+  expect(Number.parseFloat(span()?.style.width ?? "")).toBeCloseTo(50);
+  expect(screen.getByText("Could not refresh timeline. Showing stale data.").className).toBe(
+    "crit-t",
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(MIN);
+  });
+  expect(Number.parseFloat(span()?.style.width ?? "")).toBeCloseTo(50);
+  expect(Number.parseFloat(span()?.style.left ?? "")).toBeCloseTo(50 - 100 / 30);
+
+  await act(async () => hub.refetchTopic("agents"));
+  expect(screen.queryByText("Could not refresh timeline. Showing stale data.")).toBeNull();
+  expect(Number.parseFloat(span()?.style.width ?? "")).toBeCloseTo(50 + 100 / 30);
 });

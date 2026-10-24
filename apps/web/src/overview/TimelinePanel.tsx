@@ -14,6 +14,7 @@ const COLORS = {
 export function TimelinePanel() {
   const timeline = useResource<OverviewTimeline>(RESOURCES.overviewTimeline);
   const now = useSecond();
+  const openEnd = timeline.error && timeline.data ? Math.min(now, timeline.data.to) : now;
   const from = now - TIMELINE_WINDOW_MS;
   const position = (at: number) => (100 * (at - from)) / TIMELINE_WINDOW_MS;
   const lanes = timeline.data?.lanes ?? [];
@@ -21,7 +22,7 @@ export function TimelinePanel() {
   const rows = lanes.map((lane) => {
     const spans = lane.spans.flatMap((span) => {
       const start = Math.max(from, span.from);
-      const end = Math.min(now, span.to ?? now);
+      const end = Math.min(now, span.to ?? openEnd);
       if (end <= start) return [];
       active = true;
       return (
@@ -67,6 +68,9 @@ export function TimelinePanel() {
           ))}
         </div>
         <div className="overview-lanes">{rows}</div>
+        {timeline.error && timeline.data && (
+          <p className="crit-t">Could not refresh timeline. Showing stale data.</p>
+        )}
         {!timeline.data && (
           <p className={timeline.error ? "crit-t" : "muted"}>
             {timeline.error ? "Could not load timeline." : "Loading…"}
