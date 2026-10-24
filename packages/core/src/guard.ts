@@ -1,9 +1,21 @@
 /**
  * The guard's pure core: the command rules, the full-suite matcher and the secret scan. The hub
- * route (`POST /api/guard/check`) and Mission Control's push and PR build on these; nothing here does I/O.
+ * route (`POST /api/guard/check`) and Mission Control's push and PR build on these. Codex path
+ * checks also resolve filesystem paths, without changing them.
  */
+import { lstatSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { MC_TOOL_NAMES, MC_TOOLS, type McToolName, mcTool, READ_ONLY_CANNOT_WRITE } from "./mcp.ts";
-import type { CrewMode } from "./runtime.ts";
+import {
+  CODEX_SHELL,
+  type CrewMode,
+  DENIED_TOOLS,
+  GIT_READ_TOOLS,
+  isProtectedPath,
+  pathInArea,
+  type SeatCommands,
+  seatCommands,
+} from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
@@ -362,6 +374,8 @@ interface Walk {
   lineBackground: boolean;
   /** Words still to examine; past it the line is too long to judge (fail closed). */
   budget: number;
+  /** Codex must match exact argv: no expansion, hidden redirects or wrapper stripping. */
+  codex?: boolean;
 }
 
 /**
@@ -601,6 +615,7 @@ class Reader {
     for (let i = from; i < s.length; i++) {
       const c = s.charAt(i);
       const next = s.charAt(i + 1);
+      if (this.walk.codex && "$`*?[]~{}()".includes(c)) throw new Unreadable();
       if (c === "'") {
         const end = s.indexOf("'", i + 1);
         if (end === -1) throw new Unreadable();
@@ -644,6 +659,7 @@ class Reader {
         plain("${");
         i++;
       } else if (c === "\\") {
+        if (this.walk.codex && next === "") throw new Unreadable();
         if (next === "\n") i++;
         else if (i + 1 < s.length) {
           quoted(next);
@@ -659,6 +675,14 @@ class Reader {
         // A redirection: `N>`, `>>`, `>&`, `<`, `<<`, `<<<`, `&>`. A bare number before it is the fd.
         if (word !== null && /^\d+$/.test(word)) dropWord();
         else endWord();
+        if (this.walk.codex) {
+          const fd = /^(?:>&|<&)(?:\d+|-)(?=$|[ \t\n;|&])/.exec(s.slice(i));
+          if (fd !== null) {
+            i += fd[0].length - 1;
+            continue;
+          }
+          if (!(c === "<" && next === "<")) throw new Unreadable();
+        }
         if (c === "<" && next === "<" && s.charAt(i + 2) !== "<" && arith === 0 && param === 0) {
           // a heredoc: its delimiter is the next word; the body is read after this line
           const tabs = s.charAt(i + 2) === "-";
@@ -740,6 +764,7 @@ class Reader {
       if (j >= s.length) throw new Unreadable();
       const d = s.charAt(j);
       const next = s.charAt(j + 1);
+      if (this.walk.codex && (d === "$" || d === "`")) throw new Unreadable();
       if (d === '"') return { text, end: j };
       if (d === "\\" && next === "\n") {
         j += 2;
@@ -792,6 +817,7 @@ class Reader {
     for (let j = 0; j < s.length; j++) {
       const c = s.charAt(j);
       if (c === "\\") j++;
+      else if (this.walk.codex && (c === "$" || c === "`")) throw new Unreadable();
       else if (c === "`") j = this.backtick(j, depth, subs);
       else if (c === "$" && s.charAt(j + 1) === "(") j = this.subLine(j, depth, subs);
     }
@@ -884,6 +910,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   if (depth > MAX_DEPTH) throw new TooLong();
   const { argv, braces } = seg;
   spend(walk, argv.length);
+  if (walk.codex) return [{ argv, background, braces: braces.includes(true) }];
   const words = [...argv];
   let at = 0;
   let bg = background;
@@ -1054,6 +1081,418 @@ function lineCommands(cmd: string, walk: Walk): Cmd[] {
     if (e instanceof Unreadable) return [{ argv: [UNREADABLE_LINE], background: false }];
     throw e;
   }
+}
+
+/** Strict POSIX words for an approval envelope, without evaluating shell syntax. */
+function codexWords(text: string): string[] | null {
+  const words: string[] = [];
+  let word: string | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charAt(i);
+    if (c === " " || c === "\t") {
+      if (word !== null) words.push(word);
+      word = null;
+    } else if (c === "'" || c === '"') {
+      word ??= "";
+      const quote = c;
+      let closed = false;
+      while (++i < text.length) {
+        const d = text.charAt(i);
+        if (d === quote) {
+          closed = true;
+          break;
+        }
+        if (d === "\0") return null;
+        if (quote === '"' && (d === "$" || d === "`")) return null;
+        if (quote === '"' && d === "\\") {
+          const escaped = text.charAt(++i);
+          if (escaped === "" || !'"\\$`'.includes(escaped)) return null;
+          word += escaped;
+        } else word += d;
+      }
+      if (!closed) return null;
+    } else if (c === "\\") {
+      const next = text.charAt(++i);
+      if (next === "" || next.charCodeAt(0) < 32 || next.charCodeAt(0) === 127) return null;
+      word = (word ?? "") + next;
+    } else {
+      if (c.charCodeAt(0) <= 32 || c.charCodeAt(0) === 127 || "$`;|&<>(){}*?[]~#".includes(c))
+        return null;
+      word = (word ?? "") + c;
+    }
+  }
+  if (word !== null) words.push(word);
+  return words;
+}
+
+/** Decode the exact shell invocation and cross-check either form of execpolicy amendment. */
+export function codexCommand(raw: string, parsed: readonly string[] | null): string | null {
+  const words = codexWords(raw);
+  if (words?.length !== 3 || words[0] !== CODEX_SHELL || words[1] !== "-lc") return null;
+  const script = words[2];
+  if (parsed !== null) {
+    const expected = parsed[0] === CODEX_SHELL && parsed[1] === "-lc" ? words : codexWords(script);
+    if (
+      expected === null ||
+      expected.length !== parsed.length ||
+      !expected.every((w, n) => w === parsed[n])
+    )
+      return null;
+  }
+  return script;
+}
+
+/** Resolve missing leaves through their nearest existing parent; dangling links fail closed. */
+function realPathOrParent(path: string): string | null {
+  const missing: string[] = [];
+  let parent = path;
+  for (;;) {
+    try {
+      return resolve(realpathSync(parent), ...missing.reverse());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+      try {
+        lstatSync(parent);
+        return null;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+      }
+      const next = dirname(parent);
+      if (next === parent) return null;
+      missing.push(basename(parent));
+      parent = next;
+    }
+  }
+}
+
+/** The relative real path inside an existing worktree, or null. */
+function codexRelativePath(path: string, cwd: string): string | null {
+  try {
+    const root = realpathSync(cwd);
+    const real = realPathOrParent(isAbsolute(path) ? path : `${root}/${path}`);
+    if (real === null) return null;
+    const rel = relative(root, real);
+    return rel.split("/").includes("..") || isAbsolute(rel) ? null : rel;
+  } catch {
+    return null;
+  }
+}
+
+export function codexReadAllowed(path: string, cwd: string): boolean {
+  return codexRelativePath(path, cwd) !== null;
+}
+
+export function codexEditAllowed(
+  path: string,
+  cwd: string,
+  area: readonly string[],
+  protectedFiles: readonly string[],
+): boolean {
+  const real = codexRelativePath(path, cwd);
+  const rel = relative(cwd, isAbsolute(path) ? path : resolve(cwd, path));
+  return (
+    real !== null &&
+    !rel.split("/").includes("..") &&
+    [rel, real].every((p) => pathInArea(area, p) && !isProtectedPath(p, protectedFiles))
+  );
+}
+
+export interface CodexApprovalContext {
+  cwd: string;
+}
+
+/** Only local commands and file edits can become ordinary guard events. */
+export function codexApproval(
+  req: { method: string; params: unknown },
+  paths: readonly string[] | undefined,
+  ctx: CodexApprovalContext,
+): GuardEvent[] | null {
+  if (req.params === null || typeof req.params !== "object" || Array.isArray(req.params))
+    return null;
+  const p = req.params as Record<string, unknown>;
+  if (req.method === "item/fileChange/requestApproval") {
+    if (p.grantRoot !== null || paths === undefined) return null;
+    return paths.map((file_path) => ({ tool: "Edit", input: { file_path } }));
+  }
+  if (
+    req.method !== "item/commandExecution/requestApproval" ||
+    p.kind !== "command" ||
+    typeof p.command !== "string" ||
+    typeof p.cwd !== "string"
+  )
+    return null;
+  if (p.networkApprovalContext != null || (p.environmentId != null && p.environmentId !== "local"))
+    return null;
+  try {
+    if (!isAbsolute(p.cwd) || !codexReadAllowed(realpathSync(p.cwd), ctx.cwd)) return null;
+  } catch {
+    return null;
+  }
+  const parsed = p.proposedExecpolicyAmendment;
+  if (parsed != null && (!Array.isArray(parsed) || !parsed.every((w) => typeof w === "string")))
+    return null;
+  const script = codexCommand(p.command, parsed == null ? null : (parsed as string[]));
+  return script === null ? null : [{ tool: "Bash", input: { command: script } }];
+}
+
+type ReadOption = "value" | "path" | "pattern";
+interface ReadOptions {
+  flags: readonly string[];
+  values?: Readonly<Record<string, ReadOption>>;
+  pattern?: boolean;
+}
+
+/** Known read-only options only: unknown options may run a helper, follow links or write files. */
+const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
+  ls: {
+    flags: [
+      "-a",
+      "-A",
+      "-l",
+      "-h",
+      "-d",
+      "-R",
+      "-t",
+      "-r",
+      "-S",
+      "-1",
+      "-F",
+      "-p",
+      "-i",
+      "-s",
+      "-n",
+    ],
+  },
+  cat: { flags: ["-n", "-b", "-s", "-v", "-E", "-T", "-A", "-e", "-t", "-u"] },
+  head: {
+    flags: ["-q", "-v"],
+    values: { "-n": "value", "-c": "value", "--lines": "value", "--bytes": "value" },
+  },
+  tail: {
+    flags: ["-q", "-v"],
+    values: { "-n": "value", "-c": "value", "--lines": "value", "--bytes": "value" },
+  },
+  wc: { flags: ["-c", "-m", "-l", "-w", "-L"] },
+  rg: {
+    flags: [
+      "-n",
+      "-i",
+      "-s",
+      "-v",
+      "-l",
+      "-c",
+      "-w",
+      "-x",
+      "-F",
+      "-q",
+      "-o",
+      "-U",
+      "-a",
+      "--hidden",
+      "--files",
+      "--no-ignore",
+      "--line-number",
+      "--files-with-matches",
+      "--count",
+      "--fixed-strings",
+    ],
+    values: {
+      "-e": "pattern",
+      "--regexp": "pattern",
+      "-f": "path",
+      "--file": "path",
+      "-g": "value",
+      "--glob": "value",
+      "-t": "value",
+      "--type": "value",
+      "-T": "value",
+      "--type-not": "value",
+      "-A": "value",
+      "-B": "value",
+      "-C": "value",
+      "-m": "value",
+      "--max-count": "value",
+      "--max-depth": "value",
+      "--color": "value",
+    },
+    pattern: true,
+  },
+  grep: {
+    flags: [
+      "-n",
+      "-i",
+      "-v",
+      "-l",
+      "-c",
+      "-w",
+      "-x",
+      "-F",
+      "-E",
+      "-q",
+      "-o",
+      "-h",
+      "-H",
+      "-s",
+      "-a",
+    ],
+    values: {
+      "-e": "pattern",
+      "--regexp": "pattern",
+      "-f": "path",
+      "--file": "path",
+      "-A": "value",
+      "-B": "value",
+      "-C": "value",
+      "-m": "value",
+    },
+    pattern: true,
+  },
+  sed: { flags: ["-n"] },
+  find: {
+    flags: [
+      "-P",
+      "-print",
+      "-print0",
+      "-empty",
+      "-depth",
+      "-xdev",
+      "-mount",
+      "-prune",
+      "-o",
+      "-a",
+      "-not",
+      "!",
+      "(",
+      ")",
+    ],
+    values: {
+      "-name": "value",
+      "-iname": "value",
+      "-path": "value",
+      "-ipath": "value",
+      "-type": "value",
+      "-maxdepth": "value",
+      "-mindepth": "value",
+      "-size": "value",
+      "-mtime": "value",
+      "-mmin": "value",
+      "-newer": "path",
+    },
+  },
+  diff: {
+    flags: ["-u", "-q", "-s", "-i", "-w", "-b", "-B", "--brief", "--unified"],
+    values: { "-U": "value" },
+  },
+  stat: {
+    flags: ["-x"],
+    // BSD's -f takes a format; GNU's is a flag, so its next word must also be a safe path.
+    values: { "-f": "path", "-c": "value", "--format": "value" },
+  },
+};
+
+/** Check file operands, including option values that read pattern files. */
+function codexReadCommand(argv: readonly string[], cwd: string): boolean {
+  const program = argv[0];
+  const spec = CODEX_READ_COMMANDS[program];
+  if (spec === undefined || !codexReadAllowed(".", cwd)) return false;
+  if (program === "find" && argv.some((w) => FIND_EXEC.has(w) || w === "-delete")) return false;
+  let pattern = spec.pattern === true && !argv.includes("--files");
+  let options = true;
+  let sedScript = program === "sed";
+  if (sedScript && argv[1] !== "-n") return false;
+  for (let i = 1; i < argv.length; i++) {
+    const word = argv[i];
+    if (options && word === "--") {
+      // find's expressions still have meaning after its global option terminator.
+      options = program === "find";
+      continue;
+    }
+    if (
+      options &&
+      ((word.startsWith("-") && word !== "-") || (program === "find" && spec.flags.includes(word)))
+    ) {
+      const equal = word.indexOf("=");
+      const name = equal === -1 ? word : word.slice(0, equal);
+      let kind = spec.values?.[name];
+      let value = equal === -1 ? undefined : word.slice(equal + 1);
+      if (kind === undefined && equal === -1 && word.startsWith("-") && !word.startsWith("--")) {
+        const cluster = clusterValue(word, Object.keys(spec.values ?? {}));
+        if (cluster !== null) {
+          const at = word.indexOf(cluster.letter, 1);
+          if (![...word.slice(1, at)].every((c) => spec.flags.includes(`-${c}`))) return false;
+          kind = spec.values?.[`-${cluster.letter}`];
+          value = cluster.inline || undefined;
+        }
+      }
+      if (kind !== undefined) {
+        value ??= argv[++i];
+        if (value === undefined || (kind === "path" && !codexReadAllowed(value, cwd))) return false;
+        if (kind === "pattern" || (kind === "path" && spec.pattern)) pattern = false;
+      } else if (
+        equal !== -1 ||
+        (!spec.flags.includes(word) &&
+          !(
+            word.startsWith("-") &&
+            !word.startsWith("--") &&
+            [...word.slice(1)].every((c) => spec.flags.includes(`-${c}`))
+          ))
+      )
+        return false;
+    } else if (sedScript) {
+      // Printing numeric line ranges is read-only; sed's e/r/w commands are not.
+      if (!/^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(word)) return false;
+      sedScript = false;
+    } else if (pattern) pattern = false;
+    else if (word !== "-" && !codexReadAllowed(word, cwd)) return false;
+  }
+  return !pattern && !sedScript;
+}
+
+/** Match the existing CLI's Bash permission entries, including the --output* denies. */
+function codexBashEntry(argv: readonly string[], entry: string): boolean {
+  if (!entry.startsWith("Bash(")) return false;
+  const pattern = entry.slice(5, -1).replace(/:\*$/, "");
+  const words = pattern.split(" ");
+  return (
+    argv.length >= words.length &&
+    words.every((w, n) => (w.endsWith("*") ? argv[n].startsWith(w.slice(0, -1)) : argv[n] === w))
+  );
+}
+
+export function codexCommandAllowed(
+  script: string,
+  mode: CrewMode,
+  commands: SeatCommands,
+  cwd: string,
+): boolean {
+  if (
+    [...script].some(
+      (c) => c !== "\n" && c !== "\t" && (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
+    )
+  )
+    return false;
+  let allowed: readonly string[];
+  try {
+    allowed = seatCommands(mode, commands);
+  } catch {
+    return false;
+  }
+  const walk = newWalk();
+  walk.codex = true;
+  const parsed = lineCommands(script, walk);
+  if (walk.lineBackground || parsed.length === 0) return false;
+  return parsed.every(({ argv, background, braces }) => {
+    if (background || braces || DENIED_TOOLS.some((entry) => codexBashEntry(argv, entry)))
+      return false;
+    if (Object.hasOwn(CODEX_READ_COMMANDS, argv[0])) return codexReadCommand(argv, cwd);
+    return (
+      GIT_READ_TOOLS.some((entry) => codexBashEntry(argv, entry)) ||
+      allowed.some((entry) => {
+        const words = entry.split(" ");
+        return argv.length >= words.length && words.every((w, n) => argv[n] === w);
+      })
+    );
+  });
 }
 
 function commands(cmd: string, walk: Walk, depth: number, background: boolean, mux: Mux): Cmd[] {

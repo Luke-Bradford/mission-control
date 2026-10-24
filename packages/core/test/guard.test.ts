@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   BACKGROUND_SUITE_TEXT,
   closesIssue,
+  codexApproval,
+  codexCommand,
+  codexCommandAllowed,
+  codexEditAllowed,
+  codexReadAllowed,
   decodeCharRefs,
   engineHitText,
   FREE_SUITE_HINT,
@@ -22,6 +30,276 @@ import {
   unclosedMarkdown,
 } from "../src/guard.ts";
 import { MC_TOOLS } from "../src/mcp.ts";
+import { CODEX_SHELL, DEFAULT_SEAT_COMMANDS } from "../src/runtime.ts";
+
+describe("codexCommand", () => {
+  it("decodes the spike's bare, quoted, mixed-quote and heredoc commands", () => {
+    expect(codexCommand("/bin/zsh -lc ls", ["ls"])).toBe("ls");
+    expect(codexCommand("/bin/zsh -lc 'cat a.txt'", ["cat", "a.txt"])).toBe("cat a.txt");
+    const mixed = String.raw`echo 'it'"'"'s' "$HOME" \$x`;
+    const raw = String.raw`/bin/zsh -lc "echo 'it'\"'\"'s' \"\$HOME\" \\\$x"`;
+    expect(codexCommand(raw, [CODEX_SHELL, "-lc", mixed])).toBe(mixed);
+    const heredoc = "cat <<'E'\nline1\nE";
+    expect(codexCommand(`/bin/zsh -lc "${heredoc}"`, [CODEX_SHELL, "-lc", heredoc])).toBe(heredoc);
+    expect(codexCommand("/bin/zsh -lc c\"at \"'a.txt'", null)).toBe("cat a.txt");
+  });
+
+  it.each([
+    "/usr/bin/env zsh -lc x",
+    "/bin/bash -lc x",
+    "/bin/zsh -c x",
+    "/bin/zsh -lc x extra",
+    "/bin/zsh -lc",
+    "/bin/zsh -lc 'x",
+    '/bin/zsh -lc "$HOME"',
+    '/bin/zsh -lc "`id`"',
+    '/bin/zsh -lc "bad\\q"',
+    "/bin/zsh -lc $HOME",
+    "/bin/zsh -lc ls;id",
+    "/bin/zsh -lc ls\nid",
+    "/bin/zsh -lc *",
+    "/bin/zsh -lc ~",
+    "/bin/zsh -lc ls\0",
+  ])("declines ambiguous command %j", (raw) => {
+    expect(codexCommand(raw, null)).toBeNull();
+  });
+
+  it("checks both forms of amendment word for word", () => {
+    expect(codexCommand("/bin/zsh -lc 'cat a.txt'", ["cat", "b.txt"])).toBeNull();
+    expect(codexCommand("/bin/zsh -lc ls", [CODEX_SHELL, "-lc", "pwd"])).toBeNull();
+    expect(codexCommand("/bin/zsh -lc ls", [])).toBeNull();
+    expect(codexCommand("/bin/zsh -lc 'cat a.txt'", [CODEX_SHELL, "-lc", "cat a.txt"])).toBe(
+      "cat a.txt",
+    );
+  });
+});
+
+describe("Codex seat floor", () => {
+  let root: string;
+  let cwd: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "mc-codex-guard-"));
+    cwd = join(root, "worktree");
+    mkdirSync(join(cwd, "apps/web"), { recursive: true });
+    mkdirSync(join(root, "outside"));
+    symlinkSync(join(root, "outside"), join(cwd, "escape"));
+    symlinkSync(join(root, "missing"), join(cwd, "dangling"));
+    symlinkSync(join(cwd, "apps/web"), join(cwd, "inside"));
+    writeFileSync(join(cwd, "apps/web/a.ts"), "");
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const request = (params: Record<string, unknown>) => ({
+    method: "item/commandExecution/requestApproval",
+    params,
+  });
+
+  it("maps command approvals and every file-change path", () => {
+    const params = {
+      kind: "command",
+      command: "/bin/zsh -lc ls",
+      cwd,
+      environmentId: "local",
+      proposedExecpolicyAmendment: ["ls"],
+    };
+    expect(codexApproval(request(params), undefined, { cwd })).toEqual([
+      { tool: "Bash", input: { command: "ls" } },
+    ]);
+    expect(
+      codexApproval(
+        request({ ...params, cwd: join(cwd, "apps"), environmentId: null }),
+        undefined,
+        { cwd },
+      ),
+    ).not.toBeNull();
+    expect(
+      codexApproval(
+        { method: "item/fileChange/requestApproval", params: { grantRoot: null } },
+        ["apps/web/a.ts", "apps/web/b.ts"],
+        { cwd },
+      ),
+    ).toEqual([
+      { tool: "Edit", input: { file_path: "apps/web/a.ts" } },
+      { tool: "Edit", input: { file_path: "apps/web/b.ts" } },
+    ]);
+  });
+
+  it("declines malformed, nonlocal, network and non-command approvals", () => {
+    const params = { kind: "command", command: "/bin/zsh -lc ls", cwd };
+    for (const patch of [
+      { kind: "writeStdin" },
+      { kind: undefined },
+      { command: null },
+      { networkApprovalContext: {} },
+      { environmentId: "remote" },
+      { cwd: root },
+      { cwd: join(cwd, "escape") },
+      { cwd: join(cwd, "missing") },
+      { proposedExecpolicyAmendment: ["pwd"] },
+      { proposedExecpolicyAmendment: "ls" },
+    ])
+      expect(codexApproval(request({ ...params, ...patch }), undefined, { cwd })).toBeNull();
+    for (const params of [null, [], "x", 1]) {
+      expect(
+        codexApproval({ method: "item/commandExecution/requestApproval", params }, undefined, {
+          cwd,
+        }),
+      ).toBeNull();
+    }
+    expect(
+      codexApproval(
+        { method: "item/fileChange/requestApproval", params: { grantRoot: cwd } },
+        ["a.ts"],
+        { cwd },
+      ),
+    ).toBeNull();
+    expect(
+      codexApproval(
+        { method: "item/fileChange/requestApproval", params: { grantRoot: null } },
+        undefined,
+        { cwd },
+      ),
+    ).toBeNull();
+    for (const method of [
+      "item/permissions/requestApproval",
+      "item/tool/requestUserInput",
+      "mcpServer/elicitation/request",
+      "applyPatchApproval",
+      "execCommandApproval",
+      "unknown",
+    ]) {
+      expect(codexApproval({ method, params: {} }, [], { cwd })).toBeNull();
+    }
+  });
+
+  it("allows configured commands by mode, git reads and confined read commands", () => {
+    for (const script of [
+      "pnpm -s test",
+      "pnpm -s test x.test.ts",
+      "git status --short",
+      "git log --oneline",
+      "rg foo src",
+      "rg -n 'foo bar' src",
+      "cat apps/web/a.ts",
+      "head -c 5 apps/web/a.ts",
+      "tail -n 5 apps/web/a.ts",
+      "wc -l apps/web/a.ts",
+      "sed -n '1,20p' apps/web/a.ts",
+      "find apps -name '*.ts'",
+      "diff apps/web/a.ts apps/web/b.ts",
+      "stat apps/web/a.ts",
+      "ls",
+      "git status && rg foo src",
+      "pnpm -s test 2>&1",
+      "cat <<'E'\nline1\nE",
+      "cat apps/web/a.ts | grep foo",
+    ]) {
+      expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd), script).toBe(true);
+    }
+    for (const mode of ["read-only", "scratch"] as const) {
+      expect(codexCommandAllowed("pnpm -s test", mode, DEFAULT_SEAT_COMMANDS, cwd)).toBe(false);
+      expect(
+        codexCommandAllowed("pnpm -s vitest run a.test.ts", mode, DEFAULT_SEAT_COMMANDS, cwd),
+      ).toBe(true);
+    }
+    const custom = { writer: ["make check"], review: ["make inspect"] };
+    expect(codexCommandAllowed("make check unit", "writer", custom, cwd)).toBe(true);
+    expect(codexCommandAllowed("pnpm -s test", "writer", custom, cwd)).toBe(false);
+    expect(codexCommandAllowed("make checkmate", "writer", custom, cwd)).toBe(false);
+    expect(codexCommandAllowed("make inspect", "scratch", custom, cwd)).toBe(true);
+  });
+
+  it("declines substitutions, background work, file redirection and allowlist escapes", () => {
+    for (const script of [
+      "pnpm -s test && rm x",
+      "pnpm -s test $(id)",
+      "git status; curl x",
+      "sleep 20 &",
+      "cat ../../etc/passwd",
+      "cat /home/you/.ssh/id_rsa",
+      "rm -rf /",
+      "pnpm -s test &",
+      "pnpm -s test $(git status)",
+      'cat "$HOME/file"',
+      "cat `ls`",
+      "cat < /etc/passwd",
+      "pnpm -s test > out",
+      "git status >> out",
+      "cat <(ls)",
+      "cat escape/token",
+      "cat dangling/token",
+      "rg --pre=sh foo src",
+      "rg -f /etc/passwd src",
+      "grep -f/etc/passwd src",
+      "rg -L foo src",
+      "sed -n '1e id' apps/web/a.ts",
+      "sed -n '1w out' apps/web/a.ts",
+      "sed -nf /etc/passwd",
+      "find . -exec cat /etc/passwd ';'",
+      "find . -delete",
+      "find -- . -delete",
+      "find -- . -exec cat /etc/passwd ';'",
+      "find . -fprint out",
+      "find -L .",
+      "diff --output=out a b",
+      "diff --unified --from-file=/etc/passwd a",
+      "stat -f /etc/passwd",
+      "cat 'unterminated",
+      "cat *",
+      "cat apps/{web,other}/a.ts",
+      "cat <<E\n$HOME\nE",
+      "env PATH=/other pnpm -s test",
+      "PATH=/other pnpm -s test",
+      "./pnpm -s test",
+      "git diff --output=out",
+      "git log --output out",
+      "git show --output=out",
+      "",
+    ])
+      expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd), script).toBe(false);
+  });
+
+  it("keeps denies and read path checks even for a custom command", () => {
+    for (const command of ["git commit", "curl", "gh", "security", "git -c", "cat", "find"]) {
+      const script =
+        command === "cat"
+          ? "cat /etc/passwd"
+          : command === "find"
+            ? "find . -delete"
+            : `${command} x`;
+      expect(
+        codexCommandAllowed(script, "writer", { writer: [command], review: [] }, cwd),
+        script,
+      ).toBe(false);
+    }
+  });
+
+  it("confines reads and edits through existing and missing parents", () => {
+    expect(codexReadAllowed("apps/web/new/deep/a.ts", cwd)).toBe(true);
+    expect(codexReadAllowed("inside/a.ts", cwd)).toBe(true);
+    expect(codexReadAllowed("../outside/x", cwd)).toBe(false);
+    expect(codexReadAllowed("escape/new/x", cwd)).toBe(false);
+    expect(codexReadAllowed("dangling/x", cwd)).toBe(false);
+    expect(codexEditAllowed("apps/web/new/a.ts", cwd, ["apps/web/**"], [])).toBe(true);
+    for (const path of [
+      "package.json",
+      ".github/workflows/x.yml",
+      ".codex/config.toml",
+      "apps/web/.codex/config.toml",
+      "../outside/x",
+      "escape/x",
+      "dangling/x",
+    ]) {
+      expect(codexEditAllowed(path, cwd, ["apps/web/**"], []), path).toBe(false);
+    }
+    expect(codexEditAllowed(".codex/config.toml", cwd, [], [])).toBe(false);
+    expect(codexEditAllowed(".github/workflows/x.yml", cwd, [], [])).toBe(false);
+    expect(codexEditAllowed("apps/web/a.ts", cwd, [], ["apps/web/a.ts"])).toBe(false);
+    symlinkSync(join(cwd, "package.json"), join(cwd, "apps/web/alias.ts"));
+    writeFileSync(join(cwd, "package.json"), "{}");
+    expect(codexEditAllowed("apps/web/alias.ts", cwd, ["apps/web/**"], [])).toBe(false);
+  });
+});
 
 const FULL = ["pnpm -s test", "pnpm -s vitest run", "pnpm -s vitest"];
 const writer: GuardContext = {

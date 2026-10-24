@@ -57,7 +57,7 @@ Each is pinned by a test in the named step.
 
 **Interfaces produced:**
 
-- `codexSeatConfig(i: CrewSandboxInput, mode: CrewMode, mcpUrl: string): string`, in `runtime.ts`. It returns the run's `config.toml` text:
+- `codexSeatConfig(i: CrewSandboxInput, mode: CrewMode, mcpUrl: string, tmpDir: string): string`, in `runtime.ts`. It returns the run's `config.toml` text:
   - `approvals_reviewer = "user"`, `project_doc_max_bytes = 0`, and `web_search = "disabled"`;
   - no `notify`, no `[features]` except as below, and the unified/background exec feature off. Confirm the key names on 0.154 with `codex app-server generate-json-schema` (the `Config` definition), and record them in a test comment;
   - `shell_environment_policy.exclude = ["MC_SEAT_TOKEN"]`;
@@ -68,7 +68,7 @@ Each is pinned by a test in the named step.
       - every path in the seat's `denyRead` (`SANDBOX_DENY_READ_HOME` under `home`, `dataDir`, then `CrewSandboxInput.denyRead`) is `"deny"`;
       - under `":workspace_roots"`, writer mode gets `"."="write"` and read-only/scratch modes get `"."="read"`. The area is **not** used here: it is checked at approval (`codexEditAllowed`), so builds and tests can write `dist/` and caches as a Claude seat's Bash can;
       - `".git"="read"`. `gitCommonDir` and `worktreeGitDir` sit outside the workspace and stay read-only through `":root"`;
-      - the seat's own temp dir gets `"write"`. That's a per-run dir under `crewSandboxTmp`, which `TMPDIR`, the pnpm store and the Python caches point at, as `crewEnv` does today;
+      - `tmpDir` (the seat's own temp dir, an absolute path Step B passes) gets `"write"`. That's a per-run dir under `crewSandboxTmp`, which `TMPDIR`, the pnpm store and the Python caches point at, as `crewEnv` does today;
     - **network:** off, with no `features.network_proxy`.
   - Every string goes through one TOML-quoting helper, which throws on `"`, `\` and characters U+0000–001F and U+007F.
 - `codexCommand(raw: string, parsed: readonly string[] | null): string | null`, in `guard.ts`. It returns the shell script a command approval will run, or `null`, which means decline.
@@ -84,7 +84,7 @@ Each is pinned by a test in the named step.
   - **Command approval:** `kind === "command"`, `command !== null`, `networkApprovalContext` and `environmentId` are absent or `null`/`"local"`, `realpath(cwd)` is inside `ctx.cwd`, and `codexCommand` succeeds. It yields `[{ tool: "Bash", input: { command: script } }]`.
   - **File-change approval:** `grantRoot` is null and `paths` is known. It yields one `{ tool: "Edit", input: { file_path } }` per path.
   - **Any other method:** `null`.
-- `codexCommandAllowed(script: string, mode: CrewMode, commands: SeatCommands): boolean`, in `guard.ts`.
+- `codexCommandAllowed(script: string, mode: CrewMode, commands: SeatCommands, cwd: string): boolean`, in `guard.ts`.
   - It parses the script with the guard's existing `lineCommands` walker. It refuses on anything that walker flags as unreadable, and on any substitution, background (`&`), or redirect to a file.
   - Every argv must token-prefix-match an entry from the right list:
     - **writer:** `commands.writer` plus `GIT_READ_TOOLS`;

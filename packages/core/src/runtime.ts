@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve } from "node:path";
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
 import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
 import { ROLES } from "./roles.ts";
@@ -214,7 +215,7 @@ export const CREW_ISOLATION_FLAGS = [
   "--disable-slash-commands",
 ] as const;
 
-const GIT_READ_TOOLS = [
+export const GIT_READ_TOOLS = [
   "Bash(git status:*)",
   "Bash(git diff:*)",
   "Bash(git log:*)",
@@ -237,6 +238,13 @@ export const DEFAULT_SEAT_COMMANDS: SeatCommands = Object.freeze({
   ]),
   review: Object.freeze(["pnpm -s vitest"]),
 });
+
+/** The same command selection and validation for both crew CLIs. */
+export function seatCommands(mode: CrewMode, commands: SeatCommands): readonly string[] {
+  const mine = mode === "writer" ? commands.writer : commands.review;
+  checkSeatCommands(mine);
+  return mine;
+}
 
 const bashEntries = (cmds: readonly string[]): string[] => cmds.map((c) => `Bash(${c}:*)`);
 
@@ -318,6 +326,7 @@ export const PROTECTED_FILES = [
   ".github/**",
   ".husky/**",
   ".claude/**",
+  ".codex/**",
   ".git",
   "**/.git",
   ".npmrc",
@@ -779,6 +788,76 @@ export const SANDBOX_DENY_READ_HOME = [
   "Library/Keychains",
 ] as const;
 
+/** The shell Step B sets in the Codex process environment and command approvals must name. */
+export const CODEX_SHELL = "/bin/zsh";
+export const CODEX_SEAT_PROFILE = "mc_seat";
+export const CODEX_SEAT_TOKEN_ENV = "MC_SEAT_TOKEN";
+
+/** TOML strings in a seat config never need escaping; refuse input that would. */
+function tomlString(value: string): string {
+  if (
+    [...value].some(
+      (c) => c === '"' || c === "\\" || c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
+    )
+  ) {
+    throw new Error("codex seat config: unsafe TOML string");
+  }
+  return `"${value}"`;
+}
+
+/** The hub-written config in one run's isolated CODEX_HOME. */
+export function codexSeatConfig(
+  i: CrewSandboxInput,
+  mode: CrewMode,
+  mcpUrl: string,
+  tmpDir: string,
+): string {
+  const denied = sandboxReadDenies(i);
+  for (const path of [
+    i.cwd,
+    i.gitCommonDir,
+    i.worktreeGitDir,
+    i.home,
+    i.dataDir,
+    ...denied,
+    tmpDir,
+  ]) {
+    tomlString(path);
+  }
+  if (!isAbsolute(tmpDir)) throw new Error("codex seat config: tmpDir must be absolute");
+  if (
+    denied.some((path) => {
+      const rel = relative(resolve(path), resolve(tmpDir));
+      return rel === "" || (!rel.startsWith("../") && rel !== ".." && !isAbsolute(rel));
+    })
+  )
+    throw new Error("codex seat config: tmpDir is inside a denied path");
+  const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
+  return [
+    `approvals_reviewer = ${tomlString("user")}`,
+    "project_doc_max_bytes = 0",
+    `web_search = ${tomlString("disabled")}`,
+    `default_permissions = ${tomlString(CODEX_SEAT_PROFILE)}`,
+    "[features]",
+    "unified_exec = false",
+    "[shell_environment_policy]",
+    `exclude = [${tomlString(CODEX_SEAT_TOKEN_ENV)}]`,
+    `[mcp_servers.${MC_MCP_SERVER}]`,
+    `url = ${tomlString(mcpUrl)}`,
+    `bearer_token_env_var = ${tomlString(CODEX_SEAT_TOKEN_ENV)}`,
+    `[permissions.${CODEX_SEAT_PROFILE}.filesystem]`,
+    grant(":root", "read"),
+    ...denied.map((path) => grant(path, "deny")),
+    grant(tmpDir, "write"),
+    `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
+    grant(".", mode === "writer" ? "write" : "read"),
+    grant(".git", "read"),
+    `[permissions.${CODEX_SEAT_PROFILE}.network]`,
+    "enabled = false",
+    "",
+  ].join("\n");
+}
+
 /** The guard hook as a seat's settings name it: its command line and the CLI's timeout on it. */
 export interface CrewHook {
   /** From `guardHookCommand`: paths only, never the token. */
@@ -804,14 +883,8 @@ function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
   return out;
 }
 
-/**
- * The `--settings` JSON for a seat: the guard hook, and the sandbox around every Bash it runs. The
- * sandbox writes only inside the working directory (a writer's) and temp dirs, never the clone's
- * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
- * rather than run unsandboxed.
- */
-export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
-  const writes = mode !== "read-only";
+/** Absolute sandbox inputs and the shared credential, data and extra read denies. */
+function sandboxReadDenies(i: CrewSandboxInput): string[] {
   // A relative path would be resolved against the CLI's cwd, not mean what the rules below say.
   for (const [k, v] of [
     ["cwd", i.cwd],
@@ -825,9 +898,20 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
   for (const p of i.denyRead) {
     if (!p.startsWith("/")) throw new Error("crew sandbox: denyRead must be absolute");
   }
-  const denyRead = [
+  return [
     ...new Set([...SANDBOX_DENY_READ_HOME.map((d) => `${i.home}/${d}`), i.dataDir, ...i.denyRead]),
   ];
+}
+
+/**
+ * The `--settings` JSON for a seat: the guard hook, and the sandbox around every Bash it runs. The
+ * sandbox writes only inside the working directory (a writer's) and temp dirs, never the clone's
+ * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
+ * rather than run unsandboxed.
+ */
+export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
+  const writes = mode !== "read-only";
+  const denyRead = sandboxReadDenies(i);
   return JSON.stringify({
     hooks: guardHooks(hook),
     sandbox: {
@@ -920,8 +1004,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
   const base: readonly string[] =
     i.mode === "writer" ? WRITER_TOOLS : i.mode === "scratch" ? SCRATCH_TOOLS : READONLY_TOOLS;
   const cmds = i.commands ?? DEFAULT_SEAT_COMMANDS;
-  const mine = i.mode === "writer" ? cmds.writer : cmds.review;
-  checkSeatCommands(mine);
+  const mine = seatCommands(i.mode, cmds);
   const defaults = bashEntries(
     i.mode === "writer" ? DEFAULT_SEAT_COMMANDS.writer : DEFAULT_SEAT_COMMANDS.review,
   );
