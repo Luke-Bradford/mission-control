@@ -7,7 +7,7 @@ import { MachinePanel } from "../src/overview/MachinePanel.tsx";
 import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
-import { CONFIG, limit7d, NOW, OVERVIEW } from "./fixtures.ts";
+import { CONFIG, HOUR, limit7d, NOW, OVERVIEW } from "./fixtures.ts";
 
 afterEach(() => {
   cleanup();
@@ -123,6 +123,18 @@ it("marks the projected quota at reset", async () => {
   await waitFor(() =>
     expect(container.querySelector<HTMLElement>(".projection-tick")?.style.left).toBe("84%"),
   );
+});
+
+it("shows a backed-off quota row's next try beside its stale age", async () => {
+  stubFetch({ "/api/health": [] });
+  render(
+    <QuotaMeter
+      row={limit7d({ stale: true, sampledAt: NOW - 3 * HOUR, nextTryAt: NOW + 2 * 60_000 })}
+      now={NOW}
+      showAge
+    />,
+  );
+  expect(await screen.findByText(/3h ago · next try in 2m/)).toBeTruthy();
 });
 
 const attentionItem = {

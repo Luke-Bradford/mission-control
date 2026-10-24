@@ -10,10 +10,10 @@ import {
 } from "./usage-common.ts";
 
 export const OAUTH_USAGE_SOURCE = "oauth-usage";
-export const USAGE_BACKOFF_CAP_MS = 4 * 60 * 60_000;
+export const USAGE_BACKOFF_MIN_MS = 60_000;
+export const USAGE_BACKOFF_CAP_MS = 30 * 60_000;
 export const USAGE_BACKOFF_FACTOR = 2;
 export const USAGE_BACKOFF_SETTING = "usage_backoff:claude";
-export const USAGE_RETRY_AFTER_MAX_MS = 24 * 60 * 60_000;
 /** Away starts require readings no older than six hours. */
 export const USAGE_STALE_MAX_MS = 6 * 60 * 60_000;
 /** A rate-limited read is a note while a reading younger than this exists. */

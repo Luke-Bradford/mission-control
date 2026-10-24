@@ -75,6 +75,7 @@ import {
   type NotificationsView,
   personKey,
 } from "../src/collectors/notifications.ts";
+import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
@@ -2410,6 +2411,19 @@ describe("limits", () => {
       ["claude-main", "5h", false],
       ["claude-main", "7d", true],
     ]);
+  });
+
+  it("includes the Claude usage retry while its collector is backing off", async () => {
+    const nextTryAt = NOW + 2 * HOUR;
+    store.addUsage(sample({ accountId: "claude-main", window: "5h", resetAt: NOW + HOUR }));
+    store.setSetting(
+      USAGE_BACKOFF_SETTING,
+      JSON.stringify({ waitMs: 30 * 60e3, notBefore: nextTryAt }),
+    );
+    const rows = (await get("/api/limits")).json() as Record<string, unknown>[];
+    expect(rows.find((r) => r.accountId === "claude-main" && r.window === "5h")?.nextTryAt).toBe(
+      NOW + 30 * 60e3,
+    );
   });
 });
 

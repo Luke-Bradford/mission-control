@@ -71,7 +71,6 @@ import {
   USAGE_BACKOFF_FACTOR,
   USAGE_BACKOFF_SETTING,
   USAGE_RATE_LIMIT_MAX_AGE_MS,
-  USAGE_RETRY_AFTER_MAX_MS,
 } from "./collectors/usage-claude.ts";
 import { sampleCodex } from "./collectors/usage-codex.ts";
 import { WINDOWS } from "./collectors/usage-common.ts";
@@ -345,6 +344,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let githubResetAt = 0;
   // All Claude accounts use the same Keychain token and OAuth endpoint.
   let usageBackoff: { waitMs: number; notBefore: number } | null = null;
+  let usageRetryTimer: NodeJS.Timeout | null = null;
   /** When the last board read began; boards are read on the first poll. */
   let lastBoardAt = Number.NEGATIVE_INFINITY;
   /** A trigger asked for a board read that has not run yet. */
@@ -534,8 +534,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   const usageFor = async (acct: CcConfig["accounts"][number]) => {
     const backoff = usageBackoff;
-    const slack = intervals.usage / 2;
-    if (acct.vendor === "claude" && backoff && now() < backoff.notBefore - slack) {
+    if (acct.vendor === "claude" && backoff && now() < backoff.notBefore) {
       if (backoff.waitMs > 0) noteUsageLimited(acct.id, backoff.notBefore);
       return;
     }
@@ -551,8 +550,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         backoff?.waitMs ? backoff.waitMs * USAGE_BACKOFF_FACTOR : intervals.usage,
       );
       const at = now();
-      usageBackoff = { waitMs, notBefore: Math.max(at + waitMs, err.notBefore(at)) };
+      const retryAt =
+        err.retryAfterMs !== null || err.retryAt !== null ? err.notBefore(at) : at + waitMs;
+      usageBackoff = { waitMs, notBefore: retryAt };
       store.setSetting(USAGE_BACKOFF_SETTING, JSON.stringify(usageBackoff));
+      scheduleUsageRetry();
     };
     const sample = acct.vendor === "claude" ? c.claude : c.codex;
     const samples = await sample(acct.id, onError, now());
@@ -563,10 +565,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (held) noteUsageLimited(acct.id, held.notBefore);
       return;
     }
-    if (acct.vendor === "claude") {
-      // This attempt ended the 429 sequence, including a due attempt that failed otherwise.
+    if (acct.vendor === "claude" && samples.some((s) => s.source === OAUTH_USAGE_SOURCE)) {
+      // The provider has recovered, so the next 429 starts a new back-off sequence.
       usageBackoff = null;
       store.deleteSetting(USAGE_BACKOFF_SETTING);
+      clearUsageRetry();
     }
     const missing = WINDOWS.filter((w) => !samples.some((s) => s.window === w));
     const collector = usageCollector(acct.id);
@@ -955,6 +958,22 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     return "ran";
   };
 
+  const clearUsageRetry = () => {
+    if (usageRetryTimer !== null) clearTimeout(usageRetryTimer);
+    usageRetryTimer = null;
+  };
+
+  const scheduleUsageRetry = () => {
+    clearUsageRetry();
+    const backoff = usageBackoff;
+    if (!backoff || backoff.waitMs === 0 || backoff.notBefore <= now()) return;
+    usageRetryTimer = setTimeout(() => {
+      usageRetryTimer = null;
+      void tick("usage");
+    }, backoff.notBefore - now());
+    usageRetryTimer.unref();
+  };
+
   const intervals: Record<Job, number> = {
     teams: 60_000,
     ta: LOOP_INTERVAL_MS,
@@ -1015,8 +1034,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           ) {
             usageBackoff = {
               waitMs: Math.min(parsed.waitMs, USAGE_BACKOFF_CAP_MS),
-              notBefore: Math.min(parsed.notBefore, at + USAGE_RETRY_AFTER_MAX_MS),
+              notBefore: Math.min(parsed.notBefore, at + USAGE_BACKOFF_CAP_MS),
             };
+            store.setSetting(USAGE_BACKOFF_SETTING, JSON.stringify(usageBackoff));
           } else store.deleteSetting(USAGE_BACKOFF_SETTING);
         } catch {
           store.deleteSetting(USAGE_BACKOFF_SETTING);
@@ -1030,6 +1050,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           .sort((a, b) => b.at - a.at)[0];
         if (recent) usageBackoff = { waitMs: 0, notBefore: recent.at + intervals.usage };
       }
+      scheduleUsageRetry();
       store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       unsubscribeCrew = bus.subscribe((t) => {
         if (t === "agents") recordCrewSoon();
@@ -1074,6 +1095,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     },
     async stop() {
       for (const t of timers.splice(0)) clearTimeout(t); // also clears intervals
+      clearUsageRetry();
       unsubscribeCrew?.();
       unsubscribeCrew = null;
       if (cliRetry !== null) clearTimeout(cliRetry);

@@ -631,6 +631,8 @@ interface LimitRowBase {
   source: string;
   /** When the latest sample (the one `used` comes from) was taken, UTC ms. */
   sampledAt: number;
+  /** The Claude usage collector's next rate-limit retry, UTC ms. Omitted when not backing off. */
+  nextTryAt?: number;
 }
 
 /**
