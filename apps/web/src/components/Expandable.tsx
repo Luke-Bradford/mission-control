@@ -38,7 +38,17 @@ export function Clamp({
 }
 
 /** Long text stays inside its row; expanded prose scrolls within a bounded height. */
-export function Expandable({ lines, children }: { lines: number; children: ReactNode }) {
+export function Expandable({
+  lines,
+  foldAfter = lines,
+  of,
+  children,
+}: {
+  lines: number;
+  foldAfter?: number;
+  of?: string;
+  children: ReactNode;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -48,7 +58,7 @@ export function Expandable({ lines, children }: { lines: number; children: React
     if (!el) return;
     const measure = () => {
       const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
-      const clampedHeight = Number.isFinite(lineHeight) ? lines * lineHeight : el.clientHeight;
+      const clampedHeight = Number.isFinite(lineHeight) ? foldAfter * lineHeight : el.clientHeight;
       const overflowing = el.scrollHeight > clampedHeight;
       setOverflows(overflowing);
       if (!overflowing) setOpen(false);
@@ -56,26 +66,29 @@ export function Expandable({ lines, children }: { lines: number; children: React
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(el);
+    const mutations = new MutationObserver(measure);
+    mutations.observe(el, { childList: true, characterData: true, subtree: true });
     window.addEventListener("resize", measure);
     // A disclosure may start inside a closed details element.
     const details = el.closest("details");
     details?.addEventListener("toggle", measure);
     return () => {
       observer?.disconnect();
+      mutations.disconnect();
       window.removeEventListener("resize", measure);
       details?.removeEventListener("toggle", measure);
     };
-  }, [children, lines]);
+  }, [children, foldAfter]);
   return (
     <div className={`expandable${open ? " open" : ""}`}>
       <div
         ref={box}
         className="expandable-content expandable-text"
-        style={{ WebkitLineClamp: open ? "unset" : lines }}
+        style={{ WebkitLineClamp: open ? "unset" : overflows ? lines : foldAfter }}
       >
         {children}
       </div>
-      {overflows && <Toggle on={open} onClick={() => setOpen(!open)} />}
+      {overflows && <Toggle on={open} of={of} onClick={() => setOpen(!open)} />}
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import type { ItemDiscussion as Discussion } from "@mc/core";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Expandable } from "../components/Expandable.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { askFlight } from "./answer.ts";
+import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
 
 type Receipt = { id: string; text: string; note?: string };
 
@@ -10,8 +12,19 @@ export function ItemDiscussion(p: {
   live: boolean;
   title?: string;
   receipt?: Receipt;
+  focus?: boolean;
+  collapsed?: boolean;
 }) {
-  return <DiscussionBody key={p.itemKey} {...p} />;
+  return (
+    <details
+      className="item-conversation"
+      key={p.itemKey}
+      open={!p.collapsed || Boolean(p.receipt)}
+    >
+      <summary>Conversation with FLIGHT</summary>
+      <DiscussionBody {...p} />
+    </details>
+  );
 }
 
 function DiscussionBody({
@@ -19,12 +32,26 @@ function DiscussionBody({
   live,
   title,
   receipt,
+  focus = false,
 }: {
   itemKey: string;
   live: boolean;
   title?: string;
   receipt?: Receipt;
+  focus?: boolean;
 }) {
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    let active = true;
+    // Let the panel remember its opener before moving focus into the conversation.
+    if (focus && live)
+      queueMicrotask(() => {
+        if (active) input.current?.focus({ preventScroll: true });
+      });
+    return () => {
+      active = false;
+    };
+  }, [focus, live]);
   const current = useResource<Discussion>(RESOURCES.discussion(itemKey));
   const resource = current.data ? RESOURCES.discussion(itemKey, current.data.id) : null;
   const history = useResource<Discussion>(resource);
@@ -75,7 +102,11 @@ function DiscussionBody({
           .map((m) => (
             <div className={`dmsg ${m.role === "operator" ? "you" : "flight"}`} key={m.id}>
               <span className="who">{m.role === "operator" ? "You" : "FLIGHT"}</span>
-              <div className="txt">{m.text}</div>
+              <div className="txt">
+                <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+                  {m.text}
+                </Expandable>
+              </div>
             </div>
           ))}
         {receipt &&
@@ -85,7 +116,11 @@ function DiscussionBody({
           ) && (
             <div className="dmsg you">
               <span className="who">You</span>
-              <div className="txt">{receipt.text}</div>
+              <div className="txt">
+                <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+                  {receipt.text}
+                </Expandable>
+              </div>
               {receipt.note && <p className="note">{receipt.note}</p>}
             </div>
           )}
@@ -107,6 +142,7 @@ function DiscussionBody({
         }}
       >
         <input
+          ref={input}
           aria-label="Ask FLIGHT about this"
           placeholder="Ask FLIGHT about this…"
           autoComplete="off"

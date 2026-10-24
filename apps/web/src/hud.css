@@ -2828,13 +2828,15 @@ div.opt {
   box-shadow: var(--shadow);
 }
 #dsBrief {
-  max-height: 46vh;
-  overflow: auto;
   border-bottom: 1px solid var(--line);
   padding-top: 10px;
 }
 #dsOpts {
   flex-wrap: wrap;
+}
+#dsOpts .optlist {
+  width: 100%;
+  min-width: 0;
 }
 
 /* catch-up: every item brought to you starts with context */
@@ -3626,18 +3628,57 @@ button.nrow.thread.tagged {
   min-width: 0;
   flex: 1 1 160px;
 }
-#discuss.decision-item .brief,
-#discuss.decision-item .opt,
-#discuss.decision-item .ctx {
+#discuss .brief,
+#discuss .opt,
+#discuss .ctx {
   overflow-wrap: anywhere;
 }
 #discuss .panel {
-  overflow: auto;
+  max-height: 86vh;
+  overflow: hidden;
 }
-
-/* Person items retain their own scrolling brief and reply choices. */
-#discuss.person-item .panel {
+#discuss .ph {
+  flex: none;
+}
+#discuss .item-body {
+  min-height: 0;
+  overflow: auto;
+  overflow-anchor: none;
+}
+#discuss .expandable.open .expandable-content {
+  max-height: none;
   overflow: visible;
+}
+#discuss .dmsgs {
+  overflow: visible;
+}
+.item-conversation > summary {
+  margin: 10px 14px;
+}
+.brief-section {
+  min-width: 0;
+}
+.brief-section .chipref {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.brief-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.brief-section .bsec {
+  margin: 0 0 6px;
+}
+.answer-heading {
+  margin: 10px 14px;
+}
+.option-pick {
+  text-align: left;
+  white-space: normal;
+}
+#discuss .opt .pill {
+  justify-self: start;
 }
 .access-preferences {
   display: grid;
