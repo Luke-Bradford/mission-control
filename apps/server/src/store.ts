@@ -336,6 +336,10 @@ CREATE TABLE IF NOT EXISTS notifications (
   updated_at INTEGER NOT NULL, last_read_at INTEGER, unread INTEGER NOT NULL,
   first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT, handled_through INTEGER
 );
+-- Worktree paths a crew start is making (worktree add, then the install); one still here at the
+-- next start was left half-made, and is removed and made again.
+CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);
+
 `;
 
 type Row = Record<string, SQLInputValue>;
@@ -828,6 +832,24 @@ export class Store {
         "INSERT OR IGNORE INTO attention_episodes SELECT key, kind, seat_id, at, cleared_at FROM attention_notes",
       );
     this.migrate();
+  }
+
+  markCheckoutPending(path: string, at: number): void {
+    this.db
+      .prepare(
+        "INSERT INTO checkouts_pending (path, at) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET at = excluded.at",
+      )
+      .run(path, at);
+  }
+
+  checkoutPending(path: string): boolean {
+    return (
+      this.db.prepare("SELECT 1 FROM checkouts_pending WHERE path = ?").get(path) !== undefined
+    );
+  }
+
+  clearCheckoutPending(path: string): void {
+    this.db.prepare("DELETE FROM checkouts_pending WHERE path = ?").run(path);
   }
 
   /** Cache token for local writes and commits made by another SQLite connection. */

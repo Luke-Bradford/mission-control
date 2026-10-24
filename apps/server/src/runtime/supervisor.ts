@@ -156,11 +156,13 @@ import {
 import {
   existingCheckout,
   existingDetached,
+  existingReadOnlyCheckout,
   existingScratch,
   installAfterSync,
   prepareCheckout,
   prepareDetachedCheckout,
   preparePlanCheckout,
+  prepareReadOnlyCheckout,
   prepareScratch,
   type RepoPeer,
   removeCheckout,
@@ -193,6 +195,7 @@ import {
 export const CREW_LOCK_FILE = ".mc-crew.lock";
 /** A running seat's transcript is folded at most this often while it writes. */
 export const CREW_FOLD_EVERY_MS = 1000;
+const NO_BRANCH_YET = "(none yet: a detached copy of origin's default branch)";
 /** The only variables a crew process inherits from the hub (no tokens, no `ANTHROPIC_*`). */
 const CREW_ENV_KEYS = [
   "HOME",
@@ -1731,12 +1734,44 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (row !== null) await recoverSession(row);
   }
 
+  async function readOnlyCheckout(info: SeatInfo, row: SeatSessionRow, run: Run) {
+    const path = row.worktree;
+    if (path === null) throw new Error("no worktree recorded");
+    return inClone(info.session.checkout, async () => {
+      const checkout = await existingReadOnlyCheckout(info.session.checkout, path, run.branch);
+      if (runGone(run.id, row.seatId)) throw new Error("run ended during checkout validation");
+      if (run.branch !== null) {
+        const current = store.run(run.id);
+        if (current === null) throw new Error("run missing");
+        store.upsertRun({ ...current, branch: null });
+        run.branch = null;
+      }
+      return { branch: "", ...checkout };
+    });
+  }
+
   /** One active run's seat after a restart: attach to its keeper, record its end, or resume it. */
   async function takeBack(row: SeatSessionRow): Promise<void> {
     const runId = row.runId;
     if (runId === null) return;
     const dir = crewKeeperDir(deps.dbPath, runId);
     const cursor = store.keeperCursor(runId);
+    let checkoutMissing = false;
+    const info = findSeat(row.seatId);
+    const run = store.run(runId);
+    if (info && run?.endedAt === null && run.reviewId == null) {
+      const def = seatDef(info.seat);
+      if (def.mode === "read-only" && def.loop !== "plan") {
+        try {
+          await readOnlyCheckout(info, row, run);
+        } catch {
+          if (runGone(runId, row.seatId)) return;
+          // Discover the keeper first: an exit keeps its reason; a missing keeper goes through resume.
+          checkoutMissing = true;
+        }
+      }
+    }
+    if (runGone(runId, row.seatId) || stopping) return;
     const found = await attachSession({
       dir,
       // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
@@ -1759,6 +1794,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     if (found.kind === "attached") {
       if (stopping) return found.session.detach();
+      if (checkoutMissing) {
+        dropGrant(row.seatId, runId);
+        await found.session.close();
+        if (runGone(runId, row.seatId)) return;
+        return failResume(row, "could not resume: checkout missing");
+      }
       // no await before the seat is tracked: the replay's first line must find its listeners
       return attachOne(row, runId, found.session, found.hello, cursor);
     }
@@ -1934,11 +1975,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (row.cliSessionId === null) {
       return failResume(row, `${RESUME_FAILED}: CLI session ID missing`);
     }
-    if (run.branch === null && run.reviewId == null && seatDef(info.seat).loop !== "watch") {
-      return failResume(row, `${RESUME_FAILED}: no branch recorded for the run`);
-    }
     if ((modeOfSeat(info.seat) === "scratch") !== (run.reviewId != null)) {
       return failResume(row, RESUME_MODE_CHANGED, { record: false }); // a scratch seat resumes only review runs
+    }
+    const def = seatDef(info.seat);
+    const readOnly = def.mode === "read-only" && def.loop !== "plan";
+    if (run.branch === null && run.reviewId == null && !readOnly && def.loop !== "watch") {
+      return failResume(row, `${RESUME_FAILED}: no branch recorded for the run`);
     }
     let checkout: { path: string; branch: string; gitDir: string } | null = null;
     try {
@@ -1950,6 +1993,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           branch: "",
           ...(await existingScratch(info.session.checkout, row.worktree, sha)),
         };
+      } else if (readOnly) {
+        checkout = await readOnlyCheckout(info, row, run);
       } else if (run.branch !== null) {
         // still the clone's worktree, its git dirs not redirected, still on the run's branch
         checkout = await existingCheckout(info.session.checkout, row.worktree, run.branch);
@@ -2012,6 +2057,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     refuseWhileHeld();
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     const def = seatDef(info.seat);
+    const planner = def.loop === "plan";
+    const readOnly = def.mode === "read-only" && !planner;
     if (def.mode === "scratch") {
       throw new SupervisorError(409, scratchStartRefusedText(call(info)));
     }
@@ -2030,7 +2077,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, reworkFirstText(call(info), rework.ticket ?? rework.id));
     }
     const ref = `${info.repo.id}#${issue}`;
-    if (waiting.some((r) => r.ticket === ref)) {
+    if (!readOnly && waiting.some((r) => r.ticket === ref)) {
       throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
@@ -2070,6 +2117,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       ) {
         throw new SupervisorError(422, AWAY_QUOTA_REFUSED);
       }
+      // A detached reader does not compete for the ticket or its assignee.
       const refusal = eligibleToStart({
         ...(away && !opts?.operator
           ? { away: { pickUp: away.may.pickUp, flight: opts?.flight === true } }
@@ -2079,7 +2127,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         issue,
         card: {
           labels: ticket.labels,
-          assignees: card.assignees ?? [],
+          assignees: readOnly ? [] : (card.assignees ?? []),
           blockedBy: card.blockedBy,
           size: card.size,
           status: card.status,
@@ -2090,10 +2138,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         seat: { call: call(info), area: info.seat.area, loop: def.loop },
         login: deps.login(),
         hasRun:
-          store.activeTickets().has(ref) ||
-          store
-            .staleTakes(Number.POSITIVE_INFINITY)
-            .some((r) => r.repoId === info.repo.id && r.issue === issue && r.seatId !== seatId),
+          !readOnly &&
+          (store.activeTickets().has(ref) ||
+            store
+              .staleTakes(Number.POSITIVE_INFINITY)
+              .some((r) => r.repoId === info.repo.id && r.issue === issue && r.seatId !== seatId)),
         lane: config.crew?.lane,
         laneDefault: config.crew?.laneDefault ?? false,
         body: ticket.body,
@@ -2110,8 +2159,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               ? { skipped: `Size ${card.size}` }
               : undefined;
       const title = ticket.title;
-      // A planner has no branch: a detached checkout of the default branch, for reading only
-      const planner = def.loop === "plan";
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
       // The repo's CLAUDE.md as origin's default branch has it, never as the worktree does.
       const { checkout, claudeMd } = await inClone(info.session.checkout, async () => {
@@ -2125,7 +2172,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         };
         const c = planner
           ? await preparePlanCheckout(where)
-          : await prepareCheckout({ ...where, title });
+          : readOnly
+            ? await prepareReadOnlyCheckout(where)
+            : await prepareCheckout({
+                ...where,
+                title,
+                pending: {
+                  isPending: (path) => store.checkoutPending(path),
+                  markPending: (path) => store.markCheckoutPending(path, now()),
+                  clearPending: (path) => store.clearCheckoutPending(path),
+                },
+              });
         return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
@@ -2162,10 +2219,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         vendor: isCodex(info) ? "codex" : "claude",
         model: info.seat.model,
         ...on,
-        branch: planner ? null : checkout.branch,
-        ticket: planner
-          ? `${info.repo.id}#${issue}`
-          : (inferTicket(checkout.branch, info.repo.id) ?? `${info.repo.id}#${issue}`),
+        branch: planner || readOnly ? null : checkout.branch,
+        ticket:
+          planner || readOnly
+            ? `${info.repo.id}#${issue}`
+            : (inferTicket(checkout.branch, info.repo.id) ?? `${info.repo.id}#${issue}`),
         ticketTitle: title,
         costUsd: null,
         tokens: null,
@@ -2273,7 +2331,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         body: ticket.body,
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
-        branch: checkout.branch,
+        branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
         area: info.seat.area,
         commands:
           def.mode === "writer"
