@@ -34,6 +34,8 @@ describe("CI", () => {
         name: "server",
         environment: "node",
         include: ["apps/server/test/**/*.test.ts"],
+        // A loaded CI shard can take over vitest's 5 s default for tests that run in 0.1–0.5 s here.
+        testTimeout: 15_000,
       },
     });
     expect(config.test?.projects).toContainEqual({
