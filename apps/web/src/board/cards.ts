@@ -5,11 +5,13 @@ import {
   type HudColumn,
   hudColumnOf,
   OWNER_OPERATOR,
+  type PipelineStage,
   type PrCheck,
   type PullRequestView,
   priorityRank,
   prYouAction,
   REVIEW_STATUS_CONTEXT,
+  type RunLoopView,
   startOfLocalDay,
 } from "@mc/core";
 import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL } from "../crew.ts";
@@ -205,4 +207,38 @@ export function checksText(checks: readonly PrCheck[] | undefined): string | nul
   }
   if (byName.size === 0) return null;
   return [...byName].map(([name, state]) => `${name} ${state}`).join(" · ");
+}
+
+/** The Overview pipeline's stages, applied to the full Board rather than its six-card preview. */
+export function pipelineStage(
+  item: BoardItem,
+  crew: CrewRow[],
+  prs: PullRequestView[],
+  now: number,
+  todayStart: number | null,
+  loops: RunLoopView[],
+): PipelineStage["stage"] | null {
+  const ref = ticketRef(item);
+  if (
+    todayStart !== null &&
+    prs.some(
+      (p) =>
+        p.ticket === ref && p.mergedAt !== null && p.mergedAt >= todayStart && p.mergedAt <= now,
+    )
+  )
+    return "merged";
+  if (item.closed) return null;
+  const agent = cardAgent(item, crew);
+  const aside = crew.flatMap((row) => row.asideRuns ?? []).find((run) => run.ticket === ref);
+  const loop =
+    loops.find((view) => view.runId === (agent?.run?.id ?? aside?.runId))?.loop ??
+    agent?.loop ??
+    aside?.loop;
+  const column = hudColumnOf(item);
+  if (loop && "merging" in loop && loop.merging && loop.phase !== "done") return "merging";
+  if (loop?.phase === "working" || (loop?.phase === "parked" && column !== "In review"))
+    return "building";
+  if (loop?.phase === "ci") return "checks";
+  if (loop?.phase === "review" || column === "In review") return "review";
+  return column === "Ready" && !agent ? "ready" : null;
 }

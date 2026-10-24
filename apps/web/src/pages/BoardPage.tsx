@@ -9,6 +9,7 @@ import {
   type PullRequestView,
   type RepoProfile,
   type RepoView,
+  type RunLoopView,
   startOfLocalDay,
 } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
@@ -20,6 +21,7 @@ import {
   cardQueue,
   daysAgo,
   needsMe,
+  pipelineStage,
   priorityRank,
 } from "../board/cards.ts";
 import { Kanban } from "../board/Kanban.tsx";
@@ -28,7 +30,8 @@ import { type BoardLayout, type DoneRange, Toolbar } from "../board/Toolbar.tsx"
 import { useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { boardPath, followLink, navigate, setupPath } from "../router.ts";
+import { PIPELINE_STAGES } from "../overview/PipelinePanel.tsx";
+import { boardPath, followLink, navigate, setupPath, useSearch } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { BOARD_LAYOUT_KEY, LANE_KEY, readKey, writeKey } from "../storage.ts";
 
@@ -57,6 +60,12 @@ function columnsOf(p: RepoProfile | undefined, items: BoardItem[]): HudColumn[] 
  * issues hub's board; Mission Control adds only the agent, PR and CI line.
  */
 export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: number | null }) {
+  const search = useSearch();
+  const requestedStage = new URLSearchParams(search).get("stage");
+  const stage =
+    requestedStage && Object.hasOwn(PIPELINE_STAGES, requestedStage)
+      ? (requestedStage as keyof typeof PIPELINE_STAGES)
+      : null;
   const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const prRes = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
@@ -81,7 +90,12 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
 
   const ticketRoute = repoId !== null && ticket !== null;
   const lanes = useMemo(() => lanesFor(repos, githubLogin), [repos, githubLogin]);
-  const lane = resolveLane(lanes, repoId, stored, ticketRoute);
+  const lane = resolveLane(
+    lanes,
+    stage && repoId === null ? ALL_LANE : repoId,
+    stored,
+    ticketRoute,
+  );
   // /board/:repo selects that repo's lane and is then remembered; a ticket route does not.
   useEffect(() => {
     if (!ticketRoute && repoId !== null && lane.id === repoId && readKey(LANE_KEY) !== repoId) {
@@ -105,6 +119,18 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const all = useMemo(() => boards.flatMap((b) => b.data ?? []), [boards]);
   const prs = useMemo(() => prRes.flatMap((p) => p.data ?? []), [prRes]);
   const rows = crew ?? [];
+  const loopViews = useResources<RunLoopView>(
+    stage === null
+      ? []
+      : [
+          ...new Set(
+            rows.flatMap((row) => [
+              ...(row.run?.status === "running" ? [row.run.id] : []),
+              ...(row.asideRuns ?? []).map((run) => run.runId),
+            ]),
+          ),
+        ].map((id) => RESOURCES.runLoop(id)),
+  ).flatMap((view) => (view.data ? [view.data] : []));
   const items = attention ?? [];
 
   // Once per render, not once per card (#26 A1).
@@ -117,6 +143,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   });
   const shown = inLane.filter(
     (i) =>
+      (stage === null || pipelineStage(i, rows, prs, now, todayStart, loopViews) === stage) &&
       (priority === "" || i.priority === priority) &&
       (!agentOnly || cardAgent(i, rows) !== null || cardQueue(i, rows) !== null) &&
       (!mineOnly || needsMe(i, items, rows)),
@@ -160,6 +187,14 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
 
   return (
     <section id="page-board">
+      {stage && (
+        <p className="s fg2">
+          Pipeline · {PIPELINE_STAGES[stage]} ·{" "}
+          <a href="/board" onClick={(e) => followLink(e, "/board")}>
+            All stages
+          </a>
+        </p>
+      )}
       <Toolbar
         lanes={lanes}
         lane={lane}
