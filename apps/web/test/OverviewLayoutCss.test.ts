@@ -12,11 +12,20 @@ describe("Overview layout (hud.css)", () => {
     expect(css).toMatch(/main \{[^}]*overflow: auto/);
   });
 
-  it("sizes the bottom grid from its panels and keeps Activity at least 240px tall", () => {
+  it("fills remaining height with a 420px minimum and bounds Activity with an inner scroll", () => {
     const grid = rule(String.raw`\.ov`);
-    expect(grid).toContain("flex: 1 0 auto");
-    expect(grid).toContain("min-height: 240px");
+    expect(grid).toContain("flex: 1 0 0");
+    expect(grid).toContain("min-height: 420px");
+    expect(grid).toContain("grid-template-rows: minmax(0, 1fr)");
+    expect(grid).toContain("align-items: start");
     expect(rule(String.raw`\.ov > #actP`)).toContain("min-height: 240px");
+    expect(rule(String.raw`\.ov > #actP`)).toContain("align-self: stretch");
+    expect(rule(String.raw`\.ov > #actP`)).toContain("overflow: hidden");
+    expect(rule(String.raw`\.panel`)).toContain("display: flex");
+    expect(rule(String.raw`\.panel`)).toContain("flex-direction: column");
+    expect(rule(String.raw`\.scroll`)).toContain("min-height: 0");
+    expect(rule(String.raw`\.scroll`)).toContain("overflow: auto");
+    expect(rule(String.raw`\.panel > \.pb.scroll`)).toContain("flex: 1 1 auto");
     expect(rule(String.raw`\.col > \.panel`)).toContain("flex: none");
   });
 
