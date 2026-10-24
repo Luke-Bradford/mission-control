@@ -273,20 +273,24 @@ export async function retryGithubRead<T>(read: () => Promise<T>, enabled = true)
     return await read();
   } catch (e) {
     if (!enabled || !(e instanceof GqlTransportError) || !e.retryRead) throw e;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => setTimeout(resolve, 1000).unref());
     return read();
   }
+}
+
+/** Only the network cause code is safe to include in a transport failure. */
+function networkCauseSuffix(e: unknown): string {
+  const code = isObj(e) && isObj(e.cause) ? e.cause.code : undefined;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]*$/.test(code) ? ` (${code})` : "";
 }
 
 /** Only the network cause code is safe to include in a request failure. */
 export function githubRequestError(e: unknown): GqlTransportError {
   const timeout = isObj(e) && e.name === "TimeoutError";
-  const code = isObj(e) && isObj(e.cause) ? e.cause.code : undefined;
-  const suffix = typeof code === "string" && /^[A-Z][A-Z0-9_]*$/.test(code) ? ` (${code})` : "";
   return new GqlTransportError(
     timeout
       ? `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`
-      : `github: request failed${suffix}`,
+      : `github: request failed${networkCauseSuffix(e)}`,
     null,
     null,
     false,
@@ -306,7 +310,13 @@ export async function readGithubJson(res: Response): Promise<unknown> {
         null,
       );
     }
-    throw new GqlTransportError(`github: response cut off (${errMsg(e)})`, null, null, false, true);
+    throw new GqlTransportError(
+      `github: response cut off${networkCauseSuffix(e)}`,
+      null,
+      null,
+      false,
+      true,
+    );
   }
   try {
     return JSON.parse(text);

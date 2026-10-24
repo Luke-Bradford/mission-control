@@ -280,8 +280,8 @@ describe("REST response bodies", () => {
 
   it.each([
     [new DOMException("deadline", "TimeoutError"), "github: response timed out after 20 s"],
-    [new DOMException("cancelled", "AbortError"), "github: response cut off (cancelled)"],
-    [new TypeError("terminated"), "github: response cut off (terminated)"],
+    [new DOMException("cancelled", "AbortError"), "github: response cut off"],
+    [new TypeError("terminated"), "github: response cut off"],
     [null, "github: response was not JSON (text/html)"],
   ])("describes the body failure: %s", async (error, message) => {
     const f = vi.fn(async () =>

@@ -5,11 +5,11 @@ import { makeRest, NOTIFICATIONS_URL } from "../src/collectors/notifications.ts"
 import { Store } from "../src/store.ts";
 
 const reset = () => new TypeError("private message", { cause: { code: "ECONNRESET" } });
-const cutOff = () =>
+const cutOff = (error: Error = reset()) =>
   new Response(
     new ReadableStream({
       start(c) {
-        c.error(reset());
+        c.error(error);
       },
     }),
   );
@@ -50,6 +50,45 @@ describe.each(["query", "notifications"])("%s read retry", (reader) => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(await result).toBe("github: request failed (UND_ERR_SOCKET)");
     expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["UND_ERR_SOCKET", "github: response cut off (UND_ERR_SOCKET)"],
+    [undefined, "github: response cut off"],
+    ["private code text", "github: response cut off"],
+  ])("reports only a safe body failure cause code: %s", async (code, expected) => {
+    vi.useFakeTimers();
+    const f = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(cutOff())
+      .mockResolvedValueOnce(cutOff(new TypeError("secret", { cause: { code } })));
+    const result = read(f).catch((e: Error) => e.message);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await result).toBe(expected);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it("unrefs the one-second retry timer", async () => {
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(globalThis, "setTimeout");
+    try {
+      const f = vi
+        .fn<typeof fetch>()
+        .mockRejectedValueOnce(reset())
+        .mockResolvedValueOnce(new Response('{"data":{"x":1}}'));
+      const result = read(f);
+      await vi.advanceTimersByTimeAsync(0);
+      const index = timeout.mock.calls.findIndex((call) => call[1] === 1000);
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(timeout.mock.results[index]?.value.hasRef()).toBe(false);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(f).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toBeDefined();
+      expect(f).toHaveBeenCalledTimes(2);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it.each(["timeout", "body timeout", "http", "rate limit", "graphql"])(
