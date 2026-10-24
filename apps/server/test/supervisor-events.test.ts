@@ -177,6 +177,79 @@ describe("seat states", () => {
     expect(reason).not.toContain("\x1b");
   });
 
+  it.each([
+    [10_000, /^process exited 3: fake stderr/, /^fake stderr/],
+    [10_001, /^process exited 3$/, /^$/],
+  ] as const)(
+    "keeps stderr only within 10 s of exit (%i ms)",
+    async (age, expected, stderrExpected) => {
+      let at = Date.now();
+      const { sup, log } = make({ now: () => at });
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.message("guido-1", "STDERR", { interrupt: false });
+      await until(() => expect(log).toHaveBeenCalledWith(expect.stringContaining("fake stderr")));
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      at += age;
+      await sup.message("guido-1", "DIE", { interrupt: false });
+      await until(() => expect(seatState("guido-1")).toBe("error"));
+      const reason = store.seatSession("guido-1")?.reason;
+      expect(reason).toMatch(expected);
+      const diagnostic = store.run(store.seatSession("guido-1")?.runId ?? "")?.noReport?.lastStderr;
+      expect(diagnostic ?? "").toMatch(stderrExpected);
+    },
+  );
+
+  it.each([
+    ["REFUSEINT", 409, "refused the interrupt: not now"],
+    ["NOCONTROL", 504, "did not answer the interrupt"],
+  ] as const)(
+    "a %s interrupt leaves the next error result visible",
+    async (mode, status, reason) => {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.message("guido-1", `${mode} TOOLGAP TURNERROR`, { interrupt: false });
+      await until(() => expect(userLines().length).toBe(2));
+      const e = await refusal(sup.interrupt("guido-1"));
+      expect(e.status).toBe(status);
+      expect(e.message).toBe(`GUIDO-1 ${reason}`);
+      await sup.message("guido-1", "cue", { interrupt: false });
+      await sup.message("guido-1", "cue", { interrupt: false });
+      await until(() =>
+        expect(store.seatSession("guido-1")).toMatchObject({
+          state: "idle",
+          reason: "last turn ended in an error",
+        }),
+      );
+    },
+  );
+
+  it("accepts an interrupt before a result in the same stdout write", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "BATCHINT SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await sup.interrupt("guido-1");
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(store.seatSession("guido-1")?.reason).toBeNull();
+  });
+
+  it.each(["REFUSEINT", "NOCONTROL"])("delivers interrupt-and-send after %s", async (mode) => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", `${mode} SLOW`, { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await sup.message("guido-1", "operator line", { interrupt: true });
+    await until(() => expect(userLines()).toContain("operator line"));
+  });
+
   it("marks a turn that really failed with a reason, and an interrupted one without", async () => {
     const { sup } = make();
     sup.start();

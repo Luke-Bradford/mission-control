@@ -30,6 +30,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -150,9 +151,22 @@ import {
   syncReusedWorktree,
   writeReviewInputs,
 } from "./checkouts.ts";
-import { endKeeper, KEEPER_ENTRY, type KeeperHello, keeperAlive, pidAlive } from "./keeper.ts";
+import {
+  endKeeper,
+  KEEPER_ENTRY,
+  type KeeperHello,
+  keeperAlive,
+  pidAlive,
+  processInfo,
+} from "./keeper.ts";
 import { recordNoReport } from "./no-report.ts";
-import { attachSession, type CrewSession, type SessionEvent, startSession } from "./session.ts";
+import {
+  attachSession,
+  type CrewSession,
+  SessionControlError,
+  type SessionEvent,
+  startSession,
+} from "./session.ts";
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
@@ -170,6 +184,8 @@ const CREW_ENV_KEYS = [
   "SHELL",
   "TERM",
 ] as const;
+const STDERR_RECENT_MS = 10_000;
+const LOCK_REUSE_MARGIN_MS = 60_000;
 const LAST_TURN_ERROR = "last turn ended in an error";
 const SHUTTING_DOWN = "the server is shutting down";
 const CANNOT_START = "could not start the CLI";
@@ -284,10 +300,16 @@ export const CREW_ACTION_FAILED = "crew action failed";
 /** A refused action, with the HTTP status a route answers it with. */
 export class SupervisorError extends Error {
   readonly status: number;
-  constructor(status: number, message: string, options?: { cause?: unknown }) {
+  readonly deadSession: boolean;
+  constructor(
+    status: number,
+    message: string,
+    options?: { cause?: unknown; deadSession?: boolean },
+  ) {
     super(message, options);
     this.name = "SupervisorError";
     this.status = status;
+    this.deadSession = options?.deadSession === true;
   }
 }
 
@@ -304,6 +326,8 @@ export interface SupervisorDeps {
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
   now?: () => number;
+  /** Process identity lookup for lock reuse; defaults to processInfo. */
+  processStart?: (pid: number) => { startedAt: number; command: string } | null;
   /** Default `"claude"`; tests pass `process.execPath` and the fake CLI in `commandArgs`. */
   command?: string;
   /** Put before the CLI's own arguments. */
@@ -501,7 +525,7 @@ interface Live {
   chain: Promise<void>;
   /** A user line has been written and its turn's `result` has not come. */
   inTurn: boolean;
-  /** An interrupt was sent during this turn: its error result is the interrupt, not a failure. */
+  /** An interrupt was accepted during this turn: its error result is the interrupt, not a failure. */
   interrupted: boolean;
   /** A `rejected` rate limit came this turn: the seat stays parked until the next line. */
   parkedTurn: boolean;
@@ -523,6 +547,8 @@ interface Live {
   off: () => void;
   /** The process's last stderr line (cleaned), for the reason when it crashes. */
   lastStderr: string | null;
+  /** now() when lastStderr came; the reason uses it only within STDERR_RECENT_MS of the exit. */
+  lastStderrAt: number | null;
   /** The keeper's id: the stored cursor counts the lines of this one keeper only. */
   spawn: string;
   /** Attached to a keeper that is still replaying the lines the hub missed: no line goes out yet. */
@@ -640,7 +666,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** The seat's call sign in every message and commit (`guido-1` → `GUIDO-1`). */
   const call = (info: SeatInfo): string => seatCallSign(info.seat.id);
   const noLive = (info: SeatInfo) =>
-    new SupervisorError(409, `${call(info)} has no live session; start it on a ticket`);
+    new SupervisorError(409, `${call(info)} has no live session; start it on a ticket`, {
+      deadSession: true,
+    });
 
   function liveOrRefuse(info: SeatInfo): Live {
     const l = live.get(info.seat.id);
@@ -722,6 +750,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     run: Run,
     exit: Pick<NonNullable<Run["noReport"]>, "code" | "signal" | "lastStderr"> & {
       error?: string;
+      lastStderrAt?: number | null;
+      endReason?: string | null;
     },
     facts: ReturnType<typeof foldPath>,
     at: number,
@@ -736,8 +766,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             code: exit.code,
             signal: exit.signal,
             error: exit.error === undefined ? undefined : cleanText(exit.error, STDERR_TEXT_MAX),
-            lastStderr:
-              exit.lastStderr === null ? null : cleanText(exit.lastStderr, STDERR_TEXT_MAX),
+            lastStderr: recentStderr(exit, at),
           },
           facts,
           at,
@@ -773,7 +802,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       noteMissingReport(
         l.info,
         l.run,
-        { ...e, lastStderr: l.lastStderr },
+        { ...e, lastStderr: l.lastStderr, lastStderrAt: l.lastStderrAt },
         transcripts.get(l.run.transcriptPath)?.facts ?? null,
         l.run.endedAt as number,
       );
@@ -798,7 +827,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const why = how === null ? CANNOT_START : `process exited ${how}`;
       // A CLI that ran and failed: its own last word (already cleaned and cut) says why. One that
       // never started keeps the fixed text (the spawn error names the command's path; it is logged).
-      const said = how !== null && l.lastStderr ? l.lastStderr : null;
+      const said =
+        how !== null &&
+        l.lastStderr &&
+        l.lastStderrAt !== null &&
+        now() - l.lastStderrAt <= STDERR_RECENT_MS
+          ? l.lastStderr
+          : null;
       const reason = failedResume
         ? `${RESUME_FAILED}: ${said ?? why}`
         : `${why}${said === null ? "" : `: ${said}`}`;
@@ -858,6 +893,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         break;
       case "stderr":
         l.lastStderr = e.text;
+        l.lastStderrAt = now();
         log(`${l.info.seat.id}: ${e.text}`);
         break;
       case "exit":
@@ -890,12 +926,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   async function sendInterrupt(l: Live): Promise<void> {
-    l.interrupted = true;
     try {
-      await l.session.control("interrupt");
+      await l.session.control("interrupt", {
+        onSuccess: () => {
+          l.interrupted = true;
+        },
+      });
     } catch (e) {
-      if (errText(e) === "session ended") throw noLive(l.info);
-      throw new SupervisorError(504, `${call(l.info)} did not answer the interrupt`, { cause: e });
+      if (e instanceof SessionControlError && e.kind === "ended") throw noLive(l.info);
+      if (e instanceof SessionControlError && e.kind === "timeout")
+        throw new SupervisorError(504, `${call(l.info)} did not answer the interrupt`, {
+          cause: e,
+        });
+      throw new SupervisorError(409, `${call(l.info)} refused the interrupt: ${errText(e)}`, {
+        cause: e,
+      });
     }
   }
 
@@ -1233,6 +1278,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       spawnedAt: null,
       off: () => {},
       lastStderr: null,
+      lastStderrAt: null,
       attaching: false,
       replayedBelow: 0,
       awaitingAtAttach: false,
@@ -1526,13 +1572,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // The CLI exited while no hub was attached: the end is recorded as the exit path would.
       dropGrant(row.seatId, runId);
       const how = found.exit.code ?? found.exit.signal;
-      const said =
-        found.exit.lastStderr === null
-          ? ""
-          : cleanText(found.exit.lastStderr, STDERR_TEXT_MAX).trim();
+      const said = recentStderr(found.exit, found.exit.at)?.trim() ?? "";
       return failResume(
         row,
-        how === null ? CANNOT_START : `process exited ${how}${said === "" ? "" : `: ${said}`}`,
+        how === null
+          ? found.exit.endReason === null
+            ? CANNOT_START
+            : said
+          : `process exited ${how}${said === "" ? "" : `: ${said}`}`,
         { exit: found.exit },
       );
     }
@@ -2660,21 +2707,43 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             dropRestored();
             return;
           }
-          let pid = Number.NaN;
+          let pid: number;
+          let checked: ReturnType<typeof statSync>;
           try {
+            checked = statSync(lockPath());
             pid = Number.parseInt(readFileSync(lockPath(), "utf8"), 10);
           } catch {
-            continue; // removed meanwhile: try again
+            continue; // No reliable snapshot: never unlink.
           }
-          // this process's own pid is a lock left by an earlier process the pid was reused from
-          // (one process runs one supervisor, and start() runs once)
+          // This process's own pid is from an earlier run (one supervisor per process).
           if (pid !== process.pid && pidAlive(pid)) {
-            lockNote = `crew lock held by pid ${pid}`;
-            dropRestored();
-            return;
+            let reused = false;
+            try {
+              const info = (deps.processStart ?? processInfo)(pid);
+              reused =
+                info !== null &&
+                Number.isFinite(info.startedAt) &&
+                info.startedAt > checked.mtimeMs + LOCK_REUSE_MARGIN_MS &&
+                !info.command.includes("apps/server/src/main.ts");
+            } catch {
+              // Every lookup failure keeps the lock (fail closed): an uncertain pid may be a
+              // live hub. The margin tolerates clock skew and coarse filesystem timestamps.
+            }
+            if (!reused) {
+              lockNote = `crew lock held by pid ${pid}`;
+              dropRestored();
+              return;
+            }
           }
           try {
-            unlinkSync(lockPath()); // left by a process that has gone
+            const current = statSync(lockPath());
+            if (
+              current.ino !== checked.ino ||
+              current.mtimeMs !== checked.mtimeMs ||
+              Number.parseInt(readFileSync(lockPath(), "utf8"), 10) !== pid
+            )
+              continue;
+            unlinkSync(lockPath()); // The checked lock still belongs to the stale process.
           } catch {
             // removed meanwhile
           }
@@ -2872,7 +2941,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   };
 }
 
-/** Interrupt-and-send: an interrupt that times out still lets the line through. */
+/** Interrupt-and-send: a refused or timed-out interrupt still lets the line through. */
 function rethrowIfDead(e: unknown): void {
-  if (e instanceof SupervisorError && e.status === 409) throw e;
+  if (e instanceof SupervisorError && e.deadSession) throw e;
+}
+
+function recentStderr(
+  exit: { lastStderr: string | null; lastStderrAt?: number | null; endReason?: string | null },
+  at: number,
+): string | null {
+  const text =
+    exit.endReason ??
+    (exit.lastStderrAt != null && at - exit.lastStderrAt <= STDERR_RECENT_MS
+      ? exit.lastStderr
+      : null);
+  return text === null ? null : cleanText(text, STDERR_TEXT_MAX);
 }
