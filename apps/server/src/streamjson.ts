@@ -46,8 +46,8 @@ const WINDOWS = { five_hour: "5h", seven_day: "7d" } as const;
 
 const MC_TOOL_PREFIX = `mcp__${MC_MCP_SERVER}__`;
 const MINUTE_MS = 60_000;
-/** minuteTokens covers the hour up to the newest event. */
-const MINUTES_WINDOW_MS = 60 * MINUTE_MS;
+/** minuteTokens covers the two hours up to the newest event. */
+const MINUTES_WINDOW_MS = 120 * MINUTE_MS;
 const TURN_USAGE_KEEP = 60;
 const DURATIONS_KEEP = 50;
 /**

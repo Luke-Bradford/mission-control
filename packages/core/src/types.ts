@@ -444,7 +444,7 @@ export interface RunDigest {
     }
   >;
   subagents: SubagentInfo[];
-  /** `[minute start (epoch ms), input + output tokens]` for the hour up to lastEventAt. */
+  /** `[minute start (epoch ms), input + output tokens]` for the two hours up to lastEventAt. */
   minuteTokens: [number, number][];
   /** One per top-level message, the last 60. */
   turnUsage: { input: number; output: number; cacheRead: number }[];
@@ -702,10 +702,20 @@ export interface CrewAsideRun {
   ticket: string | null;
   ticketTitle: string | null;
   loop: CrewLoop;
+  events?: CrewEvent[];
+  stateSince?: number;
+}
+
+/** Recorded progress, oldest first; no synthetic ticks for idle time. */
+export interface CrewEvent {
+  kind: "commit" | "push" | "test" | "pr-opened" | "review" | "park" | "message";
+  at: number;
 }
 
 /** One `/api/crew` row: a configured loop as the HUD shows it. */
 export interface CrewRow {
+  /** Current run events from the last two hours; absent on older servers. */
+  events?: CrewEvent[];
   focus?: string | null;
   displayCallSign?: string | null;
   id: AgentId;
