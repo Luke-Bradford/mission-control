@@ -19,6 +19,15 @@ import {
   startKeeperSession,
 } from "./session.ts";
 
+export const CODEX_MCP_ELICITATION = "mcpServer/elicitation/request";
+
+/** Taken from an active mcpToolCall item, never from the elicitation's display text. */
+export interface CodexMcpCall {
+  itemId: string;
+  server: string;
+  tool: string;
+}
+
 export interface CodexSessionInput {
   args: string[];
   cwd: string;
@@ -35,7 +44,7 @@ export interface CodexSessionInput {
   resumeThreadId: string | null;
   outboxPath: string;
   approve: (
-    req: { id: number | string; method: string; params: unknown },
+    req: { id: number | string; method: string; params: unknown; mcpCall?: CodexMcpCall },
     paths: readonly string[] | undefined,
     signal: AbortSignal,
   ) => Promise<"accept" | "decline">;
@@ -160,6 +169,7 @@ function codexSession(
   const seenRequests = new Set<RpcId>();
   const approvals = new Map<RpcId, OpenApproval>();
   const paths = new Map<string, readonly string[] | undefined>();
+  const mcpCalls = new Map<string, CodexMcpCall & { threadId: string; turnId: string }>();
   const itemKeys = new Map<string, Set<string>>();
   const dispatched = new Set<string>();
   let threadId: string | null = "threadId" in i ? i.threadId : null;
@@ -231,9 +241,15 @@ function codexSession(
       },
     };
   };
-  const answer = (id: RpcId, decision: "accept" | "decline") => {
+  const answer = (req: ApprovalRequest, decision: "accept" | "decline") => {
     try {
-      transport.write({ id, result: { decision } });
+      transport.write({
+        id: req.id,
+        result:
+          req.method === CODEX_MCP_ELICITATION
+            ? { action: decision, content: decision === "accept" ? {} : null }
+            : { decision },
+      });
     } catch {
       // The process may already be gone.
     }
@@ -251,7 +267,7 @@ function codexSession(
       approvals.delete(id);
       approval.controller.abort();
       auditDecline(approval.req, approval.files);
-      answer(id, "decline");
+      answer(approval.req, "decline");
     }
   };
   const finish = (detach = false) => {
@@ -262,7 +278,7 @@ function codexSession(
       cancelApprovals();
       for (const { req, files } of replayRequests.values()) {
         auditDecline(req, files);
-        answer(req.id, "decline");
+        answer(req, "decline");
       }
     }
     replayRequests.clear();
@@ -344,7 +360,7 @@ function codexSession(
     seenRequests.add(req.id);
     const params = isObj(req.params) ? req.params : {};
     const controller = new AbortController();
-    const itemId = str(params.itemId);
+    const itemId = req.mcpCall?.itemId ?? str(params.itemId);
     const files = replay ? replay.files : itemId === null ? undefined : paths.get(itemId);
     if (replay?.completed) controller.abort();
     approvals.set(req.id, { controller, itemId, req, files });
@@ -367,10 +383,11 @@ function codexSession(
         approvals.delete(req.id);
         const supported =
           req.method === "item/commandExecution/requestApproval" ||
-          req.method === "item/fileChange/requestApproval";
+          req.method === "item/fileChange/requestApproval" ||
+          (req.method === CODEX_MCP_ELICITATION && req.mcpCall !== undefined);
         if (!supported && decision !== "decline") auditDecline(req, files);
         answer(
-          req.id,
+          req,
           supported && !controller.signal.aborted && decision === "accept" ? "accept" : "decline",
         );
       });
@@ -438,7 +455,19 @@ function codexSession(
     if (typeof m.method !== "string") return;
     const params = isObj(m.params) ? m.params : {};
     if (rpcId(m.id)) {
-      const req = { id: m.id, method: m.method, params: m.params };
+      const req: ApprovalRequest = { id: m.id, method: m.method, params: m.params };
+      if (req.method === CODEX_MCP_ELICITATION) {
+        const calls = [...mcpCalls.values()].filter(
+          (call) =>
+            call.server === params.serverName &&
+            call.threadId === threadId &&
+            call.turnId === turnId &&
+            call.threadId === params.threadId &&
+            call.turnId === params.turnId &&
+            (params.itemId == null || call.itemId === params.itemId),
+        );
+        if (calls.length === 1) req.mcpCall = calls[0];
+      }
       if ("threadId" in i && !checked && !closing) {
         const itemId = str(params.itemId);
         const key = params.approvalId ?? params.itemId;
@@ -462,7 +491,7 @@ function codexSession(
         prior?.controller.abort();
         const itemId = str(params.itemId);
         auditDecline(req, itemId === null ? undefined : paths.get(itemId));
-        answer(req.id, "decline");
+        answer(req, "decline");
         return;
       }
       approve(req);
@@ -477,6 +506,7 @@ function codexSession(
       for (const replay of replayRequests.values()) replay.completed = true;
       cancelApprovals();
       paths.clear();
+      mcpCalls.clear();
       itemKeys.clear();
       const completedId = str(params.turn.id);
       turnId = null;
@@ -492,6 +522,22 @@ function codexSession(
         });
     } else if (m.method === "item/started" && isObj(params.item)) {
       const item = params.item;
+      if (
+        item.type === "mcpToolCall" &&
+        typeof item.id === "string" &&
+        typeof item.server === "string" &&
+        typeof item.tool === "string" &&
+        typeof params.threadId === "string" &&
+        typeof params.turnId === "string"
+      ) {
+        mcpCalls.set(item.id, {
+          itemId: item.id,
+          server: item.server,
+          tool: item.tool,
+          threadId: params.threadId,
+          turnId: params.turnId,
+        });
+      }
       if (item.type === "fileChange" && typeof item.id === "string") {
         const files: string[] = [];
         let valid = Array.isArray(item.changes) && item.changes.length > 0;
@@ -517,7 +563,10 @@ function codexSession(
       const item = params.item;
       if (typeof item.id === "string") {
         for (const replay of replayRequests.values()) {
-          if (isObj(replay.req.params) && replay.req.params.itemId === item.id)
+          if (
+            replay.req.mcpCall?.itemId === item.id ||
+            (isObj(replay.req.params) && replay.req.params.itemId === item.id)
+          )
             replay.completed = true;
         }
         cancelApprovals(item.id);
@@ -527,6 +576,7 @@ function codexSession(
           }
         }
         paths.delete(item.id);
+        mcpCalls.delete(item.id);
         itemKeys.delete(item.id);
       }
     } else if (m.method === "thread/tokenUsage/updated" && isObj(params.tokenUsage)) {
