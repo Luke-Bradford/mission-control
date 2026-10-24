@@ -1,13 +1,20 @@
 import { type Directory, verifyDirectory, verifyGrant, verifyMember } from "./auth.ts";
 import { canonicalJson } from "./canonical.ts";
 import { type Sealed, verifySealedSync } from "./envelope.ts";
+import {
+  AUTH_CLOCK_SKEW_MS,
+  LOG_LIMIT,
+  POST_WINDOW_MS,
+  PRESENCE_INTERVAL_MS,
+  TOKEN_TTL_MS,
+} from "./limits.ts";
 import type { KeyGrant, Member } from "./membership.ts";
 import { ready } from "./sodium.ts";
 
 const sodium = await ready();
 const variant = sodium.base64_variants.URLSAFE_NO_PADDING;
 type Presence = Record<string, { status: string; seenAt: number }>;
-type Entry = { seq: number; sealed: Sealed };
+export type Entry = { seq: number; sealed: Sealed };
 export type RoomState = {
   room: string;
   keyEpoch: number;
@@ -17,16 +24,18 @@ export type RoomState = {
   // Retain public identities after removal so offline clients can verify older ciphertext.
   directory?: Member[];
   signedDirectory?: Directory;
-  usedRequests?: string[];
+  usedRequests?: { nonce: string; at: number }[];
+  postRates?: Record<string, number[]>;
   pending: Member[];
-  tokens: Record<string, "unused" | "used">;
+  tokens: Record<string, { status: "unused" | "used"; expiresAt: number }>;
   grants: KeyGrant[];
   log: Entry[];
   presence: Presence;
 };
 export interface RoomStorage {
   load(): RoomState | undefined;
-  save(s: RoomState): void;
+  save(s: RoomState, entry?: Entry): void;
+  readLog?(seq: number, limit: number): Entry[];
 }
 export type PostResult =
   | { seq: number }
@@ -39,13 +48,17 @@ export interface RoomCore {
   approve(by: string, memberId: string, grants: KeyGrant[], directory: Directory): void;
   remove(by: string, memberId: string, grants: KeyGrant[], directory: Directory): void;
   post(s: Sealed): PostResult;
-  since(memberId: string, seq: number): Entry[];
+  since(memberId: string, seq: number, limit?: number): Entry[];
+  oldestSeq(): number;
+  seq(): number;
   grantsFor(recipientId: string): KeyGrant[];
   members(): Member[];
+  identities(): Member[];
   directory(): Directory;
-  useRequest(nonce: string): boolean;
+  useRequest(nonce: string, at: number): boolean;
   pending(): Member[];
-  setPresence(id: string, status: "online" | "busy" | "away"): void;
+  setPresence(id: string, status: "online" | "busy" | "away"): boolean;
+  restorePresence(id: string, presence: Presence[string]): void;
   presence(): Presence;
 }
 
@@ -121,8 +134,31 @@ export function createRoomCore(opts: {
   if (!state.signedDirectory || !verifyDirectory(state.signedDirectory, opts.room, opts.owner.id))
     throw new Error("Invalid signed directory");
   state.directory ??= structuredClone(state.members);
-  const rates = new Map<string, number[]>();
-  const save = () => opts.storage?.save(structuredClone(state));
+  state.presence = {};
+  // Older Node snapshots contain bare nonces. Give them a bounded migration window too.
+  state.usedRequests = (state.usedRequests ?? []).map((request) =>
+    typeof request === "string" ? { nonce: request, at: opts.now() } : request,
+  );
+  state.postRates = Object.fromEntries(
+    Object.entries(state.postRates ?? {}).map(([id, times]) => [
+      id,
+      times.filter((at) => at > opts.now() - POST_WINDOW_MS),
+    ]),
+  );
+  const save = (entry?: Entry) =>
+    opts.storage?.save(structuredClone({ ...state, presence: {} }), entry);
+  const pruneTokens = () => {
+    let changed = false;
+    for (const [token, value] of Object.entries(state.tokens)) {
+      // Legacy tokens have no expiry and must be reissued.
+      if (!value.expiresAt || value.expiresAt <= opts.now()) {
+        delete state.tokens[token];
+        changed = true;
+      }
+    }
+    return changed;
+  };
+  if (pruneTokens()) save();
   const ownerOnly = (by: string) => {
     if (by !== state.owner.id) throw new Error("Owner only");
   };
@@ -175,25 +211,29 @@ export function createRoomCore(opts: {
       throw new Error("Invalid directory update");
   };
   return {
-    useRequest(nonce) {
-      state.usedRequests ??= [];
-      if (state.usedRequests.includes(nonce)) return false;
-      state.usedRequests.push(nonce);
+    useRequest(nonce, at) {
+      state.usedRequests = (state.usedRequests ?? []).filter(
+        (request) => request.at >= opts.now() - 2 * AUTH_CLOCK_SKEW_MS,
+      );
+      if (state.usedRequests.some((request) => request.nonce === nonce)) return false;
+      state.usedRequests.push({ nonce, at });
       save();
       return true;
     },
     issueToken(by) {
       ownerOnly(by);
       const token = sodium.to_base64(sodium.randombytes_buf(32), variant);
-      state.tokens[token] = "unused";
+      pruneTokens();
+      state.tokens[token] = { status: "unused", expiresAt: opts.now() + TOKEN_TTL_MS };
       save();
       return token;
     },
     requestJoin(token, member) {
+      if (pruneTokens()) save();
       if (!Object.hasOwn(state.tokens, token)) return "unknown";
-      if (state.tokens[token] === "used") return "used";
+      if (state.tokens[token].status === "used") return "used";
       checkNewMember(member);
-      state.tokens[token] = "used";
+      state.tokens[token].status = "used";
       state.pending.push(structuredClone(member));
       save();
       return "pending";
@@ -226,6 +266,8 @@ export function createRoomCore(opts: {
         ...structuredClone(grants),
       ];
       for (const id of Object.keys(state.presence)) if (!memberOf(id)) delete state.presence[id];
+      for (const id of Object.keys(state.postRates ?? {}))
+        if (!memberOf(id)) delete state.postRates?.[id];
       save();
     },
     post(sealed) {
@@ -250,31 +292,63 @@ export function createRoomCore(opts: {
         return { refused: "bad-signature" };
       if (sealed.keyEpoch !== state.keyEpoch) return { refused: "stale-epoch" };
       const now = opts.now();
-      const recent = (rates.get(sealed.sender.id) ?? []).filter((at) => at > now - 60_000);
+      state.postRates ??= {};
+      const rates = state.postRates;
+      const previousRate = rates[sealed.sender.id];
+      const recent = (previousRate ?? []).filter((at) => at > now - POST_WINDOW_MS);
       if (recent.length >= (opts.maxPerMinute ?? 30)) return { refused: "rate-limited" };
       recent.push(now);
-      rates.set(sealed.sender.id, recent);
+      rates[sealed.sender.id] = recent;
       const seq = ++state.seq;
-      state.log.push({ seq, sealed: structuredClone(sealed) });
-      if (state.log.length > 5000) state.log.splice(0, state.log.length - 5000);
-      save();
+      const entry = { seq, sealed: structuredClone(sealed) };
+      let trimmed: Entry[] = [];
+      if (!opts.storage?.readLog) {
+        state.log.push(entry);
+        if (state.log.length > LOG_LIMIT)
+          trimmed = state.log.splice(0, state.log.length - LOG_LIMIT);
+      }
+      try {
+        save(entry);
+      } catch (error) {
+        state.seq--;
+        if (previousRate) rates[sealed.sender.id] = previousRate;
+        else delete rates[sealed.sender.id];
+        if (!opts.storage?.readLog) {
+          state.log.pop();
+          state.log.unshift(...trimmed);
+        }
+        throw error;
+      }
       return { seq };
     },
-    since(memberId, seq) {
-      return memberOf(memberId) ? structuredClone(state.log.filter((m) => m.seq > seq)) : [];
+    since(memberId, seq, limit = LOG_LIMIT) {
+      if (!memberOf(memberId)) return [];
+      return opts.storage?.readLog
+        ? opts.storage.readLog(seq, limit)
+        : structuredClone(state.log.filter((m) => m.seq > seq).slice(0, limit));
     },
+    seq: () => state.seq,
+    oldestSeq: () => Math.max(1, state.seq - LOG_LIMIT + 1),
     grantsFor(recipientId) {
       return memberOf(recipientId)
         ? structuredClone(state.grants.filter((g) => g.memberId === recipientId))
         : [];
     },
     members: () => structuredClone(state.members),
+    identities: () => structuredClone(state.directory ?? state.members),
     directory: () => structuredClone(state.signedDirectory as Directory),
     pending: () => structuredClone(state.pending),
     setPresence(id, status) {
       if (!memberOf(id)) throw new Error("Unknown member");
-      state.presence[id] = { status, seenAt: opts.now() };
-      save();
+      const now = opts.now();
+      if (state.presence[id] && now - state.presence[id].seenAt < 0.8 * PRESENCE_INTERVAL_MS)
+        return false;
+      state.presence[id] = { status, seenAt: now };
+      return true;
+    },
+    restorePresence(id, presence) {
+      if (memberOf(id) && (!state.presence[id] || presence.seenAt > state.presence[id].seenAt))
+        state.presence[id] = structuredClone(presence);
     },
     presence() {
       const presence = structuredClone(state.presence);

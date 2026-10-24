@@ -54,6 +54,7 @@ export const helloSchema = z.strictObject({
   sig: base64,
   challenge: base64,
 });
+const messageId = z.string().min(1).max(200);
 const grants = z.array(keyGrantSchema);
 export const directorySchema = z.strictObject({
   room: z.string().min(1),
@@ -72,7 +73,7 @@ export const controlSchema = z.strictObject({
 export const tokenSchema = z.strictObject({ memberId: id, nonce: base64, at: epoch, sig: base64 });
 export const clientMessageSchema = z.discriminatedUnion("t", [
   helloSchema,
-  z.strictObject({ t: z.literal("post"), sealed: sealedSchema }),
+  z.strictObject({ t: z.literal("post"), id: messageId.optional(), sealed: sealedSchema }),
   z.strictObject({ t: z.literal("since"), seq: epoch }),
   z.strictObject({ t: z.literal("presence"), status: z.enum(["online", "busy", "away"]) }),
   z.strictObject({ t: z.literal("join"), token: base64, member: memberSchema }),
@@ -85,7 +86,10 @@ export const relayMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({ t: z.literal("pending"), members: z.array(memberSchema) }),
   z.strictObject({ t: z.literal("msg"), seq: epoch, sealed: sealedSchema }),
   z.strictObject({ t: z.literal("grants"), grants }),
-  z.strictObject({ t: z.literal("refused"), reason: z.string() }),
+  z.strictObject({ t: z.literal("gap"), from: epoch, to: epoch }),
+  z.strictObject({ t: z.literal("reset"), relaySeq: epoch }),
+  z.strictObject({ t: z.literal("more"), seq: epoch }),
+  z.strictObject({ t: z.literal("refused"), reason: z.string(), id: messageId.optional() }),
   z.strictObject({
     t: z.literal("presence"),
     map: z.record(z.string(), z.strictObject({ status: z.string(), seenAt: epoch })),

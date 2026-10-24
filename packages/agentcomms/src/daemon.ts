@@ -21,12 +21,12 @@ import {
 import { mayAutoReply, outgoingRate, similarOpen } from "./guards.ts";
 import { type InboxEntry, openInbox, type Thread } from "./inbox.ts";
 import { type Delegation, type Identity, verifyDelegation } from "./keys.ts";
+import { FRAME_MAX, HELLO_TIMEOUT_MS, PRESENCE_INTERVAL_MS } from "./limits.ts";
 import { type Invite, type Member, unwrapRoomKey } from "./membership.ts";
 import { type ClientMessage, relayMessageSchema } from "./protocol.ts";
 import { makeHello, relayUrl } from "./relay-client.ts";
-import { FRAME_MAX } from "./relay-session.ts";
 import { readRoomKeys, saveRoomKeys } from "./room-keys.ts";
-import { acceptDirectory, readTrust } from "./trust.ts";
+import { acceptDirectory, readMembershipTrust } from "./trust.ts";
 
 function killProcessGroup(child: ReturnType<typeof spawn>): void {
   if (!child.pid) return;
@@ -56,7 +56,13 @@ export interface Daemon {
   read(room: string, sinceSeq?: number, limit?: number): InboxEntry[];
   presence(room: string): Presence;
   stop(): Promise<void>;
-  rooms(): { room: string; relay: string; status?: string; error?: string }[];
+  rooms(): {
+    room: string;
+    relay: string;
+    status?: string;
+    error?: string;
+    gaps: { from: number; to: number }[];
+  }[];
   threads(room: string): Thread[];
 }
 
@@ -100,9 +106,13 @@ export async function startDaemon(opts: {
     verified: undefined as Directory | undefined,
     status: "connecting",
     error: undefined as string | undefined,
+    gaps: [] as { from: number; to: number }[],
     hookTimes: [] as number[],
     socket: undefined as WebSocket | undefined,
     connected: false,
+    removed: false,
+    relayReset: false,
+    hooks: new Set<ReturnType<typeof spawn>>(),
     directory: [] as Member[],
     activeMemberIds: [] as string[],
     backoff: 1000,
@@ -113,16 +123,6 @@ export async function startDaemon(opts: {
     incoming: Promise.resolve(),
     outgoing: Promise.resolve() as Promise<unknown>,
   }));
-  for (const state of states) {
-    const saved = await readRoomKeys(opts.home, state.invite.room);
-    for (const [epoch, key] of state.keys) if (!saved.has(epoch)) saved.set(epoch, key);
-    state.keys = saved;
-    state.verified = await readTrust(opts.home, state.invite);
-    state.epoch = state.verified?.keyEpoch ?? 0;
-    state.directory = state.verified?.members ?? [];
-    state.activeMemberIds = state.verified?.activeMemberIds ?? [];
-    if (saved.size) await saveRoomKeys(opts.home, state.invite.room, saved);
-  }
   const inbox = openInbox(join(opts.home, "inbox.sqlite"));
   type State = (typeof states)[number];
   const stateFor = (room: string) => {
@@ -131,6 +131,7 @@ export async function startDaemon(opts: {
     return state;
   };
   const write = (state: State, message: ClientMessage) => {
+    if (state.removed || state.relayReset) throw new Error(state.error);
     if (state.socket?.readyState !== WebSocket.OPEN) throw new Error("Relay disconnected");
     state.socket.send(JSON.stringify(message));
   };
@@ -140,11 +141,57 @@ export async function startDaemon(opts: {
     state.pending.reject(error);
     state.pending = undefined;
   };
+  const haltRoom = (state: State, status: "removed" | "relay-reset", error: string) => {
+    state.removed = status === "removed";
+    state.relayReset = status === "relay-reset";
+    state.connected = false;
+    state.status = status;
+    state.error = error;
+    clearTimeout(state.reconnect);
+    clearInterval(state.heartbeat);
+    for (const hook of state.hooks) killProcessGroup(hook);
+    failPending(state, new Error(error));
+    state.socket?.terminate();
+  };
+  const refreshTrust = async (state: State) => {
+    const trust = await readMembershipTrust(opts.home, state.invite, opts.member.id);
+    // A concurrent directory handler may have advanced state while disk reads were pending.
+    if (state.verified && (trust.directory?.version ?? -1) < state.verified.version) return;
+    state.verified = trust.directory;
+    state.epoch = trust.directory?.keyEpoch ?? 0;
+    state.directory = trust.directory?.members ?? [];
+    state.activeMemberIds = trust.directory?.activeMemberIds ?? [];
+    if (trust.removed)
+      haltRoom(state, "removed", "Removed from room; communicator stopped for this room");
+  };
+  const haltForReset = (state: State, relaySeq: number) => {
+    haltRoom(
+      state,
+      "relay-reset",
+      `Relay history reset: relay sequence ${relaySeq} is behind local cursor ${inbox.lastSeq(state.invite.room)}. ` +
+        "Room paused; new messages may reuse stored sequence numbers. Preserve the inbox and migrate to a new room; see the relay-reset recovery runbook. No cursor was rewound.",
+    );
+  };
+  try {
+    for (const state of states) {
+      const saved = await readRoomKeys(opts.home, state.invite.room);
+      for (const [epoch, key] of state.keys) if (!saved.has(epoch)) saved.set(epoch, key);
+      state.keys = saved;
+      await refreshTrust(state);
+      const relaySeq = inbox.relayReset(state.invite.room);
+      if (!state.removed && relaySeq !== undefined) haltForReset(state, relaySeq);
+      if (saved.size) await saveRoomKeys(opts.home, state.invite.room, saved);
+    }
+  } catch (error) {
+    inbox.dispose();
+    throw error;
+  }
   const send = (room: string, input: Draft, auto: boolean): Promise<SendResult> => {
     const state = stateFor(room);
     const draft = structuredClone(input);
     const task = state.outgoing.then(async (): Promise<SendResult> => {
       if (stopped) throw new Error("Daemon stopped");
+      if (state.removed || state.relayReset) throw new Error(state.error);
       if (draft.room !== room) throw new Error("Room mismatch");
       if (Buffer.byteLength(draft.body, "utf8") > BODY_MAX) throw new BodyTooLarge();
       if (draft.kind === "request" && !draft.reason?.trim())
@@ -155,14 +202,11 @@ export async function startDaemon(opts: {
         const thread = similarOpen(room, draft.body, inbox);
         if (thread) return { merged: thread };
       }
-      const persisted = await readTrust(opts.home, state.invite);
-      if (persisted && (!state.verified || persisted.version > state.verified.version)) {
-        state.verified = persisted;
-        state.epoch = persisted.keyEpoch;
-        state.directory = persisted.members;
-        state.activeMemberIds = persisted.activeMemberIds;
+      const previousVersion = state.verified?.version;
+      await refreshTrust(state);
+      if (state.removed || state.relayReset) throw new Error(state.error);
+      if (state.verified?.version !== previousVersion)
         state.keys = await readRoomKeys(opts.home, state.invite.room);
-      }
       if (state.epoch < Math.max(0, ...state.keys.keys()))
         return { held: "Waiting for owner-signed state for the newest verified key" };
       const key = state.keys.get(state.epoch);
@@ -174,8 +218,14 @@ export async function startDaemon(opts: {
       if (!rate.allow()) return { held: "Outgoing rate limit: 10 messages per minute" };
       const msg: Message = { ...draft, id: randomUUID(), sentAt: new Date().toISOString(), auto };
       const sealed = await seal(msg, agent, key, state.epoch, delegation);
+      if (state.removed || state.relayReset) throw new Error(state.error);
       if (sealed.keyEpoch !== state.epoch || sealed.keyEpoch < Math.max(...state.keys.keys()))
         return { held: "Verified epoch changed while sealing; retry" };
+      const post: ClientMessage = { t: "post", id: msg.id, sealed };
+      if (Buffer.byteLength(JSON.stringify(post), "utf8") > FRAME_MAX)
+        throw new Error(
+          `Sealed message exceeds FRAME_MAX (${FRAME_MAX} UTF-8 bytes); shorten the body or metadata`,
+        );
       return new Promise<SendResult>((resolve, reject) => {
         const timer = setTimeout(
           () => failPending(state, new Error("Delivery unknown; read the inbox before retrying")),
@@ -183,7 +233,7 @@ export async function startDaemon(opts: {
         );
         state.pending = { id: msg.id, resolve, reject, timer };
         try {
-          write(state, { t: "post", sealed });
+          write(state, post);
         } catch {
           failPending(state, new Error("Relay disconnected; delivery unknown"));
         }
@@ -193,7 +243,7 @@ export async function startDaemon(opts: {
     return task;
   };
   const answer = async (state: State, msg: Message) => {
-    if (!opts.answer || stopped) return;
+    if (!opts.answer || stopped || state.removed || state.relayReset) return;
     if (inbox.threads(state.invite.room).some((t) => t.thread === msg.thread && t.closed)) return;
     const output = await new Promise<string>((resolve) => {
       const child = spawn(opts.answer as string, {
@@ -219,13 +269,15 @@ export async function startDaemon(opts: {
       child.on("close", (code) => {
         clearTimeout(timer);
         hooks.delete(child);
+        state.hooks.delete(child);
         resolve(failed || code !== 0 ? "" : output.trim());
       });
       hooks.add(child);
+      state.hooks.add(child);
       child.stdin.on("error", () => {});
       child.stdin.end(JSON.stringify(msg));
     });
-    if (!output || stopped) return;
+    if (!output || stopped || state.removed || state.relayReset) return;
     let parsed: unknown;
     try {
       parsed = JSON.parse(output);
@@ -282,18 +334,19 @@ export async function startDaemon(opts: {
     hookTasks.add(task);
   };
   const connect = (state: State) => {
-    if (stopped) return;
+    if (stopped || state.removed || state.relayReset) return;
     const connectedAt = Date.now();
     state.status = "connecting";
     const socket = new WebSocket(relayUrl(state.invite.relay, state.invite.room), {
-      maxPayload: FRAME_MAX,
-      handshakeTimeout: 10000,
+      maxPayload: FRAME_MAX + 1024,
+      handshakeTimeout: HELLO_TIMEOUT_MS,
     });
     state.socket = socket;
     socket.on("message", (raw, binary) => {
       state.incoming = state.incoming
         .then(async () => {
-          if (stopped || socket !== state.socket || binary) return;
+          if (stopped || state.removed || state.relayReset || socket !== state.socket || binary)
+            return;
           const value = JSON.parse(raw.toString());
           const parsed = relayMessageSchema.safeParse(value);
           if (!parsed.success) {
@@ -318,15 +371,8 @@ export async function startDaemon(opts: {
             write(state, await makeHello(state.invite.room, agent, incoming.challenge));
           } else if (incoming.t === "directory") {
             const { t: _, ...directory } = incoming;
-            state.verified = await acceptDirectory(
-              opts.home,
-              state.invite,
-              directory,
-              state.verified,
-            );
-            state.directory = state.verified.members;
-            state.activeMemberIds = state.verified.activeMemberIds;
-            state.epoch = state.verified.keyEpoch;
+            await acceptDirectory(opts.home, state.invite, directory, state.verified);
+            await refreshTrust(state);
           } else if (incoming.t === "pending") {
             state.error = "Unexpected pending membership requests";
           } else if (incoming.t === "grants") {
@@ -348,6 +394,7 @@ export async function startDaemon(opts: {
             }
             if (incoming.grants.length)
               await saveRoomKeys(opts.home, state.invite.room, state.keys);
+            if (stopped || state.removed || state.relayReset) return;
             if (!state.verified) {
               state.status = "pending";
               return;
@@ -364,13 +411,39 @@ export async function startDaemon(opts: {
               state.heartbeat = setInterval(() => {
                 if (socket.readyState === WebSocket.OPEN)
                   write(state, { t: "presence", status: "online" });
-              }, 30000);
+              }, PRESENCE_INTERVAL_MS);
             }
           } else if (incoming.t === "presence") state.presence = incoming.map;
-          else if (incoming.t === "refused") {
+          else if (incoming.t === "more") {
+            // Incoming frames are serialized, so the page is stored before requesting another.
+            write(state, { t: "since", seq: inbox.lastSeq(state.invite.room) });
+          } else if (incoming.t === "gap") {
+            if (incoming.from > incoming.to) return;
+            const ranges = [...state.gaps, { from: incoming.from, to: incoming.to }].sort(
+              (a, b) => a.from - b.from,
+            );
+            const merged: State["gaps"] = [];
+            for (const range of ranges) {
+              const last = merged.at(-1);
+              if (last && range.from <= last.to + 1) last.to = Math.max(last.to, range.to);
+              else merged.push({ ...range });
+            }
+            state.gaps = merged.slice(-20);
+          } else if (incoming.t === "reset") {
+            // The honest relay sends a reset only when this cursor is ahead of it; anything else
+            // would pause the room for good on an unprovable claim.
+            if (incoming.relaySeq >= inbox.lastSeq(state.invite.room)) return;
+            inbox.markRelayReset(state.invite.room, incoming.relaySeq);
+            haltForReset(state, incoming.relaySeq);
+          } else if (incoming.t === "refused") {
+            if (incoming.id || (incoming.reason === "invalid-message" && state.pending)) {
+              if (!incoming.id || incoming.id === state.pending?.id)
+                failPending(state, new Error(`Relay refused: ${incoming.reason}`));
+              return;
+            }
             state.status = incoming.reason === "bad-hello" ? "pending" : "refused";
             state.error = incoming.reason;
-            failPending(state, new Error(`Relay refused: ${incoming.reason}`));
+            if (incoming.reason === "removed") socket.terminate();
           } else {
             if (
               incoming.sealed.room !== state.invite.room ||
@@ -445,16 +518,18 @@ export async function startDaemon(opts: {
           }
         })
         .catch((error) => {
-          state.error = error instanceof Error ? error.message : "Invalid relay frame";
+          if (!state.removed && !state.relayReset)
+            state.error = error instanceof Error ? error.message : "Invalid relay frame";
         });
     });
     socket.on("error", () => socket.terminate());
     socket.on("close", () => {
       state.connected = false;
-      if (state.status !== "pending") state.status = "disconnected";
+      if (state.status !== "pending" && !state.removed && !state.relayReset)
+        state.status = "disconnected";
       clearInterval(state.heartbeat);
       failPending(state, new Error("Relay disconnected; delivery unknown, read before retrying"));
-      if (!stopped) {
+      if (!stopped && !state.removed && !state.relayReset) {
         if (Date.now() - connectedAt >= 60000) state.backoff = 1000;
         state.reconnect = setTimeout(() => connect(state), state.backoff);
         state.backoff = Math.min(state.backoff * 2, 30000);
@@ -475,10 +550,11 @@ export async function startDaemon(opts: {
       return map;
     },
     rooms: () =>
-      states.map(({ invite, status, error }) => ({
+      states.map(({ invite, status, error, gaps }) => ({
         room: invite.room,
         relay: invite.relay,
         status,
+        gaps: structuredClone(gaps),
         ...(error ? { error } : {}),
       })),
     threads: (room) => {

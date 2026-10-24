@@ -1,5 +1,11 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { controlPayload, sign, signDirectory } from "../src/auth.ts";
+import {
+  AUTH_CLOCK_SKEW_MS,
+  FRAME_MAX,
+  LOG_PAGE_SIZE,
+  PRESENCE_INTERVAL_MS,
+} from "../src/limits.ts";
 import type { RelayMessage } from "../src/protocol.ts";
 import { makeHello } from "../src/relay-client.ts";
 import { createRoomCore, type RoomCore } from "../src/relay-core.ts";
@@ -136,6 +142,10 @@ it("closes removed peers, distributes grants and refuses stale epochs", async ()
   const { grants } = await f.rotate(core.members(), f.b.identity.id, 1);
   a.send(change("remove", f.b.identity.id, grants));
   expect(b.closed()).toBe(true);
+  expect(b.messages.slice(-2)).toEqual([
+    { t: "directory", ...core.directory() },
+    { t: "refused", reason: "removed" },
+  ]);
   expect(a.messages.filter((m) => m.t === "grants").at(-1)).toEqual({
     t: "grants",
     grants: grants.filter((g) => g.memberId === f.a.identity.id),
@@ -289,4 +299,141 @@ it("W3: closes sockets without hello at ten seconds", () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("reports a trimmed cursor gap before replaying bounded pages", async () => {
+  const original = core.since.bind(core);
+  const read = vi
+    .spyOn(core, "since")
+    .mockImplementation((id, seq, limit) => original(id, seq, limit));
+  vi.spyOn(core, "oldestSeq").mockReturnValue(3);
+  for (let i = 1; i <= 4; i++) core.post(await f.post(i));
+  const peer = client();
+  await auth(peer);
+  peer.send({ t: "since", seq: 0 });
+  expect(peer.messages.slice(-3)).toMatchObject([
+    { t: "gap", from: 1, to: 2 },
+    { t: "msg", seq: 3 },
+    { t: "msg", seq: 4 },
+  ]);
+  expect(read.mock.calls[0]).toEqual([f.a.identity.id, 2, LOG_PAGE_SIZE]);
+});
+it("correlates post refusals without attaching ids to unrelated refusals", async () => {
+  const peer = client();
+  await auth(peer, f.a.agent);
+  peer.send({ t: "post", id: "wrong-sender", sealed: await f.post(1) });
+  expect(peer.messages.at(-1)).toEqual({
+    t: "refused",
+    reason: "wrong-sender",
+    id: "wrong-sender",
+  });
+  peer.send({ t: "post", id: "malformed", sealed: {} });
+  expect(peer.messages.at(-1)).toEqual({
+    t: "refused",
+    reason: "invalid-message",
+    id: "malformed",
+  });
+  peer.send({ t: "since", seq: -1 });
+  expect(peer.messages.at(-1)).toEqual({ t: "refused", reason: "invalid-message" });
+});
+it("reports clock skew for a valid but expired signed token request", () => {
+  const payload = { memberId: f.a.identity.id, nonce: "clock", at: now - AUTH_CLOCK_SKEW_MS - 1 };
+  const request = {
+    ...payload,
+    sig: sign(controlPayload("token", "test-room", payload), f.a.identity),
+  };
+  const response = roomHttp({
+    room: "test-room",
+    tokens: true,
+    method: "POST",
+    body: request,
+    core,
+    now: () => now,
+    storage: { load: () => undefined, save: () => {} },
+  });
+  expect(response).toMatchObject({
+    status: 403,
+    body: { error: expect.stringContaining("clock skew") },
+  });
+});
+it("recognizes a removed member reconnecting with a valid challenge signature", async () => {
+  const rotation = await f.rotate(core.members(), f.b.identity.id, 1);
+  core.remove(
+    f.a.identity.id,
+    f.b.identity.id,
+    rotation.grants,
+    f.nextDirectory(core, f.b.identity.id),
+  );
+  const peer = client();
+  await auth(peer, f.b.agent);
+  expect(peer.closed()).toBe(true);
+  expect(peer.messages.slice(-2)).toEqual([
+    { t: "directory", ...core.directory() },
+    { t: "refused", reason: "removed" },
+  ]);
+});
+
+it("sends one replay page per since and defers live delivery until caught up", async () => {
+  const sealed = await f.post(1);
+  for (let i = 0; i < LOG_PAGE_SIZE + 3; i++) {
+    now += 60001;
+    expect(core.post(sealed)).toEqual({ seq: i + 1 });
+  }
+  const peer = client();
+  await auth(peer);
+  const read = vi.spyOn(core, "since");
+  peer.send({ t: "since", seq: 0 });
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(peer.messages.filter((m) => m.t === "msg")).toHaveLength(LOG_PAGE_SIZE);
+  expect(peer.messages.at(-1)).toEqual({ t: "more", seq: LOG_PAGE_SIZE });
+  const live = client();
+  await auth(live);
+  live.send({ t: "post", sealed });
+  expect(peer.messages.at(-1)).toEqual({ t: "more", seq: LOG_PAGE_SIZE });
+  peer.send({ t: "since", seq: LOG_PAGE_SIZE });
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(peer.messages.filter((m) => m.t === "msg").map((m) => m.seq)).toEqual(
+    Array.from({ length: LOG_PAGE_SIZE + 4 }, (_, i) => i + 1),
+  );
+  expect(peer.messages.at(-1)).toMatchObject({ t: "msg", seq: LOG_PAGE_SIZE + 4 });
+  live.send({ t: "post", sealed });
+  expect(peer.messages.at(-1)).toMatchObject({ t: "msg", seq: LOG_PAGE_SIZE + 5 });
+});
+it("refuses a post whose outgoing msg frame would exceed FRAME_MAX", async () => {
+  const peer = client();
+  await auth(peer);
+  const sealed = await f.post(1);
+  sealed.ciphertext = "a";
+  const overhead = Buffer.byteLength(
+    JSON.stringify({ t: "msg", seq: Number.MAX_SAFE_INTEGER, sealed }),
+  );
+  sealed.ciphertext = "a".repeat(FRAME_MAX - overhead + 2);
+  const post = { t: "post", id: "x", sealed };
+  expect(Buffer.byteLength(JSON.stringify(post))).toBeLessThanOrEqual(FRAME_MAX);
+  peer.send(post);
+  expect(peer.messages.at(-1)).toEqual({ t: "refused", reason: "too-large", id: "x" });
+  expect(core.seq()).toBe(0);
+});
+it("reports a distinct reset and closes a peer whose cursor is ahead of the relay", async () => {
+  core.post(await f.post(1));
+  const peer = client();
+  await auth(peer);
+  peer.send({ t: "since", seq: 20 });
+  expect(peer.messages.at(-1)).toEqual({ t: "reset", relaySeq: 1 });
+  expect(peer.closed()).toBe(true);
+  peer.send({ t: "post", sealed: await f.post(2) });
+  expect(core.seq()).toBe(1);
+});
+it("restores the newest presence per identity regardless of socket order and allows heartbeat jitter", async () => {
+  const peer = client();
+  await auth(peer);
+  core.restorePresence(f.a.identity.id, { status: "busy", seenAt: now });
+  core.restorePresence(f.a.identity.id, { status: "away", seenAt: now - 1 });
+  expect(core.presence()[f.a.identity.id]).toEqual({ status: "busy", seenAt: now });
+  now += 0.8 * PRESENCE_INTERVAL_MS - 1;
+  peer.send({ t: "presence", status: "online" });
+  expect(core.presence()[f.a.identity.id].status).toBe("busy");
+  now++;
+  peer.send({ t: "presence", status: "online" });
+  expect(core.presence()[f.a.identity.id]).toEqual({ status: "online", seenAt: now });
 });

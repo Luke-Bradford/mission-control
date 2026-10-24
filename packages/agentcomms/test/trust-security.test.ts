@@ -5,7 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { signDirectory, signMember } from "../src/auth.ts";
 import { validateMember } from "../src/relay-core.ts";
 import { readRoomKeys, saveRoomKeys } from "../src/room-keys.ts";
-import { acceptDirectory, readTrust } from "../src/trust.ts";
+import { acceptDirectory, readMembershipTrust, readTrust } from "../src/trust.ts";
 import { fixture } from "./relay-fixtures.ts";
 
 let home: string;
@@ -38,4 +38,27 @@ it("B2: overlapping persisted snapshots and keys cannot erase a newer verified e
     "Conflicting immutable local record",
   );
   expect((await readRoomKeys(home, invite.room)).get(2)).toEqual(Buffer.from(f.key));
+});
+
+it("derives removal from any verified active history and the newest stored directory", async () => {
+  const f = await fixture();
+  home = await mkdtemp(join(tmpdir(), "comms-trust-"));
+  const invite = { room: "test-room", ownerId: f.a.member.id };
+  const membership = () => readMembershipTrust(home, invite, f.b.member.id);
+  expect(await membership()).toEqual({ directory: undefined, removed: false });
+  await acceptDirectory(home, invite, f.directory);
+  expect((await membership()).removed).toBe(false);
+  const active = signDirectory("test-room", 0, 1, [f.a.member, f.b.member], f.a.identity);
+  await acceptDirectory(home, invite, active);
+  expect((await membership()).removed).toBe(false);
+  for (const version of [2, 3])
+    await acceptDirectory(
+      home,
+      invite,
+      signDirectory("test-room", 1, version, [f.a.member], f.a.identity),
+    );
+  expect(await membership()).toMatchObject({ directory: { version: 3 }, removed: true });
+  const reapproved = signDirectory("test-room", 1, 4, [f.a.member, f.b.member], f.a.identity);
+  await acceptDirectory(home, invite, reapproved);
+  expect(await membership()).toEqual({ directory: reapproved, removed: false });
 });

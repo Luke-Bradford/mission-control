@@ -199,6 +199,10 @@ it("B1/B2: verified rotations reject removed members, old ciphertext, and signed
   });
   await expect.poll(() => f.aDaemon.read("test-room").length).toBe(2);
   expect(f.aDaemon.read("test-room").every((row) => row.quarantined)).toBe(true);
+  // Align the fake relay's cursor with the injected frames before reconnecting;
+  // otherwise this fixture also simulates a relay reset, which must pause the room.
+  f.core.post(await seal({ ...msg, id: "pad1" }, f.a.agent, rotated.roomKey, 1, f.a.delegation));
+  f.core.post(await seal({ ...msg, id: "pad2" }, f.a.agent, rotated.roomKey, 1, f.a.delegation));
   await f.aDaemon.stop();
   const restarted = await startDaemon({
     home: join(home, "a"),
@@ -219,9 +223,6 @@ it("B1/B2: verified rotations reject removed members, old ciphertext, and signed
   daemons.push(restarted);
   await expect.poll(() => restarted.rooms()[0].status).toBe("connected");
   transport.sockets.at(-1)?.peer.send({ t: "directory", ...old });
-  // Skip replayed sequence numbers in the fake relay's log for the outgoing echo.
-  f.core.post(await seal({ ...msg, id: "pad1" }, f.a.agent, rotated.roomKey, 1, f.a.delegation));
-  f.core.post(await seal({ ...msg, id: "pad2" }, f.a.agent, rotated.roomKey, 1, f.a.delegation));
   expect(await restarted.send("test-room", draft("current"))).toHaveProperty("seq");
   expect(transport.sent.filter((m) => m.t === "post").at(-1)).toMatchObject({
     sealed: { keyEpoch: 1 },
