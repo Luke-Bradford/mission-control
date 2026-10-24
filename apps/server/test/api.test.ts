@@ -4860,6 +4860,17 @@ describe("operator token", () => {
     expect(bare.statusCode).toBe(403);
     expect(bare.json()).toEqual({ error: BOOTSTRAP_REFUSED });
     expect((await boot({ "sec-fetch-site": "cross-site" })).statusCode).toBe(403);
+    const fromAddress = (remoteAddress: string) =>
+      guarded.inject({
+        method: "GET",
+        url: OPERATOR_BOOTSTRAP_PATH,
+        headers: { "sec-fetch-site": "same-origin" },
+        remoteAddress,
+      });
+    const remote = await fromAddress("10.0.0.5");
+    expect(remote.statusCode).toBe(403);
+    expect(remote.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect((await fromAddress("::1")).statusCode).toBe(200);
     expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
   });
 });
