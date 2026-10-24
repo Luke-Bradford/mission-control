@@ -17,9 +17,10 @@ export const ROLE_NAME = /^[A-Z][A-Z0-9]{1,15}$/;
 export const ROLE_PROMPT = /^roles\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.md$/;
 export const ROLE_PROMPT_DIR = "roles";
 
-/** The effort levels a seat may be configured with; the CLI's `--effort` takes the same words. */
+/** Claude's `--effort` values. Codex advertises its model-specific values through `model/list`. */
 export const CREW_EFFORTS = ["low", "medium", "high", "max"] as const;
-export type CrewEffort = (typeof CREW_EFFORTS)[number];
+/** Codex 0.154's ReasoningEffort is a nonempty string, validated against the model's catalog. */
+export type CrewEffort = string;
 
 /** The modes a seat runs in; `scratch` = edits in its own throwaway worktree, no git writes, no PR. */
 export const CREW_MODES = ["writer", "read-only", "scratch"] as const;

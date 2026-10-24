@@ -27,7 +27,7 @@ import {
   tokenTotal,
 } from "@mc/core";
 import { type LiveSession, sessionForLoop } from "./collectors/sessions.ts";
-import { agentIds, type CcConfig, configuredAgents } from "./config.ts";
+import { agentIds, type CcConfig, configuredAgents, seatUnavailable } from "./config.ts";
 import { type PrCache, runPrs, runTicket } from "./runview.ts";
 import type { Store } from "./store.ts";
 
@@ -484,6 +484,7 @@ export function configView(
               model: seat.model,
               area: [...seat.area],
               ...(seat.retiring ? { retiring: true } : {}),
+              ...(seatUnavailable(seat) ? { unavailable: seatUnavailable(seat) as string } : {}),
             })),
           })),
         }

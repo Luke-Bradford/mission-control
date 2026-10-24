@@ -195,6 +195,8 @@ export interface ConfigView {
         area: string[];
         /** Removed from config.yaml, kept until free: it takes no new work. */
         retiring?: boolean;
+        /** Codex model validation has not succeeded yet. */
+        unavailable?: string;
       }[];
     }[];
   } | null;
