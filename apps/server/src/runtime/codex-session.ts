@@ -1,4 +1,6 @@
 /** A Codex app-server thread over the same keeper transport as the Claude driver. */
+import { randomUUID } from "node:crypto";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import {
   CANNOT_START,
   CODEX_COMMAND,
@@ -9,7 +11,13 @@ import {
   type SessionEvent,
 } from "@mc/core";
 import { str } from "../util.ts";
-import { type CrewSession, SessionControlError, startKeeperSession } from "./session.ts";
+import { CODEX_DELIVERY } from "./keeper.ts";
+import {
+  type CrewSession,
+  type KeeperSession,
+  SessionControlError,
+  startKeeperSession,
+} from "./session.ts";
 
 export interface CodexSessionInput {
   args: string[];
@@ -25,6 +33,7 @@ export interface CodexSessionInput {
   effort: string | null;
   developerInstructions: string;
   resumeThreadId: string | null;
+  outboxPath: string;
   approve: (
     req: { id: number | string; method: string; params: unknown },
     paths: readonly string[] | undefined,
@@ -37,6 +46,52 @@ export interface CodexSessionInput {
   stopGraceMs?: number;
 }
 
+export const CODEX_OUTBOX_FILE = "outbox.json";
+
+function saveOutbox(path: string, entries: Map<string, string>): void {
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify([...entries]), { mode: 0o600, flush: true });
+  renameSync(tmp, path);
+}
+
+function readOutbox(path: string, transcriptPath?: string): Map<string, string> {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+    throw e;
+  }
+  const entries: unknown = JSON.parse(text);
+  if (
+    !Array.isArray(entries) ||
+    !entries.every(
+      (entry) =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        typeof entry[1] === "string",
+    )
+  )
+    throw new Error("invalid Codex outbox");
+  const outbox = new Map<string, string>(entries);
+  // A cold resume has no keeper to replay receipts written while the hub was away.
+  if (outbox.size > 0 && transcriptPath !== undefined) {
+    for (const line of readFileSync(transcriptPath, "utf8").split("\n")) {
+      let message: unknown;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (isObj(message) && message.type === CODEX_DELIVERY && typeof message.id === "string")
+        outbox.delete(message.id);
+    }
+    saveOutbox(path, outbox);
+  }
+  return outbox;
+}
+
 type RpcId = number | string;
 type ApprovalRequest = Parameters<CodexSessionInput["approve"]>[0];
 interface OpenApproval {
@@ -44,6 +99,11 @@ interface OpenApproval {
   itemId: string | null;
   req: ApprovalRequest;
   files: readonly string[] | undefined;
+}
+interface ReplayApproval {
+  req: ApprovalRequest;
+  files: readonly string[] | undefined;
+  completed: boolean;
 }
 interface Pending {
   onSuccess?: () => void;
@@ -58,25 +118,57 @@ const tokens = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
 export function startCodexSession(i: CodexSessionInput): CrewSession {
+  const outbox = readOutbox(i.outboxPath, i.resumeThreadId === null ? undefined : i.transcriptPath);
   const transport = startKeeperSession({
     ...i,
     command: i.command ?? CODEX_COMMAND,
     cliSessionId: i.marker,
     turnEnd: "codex",
   });
+  return codexSession(i, transport, outbox);
+}
+
+export interface CodexAttachInput {
+  /** Earlier lines rebuild protocol state without repeating supervisor events. */
+  from: number;
+  threadId: string;
+  model: string;
+  effort: string | null;
+  cwd: string;
+  developerInstructions: string;
+  outboxPath: string;
+  approve: CodexSessionInput["approve"];
+  controlTimeoutMs?: number;
+  log?: (line: string) => void;
+}
+
+export function attachCodexSession(i: CodexAttachInput, transport: KeeperSession): CrewSession {
+  return codexSession(i, transport);
+}
+
+function codexSession(
+  i: CodexSessionInput | CodexAttachInput,
+  transport: KeeperSession,
+  outbox = readOutbox(i.outboxPath),
+): CrewSession {
+  let replaying = "threadId" in i;
+  const replayRequests = new Map<RpcId, ReplayApproval>();
+  let checked = false;
+  const report = () => !replaying || ("from" in i && transport.lines > i.from);
   const listeners = new Set<(e: SessionEvent) => void>();
   const pending = new Map<RpcId, Pending>();
   const seenRequests = new Set<RpcId>();
   const approvals = new Map<RpcId, OpenApproval>();
   const paths = new Map<string, readonly string[] | undefined>();
   const itemKeys = new Map<string, Set<string>>();
-  const queued: string[] = [];
-  let nextId = 0;
-  let threadId: string | null = null;
+  const dispatched = new Set<string>();
+  let threadId: string | null = "threadId" in i ? i.threadId : null;
   let turnId: string | null = null;
   let closing = false;
   let uncertain = false;
-  let starts = 0;
+  let startDone: Promise<void> | null = null;
+  let started: ReturnType<typeof waitForEvent> | null = null;
+  const completions = new Map<string, Set<ReturnType<typeof waitForEvent>>>();
   let failed = false;
   let totalTokens: number | null = null;
   let maxTokens: number | null = null;
@@ -94,9 +186,14 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
     }
   };
   const ended = () => new SessionControlError("ended", "session ended");
-  const request = (method: string, params: unknown, onSuccess?: () => void): Promise<unknown> => {
+  const request = (
+    method: string,
+    params: unknown,
+    onSuccess?: () => void,
+    deliveryId?: string,
+  ): Promise<unknown> => {
     if (closing || !transport.alive) return Promise.reject(ended());
-    const id = ++nextId;
+    const id = deliveryId ?? randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
@@ -104,13 +201,35 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
       }, i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS);
       pending.set(id, { resolve, reject, timer, onSuccess });
       try {
-        transport.write({ id, method, params }, method === "turn/start");
+        transport.write({ id, method, params }, method === "turn/start", deliveryId);
       } catch (e) {
         clearTimeout(timer);
         pending.delete(id);
         reject(e);
       }
     });
+  };
+  const waitForEvent = (method: string) => {
+    let resolve: () => void = () => {};
+    let reject: (error: Error) => void = () => {};
+    const promise = new Promise<void>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    const timer = setTimeout(() => {
+      reject(new SessionControlError("timeout", `${method} timeout`));
+    }, i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS);
+    return {
+      promise,
+      resolve: () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      reject: (error: Error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    };
   };
   const answer = (id: RpcId, decision: "accept" | "decline") => {
     try {
@@ -120,6 +239,8 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
     }
   };
   const auditDecline = (req: ApprovalRequest, files: readonly string[] | undefined) => {
+    // Reattachment must confirm the live floor before invoking the guard at all.
+    if ("threadId" in i && !checked) return;
     void Promise.resolve()
       .then(() => i.approve(req, files, AbortSignal.abort()))
       .catch(() => emit({ kind: "stderr", text: "Codex refusal audit failed" }));
@@ -133,10 +254,22 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
       answer(id, "decline");
     }
   };
-  const finish = () => {
-    cancelApprovals();
+  const finish = (detach = false) => {
+    if (detach) {
+      for (const approval of approvals.values()) approval.controller.abort();
+      approvals.clear();
+    } else {
+      cancelApprovals();
+      for (const { req, files } of replayRequests.values()) {
+        auditDecline(req, files);
+        answer(req.id, "decline");
+      }
+    }
+    replayRequests.clear();
+    started?.reject(ended());
+    for (const waits of completions.values()) for (const wait of waits) wait.reject(ended());
+    completions.clear();
     closing = true;
-    queued.length = 0;
     for (const p of pending.values()) {
       clearTimeout(p.timer);
       p.reject(ended());
@@ -144,30 +277,61 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
     pending.clear();
     resolveReady();
   };
-  const startTurn = (text: string) => {
-    starts++;
-    void request("turn/start", {
-      threadId,
-      input: [{ type: "text", text }],
-      effort: i.effort,
-    }).then(
+  const flush = () => {
+    if (closing || !checked || startDone !== null) return;
+    for (const [id, text] of outbox) {
+      if (dispatched.has(id)) continue;
+      dispatched.add(id);
+      if (turnId === null) {
+        startTurn(text, id);
+        return;
+      }
+      void request(
+        "turn/steer",
+        { threadId, expectedTurnId: turnId, input: [{ type: "text", text }] },
+        undefined,
+        id,
+      ).catch((e: unknown) => {
+        if (!closing)
+          emit({ kind: "stderr", text: e instanceof Error ? e.message : "turn/steer failed" });
+      });
+    }
+  };
+  const waitForStart = (response?: Promise<unknown>) => {
+    const notification = waitForEvent("turn/started");
+    started = notification;
+    startDone = Promise.all([response, notification.promise]).then(
       () => {
-        starts--;
+        started = null;
+        startDone = null;
+        if (!closing) flush();
       },
       (e: unknown) => {
-        starts--;
+        notification.reject(ended());
+        started = null;
+        startDone = null;
         if (closing) return;
         emit({ kind: "stderr", text: e instanceof Error ? e.message : "turn/start failed" });
         if (e instanceof SessionControlError && e.kind === "refused") {
-          emit({ kind: "turn-refused", active: turnId !== null || starts > 0 });
+          emit({ kind: "turn-refused", active: turnId !== null });
+          flush();
         } else {
-          // A lost acknowledgement says nothing about execution. Keep every hold until exit,
-          // even if completion notifications arrive while the keeper is terminating the process.
+          // A lost acknowledgement or start notification cannot prove that execution stopped.
           uncertain = true;
           finish();
           void transport.close();
         }
       },
+    );
+  };
+  const startTurn = (text: string, id: string) => {
+    waitForStart(
+      request(
+        "turn/start",
+        { threadId, input: [{ type: "text", text }], effort: i.effort },
+        undefined,
+        id,
+      ),
     );
   };
   const init = (id: string) => {
@@ -176,12 +340,66 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
     emit({ kind: "init", sessionId: id, model: i.model });
   };
 
+  const approve = (req: ApprovalRequest, replay?: ReplayApproval) => {
+    seenRequests.add(req.id);
+    const params = isObj(req.params) ? req.params : {};
+    const controller = new AbortController();
+    const itemId = str(params.itemId);
+    const files = replay ? replay.files : itemId === null ? undefined : paths.get(itemId);
+    if (replay?.completed) controller.abort();
+    approvals.set(req.id, { controller, itemId, req, files });
+    const key = params.approvalId ?? params.itemId;
+    if (itemId !== null && rpcId(key)) {
+      const keys = itemKeys.get(itemId) ?? new Set<string>();
+      keys.add(String(key));
+      itemKeys.set(itemId, keys);
+    }
+    void Promise.resolve()
+      .then(() => i.approve(req, files, controller.signal))
+      .catch(() => {
+        controller.abort();
+        auditDecline(req, files);
+        emit({ kind: "stderr", text: "Codex approval callback failed; request declined" });
+        return "decline" as const;
+      })
+      .then((decision) => {
+        if (approvals.get(req.id)?.controller !== controller) return;
+        approvals.delete(req.id);
+        const supported =
+          req.method === "item/commandExecution/requestApproval" ||
+          req.method === "item/fileChange/requestApproval";
+        if (!supported && decision !== "decline") auditDecline(req, files);
+        answer(
+          req.id,
+          supported && !controller.signal.aborted && decision === "accept" ? "accept" : "decline",
+        );
+      });
+  };
+
   transport.on((e) => {
     if (e.kind === "exit") {
-      if (!closing && threadId === null) failed = true;
+      if (!closing && !checked) failed = true;
       finish();
       emit(failed ? { ...e, reason: CANNOT_START } : e);
-    } else emit(e);
+    } else if (e.kind === "attached") {
+      if (closing) return;
+      replaying = false;
+      if (e.awaiting && turnId === null) waitForStart();
+      void checkThread()
+        .then(() => {
+          if (closing) return;
+          checked = true;
+          resolveReady();
+          emit({
+            kind: "attached",
+            awaiting: turnId !== null || startDone !== null || outbox.size > 0,
+          });
+          for (const replay of replayRequests.values()) approve(replay.req, replay);
+          replayRequests.clear();
+          flush();
+        })
+        .catch(cannotStart);
+    } else if (report()) emit(e);
   });
   transport.onLine((line) => {
     let m: unknown;
@@ -191,6 +409,20 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
       return;
     }
     if (!isObj(m)) return;
+    if (m.type === CODEX_DELIVERY && typeof m.id === "string") {
+      if (outbox.has(m.id)) {
+        const remaining = new Map(outbox);
+        remaining.delete(m.id);
+        try {
+          saveOutbox(i.outboxPath, remaining);
+        } catch (e) {
+          cannotStart(e);
+          return;
+        }
+        outbox.delete(m.id);
+      }
+      return;
+    }
     if (rpcId(m.id) && typeof m.method !== "string") {
       const p = pending.get(m.id);
       if (!p) return;
@@ -207,6 +439,21 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
     const params = isObj(m.params) ? m.params : {};
     if (rpcId(m.id)) {
       const req = { id: m.id, method: m.method, params: m.params };
+      if ("threadId" in i && !checked && !closing) {
+        const itemId = str(params.itemId);
+        const key = params.approvalId ?? params.itemId;
+        if (itemId !== null && rpcId(key)) {
+          const keys = itemKeys.get(itemId) ?? new Set<string>();
+          keys.add(String(key));
+          itemKeys.set(itemId, keys);
+        }
+        replayRequests.set(req.id, {
+          req,
+          files: itemId === null ? undefined : paths.get(itemId),
+          completed: false,
+        });
+        return;
+      }
       const duplicate = seenRequests.has(req.id);
       seenRequests.add(req.id);
       if (closing || threadId === null || duplicate) {
@@ -218,52 +465,31 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
         answer(req.id, "decline");
         return;
       }
-      const controller = new AbortController();
-      const itemId = str(params.itemId);
-      const files = itemId === null ? undefined : paths.get(itemId);
-      approvals.set(req.id, { controller, itemId, req, files });
-      const key = params.approvalId ?? params.itemId;
-      if (itemId !== null && rpcId(key)) {
-        const keys = itemKeys.get(itemId) ?? new Set<string>();
-        keys.add(String(key));
-        itemKeys.set(itemId, keys);
-      }
-      void Promise.resolve()
-        .then(() => i.approve(req, files, controller.signal))
-        .catch(() => {
-          controller.abort();
-          auditDecline(req, files);
-          emit({ kind: "stderr", text: "Codex approval callback failed; request declined" });
-          return "decline" as const;
-        })
-        .then((decision) => {
-          if (approvals.get(req.id)?.controller !== controller) return;
-          approvals.delete(req.id);
-          const supported =
-            req.method === "item/commandExecution/requestApproval" ||
-            req.method === "item/fileChange/requestApproval";
-          if (!supported && decision !== "decline") auditDecline(req, files);
-          answer(
-            req.id,
-            supported && !controller.signal.aborted && decision === "accept" ? "accept" : "decline",
-          );
-        });
+      approve(req);
       return;
     }
     if (m.method === "turn/started" && isObj(params.turn)) {
       turnId = str(params.turn.id);
-      emit({ kind: "turn-start" });
+      if (turnId !== null) started?.resolve();
+      if (report()) emit({ kind: "turn-start" });
     } else if (m.method === "turn/completed" && isObj(params.turn)) {
-      if (uncertain) return;
+      if (uncertain || turnId === null || params.turn.id !== turnId) return;
+      for (const replay of replayRequests.values()) replay.completed = true;
       cancelApprovals();
       paths.clear();
       itemKeys.clear();
+      const completedId = str(params.turn.id);
       turnId = null;
-      emit({
-        kind: "result",
-        isError: params.turn.status === "failed",
-        stopReason: str(params.turn.status),
-      });
+      if (completedId !== null) {
+        for (const wait of completions.get(completedId) ?? []) wait.resolve();
+        completions.delete(completedId);
+      }
+      if (report())
+        emit({
+          kind: "result",
+          isError: params.turn.status === "failed",
+          stopReason: str(params.turn.status),
+        });
     } else if (m.method === "item/started" && isObj(params.item)) {
       const item = params.item;
       if (item.type === "fileChange" && typeof item.id === "string") {
@@ -290,8 +516,12 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
     } else if (m.method === "item/completed" && isObj(params.item)) {
       const item = params.item;
       if (typeof item.id === "string") {
+        for (const replay of replayRequests.values()) {
+          if (isObj(replay.req.params) && replay.req.params.itemId === item.id)
+            replay.completed = true;
+        }
         cancelApprovals(item.id);
-        if (item.type === "commandExecution" && !uncertain) {
+        if (item.type === "commandExecution" && !uncertain && report()) {
           for (const key of new Set([item.id, ...(itemKeys.get(item.id) ?? [])])) {
             emit({ kind: "tool-result", toolUseId: key });
           }
@@ -304,6 +534,7 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
       totalTokens = isObj(usage.last) ? tokens(usage.last.totalTokens) : null;
       maxTokens = tokens(usage.modelContextWindow);
     } else if (m.method === "account/rateLimits/updated" && isObj(params.rateLimits)) {
+      if (!report()) return;
       for (const window of [params.rateLimits.primary, params.rateLimits.secondary]) {
         if (isObj(window) && typeof window.usedPercent === "number" && window.usedPercent >= 100) {
           const reset = tokens(window.resetsAt);
@@ -315,87 +546,120 @@ export function startCodexSession(i: CodexSessionInput): CrewSession {
         }
       }
     } else if (m.method === "serverRequest/resolved" && rpcId(params.requestId)) {
+      replayRequests.delete(params.requestId);
       const approval = approvals.get(params.requestId);
       approvals.delete(params.requestId);
       approval?.controller.abort();
     }
   });
 
+  const cannotStart = (e: unknown) => {
+    if (closing) return;
+    failed = true;
+    const why = `${CANNOT_START}: ${e instanceof Error ? e.message : "Codex handshake failed"}`;
+    i.log?.(why);
+    emit({ kind: "stderr", text: why });
+    finish();
+    void transport.close();
+  };
+  const checkThread = async () => {
+    const resumeId = "threadId" in i ? i.threadId : i.resumeThreadId;
+    const result = await request(resumeId === null ? "thread/start" : "thread/resume", {
+      ...(resumeId === null ? {} : { threadId: resumeId }),
+      cwd: i.cwd,
+      model: i.model,
+      approvalPolicy: "untrusted",
+      approvalsReviewer: "user",
+      developerInstructions: i.developerInstructions,
+      config: CODEX_PROJECT_DOC_CONFIG,
+      ephemeral: false,
+    });
+    if (closing) return;
+    if (
+      !isObj(result) ||
+      result.approvalPolicy !== "untrusted" ||
+      result.approvalsReviewer !== "user" ||
+      !isObj(result.activePermissionProfile) ||
+      result.activePermissionProfile.id !== CODEX_SEAT_PROFILE ||
+      !isObj(result.sandbox) ||
+      result.sandbox.networkAccess !== false ||
+      !Array.isArray(result.instructionSources) ||
+      result.instructionSources.length !== 0 ||
+      !isObj(result.thread) ||
+      typeof result.thread.id !== "string" ||
+      result.thread.id === "" ||
+      (resumeId !== null && result.thread.id !== resumeId)
+    )
+      throw new Error("Codex thread did not confirm the seat floor");
+    init(result.thread.id);
+  };
+
   void (async () => {
+    if ("threadId" in i) return;
     try {
       await transport.ready;
       if (closing || !transport.alive) return;
       await request("initialize", { clientInfo: { name: "mission_control", version: "1" } });
       transport.write({ method: "initialized" });
-      const result = await request(i.resumeThreadId === null ? "thread/start" : "thread/resume", {
-        ...(i.resumeThreadId === null ? {} : { threadId: i.resumeThreadId }),
-        cwd: i.cwd,
-        model: i.model,
-        approvalPolicy: "untrusted",
-        approvalsReviewer: "user",
-        developerInstructions: i.developerInstructions,
-        config: CODEX_PROJECT_DOC_CONFIG,
-        ephemeral: false,
-      });
+      await checkThread();
       if (closing) return;
-      if (
-        !isObj(result) ||
-        result.approvalPolicy !== "untrusted" ||
-        result.approvalsReviewer !== "user" ||
-        !isObj(result.activePermissionProfile) ||
-        result.activePermissionProfile.id !== CODEX_SEAT_PROFILE ||
-        !isObj(result.sandbox) ||
-        result.sandbox.networkAccess !== false ||
-        !Array.isArray(result.instructionSources) ||
-        result.instructionSources.length !== 0 ||
-        !isObj(result.thread) ||
-        typeof result.thread.id !== "string" ||
-        result.thread.id === ""
-      ) {
-        throw new Error("Codex thread did not confirm the seat floor");
-      }
-      init(result.thread.id);
+      checked = true;
       resolveReady();
-      for (const text of queued.splice(0)) startTurn(text);
+      flush();
     } catch (e) {
-      if (!closing) {
-        failed = true;
-        const why = `${CANNOT_START}: ${e instanceof Error ? e.message : "Codex handshake failed"}`;
-        i.log?.(why);
-        emit({ kind: "stderr", text: why });
-        finish();
-        void transport.close();
-      }
+      cannotStart(e);
     } finally {
       resolveReady();
     }
   })();
 
+  const send = (text: string) => {
+    if (closing || !transport.alive) throw ended();
+    const id = randomUUID();
+    const saved = new Map(outbox).set(id, text);
+    saveOutbox(i.outboxPath, saved);
+    outbox.set(id, text);
+    flush();
+  };
+
   return {
-    send(text) {
-      if (closing || !transport.alive) throw ended();
-      if (threadId === null) queued.push(text);
-      else startTurn(text);
-    },
+    send,
     async control(subtype, opts) {
       await ready;
       if (closing || !transport.alive) throw ended();
       if (subtype === "get_context_usage") return { categories: [], totalTokens, maxTokens };
       if (subtype !== "interrupt")
         throw new SessionControlError("refused", "unsupported Codex control");
+      while (startDone !== null) await startDone;
+      if (closing || !transport.alive) throw ended();
       cancelApprovals();
       if (turnId === null) {
         opts?.onSuccess?.();
         return {};
       }
-      return request("turn/interrupt", { threadId, turnId }, opts?.onSuccess);
+      const interruptedId = turnId;
+      const completion = waitForEvent("turn/completed after interrupt");
+      const waits = completions.get(interruptedId) ?? new Set();
+      waits.add(completion);
+      completions.set(interruptedId, waits);
+      try {
+        const [result] = await Promise.all([
+          request("turn/interrupt", { threadId, turnId: interruptedId }, opts?.onSuccess),
+          completion.promise,
+        ]);
+        return result;
+      } finally {
+        completion.reject(ended());
+        waits.delete(completion);
+        if (waits.size === 0) completions.delete(interruptedId);
+      }
     },
     close() {
       finish();
       return transport.close();
     },
     detach() {
-      finish();
+      finish(true);
       listeners.clear();
       transport.detach();
     },

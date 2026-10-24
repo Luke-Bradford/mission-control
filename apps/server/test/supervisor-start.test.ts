@@ -78,6 +78,7 @@ import {
   seatDenyRead,
 } from "../src/runtime/supervisor.ts";
 import {
+  crewCodexDir,
   crewKeeperDir,
   crewMcpPath,
   crewPrBodyPath,
@@ -2085,7 +2086,11 @@ import(${JSON.stringify(fixture)});
 `,
       { mode: 0o700 },
     );
-    const made = make({ codexCommand: command, repo: { fullSuite: ["pnpm -s test"] } });
+    const made = make({
+      codexCommand: command,
+      codexAuthPath: join(home, ".codex", "auth.json"),
+      repo: { fullSuite: ["pnpm -s test"] },
+    });
     const account = made.cfg.accounts[0];
     if (account) account.vendor = "codex";
     const seat = made.cfg.crew?.sessions[0]?.seats[0];
@@ -2095,6 +2100,22 @@ import(${JSON.stringify(fixture)});
   const decision = (id = "approval-1") =>
     recorded().find((m) => m.id === id && m.result?.decision)?.result.decision;
 
+  it("refuses a missing Codex login before spawning and records the diagnostic", async () => {
+    const { sup, log } = codex();
+    unlinkSync(join(dir, "home", ".codex", "auth.json"));
+    sup.start();
+    const error = await refusal(sup.startRun("guido-1", 42));
+    expect(error).toMatchObject({ status: 500, message: CANNOT_START });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("no Codex login"));
+    const seat = store.seatSession("guido-1");
+    expect(seat).toMatchObject({ state: "error", reason: CANNOT_START });
+    expect(store.run(seat?.runId ?? "")).toMatchObject({
+      status: "failed",
+      endedAt: expect.any(Number),
+    });
+    expect(recorded().some((m) => m.type === "spawn")).toBe(false);
+  });
+
   it("launches with only the hub's config, private auth and temp dirs, then removes them", async () => {
     const { sup } = codex();
     sup.start();
@@ -2102,7 +2123,7 @@ import(${JSON.stringify(fixture)});
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     const spawn = recorded().find((m) => m.type === "spawn");
     expect(spawn.args).toEqual(["app-server", "-c", `mc_run="${runId}"`]);
-    const folder = crewKeeperDir(dbPath, runId);
+    const folder = crewCodexDir(dbPath, runId);
     const home = join(folder, "codex-home");
     expect(spawn.env.CODEX_HOME).toBe(home);
     expect(spawn.env.SHELL).toBe(CODEX_SHELL);
@@ -2142,10 +2163,19 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex({ holdTurn: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await vi.waitFor(() => expect(seatState("guido-1")).toBe("running"), { timeout: 5_000 });
     await sup.message("guido-1", JSON.stringify({ failed: true }), { interrupt: true });
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
-    expect(store.seatSession("guido-1")?.reason).toBe("last turn ended in an error");
+    // Sending the replacement must clear the interrupted turn's idle state immediately.
+    expect(seatState("guido-1")).toBe("running");
+    await vi.waitFor(
+      () => {
+        expect(store.seatSession("guido-1")).toMatchObject({
+          state: "idle",
+          reason: "last turn ended in an error",
+        });
+      },
+      { timeout: 5_000 },
+    );
     await sup.endRunByEngine(runId);
   });
 
@@ -2226,7 +2256,7 @@ import(${JSON.stringify(fixture)});
     expect(store.run(runId)?.endedAt).not.toBeNull();
   });
 
-  it("retains an accepted test lock when a later turn/start is rejected", async () => {
+  it("retains an accepted test lock when a steer is rejected", async () => {
     const { sup, lock, log } = codex({ command: "pnpm -s test", holdItem: true, ackDelayMs: 100 });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);

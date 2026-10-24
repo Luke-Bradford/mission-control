@@ -35,6 +35,29 @@ import {
 import { Store } from "../src/store.ts";
 import { expectNoLeftovers } from "./leftovers.ts";
 
+const authReads = vi.hoisted(() => [] as string[]);
+vi.mock("node:fs", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:fs")>();
+  const os = await vi.importActual<typeof import("node:os")>("node:os");
+  const path = await vi.importActual<typeof import("node:path")>("node:path");
+  const url = await vi.importActual<typeof import("node:url")>("node:url");
+  return {
+    ...real,
+    readFileSync: (...args: Parameters<typeof real.readFileSync>) => {
+      const file = args[0];
+      if (typeof file !== "number") {
+        const name = path.resolve(file instanceof URL ? url.fileURLToPath(file) : file.toString());
+        const home = path.join(os.homedir(), ".codex");
+        if (name === home || name.startsWith(`${home}${path.sep}`)) {
+          authReads.push(name);
+          throw new Error("test attempted to read the operator's Codex home");
+        }
+      }
+      return real.readFileSync(...args);
+    },
+  };
+});
+
 /** prepareCheckout calls in flight at once, per clone (R22: they must queue). */
 const prep = vi.hoisted(() => ({
   inFlight: 0,
@@ -252,6 +275,7 @@ function make(
     fetchTicket?: FetchTicket;
     command?: string;
     codexCommand?: string;
+    codexAuthPath?: string;
     worktrees?: string;
     extraArgs?: string[];
     resumeWindowMs?: number;
@@ -306,6 +330,9 @@ function make(
   }
   const tokens = over.tokens ?? new RunTokens();
   const lock = over.lock ?? new TestLock();
+  const codexAuthPath = over.codexAuthPath ?? join(dir, "fake-codex-auth.json");
+  if (over.codexAuthPath === undefined && !existsSync(codexAuthPath))
+    writeFileSync(codexAuthPath, '{"fake":"account"}', { mode: 0o600 });
   const sup = createSupervisor({
     config: cfg,
     store,
@@ -315,6 +342,7 @@ function make(
     login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,
     codexCommand: over.codexCommand,
+    codexAuthPath,
     commandArgs:
       over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,
@@ -437,6 +465,7 @@ afterEach(async () => {
   await Promise.all(sups.splice(0).map((s) => s.stopAll()));
   await noKeepers();
   rmSync(dir, { recursive: true, force: true });
+  expect(authReads.splice(0), "tests must never read the operator's Codex home").toEqual([]);
 });
 
 function reopenStore(): void {

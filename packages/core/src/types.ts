@@ -4,7 +4,7 @@ import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { ReviewStatus } from "./review.ts";
-import type { CrewMode, CrewRole, SeatState } from "./runtime.ts";
+import type { CrewMode, CrewRole, CrewVendor, SeatState } from "./runtime.ts";
 
 export type RepoId = string;
 export type AgentId = string;
@@ -61,6 +61,10 @@ export type RunPlan =
   | { skipped: `Size ${string}` };
 
 export interface Run {
+  /** Absent on legacy callers; stored as Claude by default. */
+  vendor?: CrewVendor;
+  /** Latest execution plan text from the seat, separate from the ticket plan snapshot. */
+  latestPlan?: string;
   id: string;
   agentId: AgentId;
   repoId: RepoId;
@@ -1065,6 +1069,8 @@ export interface RepoPreview {
 
 /** One seat's live session; `runId` is null when no run is active. `reason` shows in the doing line. */
 export interface SeatSessionRow {
+  /** Absent on legacy callers; stored as Claude by default. */
+  vendor?: CrewVendor;
   seatId: string;
   runId: string | null;
   cliSessionId: string | null;

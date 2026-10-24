@@ -18,7 +18,7 @@ import { TestLock } from "../src/guard/lock.ts";
 import { registerMcp } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createCodexApprover } from "../src/runtime/codex-approval.ts";
-import { startCodexSession } from "../src/runtime/codex-session.ts";
+import { CODEX_OUTBOX_FILE, startCodexSession } from "../src/runtime/codex-session.ts";
 import type { CrewSession } from "../src/runtime/session.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
@@ -107,6 +107,7 @@ function seat(id: string, mode: CrewMode, lock: TestLock) {
     effort: "low",
     developerInstructions: "test",
     resumeThreadId: null,
+    outboxPath: join(dir, `k-${id}`, CODEX_OUTBOX_FILE),
     approve,
     stopGraceMs: 100,
   });
@@ -117,6 +118,7 @@ function seat(id: string, mode: CrewMode, lock: TestLock) {
   });
   let n = 0;
   const ask = async (scenario: object) => {
+    if (n > 0) await session.control("interrupt");
     const requestId = `approval-${++n}`;
     session.send(JSON.stringify(scenario));
     let decision: string | undefined;
@@ -145,7 +147,7 @@ describe("Codex mode and seat boundaries", () => {
         ["a", "b", a],
         ["b", "a", b],
       ] as const) {
-        // Keep the turn open so a later test input cannot race the fake's completion timer.
+        // Each case holds its approval open; the next ask interrupts before starting a new turn.
         expect(await driver.ask({ command: "cat apps/a.txt", holdItem: true })).toBe("accept");
         expect(await driver.ask({ changes: [{ path: "apps/new.txt" }], holdItem: true })).toBe(
           mode === "read-only" ? "decline" : "accept",

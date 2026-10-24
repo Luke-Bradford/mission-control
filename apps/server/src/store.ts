@@ -515,6 +515,14 @@ export function crewKeeperDir(dbPath: string, runId: string): string {
   return join(crewDir(dbPath), `k-${hex}`);
 }
 
+/** Codex thread storage survives replacement of the run's keeper. */
+export function crewCodexDir(dbPath: string, runId: string): string {
+  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
+  return join(crewDir(dbPath), `codex-${hex}`);
+}
+
+export const CREW_CODEX_DIR = /^codex-[0-9a-f]{12}$/;
+
 /** A keeper folder's name in `{DB dir}/crew/`. */
 export const CREW_KEEPER_DIR = /^k-[0-9a-f]{12}$/;
 
@@ -678,6 +686,8 @@ function parsePlan(raw: string): { plan?: Run["plan"] } {
 }
 
 const toRun = (r: Row): Run => ({
+  ...(r.vendor === "codex" ? { vendor: "codex" as const } : {}),
+  ...(r.latest_plan == null ? {} : { latestPlan: r.latest_plan as string }),
   // Absent, not null, on a row from before the ticket's title was stored.
   ...(r.ticket_title === null || r.ticket_title === undefined
     ? {}
@@ -774,6 +784,7 @@ const toQuestion = (r: Row): SeatQuestion => ({
 });
 
 const seatRow = (r: Row): SeatSessionRow => ({
+  ...(r.vendor === "codex" ? { vendor: "codex" as const } : {}),
   seatId: r.seat_id as string,
   runId: r.run_id as string | null,
   cliSessionId: r.cli_session_id as string | null,
@@ -954,6 +965,8 @@ export class Store {
     // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
     // into the row, so the backfill can skip it.
     const runColumns: [string, string][] = [
+      ["vendor", "TEXT NOT NULL DEFAULT 'claude'"],
+      ["latest_plan", "TEXT"],
       ["prs", "TEXT NOT NULL DEFAULT '[]'"],
       ["summary", "TEXT"],
       ["folded", "INTEGER NOT NULL DEFAULT 0"],
@@ -993,6 +1006,7 @@ export class Store {
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
+    this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
     this.addColumn("board_items", "item_id", "TEXT");
     this.addColumn("board_items", "project_id", "TEXT");
     // When FLIGHT passed the question to the operator (it stays open until they answer).
@@ -1099,8 +1113,8 @@ export class Store {
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version, profile, profile_hash, plan)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1109,7 +1123,8 @@ export class Store {
            transcript_path = excluded.transcript_path, prs = excluded.prs,
            summary = excluded.summary, folded = MAX(folded, excluded.folded),
            ticket_title = COALESCE(excluded.ticket_title, ticket_title),
-           cli_version = COALESCE(excluded.cli_version, cli_version)`,
+           cli_version = COALESCE(excluded.cli_version, cli_version),
+           latest_plan = COALESCE(excluded.latest_plan, latest_plan)`,
       )
       .run(
         r.id,
@@ -1136,6 +1151,8 @@ export class Store {
         r.profile ? JSON.stringify({ profile: r.profile.profile, route: r.profile.route }) : null,
         r.profile?.hash ?? null,
         r.plan === undefined ? null : JSON.stringify(r.plan),
+        r.vendor ?? "claude",
+        r.latestPlan ?? null,
       );
   }
 
@@ -3008,10 +3025,10 @@ export class Store {
   setSeatSession(row: SeatSessionRow): void {
     this.db
       .prepare(
-        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since, vendor)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(seat_id) DO UPDATE SET run_id = excluded.run_id,
-           cli_session_id = excluded.cli_session_id, state = excluded.state,
+           cli_session_id = excluded.cli_session_id, state = excluded.state, vendor = excluded.vendor,
            reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
            error_since = CASE WHEN excluded.state != 'error' THEN NULL
              WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
@@ -3026,6 +3043,7 @@ export class Store {
         row.worktree,
         row.updatedAt,
         row.state === "error" ? row.updatedAt : null,
+        row.vendor ?? "claude",
       );
   }
 

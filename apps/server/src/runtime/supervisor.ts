@@ -132,8 +132,10 @@ import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.t
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
   ACTIVE_SEAT_STATES,
+  CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
+  crewCodexDir,
   crewDir,
   crewKeeperDir,
   crewMcpPath,
@@ -169,7 +171,7 @@ import {
 } from "./checkouts.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
-import { startCodexSession } from "./codex-session.ts";
+import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
 import { probeCodexVersion } from "./codex-version.ts";
 import {
   endKeeper,
@@ -183,6 +185,7 @@ import { recordNoReport } from "./no-report.ts";
 import {
   attachSession,
   type CrewSession,
+  type KeeperSession,
   SessionControlError,
   type SessionEvent,
   startSession,
@@ -354,6 +357,8 @@ export interface SupervisorDeps {
   commandArgs?: string[];
   /** Default "codex"; its version and app-server are run through the same binary. */
   codexCommand?: string;
+  /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
+  codexAuthPath?: string;
   superuserTools?: readonly McToolName[];
   seatGrants?: (seatId: string) => readonly string[];
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
@@ -678,6 +683,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const isCodex = (info: SeatInfo) =>
     config.accounts.find((a) => a.id === info.seat.accountId)?.vendor === "codex";
 
+  const resumeModel = (info: SeatInfo, run: Run): string => {
+    if (run.model !== null) return run.model;
+    const vendor = run.vendor ?? "claude";
+    if (config.accounts.find((a) => a.id === info.seat.accountId)?.vendor !== vendor)
+      throw new Error(`${CANNOT_START}: saved model missing and account vendor changed`);
+    // Codex runs always save their model. Only legacy Claude rows need a fallback.
+    if (vendor === "codex") throw new Error(`${CANNOT_START}: saved Codex model missing`);
+    return info.seat.model;
+  };
+
   async function startedOn(info: SeatInfo): Promise<{ cliVersion?: string }> {
     if (isCodex(info)) return {};
     refuseWhileHeld();
@@ -844,6 +859,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return;
     }
     store.setRunEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
+    removeCodexHome(l.run.id);
     closeRunItems(l.info);
     // read before the seat row changes
     const worktree = store.seatSession(seatId)?.worktree ?? null;
@@ -876,7 +892,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function onEvent(l: Live, e: SessionEvent): void {
     switch (e.kind) {
       case "init":
-        if (isCodex(l.info)) {
+        if (l.run.vendor === "codex") {
           l.run = { ...l.run, sessionId: e.sessionId };
           store.upsertRun(l.run);
           setSeat(l.info.seat.id, { cliSessionId: e.sessionId });
@@ -967,13 +983,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     l.inTurn = true;
     l.parkedTurn = false;
     l.rateLimitedUntil = null;
+    // A completed Codex interrupt leaves the seat idle until the replacement is sent.
+    if (l.run.vendor === "codex") setState(l, "running", null);
   }
 
   async function sendInterrupt(l: Live): Promise<void> {
     try {
       await l.session.control("interrupt", {
         onSuccess: () => {
-          l.interrupted = true;
+          // Codex reports interrupted turns separately from failed ones.
+          if (l.run.vendor !== "codex") l.interrupted = true;
         },
       });
     } catch (e) {
@@ -1072,7 +1091,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ),
       );
       const dir = crewDir(deps.dbPath);
+      const codexHomes = new Set(
+        store
+          .runsActiveSince(Number.MAX_SAFE_INTEGER)
+          .filter((r) => r.endedAt === null && r.vendor === "codex")
+          .map((r) => basename(crewCodexDir(deps.dbPath, r.id))),
+      );
       for (const name of readdirSync(dir)) {
+        if (CREW_CODEX_DIR.test(name) && !codexHomes.has(name)) {
+          rmSync(join(dir, name), { recursive: true, force: true });
+          continue;
+        }
         // a keeper's folder of a run that is no longer active: its keeper and CLI are ended, then it goes
         if (CREW_KEEPER_DIR.test(name)) {
           const folder = join(dir, name);
@@ -1114,8 +1143,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * files).
    */
   async function checkedLaunch(...args: Parameters<typeof launch>): Promise<Live> {
-    const [info, run] = args;
-    if (isCodex(info)) {
+    const [, run] = args;
+    if (run.vendor === "codex") {
       const cliVersion = await probeCodexVersion(deps.codexCommand ?? CODEX_COMMAND);
       if (stopping) throw new Error(SHUTTING_DOWN);
       args[1] = { ...run, cliVersion };
@@ -1133,6 +1162,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     claudeMd: string | null,
   ): Live {
     const def = seatDef(info.seat);
+    const model = resume
+      ? resumeModel(info, run)
+      : run.reviewId != null && run.model !== null
+        ? run.model
+        : info.seat.model;
     const tokenPath = crewTokenPath(deps.dbPath, run.id);
     const mcpPath = crewMcpPath(deps.dbPath, run.id);
     const hub = `http://${LOOPBACK_HOST}:${deps.hubPort}`;
@@ -1199,11 +1233,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         dataDir: realpathSync(dirname(deps.dbPath)),
         denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
       };
-      if (isCodex(info)) {
+      if (run.vendor === "codex") {
+        let auth: string;
+        try {
+          auth = readFileSync(deps.codexAuthPath ?? join(homedir(), ".codex", "auth.json"), "utf8");
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === "ENOENT")
+            throw new Error("no Codex login", { cause: e });
+          throw e;
+        }
         const command = deps.codexCommand ?? CODEX_COMMAND;
         const dir = crewKeeperDir(deps.dbPath, run.id);
-        const home = join(dir, "codex-home");
-        const zdotdir = join(dir, "zsh-empty");
+        const runDir = crewCodexDir(deps.dbPath, run.id);
+        const home = join(runDir, "codex-home");
+        const zdotdir = join(runDir, "zsh-empty");
         const tmpPath = codexTmp(run.id);
         mkdirSync(tmpPath, { recursive: true, mode: 0o700 });
         const tmp = realpathSync(tmpPath);
@@ -1237,47 +1280,31 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           dir,
           spawn: keeperSpawn,
           marker,
-          model: run.reviewId != null && run.model !== null ? run.model : info.seat.model,
+          model,
           effort: info.seat.effort ?? null,
           developerInstructions: readFileSync(promptPath, "utf8"),
           resumeThreadId: resume ? cliSessionId : null,
-          approve: createCodexApprover({
-            config,
-            repoId: info.repo.id,
-            seatId: info.seat.id,
-            runId: run.id,
-            mode: def.mode,
-            area: info.seat.area,
-            cwd,
-            lock: deps.lock,
-            superuserTools: deps.superuserTools,
-            seatGrants: deps.seatGrants,
-            record: (rule, text) => {
-              store.addGuardHit({ agentId: info.seat.id, runId: run.id, rule, text, at: now() });
-              bus.emit("guard");
-            },
-          }),
+          outboxPath: join(runDir, CODEX_OUTBOX_FILE),
+          approve: codexApprover(info, run, cwd),
           log,
           controlTimeoutMs: deps.controlTimeoutMs,
           stopGraceMs: deps.stopGraceMs,
           prepare: () => {
-            mkdirSync(home, { mode: 0o700 });
-            mkdirSync(zdotdir, { mode: 0o700 });
+            mkdirSync(runDir, { recursive: true, mode: 0o700 });
+            mkdirSync(home, { recursive: true, mode: 0o700 });
+            mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
             writePrivate(
               join(home, "config.toml"),
               codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp),
             );
-            writePrivate(
-              join(home, "auth.json"),
-              readFileSync(join(homedir(), ".codex", "auth.json"), "utf8"),
-            );
+            writePrivate(join(home, "auth.json"), auth);
           },
         });
       } else {
         const args = crewCliArgs({
           commands: info.repo.commands,
           protectedFiles: info.repo.protectedFiles,
-          model: run.reviewId != null && run.model !== null ? run.model : info.seat.model,
+          model,
           effort: info.seat.effort,
           mode: def.mode,
           mcTools: def.mcTools,
@@ -1323,6 +1350,34 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return l;
   }
 
+  function codexApprover(info: SeatInfo, run: Run, cwd: string) {
+    return createCodexApprover({
+      config,
+      repoId: info.repo.id,
+      seatId: info.seat.id,
+      runId: run.id,
+      mode: seatDef(info.seat).mode,
+      area: info.seat.area,
+      cwd,
+      lock: deps.lock,
+      superuserTools: deps.superuserTools,
+      seatGrants: deps.seatGrants,
+      record: (rule, text) => {
+        store.addGuardHit({ agentId: info.seat.id, runId: run.id, rule, text, at: now() });
+        bus.emit("guard");
+      },
+    });
+  }
+
+  function removeCodexHome(runId: string): void {
+    try {
+      if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
+      rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
+    } catch (e) {
+      log(`could not remove Codex home of ${runId}: ${errText(e)}`);
+    }
+  }
+
   function codexTmp(runId: string): string {
     const uid = process.getuid?.();
     if (uid === undefined) throw new Error("Codex seats require a sandbox temp root");
@@ -1350,7 +1405,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           log(`${info.seat.id}: could not remove ${p}: ${errText(e)}`);
         }
       }
-      if (isCodex(info)) {
+      if (run.vendor === "codex") {
         try {
           rmSync(codexTmp(run.id), { recursive: true, force: true });
         } catch (e) {
@@ -1366,6 +1421,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       rmSync(crewKeeperDir(deps.dbPath, runId), { recursive: true, force: true });
       store.deleteKeeperCursor(runId);
+      if (store.run(runId)?.endedAt != null) removeCodexHome(runId);
     } catch (e) {
       log(`${seatId}: could not remove the keeper folder of ${runId}: ${errText(e)}`);
     }
@@ -1450,6 +1506,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const at = now();
       const facts = foldOpenRun(run);
       store.setRunEnded(run.id, at, "failed", "exit");
+      removeCodexHome(run.id);
       const info = findSeat(row.seatId);
       if (info && opts.record !== false)
         noteMissingReport(
@@ -1725,7 +1782,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const found = await attachSession({
       dir,
       // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
-      from: (h) => (cursor?.spawn === h.spawn ? cursor.line : 0),
+      // Codex needs earlier item paths and unresolved requests even before the saved cursor.
+      from: (h) => (row.vendor === "codex" ? 0 : cursor?.spawn === h.spawn ? cursor.line : 0),
+      raw: row.vendor === "codex",
       controlTimeoutMs: deps.controlTimeoutMs,
       stopGraceMs: deps.stopGraceMs,
       log,
@@ -1795,7 +1854,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   async function attachOne(
     row: SeatSessionRow,
     runId: string,
-    session: CrewSession,
+    session: KeeperSession,
     hello: KeeperHello,
     cursor: KeeperCursor | null,
   ): Promise<void> {
@@ -1818,6 +1877,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       refusal = RESUME_MODE_CHANGED; // a scratch seat takes back only review runs
     }
     if (refusal !== null) return refuse(refusal);
+    let developerInstructions = "";
+    if (row.vendor === "codex") {
+      try {
+        if (row.worktree === null) return refuse(CANNOT_START);
+        developerInstructions = readFileSync(crewPromptPath(deps.dbPath, runId), "utf8");
+      } catch {
+        return refuse(CANNOT_START);
+      }
+    }
     // restoreRuns has put the token back; this makes sure of it for a hub that did not run it
     try {
       deps.tokens.adopt(row.seatId, runId, readFileSync(crewTokenPath(deps.dbPath, runId), "utf8"));
@@ -1828,7 +1896,30 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const chain = new Promise<void>((r) => {
       unblock = r;
     });
-    track(info, run, session, grant(info, run), {
+    let driver: CrewSession;
+    try {
+      driver =
+        row.vendor === "codex"
+          ? attachCodexSession(
+              {
+                from: cursor?.spawn === hello.spawn ? cursor.line : 0,
+                threadId: row.cliSessionId as string,
+                cwd: row.worktree as string,
+                developerInstructions,
+                model: resumeModel(info, run),
+                outboxPath: join(crewCodexDir(deps.dbPath, run.id), CODEX_OUTBOX_FILE),
+                effort: info.seat.effort ?? null,
+                approve: codexApprover(info, run, row.worktree ?? ""),
+                controlTimeoutMs: deps.controlTimeoutMs,
+                log,
+              },
+              session,
+            )
+          : session;
+    } catch (e) {
+      return refuse(`${CANNOT_START}: ${errText(e)}`);
+    }
+    track(info, run, driver, grant(info, run), {
       spawn: hello.spawn,
       attaching: true,
       replayedBelow: hello.lines,
@@ -1838,7 +1929,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,
       chain,
     });
-    const off = session.on((e) => {
+    const off = driver.on((e) => {
       if (e.kind !== "attached" && e.kind !== "exit") return;
       off();
       unblock();
@@ -2132,6 +2223,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         endedAt: null,
         status: "running",
         sessionId: cliSessionId,
+        vendor: isCodex(info) ? "codex" : "claude",
         model: info.seat.model,
         ...on,
         branch: planner || readOnly ? null : checkout.branch,
@@ -2212,9 +2304,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
+        removeCodexHome(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
+          vendor: run.vendor,
           state: "error",
           reason: CANNOT_START,
           worktree: checkout.path,
@@ -2226,6 +2320,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       setSeat(seatId, {
         runId,
         cliSessionId,
+        vendor: run.vendor,
         state: "starting",
         reason: null,
         worktree: checkout.path,
@@ -2312,6 +2407,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         endedAt: null,
         status: "running",
         sessionId: cliSessionId,
+        vendor: isCodex(info) ? "codex" : "claude",
         model: info.seat.model,
         ...on,
         branch: null,
@@ -2338,9 +2434,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
+        removeCodexHome(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
+          vendor: run.vendor,
           state: "error",
           reason: CANNOT_START,
           worktree: checkout.path,
@@ -2352,6 +2450,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       setSeat(seatId, {
         runId,
         cliSessionId,
+        vendor: run.vendor,
         state: "starting",
         reason: null,
         worktree: checkout.path,
@@ -2485,6 +2584,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         endedAt: null,
         status: "running",
         sessionId: cliSessionId,
+        vendor: isCodex(info) ? "codex" : "claude",
         model,
         ...on,
         branch: null,
@@ -2513,9 +2613,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
+        removeCodexHome(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
+          vendor: run.vendor,
           state: "error",
           reason: CANNOT_START,
           worktree: scratch.path,
@@ -2528,6 +2630,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       setSeat(seatId, {
         runId,
         cliSessionId,
+        vendor: run.vendor,
         state: "starting",
         reason: null,
         worktree: scratch.path,
@@ -2602,6 +2705,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(ended, facts !== null);
       if (facts) persistDigest(store, digests, run.id, facts.digest);
       store.setRunEnded(run.id, at, "ok", "operator");
+      removeCodexHome(run.id);
     }
     setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
     closeRunItems(info);
@@ -2627,6 +2731,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
     store.setRunEnded(run.id, at, "ok", endedBy);
+    removeCodexHome(run.id);
     transcripts.delete(run.transcriptPath);
     digests.delete(run.id);
     emit({ kind: "run-ended", seatId: run.agentId, runId: run.id, endedBy });
@@ -2660,6 +2765,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
     store.setRunEnded(runId, at, "ok", "engine");
+    removeCodexHome(runId);
     let closing: Promise<void> | null = null;
     if (l && l.run.id === runId) {
       l.endedBy = "engine";
@@ -2768,6 +2874,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
+        removeCodexHome(runId);
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });
       };
@@ -2817,6 +2924,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         setSeat(seatId, {
           runId,
           cliSessionId: run.sessionId,
+          vendor: run.vendor,
           state: "idle",
           reason: null,
           worktree: checkout.path,
@@ -3033,7 +3141,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     async message(seatId, text, opts) {
       const l = liveOrRefuse(need(seatId));
       return enqueue(l, async () => {
-        if (opts.interrupt && l.inTurn) await sendInterrupt(l).catch(rethrowIfDead);
+        if (opts.interrupt && l.inTurn) {
+          if (l.run.vendor === "codex") await sendInterrupt(l);
+          else await sendInterrupt(l).catch(rethrowIfDead);
+        }
         writeLine(l, text);
         // The operator replies to a seat's ask_operator by messaging it: its open questions are answered
         try {
@@ -3119,6 +3230,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       )
         return false;
       store.setRunEnded(run.id, now(), "ok", "operator");
+      removeCodexHome(run.id);
       transcripts.delete(run.transcriptPath);
       digests.delete(run.id);
       emit({ kind: "run-ended", seatId: run.agentId, runId, endedBy: "operator" });
