@@ -15,9 +15,9 @@ import { Panel } from "../hud/Panel.tsx";
 import type { NotificationsView } from "../notifications.ts";
 import { navigate, PAGE_PATHS } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
-import { SituationText } from "./Brief.tsx";
 import { answersToday } from "./conversation.ts";
 import type { FlightView } from "./flightTypes.ts";
+import { Summary } from "./Summary.tsx";
 import { Timeline } from "./Timeline.tsx";
 
 const NO_REPOS: RepoView[] = [];
@@ -26,8 +26,7 @@ const count = (items: AttentionItem[], kinds: AttentionItem["kind"][]): number =
   items.filter((i) => kinds.includes(i.kind)).length;
 
 /**
- * FLIGHT › Situation (catalogue 2.2.1): FLIGHT's paragraph comes from its brief; the stats strip
- * and the timeline are computed from today's data.
+ * FLIGHT › Situation: the short summary, with the existing counts and timeline.
  */
 export function Situation() {
   const notes = useResource<NotificationsView>(RESOURCES.notifications).data;
@@ -78,7 +77,7 @@ export function Situation() {
   return (
     <Panel id="sitP" title="Situation" sub="FLIGHT's read of everything, updated as things change">
       <div className="pb">
-        <SituationText />
+        <Summary />
         {items.some((i) => i.flightTriage === "handling") && (
           <section aria-label={FLIGHT_TRIAGE_LABEL.handling}>
             <h3>{FLIGHT_TRIAGE_LABEL.handling}</h3>

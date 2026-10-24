@@ -13,6 +13,7 @@ export function Flight() {
   return (
     <section id="page-flight">
       <Situation />
+      <BriefPanel />
       <Panel
         id="askP"
         title="Asked of you"
@@ -47,7 +48,6 @@ export function Flight() {
           </Panel>
         </div>
       </div>
-      <BriefPanel />
       <WorkingLog />
     </section>
   );

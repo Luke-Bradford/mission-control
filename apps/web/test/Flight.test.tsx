@@ -10,11 +10,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
-import { BRIEF_EMPTY, SITUATION_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
+import { BRIEF_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
 import { Drafts, postedText } from "../src/flight/Drafts.tsx";
 import { FLIGHT_NO_SEAT, type FlightDecision, type FlightView } from "../src/flight/flightTypes.ts";
 import { NO_INCOMING } from "../src/flight/Incoming.tsx";
+import { SUMMARY_EMPTY } from "../src/flight/Summary.tsx";
 import { NO_CREW_RUNS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
 import { rel } from "../src/fmt.ts";
@@ -25,6 +26,7 @@ import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch as fetchStub } from "./fetchStub.ts";
+import { flightSummary } from "./flightSummaryFixture.ts";
 
 const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
   fetchStub({
@@ -32,6 +34,9 @@ const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
     "/api/drafts/history": [],
     "/api/flight/incoming": { entries: [] },
     "/api/flight/brief": { session: null, sections: [] },
+    "/api/flight/summary": flightSummary({ session: null }),
+    "/api/flight/ledger": { session: null, entries: [] },
+    "/api/flight/schedule": { session: null, entries: [] },
     ...routes,
   });
 
@@ -944,19 +949,28 @@ describe("FLIGHT's brief", () => {
     );
   });
 
-  it("Situation's paragraph is FLIGHT's goals and what is in progress", async () => {
+  it("Situation shows the summary and keeps the brief in collapsed notes", async () => {
     stubFetch({
       "/api/flight/brief": briefView({
         goals: { text: "Ship the brief." },
         in_progress: { text: "Wiring the page." },
       }),
+      "/api/flight/summary": flightSummary(),
       "/api/config": CONFIG,
     });
     const { container } = render(<Flight />);
-    await waitFor(() => expect(container.querySelector("#sitP div.sittext")).not.toBeNull());
-    const t = container.querySelector("#sitP div.sittext")?.textContent ?? "";
-    expect(t).toContain("Ship the brief.");
-    expect(t.indexOf("Wiring the page.")).toBeGreaterThan(t.indexOf("Ship the brief."));
+    await waitFor(() =>
+      expect(container.querySelector("#sitP .sittext")?.textContent).toBe(flightSummary().headline),
+    );
+    const situation = container.querySelector("#sitP") as HTMLElement;
+    expect(situation.textContent).not.toContain("Ship the brief.");
+    expect(situation.textContent).not.toContain("Wiring the page.");
+    const notes = container.querySelector("#briefP details") as HTMLDetailsElement;
+    expect(notes.open).toBe(false);
+    fireEvent.click(within(notes).getByText("FLIGHT's notes"));
+    expect(notes.open).toBe(true);
+    expect(notes.textContent).toContain("Ship the brief.");
+    expect(notes.textContent).toContain("Wiring the page.");
   });
 
   it("lists items FLIGHT is handling with its note", async () => {
@@ -978,11 +992,11 @@ describe("FLIGHT's brief", () => {
     expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
   });
 
-  it("Situation says so with an empty brief", async () => {
-    stubFetch({ "/api/flight/brief": briefView(), "/api/config": CONFIG });
+  it("Situation says so with an empty headline", async () => {
+    stubFetch({ "/api/flight/summary": flightSummary({ headline: "" }), "/api/config": CONFIG });
     const { container } = render(<Flight />);
     await waitFor(() =>
-      expect(container.querySelector("#sitP .sittext")?.textContent).toBe(SITUATION_EMPTY),
+      expect(container.querySelector("#sitP .sittext")?.textContent).toBe(SUMMARY_EMPTY),
     );
   });
 

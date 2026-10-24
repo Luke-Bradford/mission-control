@@ -37,8 +37,25 @@ export function Clamp({
   );
 }
 
+type ExpandableProps =
+  | { summary: ReactNode; children: ReactNode }
+  | { lines: number; foldAfter?: number; of?: string; children: ReactNode };
+
+/** Explicit summaries stay whole; measured prose folds only when it overflows. */
+export function Expandable(props: ExpandableProps) {
+  if ("summary" in props) {
+    return (
+      <details className="expandable disclosure">
+        <summary>{props.summary}</summary>
+        <div className="expandable-content">{props.children}</div>
+      </details>
+    );
+  }
+  return <MeasuredExpandable {...props} />;
+}
+
 /** Long text stays inside its row; expanded prose scrolls within a bounded height. */
-export function Expandable({
+function MeasuredExpandable({
   lines,
   foldAfter = lines,
   of,

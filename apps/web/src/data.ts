@@ -66,6 +66,8 @@ export const RESOURCES = {
   flightSchedule: { path: "/api/flight/schedule", topic: "flight" },
   flightIncoming: { path: "/api/flight/incoming", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
+  flightSummary: { path: "/api/flight/summary", topic: "flight" },
+  flightLedger: { path: "/api/flight/ledger", topic: "flight" },
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
@@ -323,8 +325,10 @@ class Hub {
         e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
       const notificationSettingsChanged =
         topic === "settings" && e.path === RESOURCES.notificationEvents.path;
+      const summaryChanged =
+        e.path === RESOURCES.flightSummary.path && (topic === "agents" || topic === "boards");
       if (
-        (e.topic === topic || briefChanged || notificationSettingsChanged) &&
+        (e.topic === topic || briefChanged || notificationSettingsChanged || summaryChanged) &&
         e.listeners.size > 0
       )
         void this.fetch(e);
