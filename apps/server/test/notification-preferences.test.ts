@@ -283,6 +283,25 @@ it("emits one away digest on return through settings invalidations", async () =>
   expect(await events()).toHaveLength(1);
 });
 
+it("emits one digest when the away end date passes", async () => {
+  await app.ready();
+  await app.inject({
+    method: "POST",
+    url: "/api/settings/away",
+    payload: {
+      on: true,
+      until: "2026-10-23",
+      may: { pickUp: true, research: true, check: true, status: true, safePr: true },
+    },
+  });
+  expect(await events()).toEqual([]);
+  vi.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+  bus.emit("settings");
+  expect(await events()).toMatchObject([{ category: "awayDigest" }]);
+  bus.emit("settings");
+  expect(await events()).toHaveLength(1);
+});
+
 it("supports same-day quiet windows and never replays suppressed transitions", async () => {
   const p = await preferences();
   p.quietHours = { ...p.quietHours, start: "12:00", end: "14:00", timezone: "UTC" };

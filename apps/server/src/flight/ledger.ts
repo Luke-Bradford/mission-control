@@ -3,9 +3,11 @@ import {
   CI_PARK_FAILED_PREFIX,
   CI_RERUN_FAILED_EVENT_PREFIX,
   FLIGHT_DECISIONS_SCAN_LIMIT,
-  FLIGHT_HEADLINE,
+  FLIGHT_LEDGER_KINDS,
   FLIGHT_LEDGER_OPEN,
+  FLIGHT_LEDGER_STATUSES,
   FLIGHT_LEDGER_TITLE_MAX,
+  FLIGHT_LIST_MAX,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_SUMMARY_LISTED,
   FLIGHT_WATCH_ORDER,
@@ -18,19 +20,41 @@ import {
   orderLedger,
   parkedEventText,
   priorityRank,
+  type TestLockState,
   tokenTotal,
   wakeKeyPrefix,
 } from "@mc/core";
+import { z } from "zod";
 import type { CcConfig } from "../config.ts";
-import { parseTicket } from "../runview.ts";
+import { crew, NO_LOCK } from "../hud.ts";
 import type { Store } from "../store.ts";
 import { median } from "../telemetry.ts";
-import { flightSeat } from "./state.ts";
+import { flightBriefView, flightHeadline, flightSeat, flightTriageItems } from "./state.ts";
 import { cut } from "./tools.ts";
 
-export function flightLedgerView(config: CcConfig, store: Store): FlightLedgerView {
+export const FlightLedgerArgs = z.strictObject({
+  kind: z.enum(FLIGHT_LEDGER_KINDS).optional(),
+  status: z.enum([...FLIGHT_LEDGER_STATUSES, "open", "all"]).default("open"),
+  limit: z.number().int().min(1).max(FLIGHT_LIST_MAX).default(FLIGHT_LIST_MAX),
+  offset: z.number().int().min(0).default(0),
+});
+
+export function flightLedgerView(
+  config: CcConfig,
+  store: Store,
+  args: z.input<typeof FlightLedgerArgs> = {},
+): FlightLedgerView {
+  const { kind, status, limit, offset } = FlightLedgerArgs.parse(args);
   const session = flightSeat(config)?.session.id ?? null;
-  return { session, entries: session === null ? [] : orderLedger(store.flightLedger(session)) };
+  const entries = orderLedger(session === null ? [] : store.flightLedger(session)).filter(
+    (e) =>
+      (kind === undefined || e.kind === kind) &&
+      (status === "all" ||
+        (status === "open" ? FLIGHT_LEDGER_OPEN.includes(e.status) : e.status === status)),
+  );
+  const page = entries.slice(offset, offset + limit);
+  const more = offset + page.length < entries.length;
+  return { session, entries: page, more, nextOffset: more ? offset + page.length : null };
 }
 
 export function flightMetrics(config: CcConfig, store: Store, now: number): FlightMetrics {
@@ -96,28 +120,18 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
     })
     .sort((a, b) => b.costUsd - a.costUsd || a.seat.localeCompare(b.seat));
   metrics.flight.costUsd = metrics.seats.find((s) => s.seat === seat.id)?.costUsd ?? 0;
-  metrics.flight.wakes = store
-    .runs(seat.id, 50)
+  metrics.flight.wakes = runs
+    .filter((r) => r.agentId === seat.id && r.startedAt <= now)
     .reduce(
       (sum, r) =>
         sum +
+        Number(r.startedAt >= since) +
         Object.entries(store.claimedKeys(r.id)).filter(
-          ([key, at]) => key.startsWith(wakeKeyPrefix(r.id)) && at >= since,
+          ([key, at]) => key.startsWith(wakeKeyPrefix(r.id)) && at >= since && at <= now,
         ).length,
       0,
     );
-  const issues = store.flowIssues(0);
-  const minutes = merged.flatMap((p) => {
-    const ticket = p.ticket === null ? null : parseTicket(p.ticket);
-    const issue =
-      ticket === null
-        ? undefined
-        : issues.find((i) => i.repoId === ticket.repoId && i.number === ticket.number);
-    return issue?.startAt == null || p.mergedAt === null || issue.startAt > p.mergedAt
-      ? []
-      : [(p.mergedAt - issue.startAt) / 60_000];
-  });
-  const readyToMerged = median(minutes);
+  const readyToMerged = median(store.readyToMergedMinutes(session.repoId, since));
   metrics.readyToMergedMin = readyToMerged === null ? null : Math.round(readyToMerged);
   metrics.forTheController = store
     .flightDecisions(since, FLIGHT_DECISIONS_SCAN_LIMIT)
@@ -127,8 +141,15 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
   return metrics;
 }
 
-export function flightSummary(config: CcConfig, store: Store, now: number): FlightSummaryView {
-  const { session, entries } = flightLedgerView(config, store);
+export function flightSummary(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  lock: TestLockState = NO_LOCK,
+  hubLogin: string | null = null,
+): FlightSummaryView {
+  const session = flightSeat(config)?.session.id ?? null;
+  const entries = session === null ? [] : store.flightLedger(session);
   const open = entries.filter((e) => FLIGHT_LEDGER_OPEN.includes(e.status));
   const item = (e: FlightLedgerEntry): FlightSummaryItem => ({
     key: e.key,
@@ -152,6 +173,29 @@ export function flightSummary(config: CcConfig, store: Store, now: number): Flig
     dropped: 0,
   };
   for (const e of entries) if (e.kind === "watch") counts[e.status]++;
+  const rows = crew(config, store, now, lock, () => null).rows;
+  const watching = open.filter((e) => e.kind === "watch");
+  for (const watch of flightBriefView(config, store, lock, now, rows).watch ?? []) {
+    const status = watch.state === "warn" ? "blocked" : watch.state === "ok" ? "done" : "active";
+    counts[status]++;
+    if (status === "done") continue;
+    watching.push({
+      key: `structured:${watch.id}`,
+      kind: "watch",
+      title: watch.title,
+      status,
+      next: watch.next,
+      due: null,
+      priority: null,
+      createdAt: watch.updatedAt ?? now,
+      updatedAt: watch.updatedAt ?? now,
+      owner: null,
+      waitsOn: null,
+      refs: [],
+      outcome: null,
+      basis: watch.detail,
+    });
+  }
   const planned: FlightSummaryItem[] = (session === null ? [] : store.flightPlans(session))
     .filter((p) => p.status === "pending")
     .map((p) => ({
@@ -166,10 +210,7 @@ export function flightSummary(config: CcConfig, store: Store, now: number): Flig
     }));
   return {
     session,
-    headline:
-      session === null
-        ? ""
-        : (store.flightBrief(session).find((r) => r.section === FLIGHT_HEADLINE)?.text ?? ""),
+    ...flightHeadline(store, session, now),
     now: open
       .filter((e) => e.kind === "work" && (e.status === "active" || e.status === "blocked"))
       .sort(priorityAge)
@@ -177,8 +218,7 @@ export function flightSummary(config: CcConfig, store: Store, now: number): Flig
       .map(item),
     watching: {
       counts,
-      top: open
-        .filter((e) => e.kind === "watch")
+      top: watching
         .sort(
           (a, b) =>
             FLIGHT_WATCH_ORDER[a.status] - FLIGHT_WATCH_ORDER[b.status] || priorityAge(a, b),
@@ -189,7 +229,10 @@ export function flightSummary(config: CcConfig, store: Store, now: number): Flig
     next: [...open.filter((e) => e.kind === "commitment").map(item), ...planned]
       .sort((a, b) => (a.due ?? Infinity) - (b.due ?? Infinity) || a.key.localeCompare(b.key))
       .slice(0, FLIGHT_SUMMARY_LISTED),
-    incoming: open.filter((e) => e.kind === "incoming").length,
+    incoming: new Set([
+      ...open.filter((e) => e.kind === "incoming").map((e) => e.key),
+      ...flightTriageItems(config, store, now, hubLogin, rows, lock).map((e) => e.key),
+    ]).size,
     metrics: flightMetrics(config, store, now),
   };
 }

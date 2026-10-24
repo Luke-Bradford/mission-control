@@ -8,7 +8,6 @@ import {
   type CrewRow,
   type DriverStop,
   HUD_STATE_LABEL,
-  HUD_STATE_RANK,
   HUD_STATE_TONE,
   type HudLampKind,
   type HudState,
@@ -43,18 +42,31 @@ export function seatItems(row: CrewRow, items: AttentionItem[]): AttentionItem[]
   );
 }
 
-/**
- * The order the Overview table and j/k share: agents with an attention item first, then by state
- * (broken and stalled first), then config order.
- */
-export function crewOrder(rows: CrewRow[], items: AttentionItem[]): CrewRow[] {
-  const needs = new Set(rows.filter((r) => seatItems(r, items).length > 0).map((r) => r.id));
-  return [...rows].sort(
-    (a, b) =>
-      Number(needs.has(b.id)) - Number(needs.has(a.id)) ||
-      HUD_STATE_RANK[a.hudState] - HUD_STATE_RANK[b.hudState] ||
-      a.index - b.index,
-  );
+/** Shared task-manager order for Overview and j/k; ties retain configured order. */
+export function crewOrder(rows: CrewRow[], items: AttentionItem[], now = Date.now()): CrewRow[] {
+  const end = Math.floor(now / 60_000) * 60_000;
+  const tokens = (r: CrewRow) =>
+    (r.digest?.minuteTokens ?? [])
+      .filter(([at]) => at < end && at >= end - 10 * 60_000)
+      .reduce((sum, [, n]) => sum + n, 0);
+  const rank = (r: CrewRow) => {
+    if (needLine(r, items, now).length) return 0;
+    if (r.hudState === "running") return 1;
+    if (r.hudState === "stopped") return 4;
+    if (
+      ["waiting", "blocked", "parked", "stalled", "error"].includes(r.hudState) ||
+      ["ci", "review", "parked"].includes(r.loop?.phase ?? "")
+    )
+      return 2;
+    return 3;
+  };
+  const keys = new Map(rows.map((row) => [row, { rank: rank(row), tokens: tokens(row) }]));
+  return [...rows].sort((a, b) => {
+    const ka = keys.get(a);
+    const kb = keys.get(b);
+    if (!ka || !kb) return a.index - b.index;
+    return ka.rank - kb.rank || (ka.rank === 1 ? kb.tokens - ka.tokens : 0) || a.index - b.index;
+  });
 }
 
 /**
@@ -344,14 +356,14 @@ export function contextPct(row: CrewRow): number | null {
 export interface NeedPart {
   text: string;
   /**
-   * The button the line carries: Answer or Open (both open the Item panel), Interrupt or Stop the
+   * The button the line carries: Answer, Open or Read (open the Item panel), Interrupt or Stop the
    * run (both stop the seat's turn), or none.
    */
-  action: "answer" | "open" | "interrupt" | "stop" | null;
+  action: "answer" | "open" | "read" | "interrupt" | "stop" | null;
   key: string;
 }
 
-const ASKS = ["decision", "approval", "question"] as const;
+const ASKS = ["decision", "question", "approval"] as const;
 
 /**
  * The need line under an agent row (catalogue 2.1.2, the parts that exist): its stall (age from
@@ -382,11 +394,19 @@ export function needLine(
   }
   const parked = mine.find((i) => i.kind === "parked");
   if (parked) parts.push({ text: `Parked: ${parked.text}`, action: "open", key: parked.key });
-  for (const kind of ASKS) {
-    const ask = mine.find((i) => i.kind === kind);
-    if (ask) {
-      parts.push({ text: `${ATTENTION_LABEL[kind]} for you`, action: "answer", key: ask.key });
-    }
+  const asks = mine.filter((i) => ASKS.some((kind) => i.kind === kind));
+  if (asks.length > 0) {
+    const oldest = asks.reduce((a, b) => (b.at < a.at ? b : a));
+    const labels = ASKS.filter((kind) => asks.some((i) => i.kind === kind)).map((kind, index) =>
+      index === 0 ? ATTENTION_LABEL[kind] : ATTENTION_LABEL[kind].toLowerCase(),
+    );
+    const kinds =
+      labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+    parts.push({ text: `${kinds} for you`, action: "answer", key: oldest.key });
+  }
+  const tag = mine.find((i) => i.kind === "tag");
+  if (tag && !parts.some((p) => p.action === "answer")) {
+    parts.push({ text: ATTENTION_LABEL.tag, action: "read", key: tag.key });
   }
   const ready = mine.find((i) => (i.kind as string) === READY_KIND);
   if (ready) parts.push({ text: READY_TO_MERGE, action: "open", key: ready.key });
@@ -688,4 +708,15 @@ export function namedSeat(id: string, rows: readonly CrewRow[] | undefined): Cre
 export function seatName(id: string, rows: readonly CrewRow[] | undefined): string {
   const row = namedSeat(id, rows);
   return row ? callSign(row) : seatCallSign(id);
+}
+
+/** Whether Work should show current references rather than the last assignment. */
+export function isCurrentWork(row: CrewRow): boolean {
+  if (row.paused || row.hudState === "stopped" || row.hudState === "error") return false;
+  if (["running", "stalled", "parked"].includes(row.hudState)) return true;
+  if (isSeatFree(row)) return false;
+  return (
+    ["waiting", "blocked"].includes(row.hudState) ||
+    (row.kind === "crew" && ["ci", "review", "parked"].includes(row.loop?.phase ?? ""))
+  );
 }

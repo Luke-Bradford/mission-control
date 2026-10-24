@@ -3,11 +3,12 @@ import "./supervisor-harness.ts";
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { clockHm, type Run, type RunLoop } from "@mc/core";
+import { clockHm, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import * as sessionDriver from "../src/runtime/session.ts";
 import type { Supervisor, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import type { Store } from "../src/store.ts";
 import {
@@ -130,11 +131,35 @@ describe("seat states", () => {
     expect(store.seatSession("guido-1")?.reason).toBe("process exited 3");
     const run = store.run(runId);
     expect(run?.status).toBe("failed");
+    expect(run?.noReport).toMatchObject({
+      code: 3,
+      signal: null,
+      stopReason: "half",
+      isError: true,
+    });
+    expect(store.notes()).toContainEqual(
+      expect.objectContaining({
+        runId,
+        text: expect.stringContaining("stop reason half"),
+      }),
+    );
     expect(run?.endedAt).not.toBeNull();
     const lines = readFileSync(run?.transcriptPath ?? "", "utf8").split("\n");
     expect(lines).toContain('{"type":"result","is_error":true,"stop_reason":"half"}');
     const e = await refusal(sup.message("guido-1", "again", { interrupt: false }));
     expect(e.message).toBe("GUIDO-1 has no live session; start it on a ticket");
+  });
+
+  it("does not record missing-report diagnostics when evidence was reported before exit", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    store.addEvidence(runId, "done", Date.now());
+    await sup.message("guido-1", "DIE", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("error"));
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.runId === runId)).toEqual([]);
   });
 
   it("logs each stderr line, and a crash keeps the last one in the seat's reason", async () => {
@@ -150,6 +175,79 @@ describe("seat states", () => {
     const reason = store.seatSession("guido-1")?.reason ?? "";
     expect(reason).toMatch(/^process exited 3: fake stderr x+…$/);
     expect(reason).not.toContain("\x1b");
+  });
+
+  it.each([
+    [10_000, /^process exited 3: fake stderr/, /^fake stderr/],
+    [10_001, /^process exited 3$/, /^$/],
+  ] as const)(
+    "keeps stderr only within 10 s of exit (%i ms)",
+    async (age, expected, stderrExpected) => {
+      let at = Date.now();
+      const { sup, log } = make({ now: () => at });
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.message("guido-1", "STDERR", { interrupt: false });
+      await until(() => expect(log).toHaveBeenCalledWith(expect.stringContaining("fake stderr")));
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      at += age;
+      await sup.message("guido-1", "DIE", { interrupt: false });
+      await until(() => expect(seatState("guido-1")).toBe("error"));
+      const reason = store.seatSession("guido-1")?.reason;
+      expect(reason).toMatch(expected);
+      const diagnostic = store.run(store.seatSession("guido-1")?.runId ?? "")?.noReport?.lastStderr;
+      expect(diagnostic ?? "").toMatch(stderrExpected);
+    },
+  );
+
+  it.each([
+    ["REFUSEINT", 409, "refused the interrupt: not now"],
+    ["NOCONTROL", 504, "did not answer the interrupt"],
+  ] as const)(
+    "a %s interrupt leaves the next error result visible",
+    async (mode, status, reason) => {
+      const { sup } = make();
+      sup.start();
+      await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.message("guido-1", `${mode} TOOLGAP TURNERROR`, { interrupt: false });
+      await until(() => expect(userLines().length).toBe(2));
+      const e = await refusal(sup.interrupt("guido-1"));
+      expect(e.status).toBe(status);
+      expect(e.message).toBe(`GUIDO-1 ${reason}`);
+      await sup.message("guido-1", "cue", { interrupt: false });
+      await sup.message("guido-1", "cue", { interrupt: false });
+      await until(() =>
+        expect(store.seatSession("guido-1")).toMatchObject({
+          state: "idle",
+          reason: "last turn ended in an error",
+        }),
+      );
+    },
+  );
+
+  it("accepts an interrupt before a result in the same stdout write", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "BATCHINT SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await sup.interrupt("guido-1");
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(store.seatSession("guido-1")?.reason).toBeNull();
+  });
+
+  it.each(["REFUSEINT", "NOCONTROL"])("delivers interrupt-and-send after %s", async (mode) => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", `${mode} SLOW`, { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await sup.message("guido-1", "operator line", { interrupt: true });
+    await until(() => expect(userLines()).toContain("operator line"));
   });
 
   it("marks a turn that really failed with a reason, and an interrupted one without", async () => {
@@ -315,6 +413,8 @@ describe("supervisor events (Plan 7a)", () => {
         { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
       ]);
       expect(atEvent).toMatchObject({ status: "ok", endedBy: "operator" });
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
       expect(seatState("guido-1")).toBe("idle");
     });
 
@@ -347,6 +447,12 @@ describe("supervisor events (Plan 7a)", () => {
       });
       expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
       expect(seatState("guido-1")).toBe("error");
+      expect(store.run(runId)?.noReport).toMatchObject({
+        code: null,
+        signal: null,
+        lastStderr: null,
+        error: "could not resume: checkout missing",
+      });
     });
 
     it("is operator for a Stop with no live process", async () => {
@@ -364,13 +470,58 @@ describe("supervisor events (Plan 7a)", () => {
     });
 
     it("does not fire when the hub shuts down (the run stays active)", async () => {
-      const { sup, seen } = await idleRun();
+      const { sup, seen, runId } = await idleRun();
       await sup.stopAll();
       expect(ended(seen)).toEqual([]);
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
     });
   });
 
   describe("endRunByEngine", () => {
+    it("emits seat-free after an engine-ended process releases the seat", async () => {
+      const { sup, seen, runId } = await idleRun();
+      const free: boolean[] = [];
+      sup.on((e) => {
+        if (e.kind === "seat-free") free.push(sup.seatBusy(e.seatId));
+      });
+      await sup.endRunByEngine(runId);
+      expect(seen).toContainEqual({ kind: "seat-free", seatId: "guido-1", runId });
+      expect(free).toEqual([false]);
+    });
+
+    it("does not record a missing report when a PR was merged by hand", async () => {
+      const { sup, runId } = await idleRun();
+      store.setRunLoop(runId, { ...NEW_LOOP, phase: "done", prNumber: 7 });
+      await sup.endRunByEngine(runId);
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
+    });
+
+    it("does not record a missing report when a silent parked run's PR was merged", async () => {
+      const { sup, runId } = await idleRun();
+      store.setRunLoop(runId, {
+        ...NEW_LOOP,
+        phase: "done",
+        prNumber: 7,
+        parked: { kind: "silent", reason: "no report", ended: true },
+      });
+      await sup.endRunByEngine(runId);
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
+    });
+
+    it.each(["silent", "budget"])("records an engine end after a %s failure", async (kind) => {
+      const { sup, runId } = await idleRun();
+      store.setRunLoop(runId, {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind, reason: "no report", ended: true },
+      });
+      await sup.endRunByEngine(runId);
+      expect(store.run(runId)?.noReport).toBeDefined();
+    });
+
     it("ends the run ok, endedBy engine, leaves the seat idle and removes the worktree", async () => {
       const { sup, seen, runId } = await idleRun();
       const wt = join(root, "mc-crew", "guido-1-42");
@@ -686,6 +837,106 @@ describe("supervisor events (Plan 7a)", () => {
   const settle = () => new Promise((r) => setTimeout(r, 400));
 
   describe("run-ended: after the store write, exactly once", () => {
+    it("publishes a removed aside ending only while holding the crew lock", () => {
+      const { sup } = make();
+      const run: Run = {
+        id: "removed:1",
+        agentId: "removed",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1000,
+        endedAt: null,
+        status: "running",
+        sessionId: "s",
+        model: "sonnet",
+        branch: null,
+        ticket: null,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+        loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+      };
+      store.upsertRun(run);
+      const seen = watchStored(sup);
+      expect(sup.endRemovedAside?.(run.id)).toBe(false);
+      expect(store.run(run.id)?.endedAt).toBeNull();
+      expect(seen).toEqual([]);
+      sup.start();
+      expect(sup.endRemovedAside?.(run.id)).toBe(true);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.event).toEqual({
+        kind: "run-ended",
+        seatId: "removed",
+        runId: run.id,
+        endedBy: "operator",
+      });
+      expect(seen[0]?.run).toMatchObject({ status: "ok", endedBy: "operator" });
+      expect(seen[0]?.run?.endedAt).not.toBeNull();
+      expect(sup.endRemovedAside?.(run.id)).toBe(false);
+      expect(seen).toHaveLength(1);
+    });
+
+    it.each(["engine", "operator", "exit"])(
+      "frees the seat before %s ending and signals once",
+      async (ending) => {
+        const listeners = new Set<(event: sessionDriver.SessionEvent) => void>();
+        let alive = true;
+        const exit = () => {
+          alive = false;
+          for (const listener of [...listeners]) listener({ kind: "exit", code: 0, signal: null });
+        };
+        const session: sessionDriver.CrewSession = {
+          send: () => {},
+          control: async () => ({}),
+          close: async () => {
+            exit();
+            return 0;
+          },
+          detach: () => {},
+          on: (listener) => {
+            listeners.add(listener);
+            return () => {
+              listeners.delete(listener);
+            };
+          },
+          pid: undefined,
+          get alive() {
+            return alive;
+          },
+          ready: Promise.resolve(),
+          lines: 0,
+          closeSent: Promise.resolve(),
+        };
+        const launch = vi.spyOn(sessionDriver, "startSession").mockReturnValue(session);
+        const { sup } = make();
+        sup.start();
+        try {
+          const { runId } = await sup.startRun("guido-1", 42);
+          const occupied: boolean[] = [];
+          const signals: string[] = [];
+          sup.on((event) => {
+            if (event.runId !== runId) return;
+            if (event.kind === "run-ended" || event.kind === "seat-free") {
+              signals.push(event.kind);
+              occupied.push(sup.seatBusy("guido-1"));
+            }
+          });
+          if (ending === "engine") await sup.endRunByEngine(runId);
+          else if (ending === "operator") await sup.endRun("guido-1");
+          else exit();
+          await until(() => expect(signals).toContain("run-ended"));
+          await settle();
+          expect(occupied).toEqual(ending === "engine" ? [false, false] : [false]);
+          expect(signals).toEqual(ending === "engine" ? ["seat-free", "run-ended"] : ["run-ended"]);
+        } finally {
+          await sup.stopAll();
+          launch.mockRestore();
+        }
+      },
+    );
+
     it("failResume", async () => {
       const runId = await leftActive();
       rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });

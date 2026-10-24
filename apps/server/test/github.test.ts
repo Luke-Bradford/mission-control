@@ -1,5 +1,5 @@
 import { type BoardItem, columnOf, FLIGHT_MAIN_SETTING, hudColumnOf } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   call,
   collectGithub,
@@ -1094,6 +1094,53 @@ describe("describeGqlErrors", () => {
 });
 
 describe("makeGql", () => {
+  it.each([
+    [new DOMException("deadline", "TimeoutError"), "github: response timed out after 20 s"],
+    [new TypeError("network failed"), "github: request failed"],
+    [new DOMException("cancelled", "AbortError"), "github: request failed"],
+  ])("describes a failure before headers: %s", async (error, message) => {
+    const f = vi.fn().mockRejectedValue(error);
+    await expect(makeGql("t", f)("q", {})).rejects.toMatchObject({
+      name: "GqlTransportError",
+      message,
+      status: null,
+    });
+  });
+
+  it.each([
+    [new DOMException("deadline", "TimeoutError"), "github: response timed out after 20 s"],
+    [new DOMException("cancelled", "AbortError"), "github: response cut off"],
+    [new TypeError("terminated"), "github: response cut off"],
+  ])("describes a failed body read: %s", async (error, message) => {
+    const f = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(error);
+            },
+          }),
+        ),
+    );
+    await expect(makeGql("t", f)("q", {})).rejects.toMatchObject({
+      name: "GqlTransportError",
+      message,
+      status: null,
+    });
+  });
+
+  it("reports only content-type for a whole non-JSON body", async () => {
+    const f = vi.fn(
+      async () =>
+        new Response("private body", {
+          headers: { "content-type": "text/html", "x-private": "private header" },
+        }),
+    );
+    await expect(makeGql("t", f)("q", {})).rejects.toThrow(
+      /^github: response was not JSON \(text\/html\)$/,
+    );
+  });
+
   it("posts the query and variables with a bearer token and returns data", async () => {
     let seen: { url: string; init: RequestInit } | undefined;
     const f = (async (url: string, init: RequestInit) => {
@@ -1549,6 +1596,70 @@ async function one(node: unknown) {
 }
 
 describe("sweepPullRequests", () => {
+  it.each([
+    ["retry-after", { "retry-after": "60" }],
+    ["exhausted budget", { "x-ratelimit-remaining": "0" }],
+  ])("does not retry a rate-limited 503: %s", async (_kind, headers) => {
+    store.upsertPullRequests(repo.id, [await one(pull(7))], 0);
+    const f = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503, headers }));
+    vi.useFakeTimers();
+    try {
+      const pending = sweepPullRequests(repo, store, makeGql("t", f), NOW);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await pending;
+      expect(f).toHaveBeenCalledTimes(1);
+      expect(store.pullRequests(repo.id).map((p) => p.number)).toEqual([7]);
+      expect(store.status().find((s) => s.collector === "github:shop-app:prs")).toMatchObject({
+        ok: false,
+        error: `github: HTTP 503 at ${new Date(NOW).toISOString()}`,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["success", "failure", "graphql", "rate-limit"] as const)(
+    "retries only transient failures once: %s",
+    async (outcome) => {
+      store.upsertPullRequests(repo.id, [await one(pull(7))], 0);
+      const first =
+        outcome === "graphql"
+          ? new GqlError("github: query refused", [], null)
+          : outcome === "rate-limit"
+            ? new GqlTransportError("github: HTTP 429", 429)
+            : new GqlTransportError("github: request failed", null);
+      const gql = vi.fn().mockRejectedValueOnce(first);
+      if (outcome === "failure") {
+        gql.mockRejectedValue(new GqlTransportError("github: response cut off (second)", null));
+      } else {
+        gql.mockResolvedValue(prPage([pull(8)]));
+      }
+      vi.useFakeTimers();
+      try {
+        const pending = sweepPullRequests(repo, store, gql, NOW);
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(gql).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await pending;
+        const retried = outcome === "success" || outcome === "failure";
+        expect(gql).toHaveBeenCalledTimes(retried ? 2 : 1);
+        expect(store.pullRequests(repo.id).map((p) => p.number)).toEqual(
+          outcome === "success" ? [8] : [7],
+        );
+        expect(store.status().find((s) => s.collector === "github:shop-app:prs")).toMatchObject({
+          ok: outcome === "success",
+        });
+        if (outcome !== "success") {
+          expect(
+            store.status().find((s) => s.collector === "github:shop-app:prs")?.error,
+          ).toContain(outcome === "failure" ? "cut off (second)" : first.message);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("collects main's SHA and CI verdict in the existing PR request", async () => {
     const response = prPage([pull(7)]);
     const { gql, calls } = stub({

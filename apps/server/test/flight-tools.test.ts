@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AWAY_PLANNER_REFUSED,
+  AWAY_QUOTA_REFUSED,
+  AWAY_SETTING,
+  AWAY_WRITES_REFUSED,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
   BRIEF_INPUT_MAX,
@@ -20,6 +24,7 @@ import {
   ciNotActionsText,
   ciNotFailedText,
   claimedText,
+  DEFAULT_AWAY,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_BRIEF_EDITS_PER_HOUR,
@@ -39,6 +44,7 @@ import {
   FLIGHT_HEADLINE_TITLE,
   FLIGHT_LEDGER_EDITS_PER_HOUR,
   FLIGHT_LEDGER_OPEN_MAX,
+  FLIGHT_LIST_MAX,
   FLIGHT_LIST_PAGES,
   FLIGHT_MEMORY_BODY_MAX,
   FLIGHT_MEMORY_EDITS_PER_HOUR,
@@ -62,6 +68,8 @@ import {
   GH_READ_UNTRUSTED,
   GITHUB_WRITES_OFF,
   GUARD_ACK_PREFIX,
+  GUARD_ALLOW_OUTPUT,
+  GUARD_CHECK_PATH,
   headlineSavedText,
   headlineText,
   LEDGER_FULL_TEXT,
@@ -76,11 +84,13 @@ import {
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TICKET_READERS_ONLY,
+  MC_TOOLS,
   NEW_LOOP,
   NOT_ON_BOARD,
   needsSuperuserText,
   OPERATOR_HEADER,
   PROFILE_PAIR_TEXT,
+  type PullRequestView,
   READ_NO_GITHUB,
   READ_NO_PR,
   READ_OTHER_REPO,
@@ -88,6 +98,7 @@ import {
   type Run,
   type RunLoop,
   researchText,
+  retiredBriefText,
   type SeatSessionRow,
   startMissingNeedsText,
   startNeedsPlanText,
@@ -121,6 +132,7 @@ import { attentionItems } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
+import { createMcTools } from "../src/mcp/tools.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -953,6 +965,30 @@ describe("start_seat", () => {
     fetchImpl = async (n) => ticket(n, { body: DONE });
   });
 
+  it("FLIGHT explicitly starts otherwise excluded work as a draft while away", async () => {
+    store.setSetting(
+      AWAY_SETTING,
+      JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, pickUp: false } }),
+    );
+    for (const window of ["5h", "7d"] as const)
+      store.addUsage({
+        accountId: "claude-main",
+        window,
+        at: NOW,
+        resetAt: NOW + 86_400_000,
+        pct: 10,
+        source: "test",
+      });
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls[0]?.[2]).toMatchObject({ flight: true });
+  });
+
+  it("reaches the inner start quota check while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await start()).toEqual(refused(AWAY_QUOTA_REFUSED));
+    expect(startCalls).toEqual([]);
+  });
+
   it("respects an operator stop", async () => {
     store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
     expect(await start()).toHaveProperty("isError", true);
@@ -1339,6 +1375,18 @@ describe("start_seat planner", () => {
     board(sized());
     fetchImpl = async (n) => ticket(n, { body: GOOD });
   });
+
+  it.each([true, false])(
+    "refuses planner starts while away even with research=%s",
+    async (research) => {
+      store.setSetting(
+        AWAY_SETTING,
+        JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, research } }),
+      );
+      expect(await plan()).toEqual(refused(AWAY_PLANNER_REFUSED));
+      expect(startCalls).toEqual([]);
+    },
+  );
 
   it("starts the planner with no loop on a complete Size M Backlog ticket", async () => {
     expect(await plan()).toEqual({ text: "Started FAO-1 on mc#7." });
@@ -1977,6 +2025,89 @@ describe("sync_main", () => {
     live("guido-1", "r-g", { ticket: "mc#7" });
   });
 
+  it("advertises and dispatches a separate sync_main schema for each caller mode", async () => {
+    const writerSync = vi.fn(async () => ({ text: "writer synced" }));
+    const writerTools = createMcTools({
+      config: cfg,
+      store,
+      bus,
+      inClone: (_checkout, fn) => fn(),
+      gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+      dbPath: join(dir, "mc.sqlite"),
+      knownSecrets: async () => [],
+      syncMain: writerSync,
+    });
+    const tokens = new RunTokens();
+    const writer = tokens.issue("guido-1", "r-g");
+    const flight = tokens.issue("flight-1", "r-flight");
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      tokens,
+      seatMode: (id) => crewSeatMode(cfg, id),
+      seatGrants: (id) => crewSeatGrants(cfg, id),
+      mcpTools: () => [...writerTools, ...tools],
+    });
+    const rpc = async (token: string, method: string, params?: object) =>
+      (
+        await app.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: { authorization: `Bearer ${token}` },
+          payload: { jsonrpc: "2.0", id: 1, method, params },
+        })
+      ).json();
+    try {
+      const listed = async (token: string) =>
+        (await rpc(token, "tools/list")).result.tools.filter(
+          (t: { name: string }) => t.name === "sync_main",
+        );
+      const writerList = await listed(writer);
+      const flightList = await listed(flight);
+      expect(writerList).toHaveLength(1);
+      expect(flightList).toHaveLength(1);
+      expect(writerList[0].inputSchema).toEqual({
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      });
+      expect(flightList[0].inputSchema.required).toEqual(["runId", "basis"]);
+      expect(
+        (await rpc(writer, "tools/call", { name: "sync_main", arguments: {} })).result.content[0]
+          .text,
+      ).toBe("writer synced");
+      for (const token of [writer, flight]) {
+        const guarded = await app.inject({
+          method: "POST",
+          url: GUARD_CHECK_PATH,
+          headers: { authorization: `Bearer ${token}` },
+          payload: {
+            hook_event_name: "PreToolUse",
+            tool_name: MC_TOOLS.syncMain,
+            tool_use_id: "sync",
+            tool_input: {},
+          },
+        });
+        expect(guarded.body).toBe(GUARD_ALLOW_OUTPUT);
+      }
+      expect(writerSync).toHaveBeenCalledExactlyOnceWith("r-g");
+      expect(syncCalls).toEqual([]);
+      expect(
+        (await rpc(flight, "tools/call", { name: "sync_main", arguments: S() })).result.isError,
+      ).toBeUndefined();
+      expect(syncCalls).toEqual(["r-g"]);
+      expect(
+        (await rpc(flight, "tools/call", { name: "sync_main", arguments: {} })).result.isError,
+      ).toBe(true);
+      expect(
+        (await rpc(writer, "tools/call", { name: "sync_main", arguments: S() })).result.isError,
+      ).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("merges main through the engine, and records it", async () => {
     expect(await call("sync_main", S())).toEqual({
       text: "Merged main ddddddd into GUIDO-1's branch as bbbbbbb. Recorded in Decided without you.",
@@ -2034,6 +2165,43 @@ describe("sync_main", () => {
 
 describe("flight_state", () => {
   const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
+
+  it("exposes the hub's away bug decision key only for the current head", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    const expected = {
+      headSha: "head",
+      about: "away-bug:mc#7:base:head",
+      testPaths: ["apps/a.test.ts"],
+    };
+    store.upsertRun(
+      run("r-bug", "guido-1", { loop: { ...NEW_LOOP, prNumber: 12, awayBugDecision: expected } }),
+    );
+    const pr = (headSha: string): PullRequestView => ({
+      repoId: "mc",
+      number: 12,
+      title: "PR",
+      url: "u",
+      branch: "feature/7-x",
+      ticket: "mc#7",
+      state: "open",
+      isDraft: true,
+      review: null,
+      ci: "passing",
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha,
+      mergeable: null,
+    });
+    store.upsertPullRequests("mc", [pr("head")], NOW);
+    expect(JSON.parse((await call("flight_state", {})).text).prs[0].awayBugDecision).toEqual(
+      expected,
+    );
+    store.upsertPullRequests("mc", [pr("moved")], NOW);
+    expect(
+      JSON.parse((await call("flight_state", {})).text).prs[0].awayBugDecision,
+    ).toBeUndefined();
+  });
 
   it("marks signals delivered by flight_state while retaining active faults as told", async () => {
     await state(); // Seed pre-existing state.
@@ -2348,6 +2516,7 @@ describe("flight_state", () => {
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
       ],
       limits: { startsLeft: 8, messagesLeft: 29 },
+      headlineAgeMin: null,
       headline: "",
       ledger: [],
       ledgerMore: 0,
@@ -3030,6 +3199,47 @@ describe("comment_ticket", () => {
     engineOn = true;
   });
 
+  it("keeps comments as drafts while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(
+      (await call("draft_reply", { target: "mc#12", kind: "issue", text: "Ready for your review" }))
+        .isError,
+    ).toBeUndefined();
+    expect(store.drafts()).toMatchObject([{ text: "Ready for your review", state: "pending" }]);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "refuses away posts and allows them after off or expiry (%s)",
+    async (expired) => {
+      store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+      expect(await call("comment_ticket", K())).toEqual(refused(AWAY_WRITES_REFUSED));
+      expect(ghCalls).toEqual([]);
+      store.setSetting(
+        AWAY_SETTING,
+        JSON.stringify({ ...DEFAULT_AWAY, on: expired, until: expired ? "2020-01-01" : "" }),
+      );
+      expect((await call("comment_ticket", K())).isError).toBeUndefined();
+      expect(ghCalls).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    "merge_pr",
+    "promote",
+    "edit_card",
+    "create_ticket",
+    "rerun_ci",
+    "accept_ruling",
+    "settle_park",
+    "sync_main",
+  ])("refuses the external writes of %s while away", async (name) => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await call(name, {})).toEqual(refused(AWAY_WRITES_REFUSED));
+    expect(ghCalls).toEqual([]);
+    expect(moveCalls).toEqual([]);
+  });
+
   it("writes nothing while the engine is off", async () => {
     engineOn = false;
     expect((await call("comment_ticket", K())).isError).toBe(true);
@@ -3583,37 +3793,119 @@ describe("brief_item", () => {
 });
 
 describe("update_brief", () => {
-  const GOALS = "Goals and priorities";
+  const PROJECT = "The project";
   const save = (section: string, text: string, c = ctx()) =>
     call("update_brief", { section, text, basis: "a wake" }, c);
   const briefDecisions = () => decisions().filter((d) => d.kind === "brief");
 
+  it.each(["goals", "in_progress", "coming_up", "risks", "recently_done"] as const)(
+    "refuses retired %s before writing any part of the brief",
+    async (section) => {
+      expect(
+        await call("update_brief", {
+          section,
+          text: "old status",
+          basis: "wake",
+          planned: {
+            upsert: [
+              {
+                id: "plan",
+                dueAt: NOW,
+                kind: "report",
+                target: "crew",
+                label: "Report",
+                status: "pending",
+              },
+            ],
+          },
+        }),
+      ).toEqual(refused(retiredBriefText(section)));
+      expect(store.flightBrief("s1")).toEqual([]);
+      expect(store.flightPlans("s1")).toEqual([]);
+      expect(briefDecisions()).toEqual([]);
+    },
+  );
+
+  it.each([
+    {},
+    { section: "operator" },
+    { text: "notes" },
+    { section: "operator", watch: { remove: ["missing"] } },
+    { text: "notes", planned: { upsert: [] } },
+  ])("requires a change and pairs section with text: %j", async (args) => {
+    expect((await call("update_brief", { ...args, basis: "wake" })).isError).toBe(true);
+    expect(store.flightBrief("s1")).toEqual([]);
+    expect(briefDecisions()).toEqual([]);
+  });
+
+  it("updates plans and watches without spending a brief edit, even at the section cap", async () => {
+    for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++)
+      await save("operator", "Keep these notes");
+    const before = store.flightBrief("s1");
+    nowMs += 1000;
+    expect(
+      (
+        await call("update_brief", {
+          basis: "Agreed report",
+          planned: {
+            upsert: [
+              {
+                id: "report",
+                dueAt: NOW,
+                kind: "report",
+                target: "crew",
+                label: "Report",
+                status: "pending",
+              },
+            ],
+          },
+          watch: {
+            upsert: [
+              {
+                id: "report",
+                state: "info",
+                title: "Report",
+                detail: "Scheduled",
+                next: "Read",
+                catchUp: { kind: "new", line: "Agreed" },
+              },
+            ],
+          },
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(store.flightPlans("s1")).toHaveLength(1);
+    expect(store.flightWatch("s1")).toHaveLength(1);
+    expect(store.flightBrief("s1")).toEqual(before);
+    expect(briefDecisions()).toHaveLength(FLIGHT_BRIEF_EDITS_PER_HOUR);
+  });
+
   it("replaces one section and leaves the others", async () => {
-    await save("goals", "Ship the brief.");
-    await save("risks", "Flaky api test.");
+    await save("project", "Ship the brief.");
+    await save("operator", "Flaky api test.");
     nowMs = NOW + 1000;
-    expect(await save("goals", "Ship the merge step.")).toEqual({
-      text: briefSavedText(GOALS, 20),
+    expect(await save("project", "Ship the merge step.")).toEqual({
+      text: briefSavedText(PROJECT, 20),
     });
     expect(store.flightBrief("s1")).toEqual([
       {
         sessionId: "s1",
-        section: "goals",
-        text: "Ship the merge step.",
-        updatedAt: NOW + 1000,
+        section: "operator",
+        text: "Flaky api test.",
+        updatedAt: NOW,
         updatedBy: "flight-1",
       },
       {
         sessionId: "s1",
-        section: "risks",
-        text: "Flaky api test.",
-        updatedAt: NOW,
+        section: "project",
+        text: "Ship the merge step.",
+        updatedAt: NOW + 1000,
         updatedBy: "flight-1",
       },
     ]);
     expect(briefDecisions()).toHaveLength(3);
     expect(briefDecisions()[0]).toMatchObject({
-      about: "Brief: Goals and priorities",
+      about: "Brief: The project",
       decision: briefSavedDecision(20),
     });
     expect(seen).toContain("flight");
@@ -3626,21 +3918,21 @@ describe("update_brief", () => {
   });
 
   it("clears a section with an empty text", async () => {
-    await save("goals", "x");
-    expect(await save("goals", "")).toEqual({ text: briefClearedText(GOALS) });
+    await save("project", "x");
+    expect(await save("project", "")).toEqual({ text: briefClearedText(PROJECT) });
     expect(store.flightBrief("s1")[0]?.text).toBe("");
     expect(briefDecisions()[0]?.decision).toBe(BRIEF_CLEARED_DECISION);
   });
 
   it("holds the 4000-character cap", async () => {
     const full = "x".repeat(FLIGHT_BRIEF_SECTION_MAX);
-    expect(await save("goals", full)).toEqual({ text: briefSavedText(GOALS, 4000) });
-    expect(await save("goals", "y".repeat(FLIGHT_BRIEF_SECTION_MAX + 1))).toEqual(
-      refused(briefTooLongText(GOALS, 4001)),
+    expect(await save("project", full)).toEqual({ text: briefSavedText(PROJECT, 4000) });
+    expect(await save("project", "y".repeat(FLIGHT_BRIEF_SECTION_MAX + 1))).toEqual(
+      refused(briefTooLongText(PROJECT, 4001)),
     );
     expect(store.flightBrief("s1")[0]?.text).toBe(full);
     expect(briefDecisions()).toHaveLength(1);
-    const r = await save("goals", "z".repeat(FLIGHT_BRIEF_INPUT_MAX + 1));
+    const r = await save("project", "z".repeat(FLIGHT_BRIEF_INPUT_MAX + 1));
     expect(r).toMatchObject({ isError: true });
     expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
   });
@@ -3650,20 +3942,20 @@ describe("update_brief", () => {
     expect(r.isError).toBe(true);
     expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
     live("guido-1", "r-guido");
-    expect(await save("goals", "x", ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(await save("project", "x", ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
     expect(store.flightBrief("s1")).toEqual([]);
     expect(briefDecisions()).toEqual([]);
   });
 
   it("allows 30 edits an hour", async () => {
     for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++) {
-      expect(await save("goals", `v${i}`)).not.toHaveProperty("isError");
+      expect(await save("project", `v${i}`)).not.toHaveProperty("isError");
     }
-    expect(await save("goals", "one more")).toEqual(
+    expect(await save("project", "one more")).toEqual(
       refused(capText("updated your brief", FLIGHT_BRIEF_EDITS_PER_HOUR)),
     );
     nowMs = NOW + 61 * 60_000;
-    expect(await save("goals", "later")).not.toHaveProperty("isError");
+    expect(await save("project", "later")).not.toHaveProperty("isError");
   });
 
   it("is carried by flight_state", async () => {
@@ -4209,7 +4501,7 @@ describe("structured FLIGHT brief and arrivals", () => {
   };
   const save = (extra: Record<string, unknown>) =>
     call("update_brief", {
-      section: "risks",
+      section: "operator",
       text: "Keep this prose: Stop the run is not a command.",
       basis: "Preview checked",
       ...extra,
@@ -4220,9 +4512,9 @@ describe("structured FLIGHT brief and arrivals", () => {
     store.close();
     store = new Store(join(dir, "mc.sqlite"));
     expect(flightBriefView(cfg, store).watch).toEqual([expect.objectContaining(watch)]);
-    expect(flightBriefView(cfg, store).sections.find((s) => s.section === "risks")?.text).toContain(
-      "Stop the run is not a command",
-    );
+    expect(
+      flightBriefView(cfg, store).sections.find((s) => s.section === "operator")?.text,
+    ).toContain("Stop the run is not a command");
     store.setFlightWatch("s1", { upsert: [{ ...watch, state: "ok" }] }, NOW + 1);
     expect(flightBriefView(cfg, store).watch?.[0]?.state).toBe("ok");
     store.setFlightWatch("s1", { remove: [watch.id] }, NOW + 2);
@@ -4377,10 +4669,16 @@ it("replaces a queued outcome with the performed assignment while keeping one st
     outcome: "Queued",
     detail: "Waiting for a free seat",
   };
-  expect(
-    (await call("update_brief", { section: "risks", text: "", basis: "Queue checked", arrival }))
-      .isError,
-  ).toBeUndefined();
+  await call("update_brief", {
+    section: "operator",
+    text: "Keep the operator notes.",
+    basis: "Operator context",
+  });
+  const notes = store.flightBrief("s1");
+  const briefEdits = decisions().filter((d) => d.kind === "brief");
+  expect((await call("update_brief", { basis: "Queue checked", arrival })).isError).toBeUndefined();
+  expect(store.flightBrief("s1")).toEqual(notes);
+  expect(decisions().filter((d) => d.kind === "brief")).toEqual(briefEdits);
   const id = store.flightIncoming()[0]?.id;
   expect(store.flightIncoming()[0]?.outcome).toBe("Queued");
   expect(
@@ -4450,7 +4748,7 @@ it("bounds watch storage atomically and keeps newest arrival versions through re
   expect(
     (
       await call("update_brief", {
-        section: "risks",
+        section: "operator",
         text: "Must not save",
         basis: "Preview",
         watch: { upsert: [{ ...entries[0], id: "overflow" }] },
@@ -4659,7 +4957,7 @@ describe("scheduled FLIGHT work", () => {
   };
   const save = (entries: unknown[]) =>
     call("update_brief", {
-      section: "coming_up",
+      section: "project",
       text: "Reports and checks",
       basis: "Agreed plan",
       planned: { upsert: entries },
@@ -4711,7 +5009,7 @@ describe("scheduled FLIGHT work", () => {
       decisions: decisions(),
     };
     const result = await call("update_brief", {
-      section: "coming_up",
+      section: "project",
       text: "Changed brief",
       basis: "Combined update",
       planned: {
@@ -4786,6 +5084,20 @@ describe("superuser housekeeping", () => {
       text: expect.stringContaining("superuser"),
     });
   });
+  it.each([
+    ["merge_pr", { pr: 12 }],
+    ["settle_park", { runId: "r", action: "accept" }],
+    ["rerun_ci", { pr: 12 }],
+    ["edit_card", { issue: 7, size: "S" }],
+  ])("rechecks away inside the queued %s handler", async (name, args) => {
+    elevated();
+    const pending = call(name as string, args as object);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await pending).toEqual(refused(AWAY_WRITES_REFUSED));
+    expect(ghCalls).toEqual([]);
+    expect(moveCalls).toEqual([]);
+  });
+
   const runPr = () => {
     live("guido-1", "r-pr", {
       branch: "mc/7",
@@ -5177,6 +5489,19 @@ describe("track", () => {
     basis: "ticket",
   };
 
+  it("keeps #533 ledger tools available while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await call("track", entry)).toEqual({ text: trackedText(entry.key, true) });
+    expect(JSON.parse((await call("ledger", { limit: 1, offset: 0 })).text).entries).toHaveLength(
+      1,
+    );
+    expect(
+      (await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" })).isError,
+    ).toBeUndefined();
+    expect(store.flightLedger("s1")[0]?.status).toBe("done");
+    expect(ghCalls).toEqual([]);
+  });
+
   it("creates and updates by key, retaining omitted fields and refusing invalid titles and owners", async () => {
     expect(await call("track", entry)).toEqual({ text: trackedText(entry.key, true) });
     nowMs = NOW + 1000;
@@ -5292,6 +5617,38 @@ describe("track", () => {
     expect(await call("track", { ...entry, key: "new" })).toEqual({
       text: trackedText("new", true),
     });
+    expect(await call("track", entry)).toEqual(refused(LEDGER_FULL_TEXT));
+    expect(store.flightLedger("s1").find((e) => e.key === entry.key)?.status).toBe("done");
+  });
+
+  it("emits an input schema with optional defaulted ledger filters", () => {
+    const schema = named("ledger").inputSchema as { required?: string[] };
+    for (const field of ["status", "limit", "offset"])
+      expect(schema.required ?? []).not.toContain(field);
+  });
+
+  it("defaults to open entries and pages after applying filters", async () => {
+    await call("track", entry);
+    const saved = store.flightLedger("s1")[0];
+    if (!saved) throw new Error("no entry");
+    for (let n = 0; n < FLIGHT_LIST_MAX; n++)
+      store.putFlightLedgerEntry("s1", { ...saved, key: `watch-${n}`, kind: "watch" }, 0);
+    store.putFlightLedgerEntry("s1", { ...saved, key: "closed", status: "done" }, 0);
+    const first = JSON.parse((await call("ledger", {})).text);
+    expect(first.entries).toHaveLength(FLIGHT_LIST_MAX);
+    expect(first).toMatchObject({ more: true, nextOffset: FLIGHT_LIST_MAX });
+    const last = JSON.parse((await call("ledger", { offset: first.nextOffset })).text);
+    expect(last.entries).toHaveLength(1);
+    expect(last).toMatchObject({ more: false, nextOffset: null });
+    const filtered = JSON.parse(
+      (await call("ledger", { kind: "watch", limit: 1, offset: 1 })).text,
+    );
+    expect(filtered.entries[0]?.key).toBe("watch-1");
+    expect(JSON.parse((await call("ledger", { status: "done" })).text).entries[0]?.key).toBe(
+      "closed",
+    );
+    expect((await call("ledger", { limit: FLIGHT_LIST_MAX + 1 })).isError).toBe(true);
+    expect((await call("ledger", { offset: -1 })).isError).toBe(true);
   });
 
   it("lists ordered entries with optional kind and status filters", async () => {
@@ -5365,6 +5722,17 @@ describe("repo memory", () => {
     source: "#450",
     basis: "ticket",
   };
+  it("keeps remember, recall and forget available while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect((await call("remember", note)).isError).toBeUndefined();
+    expect(JSON.parse((await call("recall", { query: note.topic })).text).notes).toHaveLength(1);
+    expect(
+      (await call("forget", { topic: note.topic, basis: "obsolete" })).isError,
+    ).toBeUndefined();
+    expect(JSON.parse((await call("recall", { query: note.topic })).text).notes).toHaveLength(0);
+    expect(ghCalls).toEqual([]);
+  });
+
   it.each(["remember", "forget"])("%s preserves operator-authored notes", async (tool) => {
     const stored = {
       ...note,

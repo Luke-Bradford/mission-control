@@ -56,6 +56,7 @@ describe("loopTries", () => {
     expect(loopTries(run(), [], null)).toEqual([
       {
         step: "working",
+        trigger: "run started",
         fix: false,
         n: 1,
         startedAt: T0,
@@ -124,20 +125,24 @@ describe("loopTries", () => {
     expect(tries[3]).toMatchObject({ startedAt: at(2), endedAt: at(4) });
   });
 
-  it("leaves the CI try open across an engine re-run of a failed CI", () => {
+  it("records a re-run as another execution without charging another failure", () => {
     const rerun: [string, string] = [`${RUN}:rerun:abc`, "CI failed on abc1234; re-ran build"];
     const passed = loopTries(run(), evs(REPORTED, rerun, "CI passed on abc1234"), null);
     expect(passed.map((t) => [t.step, t.outcome])).toEqual([
       ["working", "pass"],
+      ["ci", "fail"],
       ["ci", "pass"],
       ["review", "waiting"],
     ]);
+    expect(passed.filter((t) => t.step === "ci").map((t) => t.failures)).toEqual([0, 0]);
     const failed = loopTries(run(), evs(REPORTED, rerun, "CI failed on abc1234"), null);
     expect(failed.map((t) => [t.step, t.n, t.outcome])).toEqual([
       ["working", 1, "pass"],
       ["ci", 1, "fail"],
+      ["ci", 2, "fail"],
       ["working", 2, "running"],
     ]);
+    expect(failed.filter((t) => t.step === "ci").map((t) => t.failures)).toEqual([0, 1]);
   });
 
   it("puts a resumed try on In review when a review fix follows", () => {
@@ -203,6 +208,7 @@ describe("loopTries", () => {
     expect(loopTries(ended, [], null)).toEqual([
       {
         step: "working",
+        trigger: "run started",
         fix: false,
         n: 1,
         startedAt: T0,
@@ -237,4 +243,57 @@ it("attributes measured zero and usage at retry boundaries, without run totals",
   ];
   expect(loopTries(run(), events, null, usage).map((t) => t.tokens)).toEqual([0, null, 12]);
   expect(loopTries(run(), events, null, []).map((t) => t.tokens)).toEqual([null, null, null]);
+});
+
+it("names verification triggers and separates runs from failures", () => {
+  const tries = loopTries(
+    run(),
+    evs(
+      REPORTED,
+      "CI passed on abc",
+      [reviewEventKey(RUN, 1, "fix"), "findings"],
+      REPORTED,
+      "CI passed on def",
+      [`${RUN}:update:abc`, "merged main"],
+      [`${RUN}:rerun:abc`, "CI re-run"],
+    ),
+    null,
+  );
+  expect(tries.every((t) => typeof t.trigger === "string")).toBe(true);
+  expect(tries.filter((t) => t.step === "ci").map((t) => t.trigger)).toEqual([
+    "first push",
+    "review fix round 1",
+    "main merged",
+    "re-run",
+  ]);
+  expect(tries.filter((t) => t.step === "ci").map((t) => t.failures)).toEqual([0, 0, 0, 0]);
+});
+
+it("carries recorded cache usage per attempt", () => {
+  const tries = loopTries(run(), evs(REPORTED), null, [
+    {
+      id: "m",
+      at: T0 + 1,
+      tokens: 5,
+      usage: { input: 2, output: 3, cacheRead: 100, cacheCreate: 20 },
+      model: "model-a",
+    },
+  ]);
+  expect(tries[0]?.usage).toEqual({ input: 2, output: 3, cacheRead: 100, cacheCreate: 20 });
+});
+
+it("shows the final charged CI failure when the engine parks at the limit", () => {
+  const tries = loopTries(
+    run(
+      {},
+      {
+        phase: "parked",
+        ciFails: 3,
+        parked: { kind: "ci", reason: "CI failed 3 times; last on abc", ended: false },
+      },
+    ),
+    evs(REPORTED, parkedEventText("CI failed 3 times; last on abc")),
+    null,
+  );
+  expect(tries.at(-1)).toMatchObject({ step: "ci", failures: 3, outcome: "parked" });
 });

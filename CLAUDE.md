@@ -73,6 +73,7 @@ mc:
     "area:web": ["apps/web/**"]
     "area:core": ["packages/core/**"]
   hard_rules:
+    - "apps/server/src/away.ts"
     - "apps/server/src/guard/**"
     - "apps/server/src/mcp/**"
     - "apps/server/src/runtime/**"
@@ -81,6 +82,7 @@ mc:
     - "apps/server/src/update.ts"
     - "apps/server/src/config.ts"
     - "apps/server/src/crew-apply.ts"
+    - "packages/core/src/away.ts"
     - "packages/core/src/guard.ts"
     - "packages/core/src/flight.ts"
     - "packages/core/src/runtime.ts"

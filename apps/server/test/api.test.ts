@@ -22,6 +22,7 @@ import {
   type ActivityEvent,
   type AgentStream,
   type AttentionItem,
+  type AwayDigest,
   type AwaySettings,
   type BoardItem,
   type ChangedFiles,
@@ -37,6 +38,7 @@ import {
   type Escalation,
   type FileDiff,
   FLIGHT_HEADLINE,
+  FLIGHT_LIST_MAX,
   type FlightBriefView,
   type FlightLedgerEntry,
   type FlightSummaryView,
@@ -49,6 +51,7 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   otherLaneText,
   type PrCheck,
+  type PullRequestView,
   projectAtReset,
   READONLY_FILES_NOTE,
   type ReloadResult,
@@ -79,6 +82,7 @@ import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
+import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
@@ -482,6 +486,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
+  ["POST", "/api/profiles"],
   ["GET", "/api/accounts/status"],
   ["GET", "/api/sources/teams"],
   ["POST", "/api/sources/teams/selection", { selected: [] }],
@@ -490,6 +495,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/config/reload"],
   ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
+  ["POST", "/api/crew/sessions"],
+  ["POST", "/api/crew/sessions/:id/close"],
   ["GET", "/api/crew/changes"],
   ["GET", "/api/telemetry?range=6h"],
   ["GET", "/api/stream"],
@@ -538,6 +545,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/notifications/events"],
   ["POST", "/api/notifications/test", {}],
   ["GET", "/api/settings/away"],
+  ["GET", "/api/away/digest"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
     "POST",
@@ -997,7 +1005,11 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(202);
         continue;
       }
-      if (url === "/api/sources/teams/selection") {
+      if (
+        url === "/api/profiles" ||
+        url === "/api/sources/teams/selection" ||
+        (method === "POST" && (url === "/api/crew/sessions" || url.endsWith("/close")))
+      ) {
         // the fixture has no config path: a valid selection can't be written
         expect(r.statusCode, `${method} ${url}`).toBe(409);
         continue;
@@ -2130,6 +2142,99 @@ describe("away settings", () => {
     may: { pickUp: true, research: false, check: true, status: false, safePr: true },
   };
 
+  it("GET /api/away/digest assembles one item per group without saving a digest", async () => {
+    store.replaceEscalations("shop-app", [escalation({})]);
+    const pr: PullRequestView = {
+      repoId: "shop-app",
+      number: 41,
+      title: "Safe docs",
+      url: "https://github.com/o/shop-app/pull/41",
+      branch: "docs/guide",
+      ticket: "shop-app#7",
+      state: "open",
+      isDraft: false,
+      review: null,
+      ci: "passing",
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: "safe-sha",
+      mergeable: null,
+    };
+    store.upsertRun(
+      run({
+        id: "safe",
+        repoId: "shop-app",
+        loop: { ...NEW_LOOP, prNumber: 41, merging: { sha: "safe-sha", done: ["ready"] } },
+      }),
+    );
+    store.upsertPullRequests(
+      "shop-app",
+      [pr, { ...pr, number: 42, isDraft: true, ticket: "shop-app#8" }],
+      NOW,
+    );
+    store.upsertRun(
+      run({
+        id: "failed",
+        ticket: "shop-app#8",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "stuck", reason: "Verify stopped producing output", ended: false },
+        },
+      }),
+    );
+    store.addFlightDecision({
+      at: NOW,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "shop-app#7",
+      decision: "Ready for review",
+      basis: "CI and RETRO passed",
+    });
+    store.addDraft("shop-app#7", "issue", "Review is ready", NOW);
+    const result = await get("/api/away/digest");
+    expect(result.statusCode).toBe(200);
+    const digest = result.json() as AwayDigest;
+    expect(digest.active).toBe(false);
+    expect(digest.groups.map((g) => [g.kind, g.items.length])).toEqual([
+      ["needYouNow", 1],
+      ["safePrsReady", 1],
+      ["draftsToWalkThrough", 1],
+      ["failures", 1],
+      ["flightDecisions", 1],
+      ["messagesDrafted", 1],
+    ]);
+    expect(digest.groups[3].items[0]?.reason).toBe("Verify stopped producing output");
+    expect((await get("/api/away/digest")).json()).toEqual(digest);
+  });
+
+  it("digest accepts a since timestamp and stores away start only on activation", async () => {
+    await postBody("/api/settings/away", { ...away, until: "" });
+    expect(store.getSetting("awayStartedAt")).toBe(String(NOW));
+    expect((await get("/api/away/digest")).json().startedAt).toBe(NOW);
+    await postBody("/api/settings/away", { ...away, on: false });
+    expect((await get("/api/away/digest")).json().startedAt).toBe(NOW);
+    store.addFlightDecision({
+      at: NOW - 1,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "old",
+      decision: "checked",
+      basis: "test",
+    });
+    expect((await get("/api/away/digest")).json().groups[4].items).toEqual([]);
+    expect((await get(`/api/away/digest?since=${NOW - 1}`)).json().groups[4].items).toHaveLength(1);
+    expect((await get("/api/away/digest?since=nope")).statusCode).toBe(400);
+    expect((await get("/api/away/digest?since=-1")).statusCode).toBe(400);
+  });
+
   it("GET answers the defaults when nothing is stored", async () => {
     const r = await get("/api/settings/away");
     expect(r.statusCode).toBe(200);
@@ -2174,11 +2279,19 @@ describe("away settings", () => {
     ).toBe(200);
   });
 
-  it("GET falls back to the defaults when the stored value is unreadable", async () => {
+  it("GET fails closed when the stored value is unreadable", async () => {
     store.setSetting("away", "{not json");
-    expect((await get("/api/settings/away")).json()).toEqual(DEFAULT_AWAY);
+    expect((await get("/api/settings/away")).json()).toEqual({
+      on: true,
+      until: "",
+      may: { pickUp: false, research: false, check: false, status: false, safePr: false },
+    });
     store.setSetting("away", JSON.stringify({ on: "x" }));
-    expect((await get("/api/settings/away")).json()).toEqual(DEFAULT_AWAY);
+    expect((await get("/api/settings/away")).json()).toEqual({
+      on: true,
+      until: "",
+      may: { pickUp: false, research: false, check: false, status: false, safePr: false },
+    });
   });
 });
 
@@ -2995,7 +3108,11 @@ describe("config", () => {
     expect(builtIn.list[0]).toEqual({
       name: "feature",
       labels: ["type:feature"],
-      steps: feature?.steps,
+      steps: feature?.steps.map((step) => ({ ...step, agents: [] })),
+      nodes: feature?.nodes,
+      trigger: feature?.trigger,
+      budget: feature?.budget,
+      orchestrationOnly: false,
       planRequired: true,
       reviewer: { role: "RETRO", depth: "full" },
       tries: 3,
@@ -3326,13 +3443,19 @@ describe("crew routes", () => {
   const post5 = (action: string, body: unknown = {}) =>
     postBody(`/api/seats/guido-1/${action}`, body);
 
+  it("identifies an operator start while away", async () => {
+    store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
+
   it("start answers { runId, branch } and emits agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
     const r = await post5("start", { issue: 5 });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ runId: "r-1", branch: "feature/5-x" });
-    expect(supervisorCalls).toEqual([["start", "guido-1", 5]]);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
     expect(seen).toContain("agents");
   });
 
@@ -3374,7 +3497,9 @@ describe("crew routes", () => {
     it("starts a writer seat's run looped when the engine is on, in a draft repo too", async () => {
       expect(config.repos[0]?.autonomy).toBe("draft");
       expect((await startVia(true, "guido-1")).statusCode).toBe(200);
-      expect(supervisorCalls).toEqual([["start", "guido-1", 5, { loop: NEW_LOOP }]]);
+      expect(supervisorCalls).toEqual([
+        ["start", "guido-1", 5, { loop: NEW_LOOP, operator: true }],
+      ]);
     });
 
     it("starts a writer seat's run looped in a merge repo too", async () => {
@@ -3382,22 +3507,24 @@ describe("crew routes", () => {
       if (repo === undefined) throw new Error("no repo");
       repo.autonomy = "merge";
       expect((await startVia(true, "guido-1")).statusCode).toBe(200);
-      expect(supervisorCalls).toEqual([["start", "guido-1", 5, { loop: NEW_LOOP }]]);
+      expect(supervisorCalls).toEqual([
+        ["start", "guido-1", 5, { loop: NEW_LOOP, operator: true }],
+      ]);
     });
 
     it("starts it with no loop when the engine is off or absent", async () => {
       await startVia(false, "guido-1");
       await startVia(null, "guido-1");
       expect(supervisorCalls).toEqual([
-        ["start", "guido-1", 5],
-        ["start", "guido-1", 5],
+        ["start", "guido-1", 5, { operator: true }],
+        ["start", "guido-1", 5, { operator: true }],
       ]);
     });
 
     it("never loops a read-only seat's run", async () => {
       withReader();
       await startVia(true, "retro");
-      expect(supervisorCalls).toEqual([["start", "retro", 5]]);
+      expect(supervisorCalls).toEqual([["start", "retro", 5, { operator: true }]]);
     });
   });
 
@@ -4593,6 +4720,28 @@ describe("the first loop's engine", () => {
     expect((await get("/api/agents/guido-1/stream")).json().tasks).toEqual([]);
   });
 
+  it.each([
+    { cacheRead: 0, cacheCreate: 0, budget: 105000 },
+    { cacheRead: 20, cacheCreate: 0, budget: null },
+    { cacheRead: 0, cacheCreate: 20, budget: null },
+  ])(
+    "shows the budget only when HUD and enforced usage match: %j",
+    async ({ cacheRead, cacheCreate, budget }) => {
+      if (config.crew) config.crew.runTokenBudget = 100000;
+      store.upsertRun(
+        run({
+          id: "budgeted",
+          agentId: "guido-1",
+          loop: { ...loop, budgetExtra: 5000 },
+          tokens: { input: 100, output: 50, cacheRead, cacheCreate },
+        }),
+      );
+      const view = (await get("/api/runs/budgeted/loop")).json();
+      expect(view.usage).toMatchObject({ input: 100, output: 50, cacheRead, cacheCreate });
+      expect(view.budget).toBe(budget);
+    },
+  );
+
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
@@ -4605,12 +4754,12 @@ describe("the first loop's engine", () => {
       loop,
       events: [{ key: "k1", runId: "looped", text: "reported; pushing", at: NOW }],
       round: 1,
-      budget: 100_000,
+      budget: null,
       review: null,
     });
     expect(body.tries.map((t: { step: string }) => t.step)).toEqual(["working", "ci"]);
     store.setRunLoop("looped", { ...loop, budgetExtra: 5000 });
-    expect((await get("/api/runs/looped/loop")).json().budget).toBe(105_000);
+    expect((await get("/api/runs/looped/loop")).json().budget).toBeNull();
     const claim = (n: number) =>
       store.claimLine(`fix:looped:${loop.epoch}:${n}`, {
         runId: "looped",
@@ -4626,6 +4775,17 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/looped/loop")).json().round).toBe(3);
     expect((await get("/api/runs/plain/loop")).json()).toEqual({
       runId: "plain",
+      usage: {
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheCreate: null,
+        costUsd: null,
+        model: null,
+        turns: null,
+        durationMs: 3600000,
+      },
+      noReport: null,
       loop: null,
       events: [{ key: "k2", runId: "plain", text: "other", at: NOW }],
       tries: [],
@@ -4634,6 +4794,34 @@ describe("the first loop's engine", () => {
       review: null,
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
+  });
+
+  it("serves full missing-report diagnostics only on the single-run loop view", async () => {
+    const r = run({ id: "unreported", agentId: "guido-1", loop });
+    store.upsertRun(r);
+    recordNoReport(store, r, "build", { code: 1, signal: null, lastStderr: null }, null, NOW);
+    const noReport = store.run(r.id)?.noReport;
+    if (!noReport) throw new Error("missing diagnostics");
+    store.recordNoReport(
+      r.id,
+      { ...noReport, lastAssistantText: "The unfinished work." },
+      {
+        key: `no_report:${r.id}`,
+        kind: "flag",
+        runId: r.id,
+        seatId: r.agentId,
+        repoId: r.repoId,
+        text: "Missing report",
+        at: NOW,
+      },
+    );
+    const view = (await get(`/api/runs/${r.id}/loop`)).json();
+    expect(view.noReport.lastAssistantText).toBe("The unfinished work.");
+    const rows = (await get("/api/agents/guido-1/runs")).json<RunView[]>();
+    expect(rows.find((row) => row.id === r.id)?.noReport).toMatchObject({ code: 1 });
+    expect(rows.find((row) => row.id === r.id)?.noReport).not.toHaveProperty("lastAssistantText");
+    expect((await get("/api/agents")).body).not.toContain("lastAssistantText");
+    expect((await get("/api/crew")).body).not.toContain("lastAssistantText");
   });
 });
 
@@ -4835,6 +5023,28 @@ it.each([false, true])(
   },
 );
 
+it("builds without Fastify's request-logging deprecation warning", async () => {
+  const warn = vi.spyOn(process, "emitWarning").mockImplementation(() => {});
+  try {
+    const quiet = buildApp({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      configPath,
+      crewReloader: stubReloader(),
+      supervisor: stubSupervisor(),
+      updater: stubUpdater(),
+    });
+    await quiet.ready();
+    await quiet.close();
+    // Fastify calls emitWarning(message, name, code).
+    expect(warn.mock.calls.filter((call) => (call as unknown[])[2] === "FSTDEP023")).toEqual([]);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
 describe("operator token", () => {
   let guarded: FastifyInstance;
 
@@ -4923,7 +5133,12 @@ describe("operator token", () => {
 
 describe("FLIGHT ledger views", () => {
   it("returns empty views without a FLIGHT session", async () => {
-    expect((await get("/api/flight/ledger")).json()).toEqual({ session: null, entries: [] });
+    expect((await get("/api/flight/ledger")).json()).toEqual({
+      session: null,
+      entries: [],
+      more: false,
+      nextOffset: null,
+    });
     expect((await get("/api/flight/summary")).json()).toMatchObject({
       session: null,
       headline: "",
@@ -5001,6 +5216,20 @@ describe("FLIGHT ledger views", () => {
       dropped: 0,
     });
     expect(summary.incoming).toBe(1);
-    expect((await get("/api/flight/ledger")).json().entries).toHaveLength(24);
+    expect((await get("/api/flight/ledger")).json().entries).toHaveLength(22);
+    const first = (await get("/api/flight/ledger?limit=2")).json();
+    expect(first.entries.map((e: FlightLedgerEntry) => e.key)).toEqual(["waiting-work", "w2"]);
+    expect(first).toMatchObject({ more: true, nextOffset: 2 });
+    expect(
+      (await get(`/api/flight/ledger?limit=2&offset=${first.nextOffset}`))
+        .json()
+        .entries.map((e: FlightLedgerEntry) => e.key),
+    ).toEqual(["w5", "w3"]);
+    expect((await get("/api/flight/ledger?status=all")).json().entries).toHaveLength(24);
+    expect((await get("/api/flight/ledger?kind=watch&status=done")).json().entries[0]?.key).toBe(
+      "watch-done",
+    );
+    for (const query of [`limit=${FLIGHT_LIST_MAX + 1}`, "offset=-1", "offset=nope", "status=bad"])
+      expect((await get(`/api/flight/ledger?${query}`)).statusCode).toBe(400);
   });
 });

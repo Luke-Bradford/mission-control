@@ -2,9 +2,16 @@
  * What a run was about, as the API serves it: the PRs the run published joined to the stored PR
  * rows, and the run's ticket resolved through them (#26 A3).
  */
-import type { PullRequestView, RepoId, Run, RunPr, RunView } from "@mc/core";
+import type { PullRequestView, RepoId, Run, RunPr, RunSummary, RunUsage, RunView } from "@mc/core";
 import type { CcConfig } from "./config.ts";
 import type { Store } from "./store.ts";
+
+/** Compact list diagnostics without mutating the single-run record. */
+export function runSummary(run: Run): RunSummary {
+  if (!run.noReport) return run;
+  const { lastAssistantText: _, ...noReport } = run.noReport;
+  return { ...run, noReport };
+}
 
 /** A repo's stored PRs by number, read once per request: pass one cache to every call. */
 export type PrCache = Map<RepoId, Map<number, PullRequestView>>;
@@ -92,5 +99,26 @@ export function runView(
     }
     boardTitle = titles.get(t.number) ?? null;
   }
-  return { ...run, prs, ticket, ticketTitle: runTicketTitle(run, ticket, boardTitle) };
+  return {
+    ...runSummary(run),
+    usage: runUsage(store, run),
+    prs,
+    ticket,
+    ticketTitle: runTicketTitle(run, ticket, boardTitle),
+  };
+}
+
+/** Full run measurements, independent of a template's illustrative budget. */
+export function runUsage(store: Store, run: Run, now = Date.now()): RunUsage {
+  const digest = store.digest(run.id);
+  return {
+    input: run.tokens?.input ?? null,
+    output: run.tokens?.output ?? null,
+    cacheRead: run.tokens?.cacheRead ?? null,
+    cacheCreate: run.tokens?.cacheCreate ?? null,
+    costUsd: run.costUsd,
+    model: run.model ?? digest?.model ?? null,
+    turns: digest?.turns ?? null,
+    durationMs: Math.max(0, (run.endedAt ?? now) - run.startedAt),
+  };
 }

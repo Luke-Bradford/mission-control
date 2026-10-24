@@ -18,6 +18,7 @@
 //              ends and when the turn does, with no timing window)
 //   DIE        exit 3 mid-turn, after a line with no newline (valid JSON, so a test can show the
 //              driver does not parse it)
+//   REFUSEINT  refuse later interrupts with an error
 //   NOCONTROL  ignore every later control request
 //   RATELIMIT  a rate_limit_event with status "rejected"
 //   TURNERROR  the turn's result is an error that no interrupt caused (`error_max_turns`)
@@ -57,6 +58,8 @@ if (argv.includes("--fail-resume") && argv.includes("--resume")) {
 }
 
 let ignoreControl = false;
+let refuseInterrupt = false;
+let batchInterrupt = false;
 let hang = false;
 /** The SLOW turn while it waits: its timer and the texts folded into it. */
 let slow = null;
@@ -152,6 +155,8 @@ function userTurn(text) {
     },
     session_id: sessionId,
   });
+  if (text.includes("BATCHINT")) batchInterrupt = true;
+  if (text.includes("REFUSEINT")) refuseInterrupt = true;
   if (text.includes("NOCONTROL")) ignoreControl = true;
   if (text.includes("HANG")) hang = true;
   if (text.includes("IGNORETERM")) {
@@ -197,7 +202,7 @@ function userTurn(text) {
       () => user([{ tool_use_id: "toolu_g", type: "tool_result", content: "ok", is_error: false }]),
       () => {
         assistant([{ type: "text", text: `echo: ${text}` }], "end_turn");
-        result(`echo: ${text}`, "end_turn");
+        result(`echo: ${text}`, "end_turn", false, text.includes("TURNERROR"));
       },
     );
     return;
@@ -232,6 +237,27 @@ function control(requestId, subtype) {
       type: "control_response",
       response: { subtype: "success", request_id: requestId, response },
     });
+  if (subtype === "interrupt" && refuseInterrupt) {
+    out({
+      type: "control_response",
+      response: { subtype: "error", request_id: requestId, error: "\x1b[31mnot now\x1b[0m" },
+    });
+    return;
+  }
+  if (subtype === "interrupt" && batchInterrupt) {
+    if (slow) clearTimeout(slow.timer);
+    slow = null;
+    process.stdout.write(
+      `${[
+        JSON.stringify({
+          type: "control_response",
+          response: { subtype: "success", request_id: requestId, response: {} },
+        }),
+        JSON.stringify({ type: "result", is_error: true, stop_reason: "tool_use" }),
+      ].join("\n")}\n`,
+    );
+    return;
+  }
   if (subtype === "interrupt") {
     ok({ still_queued: [] });
     if (slow) {

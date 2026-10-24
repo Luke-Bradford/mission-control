@@ -663,6 +663,16 @@ const toSample = (r: Row): UsageSample => ({
   source: r.source as string,
 });
 
+/** A run's stored plan fact; a value that won't parse is dropped rather than failing every run read. */
+function parsePlan(raw: string): { plan?: Run["plan"] } {
+  try {
+    const plan = JSON.parse(raw) as Run["plan"];
+    return plan !== null && typeof plan === "object" ? { plan } : {};
+  } catch {
+    return {};
+  }
+}
+
 const toRun = (r: Row): Run => ({
   // Absent, not null, on a row from before the ticket's title was stored.
   ...(r.ticket_title === null || r.ticket_title === undefined
@@ -676,6 +686,7 @@ const toRun = (r: Row): Run => ({
   ...(r.loop === null || r.loop === undefined
     ? {}
     : { loop: JSON.parse(r.loop as string) as RunLoop }),
+  ...(r.plan == null ? {} : parsePlan(r.plan as string)),
   // Absent, not null, on a run that started without a profile.
   ...(r.profile === null || r.profile === undefined
     ? {}
@@ -688,6 +699,9 @@ const toRun = (r: Row): Run => ({
   ...(r.ended_by === null || r.ended_by === undefined
     ? {}
     : { endedBy: r.ended_by as NonNullable<Run["endedBy"]> }),
+  ...(r.no_report == null
+    ? {}
+    : { noReport: JSON.parse(r.no_report as string) as Run["noReport"] }),
   id: r.id as string,
   agentId: r.agent_id as string,
   repoId: r.repo_id as string,
@@ -924,6 +938,7 @@ export class Store {
       // The first loop's state (JSON) and who ended the run; `upsertRun` never writes them.
       ["loop", "TEXT"],
       ["ended_by", "TEXT"],
+      ["no_report", "TEXT"],
       // The ticket's title as the run started with it; null on rows from before it was stored.
       ["ticket_title", "TEXT"],
       // The review a run performs (7b-1); `upsertRun` never rewrites it.
@@ -934,6 +949,8 @@ export class Store {
       // `upsertRun` writes them on a new row only.
       ["profile", "TEXT"],
       ["profile_hash", "TEXT"],
+      // The plan at run creation; later transcript folds never rewrite it.
+      ["plan", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     this.db.exec(`
@@ -1060,8 +1077,8 @@ export class Store {
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version, profile, profile_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ticket_title, review_id, cli_version, profile, profile_hash, plan)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1096,6 +1113,7 @@ export class Store {
         r.cliVersion ?? null,
         r.profile ? JSON.stringify({ profile: r.profile.profile, route: r.profile.route }) : null,
         r.profile?.hash ?? null,
+        r.plan === undefined ? null : JSON.stringify(r.plan),
       );
   }
 
@@ -1140,6 +1158,16 @@ export class Store {
         "SELECT * FROM runs WHERE ended_at IS NULL OR ended_at >= ? ORDER BY started_at, seq",
       )
       .all(since) as Row[];
+    return rows.map(toRun);
+  }
+
+  /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
+  runsForAwayDigest(): Run[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE ended_at IS NULL OR json_extract(loop, '$.merging') IS NOT NULL ORDER BY started_at, seq",
+      )
+      .all() as Row[];
     return rows.map(toRun);
   }
 
@@ -1870,6 +1898,23 @@ export class Store {
     }));
   }
 
+  /** Latest successful Ready move before each merge, falling back to the collected flow start. */
+  readyToMergedMinutes(repoId: RepoId, since: number): number[] {
+    const rows = this.db
+      .prepare(`
+      SELECT p.merged_at, COALESCE(MAX(m.at), f.start_at) AS ready_at
+      FROM pull_requests p
+      LEFT JOIN board_moves m ON p.ticket = m.repo_id || '#' || m.issue
+        AND m.board_column = 'Ready' AND m.state = 'done' AND m.at <= p.merged_at
+      LEFT JOIN flow_issues f ON p.ticket = f.repo_id || '#' || f.number
+      WHERE p.repo_id = ? AND p.state = 'merged' AND p.merged_at >= ?
+      GROUP BY p.number, p.merged_at, f.start_at
+      HAVING ready_at IS NOT NULL AND ready_at <= p.merged_at
+    `)
+      .all(repoId, since) as { merged_at: number; ready_at: number }[];
+    return rows.map((r) => (r.merged_at - r.ready_at) / 60_000);
+  }
+
   /** PRs merged at or after `sinceMs`, across repos, oldest first. */
   flowPrs(sinceMs: number): FlowPr[] {
     const rows = this.db
@@ -2162,10 +2207,11 @@ export class Store {
   }
 
   /** Sets the run's loop state (null clears it). */
-  setRunLoop(runId: string, loop: RunLoop | null): void {
+  setRunLoop(runId: string, loop: RunLoop | null, at = Date.now()): void {
     this.db
       .prepare("UPDATE runs SET loop = ? WHERE id = ?")
       .run(loop === null ? null : JSON.stringify(loop), runId);
+    if (loop?.phase === "done") this.clearNoReportNotes(runId, at, true);
   }
 
   /** Ends the run: when, with what status, and who ended it. */
@@ -2180,11 +2226,38 @@ export class Store {
       .run(at, status, endedBy, runId);
   }
 
+  /** Exit diagnostics are controller-owned; transcript upserts never overwrite them. */
+  recordNoReport(runId: string, record: NonNullable<Run["noReport"]>, note: NoteInput): void {
+    this.transaction(() => {
+      this.db
+        .prepare("UPDATE runs SET no_report = ? WHERE id = ?")
+        .run(JSON.stringify(record), runId);
+      this.raiseNote(note);
+    });
+  }
+
+  /** A report resolves earlier failures on this ticket; done resolves the whole ticket. */
+  private clearNoReportNotes(runId: string, at: number, done = false): void {
+    this.db
+      .prepare(`
+      UPDATE attention_notes SET cleared_at = ?
+      WHERE cleared_at IS NULL AND key IN (
+        SELECT 'no_report:' || old.id FROM runs old JOIN runs fresh ON fresh.id = ?
+        WHERE old.id = fresh.id OR (
+          old.repo_id = fresh.repo_id AND old.ticket = fresh.ticket
+          AND (? OR old.started_at <= fresh.started_at)
+        )
+      )
+    `)
+      .run(at, runId, done ? 1 : 0);
+  }
+
   /** Appends a note the run's seat reported; returns its id. */
   addEvidence(runId: string, note: string, at: number): number {
     const r = this.db
       .prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, ?, ?)")
       .run(runId, note, at);
+    this.clearNoReportNotes(runId, at);
     return Number(r.lastInsertRowid);
   }
 
@@ -2357,6 +2430,7 @@ export class Store {
           isBlocking(f) ? "open" : "logged",
         );
       });
+      this.clearNoReportNotes(runId, r.at);
       recorded = true;
     }, true);
     return recorded;
@@ -2451,7 +2525,20 @@ export class Store {
     const r = this.db
       .prepare("INSERT OR IGNORE INTO loop_events (key, run_id, text, at) VALUES (?, ?, ?, ?)")
       .run(key, runId, text, at);
+    if (r.changes === 1 && key === `${runId}:plan`) this.clearNoReportNotes(runId, at);
     return r.changes === 1;
+  }
+
+  /** The latest report_plan record for a ticket, attributed to the reporting run's seat. */
+  ticketPlan(repoId: RepoId, ref: string): { by: AgentId; at: number; ref: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT r.agent_id, e.at FROM loop_events e JOIN runs r ON r.id = e.run_id
+         WHERE e.key = r.id || ':plan' AND r.repo_id = ? AND r.ticket = ?
+         ORDER BY e.at DESC, e.key DESC LIMIT 1`,
+      )
+      .get(repoId, ref) as Row | undefined;
+    return row ? { by: row.agent_id as AgentId, at: row.at as number, ref } : null;
   }
 
   /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */
@@ -3465,7 +3552,8 @@ export class Store {
 
   /** Validate the whole update before writing any part of it. */
   updateFlightBrief(
-    section: FlightBriefRow,
+    section: Omit<FlightBriefRow, "section" | "text"> &
+      Partial<Pick<FlightBriefRow, "section" | "text">>,
     planned?: FlightPlanOperation,
     watch?: FlightWatchOperation,
     arrival?: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">,
@@ -3480,7 +3568,8 @@ export class Store {
       plansWrite?.();
       watchWrite?.();
       if (arrival) this.writeFlightArrival(arrival);
-      this.setFlightBriefSection(section);
+      if (section.section !== undefined && section.text !== undefined)
+        this.setFlightBriefSection({ ...section, section: section.section, text: section.text });
     });
   }
 
@@ -3704,7 +3793,7 @@ export class Store {
     ).map((r) => JSON.parse(r.entry) as FlightLedgerEntry);
   }
 
-  /** Save an entry and prune old closed entries in its session, in one transaction. */
+  /** Save an entry and prune old closed entries across all sessions, in one transaction. */
   putFlightLedgerEntry(session: string, entry: FlightLedgerEntry, pruneBefore: number): void {
     this.transaction(() => {
       this.db
@@ -3713,9 +3802,9 @@ export class Store {
         kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at, entry = excluded.entry`)
         .run(session, entry.key, entry.kind, entry.status, entry.updatedAt, JSON.stringify(entry));
       this.db
-        .prepare(`DELETE FROM flight_ledger WHERE session_id = ? AND updated_at < ?
+        .prepare(`DELETE FROM flight_ledger WHERE updated_at < ?
         AND status NOT IN (${FLIGHT_LEDGER_OPEN.map(() => "?").join(", ")})`)
-        .run(session, pruneBefore, ...FLIGHT_LEDGER_OPEN);
+        .run(pruneBefore, ...FLIGHT_LEDGER_OPEN);
     });
   }
 

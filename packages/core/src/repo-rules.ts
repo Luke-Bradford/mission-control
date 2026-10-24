@@ -1,8 +1,9 @@
 /**
- * A repo's board rules, read from the `## Mission Control` section of its `CLAUDE.md`: which
+ * A repo's board rules, from user config with an optional `## Mission Control` override: which
  * statuses a seat may pick from, which area labels match a seat, and which paths are hard-rule
  * files. The parser is the server's; this is the shape, the defaults and the label match.
  */
+import { AWAY_START_REFUSED, awayTicketType } from "./away.ts";
 import {
   claimedText,
   hasDoneWhenSection,
@@ -31,6 +32,10 @@ export const HARD_RULES_BY = ["operator", "controller"] as const;
 export type HardRulesBy = (typeof HARD_RULES_BY)[number];
 
 export interface RepoRules {
+  /** Explicit user-config keys, preserved across copies of these rules. */
+  userSet?: readonly string[];
+  /** Label to template mapping from the resolved repo rules. */
+  templates?: Record<string, string>;
   /** Board statuses a seat may pick a ticket from. */
   pickFrom: string[];
   /** Whether the hub may promote Backlog tickets to a pickable status. */
@@ -41,7 +46,7 @@ export interface RepoRules {
   areas: Record<string, string[]>;
   /** Globs of files that need the operator's sign-off. */
   hardRules: string[];
-  /** Whether the repo's block set `hard_rules` itself (`[]` counts); false on the defaults. */
+  /** Whether user config or the repo block set a `hard_rules` list (`[]` counts). */
   hardRulesSet: boolean;
   /** Who merges a PR that touches hard-rule files: the operator by hand, or the controller. */
   hardRulesBy: HardRulesBy | "flight";
@@ -55,10 +60,12 @@ export interface RepoRules {
 export function freezeRules(rules: RepoRules): RepoRules {
   for (const globs of Object.values(rules.areas)) Object.freeze(globs);
   Object.freeze(rules.areas);
+  if (rules.templates) Object.freeze(rules.templates);
   Object.freeze(rules.pickFrom);
   Object.freeze(rules.needs);
   Object.freeze(rules.hardRules);
   Object.freeze(rules.alwaysAsk);
+  if (rules.userSet) Object.freeze(rules.userSet);
   return Object.freeze(rules);
 }
 
@@ -69,15 +76,17 @@ export const hardRulesUnsetNoteKey = (repoId: string): string => `hard-rules-uns
 export const hardRulesBySettingKey = (repoId: string): string => `hard_rules_by:${repoId}`;
 
 export const hardRulesUnsetText = (repo: string): string =>
-  `${repo}: set \`hard_rules\` in the repo's Mission Control block (a list of paths that never auto-merge, or \`[]\`) before the hub merges there.`;
+  `${repo}: set \`repos[].rules.hard_rules\` for this repo in \`~/.config/mission-control/config.yaml\` (or \`MC_CONFIG\`) before the hub merges there: a list of paths that never auto-merge, or \`[]\`.`;
 
 /** Code that enforces FLIGHT's floors requires independent RETRO review. */
 export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
+  "apps/server/src/away.ts",
   "apps/server/src/guard/**",
   "apps/server/src/mcp/**",
   "apps/server/src/runtime/**",
   "apps/server/src/engine/**",
   "apps/server/src/flight/**",
+  "packages/core/src/away.ts",
   "packages/core/src/guard.ts",
   "packages/core/src/flight.ts",
   "packages/core/src/loop.ts",
@@ -194,13 +203,15 @@ export function inLane(
 }
 
 export interface StartCheck {
+  /** Present only while away; FLIGHT may explicitly start work that must stay draft. */
+  away?: { pickUp: boolean; flight: boolean };
   repoId: string;
   issue: number;
   card: Pick<
     BoardItem,
     "labels" | "assignees" | "blockedBy" | "size" | "status" | "state" | "closed"
   >;
-  rules: Pick<RepoRules, "areas" | "needs">;
+  rules: Pick<RepoRules, "areas" | "needs" | "templates">;
   seat: { call: string; area: string[]; loop: LoopKind };
   login: string | null;
   hasRun: boolean;
@@ -247,6 +258,13 @@ export function eligibleToStart(c: StartCheck): string | null {
   if (waits.size > 0) return waitsOnText(ref, [...waits]);
   const build = seat.loop === "build";
   if (build && card.labels.some((l) => RESEARCH_LABELS.includes(l))) return researchText(ref);
+  if (
+    c.away &&
+    !c.away.flight &&
+    (!c.away.pickUp || awayTicketType(card, rules.templates) === null)
+  ) {
+    return AWAY_START_REFUSED;
+  }
   if (body === null) return null;
   if (build || seat.loop === "plan") {
     const missing = rules.needs.filter((n) =>

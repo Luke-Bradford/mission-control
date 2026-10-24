@@ -1,6 +1,8 @@
-import type { AttentionItem, Crew } from "@mc/core";
+import type { AttentionItem, ConfigView, Crew } from "@mc/core";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useSecond } from "./clock.ts";
 import { RESOURCES, startStream, useResource } from "./data.ts";
+import type { FlightView } from "./flight/flightTypes.ts";
 
 import {
   agentPath,
@@ -13,6 +15,7 @@ import {
   route,
   usePath,
 } from "./router.ts";
+import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { Dock } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
@@ -113,7 +116,9 @@ export function App() {
       <Header page={shown.page} />
       <div className="shell">
         <main>
-          <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
+          <AwayDigest>
+            <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
+          </AwayDigest>
         </main>
         <Dock />
       </div>
@@ -178,11 +183,18 @@ function PageView({ route: r }: { route: Route }) {
 
 /** The global shortcuts, reading the latest crew, attention and page when a key is pressed. */
 function useShellKeys(current: Route, popout: boolean) {
+  const now = useSecond();
   const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const flightId =
+    flight?.seat?.id ??
+    config?.crew?.sessions.flatMap((s) => s.seats).find((s) => !s.retiring && s.loop === "watch")
+      ?.id;
   const { repo } = useSessionScope();
-  const latest = useRef({ current, rows, items, popout, repo });
-  latest.current = { current, rows, items, popout, repo };
+  const latest = useRef({ current, rows, items, popout, repo, flightId, now });
+  latest.current = { current, rows, items, popout, repo, flightId, now };
   useEffect(() => {
     const select = (dir: 1 | -1) => {
       const { current: on, rows: r, items: i } = latest.current;
@@ -193,6 +205,8 @@ function useShellKeys(current: Route, popout: boolean) {
         getSelectedAgent(),
         dir,
         latest.current.repo,
+        latest.current.flightId,
+        latest.current.now,
       );
       if (id === null) return;
       setSelectedAgent(id);

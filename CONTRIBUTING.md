@@ -82,8 +82,8 @@ open links. A Ready ticket therefore carries everything needed to build it.
   automatically. They are the guard, MCP, runtime and engine code (`apps/server/src/{guard,mcp,runtime,engine}/**`,
   `packages/core/src/guard.ts`, `packages/core/src/runtime.ts`), `loops/**`, `roles/**`,
   `CLAUDE.md`, `.github/**` and `config.example.yaml`. The list is `DEFAULT_HARD_RULES` in
-  `packages/core/src/repo-rules.ts`, and a repo can set its own in the `## Mission Control` block of
-  CLAUDE.md.
+  `packages/core/src/repo-rules.ts`, and a repo sets its own in `repos[].rules` in user config. The
+  `## Mission Control` block in `CLAUDE.md` is an optional tightening override.
 
 ## Data
 

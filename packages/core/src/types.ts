@@ -20,6 +20,46 @@ export interface TokenUsage {
   cacheCreate: number;
 }
 
+/** Recorded usage; missing token measurements stay null. */
+export interface RunUsage {
+  input: number | null;
+  output: number | null;
+  cacheRead: number | null;
+  cacheCreate: number | null;
+  costUsd: number | null;
+  model: string | null;
+  turns: number | null;
+  durationMs: number;
+}
+
+/** The CLI's last word when a run ended without an accepted report. */
+export interface NoReport {
+  code: number | null;
+  signal: string | null;
+  stopReason: string | null;
+  resultSubtype: string | null;
+  terminalReason: string | null;
+  apiErrorStatus: number | null;
+  isError: boolean | null;
+  error: string | null;
+  /** Completed turns in the run (result frames), not the CLI's per-result num_turns. */
+  turns: number | null;
+  tokens: TokenUsage | null;
+  lastAssistantText: string | null;
+  lastStderr: string | null;
+}
+
+/** The plan the ticket had when the run started, or its Size waiver. */
+/**
+ * Where a build run's plan came from: the latest recorded report_plan for its ticket (which may
+ * predate a hand edit of the plan), a plan on the ticket the hub never recorded (by and at null),
+ * or the Size that let it start without one. Planner and review runs carry none.
+ */
+export type RunPlan =
+  | { by: AgentId; at: number; ref: string }
+  | { by: null; at: null; ref: string }
+  | { skipped: `Size ${string}` };
+
 export interface Run {
   id: string;
   agentId: AgentId;
@@ -51,10 +91,14 @@ export interface Run {
   loop?: RunLoop | null;
   /** The template profile the run started with, as it was then; absent on a run without one. */
   profile?: RunProfile | null;
+  /** Snapshotted at creation; absent on older runs or when no plan or Size waiver applies. */
+  plan?: RunPlan;
   /** The `claude` CLI version the run started on; absent on a run that did not record it. */
   cliVersion?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
   endedBy?: "operator" | "engine" | "exit" | null;
+  /** Absent until a session ends without its loop's report. */
+  noReport?: NoReport | null;
 }
 
 export type LoopPhase = "working" | "ci" | "review" | "parked" | "done";
@@ -74,6 +118,8 @@ export interface CiRerun {
 
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
+  /** Computed from the checked diff; FLIGHT copies this exact key and evidence path. */
+  awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
   flightReruns?: Record<string, number>;
@@ -155,6 +201,12 @@ export interface LoopEvent {
 
 /** One try at a step of a looped run, oldest first. */
 export interface LoopTry {
+  trigger?: string;
+  /** Failures charged by Mission Control, separate from the number of executions. */
+  failures?: number;
+  usage?: TokenUsage | null;
+  models?: string[];
+  durationMs?: number | null;
   /** Measured input + output tokens; null when usage was not recorded. */
   tokens?: number | null;
   step: Exclude<LoopPhase, "parked">;
@@ -173,12 +225,15 @@ export interface LoopTry {
 /** `GET /api/runs/:id/loop`. */
 export interface RunLoopView {
   runId: string;
+  /** Full diagnostics for the operator's single-run view only. */
+  noReport?: NoReport | null;
+  usage?: RunUsage;
   loop: RunLoop | null;
   events: LoopEvent[];
   tries: LoopTry[];
   /** 1 + the fix lines sent in the loop's epoch, at most REVIEW_ROUNDS. null without a loop. */
   round: number | null;
-  /** crew.runTokenBudget + loop.budgetExtra. null without a loop or a crew section. */
+  /** null until the HUD and enforcement use the same token measure. */
   budget: number | null;
   /** reviewStatusOf for the pushed sha in the loop's epoch, else null. */
   review: ReviewStatus | null;
@@ -194,9 +249,15 @@ export interface RunPr {
   ticket: string | null;
 }
 
+/** A run in a list; full assistant text stays on the individual run record. */
+export type RunSummary = Omit<Run, "noReport"> & {
+  noReport?: Omit<NoReport, "lastAssistantText"> | null;
+};
+
 /** `GET /api/agents/:id/runs` row: the run with its PRs joined and its ticket resolved. */
-export type RunView = Omit<Run, "prs" | "ticket"> & {
+export type RunView = Omit<RunSummary, "prs" | "ticket"> & {
   prs: RunPr[];
+  usage?: RunUsage;
   /** The run's own ticket, else the first of its PRs' tickets (see runTicket). */
   ticket: string | null;
   /** The title stored with the run, else the board's title for its ticket; null when neither is known. */
@@ -375,7 +436,7 @@ export interface AgentView {
   accountId: AccountId;
   state: AgentState;
   stateSince: number;
-  currentRun: Run | null;
+  currentRun: RunSummary | null;
   paused: boolean;
   sourceError: string | null;
   /** The loop's own latest STOP note (studio loop), e.g. `stopped: quota ...`; display only. */
@@ -412,7 +473,13 @@ export interface LiveTask {
 export interface RunDigest {
   tasks?: LiveTask[];
   /** Timestamped message usage, retained for attempt attribution (not run totals). */
-  attemptUsage?: { id: string; at: number | null; tokens: number }[];
+  attemptUsage?: {
+    id: string;
+    at: number | null;
+    tokens: number;
+    usage?: TokenUsage;
+    model?: string | null;
+  }[];
   /** Committed lines; missing or null means unmeasured, including binary counts. */
   additions?: number | null;
   deletions?: number | null;
@@ -565,7 +632,8 @@ interface LimitRowBase {
  * and a `fullAt`. `fullAt`: when the window reaches 100% at its current pace (null when it will
  * not before the reset); the 7d pace is `pace24h`, the 5h pace `pace5h`. A 5h row's `paceReady` is
  * false when the server had too few samples to compute that pace (so a null `fullAt` means "too
- * little history", not "not filling"). Optional only until the web reads it.
+ * little history", not "not filling"). Optional because older hubs omit it; the web treats a
+ * missing value as ready.
  */
 export type LimitRow =
   | (LimitRowBase & {
@@ -681,7 +749,7 @@ export interface CrewLoop {
   /** A planner's plan landed for the run's ticket (a `{runId}:plan` loop event); absent without a profile. */
   planned?: boolean;
   /** The current step's try and its limit (ci: CI tries; review: review rounds), else null. */
-  tries?: { n: number; max: number } | null;
+  tries?: { n: number; max: number; failures?: number; runs?: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
   wait?: LoopWait | null;
 }

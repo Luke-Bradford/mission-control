@@ -64,7 +64,15 @@ import { defaultIsAlive, type LiveSession, readSessions } from "./collectors/ses
 import { collectStudioLoop, newStudioState } from "./collectors/studio-loop.ts";
 import { collectTaLoop, newTaState } from "./collectors/ta-loop.ts";
 import { collectTeams } from "./collectors/teams.ts";
-import { sampleClaude } from "./collectors/usage-claude.ts";
+import {
+  OAUTH_USAGE_SOURCE,
+  sampleClaude,
+  USAGE_BACKOFF_CAP_MS,
+  USAGE_BACKOFF_FACTOR,
+  USAGE_BACKOFF_SETTING,
+  USAGE_RATE_LIMIT_MAX_AGE_MS,
+  USAGE_RETRY_AFTER_MAX_MS,
+} from "./collectors/usage-claude.ts";
 import { sampleCodex } from "./collectors/usage-codex.ts";
 import { WINDOWS } from "./collectors/usage-common.ts";
 import {
@@ -72,6 +80,7 @@ import {
   fetchUsage,
   latestRollout,
   latestTranscriptLimits,
+  UsageRateLimited,
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
@@ -334,6 +343,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let githubNotBefore = 0;
   /** The reset of the reading that caused the back-off; the back-off ends then, whoever reads next. */
   let githubResetAt = 0;
+  // All Claude accounts use the same Keychain token and OAuth endpoint.
+  let usageBackoff: { waitMs: number; notBefore: number } | null = null;
   /** When the last board read began; boards are read on the first poll. */
   let lastBoardAt = Number.NEGATIVE_INFINITY;
   /** A trigger asked for a board read that has not run yet. */
@@ -492,13 +503,71 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     return gql;
   };
 
+  const noteUsageLimited = (acct: AccountId, notBefore: number) => {
+    const readings = WINDOWS.flatMap((w) => store.latestUsage(acct, w) ?? []);
+    const latest = readings.sort((a, b) => b.at - a.at)[0];
+    const reading = readings.find((r) => r.window === "7d") ?? latest;
+    const at = now();
+    const date = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: config.operator.timezone,
+    });
+    const time = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: config.operator.timezone,
+    });
+    const format = (value: number) =>
+      `${date.format(value) === date.format(at) ? "" : `${date.format(value)} `}${time.format(value)}`;
+    const last = reading
+      ? `last reading ${format(reading.at)} (${reading.pct}% ${reading.window})`
+      : "no previous reading";
+    recordStatus(
+      usageCollector(acct),
+      latest !== undefined && at - latest.at < USAGE_RATE_LIMIT_MAX_AGE_MS,
+      `rate limited by Anthropic; ${last}; next try ${format(notBefore)}`,
+    );
+  };
+
   const usageFor = async (acct: CcConfig["accounts"][number]) => {
+    const backoff = usageBackoff;
+    const slack = intervals.usage / 2;
+    if (acct.vendor === "claude" && backoff && now() < backoff.notBefore - slack) {
+      if (backoff.waitMs > 0) noteUsageLimited(acct.id, backoff.notBefore);
+      return;
+    }
     const errors: string[] = [];
-    const onError: OnError = (source, err) => errors.push(`${source}: ${msg(err)}`);
+    let rateLimited = false;
+    const onError: OnError = (source, err) => {
+      errors.push(`${source}: ${msg(err)}`);
+      if (acct.vendor !== "claude" || source !== OAUTH_USAGE_SOURCE) return;
+      if (!(err instanceof UsageRateLimited)) return;
+      rateLimited = true;
+      const waitMs = Math.min(
+        USAGE_BACKOFF_CAP_MS,
+        backoff?.waitMs ? backoff.waitMs * USAGE_BACKOFF_FACTOR : intervals.usage,
+      );
+      const at = now();
+      usageBackoff = { waitMs, notBefore: Math.max(at + waitMs, err.notBefore(at)) };
+      store.setSetting(USAGE_BACKOFF_SETTING, JSON.stringify(usageBackoff));
+    };
     const sample = acct.vendor === "claude" ? c.claude : c.codex;
     const samples = await sample(acct.id, onError, now());
     // A fallback source can return the same reading on every poll; addUsage keeps one row of it.
     for (const s of samples) store.addUsage(s);
+    if (rateLimited) {
+      const held = usageBackoff;
+      if (held) noteUsageLimited(acct.id, held.notBefore);
+      return;
+    }
+    if (acct.vendor === "claude") {
+      // This attempt ended the 429 sequence, including a due attempt that failed otherwise.
+      usageBackoff = null;
+      store.deleteSetting(USAGE_BACKOFF_SETTING);
+    }
     const missing = WINDOWS.filter((w) => !samples.some((s) => s.window === w));
     const collector = usageCollector(acct.id);
     if (samples.length === 0) {
@@ -933,6 +1002,34 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     refreshBoards,
     start() {
       if (timers.length > 0) return;
+      const at = now();
+      const saved = store.getSetting(USAGE_BACKOFF_SETTING);
+      if (saved !== null) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (
+            parsed &&
+            Number.isFinite(parsed.waitMs) &&
+            parsed.waitMs > 0 &&
+            Number.isFinite(parsed.notBefore)
+          ) {
+            usageBackoff = {
+              waitMs: Math.min(parsed.waitMs, USAGE_BACKOFF_CAP_MS),
+              notBefore: Math.min(parsed.notBefore, at + USAGE_RETRY_AFTER_MAX_MS),
+            };
+          } else store.deleteSetting(USAGE_BACKOFF_SETTING);
+        } catch {
+          store.deleteSetting(USAGE_BACKOFF_SETTING);
+        }
+      }
+      if (!usageBackoff) {
+        const recent = config.accounts
+          .filter((acct) => acct.vendor === "claude")
+          .flatMap((acct) => WINDOWS.flatMap((w) => store.usage(acct.id, w, at - intervals.usage)))
+          .filter((s) => s.source === OAUTH_USAGE_SOURCE && at - s.at < intervals.usage)
+          .sort((a, b) => b.at - a.at)[0];
+        if (recent) usageBackoff = { waitMs: 0, notBefore: recent.at + intervals.usage };
+      }
       store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       unsubscribeCrew = bus.subscribe((t) => {
         if (t === "agents") recordCrewSoon();

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { LAST_TEXT_MAX, LIVE_DETAIL_MAX } from "@mc/core";
+import { LAST_TEXT_MAX, LIVE_DETAIL_MAX, NO_REPORT_REASON_MAX, NO_REPORT_TEXT_MAX } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { foldTranscript } from "../src/streamjson.ts";
 
@@ -9,6 +9,111 @@ const lines = readFileSync(resolve(import.meta.dirname, "fixtures/iteration.samp
   .filter((l) => l.length > 0);
 
 describe("foldTranscript", () => {
+  it("reads a sanitized aborted_streaming result (retro-1:20260101T000000Z)", () => {
+    const line = readFileSync(
+      resolve(import.meta.dirname, "fixtures/no-report-result.jsonl"),
+      "utf8",
+    ).trim();
+    const f = foldTranscript(null, [line], 1);
+    expect(f).toMatchObject({
+      terminalReason: "aborted_streaming",
+      resultSubtype: "error_during_execution",
+      stopReason: "tool_use",
+      numTurns: 9,
+      error: null,
+    });
+  });
+
+  it.each(["completed", "aborted_tools", "aborted_streaming"])(
+    "captures terminal reason %s and API status",
+    (terminal_reason) => {
+      const f = foldTranscript(
+        null,
+        [JSON.stringify({ type: "result", terminal_reason, api_error_status: 429, num_turns: 4 })],
+        1,
+      );
+      expect(f).toMatchObject({
+        terminalReason: terminal_reason,
+        apiErrorStatus: 429,
+        numTurns: 4,
+      });
+    },
+  );
+
+  it.each(["user", "assistant"])(
+    "resets result diagnostics on a new %s frame, across folds",
+    (type) => {
+      const previous = JSON.stringify({
+        type: "result",
+        stop_reason: "end_turn",
+        subtype: "error_during_execution",
+        terminal_reason: "aborted_tools",
+        api_error_status: 500,
+        errors: ["old error"],
+        is_error: true,
+        num_turns: 5,
+      });
+      const start = JSON.stringify({ type, message: { content: [] } });
+      const a = foldTranscript(null, [previous], 1);
+      const b = foldTranscript(a, [start], 2);
+      expect(b).toMatchObject({
+        stopReason: null,
+        resultSubtype: null,
+        terminalReason: "mid-turn (no result)",
+        apiErrorStatus: null,
+        numTurns: null,
+        error: null,
+        isError: false,
+      });
+      expect(b).toEqual(foldTranscript(null, [previous, start], 2));
+      expect(a.terminalReason).toBe("aborted_tools");
+    },
+  );
+
+  it("preserves a turn's stream error through empty result errors, then resets it", () => {
+    const assistant = JSON.stringify({
+      type: "assistant",
+      error: "invalid_request",
+      message: { content: [] },
+    });
+    const result = JSON.stringify({ type: "result", errors: [], is_error: true });
+    const f = foldTranscript(null, [assistant, result], 1);
+    expect(f.error).toBe("invalid_request");
+    expect(
+      foldTranscript(f, [JSON.stringify({ type: "user", message: { content: [] } })], 2).error,
+    ).toBeNull();
+  });
+
+  it.each(["user", "assistant"])(
+    "keeps the last assistant text when a %s starts a new turn",
+    (type) => {
+      const lines = [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "Last useful text." }] },
+        }),
+        JSON.stringify({ type: "result", num_turns: 9 }),
+      ];
+      const previous = foldTranscript(null, lines, 1);
+      const start = JSON.stringify({ type, message: { content: [] } });
+      const next = foldTranscript(previous, [start], 2);
+      expect(next.lastAssistantText).toBe("Last useful text.");
+      expect(next.resultCount).toBe(1);
+      expect(next).toEqual(foldTranscript(null, [...lines, start], 2));
+    },
+  );
+
+  it("caps structured reasons at the named limit", () => {
+    const long = "x".repeat(NO_REPORT_REASON_MAX + 100);
+    const f = foldTranscript(
+      null,
+      [JSON.stringify({ type: "result", stop_reason: long, subtype: long, terminal_reason: long })],
+      1,
+    );
+    for (const reason of [f.stopReason, f.resultSubtype, f.terminalReason])
+      expect(reason).toHaveLength(NO_REPORT_REASON_MAX);
+  });
+
   it("folds the fixture into run facts", () => {
     const f = foldTranscript(null, lines, 123_000);
     expect(f.sessionId).toBe("11111111-2222-4333-8444-555555555555");
@@ -73,6 +178,64 @@ describe("foldTranscript", () => {
     expect(f.costUsd).toBe(3);
     expect(f.resultCount).toBe(2);
     expect(f.isError).toBe(true);
+  });
+
+  it("retains the latest top-level stop reason and full cleaned assistant text across folds", () => {
+    const assistant = (text: string, stop: string | null, extra = {}) =>
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text }], stop_reason: stop },
+        ...extra,
+      });
+    const a = foldTranscript(null, [assistant("First sentence. Second sentence.", "end_turn")], 1);
+    const b = foldTranscript(
+      a,
+      [
+        assistant("child", "max_tokens", { parent_tool_use_id: "child" }),
+        JSON.stringify({ type: "result", is_error: false, subtype: "success" }),
+      ],
+      1,
+    );
+    expect(b.lastAssistantText).toBe("First sentence. Second sentence.");
+    expect(b.stopReason).toBe("end_turn");
+    const c = foldTranscript(
+      b,
+      [
+        assistant(`\x1b[31mcontext limit ghp_${"a".repeat(25)}`, "model_context_window_exceeded"),
+        JSON.stringify({
+          type: "result",
+          is_error: true,
+          subtype: "error_during_execution",
+          errors: ["Context exhausted"],
+        }),
+      ],
+      1,
+    );
+    expect(c.stopReason).toBe("model_context_window_exceeded");
+    expect(c.isError).toBe(true);
+    expect(c.error).toBe("Context exhausted");
+    expect(c.resultSubtype).toBe("error_during_execution");
+    expect(c.lastAssistantText).toBe("context limit [redacted]");
+    expect(a.lastAssistantText).toBe("First sentence. Second sentence.");
+    const d = foldTranscript(c, [assistant("x".repeat(NO_REPORT_TEXT_MAX + 100), "max_tokens")], 1);
+    expect(d.lastAssistantText).toHaveLength(NO_REPORT_TEXT_MAX);
+  });
+
+  it("keeps a stream error even when the CLI dies before a result", () => {
+    const f = foldTranscript(
+      null,
+      [
+        JSON.stringify({
+          type: "assistant",
+          error: "invalid_request",
+          message: { content: [{ type: "text", text: "Context limit reached" }] },
+        }),
+      ],
+      1,
+    );
+    expect(f.isError).toBe(true);
+    expect(f.error).toBe("invalid_request");
+    expect(f.resultSubtype).toBeNull();
   });
 
   const published = (branch?: string) =>
@@ -893,4 +1056,33 @@ it("retains two hours of token buckets for the shared Overview axis", () => {
   expect(
     foldTranscript(null, lines, now).digest.minuteTokens.map(([at]) => (now - at) / 60_000),
   ).toEqual([100, 90, 0]);
+});
+
+it("retains all four token measures and model for attempt attribution", () => {
+  const f = foldTranscript(
+    null,
+    [
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-01-01T00:00:00Z",
+        message: {
+          id: "msg",
+          model: "model-a",
+          content: [],
+          usage: {
+            input_tokens: 2,
+            output_tokens: 3,
+            cache_read_input_tokens: 100,
+            cache_creation_input_tokens: 20,
+          },
+        },
+      }),
+    ],
+    1,
+  );
+  expect(f.digest.attemptUsage?.[0]).toMatchObject({
+    tokens: 5,
+    usage: { input: 2, output: 3, cacheRead: 100, cacheCreate: 20 },
+    model: "model-a",
+  });
 });

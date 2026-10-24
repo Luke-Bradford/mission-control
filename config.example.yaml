@@ -18,6 +18,24 @@ accounts:
 repos:
   - id: shop-app
     github: octo-org/shop-app
+    # Repo rules live here; no Mission Control file is needed in the target repo.
+    # An optional CLAUDE.md Mission Control block tightens safety rules; user templates,
+    # promote_backlog and needs win. The block may set pick_from/areas and fill omitted keys.
+    # Set an explicit hard_rules list before enabling merges; [] explicitly means no paths.
+    # rules:
+    #   pick_from: [Todo]
+    #   promote_backlog: false
+    #   needs: [done_when, size]
+    #   templates: {bug: bugfix, chore: small-change}
+    #   areas: {"area:app": ["src/**"]}
+    #   hard_rules: ["policy/**"]
+    #   hard_rules_by: operator
+    #   always_ask: []
+    # Commands and protected files are user-config keys alongside rules.
+    # commands:
+    #   writer: ["uv run pytest"]
+    #   review: ["uv run pytest"]
+    # protected: ["pyproject.toml", "uv.lock", "uv.toml", "conftest.py", "setup.cfg"]
     project: 2
     # autonomy: draft
     # flight_powers: standard   # standard (default) | superuser. superuser raises FLIGHT's powers on this repo (docs/superpowers/specs/2026-10-23-flight-superuser-design.md). Only the user config sets it. A change applies live and restarts FLIGHT.
@@ -43,6 +61,10 @@ repos:
   # Placeholder: no Mission Control project exists yet; use its number once it is created.
   - id: mission-control
     github: octo-org/mission-control
+    # Operator migration: copy this repo's CLAUDE.md mc: mapping into rules: here in your
+    # ~/.config/mission-control/config.yaml, omitting the unused ci key. Keep the full hard_rules
+    # list. The existing repo block remains an optional override that tightens rules until separately removed.
+    # See docs/runbook.md, Per-repo board rules. This example does not edit your home config.
     project: 5
     # Commands that run the whole suite: the guard lets one seat at a time run them. Each must be a
     # command crew seats may run (see WRITER_TOOLS in packages/core/src/runtime.ts).

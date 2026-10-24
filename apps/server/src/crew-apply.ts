@@ -8,10 +8,13 @@ import {
   type CrewSeatConfig,
   type CrewSessionConfig,
   flightPowersOf,
+  isInside,
   loadConfig,
+  realish,
   seatInput,
   writerAreaConflict,
 } from "./config.ts";
+import { ConfigWriteError, noSessionText, sessionActiveText } from "./config-write.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 
@@ -64,7 +67,19 @@ export function planCrew(
   const appliedSessions = applied.crew?.sessions ?? [];
   const targetSessions = target.crew?.sessions ?? [];
   const maxSeats = target.crew?.maxSeats ?? 0;
-  let total = appliedSessions.reduce((n, s) => n + s.seats.length, 0);
+  // Free removals across every session release their identity and capacity before additions.
+  const remaining = appliedSessions.map((session) => {
+    const next = targetSessions.find(
+      (x) => x.id === session.id && x.repoId === session.repoId && x.checkout === session.checkout,
+    );
+    return {
+      ...session,
+      seats: session.seats.filter(
+        (seat) => next === undefined || next.seats.some((s) => s.id === seat.id) || busy(seat.id),
+      ),
+    };
+  });
+  let total = remaining.reduce((n, s) => n + s.seats.length, 0);
 
   for (const session of appliedSessions) {
     const t = targetSessions.find(
@@ -115,7 +130,6 @@ export function planCrew(
         pend(was.id, "remove", RETIRE_WAIT);
         if (!was.retiring) plan.applied.push(`seat ${was.id} retiring`);
       } else {
-        total--;
         plan.applied.push(`seat ${was.id} removed`);
       }
     }
@@ -135,7 +149,7 @@ export function planCrew(
         continue;
       }
       if (isAdd) {
-        const elsewhere = appliedSessions.find(
+        const elsewhere = remaining.find(
           (s) => s.id !== session.id && s.seats.some((x) => x.id === seat.id),
         );
         if (elsewhere !== undefined) {
@@ -150,7 +164,7 @@ export function planCrew(
       if (seatDef(seat).loop === "watch") {
         const rival = [
           ...others(),
-          ...appliedSessions.filter((x) => x.id !== session.id).flatMap((x) => x.seats),
+          ...remaining.filter((x) => x.id !== session.id).flatMap((x) => x.seats),
         ].find((w) => w.id !== seat.id && seatDef(w).loop === "watch");
         if (rival !== undefined) {
           pend(seat.id, change, watchWaitText(rival.id));
@@ -214,6 +228,11 @@ export interface CrewReloader {
   /** Applies what waited for a seat to be free; returns what it did. */
   settle(): string[];
   status(): CrewChanges;
+  /** Holds live removal across the save; a failed save restores the exact session. */
+  removeSession?<T extends { config: CcConfig }>(
+    id: string,
+    save: (stopped: (id: string) => boolean, session: CrewSessionConfig) => Promise<T>,
+  ): Promise<T>;
 }
 
 interface FileStat {
@@ -227,7 +246,7 @@ export function createCrewReloader(deps: {
   config: CcConfig;
   store: Store;
   bus: ChangeBus;
-  supervisor: Pick<Supervisor, "on" | "seatBusy">;
+  supervisor: Pick<Supervisor, "on" | "seatBusy" | "holdsCrewLock" | "endRemovedAside">;
   /** The watch rotates FLIGHT between turns, outside its crash restart limit. */
   rotateFlight?: () => void;
   now?: () => number;
@@ -250,6 +269,8 @@ export function createCrewReloader(deps: {
   let chain: Promise<unknown> = Promise.resolve();
   let timer: NodeJS.Timeout | undefined;
   let off: (() => void) | undefined;
+  let removing = false;
+  let settling = false;
 
   const statFile = (): FileStat => {
     const s = statSync(configPath);
@@ -275,11 +296,16 @@ export function createCrewReloader(deps: {
 
   const busy = (seatId: string): boolean => {
     try {
+      const removed = !(target.crew?.sessions ?? []).some((s) =>
+        s.seats.some((seat) => seat.id === seatId),
+      );
+      const run = store.seatRun(seatId);
       return (
         supervisor.seatBusy(seatId) ||
+        (run?.endedAt === null && !(removed && run.loop?.aside)) ||
         store.queue(seatId).some((q) => q.takenAt !== null) ||
         // an aside run has no process or seat row, but the seat is working
-        store.asideRuns().some((r) => r.agentId === seatId)
+        (!removed && store.asideRuns().some((r) => r.agentId === seatId))
       );
     } catch {
       return true;
@@ -287,26 +313,104 @@ export function createCrewReloader(deps: {
   };
 
   function settle(): string[] {
+    if (removing || settling) return [];
+    settling = true;
     // Guards read powers per call. Apply them even if unrelated crew edits cannot settle.
     const powersApplied: string[] = [];
-    for (const repo of config.repos) {
-      const next = flightPowersOf(target, repo.id);
-      if ((repo.flightPowers ?? "standard") === next) continue;
-      repo.flightPowers = next;
-      powersApplied.push(`repo ${repo.id} flight_powers ${next}`);
-    }
-    if (powersApplied.length > 0) {
-      // Refresh the session's context after its turn; permissions already changed above.
-      deps.rotateFlight?.();
-      bus.emit("config");
-      bus.emit("agents");
-    }
     try {
+      for (const repo of config.repos) {
+        const next = flightPowersOf(target, repo.id);
+        if ((repo.flightPowers ?? "standard") === next) continue;
+        repo.flightPowers = next;
+        powersApplied.push(`repo ${repo.id} flight_powers ${next}`);
+      }
+      if (powersApplied.length > 0) {
+        // Refresh the session's context after its turn; permissions already changed above.
+        deps.rotateFlight?.();
+        bus.emit("config");
+        bus.emit("agents");
+      }
+      // A newly created session has no agents or runtime state to migrate.
+      if (
+        config.crew &&
+        target.crew &&
+        isDeepStrictEqual(config.loops, target.loops) &&
+        config.crew.worktrees === target.crew.worktrees &&
+        isDeepStrictEqual(config.crew.denyRead, target.crew.denyRead)
+      ) {
+        for (const session of target.crew.sessions) {
+          if (
+            session.seats.length === 0 &&
+            config.crew.sessions.every((s) => s.seats.every((seat) => !busy(seat.id))) &&
+            !config.crew.sessions.some((s) => s.id === session.id) &&
+            config.repos.some((r) => r.id === session.repoId) &&
+            config.crew.sessions.every(
+              (s) =>
+                !isInside(realish(s.checkout), realish(session.checkout)) &&
+                !isInside(realish(session.checkout), realish(s.checkout)),
+            )
+          ) {
+            config.crew.sessions.push(structuredClone(session));
+            powersApplied.push(`session ${session.id} added`);
+            bus.emit("config");
+          }
+        }
+      }
       const plan = planCrew(config, target, busy);
       const nextRestart = restartNeeded(config, target);
       // all reads are done: from here nothing awaits, and the swap is last
       if (plan.drop.length > 0) {
         store.replaceQueues([...new Set(plan.drop)].map((seatId) => ({ seatId, items: [] })));
+      }
+      const held = new Set(
+        (config.crew?.sessions ?? []).flatMap((s) =>
+          (plan.sessions.get(s.id) ?? s.seats).map((seat) => seat.id),
+        ),
+      );
+      const wanted = new Set(
+        (target.crew?.sessions ?? []).flatMap((s) => s.seats.map((seat) => seat.id)),
+      );
+      const removed = new Set(
+        [
+          ...(config.crew?.sessions ?? []).flatMap((s) => s.seats.map((seat) => seat.id)),
+          ...store.openQuestions().map((q) => q.agentId),
+          ...store.notes().flatMap((n) => (n.seatId === null ? [] : [n.seatId])),
+          ...store.asideRuns().map((r) => r.agentId),
+        ].filter((id) => !held.has(id) && !wanted.has(id)),
+      );
+      const at = now();
+      for (const seatId of removed) {
+        if (!supervisor.holdsCrewLock?.() || supervisor.seatBusy(seatId)) continue;
+        const open = store
+          .runsActiveSince(Number.MAX_SAFE_INTEGER)
+          .filter((run) => run.agentId === seatId && run.endedAt === null);
+        // A removed aside may be ended deliberately; every other open run keeps its attention.
+        if (open.some((run) => !run.loop?.aside)) continue;
+        for (const run of open) {
+          if (!supervisor.endRemovedAside?.(run.id)) continue;
+          store.addComms({
+            at,
+            from: "CAPCOM",
+            to: seatId,
+            ticket: run.ticket,
+            text: `Seat ${seatId} removed; ended set-aside run ${run.id}.`,
+          });
+        }
+        if (
+          store
+            .runsActiveSince(Number.MAX_SAFE_INTEGER)
+            .some((run) => run.agentId === seatId && run.endedAt === null)
+        )
+          continue;
+        if (!supervisor.holdsCrewLock?.() || supervisor.seatBusy(seatId)) continue;
+        store.answerQuestions(seatId, at);
+        for (const note of store.notes()) {
+          if (note.seatId === seatId) store.clearNote(note.key, at);
+        }
+      }
+      if (removed.size > 0) {
+        bus.emit("attention");
+        bus.emit("agents");
       }
       for (const [id, seats] of plan.sessions) {
         const session: CrewSessionConfig | undefined = config.crew?.sessions.find(
@@ -334,6 +438,8 @@ export function createCrewReloader(deps: {
     } catch (e) {
       log(`could not apply config.yaml: ${e instanceof Error ? e.message : String(e)}`);
       return powersApplied;
+    } finally {
+      settling = false;
     }
   }
 
@@ -392,10 +498,13 @@ export function createCrewReloader(deps: {
       } catch {
         last = null;
       }
+      settle();
       timer = setInterval(poll, CONFIG_POLL_MS);
       timer.unref();
       off = supervisor.on((e) => {
         if (e.kind === "run-ended") settle();
+        // An ended run already settles on run-ended, after its process is released.
+        if (e.kind === "seat-free" && store.run(e.runId)?.endedAt == null) settle();
       });
     },
     stop() {
@@ -403,6 +512,38 @@ export function createCrewReloader(deps: {
       timer = undefined;
       off?.();
       off = undefined;
+    },
+    removeSession(id, save) {
+      const run = chain.then(async () => {
+        const sessions = config.crew?.sessions;
+        const index = sessions?.findIndex((s) => s.id === id) ?? -1;
+        const session = sessions?.[index];
+        if (!sessions || !session) throw new ConfigWriteError("missing", noSessionText(id));
+        const stopped = (seatId: string) =>
+          store.seatSession(seatId)?.state === "stopped" && !busy(seatId);
+        const active = session.seats.filter((s) => !stopped(s.id)).length;
+        if (active) throw new ConfigWriteError("conflict", sessionActiveText(id, active));
+        // Removing it synchronously prevents any new supervisor start during the file write.
+        removing = true;
+        sessions.splice(index, 1);
+        let saved = false;
+        try {
+          const result = await save(stopped, session);
+          saved = true;
+          target = structuredClone(result.config);
+          pending = pending.filter((p) => p.sessionId !== id);
+          restart = restartNeeded(config, target);
+          store.replaceQueues(session.seats.map((s) => ({ seatId: s.id, items: [] })));
+          bus.emit("config");
+          bus.emit("agents");
+          return result;
+        } finally {
+          if (!saved) sessions.splice(index, 0, session);
+          removing = false;
+        }
+      });
+      chain = run.catch(() => undefined);
+      return run;
     },
     reload,
     settle,

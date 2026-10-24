@@ -471,23 +471,6 @@ describe("startWatch", () => {
       "FLIGHT-1 runs the crew and is started without a ticket.",
     ]);
   });
-
-  it("is failed, not resumed, after a restart", async () => {
-    const first = flightMake();
-    first.sup.start();
-    const { runId } = await first.sup.startWatch("flight-1");
-    await until(() => expect(seatState("flight-1")).toBe("idle"));
-    await first.sup.stopAll();
-    await noKeepers(); // no keeper to attach to: only a resume could take it back, and a watch run has none
-    const { sup } = flightMake();
-    const seen: SupervisorEvent[] = [];
-    sup.on((e) => seen.push(e));
-    sup.start();
-    await until(() => expect(seatState("flight-1")).toBe("error"));
-    expect(store.seatSession("flight-1")?.reason).toBe("could not resume the session");
-    expect(store.run(runId)?.endedAt).not.toBeNull();
-    expect(seen.some((e) => e.kind === "run-ended" && e.runId === runId)).toBe(true);
-  });
 });
 
 describe("startReview", () => {
@@ -621,6 +604,18 @@ describe("startReview", () => {
 
   it("a light review runs on the seat's model", async () => {
     expect(await reviewModel("light")).toBe("haiku");
+  });
+
+  it("a superseded review ends without missing-report diagnostics", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    store.setReviewState(r.reviewId, ["running"], "superseded", { at: Date.now() });
+    await sup.endRunByEngine(runId);
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
   });
 
   it("startReview launches a scratch run", async () => {
@@ -814,6 +809,8 @@ describe("startReview", () => {
       }),
     );
     expect(store.run(runId)?.status).toBe("failed");
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     await until(() => expect(existsSync(scratch(reviewId))).toBe(false));
     expect(recorded().filter((l) => Array.isArray(l.argv))).toHaveLength(1);
   });

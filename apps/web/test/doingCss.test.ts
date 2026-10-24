@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL } from "../src/crew.ts";
 
 const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
 const rule = (sel: string) => css.match(new RegExp(`\\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
@@ -12,7 +11,8 @@ interface Track {
   min: number;
 }
 
-const parseTrack = (t: string): Track => {
+const parseTrack = (track: string): Track => {
+  const t = track.replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")");
   const px = t.match(/^([\d.]+)px$/);
   if (px) return { px: Number(px[1]), fr: 0, min: 0 };
   const mm = t.match(/^minmax\(([\d.]+)(?:px)?, ([\d.]+)fr\)$/);
@@ -27,14 +27,6 @@ const templateOf = (r: string): Track[] =>
     .split(/ (?![^(]*\))/)
     .filter(Boolean)
     .map(parseTrack);
-
-/** The doing text is 11px (--fs-xs), about 6.6px a character at its widest. */
-const CHAR_PX = 6.6;
-
-/** The longest Loop step label, `build › In review`, on one line. */
-const LABEL_PX =
-  Math.max(...Object.values(LOOP_PHASE_LABEL).map((l) => `${BUILD_LOOP_TEMPLATE} › ${l}`.length)) *
-  CHAR_PX;
 
 const gapOf = (r: string) => Number(r.match(/\n\s*gap: (\d+)px/)?.[1]);
 
@@ -73,7 +65,7 @@ function ticketColumn(viewport: number, selector: string) {
   )?.[1];
   const [main] = solve(templateOf(viewport < 1200 ? (drawer ?? "") : shell), inner, gapOf(shell));
   const ov = rule(String.raw`\.ov`);
-  const [agents] = solve(templateOf(ov), main ?? 0, gapOf(ov));
+  const [agents] = viewport <= 1600 ? [main] : solve(templateOf(ov), main ?? 0, gapOf(ov));
   const panel = (agents ?? 0) - 2 * pxOf(rule(String.raw`\.panel`), "border");
   const row = rule(String.raw`\.trow`);
   const tracks = templateOf(rule(selector));
@@ -82,7 +74,7 @@ function ticketColumn(viewport: number, selector: string) {
     tracks,
     cols,
     gap: gapOf(row),
-    width: cols[tracks.findIndex((t) => t.px === null)] ?? 0,
+    width: cols[2] ?? 0,
   };
 }
 
@@ -94,10 +86,6 @@ function columnsOf(r: string, count: number): [number, number] {
   const start = line(Number(m[1]));
   return [start - 1, (m[2] === undefined ? start + 1 : line(Number(m[2]))) - 2];
 }
-
-/** The width of tracks `first` to `last` and the gaps between them. */
-const spanWidth = (cols: number[], gap: number, [first, last]: [number, number]) =>
-  cols.slice(first, last + 1).reduce((n, w) => n + w, 0) + gap * (last - first);
 
 describe("doing lines and run rows (hud.css)", () => {
   it("Work in flight stretches the agent link across the row, below ticket and PR links", () => {
@@ -143,72 +131,65 @@ describe("doing lines and run rows (hud.css)", () => {
     expect(rule(String.raw`\.runrow button\.rsummary`)).toContain("line-height: inherit");
   });
 
-  it("the Overview row gives its ticket and doing column the room the others leave", () => {
-    const r = rule(String.raw`\.trow`);
-    expect(r).toContain("grid-template-columns: 108px 84px minmax(0, 1fr) 116px 112px 88px");
-    expect(r).toContain("gap: 8px");
+  it("keeps the ticket on line one and spans doing across the middle columns", () => {
+    expect(rule("#agentsList")).toContain("container: agents / inline-size");
+    expect(rule(String.raw`#agentsList \.trow > \*`)).toContain("grid-row: 1");
+    const cell = rule(String.raw`#agentsList \.trow > \.need`);
+    expect(cell).toContain("grid-row: 2");
+    expect(columnsOf(cell, 9)).toEqual([1, 8]);
   });
 
-  it("at 1440 the Overview doing line fits about 32 characters, with the loop column or without", () => {
-    // The loop step column is wide enough for `build › In review` on one line, which costs the
-    // ticket column 28px against the earlier 40-character goal.
-    const MIN_CHARS = 32;
-    const doing = rule(String.raw`\.trow \.doing`);
-    const lines = Number(doing.match(/-webkit-line-clamp: (\d+)/)?.[1]);
-    expect(doing).toContain(`line-clamp: ${lines}`);
-    expect(doing).toContain("white-space: normal");
-    expect(doing).toContain("overflow: hidden");
-    const fits = (width: number) => Math.floor(width / CHAR_PX) * lines;
-
-    const six = ticketColumn(1440, String.raw`\.trow`);
-    expect(six.tracks).toHaveLength(6);
-    expect(Math.round(six.width)).toBe(112);
-    expect(six.cols[3]).toBeGreaterThanOrEqual(LABEL_PX);
-    expect(fits(six.width)).toBeGreaterThanOrEqual(MIN_CHARS);
-
-    // no row has a loop: the dashes' column and its gap go to the ticket column
-    const five = ticketColumn(1440, String.raw`  \.noloop \.trow`);
-    expect(five.tracks).toHaveLength(5);
-    expect(Math.round(five.width)).toBe(212);
-    expect(fits(five.width)).toBeGreaterThanOrEqual(MIN_CHARS);
-    expect(rule(String.raw`  \.noloop \.trow > :nth-child\(4\)`)).toContain("display: none");
-    expect(css).toContain("@media (min-width: 761px) {\n  /* With no loop");
+  it("lets the desktop table shrink without a fixed minimum width", () => {
+    expect(rule("#agentsList")).toContain("overflow: visible");
+    expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 0");
+    expect(templateOf(rule(String.raw`#agentsList \.trow`))).toHaveLength(9);
+    expect(templateOf(rule(String.raw`#agentsList\.no-steps \.trow`))).toHaveLength(8);
   });
 
-  it("from 1200 to 1439 with the dock open the row shows the ticket number, 30 characters and the loop step", () => {
-    const lines = Number(rule(String.raw`\.trow \.doing`).match(/-webkit-line-clamp: (\d+)/)?.[1]);
-    // the repo chip (8ch, its padding and border), a space and "#191"
-    const chip = rule(String.raw`\.rchip`);
-    const chipPad = Number(chip.match(/padding: 0 (\d+)px/)?.[1]);
-    const NUMBER_PX = (8 + 1 + 4) * CHAR_PX + 2 * chipPad + 2 * pxOf(chip, "border");
-    const dock = String.raw`  \.app:not\(\.dock-hidden\) \.trow`;
-    const cell = (n: number) => rule(`${dock} > :nth-child\\(${n}\\)`);
-    // the dock is a column from 1200 up; the one-line row holds from 1440
-    const media = css.match(
-      /@media \(min-width: 1200px\) and \(max-width: (\d+)px\) \{\n {2}\.app:not\(\.dock-hidden\) \.trow \{/,
-    );
-    expect(Number(media?.[1])).toBe(1439);
-
-    // the loop, tokens and meters cells sit on the row's second line, each in its own columns
-    const sets = [4, 5, 6].map((n) => {
-      expect(cell(n)).toContain("grid-row: 2");
-      return columnsOf(cell(n), templateOf(rule(dock)).length);
-    });
-    const [loop, tokens, meters] = sets as [[number, number], [number, number], [number, number]];
-    expect(loop[1]).toBeLessThan(tokens[0]);
-    expect(tokens[1]).toBeLessThan(meters[0]);
-
-    for (const viewport of [1200, 1280, 1439]) {
-      // the solver throws if the fixed tracks overrun the row's content box
-      const t = ticketColumn(viewport, dock);
-      const span = (c: [number, number]) => spanWidth(t.cols, t.gap, c);
-      const ticket = span(columnsOf(cell(3), t.tracks.length));
-      expect(ticket).toBeGreaterThanOrEqual(NUMBER_PX);
-      expect(Math.floor(ticket / CHAR_PX) * lines).toBeGreaterThanOrEqual(30);
-      expect(span(loop)).toBeGreaterThanOrEqual(LABEL_PX);
-      expect(t.width).toBeGreaterThan(0);
-    }
-  });
+  it.each([1100, 1199, 1200, 1280, 1359, 1360, 1440, 1800, 2000])(
+    "fits both Agents grids with FLIGHT open at %ipx",
+    (viewport) => {
+      const app = rule(String.raw`\.app`);
+      const inner = viewport - pxOf(app, "padding-left") - pxOf(app, "padding-right");
+      const shell = rule(String.raw`\.shell`);
+      const main =
+        viewport < 1200 ? inner : (solve(templateOf(shell), inner, gapOf(shell))[0] ?? 0);
+      // Reserve space for a classic scrollbar as well as the panel borders.
+      const panel = main - 16 - 2 * pxOf(rule(String.raw`\.panel`), "border");
+      if (panel < 940) {
+        expect(css).toContain("@container agents (width < 940px)");
+        return;
+      }
+      const compact = css.slice(
+        css.indexOf("@container agents (width < 1360px)"),
+        css.indexOf(".activity-live {"),
+      );
+      for (const selector of [
+        String.raw`#agentsList \.trow`,
+        String.raw`#agentsList\.no-steps \.trow`,
+        String.raw`#agentsList\.no-quota \.trow`,
+        String.raw`#agentsList\.no-steps\.no-quota \.trow`,
+      ]) {
+        const grid =
+          panel < 1360
+            ? (compact.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "")
+            : rule(selector);
+        const tracks = templateOf(grid);
+        const gap = panel < 1360 ? 6 : 8;
+        const available = panel - 2 * pxOf(rule(String.raw`\.trow`), "padding", 2);
+        const widths = solve(tracks, available, gap);
+        expect(widths[3]).toBeGreaterThan(0);
+        expect(widths.reduce((a, b) => a + b, 0) + gap * (widths.length - 1)).toBeLessThanOrEqual(
+          available + 0.01,
+        );
+        expect(widths[2]).toBe(140);
+        expect(tracks.filter((t) => t.fr > 0)).toHaveLength(1);
+        expect(tracks[3]?.fr).toBe(1);
+        expect(widths.at(-1)).toBe(panel < 1360 ? 60 : 72);
+        if (viewport >= 1440) expect(widths[3]).toBeGreaterThan(50);
+      }
+    },
+  );
 
   it("the loop step is one line and a 4px bar, with the mockup's colours", () => {
     expect(rule(String.raw`\.ellip`)).toContain("white-space: nowrap");
@@ -233,7 +214,7 @@ describe("doing lines and run rows (hud.css)", () => {
     }
   });
 
-  it("the fixed tracks fit the narrowest two-column Overview", () => {
+  it("the fixed tracks fit a 1000px Overview with the dock as a drawer", () => {
     expect(() => ticketColumn(1000, String.raw`\.trow`)).not.toThrow();
   });
 

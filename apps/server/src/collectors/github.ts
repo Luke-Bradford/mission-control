@@ -240,22 +240,92 @@ export class GqlError extends Error {
 
 /**
  * The request never got an answer (`status` null: fetch failed) or got an HTTP error status. A
- * caller may retry a lost request or a 5xx (`isTransient`), never a 401/403/429.
+ * caller may retry a lost request or a 5xx (`isTransient`), never a rate-limited answer.
  */
 export class GqlTransportError extends Error {
   readonly status: number | null;
   /** The response's X-GitHub-SSO header (SAML single sign-on), or null. */
   readonly sso: string | null;
-  constructor(message: string, status: number | null, sso: string | null = null) {
+  readonly rateLimited: boolean;
+  readonly retryRead: boolean;
+  constructor(
+    message: string,
+    status: number | null,
+    sso: string | null = null,
+    rateLimited = false,
+    retryRead = false,
+  ) {
     super(message);
     this.name = "GqlTransportError";
     this.status = status;
     this.sso = sso;
+    this.rateLimited = rateLimited;
+    this.retryRead = retryRead;
   }
 }
 
 export const isTransient = (e: unknown): boolean =>
-  e instanceof GqlTransportError && (e.status === null || e.status >= 500);
+  e instanceof GqlTransportError && !e.rateLimited && (e.status === null || e.status >= 500);
+
+/** Retry only a dropped read, leaving longer outages to the sweep's retry. */
+export async function retryGithubRead<T>(read: () => Promise<T>, enabled = true): Promise<T> {
+  try {
+    return await read();
+  } catch (e) {
+    if (!enabled || !(e instanceof GqlTransportError) || !e.retryRead) throw e;
+    await new Promise((resolve) => setTimeout(resolve, 1000).unref());
+    return read();
+  }
+}
+
+/** Only the network cause code is safe to include in a transport failure. */
+function networkCauseSuffix(e: unknown): string {
+  const code = isObj(e) && isObj(e.cause) ? e.cause.code : undefined;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]*$/.test(code) ? ` (${code})` : "";
+}
+
+/** Only the network cause code is safe to include in a request failure. */
+export function githubRequestError(e: unknown): GqlTransportError {
+  const timeout = isObj(e) && e.name === "TimeoutError";
+  return new GqlTransportError(
+    timeout
+      ? `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`
+      : `github: request failed${networkCauseSuffix(e)}`,
+    null,
+    null,
+    false,
+    !timeout,
+  );
+}
+
+/** Read the body separately from parsing so an interrupted response keeps its cause. */
+export async function readGithubJson(res: Response): Promise<unknown> {
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (e) {
+    if (isObj(e) && e.name === "TimeoutError") {
+      throw new GqlTransportError(
+        `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`,
+        null,
+      );
+    }
+    throw new GqlTransportError(
+      `github: response cut off${networkCauseSuffix(e)}`,
+      null,
+      null,
+      false,
+      true,
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `github: response was not JSON (${res.headers.get("content-type") ?? "unknown"})`,
+    );
+  }
+}
 
 /** Starts the one line a token missing a scope gets; the scheduler looks for it to log at start-up. */
 export const MISSING_SCOPE_PREFIX = "gh token lacks the ";
@@ -298,54 +368,57 @@ export function makeGql(
   rates?: { record(query: string, rl: GithubRateLimit): void },
   now: () => number = Date.now,
 ): Gql {
-  return async (query, variables) => {
-    let res: Response;
-    try {
-      res = await doFetch(GITHUB_GRAPHQL_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "mission-control",
-        },
-        body: JSON.stringify({ query, variables }),
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-      });
-    } catch {
-      throw new GqlTransportError("github: request failed", null);
-    }
-    // An exhausted budget answers with no rateLimit block: record it, or the poll never slows.
-    if (!res.ok && isRateLimitedResponse(res.status, res.headers)) {
-      rates?.record(queryName(query), exhaustedReading(res.headers, now()));
-    }
-    if (!res.ok) {
-      throw new GqlTransportError(
-        `github: HTTP ${res.status}`,
-        res.status,
-        res.headers.get("x-github-sso"),
-      );
-    }
-    let body: { data?: unknown; errors?: { message?: unknown }[] };
-    try {
-      body = (await res.json()) as typeof body;
-    } catch {
-      throw new Error("github: response was not JSON");
-    }
-    if (Array.isArray(body.errors) && body.errors.length > 0) {
-      if (body.errors.some(isRateLimitedError)) {
-        rates?.record(queryName(query), exhaustedReading(res.headers, now()));
-      }
-      const line = describeGqlErrors(body.errors);
-      throw new GqlError(
-        line.startsWith(MISSING_SCOPE_PREFIX) ? line : `github: ${line}`,
-        body.errors,
-        body.data ?? null,
-      );
-    }
-    const rl = parseRateLimit(body.data, now());
-    if (rl) rates?.record(queryName(query), rl);
-    return body.data;
-  };
+  return (query, variables) =>
+    retryGithubRead(
+      async () => {
+        let res: Response;
+        try {
+          res = await doFetch(GITHUB_GRAPHQL_URL, {
+            method: "POST",
+            headers: {
+              Authorization: `bearer ${token}`,
+              "Content-Type": "application/json",
+              "User-Agent": "mission-control",
+            },
+            body: JSON.stringify({ query, variables }),
+            signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+          });
+        } catch (e) {
+          throw githubRequestError(e);
+        }
+        // An exhausted budget answers with no rateLimit block: record it, or the poll never slows.
+        if (!res.ok && isRateLimitedResponse(res.status, res.headers)) {
+          rates?.record(queryName(query), exhaustedReading(res.headers, now()));
+        }
+        if (!res.ok) {
+          throw new GqlTransportError(
+            `github: HTTP ${res.status}`,
+            res.status,
+            res.headers.get("x-github-sso"),
+            isRateLimitedResponse(res.status, res.headers),
+          );
+        }
+        const body = (await readGithubJson(res)) as {
+          data?: unknown;
+          errors?: { message?: unknown }[];
+        };
+        if (Array.isArray(body.errors) && body.errors.length > 0) {
+          if (body.errors.some(isRateLimitedError)) {
+            rates?.record(queryName(query), exhaustedReading(res.headers, now()));
+          }
+          const line = describeGqlErrors(body.errors);
+          throw new GqlError(
+            line.startsWith(MISSING_SCOPE_PREFIX) ? line : `github: ${line}`,
+            body.errors,
+            body.data ?? null,
+          );
+        }
+        const rl = parseRateLimit(body.data, now());
+        if (rl) rates?.record(queryName(query), rl);
+        return body.data;
+      },
+      /^\s*(?:query\b|\{)/.test(query),
+    );
 }
 
 /**
@@ -1040,7 +1113,12 @@ export async function sweepPullRequests(
   const collector = prSweepCollector(repo.id);
   let boards = false;
   try {
-    const { prs, nodes } = await fetchPrs(repo, gql, now, true, store, observe);
+    const read = () => fetchPrs(repo, gql, now, true, store, observe);
+    const { prs, nodes } = await read().catch(async (e: unknown) => {
+      if (!isTransient(e)) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      return read();
+    });
     // GitHub returning no nodes at all is no data, not "no PRs": it must not wipe the rows until
     // the next poll. Nodes that are all older than the keep window do prune.
     if (nodes > 0) boards = store.sweepPullRequests(repo.id, prs, now);

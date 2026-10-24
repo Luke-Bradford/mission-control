@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AdoptedLoop } from "../config.ts";
 import { foldTranscript, type TranscriptFacts } from "../streamjson.ts";
+import { USAGE_RETRY_AFTER_MAX_MS } from "./usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, isObj } from "./usage-common.ts";
 
 const execFileAsync = promisify(execFile);
@@ -66,6 +67,45 @@ export interface FetchUsageDeps {
   fetch?: typeof fetch;
 }
 
+export class UsageRateLimited extends Error {
+  readonly retryAfterMs: number | null;
+  readonly retryAt: number | null;
+
+  constructor(retryAfter: string | null = null, now = Date.now()) {
+    super("oauth usage request failed: HTTP 429");
+    this.name = "UsageRateLimited";
+    const value = retryAfter?.trim() ?? "";
+    this.retryAfterMs = /^\d+$/.test(value)
+      ? Math.min(Number(value) * 1000, USAGE_RETRY_AFTER_MAX_MS)
+      : null;
+    // Date.parse also accepts numbers, ISO dates and other non-HTTP strings. Accept
+    // only HTTP's three date formats, with a round trip to reject invalid dates.
+    const isAsctime = /^[A-Z][a-z]{2} [A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$/.test(value);
+    const at = Date.parse(isAsctime ? `${value} GMT` : value);
+    const date = Number.isFinite(at) ? new Date(at) : null;
+    const canonical =
+      date && date.getUTCFullYear() >= 0 && date.getUTCFullYear() <= 9999
+        ? date.toUTCString()
+        : null;
+    const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const obsolete =
+      date && canonical
+        ? `${weekdays[date.getUTCDay()]}, ${canonical.slice(5, 7)}-${canonical.slice(8, 11)}-${canonical.slice(14, 16)} ${canonical.slice(17)}`
+        : null;
+    const asctime = canonical
+      ? `${canonical.slice(0, 3)} ${canonical.slice(8, 11)} ${canonical.slice(5, 7).replace(/^0/, " ")} ${canonical.slice(17, 25)} ${canonical.slice(12, 16)}`
+      : null;
+    this.retryAt =
+      this.retryAfterMs === null && (value === canonical || value === obsolete || value === asctime)
+        ? Math.min(at, now + USAGE_RETRY_AFTER_MAX_MS)
+        : null;
+  }
+
+  notBefore(now: number): number {
+    return this.retryAt ?? now + (this.retryAfterMs ?? 0);
+  }
+}
+
 export async function fetchUsage(deps: FetchUsageDeps = {}): Promise<unknown> {
   const token = await readOauthToken(deps.exec ?? ((f, a) => execFileAsync(f, a)));
   const doFetch = deps.fetch ?? fetch;
@@ -83,6 +123,7 @@ export async function fetchUsage(deps: FetchUsageDeps = {}): Promise<unknown> {
   } catch (err) {
     throw new Error(`oauth usage request failed: ${err instanceof Error ? err.name : "error"}`);
   }
+  if (res.status === 429) throw new UsageRateLimited(res.headers.get("Retry-After"));
   if (!res.ok) throw new Error(`oauth usage request failed: HTTP ${res.status}`);
   try {
     return await res.json();

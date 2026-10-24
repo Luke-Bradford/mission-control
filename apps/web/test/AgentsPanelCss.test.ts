@@ -3,21 +3,57 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
-it("keeps narrow agent cells shrinkable, folds progress and metadata, and aligns nested runs", () => {
-  const phone = css.slice(css.lastIndexOf("@media (max-width: 760px)"));
-  expect(phone).toMatch(
-    /#agentsList \.trow \{\s*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/,
-  );
-  expect(phone).toMatch(
-    /#agentsList \.agent-activity,\s*#agentsList \.agent-metadata \{\s*display: none/,
-  );
-  expect(phone).toMatch(/#agentsList \.asideline > :nth-child\(3\),[^}]*grid-column: 1 \/ -1/);
-  expect(css).toMatch(/\.trow \.asideline \{[^}]*grid-template-columns: subgrid/);
-  expect(css).toMatch(/\.trow > \*,\s*\.trow \.asideline > \* \{\s*min-width: 0/);
+it("sizes Agents to its rows and gives Activity the remaining height", () => {
+  expect(css).toMatch(/#page-overview > #agentsP \{\s*flex: none/);
+  expect(css).toMatch(/#agentsList \{\s*overflow: visible/);
+  expect(css).toMatch(/\.ov > \.col \{\s*overflow: visible/);
+  expect(css).toMatch(/\.ov > #actP \{\s*min-height: 240px;\s*align-self: stretch/);
+  expect(css).toMatch(/grid-template-columns: minmax\(0, 1fr\) 300px/);
+  expect(css).not.toContain("min-height: calc(100dvh - 130px)");
+  expect(css).not.toContain("#agentsP .scroll");
 });
 
-it("hides the column headers and empty set-aside context cell on phones", () => {
-  const phone = css.slice(css.lastIndexOf("@media (max-width: 760px)"));
-  expect(phone).toMatch(/#agentsList \.trow\.head[^{]*\{\s*display: none/);
-  expect(phone).toMatch(/#agentsList \.asideline > :nth-child\(6\)[^{]*\{\s*display: none/);
+it("keeps all metrics on one padded line and only needs on line two", () => {
+  expect(css).toMatch(/\.trow \{[^}]*padding: 8px 10px/);
+  expect(css).toMatch(/\.trow:not\(\.head\) \{\s*grid-template-rows: 20px/);
+  expect(css).toMatch(/#agentsList \.trow > \* \{\s*grid-row: 1/);
+  expect(css).toMatch(/#agentsList \.trow > \.need \{[^}]*grid-row: 2;[^}]*height: 20px/);
+  expect(css).toMatch(/#agentsList\.no-steps \.loopstep \{\s*display: none/);
+  expect(css).not.toMatch(/#agentsList \.agent-activity \.spark \{[^}]*display: none/);
+  expect(css).toContain("animation: activity-pulse");
+  expect(css).toContain("prefers-reduced-motion: reduce");
+});
+
+it("keeps State pills and their age from shrinking", () => {
+  expect(css).toMatch(/#agentsList \.state-cell \.pill \{\s*flex: none/);
+  expect(css).toMatch(/\.state-cell > \.xs \{\s*flex: none/);
+  expect(css).toMatch(/\.state-cell \.pill > span \{[^}]*text-overflow: ellipsis/);
+  expect(css).not.toMatch(/\.trow \{[^}]*grid-template-columns:[^;]* 84px /);
+});
+
+it("compacts and stacks by available panel width", () => {
+  expect(css).not.toMatch(/#agentsList[^{}]*\.trow\s*\{[^}]*min-width: (?:960|1010)px/);
+  const compact = css.slice(
+    css.indexOf("@container agents (width < 1360px)"),
+    css.indexOf(".activity-live {"),
+  );
+  expect(compact).toMatch(/\.agent-cli\s*\{\s*display: none/);
+  expect(css).toMatch(/#agentsList \.agent-activity \.spark \{\s*flex: 1;\s*min-width: 40px/);
+  expect(compact.match(/140px minmax\(0, 1fr\)/g)).toHaveLength(4);
+  const stacked = css.slice(
+    css.indexOf("@media (width < 1100px)"),
+    css.indexOf("/* Summary disclosures"),
+  );
+  expect(stacked).toContain("#agentsList.no-steps .trow");
+  expect(stacked).toContain("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)");
+  expect(stacked).toMatch(/\.trow.head\s*\{\s*display: none/);
+  expect(stacked).toContain("grid-row: auto");
+});
+
+it("keeps feed tags beside readable text on desktop and preserves the phone grid", () => {
+  expect(css).toMatch(
+    /@media \(min-width: 761px\) \{\s*\.arow \{\s*grid-template-columns: 44px 16px fit-content\(110ch\) auto;\s*justify-content: start/,
+  );
+  expect(css).toMatch(/\.arow > \.expandable \{\s*max-width: 110ch/);
+  expect(css).toMatch(/#agentsList\.no-quota \.trow > :nth-child\(9\) \{\s*display: none/);
 });

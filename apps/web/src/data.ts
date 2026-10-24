@@ -8,6 +8,7 @@ import {
   ACTIVITY_WINDOW_MS,
   type ActivityRow,
   type CrewRow,
+  type FlightLedgerView,
   GUARD_WINDOW_DAYS,
   type PullRequestView,
   TOPICS,
@@ -37,6 +38,7 @@ export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 // Full loads reconcile mutable activity rows and arrivals older than the delta cursor.
 const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
+const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
@@ -67,8 +69,16 @@ export const RESOURCES = {
   flightIncoming: { path: "/api/flight/incoming", topic: "flight" },
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   flightSummary: { path: "/api/flight/summary", topic: "flight" },
-  flightLedger: { path: "/api/flight/ledger", topic: "flight" },
+  flightLedger: { path: "/api/flight/ledger?status=all", topic: "flight" },
+  flightMemory: (repoId: string): ResourceRef => ({
+    path: `${FLIGHT_MEMORY_PATH}?repo=${enc(repoId)}`,
+    topic: "flight",
+  }),
   machine: { path: "/api/machine", topic: "machine" },
+  awayDigest: (since = ""): ResourceRef => ({
+    path: `/api/away/digest${since ? `?since=${enc(since)}` : ""}`,
+    topic: "settings",
+  }),
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
@@ -151,8 +161,10 @@ export const RESOURCES = {
   | ((id: string, s: string) => ResourceRef)
 >;
 
-/** POST endpoints. */
+/** Mutation endpoints. */
 export const ACTIONS = {
+  flightMemory: (repoId: string, topic: string) =>
+    `${FLIGHT_MEMORY_PATH}/${enc(repoId)}/${enc(topic)}`,
   notificationPreferences: RESOURCES.notificationPreferences.path,
   notificationTest: "/api/notifications/test",
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,
@@ -275,6 +287,19 @@ class Hub {
       const since = previous === undefined ? undefined : (previous[0]?.at ?? 1);
       const path = since === undefined ? e.path : `${e.path}?since=${Math.max(0, since - 1)}`;
       let data = await apiGet<unknown>(path);
+      if (e.path === RESOURCES.flightLedger.path) {
+        const ledger = data as FlightLedgerView;
+        let page = ledger;
+        while (page.more && page.nextOffset !== null) {
+          page = await apiGet<FlightLedgerView>(`${path}&offset=${page.nextOffset}`);
+          if (page.session !== ledger.session)
+            throw new Error("FLIGHT session changed while reading the ledger.");
+          ledger.entries.push(...page.entries);
+        }
+        ledger.entries = [...new Map(ledger.entries.map((entry) => [entry.key, entry])).values()];
+        ledger.more = false;
+        ledger.nextOffset = null;
+      }
       if (previous && since !== undefined) {
         data = [...(data as ActivityRow[]), ...previous.filter((r) => r.at < since)]
           .filter((r) => r.at >= Date.now() - ACTIVITY_WINDOW_MS)
@@ -326,7 +351,8 @@ class Hub {
       const notificationSettingsChanged =
         topic === "settings" && e.path === RESOURCES.notificationEvents.path;
       const summaryChanged =
-        e.path === RESOURCES.flightSummary.path && (topic === "agents" || topic === "boards");
+        e.path === RESOURCES.flightSummary.path &&
+        (topic === "agents" || topic === "boards" || topic === "attention" || topic === "guard");
       if (
         (e.topic === topic || briefChanged || notificationSettingsChanged || summaryChanged) &&
         e.listeners.size > 0

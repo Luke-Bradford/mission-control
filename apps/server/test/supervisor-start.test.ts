@@ -13,14 +13,20 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 import {
+  AWAY_QUOTA_REFUSED,
+  AWAY_SETTING,
   type BoardItem,
   CREW_DISABLED,
   claimedText,
+  conflictKey,
+  conflictText,
+  DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   freezeRules,
@@ -28,6 +34,8 @@ import {
   GUARD_UNREACHABLE_TEXT,
   guardDenyOutput,
   HOOK_RETRY_ENV,
+  mergedMainText,
+  NEW_LOOP,
   notOnBoardText,
   otherLaneText,
   PNPM_STORE_ENV,
@@ -56,9 +64,10 @@ import { RepoRulesError } from "../src/engine/rules.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
+import { createMcTools } from "../src/mcp/tools.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
-import { CheckoutError } from "../src/runtime/checkouts.ts";
+import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -136,6 +145,34 @@ describe("startRun eligibility", () => {
     expect(worktrees()).toEqual([]);
     expect(claim).not.toHaveBeenCalled();
   }
+
+  it.each(["missing", "5h", "7d"])("refuses an away start with %s quota data", async (missing) => {
+    const at = Date.now();
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    if (missing !== "missing")
+      for (const window of ["5h", "7d"] as const) {
+        store.addUsage({
+          accountId: "claude-main",
+          window,
+          at,
+          resetAt: window === missing ? at - 1 : at + 86_400_000,
+          pct: 10,
+          source: "test",
+        });
+      }
+    await refused(422, AWAY_QUOTA_REFUSED);
+  });
+
+  it("allows the operator's manual start while away with pickUp off and unknown quota", async () => {
+    store.setSetting(
+      AWAY_SETTING,
+      JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, pickUp: false } }),
+    );
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    const started = await sup.startRun("guido-1", 42, { operator: true });
+    expect(started.runId).toBeTruthy();
+  });
 
   it("0: refuses a closed card", async () => {
     onBoard(boardCard(42, { closed: true }));
@@ -475,6 +512,14 @@ describe("startRun", () => {
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "DISABLE_AUTOUPDATER",
       PNPM_STORE_ENV,
+      "UV_NO_SYNC",
+      "UV_OFFLINE",
+      "UV_CACHE_DIR",
+      "PYTHONPYCACHEPREFIX",
+      "RUFF_CACHE_DIR",
+      "MYPY_CACHE_DIR",
+      "COVERAGE_FILE",
+      "PYTEST_ADDOPTS",
     ]);
     expect(env.DISABLE_AUTOUPDATER).toBe("1");
     // macOS adds __CF_USER_TEXT_ENCODING to every process's environment
@@ -568,6 +613,36 @@ describe("startRun", () => {
     );
   });
 
+  it("points uv's cache and Python's tool caches at the seat's own folders in the sandbox's temp root", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const [start] = recorded();
+    const env = start.env as Record<string, string>;
+    const tmp = `/tmp/claude-${process.getuid?.()}`;
+    expect(env).toMatchObject({
+      UV_NO_SYNC: "1",
+      UV_OFFLINE: "1",
+      UV_CACHE_DIR: `${tmp}/mc-uv-cache/guido-1`,
+      PYTHONPYCACHEPREFIX: `${tmp}/mc-pycache/guido-1`,
+      RUFF_CACHE_DIR: `${tmp}/mc-ruff-cache/guido-1`,
+      MYPY_CACHE_DIR: `${tmp}/mc-mypy-cache/guido-1`,
+      COVERAGE_FILE: `${tmp}/mc-pycache/guido-1/.coverage`,
+      PYTEST_ADDOPTS: "-p no:cacheprovider",
+    });
+    for (const key of [
+      "UV_CACHE_DIR",
+      "PYTHONPYCACHEPREFIX",
+      "RUFF_CACHE_DIR",
+      "MYPY_CACHE_DIR",
+      "COVERAGE_FILE",
+    ]) {
+      const rel = relative(start.cwd as string, env[key]);
+      expect(rel.startsWith("..") || isAbsolute(rel)).toBe(true);
+    }
+  });
+
   it("writes the prompt file beside the transcript: role brief, then the repo's CLAUDE.md", async () => {
     const { sup } = make();
     sup.start();
@@ -579,6 +654,34 @@ describe("startRun", () => {
     const text = readFileSync(promptPath, "utf8");
     expect(text.startsWith(readFileSync(join(HUB_ROLES, "GUIDO.md"), "utf8").trimEnd())).toBe(true);
     expect(text).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule: keep tests green.\n`);
+  });
+
+  it("indexes repo references and leaves them readable without loading repo hooks", async () => {
+    const { sup } = make();
+    mkdirSync(join(clone, ".claude/skills/gates"), { recursive: true });
+    const skill = "---\nname: gates\ndescription: Check the work.\n---\nRun the checks.";
+    writeFileSync(join(clone, ".claude/skills/gates/SKILL.md"), skill);
+    git(clone, "add", ".claude");
+    git(clone, "commit", "-qm", "Add reference");
+    git(join(dir, "origin.git"), "fetch", clone, "main:main");
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const cwd = recorded()[0].cwd as string;
+    const allowed = argv.slice(
+      argv.indexOf("--allowedTools") + 1,
+      argv.indexOf("--disallowedTools"),
+    );
+    expect(allowed).toContain("Read");
+    expect(readFileSync(join(cwd, ".claude/skills/gates/SKILL.md"), "utf8")).toBe(skill);
+    expect(argv).toContain("--restricted");
+    expect(argv).toContain("--disable-slash-commands");
+    expect(argv).toContain(`Edit(/${cwd}/.claude/**)`);
+    expect(argv).toContain(`Write(/${cwd}/.claude/**)`);
+    expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).toContain(
+      'gates — Check the work. (".claude/skills/gates/SKILL.md")',
+    );
   });
 
   it("never follows a symlinked CLAUDE.md a seat left in its worktree", async () => {
@@ -722,6 +825,32 @@ describe("startRun", () => {
       main,
       join(dir, "shop-app-loop", "var"),
     ]);
+  });
+
+  it("denies a bare loop repo and its worktree, without denying the repo's parent", () => {
+    const cfg = config();
+    const parent = join(dir, "bare");
+    const bare = join(parent, "shop-app.git");
+    const worktree = join(dir, "shop-app-loop");
+    mkdirSync(parent);
+    git(dir, "init", "-q", "--bare", "-b", "main", bare);
+    git(clone, "push", "-q", bare, "HEAD:main");
+    git(bare, "worktree", "add", "-q", "-b", "loop", worktree);
+    cfg.loops = [
+      {
+        id: "ta",
+        repoId: "mc",
+        kind: "ta-loop",
+        accountId: "claude-main",
+        stateDir: join(worktree, "var"),
+        worktree,
+        launchdLabel: "com.example.ta",
+      },
+    ];
+    const denied = seatDenyRead(cfg, join(dir, "hub"), "mc-crew");
+    expect(denied).toContain(realpathSync(worktree));
+    expect(denied).toContain(realpathSync(bare));
+    expect(denied).not.toContain(realpathSync(parent));
   });
 
   it("denies a loop repo's main working tree (`<repo>/.git` common dir), never the seat's own folders", () => {
@@ -1132,6 +1261,159 @@ describe("message", () => {
   });
 });
 
+describe("reused worktrees", () => {
+  const checkout = () =>
+    prepareCheckout({
+      checkout: clone,
+      worktreesRoot: root,
+      sessionId: "mc-crew",
+      seatId: "guido-1",
+      issue: 42,
+      title: TICKET.title,
+    });
+
+  it.each([false, true])(
+    "records a start conflict, briefs the seat and permits mc commit (orphan: %s)",
+    async (orphan) => {
+      const first = await checkout();
+      mkdirSync(join(first.path, "apps"));
+      writeFileSync(join(first.path, "apps/conflict.ts"), "branch\n");
+      git(first.path, "add", "-A");
+      git(first.path, "commit", "-qm", "branch change");
+      const seed = join(dir, "seed");
+      mkdirSync(join(seed, "apps"));
+      writeFileSync(join(seed, "apps/conflict.ts"), "main\n");
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "main change");
+      git(seed, "push", "-q", "origin", "main");
+      const mainSha = git(seed, "rev-parse", "HEAD");
+      if (orphan) {
+        expect(await syncReusedWorktree(clone, await checkout(), { syncMain: true })).toMatchObject(
+          { kind: "conflict" },
+        );
+        writeFileSync(join(seed, "later.txt"), "later main\n");
+        git(seed, "add", "-A");
+        git(seed, "commit", "-qm", "later main");
+        git(seed, "push", "-q", "origin", "main");
+      }
+      const { sup, cfg } = make();
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+      const files = ["apps/conflict.ts"];
+      expect(store.run(runId)?.loop?.mainMerge).toEqual({ mainSha, files });
+      expect(store.claimedKeys(runId)[conflictKey(runId, mainSha)]).toBeDefined();
+      await until(() => expect(userLines().at(-1)?.endsWith(conflictText(files))).toBe(true));
+      writeFileSync(join(first.path, files[0] as string), "resolved branch and main\n");
+      const commit = createMcTools({
+        config: cfg,
+        store,
+        bus,
+        dbPath,
+        inClone: sup.inClone,
+        knownSecrets: async () => [],
+        gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+      }).find((t) => t.name === "commit");
+      expect(commit).toBeDefined();
+      const result = await commit?.call(
+        { seatId: "guido-1", runId },
+        { message: "Resolve main conflict" },
+      );
+      expect(result?.isError, result?.text).not.toBe(true);
+      expect(store.runCommits(runId)).toContain(git(first.path, "rev-parse", "HEAD"));
+    },
+  );
+
+  it.each([false, true])(
+    "keeps the sync recorded when launching the CLI fails (conflict: %s)",
+    async (conflict) => {
+      const first = await checkout();
+      writeFileSync(join(first.path, "README.md"), "branch\n");
+      git(first.path, "commit", "-qam", "branch change");
+      const seed = join(dir, "seed");
+      writeFileSync(join(seed, conflict ? "README.md" : "main.txt"), "main\n");
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "main change");
+      git(seed, "push", "-q", "origin", "main");
+      const mainSha = git(seed, "rev-parse", "HEAD");
+      const { sup } = make({ command: join(dir, "missing-cli") });
+      sup.start();
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow();
+      const run = store.runs("guido-1", 1)[0];
+      expect(run).toBeDefined();
+      if (!run) throw new Error("expected stored run");
+      if (conflict) {
+        expect(run.loop?.mainMerge).toEqual({ mainSha, files: ["README.md"] });
+        expect(store.claimedKeys(run.id)[conflictKey(run.id, mainSha)]).toBeDefined();
+      } else {
+        expect(store.runCommits(run.id)).toContain(git(first.path, "rev-parse", "HEAD"));
+      }
+    },
+  );
+
+  it("leaves the reused worktree unchanged when claiming the ticket fails", async () => {
+    const first = await checkout();
+    const seed = join(dir, "seed");
+    writeFileSync(join(seed, "main.txt"), "main\n");
+    git(seed, "add", "-A");
+    git(seed, "commit", "-qm", "main change");
+    git(seed, "push", "-q", "origin", "main");
+    const { sup } = make({
+      claim: async () => {
+        throw new Error("claim failed");
+      },
+    });
+    sup.start();
+    await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+      "could not claim",
+    );
+    expect(git(first.path, "rev-parse", "HEAD")).toBe(first.baseSha);
+    expect(store.runs("guido-1", 10)).toEqual([]);
+  });
+
+  it("reports an install refusal in the brief after recording the start merge", async () => {
+    const first = await checkout();
+    writeFileSync(join(first.path, ".npmrc"), "unsafe=true\n");
+    git(first.path, "add", "-A");
+    git(first.path, "commit", "-qm", "branch input");
+    const seed = join(dir, "seed");
+    writeFileSync(join(seed, "package.json"), '{"name":"sync-test","private":true}\n');
+    git(seed, "add", "-A");
+    git(seed, "commit", "-qm", "main dependencies");
+    git(seed, "push", "-q", "origin", "main");
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    expect(store.runCommits(runId)).toContain(git(first.path, "rev-parse", "HEAD"));
+    await until(() =>
+      expect(userLines().at(-1)).toContain("dependencies changed; install refused:"),
+    );
+    expect(userLines().at(-1)).toContain("changes .npmrc");
+  });
+
+  it("records the merge that brings main into a reused worktree", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const seed = join(dir, "seed");
+    writeFileSync(join(seed, "m.txt"), "main\n");
+    git(seed, "add", "m.txt");
+    git(seed, "commit", "-qm", "main change");
+    git(seed, "push", "-q", "origin", "main");
+    const mainSha = git(seed, "rev-parse", "HEAD");
+    const { runId } = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    expect(store.runCommits(runId)).toEqual([git(worktree, "rev-parse", "HEAD")]);
+    expect(
+      store
+        .loopEvents(0)
+        .filter((e) => e.runId === runId)
+        .map((e) => e.text),
+    ).toContain(mergedMainText(mainSha));
+    expect(readFileSync(join(worktree, "m.txt"), "utf8")).toBe("main\n");
+  });
+});
+
 describe("endRun", () => {
   it("ends the run ok, leaves the seat idle for its next ticket and keeps the worktree", async () => {
     const { sup } = make();
@@ -1270,6 +1552,50 @@ describe("the crew lock", () => {
     expect(e.message).toBe(note);
     await sup.stopAll();
     expect(readFileSync(join(root, CREW_LOCK_FILE), "utf8").trim()).toBe(String(process.ppid));
+  });
+
+  it.each([
+    [
+      "throws",
+      (): never => {
+        throw new Error("lookup failed");
+      },
+      false,
+    ],
+    ["missing", (): null => null, false],
+    ["within margin", () => ({ startedAt: 60_000, command: "node worker.js" }), false],
+    ["after margin", () => ({ startedAt: 60_001, command: "node worker.js" }), true],
+    ["hub", () => ({ startedAt: 60_001, command: "node apps/server/src/main.ts" }), false],
+    ["nonfinite", () => ({ startedAt: Infinity, command: "node worker.js" }), false],
+  ] as const)("checks lock reuse: %s", async (_name, processStart, taken) => {
+    mkdirSync(root, { recursive: true });
+    const path = join(root, CREW_LOCK_FILE);
+    writeFileSync(path, `${process.ppid}\n`);
+    utimesSync(path, new Date(0), new Date(0));
+    const { sup } = make({ processStart });
+    sup.start();
+    expect(sup.status().enabled).toBe(taken);
+    expect(readFileSync(path, "utf8")).toBe(`${taken ? process.pid : process.ppid}\n`);
+    await sup.stopAll();
+    expect(existsSync(path)).toBe(!taken);
+  });
+
+  it("keeps a lock replaced during the process lookup", async () => {
+    mkdirSync(root, { recursive: true });
+    const path = join(root, CREW_LOCK_FILE);
+    writeFileSync(path, `${process.ppid}\n`);
+    utimesSync(path, new Date(0), new Date(0));
+    const { sup } = make({
+      processStart: () => {
+        unlinkSync(path);
+        writeFileSync(path, `${process.ppid}\n`);
+        return { startedAt: 60_001, command: "node worker.js" };
+      },
+    });
+    sup.start();
+    expect(sup.status().enabled).toBe(false);
+    await sup.stopAll();
+    expect(readFileSync(path, "utf8")).toBe(`${process.ppid}\n`);
   });
 
   it("treats a lock holding this process's own pid as stale (a previous run, the pid reused)", () => {

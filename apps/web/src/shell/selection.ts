@@ -27,11 +27,18 @@ export function nextAgent(
   current: AgentId | null,
   dir: 1 | -1,
   repo: string | null = session,
+  flightId?: string | null,
+  now = Date.now(),
 ): AgentId | null {
-  const order = crewOrder(
-    rows.filter((r) => inCrewSession(session, r, repo)),
-    items,
-  );
+  const flight = rows.find((r) => r.id === flightId);
+  const order = [
+    ...(flight ? [flight] : []),
+    ...crewOrder(
+      rows.filter((r) => r !== flight && inCrewSession(session, r, repo)),
+      items,
+      now,
+    ),
+  ];
   const n = order.length;
   if (n === 0) return null;
   const i = order.findIndex((r) => r.id === current);

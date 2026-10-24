@@ -7,11 +7,11 @@ import { join } from "node:path";
 import { DEFAULT_REPO_RULES, freezeRules, otherLaneText } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
-import type { CrewSeatConfig } from "../src/config.ts";
 import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { rolePrompt } from "../src/runtime/brief.ts";
+import * as keeper from "../src/runtime/keeper.ts";
 import {
   CLI_PID_FILE,
   endKeeper,
@@ -199,6 +199,8 @@ describe("stopAll", () => {
     expect(existsSync(crewMcpPath(dbPath, runId))).toBe(true);
     expect(tokens.resolve(token)).not.toBeNull();
     expect(sup.seatFacts("guido-1")).toBeNull();
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     expect(store.keeperCursor(runId)).toMatchObject({ runId });
     expect(existsSync(join(root, CREW_LOCK_FILE))).toBe(false);
   });
@@ -220,6 +222,33 @@ describe("reattach after a restart", () => {
     const transcript = readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8");
     return { runId, row, transcript };
   }
+
+  it("explains when the old keeper cannot be ended and does not resume", async () => {
+    const { runId } = await leftActive();
+    const end = vi.spyOn(keeper, "endKeeper").mockResolvedValue(false);
+    try {
+      const { sup } = make();
+      const seen: SupervisorEvent[] = [];
+      sup.on((e) => seen.push(e));
+      sup.start();
+      await until(() =>
+        expect(store.seatSession("guido-1")).toMatchObject({
+          state: "error",
+          reason: "could not resume the session: could not end the old keeper",
+        }),
+      );
+      expect(end).toHaveBeenCalledWith(
+        crewKeeperDir(dbPath, runId),
+        expect.any(Number),
+        expect.any(Function),
+      );
+      expect(store.run(runId)).toMatchObject({ status: "failed" });
+      expect(seen).toContainEqual({ kind: "run-ended", seatId: "guido-1", runId, endedBy: "exit" });
+      expect(starts()).toHaveLength(1);
+    } finally {
+      end.mockRestore();
+    }
+  });
 
   it("drops the token and test-lock hold restored for a run it does not reattach", async () => {
     const { runId } = await leftActive();
@@ -261,6 +290,8 @@ describe("reattach after a restart", () => {
     );
     expect(store.run(runId)?.status).toBe("failed");
     expect(store.run(runId)?.endedAt).not.toBeNull();
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     await new Promise((r) => setTimeout(r, 200));
     expect(starts()).toHaveLength(1);
   });
@@ -531,6 +562,20 @@ describe("reattach after a restart", () => {
     expect(store.run(runId)?.status).toBe("failed");
   });
 
+  it("names the exit when a resumed process fails without stderr", async () => {
+    await leftActive();
+    const { sup } = make({ resumeWindowMs: 60_000 });
+    sup.start();
+    await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
+    await sup.message("guido-1", "DIE", { interrupt: false });
+    await until(() =>
+      expect(store.seatSession("guido-1")).toMatchObject({
+        state: "error",
+        reason: "could not resume the session: process exited 3",
+      }),
+    );
+  });
+
   it("an exit after the window is an ordinary crash", async () => {
     await leftActive();
     const { sup } = make({ resumeWindowMs: 0 });
@@ -604,7 +649,7 @@ describe("reattach after a restart", () => {
     await until(() =>
       expect(store.seatSession("guido-1")).toMatchObject({
         state: "error",
-        reason: "could not resume the session",
+        reason: "could not resume the session: database is locked",
       }),
     );
     expect(log).toHaveBeenCalledWith(expect.stringMatching(/database is locked/));
@@ -613,7 +658,9 @@ describe("reattach after a restart", () => {
     // the resumed fake got EOF and exited: its stdin saw no line
     await new Promise((r) => setTimeout(r, 200));
     expect(userLines()).toHaveLength(1);
-    expect(store.seatSession("guido-1")?.reason).toBe("could not resume the session");
+    expect(store.seatSession("guido-1")?.reason).toBe(
+      "could not resume the session: database is locked",
+    );
   });
 
   it("does not resume or fail a run that has already ended", async () => {
@@ -652,6 +699,22 @@ describe("a seat keeps running through a restart", () => {
   const RESUMED = "resumed after a restart; send a message to continue";
   const starts = () => recorded().filter((l) => Array.isArray(l.argv));
 
+  function watchMake() {
+    const rolesDir = join(dir, "roles");
+    mkdirSync(rolesDir, { recursive: true });
+    writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
+    return make({
+      rolesDir,
+      extraSeat: {
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      },
+    });
+  }
+
   it("a seat mid-turn across a supervisor stop and a new supervisor's start finishes its turn, and the new supervisor sees the result", async () => {
     const first = make();
     first.sup.start();
@@ -671,6 +734,8 @@ describe("a seat keeps running through a restart", () => {
     expect(starts()).toHaveLength(1);
     expect(userLines()).toEqual([expect.stringContaining("You are GUIDO-1"), "SLOW"]);
     expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain("echo: SLOW");
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
   });
 
@@ -821,6 +886,44 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
   });
 
+  it.each([
+    [10_000, null, "last words"],
+    [10_001, null, null],
+    [10_001, "keeper ended the CLI", "keeper ended the CLI"],
+  ] as const)(
+    "filters detached stderr at age %i with end reason %s",
+    async (age, endReason, expected) => {
+      const first = make();
+      first.sup.start();
+      const { runId } = await first.sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await first.sup.stopAll();
+      const keeperDir = crewKeeperDir(dbPath, runId);
+      process.kill(readPidFile(keeperDir, CLI_PID_FILE) as number, "SIGTERM");
+      const path = join(keeperDir, KEEPER_EXIT_FILE);
+      await until(() => expect(existsSync(path)).toBe(true));
+      const exit = JSON.parse(readFileSync(path, "utf8"));
+      writeFileSync(
+        path,
+        JSON.stringify({
+          ...exit,
+          lastStderr: "last words",
+          lastStderrAt: exit.at - age,
+          endReason,
+        }),
+      );
+      const { sup } = make();
+      sup.start();
+      await until(() =>
+        expect(store.seatSession("guido-1")).toMatchObject({
+          state: "error",
+          reason: `process exited SIGTERM${expected === null ? "" : `: ${expected}`}`,
+        }),
+      );
+      expect(store.run(runId)?.noReport?.lastStderr ?? null).toBe(expected);
+    },
+  );
+
   it("a run whose CLI exits while no hub is attached is recorded as ended on the next start", async () => {
     const first = make();
     first.sup.start();
@@ -841,6 +944,18 @@ describe("a seat keeps running through a restart", () => {
       }),
     );
     expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
+    expect(store.run(runId)?.noReport).toMatchObject({
+      code: null,
+      signal: "SIGTERM",
+      stopReason: "end_turn",
+      isError: false,
+    });
+    expect(store.notes()).toContainEqual(
+      expect.objectContaining({
+        runId,
+        text: expect.stringContaining("signal SIGTERM"),
+      }),
+    );
     expect(store.run(runId)?.endedAt).not.toBeNull();
     expect(seen).toEqual([{ kind: "run-ended", seatId: "guido-1", runId, endedBy: "exit" }]);
     expect(starts()).toHaveLength(1);
@@ -910,7 +1025,7 @@ describe("a seat keeps running through a restart", () => {
     await until(() =>
       expect(store.seatSession("guido-1")).toMatchObject({
         state: "error",
-        reason: "could not resume the session",
+        reason: "could not resume the session: initial brief was not sent",
       }),
     );
     expect(store.run(runId)).toMatchObject({ status: "failed" });
@@ -918,23 +1033,12 @@ describe("a seat keeps running through a restart", () => {
   });
 
   it("attaches to the watch seat too, which has no branch to resume on", async () => {
-    const flight: CrewSeatConfig = {
-      id: "flight-1",
-      role: "FLIGHT",
-      accountId: "claude-main",
-      model: "opus",
-      area: [],
-    };
-    // roles/FLIGHT.md is the controller's file; this test brings its own role brief
-    const rolesDir = join(dir, "roles");
-    mkdirSync(rolesDir, { recursive: true });
-    writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
-    const first = make({ rolesDir, extraSeat: flight });
+    const first = watchMake();
     first.sup.start();
     const { runId } = await first.sup.startWatch("flight-1");
     await until(() => expect(seatState("flight-1")).toBe("idle"));
     await first.sup.stopAll();
-    const { sup } = make({ rolesDir, extraSeat: flight });
+    const { sup } = watchMake();
     sup.start();
     await until(() => expect(sup.seatFacts("flight-1")).toMatchObject({ inTurn: false }));
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
@@ -1019,7 +1123,7 @@ describe("a seat keeps running through a restart", () => {
     await until(() =>
       expect(store.seatSession("guido-1")).toMatchObject({
         state: "error",
-        reason: "could not resume the session",
+        reason: "could not resume the session: db is locked",
       }),
     );
     cursor.mockRestore();
@@ -1126,5 +1230,68 @@ describe("a seat keeps running through a restart", () => {
     expect(pidAlive(cliPid)).toBe(false);
     await ending;
     expect(store.run(runId)).toMatchObject({ endedBy: "operator" });
+  });
+
+  it("resumes a watch run with its context after a restart", async () => {
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await first.sup.stopAll();
+    await noKeepers(); // a reboot: the watch must resume its existing CLI session
+    const cliSessionId = store.seatSession("flight-1")?.cliSessionId;
+    expect(cliSessionId).toEqual(expect.any(String));
+    const { sup } = watchMake();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    await until(() => expect(store.seatSession("flight-1")?.reason).toBe(RESUMED));
+    await until(() => expect(starts()).toHaveLength(2));
+    const argv = starts()[1].argv as string[];
+    expect(argv).toContain("--resume");
+    expect(argv[argv.indexOf("--resume") + 1]).toBe(cliSessionId);
+    expect(starts()[1].cwd).toBe(join(root, "mc-crew", "flight-1-watch"));
+    expect(store.seatSession("flight-1")).toMatchObject({ runId, cliSessionId });
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+  });
+
+  it("fails a watch resume when its worktree is missing", async () => {
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await first.sup.stopAll();
+    await noKeepers();
+    rmSync(join(root, "mc-crew", "flight-1-watch"), { recursive: true });
+    const { sup } = watchMake();
+    sup.start();
+    await until(() =>
+      expect(store.seatSession("flight-1")).toMatchObject({
+        state: "error",
+        reason: "could not resume: checkout missing",
+      }),
+    );
+    expect(store.run(runId)).toMatchObject({ status: "failed" });
+    expect(starts()).toHaveLength(1);
+  });
+
+  it("an ended watch run is left alone after a restart", async () => {
+    const first = watchMake();
+    first.sup.start();
+    const { runId } = await first.sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    await first.sup.endRunByEngine(runId);
+    await first.sup.stopAll();
+    const { sup } = watchMake();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    const fresh = await sup.startWatch("flight-1");
+    await until(() => expect(seatState("flight-1")).toBe("idle"));
+    expect(fresh.runId).not.toBe(runId);
+    expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
+    expect(store.seatSession("flight-1")?.reason).toBeNull();
+    expect(seen.some((e) => e.kind === "run-ended" && e.runId === runId)).toBe(false);
   });
 });

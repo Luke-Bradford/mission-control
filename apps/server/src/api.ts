@@ -7,6 +7,7 @@ import {
   type AgentStream,
   API_PREFIX,
   type AttentionItem,
+  AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
@@ -20,7 +21,6 @@ import {
   type CrewChanges,
   type CrewMode,
   type CrewSessionFolders,
-  DEFAULT_AWAY,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
   type FileDiff,
@@ -78,9 +78,21 @@ import {
   type VersionInfo,
   watchStartRefusedText,
 } from "@mc/core";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  LogController,
+} from "fastify";
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
+import {
+  AWAY_STARTED_SETTING,
+  AwayBody,
+  activeAway,
+  awayDigest,
+  readAwaySettings,
+} from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
@@ -113,9 +125,12 @@ import {
   addAccount,
   addRepo,
   ConfigWriteError,
+  closeSession,
+  createSession,
   duplicateReason,
   NewAccountBody,
   NewRepoBody,
+  NewSessionBody,
   RepoLocation,
   SeatsBody,
   setSessionSeats,
@@ -131,7 +146,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
-import { flightLedgerView, flightSummary } from "./flight/ledger.ts";
+import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
@@ -152,12 +167,19 @@ import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./
 import type { RunTokens } from "./mcp/tokens.ts";
 import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
-import { profilesView } from "./profiles.ts";
+import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
+import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "./runview.ts";
+import {
+  type BoardTitleCache,
+  type PrCache,
+  runPrs,
+  runTicket,
+  runUsage,
+  runView,
+} from "./runview.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
@@ -193,8 +215,8 @@ export const CONFIG_WRITES_UNAVAILABLE = "config writes are not available on thi
 export const CONFIG_WRITE_FAILED = "could not write config.yaml";
 /** The check route's answer to a failure outside the updater's own (502) errors. */
 export const CHECK_FAILED = "could not check for updates";
-/** The settings-table key of the Away settings. */
-export const AWAY_SETTING = "away";
+export { AWAY_SETTING } from "@mc/core";
+
 const DEFAULT_RUNS_LIMIT = 50;
 const MAX_RUNS_LIMIT = 500;
 const DEFAULT_STREAM_LIMIT = 200;
@@ -380,29 +402,6 @@ const AckBody = z.strictObject({
 /** The answer to a dismiss of a key that is not an open note (a seat's question is not a note). */
 export const NO_OPEN_NOTE = "no such open note";
 
-/** `YYYY-MM-DD` naming a real calendar day. */
-const isCalendarDate = (s: string): boolean => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (!m) return false;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  return d.toISOString().slice(0, 10) === s;
-};
-
-/** A full AwaySettings: `until` is empty (until turned off) or a real `YYYY-MM-DD`. */
-const AwayBody = z.strictObject({
-  on: z.boolean(),
-  until: z.string().refine((s) => s === "" || isCalendarDate(s), {
-    message: "must be empty or a calendar date YYYY-MM-DD",
-  }),
-  may: z.strictObject({
-    pickUp: z.boolean(),
-    research: z.boolean(),
-    check: z.boolean(),
-    status: z.boolean(),
-    safePr: z.boolean(),
-  }),
-}) satisfies z.ZodType<AwaySettings>;
-
 /** The first zod issue as `path: message`, for a 400 body. */
 const zodError = (e: z.ZodError): string => {
   const issue = e.issues[0];
@@ -507,7 +506,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   const app = Fastify({
     bodyLimit: 16 * 1024,
-    disableRequestLogging: true,
+    logController: new LogController({ disableRequestLogging: true }),
     logger: deps.logger
       ? {
           level: "info",
@@ -1023,6 +1022,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             seatMode(who.seatId),
             { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
             deps.superuserTools,
+            deps.seatGrants?.(who.seatId),
           );
           if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {
@@ -1397,10 +1397,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/config", async () =>
         configView(
           config,
-          deps.profilesPath === undefined ? undefined : profilesView(deps.profilesPath),
+          deps.profilesPath === undefined
+            ? undefined
+            : profilesView(
+                deps.profilesPath,
+                crew(config, store, now(), deps.lock?.state() ?? NO_LOCK).rows.filter(
+                  (row) => row.run?.endedAt === null,
+                ),
+              ),
           await readGithubLogin(),
         ),
       );
+
+      // Reader: apps/web/src/setup/Loops.tsx (Setup template creation)
+      api.post("/profiles", async (req, reply) => {
+        if (!deps.profilesPath)
+          return reply.code(409).send({ error: "template writes are unavailable" });
+        const body = NewProfileBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await createProfile(
+            deps.profilesPath,
+            body.data.profile,
+            body.data.base,
+            now(),
+          );
+          bus.emit("config");
+          return reply.code(201).send(result);
+        } catch (e) {
+          if (e instanceof ConfigWriteError)
+            return reply.code(e.kind === "invalid" ? 400 : 409).send({ error: e.message });
+          return reply.code(500).send({ error: "could not save template" });
+        }
+      });
 
       // Re-reads the config.yaml the server started with now (no request names a path); a file that
       // does not load changes nothing.
@@ -1412,6 +1441,76 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const result = await deps.crewReloader.reload();
         if (result.error !== null) return reply.code(400).send({ error: result.error });
         return result;
+      });
+
+      // Reader: docs/runbook.md#reloading-the-config
+      api.post("/crew/sessions", async (req, reply) => {
+        const { configPath, crewReloader, seatWrites } = deps;
+        if (!configPath || !crewReloader || !seatWrites) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        const body = NewSessionBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await createSession(configPath, body.data, now(), config);
+          const changes = await crewReloader.reload();
+          return {
+            id: body.data.id,
+            folders: result.folders,
+            backup: basename(result.backup),
+            changes,
+          };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(e.kind === "invalid" ? 400 : e.kind === "write" ? 500 : 409)
+              .send({ error: e.message });
+          }
+          captureError(reply, e);
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
+      // Reader: docs/runbook.md#reloading-the-config
+      api.post<{ Params: { id: string } }>("/crew/sessions/:id/close", async (req, reply) => {
+        const { configPath, crewReloader, seatWrites } = deps;
+        if (!configPath || !crewReloader?.removeSession || !seatWrites) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        try {
+          const result = await crewReloader.removeSession(req.params.id, (stopped, session) =>
+            closeSession(configPath, req.params.id, stopped, now(), session),
+          );
+          const checkout = await removeSessionCheckout(result.session, result.worktrees);
+          return {
+            id: req.params.id,
+            checkout,
+            backup: basename(result.backup),
+            retainedPath: checkout === "removed" ? null : result.session.checkout,
+            outcome:
+              checkout === "retained-unproven"
+                ? "Checkout retained: ownership or safe removal is unproven (a seat worktree may still be registered)."
+                : checkout === "removal-failed-partway"
+                  ? "Checkout removal failed partway."
+                  : checkout,
+          };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(
+                e.kind === "missing"
+                  ? 404
+                  : e.kind === "invalid"
+                    ? 400
+                    : e.kind === "write"
+                      ? 500
+                      : 409,
+              )
+              .send({ error: e.message });
+          }
+          captureError(reply, e);
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
       });
 
       // Reader: docs/runbook.md#reloading-the-config
@@ -1668,8 +1767,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
         return deps.engine?.status().on === true && loop === "build"
-          ? sup.startRun(id, b.issue, { loop: NEW_LOOP })
-          : sup.startRun(id, b.issue);
+          ? sup.startRun(id, b.issue, { loop: NEW_LOOP, operator: true })
+          : sup.startRun(id, b.issue, { operator: true });
       });
       seatAction(
         "/seats/:id/message",
@@ -1776,10 +1875,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("flight");
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#your-ledger (high-level tracking summary)
-      api.get("/flight/summary", async () => flightSummary(config, store, now()));
-      // Reader: roles/FLIGHT.md#your-ledger (full tracking details)
-      api.get("/flight/ledger", async () => flightLedgerView(config, store));
+      // Reader: apps/web/src/flight/Summary.tsx (high-level tracking summary)
+      api.get("/flight/summary", async () =>
+        flightSummary(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          deps.hubLogin?.() ?? null,
+        ),
+      );
+      // Reader: apps/web/src/flight/Summary.tsx (full tracking details)
+      api.get("/flight/ledger", async (req, reply) => {
+        const query = FlightLedgerArgs.extend({
+          limit: z.preprocess(
+            (v) => (typeof v === "string" ? Number(v) : v),
+            FlightLedgerArgs.shape.limit,
+          ),
+          offset: z.preprocess(
+            (v) => (typeof v === "string" ? Number(v) : v),
+            FlightLedgerArgs.shape.offset,
+          ),
+        }).safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: "Invalid ledger query" });
+        return flightLedgerView(config, store, query.data);
+      });
 
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),
@@ -2015,6 +2135,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
         const view: RunLoopView = {
           runId: run.id,
+          usage: runUsage(store, run, now()),
+          noReport: run.noReport ?? null,
           loop,
           events,
           tries: loopTries(run, events, review, [
@@ -2029,7 +2151,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
             : null,
           budget:
-            loop && config.crew?.runTokenBudget !== undefined
+            loop &&
+            config.crew?.runTokenBudget !== undefined &&
+            run.tokens !== null &&
+            run.tokens.cacheRead + run.tokens.cacheCreate === 0
               ? config.crew.runTokenBudget + loop.budgetExtra
               : null,
           review,
@@ -2343,22 +2468,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
 
-      api.get("/settings/away", async (): Promise<AwaySettings> => {
-        const raw = store.getSetting(AWAY_SETTING);
-        if (raw === null) return DEFAULT_AWAY;
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          return DEFAULT_AWAY;
-        }
-        const stored = AwayBody.safeParse(parsed);
-        return stored.success ? stored.data : DEFAULT_AWAY;
+      api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
+
+      // Reader: apps/web/src/shell/AwayDigest.tsx
+      api.get("/away/digest", async (req, reply) => {
+        const query = z
+          .object({ since: z.coerce.number().finite().nonnegative().optional() })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
+        return awayDigest(
+          store,
+          activeAway(store, now(), config.operator.timezone) !== null,
+          attentionItems(
+            config,
+            store,
+            now(),
+            deps.lock?.state() ?? NO_LOCK,
+            undefined,
+            deps.hubLogin?.() ?? null,
+          ),
+          config.repos.map((r) => r.id),
+          now(),
+          query.data.since,
+        );
       });
 
       api.post("/settings/away", async (req, reply) => {
         const body = AwayBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.on && !activeAway(store, now(), config.operator.timezone))
+          store.setSetting(AWAY_STARTED_SETTING, String(now()));
         store.setSetting(AWAY_SETTING, JSON.stringify(body.data));
         bus.emit("settings");
         return body.data;

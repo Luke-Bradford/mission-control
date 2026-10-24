@@ -33,6 +33,7 @@ const busyBoard = (): FlightState => ({
   repo: "mc",
   lane: null,
   hubLogin: "operator",
+  headlineAgeMin: null,
   headline: "The crew is building tickets and reviewing PRs.",
   brief: FLIGHT_NOTE_SECTIONS.map((section) => ({
     section,

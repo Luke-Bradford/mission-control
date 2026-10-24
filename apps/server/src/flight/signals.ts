@@ -15,6 +15,7 @@ import {
   hudColumnOf,
   inLane,
   isFlakeNoteKey,
+  noReportExitReason,
   type PullRequestView,
   parkedEventText,
   seatDef,
@@ -319,7 +320,11 @@ export function flightSignals(i: {
     if (!run?.ticket || !onBoard.has(run.ticket)) continue;
     if (planned) triage(run.ticket, "plan", event.at, event.text);
     if (parked) {
-      const reason = event.text.slice(parkPrefix.length).replace(/\b[0-9a-f]{7,40}\b/g, "<sha>");
+      // a budget park names the tokens it used, which differs every time; group on the ceiling
+      const reason = event.text
+        .slice(parkPrefix.length)
+        .replace(/\b[0-9a-f]{7,40}\b/g, "<sha>")
+        .replace(/^used \d+ input \+ output tokens of/, "used <n> input + output tokens of");
       const key = `${run.ticket}:${reason}`;
       const entries = parks.get(key) ?? [];
       entries.push({
@@ -457,11 +462,17 @@ export function flightSignals(i: {
     if (!seat) continue;
     const loop = seatDef(seat).loop;
     const review = run.reviewId == null ? null : store.review(run.reviewId);
-    if (loop === "review" && (!review || !["queued", "starting", "running"].includes(review.state)))
+    if (review?.state === "superseded") continue;
+    if (
+      !run.noReport &&
+      loop === "review" &&
+      (!review || !["queued", "starting", "running"].includes(review.state))
+    )
       continue;
     const stoppedWithoutReport = /stopped.*without reporting/i.test(run.loop?.parked?.reason ?? "");
     if (run.endedAt === null && !stoppedWithoutReport) continue;
     const missing =
+      run.noReport != null ||
       stoppedWithoutReport ||
       (loop === "build"
         ? run.loop != null &&
@@ -477,7 +488,7 @@ export function flightSignals(i: {
         "hub_error",
         `report:${run.id}`,
         run.endedAt ?? store.seatSession(run.agentId)?.updatedAt ?? now,
-        `${run.agentId} ${loop} run ${run.id} (${run.ticket ?? "no ticket"}) ${run.endedAt === null ? "stopped" : "ended"} without its report`,
+        `${run.agentId} ${loop} run ${run.id} (${run.ticket ?? "no ticket"}) ${run.endedAt === null ? "stopped" : "ended"} without its report${run.noReport ? `: ${noReportExitReason(run.noReport)}` : ""}`,
       );
   }
   const loops = heartbeats(store).loops;

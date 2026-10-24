@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AWAY_SETTING,
+  AWAY_START_REFUSED,
+  AWAY_WEEKLY_STOP_PCT,
   type BoardItem,
+  DEFAULT_AWAY,
   DEFAULT_PROFILES,
   fillLoopText,
   freezeRules,
@@ -19,8 +23,12 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
+import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
+  accountAtStop,
+  awayQuotaReserve,
+  awayQuotaUnknown,
   clearBodyCache,
   dealQueues,
   type QueueDeps,
@@ -293,6 +301,62 @@ afterEach(() => {
 });
 
 describe("refillQueues", () => {
+  it.each([false, true])(
+    "away excludes an untyped ticket until off or expired (%s)",
+    async (expired) => {
+      store.replaceBoard(REPO, [card(1)]);
+      store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+      await refill();
+      await take();
+      expect(started).toEqual([]);
+      store.setSetting(
+        AWAY_SETTING,
+        JSON.stringify({ ...DEFAULT_AWAY, on: expired, until: expired ? "2026-10-20" : "" }),
+      );
+      await refill();
+      await take();
+      expect(started.map((r) => r.issue)).toEqual([1]);
+    },
+  );
+
+  it("a start refused after away changes is retried without a permanent ticket failure", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    await refill();
+    startFails = () => new SupervisorError(422, AWAY_START_REFUSED);
+    await take();
+    expect(started).toEqual([]);
+    expect(store.notes()).toEqual([]);
+    startFails = () => null;
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
+  it("away picks mapped safe tickets only while pickUp is enabled", async () => {
+    store.replaceBoard(REPO, [card(1, { labels: ["area:server", "docs"] })]);
+    store.setSetting(
+      AWAY_SETTING,
+      JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, pickUp: false } }),
+    );
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: NOW,
+      pct: 70,
+      resetAt: NOW + DAY,
+      source: "test",
+    });
+    await take();
+    expect(started).toEqual([]);
+    store.setSetting(AWAY_SETTING, JSON.stringify(DEFAULT_AWAY));
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
   it("deals no card without a done-when, Size M without a plan, or a ticket GitHub lacks", async () => {
     store.replaceBoard(REPO, [
       card(1, { size: "S" }),
@@ -1450,5 +1514,80 @@ describe("refillQueues: notes and races", () => {
       await refill();
       expect(store.notes()).toEqual([]);
     });
+  });
+});
+
+describe("away start quota", () => {
+  const accountId = "claude-main";
+  const reading = (window: "5h" | "7d", resetAt = NOW + DAY, pct = 20) =>
+    store.addUsage({ accountId, window, at: NOW, resetAt, pct, source: "test" });
+  it("holds unknown accounts, missing windows and reset readings only while away", () => {
+    expect(awayQuotaUnknown(config, store, "missing", NOW)).toBe(false);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(awayQuotaUnknown(config, store, "missing", NOW)).toBe(true);
+    expect(awayQuotaUnknown(config, store, accountId, NOW)).toBe(true);
+    reading("5h");
+    expect(awayQuotaUnknown(config, store, accountId, NOW)).toBe(true);
+    reading("7d");
+    expect(awayQuotaUnknown(config, store, accountId, NOW)).toBe(false);
+    expect(awayQuotaUnknown(config, store, accountId, NOW + DAY)).toBe(true);
+  });
+  it.each(["5h", "7d"] as const)(
+    "treats an old %s reading as unknown despite collector success",
+    async (window) => {
+      store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+      store.replaceBoard(REPO, [card(1, { labels: ["area:server", "docs"] })]);
+      for (const w of ["5h", "7d"] as const) {
+        store.addUsage({
+          accountId,
+          window: w,
+          at: w === window ? NOW - USAGE_STALE_MAX_MS - 1 : NOW,
+          resetAt: NOW + DAY,
+          pct: 20,
+          source: "test",
+        });
+      }
+      store.setStatus(`usage:${accountId}`, true, "rate limited");
+      expect(awayQuotaUnknown(config, store, accountId, NOW - 1)).toBe(false);
+      expect(awayQuotaUnknown(config, store, accountId, NOW)).toBe(true);
+      await refill();
+      await take();
+      expect(started).toEqual([]);
+      expect(issues(SERVER)).toEqual([1]);
+    },
+  );
+  it("ignores a stale weekly reading for the away reserve", () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    reading("7d", NOW + DAY, AWAY_WEEKLY_STOP_PCT);
+    expect(awayQuotaReserve(config, store, accountId, NOW + USAGE_STALE_MAX_MS)).toBe(true);
+    expect(awayQuotaReserve(config, store, accountId, NOW + USAGE_STALE_MAX_MS + 1)).toBe(false);
+  });
+  it.each(["5h", "7d"] as const)("holds a start when %s has reset", async (window) => {
+    store.replaceBoard(REPO, [card(1, { labels: ["area:server", "docs"] })]);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    reading("5h", window === "5h" ? NOW : NOW + DAY);
+    reading("7d", window === "7d" ? NOW : NOW + DAY);
+    await refill();
+    await take();
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([1]);
+  });
+  it("holds missing quota before taking a queued ticket", async () => {
+    store.replaceBoard(REPO, [card(1, { labels: ["area:server", "docs"] })]);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    await refill();
+    await take();
+    expect(started).toEqual([]);
+    reading("5h");
+    reading("7d");
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+  it("the 70% reserve does not stop resumes, reviews or watch", () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    reading("5h");
+    reading("7d", NOW + DAY, AWAY_WEEKLY_STOP_PCT);
+    expect(awayQuotaReserve(config, store, accountId, NOW)).toBe(true);
+    expect(accountAtStop(config, store, accountId, NOW)).toBe(false);
   });
 });

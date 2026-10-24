@@ -16,9 +16,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AWAY_PLAN_REFUSED,
+  AWAY_SETTING,
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
+  DEFAULT_AWAY,
   DEFAULT_PROFILES,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
@@ -51,6 +54,8 @@ import {
   MC_PUSH_ROOT,
   MC_REMOVE_REFUSED,
   MC_RUN_ENDED,
+  MC_SYNC_OFF,
+  MC_SYNC_UP_TO_DATE,
   MC_TOOL_GRANTS,
   MC_TOOLS,
   NEW_LOOP,
@@ -69,6 +74,7 @@ import {
   prSecretText,
   type Run,
   type RunLoop,
+  readOnlyToolText,
   removeLinkedText,
   removeMissingText,
   removeNotFileText,
@@ -78,6 +84,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
+import { createFlightTools } from "../src/flight/tools.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
@@ -296,6 +303,7 @@ describe("the mc tools", () => {
   it("serves commit (writer), ask_operator and report_evidence (writer and read-only) and report_findings (scratch) under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
       ["commit", ["writer"]],
+      ["sync_main", ["writer"]],
       ["ask_operator", ["writer", "read-only"]],
       ["report_evidence", ["writer", "read-only"]],
       ["report_findings", ["scratch"]],
@@ -303,6 +311,7 @@ describe("the mc tools", () => {
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
       MC_TOOLS.commit,
+      MC_TOOLS.syncMain,
       MC_TOOLS.askOperator,
       MC_TOOLS.reportEvidence,
       MC_TOOLS.reportFindings,
@@ -315,8 +324,56 @@ describe("the mc tools", () => {
       CREW_MODES.filter((m) => (MC_TOOL_GRANTS[m][key] as readonly string[]).includes(name));
     for (const t of tools) {
       expect([...t.modes], t.name).toEqual(modesWith("base", t.name));
-      expect([...(t.grantable ?? [])], t.name).toEqual(modesWith("grantable", t.name));
+      // FLIGHT's separate sync_main entry owns the read-only grant and its runId/basis schema.
+      expect([...(t.grantable ?? [])], t.name).toEqual(
+        t.name === "sync_main" ? [] : modesWith("grantable", t.name),
+      );
     }
+    const flight = createFlightTools({
+      ...deps(),
+      login: "me",
+      engine: null,
+      supervisor: {
+        message: vi.fn(),
+        busy: () => [],
+        startRun: vi.fn(),
+        endRun: vi.fn(),
+        endAsideRun: vi.fn(),
+      },
+      rules: vi.fn(),
+      fetchTicket: vi.fn(),
+      board: { move: vi.fn() },
+    });
+    expect(flight.find((t) => t.name === "sync_main")?.grantable).toEqual(["read-only"]);
+  });
+});
+
+describe("sync_main", () => {
+  it("sync_main hands the run to deps.syncMain, and answers MC_SYNC_OFF without it", async () => {
+    const calls: string[] = [];
+    const ts = make({
+      syncMain: async (id) => {
+        calls.push(id);
+        return { text: MC_SYNC_UP_TO_DATE };
+      },
+    });
+    expect(await tool("sync_main", ts).call(CTX, {})).toEqual({ text: MC_SYNC_UP_TO_DATE });
+    expect(calls).toEqual([RUN]);
+    expect(await tool("sync_main").call(CTX, {})).toEqual({ text: MC_SYNC_OFF, isError: true });
+    liveSeat("retro", "retro:1");
+    expect(await tool("sync_main", ts).call({ seatId: "retro", runId: "retro:1" }, {})).toEqual({
+      text: readOnlyToolText("sync_main"),
+      isError: true,
+    });
+    expect((await tool("sync_main", ts).call(CTX, { runId: RUN })).text).toMatch(
+      /^Invalid arguments:/,
+    );
+    store.upsertRun(run({ endedAt: NOW }));
+    expect(await tool("sync_main", ts).call(CTX, {})).toEqual({
+      text: MC_RUN_ENDED,
+      isError: true,
+    });
+    expect(calls).toEqual([RUN]);
   });
 });
 
@@ -375,6 +432,34 @@ describe("commit", () => {
       "?? .pnpm-store/v11/index.db",
       "?? apps/.pnpm-store/v11/index.db",
     ]);
+  });
+
+  it("never stages Python caches or a .venv, at the top or nested", async () => {
+    write("pkg/__pycache__/a.pyc", "cache\n");
+    write(".pytest_cache/v", "cache\n");
+    write(".venv/x", "cache\n");
+    write(".ruff_cache/x", "cache\n");
+    write("apps/.mypy_cache/x", "cache\n");
+    for (const prefix of ["", "pkg/"]) {
+      for (const file of [
+        ".coverage",
+        ".hypothesis/x",
+        "demo.egg-info/PKG-INFO",
+        ".tox/x",
+        ".nox/x",
+        "htmlcov/index.html",
+        ".ipynb_checkpoints/test.ipynb",
+      ]) {
+        write(`${prefix}${file}`, "cache\n");
+      }
+    }
+    write("apps/a.ts", "a2\n");
+    const r = await commit("feat: x");
+    expect(r.text).toMatch(/^Committed /);
+    expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim().split("\n")).toEqual([
+      "apps/a.ts",
+    ]);
+    expect(store.strays()).toEqual([]);
   });
 
   it("answers Nothing to commit when only a .pnpm-store changed, recording no stray", async () => {
@@ -961,7 +1046,12 @@ describe("through /mcp", () => {
           .then((r) => r.json());
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
-      expect(await names(writer)).toEqual(["commit", "ask_operator", "report_evidence"]);
+      expect(await names(writer)).toEqual([
+        "commit",
+        "sync_main",
+        "ask_operator",
+        "report_evidence",
+      ]);
       expect(await names(reader)).toEqual(["ask_operator", "report_evidence"]);
       write("apps/a.ts", "a2\n");
       const r = await rpc(writer, "tools/call", {
@@ -1389,6 +1479,34 @@ describe("commit: secrets (final review m6)", () => {
     });
     expect(head()).toBe(base);
     expect(staged()).toBe("");
+  });
+
+  it("reads a staged rename as the whole file added (--no-renames)", async () => {
+    const origin = join(dir, "origin.git");
+    git(dir, "init", "-q", "--bare", "-b", "main", origin);
+    git(clone, "remote", "add", "origin", origin);
+    git(clone, "checkout", "-q", "main");
+    writeFileSync(join(clone, "apps", "old.ts"), `${LOCAL}\n`);
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "fixture");
+    git(clone, "push", "-q", "origin", "main");
+    git(wt, "merge", "-q", "--ff-only", "main");
+    git(clone, "config", "diff.renames", "true");
+    renameSync(join(wt, "apps", "old.ts"), join(wt, "apps", "new.ts"));
+    expect(await commit("refactor: move", make({ knownSecrets: async () => [LOCAL] }))).toEqual({
+      text: `Not committed: apps/new.ts:1 looks like a local credential. ${SECRET_TAIL}`,
+      isError: true,
+    });
+  });
+
+  it("reads staged files as stored, not through a textconv driver (--no-textconv)", async () => {
+    writeFileSync(join(clone, ".git", "info", "attributes"), "*.dat diff=hide\n");
+    git(clone, "config", "diff.hide.textconv", "true");
+    write("apps/k.dat", `${TOKEN}\n`);
+    expect(await commit("feat: x")).toEqual({
+      text: `Not committed: apps/k.dat:1 looks like a GitHub token. ${SECRET_TAIL}`,
+      isError: true,
+    });
   });
 
   it("refuses a known secret verbatim, and a file under * -diff read as stored", async () => {
@@ -3099,6 +3217,40 @@ describe("report_plan", () => {
   it("is offered to read-only seats whose role is granted it", () => {
     expect(tool("report_plan", pt).modes).toEqual([]);
     expect(tool("report_plan", pt).grantable).toEqual(["read-only"]);
+  });
+
+  it("refuses report_plan while away without editing GitHub", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await plan()).toEqual(refused(AWAY_PLAN_REFUSED));
+    expect(ghCalls()).toEqual([]);
+    expect(told).toEqual([]);
+  });
+
+  it("rechecks away after reading the issue and before editing it", async () => {
+    const calls: string[][] = [];
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "fao-1",
+      role: "FAO",
+      accountId: "claude-main",
+      model: "haiku",
+      area: [],
+    });
+    const tools = createMcTools(
+      deps({
+        config: cfg,
+        gh: async (args) => {
+          calls.push([...args]);
+          store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+          return { code: 0, stdout: JSON.stringify({ body: "Do X.", state: "OPEN" }), stderr: "" };
+        },
+      }),
+    );
+    expect(await tool("report_plan", tools).call(FAO_CTX, { plan: PLAN })).toEqual(
+      refused(AWAY_PLAN_REFUSED),
+    );
+    expect(calls.some((a) => a[1] === "edit")).toBe(false);
+    expect(told).toEqual([]);
   });
 
   it("appends the plan", async () => {

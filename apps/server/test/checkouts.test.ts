@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -12,26 +12,34 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
 import {
   DIFF_CUT_LINE,
+  PNPM_STORE_DIR_NAME,
   REVIEW_DIFF_FILE,
   REVIEW_DIFF_MAX,
   REVIEW_INPUT_DIR,
   REVIEW_SINCE_FILE,
 } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CheckoutError,
   existingCheckout,
   existingScratch,
   INSTALL_ARGS,
+  type InstallRunner,
+  installAfterSync,
   installEnv,
+  MC_MERGE_AUTHOR,
   prepareCheckout,
   prepareDetachedCheckout,
   preparePlanCheckout,
   prepareScratch,
   removeCheckout,
+  syncReusedWorktree,
+  UV_SYNC_ARGS,
+  uvInstallEnv,
   writeReviewInputs,
 } from "../src/runtime/checkouts.ts";
 
@@ -96,6 +104,54 @@ const hasBranch = (b: string) => {
 const EMPTY_LOCK = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n";
 const PKG = '{"name":"x","version":"1.0.0","private":true}\n';
 
+const PYPROJECT = '[project]\nname = "x"\nversion = "0"\n';
+const UV_LOCK = "version = 1\n";
+const execFileP = promisify(execFile);
+
+function useFakeUv(): InstallRunner {
+  let saved: NodeJS.ProcessEnv;
+  beforeEach(() => {
+    saved = {
+      PATH: process.env.PATH,
+      UV_INDEX_URL: process.env.UV_INDEX_URL,
+      PIP_INDEX_URL: process.env.PIP_INDEX_URL,
+    };
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "uv"),
+      `#!/bin/sh
+printf '%s\\n' "$@" > "${dir}/uv-argv"
+pwd -P > "${dir}/uv-cwd"
+env > "${dir}/uv-env"
+exit "$(cat "${dir}/uv-exit" 2>/dev/null || echo 0)"
+`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    process.env.UV_INDEX_URL = "http://uv.invalid";
+    process.env.PIP_INDEX_URL = "http://pip.invalid";
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  // Pin uv to the fixture even if PATH changes: never invoke an installed uv.
+  return (command, args, options) =>
+    execFileP(command === "uv" ? join(dir, "bin", "uv") : command, args, options);
+}
+const uvArgv = () =>
+  existsSync(join(dir, "uv-argv"))
+    ? readFileSync(join(dir, "uv-argv"), "utf8").trim().split("\n")
+    : null;
+const uvEnvKeys = () =>
+  readFileSync(join(dir, "uv-env"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => line.split("=", 1)[0] ?? "");
+
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-checkouts-")));
   origin = join(dir, "origin.git");
@@ -111,7 +167,390 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+async function syncCheckout() {
+  const checkout = await prepareCheckout(input());
+  return { ...checkout, synced: await syncReusedWorktree(clone, checkout, { syncMain: true }) };
+}
+
 describe("prepareCheckout", () => {
+  describe("uv installs", () => {
+    const run = useFakeUv();
+    const prepare = () => prepareCheckout(input(), run);
+    const push = (files: Record<string, string> = {}) => {
+      commit(seed, { "pyproject.toml": PYPROJECT, "uv.lock": UV_LOCK, ...files });
+      git(seed, "push", "-q", "origin", "main");
+    };
+    const refused = async (what: string) => {
+      const e = await fail(prepare());
+      expect(e.code).toBe("protected");
+      expect(e.message).toBe(`branch ${BRANCH} ${what}; Mission Control won't install from it`);
+      expect(existsSync(wtPath())).toBe(false);
+      expect(uvArgv()).toBeNull();
+    };
+
+    it("installs with configuration and downloads disabled and the worktree's own environment", async () => {
+      push();
+      await prepare();
+      expect(uvArgv()).toEqual([...UV_SYNC_ARGS]);
+      expect(readFileSync(join(dir, "uv-cwd"), "utf8").trim()).toBe(wtPath());
+      expect(uvEnvKeys().filter((k) => k.startsWith("UV_") || k.startsWith("PIP_"))).toEqual([
+        "UV_PROJECT_ENVIRONMENT",
+      ]);
+      expect(readFileSync(join(dir, "uv-env"), "utf8")).toContain(
+        `UV_PROJECT_ENVIRONMENT=${join(wtPath(), ".venv")}\n`,
+      );
+      expect(UV_SYNC_ARGS).toEqual([
+        "sync",
+        "--no-config",
+        "--no-python-downloads",
+        "--frozen",
+        "--no-build",
+        "--no-install-workspace",
+        "--no-install-local",
+        "--link-mode=copy",
+      ]);
+    });
+
+    it("strips inherited interpreter settings and overrides UV_PROJECT_ENVIRONMENT", () => {
+      const keys = ["VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP"];
+      try {
+        for (const key of [...keys, "UV_PROJECT_ENVIRONMENT", "UV_INDEX_PRIVATE_PASSWORD"]) {
+          vi.stubEnv(key, "/untrusted");
+        }
+        const env = uvInstallEnv(wtPath());
+        for (const key of [...keys, "UV_INDEX_PRIVATE_PASSWORD"]) expect(env[key]).toBeUndefined();
+        expect(env.UV_PROJECT_ENVIRONMENT).toBe(join(wtPath(), ".venv"));
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it.each(["./fakepy", "/tmp/claude-501/py", "python3", "3.12\n./fakepy", "3.12 # comment"])(
+      "refuses non-version interpreter requests: %s",
+      async (version) => {
+        push({ ".python-version": `${version}\n` });
+        await refused("has a non-version interpreter in .python-version");
+      },
+    );
+
+    it("accepts plain versions, blank lines and comment lines", async () => {
+      push({
+        ".python-version":
+          "\n# Python versions\n3\n3.12\n3.13.0rc1\ncpython-3.12.1\npypy-3.10\ngraalpy-3.11\n",
+      });
+      await prepare();
+      expect(uvArgv()).toEqual([...UV_SYNC_ARGS]);
+    });
+
+    it.each(["pyproject.toml", "uv.toml"])(
+      "refuses a parent %s at each ancestor level",
+      async (file) => {
+        push();
+        for (const parent of [join(root, "a"), root, dir]) {
+          mkdirSync(parent, { recursive: true });
+          writeFileSync(join(parent, file), "# parent workspace\n");
+          await refused(`has an ancestor ${file}`);
+          rmSync(join(parent, file));
+        }
+      },
+    );
+
+    it.each([
+      "http://index.invalid/simple",
+      "file:///tmp/wheels",
+      "./wheels",
+      "/tmp/wheels",
+      "https://",
+    ])("refuses a non-HTTPS registry: %s", async (registry) => {
+      push({
+        "uv.lock": `${UV_LOCK}[[package]]\nname = "x"\nsource = { registry = "${registry}" }\n`,
+      });
+      await refused("has a non-HTTPS registry in uv.lock");
+    });
+
+    it.each([
+      '[package.source]\n"registry" = "http://index.invalid/simple"',
+      '[[package]]\nsource = { "reg\\u0069stry" = "file:///tmp/wheels" }',
+      "[[package]]\nsource.'registry' = 'file:///tmp/wheels'",
+      "[[package]]\nsource = { registry = 123 }",
+    ])("checks registry keys using TOML semantics: %s", async (source) => {
+      push({ "uv.lock": `${UV_LOCK}${source}\n` });
+      await refused("has a non-HTTPS registry in uv.lock");
+    });
+
+    it.each([
+      '[[package]]\nsource = { registry = """file:///tmp/wheels""" }',
+      '[[package]]\nsource = { "reg\\U00000069stry" = "file:///tmp/wheels" }',
+    ])("refuses unsupported lockfile string syntax: %s", async (source) => {
+      push({ "uv.lock": `${UV_LOCK}${source}\n` });
+      await refused("has unsupported string syntax in uv.lock");
+    });
+
+    it("accepts HTTPS registry sources", async () => {
+      push({
+        "uv.lock": `${UV_LOCK}[[package]]\nsource = { registry = "https://pypi.org/simple" }\n`,
+      });
+      await prepare();
+      expect(uvArgv()).toEqual([...UV_SYNC_ARGS]);
+    });
+
+    it.each(["pyproject.toml", "uv.lock", "uv.toml", ".python-version"])(
+      "refuses to install when a reused branch changes %s",
+      async (file) => {
+        push();
+        git(clone, "pull", "-q", "--ff-only");
+        git(clone, "checkout", "-q", "-b", BRANCH);
+        const body = file === "pyproject.toml" ? PYPROJECT : UV_LOCK;
+        const tip = commit(clone, { [file]: `${body}\n` });
+        git(clone, "checkout", "-q", "main");
+        await refused(`changes ${file}`);
+        expect(git(clone, "rev-parse", BRANCH)).toBe(tip);
+      },
+    );
+
+    it.each([".venv/pyvenv.cfg", "pkg/.venv/pyvenv.cfg"])(
+      "refuses a committed .venv at %s",
+      async (file) => {
+        push({ [file]: "x\n" });
+        await refused(`has ${file}`);
+        expect(hasBranch(BRANCH)).toBe(false);
+      },
+    );
+
+    it("refuses a symlink in a uv repo", async () => {
+      push();
+      mkdirSync(join(seed, "docs"));
+      symlinkSync("../README.md", join(seed, "docs", "link"));
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "link");
+      git(seed, "push", "-q", "origin", "main");
+      await refused("has a symlink at docs/link");
+      expect(hasBranch(BRANCH)).toBe(false);
+    });
+
+    const onCheckout = (script: string) => {
+      push({ ".gitattributes": "x.txt filter=plant\n", "x.txt": "x\n" });
+      git(clone, "config", "filter.plant.smudge", `sh -c '${script}; cat'`);
+    };
+
+    it("refuses a .venv on disk that the tree does not have", async () => {
+      onCheckout("mkdir -p .venv");
+      await refused("has .venv");
+    });
+
+    it("refuses changed inputs on disk even when the branch's ref is clean", async () => {
+      onCheckout("echo changed >> pyproject.toml");
+      await refused("changes pyproject.toml");
+    });
+
+    it.each(["pyproject.toml", "uv.toml", ".python-version"])(
+      "refuses a missing root %s that origin has",
+      async (file) => {
+        push({ [file]: file === ".python-version" ? "3.12\n" : PYPROJECT });
+        onCheckout(`rm -f ${file}`);
+        await refused(`changes ${file}`);
+      },
+    );
+
+    it("removes the worktree and the fresh branch when uv sync fails", async () => {
+      push();
+      writeFileSync(join(dir, "uv-exit"), "3");
+      const e = await fail(prepare());
+      expect(e.code).toBe("install");
+      expect(e.message).toBe(`uv sync failed for ${BRANCH} (exit 3)`);
+      expect(existsSync(wtPath())).toBe(false);
+      expect(worktrees()).toHaveLength(1);
+      expect(hasBranch(BRANCH)).toBe(false);
+    });
+
+    it("reports a timed out uv sync and cleans up", async () => {
+      push();
+      const e = await fail(
+        prepareCheckout(input(), async () => {
+          throw { killed: true };
+        }),
+      );
+      expect(e.code).toBe("install");
+      expect(e.message).toBe(`uv sync failed for ${BRANCH} (timed out)`);
+      expect(existsSync(wtPath())).toBe(false);
+      expect(hasBranch(BRANCH)).toBe(false);
+    });
+
+    it("fails and cleans up when uv is not on PATH", async () => {
+      push();
+      const e = await fail(
+        prepareCheckout(input(), async () => {
+          throw { code: "ENOENT" };
+        }),
+      );
+      expect(e.code).toBe("install");
+      expect(e.message).toBe(`uv sync failed for ${BRANCH} (uv not found)`);
+      expect(existsSync(wtPath())).toBe(false);
+      expect(hasBranch(BRANCH)).toBe(false);
+      expect(uvArgv()).toBeNull();
+    });
+
+    it.each(["pyproject.toml", "uv.lock", "uv.toml", ".python-version", "pkg/pyproject.toml"])(
+      "reports unsupported reinstall after syncing a changed %s",
+      async (file) => {
+        push();
+        const first = await prepare();
+        const before = git(first.path, "rev-parse", "HEAD");
+        commit(seed, { [file]: file === ".python-version" ? "3.12\n" : `${PYPROJECT}\n` });
+        git(seed, "push", "-q", "origin", "main");
+        const next = await prepare();
+        expect((await syncReusedWorktree(clone, next, { syncMain: true }))?.kind).toBe("merged");
+        rmSync(join(dir, "uv-argv"));
+        expect(await installAfterSync(clone, next, before)).toBe(
+          "dependencies changed; uv reinstall is not supported in a reused worktree",
+        );
+        expect(uvArgv()).toBeNull();
+      },
+    );
+
+    it("never runs uv without a uv.lock", async () => {
+      commit(seed, { "pyproject.toml": PYPROJECT });
+      git(seed, "push", "-q", "origin", "main");
+      await prepare();
+      expect(uvArgv()).toBeNull();
+    });
+
+    it("refuses a uv.lock with no pyproject.toml", async () => {
+      commit(seed, { "uv.lock": UV_LOCK });
+      git(seed, "push", "-q", "origin", "main");
+      await refused("has no pyproject.toml");
+    });
+
+    it("runs pnpm then uv when both lockfiles are there", async () => {
+      push({ "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+      const commands: string[] = [];
+      await prepareCheckout(input(), (command, args, options) => {
+        commands.push(command);
+        if (command === "uv") expect(existsSync(join(wtPath(), "node_modules"))).toBe(true);
+        return run(command, args, options);
+      });
+      expect(commands).toEqual(["pnpm", "uv"]);
+      expect(uvArgv()).toEqual([...UV_SYNC_ARGS]);
+    });
+
+    it("checks both tools before either install starts", async () => {
+      push({ "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK, ".venv/x": "x" });
+      const runner = vi.fn(run);
+      await fail(prepareCheckout(input(), runner));
+      expect(runner).not.toHaveBeenCalled();
+    });
+
+    it("allows node_modules in a uv-only repo", async () => {
+      onCheckout("mkdir -p node_modules");
+      await prepare();
+      expect(uvArgv()).toEqual([...UV_SYNC_ARGS]);
+    });
+  });
+
+  it("brings origin's tip into a reused worktree when asked", async () => {
+    const first = await prepareCheckout(input());
+    const tip = commit(first.path, { "b.txt": "branch\n" });
+    const main = commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await syncCheckout();
+    expect(r.synced).toEqual({
+      kind: "merged",
+      sha: git(r.path, "rev-parse", "HEAD"),
+      before: tip,
+    });
+    expect(git(r.path, "log", "-1", "--format=%P")).toBe(`${tip} ${main}`);
+    expect(git(r.path, "log", "-1", "--format=%an|%cn")).toBe(
+      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}`,
+    );
+    expect(readFileSync(join(r.path, "m.txt"), "utf8")).toBe("main\n");
+  });
+
+  it("leaves a reused worktree's conflicts for the seat", async () => {
+    const first = await prepareCheckout(input());
+    commit(first.path, { "README.md": "branch\n" });
+    const mainSha = commit(seed, { "README.md": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await syncCheckout();
+    expect(r.synced).toEqual({ kind: "conflict", mainSha, files: ["README.md"] });
+    expect(git(r.path, "rev-parse", "MERGE_HEAD")).toBe(mainSha);
+    expect(readFileSync(join(r.path, "README.md"), "utf8")).toContain("<<<<<<<");
+    commit(seed, { "later.txt": "new main tip\n" });
+    git(seed, "push", "-q", "origin", "main");
+    expect((await syncCheckout()).synced).toEqual({
+      kind: "conflict",
+      mainSha,
+      files: ["README.md"],
+    });
+  });
+
+  it("skips a dirty reused worktree", async () => {
+    const first = await prepareCheckout(input());
+    writeFileSync(join(first.path, "new.txt"), "uncommitted\n");
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    expect((await syncCheckout()).synced).toEqual({
+      kind: "skipped",
+      why: "dirty",
+    });
+    expect(readFileSync(join(first.path, "new.txt"), "utf8")).toBe("uncommitted\n");
+  });
+
+  it("leaves a reused worktree unchanged without the sync flag", async () => {
+    const first = await prepareCheckout(input());
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await prepareCheckout(input());
+    expect(await syncReusedWorktree(clone, r, { syncMain: false })).toBeUndefined();
+    expect(git(r.path, "rev-parse", "HEAD")).toBe(first.baseSha);
+  });
+
+  it("ignores local pnpm stores when syncing a reused worktree", async () => {
+    const first = await prepareCheckout(input());
+    for (const folder of [PNPM_STORE_DIR_NAME, `nested/${PNPM_STORE_DIR_NAME}`]) {
+      mkdirSync(join(first.path, folder), { recursive: true });
+      writeFileSync(join(first.path, folder, "cache"), "local cache\n");
+    }
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await syncCheckout();
+    expect(r.synced?.kind).toBe("merged");
+    expect(git(r.path, "ls-tree", "-r", "--name-only", "HEAD")).not.toContain(PNPM_STORE_DIR_NAME);
+  });
+
+  it("answers up-to-date when the reused branch contains main", async () => {
+    const first = await prepareCheckout(input());
+    const tip = commit(first.path, { "b.txt": "branch\n" });
+    expect((await syncCheckout()).synced).toEqual({
+      kind: "up-to-date",
+    });
+    expect(git(first.path, "rev-parse", "HEAD")).toBe(tip);
+  });
+
+  it.each(["installed", "unsafe", "failed"])(
+    "checks changed install inputs after a sync: %s",
+    async (outcome) => {
+      const first = await prepareCheckout(input());
+      if (outcome === "unsafe") commit(first.path, { "nested/.npmrc": "unsafe=true\n" });
+      commit(seed, {
+        "package.json": PKG,
+        "pnpm-lock.yaml": outcome === "failed" ? "garbage: [\n" : EMPTY_LOCK,
+      });
+      git(seed, "push", "-q", "origin", "main");
+      const checkout = await syncCheckout();
+      expect(checkout.synced?.kind).toBe("merged");
+      if (checkout.synced?.kind !== "merged") throw new Error("expected merge");
+      const note = await installAfterSync(clone, checkout, checkout.synced.before);
+      if (outcome === "installed") {
+        expect(note).toBeUndefined();
+        expect(existsSync(join(checkout.path, "node_modules"))).toBe(true);
+      } else {
+        expect(note).toContain("dependencies changed; install refused:");
+        expect(note).toContain(outcome === "unsafe" ? "nested/.npmrc" : "pnpm install failed");
+      }
+      expect(git(checkout.path, "rev-parse", "HEAD")).toBe(checkout.synced.sha);
+    },
+  );
+
   it("creates a fresh branch from origin's default branch, read from origin itself", async () => {
     // origin moved on since the clone, and a seat pointed the local origin/HEAD at its own ref
     const tip = commit(seed, { "b.txt": "b\n" });
@@ -691,6 +1130,7 @@ describe("prepareDetachedCheckout", () => {
 });
 
 describe("review scratch checkouts", () => {
+  const runUv = useFakeUv();
   const scratchPath = () => join(root, "a", "retro-review-7");
   /** A PR branch off main's current tip; main then moves on. Returns { head, fork }. */
   function pr(files: Record<string, string>): { head: string; fork: string } {
@@ -708,6 +1148,15 @@ describe("review scratch checkouts", () => {
     seatId: "retro",
     reviewId: 7,
     sha,
+  });
+
+  it("installs with uv at a PR head off a uv repo", async () => {
+    commit(seed, { "pyproject.toml": PYPROJECT, "uv.lock": UV_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const { head } = pr({ "a.txt": "a\n" });
+    await prepareScratch(scratchInput(head), runUv);
+    expect(uvArgv()).toEqual([...UV_SYNC_ARGS]);
+    expect(readFileSync(join(dir, "uv-cwd"), "utf8").trim()).toBe(scratchPath());
   });
 
   it("prepareScratch checks out the sha detached", async () => {

@@ -6,6 +6,8 @@
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AWAY_WRITES_REFUSED,
+  type AwayDiff,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
   type CiRerun,
@@ -31,6 +33,7 @@ import {
   type Run,
   STDERR_TEXT_MAX,
 } from "@mc/core";
+import { activeAway } from "../away.ts";
 import {
   COMMIT_ADD_PATHSPEC,
   editRunPrBody,
@@ -45,7 +48,13 @@ import {
   readKnown,
   seatPlace,
 } from "../mcp/tools.ts";
-import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
+import {
+  adminDirOf,
+  CREW_GIT_SLOW_MS,
+  installAfterSync,
+  MC_MERGE_AUTHOR,
+  mainMergeArgs,
+} from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { crewDir } from "../store.ts";
 import { mcSection } from "./rules.ts";
@@ -69,6 +78,8 @@ export const CI_LOG_MAX_BUFFER = 16 * 1024 * 1024;
 export const MERGE_NO_PR = "the run has no PR";
 export const MERGE_NO_SEAT = "the run's seat is no longer configured";
 export const MERGE_BAD_SHA = "not a commit sha";
+/** Ready succeeded but its head could not be confirmed and restoring draft failed. */
+export const READY_UNDO_FAILED = "the PR was marked ready but could not be restored to draft";
 export const MERGE_HEAD_MOVED = "the PR's head is not the commit that passed the gate";
 export const MERGE_CONFLICTING = "the PR conflicts with main";
 /** The run's Activity line, once per head, when its merge waits for main to be merged in. */
@@ -84,8 +95,7 @@ export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the s
 export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
 export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
-/** The author and committer of the merge commit the engine makes. */
-export const MC_MERGE_AUTHOR = "Mission Control";
+export { MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
@@ -115,7 +125,7 @@ export type GateResult =
  * changes, so nothing was merged).
  */
 export type UpdateBranchResult =
-  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean }
+  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean; installNote?: string }
   | { ok: true; kind: "conflict"; files: string[] }
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
@@ -142,6 +152,12 @@ export function prDiffKey(diff: string): string {
 }
 
 export interface Publisher {
+  /** The pending merge in the registered worktree, or null when absent or unreadable. */
+  mergeHead(run: Run, worktree: string): Promise<string | null>;
+  mainTip(
+    run: Run,
+  ): Promise<{ ok: true; sha: string } | { ok: false; text: string; transient: boolean }>;
+  awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
@@ -200,7 +216,8 @@ export interface Publisher {
    */
   worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
-  markReady(run: Run): Promise<PublishResult>;
+  markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
+  markDraft(run: Run): Promise<PublishResult>;
   /** Merges the run's PR with a merge commit, only if its head is `sha`. */
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
@@ -763,6 +780,27 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
 
+    async awayDiff(run, sha) {
+      if (!SHA.test(sha)) return null;
+      const result = await inGit(run, async (g) => {
+        const base = (await g(["merge-base", "refs/remotes/origin/HEAD", sha])).trim();
+        if (!SHA.test(base)) throw new Error("no merge base with origin/HEAD");
+        const fields = (
+          await g(["diff", "--name-status", "-z", "--no-renames", base, sha, "--"])
+        ).split("\0");
+        if (fields.pop() !== "" || fields.length % 2 !== 0) throw new Error("unreadable diff");
+        const changes: AwayDiff["changes"] = [];
+        for (let i = 0; i < fields.length; i += 2) {
+          const status = fields[i];
+          const path = fields[i + 1];
+          if (!status || !path) throw new Error("unreadable diff path");
+          changes.push({ status, path });
+        }
+        return { ok: true as const, diff: { base, changes } };
+      });
+      return result.ok ? result.diff : null;
+    },
+
     async isDescendant(run, ancestor, head) {
       if (!SHA.test(ancestor) || !SHA.test(head)) return false;
       const result = await inGit(run, async (g) => ({
@@ -823,9 +861,24 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (names.some((p) => p.toLowerCase() === "claude.md")) {
           missionControlChanged = true;
           try {
-            const before = await g(["show", `${base}:CLAUDE.md`]);
-            const after = await g(["show", `${sha}:CLAUDE.md`]);
-            missionControlChanged = mcSection(before) !== mcSection(after);
+            const readClaude = async (commit: string): Promise<string | null> => {
+              try {
+                await g(["cat-file", "-e", `${commit}:CLAUDE.md`]);
+              } catch (e) {
+                const error = e as { code?: unknown; stderr?: unknown } | null;
+                if (
+                  error?.code === 128 &&
+                  typeof error.stderr === "string" &&
+                  error.stderr.includes("path 'CLAUDE.md' does not exist in")
+                )
+                  return null;
+                throw e;
+              }
+              return g(["show", `${commit}:CLAUDE.md`]);
+            };
+            const before = await readClaude(base);
+            const after = await readClaude(sha);
+            missionControlChanged = mcSection(before ?? "") !== mcSection(after ?? "");
           } catch {
             /* an unreadable rules block stays protected */
           }
@@ -843,6 +896,30 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           },
         };
       });
+    },
+
+    async mergeHead(run, worktree) {
+      const place = seatPlace(deps.config, run.agentId);
+      if (place === null) return null;
+      try {
+        const common = await realpath(join(place.session.checkout, ".git"));
+        const gitDir = await adminDirOf(common, worktree);
+        if (gitDir === null) return null;
+        return (
+          await (deps.git ?? crewGit)(
+            worktree,
+            ["rev-parse", "-q", "--verify", "MERGE_HEAD"],
+            common,
+            { gitDir },
+          )
+        ).trim();
+      } catch {
+        return null;
+      }
+    },
+
+    mainTip(run) {
+      return inGit(run, async (g) => ({ ok: true, sha: (await originNow(g, null)).mainSha }));
     },
 
     async updateBranch(run, mainSha, worktree) {
@@ -899,27 +976,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           const { defaultBranch } = await originNow(g, null);
           await fetchMain(g, defaultBranch, mainSha);
           const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
-          // the work is on main already: the PR is merged, and the next pass sees it
+          // No branch-only commits remain: there is nothing to merge main into.
           if (await yes(g, ["merge-base", "--is-ancestor", before, mainSha])) {
             return transient(UPDATE_UP_TO_DATE);
           }
           try {
-            await w(
-              [
-                "-c",
-                "commit.gpgsign=false",
-                "-c",
-                "rerere.enabled=false",
-                "merge",
-                "--no-ff",
-                "--no-edit",
-                "--no-verify",
-                "-m",
-                `Merge main into ${branch}`,
-                mainSha,
-              ],
-              { GIT_AUTHOR_NAME: MC_MERGE_AUTHOR, GIT_COMMITTER_NAME: MC_MERGE_AUTHOR },
-            );
+            await w(mainMergeArgs(branch, mainSha), {
+              GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
+              GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
+            });
           } catch (e) {
             if ((e as { code?: unknown } | null)?.code === 1) {
               const files = await unmerged();
@@ -960,7 +1025,24 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           } catch {
             prSame = false;
           }
-          return { ok: true, kind: "merged", sha, parent: before, prSame };
+          const installNote = await installAfterSync(
+            checkout,
+            {
+              path: worktree,
+              gitDir,
+              branch,
+              baseSha: mainSha,
+            },
+            before,
+          );
+          return {
+            ok: true,
+            kind: "merged",
+            sha,
+            parent: before,
+            prSame,
+            ...(installNote ? { installNote } : {}),
+          };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);
@@ -999,11 +1081,41 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       }
     },
 
-    async markReady(run) {
+    async markReady(run, expectedSha) {
       const repo = repoOf(run);
       const n = run.loop?.prNumber ?? null;
       if (repo === undefined || n === null) return final(MERGE_NO_PR);
-      return ghDo(["pr", "ready", String(n), `--repo=${repo}`], "pr ready");
+      if (expectedSha !== undefined) {
+        const pr = await ghJson(
+          ["pr", "view", String(n), `--repo=${repo}`, "--json", "state,headRefOid"],
+          "pr view",
+        );
+        if (isRefusal(pr)) return pr;
+        if (pr.state !== "OPEN") return final(MERGE_PR_NOT_OPEN);
+        if (pr.headRefOid !== expectedSha) return final(MERGE_HEAD_MOVED);
+      }
+      const ready = await ghDo(["pr", "ready", String(n), `--repo=${repo}`], "pr ready");
+      if (!ready.ok || expectedSha === undefined) return ready;
+      const after = await ghJson(
+        ["pr", "view", String(n), `--repo=${repo}`, "--json", "state,headRefOid"],
+        "pr view",
+      );
+      if (isRefusal(after) || after.headRefOid !== expectedSha) {
+        const undo = await ghDo(
+          ["pr", "ready", String(n), `--repo=${repo}`, "--undo"],
+          "pr ready --undo",
+        );
+        if (!undo.ok) return transient(READY_UNDO_FAILED);
+        return isRefusal(after) ? after : final(MERGE_HEAD_MOVED);
+      }
+      return ready;
+    },
+
+    async markDraft(run) {
+      const repo = repoOf(run);
+      const n = run.loop?.prNumber ?? null;
+      if (repo === undefined || n === null) return final(MERGE_NO_PR);
+      return ghDo(["pr", "ready", String(n), `--repo=${repo}`, "--undo"], "pr ready --undo");
     },
 
     async merge(run, sha) {
@@ -1038,6 +1150,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           return pr.baseRefName === defaultBranch ? { ok: true } : final(MERGE_PR_NOT_RUNS);
         });
         if (!base.ok) return base;
+        if (activeAway(deps.store, (deps.now ?? Date.now)(), deps.config.operator.timezone))
+          return final(AWAY_WRITES_REFUSED);
         const merged = await ghDo(
           ["pr", "merge", String(n), `--repo=${repo}`, "--merge", `--match-head-commit=${sha}`],
           "pr merge",

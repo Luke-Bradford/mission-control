@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as markdown from "../src/components/Markdown.tsx";
@@ -63,6 +65,25 @@ afterEach(() => {
 });
 
 describe("Dock content", () => {
+  it("keeps waiting asks above an independently scrolling message stream", () => {
+    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    expect(css).toMatch(/\.panel \{[^}]*display: flex;[^}]*flex-direction: column/);
+    expect(css).toMatch(/\.dock \.dh \{[^}]*flex: none/);
+    expect(css).toMatch(/\.dwait \{[^}]*flex: none;[^}]*max-height: 40%;[^}]*overflow: auto/);
+    expect(css).toMatch(/\.dmsgs \{[^}]*flex: 1;[^}]*min-height: 0;[^}]*overflow: auto/);
+  });
+
+  it("keeps Head agent visible in the dock header on phones", async () => {
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      matches: media === "(max-width: 760px)",
+      media,
+      addEventListener: noop,
+      removeEventListener: noop,
+    }));
+    const { container } = render(<Dock />);
+    expect(container.querySelector("#dockHead .rt")?.textContent).toBe(" · Head agent");
+  });
+
   it("says no FLIGHT seat is configured, with no conversation and the input switched off", async () => {
     const { container } = render(<Dock />);
     const dock = dockEl(container) as HTMLElement;
@@ -70,7 +91,8 @@ describe("Dock content", () => {
     await waitFor(() => expect(dock.querySelector(".meta")?.textContent).toBe(FLIGHT_NO_SEAT));
     expect(dock.getAttribute("aria-label")).toBe("FLIGHT");
     expect(dock.querySelector(".dh")?.textContent).toContain("FLIGHT");
-    expect(screen.getByText("Head agent").className).toBe("pill neutral");
+    expect(dock.querySelectorAll(".rt")).toHaveLength(1);
+    expect(dock.querySelector(".rt")?.textContent).toBe(" · Head agent");
     expect(container.querySelector("#dockWaiting")).toBeNull();
     expect(container.querySelector("#dockMsgs")?.children.length).toBe(0);
     const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
@@ -349,7 +371,7 @@ describe("live FLIGHT", () => {
                 turns: 4,
                 lastEventAt: NOW,
                 model: null,
-                contextTokens: 50_000,
+                contextTokens: 85_145,
                 contextWindow: null,
                 liveTool: null,
                 tools: {},
@@ -367,9 +389,10 @@ describe("live FLIGHT", () => {
     const { container } = render(<Dock />);
     await waitFor(() =>
       expect(container.querySelector(".meta")?.textContent).toBe(
-        "claude-main · opus · turn 4 of 41, then a fresh session · context 25% · run #12",
+        "claude-main · opus · turn 4 of 41, then a fresh session · context 43% · run #12",
       ),
     );
+    expect(container.querySelector("#dockHead")?.textContent?.match(/Head agent/g)).toHaveLength(1);
   });
 
   it("omits missing turns, account and context without empty separators", async () => {
@@ -477,6 +500,31 @@ describe("Waiting on you", () => {
     fireEvent.click(rows[0]?.querySelector("button") as HTMLElement);
     expect(screen.getByTestId("item").textContent).toBe("ask:7");
     expect(rows[1]?.textContent).toContain("Which?");
+  });
+
+  it("repins on ask mount and growth, while preserving a reader's scroll position", async () => {
+    let asks: ReturnType<typeof ask>[] = [];
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/attention": () => ({ status: 200, body: asks }),
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
+    const log = screen.getByRole("log");
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
+    for (let n = 1; n <= 3; n++) {
+      log.scrollTop = n === 3 ? 100 : 800;
+      fireEvent.scroll(log);
+      asks = [...asks, ask({ key: `ask-${n}` })];
+      await act(async () => {
+        hub.refetch("/api/attention");
+      });
+      await waitFor(() => expect(screen.getAllByTestId("waiting-ask")).toHaveLength(n));
+      expect(log.scrollTop).toBe(n === 3 ? 100 : 1000);
+    }
   });
 
   it("shows no band with nothing to wait on", async () => {

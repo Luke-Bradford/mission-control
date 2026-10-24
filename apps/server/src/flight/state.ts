@@ -64,6 +64,7 @@ import {
   type TestLockState,
   wakeKeyPrefix,
 } from "@mc/core";
+import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -105,6 +106,50 @@ export function operatorItems(
     rows ?? crew(config, store, now, lock, () => null).rows,
     hubLogin,
   ).filter((i) => i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT);
+}
+
+/** All items awaiting FLIGHT triage, before the digest's display cap. */
+export function flightTriageItems(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  hubLogin: string | null,
+  rows?: ReturnType<typeof crew>["rows"],
+  lock: TestLockState = NO_LOCK,
+): AttentionItem[] {
+  const flightId = flightSeat(config)?.seat.id ?? null;
+  if (flightId === null) return [];
+  const questionKeys = new Set(
+    store
+      .openQuestions()
+      .filter(
+        (q) => q.agentId !== flightId && q.passedAt === null && store.run(q.runId)?.endedAt == null,
+      )
+      .map((q) => `ask:${q.id}`),
+  );
+  return operatorItems(config, store, now, hubLogin, rows, lock)
+    .filter(
+      (x) =>
+        !x.brief &&
+        !ownReply(x, flightId) &&
+        (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
+    )
+    .filter((item) => item.kind !== "message" || flightQuestion(item.text));
+}
+
+export function flightHeadline(
+  store: Store,
+  session: string | null,
+  now: number,
+): Pick<FlightState, "headline" | "headlineAgeMin"> {
+  const row =
+    session === null
+      ? undefined
+      : store.flightBrief(session).find((r) => r.section === FLIGHT_HEADLINE);
+  return {
+    headline: row?.text ?? "",
+    headlineAgeMin: !row?.text ? null : Math.floor((now - row.updatedAt) / 60_000),
+  };
 }
 
 /**
@@ -244,10 +289,10 @@ export function flightBriefView(
   store: Store,
   lock: TestLockState = NO_LOCK,
   now = Date.now(),
+  rows = crew(config, store, now, lock, () => null).rows,
 ): FlightBriefView {
   const session = flightSeat(config)?.session.id ?? null;
   const drafts = store.drafts(true);
-  const rows = crew(config, store, now, lock, () => null).rows;
   const watch = (session === null ? [] : store.flightWatch(session)).filter((entry) => {
     const action = entry.action;
     if (!action) return true;
@@ -408,11 +453,7 @@ export function flightState(i: {
       about: cut(d.about, FLIGHT_STATE_TEXT_MAX),
       decision: cut(d.decision, FLIGHT_STATE_DECISION_MAX),
     }));
-  const headline =
-    found === null
-      ? ""
-      : (store.flightBrief(found.session.id).find((r) => r.section === FLIGHT_HEADLINE)?.text ??
-        "");
+  const headline = flightHeadline(store, found?.session.id ?? null, now);
   const openLedger = orderLedger(found === null ? [] : store.flightLedger(found.session.id)).filter(
     (e) => FLIGHT_LEDGER_OPEN.includes(e.status),
   );
@@ -447,7 +488,7 @@ export function flightState(i: {
       recent,
       limits,
       brief,
-      headline,
+      ...headline,
       ledger,
       ledgerMore: openLedger.length - ledger.length,
     };
@@ -583,6 +624,11 @@ export function flightState(i: {
         runId: holder?.id ?? "",
         ready: holder !== undefined && ready.has(holder.id),
         awaitingFlight: holder?.loop?.awaitingFlight ?? null,
+        ...(activeAway(store, now, tz) &&
+        holder?.loop?.awayBugDecision?.headSha === p.headSha &&
+        holder?.loop?.awayBugDecision
+          ? { awayBugDecision: holder.loop.awayBugDecision }
+          : {}),
         state: p.state,
         headSha: p.headSha,
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
@@ -689,22 +735,7 @@ export function flightState(i: {
     ];
   });
 
-  const flightId = found.seat.id;
-  const questionKeys = new Set(
-    open
-      .filter(
-        (q) => q.agentId !== flightId && q.passedAt === null && store.run(q.runId)?.endedAt == null,
-      )
-      .map((q) => `ask:${q.id}`),
-  );
-  const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock)
-    .filter(
-      (x) =>
-        !x.brief &&
-        !ownReply(x, flightId) &&
-        (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
-    )
-    .filter((item) => item.kind !== "message" || flightQuestion(item.text))
+  const items = flightTriageItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock)
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -748,7 +779,7 @@ export function flightState(i: {
     recent,
     limits,
     brief,
-    headline,
+    ...headline,
     ledger,
     ledgerMore: openLedger.length - ledger.length,
   };
@@ -957,7 +988,10 @@ export function wakeFacts(
     ].sort(),
     stopped: stoppedSeats(s),
     prs: s.prs
-      .map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}`)
+      .map(
+        (p) =>
+          `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
+      )
       .sort(),
     items: s.items
       .map((x) =>
@@ -999,7 +1033,7 @@ export function pending(
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
     (s.discussions?.length ?? 0) > 0 ||
     (s.teamsDigest?.matches.length ?? 0) > 0 ||
-    s.prs.some((p) => p.awaitingFlight != null) ||
+    s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
     s.questions.length > 0 ||
     s.items.length > 0 ||
     releasable(s).length > 0 ||

@@ -503,7 +503,7 @@ describe("Agent page: need banner", () => {
     const banner = $(container, "#needBanner .banner") as HTMLElement;
     expect(banner.textContent).toContain("shop-app-ta needs you.");
     expect(banner.textContent).toContain("Stalled 12:00 in Bash");
-    expect(banner.textContent).toContain("Decision for you");
+    expect(banner.textContent).toContain("Decision and question for you");
     fireEvent.click(within(banner).getByRole("button", { name: "Ack" }));
     await vi.waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
@@ -1883,9 +1883,10 @@ describe("Agent page: loop steps", () => {
     expect(dots(panel)).toEqual([
       ["reproduce", "1"],
       ["fix", "✓"],
+      ["draft PR", "3"],
       ["verify", "●"],
-      ["review", "4"],
-      ["draft PR", "5"],
+      ["review", "5"],
+      ["merge", "6"],
     ]);
     expect(panel.querySelector('[aria-current="step"] .vname')?.textContent).toBe("verify");
   });
@@ -3051,14 +3052,15 @@ describe("Agent page: header and tile mockup", () => {
     expect(tile.textContent).toContain("bugfix › verify · try 2 of 3 · 1:32 in this step");
     expect(tile.textContent).not.toContain("in this run");
     expect(tile.querySelector(".stepbar")?.getAttribute("title")).toBe(
-      "reproduce → fix → verify → review → draft PR",
+      "reproduce → fix → draft PR → verify → review → merge",
     );
     expect([...tile.querySelectorAll(".stepbar i")].map((i) => i.className)).toEqual([
       "",
       "d",
+      "d",
       "c",
       "",
-      "d",
+      "",
     ]);
   });
 

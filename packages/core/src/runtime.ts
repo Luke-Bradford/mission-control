@@ -41,7 +41,7 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
   scratch: ["review"],
 };
 
-/** The mc tools the FLIGHT seat (a `watch` role) holds. Only `read_ticket` may also go to a `plan` role. */
+/** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.readTicket,
@@ -78,13 +78,13 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
 
 /**
  * The mc tools each mode has. `base`: every seat of the mode (`*_TOOLS` below lists the same);
- * `grantable`: a role may add. `commit` is a writer's only; `push` and `draft_pr` are the hub's
+ * `grantable`: a role may add. Writers commit and sync main; `push` and `draft_pr` are the hub's
  * own and never appear.
  */
 export const MC_TOOL_GRANTS: Readonly<
   Record<CrewMode, { base: readonly McToolName[]; grantable: readonly McToolName[] }>
 > = {
-  writer: { base: ["commit", "ask_operator", "report_evidence"], grantable: [] },
+  writer: { base: ["commit", "sync_main", "ask_operator", "report_evidence"], grantable: [] },
   "read-only": {
     base: ["ask_operator", "report_evidence"],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
@@ -250,6 +250,7 @@ export const WRITER_TOOLS = [
   ...bashEntries(DEFAULT_SEAT_COMMANDS.writer),
   ...GIT_READ_TOOLS,
   MC_TOOLS.commit,
+  MC_TOOLS.syncMain,
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
 ] as const;
@@ -761,6 +762,23 @@ export const SANDBOX_DENY_READ_HOME = [
   ".docker",
   ".kube",
   ".claude",
+  // the Claude CLI's account and MCP config, a sibling of .claude that the entry above misses
+  ".claude.json",
+  // the Codex CLI's login (auth.json) and its session transcripts
+  ".codex",
+  // other CLIs' logins and tokens a dev machine commonly holds
+  ".config/gcloud",
+  ".azure",
+  ".config/op",
+  ".pypirc",
+  ".cargo/credentials.toml",
+  ".gem/credentials",
+  ".vault-token",
+  ".terraform.d",
+  ".copilot",
+  // shell history often holds pasted secrets
+  ".zsh_history",
+  ".bash_history",
   // the login keychain: without this, code a seat runs sees it in `security list-keychains` and
   // opens it; with it, opening fails EPERM and only the System keychain is listed (probe
   // 2026-10-20; no real item was read). The CLI's own login runs outside the sandbox.
@@ -1072,3 +1090,22 @@ export interface CrewSessionFolders {
   readable: boolean;
   folders: { name: string; owners: AgentId[] }[];
 }
+
+/** `POST /api/crew/sessions`: the name/id is independent of the repo, branch and strategy. */
+export const SESSION_CHECKOUT_STRATEGIES = ["shared", "separate"] as const;
+export interface NewCrewSession {
+  id: string;
+  repoId: string;
+  source: string;
+  branch: string;
+  checkoutStrategy: (typeof SESSION_CHECKOUT_STRATEGIES)[number];
+}
+
+/** `POST /api/crew/sessions/:id/close`: what happened to the checkout after closing. */
+export type SessionCheckoutOutcome =
+  | "unmanaged"
+  | "removed"
+  | "retained-dirty"
+  | "retained-unpushed"
+  | "retained-unproven"
+  | "removal-failed-partway";

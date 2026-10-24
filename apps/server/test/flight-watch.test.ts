@@ -57,8 +57,10 @@ import {
 } from "../src/flight/state.ts";
 import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
+import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
+import { foldTranscript } from "../src/streamjson.ts";
 
 const T0 = Date.parse("2026-10-22T12:00:00Z");
 const MIN = 60_000;
@@ -711,7 +713,7 @@ describe("FLIGHT's brief in the digest", () => {
     expect(state.brief?.[3]?.text).toBe("Ship the brief.");
   });
 
-  it("carries a ledger index and headline without in_progress prose", async () => {
+  it("carries a ledger index and headline, and a ledger edit does not wake FLIGHT", async () => {
     for (const [section, text] of [
       ["in_progress", "Wiring the page."],
       [FLIGHT_HEADLINE, "H"],
@@ -752,6 +754,17 @@ describe("FLIGHT's brief in the digest", () => {
     expect(state.headline).toBe("H");
     expect(state.brief?.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
     expect(line).not.toContain("Wiring the page.");
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    store.putFlightLedgerEntry("s1", { ...entry, next: "Review it", updatedAt: nowMs }, 0);
+    bus.emit("flight");
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    // A real question can wake FLIGHT at the same time; the ledger edit was not throttled.
+    live("guido-1", "r-guido");
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
   });
 
   it("a brief edit alone does not wake FLIGHT", async () => {
@@ -1520,6 +1533,7 @@ describe("wakeSummary", () => {
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
     brief: [],
+    headlineAgeMin: null,
     headline: "",
     ledger: [],
     ledgerMore: 0,
@@ -2336,6 +2350,29 @@ describe("ops review regressions", () => {
     signalState();
   });
 
+  it("groups budget parks by their ceiling, not the tokens each one used", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    for (const [id, used] of [
+      ["budget-a", 1001],
+      ["budget-b", 1043],
+    ]) {
+      const reason = `used ${used} input + output tokens of a 1000-token budget`;
+      store.upsertRun(
+        run(id as string, "guido-1", {
+          ticket: "mc#176",
+          loop: { ...NEW_LOOP, phase: "parked", parked: { kind: "budget", reason, ended: false } },
+        }),
+      );
+      store.addLoopEvent(`${id}:park`, id as string, `parked: ${reason}`, T0);
+    }
+    expect(signalState().signals).toEqual([
+      expect.objectContaining({
+        kind: "repeat_park",
+        key: "mc#176:used <n> input + output tokens of a 1000-token budget",
+      }),
+    ]);
+  });
+
   it("normalizes SHA evidence and keys repeated parks by ticket and reason, excluding closed and absent tickets", () => {
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     for (const [id, sha] of [
@@ -2529,6 +2566,61 @@ describe("ops review regressions", () => {
         .sort(),
     ).toEqual(["report:engine-ended", "report:silent"]);
   });
+
+  it.each(["failed", "superseded"] as const)(
+    "uses only structured diagnostics for a %s review",
+    (state) => {
+      const reviewId = store.requestReview({
+        authorRunId: "author",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: "head",
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      }) as number;
+      store.setReviewState(reviewId, ["queued"], state, { at: T0 });
+      const r = run("failed-review", "retro-1", { reviewId, endedAt: T0, status: "failed" });
+      store.upsertRun(r);
+      recordNoReport(
+        store,
+        r,
+        "review",
+        { code: 1, signal: null, lastStderr: "private stderr" },
+        foldTranscript(
+          null,
+          [
+            JSON.stringify({
+              type: "result",
+              subtype: "error_during_execution",
+              is_error: true,
+              stop_reason: "model_context_window_exceeded",
+              terminal_reason: "aborted_streaming",
+              errors: ["private error text"],
+            }),
+          ],
+          T0,
+        ),
+        T0,
+      );
+      const signals = signalState().signals;
+      if (state === "superseded") {
+        expect(signals).toEqual([]);
+        return;
+      }
+      expect(JSON.stringify(signals)).not.toContain("private");
+      expect(JSON.stringify(signals)).toContain("aborted_streaming");
+      expect(signals).toContainEqual(
+        expect.objectContaining({
+          key: `report:${r.id}`,
+          kind: "hub_error",
+          evidence: expect.stringContaining("stop reason model_context_window_exceeded"),
+        }),
+      );
+    },
+  );
 
   it.each(["queued", "starting", "running", "reported", "superseded", "failed"] as const)(
     "only treats pending reviews as missing reports: %s",

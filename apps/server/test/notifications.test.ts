@@ -263,3 +263,52 @@ describe("notifications", () => {
     expect(parsePersonKey("note:1")).toBeNull();
   });
 });
+
+describe("REST response bodies", () => {
+  // A dropped read retries after 1 s; fake only setTimeout so stream reads still settle.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    [new DOMException("deadline", "TimeoutError"), "github: response timed out after 20 s"],
+    [new TypeError("network failed"), "github: request failed"],
+    [new DOMException("cancelled", "AbortError"), "github: request failed"],
+  ])("describes a failure before headers: %s", async (error, message) => {
+    const f = vi.fn().mockRejectedValue(error);
+    const failed = makeRest("t", f)(NOTIFICATIONS_URL).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await failed).toMatchObject({
+      name: "GqlTransportError",
+      message,
+      status: null,
+    });
+  });
+
+  it.each([
+    [new DOMException("deadline", "TimeoutError"), "github: response timed out after 20 s"],
+    [new DOMException("cancelled", "AbortError"), "github: response cut off"],
+    [new TypeError("terminated"), "github: response cut off"],
+    [null, "github: response was not JSON (text/html)"],
+  ])("describes the body failure: %s", async (error, message) => {
+    const f = vi.fn(async () =>
+      error
+        ? new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(error);
+              },
+            }),
+          )
+        : new Response("private body", { headers: { "content-type": "text/html" } }),
+    );
+    const failed = makeRest("t", f)(NOTIFICATIONS_URL).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1000);
+    const caught = await failed;
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe(message);
+  });
+});

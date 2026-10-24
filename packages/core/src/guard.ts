@@ -73,6 +73,8 @@ export interface GuardContext {
   /** The repo's current `flight_powers`, read from the live config on each call. */
   flightPowers: FlightPowers;
   fullSuite: readonly string[];
+  /** Extra role grants; FLIGHT shares sync_main with writers through its own tool. */
+  mcTools?: readonly string[];
 }
 
 export type GuardVerdict =
@@ -175,8 +177,8 @@ export interface GuardHitsView {
   counts: Record<GuardRule, number>;
 }
 
-/** The mc tools that write (hub-side git); a read-only seat may not call them. */
-export const MC_WRITER_TOOLS = [MC_TOOLS.commit] as const;
+/** The writer tools that write through hub-side git; FLIGHT has its own granted sync_main. */
+export const MC_WRITER_TOOLS = [MC_TOOLS.commit, MC_TOOLS.syncMain] as const;
 
 /** The mc tools a scratch seat may not call: a review answers with report_findings alone. */
 export const MC_SCRATCH_DENIED_TOOLS = [
@@ -1330,7 +1332,10 @@ export function guardDecision(
     if ((READ_ONLY_BUILTINS as readonly string[]).includes(e.tool)) {
       return deny("read-only", e.tool);
     }
-    if ((MC_WRITER_TOOLS as readonly string[]).includes(e.tool)) {
+    if (
+      (MC_WRITER_TOOLS as readonly string[]).includes(e.tool) &&
+      !(e.tool === MC_TOOLS.syncMain && ctx.mcTools?.includes(MC_TOOL_NAMES.syncMain))
+    ) {
       return deny("read-only", e.tool);
     }
   }
@@ -1811,6 +1816,35 @@ export function unclosedMarkdown(md: string): boolean {
   return fence !== null || rawEnd !== null;
 }
 
+/** Link equal-length runs in one scan, then blank spans in opening order without rescanning text. */
+function blankCodeSpans(md: string): string {
+  type Run = { start: number; end: number; next?: Run };
+  const runs: Run[] = [];
+  const open = new Map<number, Run>();
+  for (const match of md.matchAll(/`+|\r?\n[ \t]*\r?\n/g)) {
+    const marks = match[0];
+    if (marks.charAt(0) !== "`") {
+      open.clear();
+      continue;
+    }
+    const run: Run = { start: match.index, end: match.index + marks.length };
+    const previous = open.get(marks.length);
+    if (previous !== undefined) previous.next = run;
+    open.set(marks.length, run);
+    runs.push(run);
+  }
+  const parts: string[] = [];
+  let end = 0;
+  for (const run of runs) {
+    if (run.start < end || run.next === undefined) continue;
+    // closesIssue rejects references containing or directly touching this sentinel.
+    parts.push(md.slice(end, run.start), "\0");
+    end = run.next.end;
+  }
+  parts.push(md.slice(end));
+  return parts.join("");
+}
+
 /**
  * Whether markdown has a closing keyword (`Fixes #n`, `Closes owner/repo#n`, …) aimed at the run's
  * own issue in the run's own repo (character references decoded). A plain mention does not close
@@ -1820,15 +1854,19 @@ export function unclosedMarkdown(md: string): boolean {
  */
 export function closesIssue(md: string, { repo, issue }: { repo: string; issue: number }): boolean {
   const own = repo.toLowerCase();
-  const text = decodeCharRefs(md)
-    .replace(
-      /^ {0,3}(?:(`{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1`*[ \t]*(?=\n|$)|(?![\s\S]))|(~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\2~*[ \t]*(?=\n|$)|(?![\s\S])))/gm,
+  const text = blankCodeSpans(
+    decodeCharRefs(md).replace(
+      /^ {0,3}(?:(`{3,})(?!`)[^\n]*\n[\s\S]*?(?:\n {0,3}\1`*[ \t]*(?=\n|$)|(?![\s\S]))|(~{3,})(?!~)[^\n]*\n[\s\S]*?(?:\n {0,3}\2~*[ \t]*(?=\n|$)|(?![\s\S])))/gm,
       "",
-    )
-    // a span opens with a run of n backticks and closes at the next run of exactly n
-    .replace(/(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g, "")
-    .replace(/<!--[\s\S]*?-->/g, "");
-  return [...text.matchAll(STRICT_CLOSING_REF)].some((m) => closesOwn(m, own, issue));
+    ),
+  ).replace(/<!--[\s\S]*?-->/g, "");
+  return [...text.matchAll(STRICT_CLOSING_REF)].some(
+    (m) =>
+      !m[0].includes("\0") &&
+      text[m.index - 1] !== "\0" &&
+      text[m.index + m[0].length] !== "\0" &&
+      closesOwn(m, own, issue),
+  );
 }
 
 /**
