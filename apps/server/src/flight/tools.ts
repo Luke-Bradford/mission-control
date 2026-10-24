@@ -81,7 +81,22 @@ import {
   FLIGHT_ENDS_PER_HOUR,
   FLIGHT_FIELD_MAX,
   FLIGHT_GH_READS_PER_HOUR,
+  FLIGHT_HEADLINE,
+  FLIGHT_HEADLINE_MAX,
+  FLIGHT_HEADLINE_TITLE,
   FLIGHT_HOUR_MS,
+  FLIGHT_LEDGER_EDITS_PER_HOUR,
+  FLIGHT_LEDGER_KEEP_MS,
+  FLIGHT_LEDGER_KEY,
+  FLIGHT_LEDGER_KINDS,
+  FLIGHT_LEDGER_NEXT_MAX,
+  FLIGHT_LEDGER_OPEN,
+  FLIGHT_LEDGER_OPEN_MAX,
+  FLIGHT_LEDGER_OUTCOME_MAX,
+  FLIGHT_LEDGER_REF,
+  FLIGHT_LEDGER_REFS_MAX,
+  FLIGHT_LEDGER_STATUSES,
+  FLIGHT_LEDGER_TITLE_MAX,
   FLIGHT_LIST_MAX,
   FLIGHT_LIST_PAGES,
   FLIGHT_MESSAGES_PER_HOUR,
@@ -104,6 +119,7 @@ import {
   FLIGHT_UNPARKS_PER_RUN,
   type FlightDecision,
   type FlightDecisionKind,
+  type FlightLedgerEntry,
   type FlightMoveColumn,
   type FlightPowers,
   type FlightPrRead,
@@ -115,12 +131,23 @@ import {
   hasDoneWhenSection,
   hasOutcomeSection,
   hasPlanSection,
+  headlineSavedText,
+  headlineText,
   heldDecision,
   holdNotOpenPrText,
   hudColumnOf,
   LANE_LABEL_PREFIX,
+  LEDGER_DESCRIPTION,
+  LEDGER_FULL_TEXT,
+  LEDGER_KIND_CHANGE_TEXT,
+  LEDGER_TRACK_CLOSED_TEXT,
   LIST_TICKETS_DESCRIPTION,
   labelCountText,
+  ledgerClosedText,
+  ledgerNextText,
+  ledgerNoKeyText,
+  ledgerOwnerText,
+  ledgerTitleText,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TEXT_MAX,
@@ -158,6 +185,8 @@ import {
   notSentText,
   notStartableSeatText,
   OWN_SEAT_TEXT,
+  OWNER_OPERATOR,
+  orderLedger,
   PASSED_DECISION,
   PASSED_TEXT,
   PLAN_SIZES,
@@ -220,11 +249,15 @@ import {
   type TestLockState,
   TICKET_SIZES,
   type TicketView,
+  TRACK_DESCRIPTION,
   ticketReadText,
+  trackedText,
+  UNTRACK_DESCRIPTION,
   UPDATE_BRIEF_DESCRIPTION,
   unclosedMarkdown,
   unknownLabelText,
   unparkCapText,
+  untrackedText,
   WAITS_ON_ONLY_BACKLOG,
   wrongColumnText,
 } from "@mc/core";
@@ -455,11 +488,39 @@ const ArrivalOperationArgs = z.strictObject({
   outcome: z.enum(["No action", "Queued"]),
   detail: text(MC_TEXT_MAX),
 });
+const TrackArgs = z.strictObject({
+  kind: z.enum(FLIGHT_LEDGER_KINDS),
+  key: z.string().regex(FLIGHT_LEDGER_KEY),
+  title: text(MC_TEXT_MAX),
+  status: z.enum(FLIGHT_LEDGER_STATUSES),
+  owner: text(MC_TEXT_MAX).nullable().optional(),
+  next: text(MC_TEXT_MAX).nullable().optional(),
+  waitsOn: text(FLIGHT_LEDGER_NEXT_MAX).nullable().optional(),
+  due: z.number().int().min(0).nullable().optional(),
+  refs: z
+    .array(z.string().regex(FLIGHT_LEDGER_REF))
+    .max(FLIGHT_LEDGER_REFS_MAX)
+    .nullable()
+    .optional(),
+  priority: z.enum(PRIORITIES).nullable().optional(),
+  basis: basisArg,
+});
+const UntrackArgs = z.strictObject({
+  key: z.string().regex(FLIGHT_LEDGER_KEY),
+  status: z.enum(["done", "dropped"]).default("done"),
+  outcome: text(FLIGHT_LEDGER_OUTCOME_MAX),
+  basis: basisArg,
+});
+const LedgerArgs = z.strictObject({
+  kind: z.enum(FLIGHT_LEDGER_KINDS).optional(),
+  status: z.enum(FLIGHT_LEDGER_STATUSES).optional(),
+});
+
 const UpdateBriefArgs = z.strictObject({
   planned: PlanOperationArgs.optional(),
   watch: WatchOperationArgs.optional(),
   arrival: ArrivalOperationArgs.optional(),
-  section: z.enum(FLIGHT_BRIEF_SECTIONS),
+  section: z.enum([...FLIGHT_BRIEF_SECTIONS, FLIGHT_HEADLINE]),
   text: z.string().max(FLIGHT_BRIEF_INPUT_MAX),
   basis: basisArg,
 });
@@ -1930,13 +1991,108 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: JSON.stringify({ repo: repo.id, tickets, more }) };
   }
 
+  let ledgerEdits: number[] = [];
+  const ledgerEditCount = (at: number): number => {
+    ledgerEdits = ledgerEdits.filter((t) => t >= at - FLIGHT_HOUR_MS);
+    return ledgerEdits.length;
+  };
+
+  async function track(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, TrackArgs, args);
+    if (!c.ok) return c.result;
+    const session = flightSeat(config)?.session;
+    if (!session) return fail(MC_FLIGHT_ONLY);
+    const a = c.args;
+    if (!FLIGHT_LEDGER_OPEN.includes(a.status)) return fail(LEDGER_TRACK_CLOSED_TEXT);
+    if (a.title.length > FLIGHT_LEDGER_TITLE_MAX || /[\r\n]/.test(a.title))
+      return fail(ledgerTitleText(a.title.length));
+    if (a.next != null && (a.next.length > FLIGHT_LEDGER_NEXT_MAX || /[\r\n]/.test(a.next)))
+      return fail(ledgerNextText(a.next.length));
+    if (
+      a.owner != null &&
+      a.owner !== OWNER_OPERATOR &&
+      !session.seats.some((s) => s.id === a.owner) &&
+      !CREW_LANES.some((lane) => a.owner === `${LANE_LABEL_PREFIX}${lane}`)
+    )
+      return fail(ledgerOwnerText(a.owner));
+    const at = now();
+    const n = ledgerEditCount(at);
+    if (n >= FLIGHT_LEDGER_EDITS_PER_HOUR) return fail(capText("changed your ledger", n));
+    const entries = store.flightLedger(session.id);
+    const old = entries.find((e) => e.key === a.key);
+    if (old && old.kind !== a.kind) return fail(LEDGER_KIND_CHANGE_TEXT);
+    const entry: FlightLedgerEntry = {
+      kind: a.kind,
+      key: a.key,
+      title: a.title,
+      status: a.status,
+      owner: a.owner === undefined ? (old?.owner ?? null) : a.owner,
+      next: a.next === undefined ? (old?.next ?? null) : a.next,
+      waitsOn: a.waitsOn === undefined ? (old?.waitsOn ?? null) : a.waitsOn,
+      due: a.due === undefined ? (old?.due ?? null) : a.due,
+      refs: a.refs === undefined ? (old?.refs ?? []) : (a.refs ?? []),
+      priority: a.priority === undefined ? (old?.priority ?? null) : a.priority,
+      createdAt: old?.createdAt ?? at,
+      updatedAt: at,
+      outcome: null,
+      basis: a.basis,
+    };
+    const open = entries.filter(
+      (e) => e.key !== a.key && FLIGHT_LEDGER_OPEN.includes(e.status),
+    ).length;
+    if (open + Number(FLIGHT_LEDGER_OPEN.includes(entry.status)) > FLIGHT_LEDGER_OPEN_MAX)
+      return fail(LEDGER_FULL_TEXT);
+    store.putFlightLedgerEntry(session.id, entry, at - FLIGHT_LEDGER_KEEP_MS);
+    ledgerEdits.push(at);
+    bus.emit("flight");
+    return { text: trackedText(a.key, old === undefined) };
+  }
+
+  async function untrack(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, UntrackArgs, args);
+    if (!c.ok) return c.result;
+    const session = flightSeat(config)?.session.id;
+    if (session === undefined) return fail(MC_FLIGHT_ONLY);
+    const { key, status, outcome, basis } = c.args;
+    const entry = store.flightLedger(session).find((e) => e.key === key);
+    if (!entry) return fail(ledgerNoKeyText(key));
+    if (!FLIGHT_LEDGER_OPEN.includes(entry.status)) return fail(ledgerClosedText(key));
+    const at = now();
+    const n = ledgerEditCount(at);
+    if (n >= FLIGHT_LEDGER_EDITS_PER_HOUR) return fail(capText("changed your ledger", n));
+    store.putFlightLedgerEntry(
+      session,
+      { ...entry, status, outcome, basis, updatedAt: at },
+      at - FLIGHT_LEDGER_KEEP_MS,
+    );
+    ledgerEdits.push(at);
+    bus.emit("flight");
+    return { text: untrackedText(key) };
+  }
+
+  async function ledger(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, LedgerArgs, args);
+    if (!c.ok) return c.result;
+    const session = flightSeat(config)?.session.id;
+    if (session === undefined) return fail(MC_FLIGHT_ONLY);
+    const entries = orderLedger(store.flightLedger(session)).filter(
+      (e) =>
+        (c.args.kind === undefined || e.kind === c.args.kind) &&
+        (c.args.status === undefined || e.status === c.args.status),
+    );
+    return { text: JSON.stringify({ entries }) };
+  }
+
   async function updateBrief(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, UpdateBriefArgs, args);
     if (!c.ok) return c.result;
     const { section, text: body, basis } = c.args;
     const session = flightSeat(config)?.session.id;
     if (session === undefined) return fail(MC_FLIGHT_ONLY);
-    const title = FLIGHT_BRIEF_TITLES[section];
+    const title =
+      section === FLIGHT_HEADLINE ? FLIGHT_HEADLINE_TITLE : FLIGHT_BRIEF_TITLES[section];
+    if (section === FLIGHT_HEADLINE && (body.length > FLIGHT_HEADLINE_MAX || /[\r\n]/.test(body)))
+      return fail(headlineText(body.length));
     if (body.length > FLIGHT_BRIEF_SECTION_MAX) return fail(briefTooLongText(title, body.length));
     const at = now();
     const n = lastHour(["brief"], at);
@@ -1979,7 +2135,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       basis,
     });
     bus.emit("flight");
-    return { text: body === "" ? briefClearedText(title) : briefSavedText(title, body.length) };
+    return {
+      text:
+        body === ""
+          ? briefClearedText(title)
+          : section === FLIGHT_HEADLINE
+            ? headlineSavedText(body.length)
+            : briefSavedText(title, body.length),
+    };
   }
 
   const PrBasisArgs = z.strictObject({ pr: issueNumber, basis: basisArg });
@@ -2531,7 +2694,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           watch: z.toJSONSchema(WatchOperationArgs),
           planned: z.toJSONSchema(PlanOperationArgs),
           arrival: z.toJSONSchema(ArrivalOperationArgs),
-          section: { type: "string", enum: FLIGHT_BRIEF_SECTIONS },
+          section: { type: "string", enum: [...FLIGHT_BRIEF_SECTIONS, FLIGHT_HEADLINE] },
           text: { type: "string", maxLength: FLIGHT_BRIEF_SECTION_MAX },
           basis: BASIS_SCHEMA,
         },
@@ -2603,6 +2766,30 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         bus.emit("flight");
         return { text: draftedReplyText(id) };
       },
+    },
+    {
+      name: MC_TOOL_NAMES.track,
+      description: TRACK_DESCRIPTION,
+      inputSchema: z.toJSONSchema(TrackArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: track,
+    },
+    {
+      name: MC_TOOL_NAMES.untrack,
+      description: UNTRACK_DESCRIPTION,
+      inputSchema: z.toJSONSchema(UntrackArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: untrack,
+    },
+    {
+      name: MC_TOOL_NAMES.ledger,
+      description: LEDGER_DESCRIPTION,
+      inputSchema: z.toJSONSchema(LedgerArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: ledger,
     },
   ];
 }

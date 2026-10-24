@@ -5,12 +5,15 @@ import {
   type BoardItem,
   COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
+  FLIGHT_HEADLINE,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
+  FLIGHT_NOTE_SECTIONS,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
+  type FlightLedgerEntry,
   type FlightSeatState,
   type FlightState,
   flightStartFailedText,
@@ -661,28 +664,71 @@ describe("FLIGHT's items to brief", () => {
 });
 
 describe("FLIGHT's brief in the digest", () => {
-  const setGoals = (at: number) =>
+  const setNotes = (at: number) =>
     store.setFlightBriefSection({
       sessionId: "s1",
-      section: "goals",
+      section: "lessons",
       text: "Ship the brief.",
       updatedAt: at,
       updatedBy: "flight-1",
     });
 
-  it("starts FLIGHT with the whole brief", async () => {
-    setGoals(T0);
+  it("starts FLIGHT with the note sections", async () => {
+    setNotes(T0);
     await watch.check();
     const state = JSON.parse(startCalls[0]?.first?.split("\n")[2] ?? "") as FlightState;
-    expect(state.brief).toHaveLength(9);
-    expect(state.brief[0]?.text).toBe("Ship the brief.");
+    expect(state.brief.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
+    expect(state.brief[3]?.text).toBe("Ship the brief.");
+  });
+
+  it("carries a ledger index and headline without in_progress prose", async () => {
+    for (const [section, text] of [
+      ["in_progress", "Wiring the page."],
+      [FLIGHT_HEADLINE, "H"],
+    ] as const) {
+      store.setFlightBriefSection({
+        sessionId: "s1",
+        section,
+        text,
+        updatedAt: T0,
+        updatedBy: "flight-1",
+      });
+    }
+    const entry: FlightLedgerEntry = {
+      kind: "work",
+      key: "w-ledger",
+      title: "Wire the page",
+      status: "active",
+      next: "plan it",
+      owner: null,
+      waitsOn: null,
+      due: null,
+      refs: [],
+      priority: null,
+      createdAt: T0,
+      updatedAt: T0,
+      outcome: null,
+      basis: "ticket",
+    };
+    store.putFlightLedgerEntry("s1", entry, 0);
+    store.putFlightLedgerEntry("s1", { ...entry, key: "old", status: "done" }, 0);
+    await watch.check();
+    const line = startCalls[0]?.first ?? "";
+    const state = JSON.parse(line.split("\n")[2] ?? "") as FlightState;
+    expect(state.ledger).toEqual([
+      { kind: "work", key: "w-ledger", title: "Wire the page", status: "active", next: "plan it" },
+    ]);
+    expect(state.ledgerMore).toBe(0);
+    expect(state.headline).toBe("H");
+    expect(state.brief.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
+    expect(line).not.toContain("Wiring the page.");
   });
 
   it("a brief edit alone does not wake FLIGHT", async () => {
     liveCrew();
     await watch.check();
     const sent = sendCalls.length;
-    setGoals(T0);
+    setNotes(T0);
     nowMs = T0 + MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(sent);
@@ -1276,6 +1322,9 @@ describe("wakeSummary", () => {
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
     brief: [],
+    headline: "",
+    ledger: [],
+    ledgerMore: 0,
     ...over,
   });
 

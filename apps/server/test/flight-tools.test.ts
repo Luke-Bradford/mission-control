@@ -25,14 +25,19 @@ import {
   FLIGHT_BRIEF_EDITS_PER_HOUR,
   FLIGHT_BRIEF_INPUT_MAX,
   FLIGHT_BRIEF_SECTION_MAX,
-  FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
   FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
   FLIGHT_GH_READS_PER_HOUR,
   FLIGHT_HANDLING_MAX_MS,
+  FLIGHT_HEADLINE,
+  FLIGHT_HEADLINE_MAX,
+  FLIGHT_HEADLINE_TITLE,
+  FLIGHT_LEDGER_EDITS_PER_HOUR,
+  FLIGHT_LEDGER_OPEN_MAX,
   FLIGHT_LIST_PAGES,
+  FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
   FLIGHT_PR_CHECKS_LISTED,
@@ -41,6 +46,16 @@ import {
   type FlightDecision,
   GITHUB_WRITES_OFF,
   GUARD_ACK_PREFIX,
+  headlineSavedText,
+  headlineText,
+  LEDGER_FULL_TEXT,
+  LEDGER_KIND_CHANGE_TEXT,
+  LEDGER_TRACK_CLOSED_TEXT,
+  ledgerClosedText,
+  ledgerNextText,
+  ledgerNoKeyText,
+  ledgerOwnerText,
+  ledgerTitleText,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
@@ -62,7 +77,9 @@ import {
   type TestLockState,
   type TicketView,
   ticketHasRunText,
+  trackedText,
   twoAreasText,
+  untrackedText,
   WAITS_ON_ONLY_BACKLOG,
   waitsOnText,
   wrongAreaText,
@@ -510,6 +527,9 @@ describe("tool list", () => {
       "edit_card",
       "dismiss_item",
       "draft_reply",
+      "track",
+      "untrack",
+      "ledger",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -2241,7 +2261,10 @@ describe("flight_state", () => {
       holds: [],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
-      brief: FLIGHT_BRIEF_SECTIONS.map((section) => ({
+      headline: "",
+      ledger: [],
+      ledgerMore: 0,
+      brief: FLIGHT_NOTE_SECTIONS.map((section) => ({
         section,
         title: FLIGHT_BRIEF_TITLES[section],
         text: "",
@@ -3556,19 +3579,19 @@ describe("update_brief", () => {
   });
 
   it("is carried by flight_state", async () => {
-    await save("goals", "G");
+    await save("lessons", "G");
     nowMs = NOW + 5 * 60_000;
     const s = JSON.parse((await call("flight_state", {})).text) as {
       brief: { section: string; title: string; text: string; ageMin: number | null }[];
     };
-    expect(s.brief).toHaveLength(9);
-    expect(s.brief[0]).toEqual({
-      section: "goals",
-      title: GOALS,
+    expect(s.brief).toHaveLength(4);
+    expect(s.brief[3]).toEqual({
+      section: "lessons",
+      title: FLIGHT_BRIEF_TITLES.lessons,
       text: "G",
       ageMin: 5,
     });
-    expect(s.brief[8]).toMatchObject({ text: "", ageMin: null });
+    expect(s.brief[0]).toMatchObject({ text: "", ageMin: null });
   });
 });
 
@@ -5056,5 +5079,196 @@ describe("superuser housekeeping", () => {
       true,
     );
     expect(ghCalls).toEqual([]);
+  });
+});
+
+describe("track", () => {
+  const entry = {
+    kind: "work",
+    key: "w-ledger",
+    title: "Ledger",
+    status: "active",
+    next: "plan it",
+    priority: "P1",
+    basis: "ticket",
+  };
+
+  it("creates and updates by key, retaining omitted fields and refusing invalid titles and owners", async () => {
+    expect(await call("track", entry)).toEqual({ text: trackedText(entry.key, true) });
+    nowMs = NOW + 1000;
+    const { next: _next, ...update } = entry;
+    expect(await call("track", { ...update, status: "blocked" })).toEqual({
+      text: trackedText(entry.key, false),
+    });
+    const saved = store.flightLedger("s1");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      status: "blocked",
+      next: "plan it",
+      createdAt: NOW,
+      updatedAt: NOW + 1000,
+    });
+    expect(await call("track", { ...entry, title: "x".repeat(81) })).toEqual(
+      refused(ledgerTitleText(81)),
+    );
+    expect(await call("track", { ...entry, owner: "nobody-9" })).toEqual(
+      refused(ledgerOwnerText("nobody-9")),
+    );
+    expect(await call("track", { ...entry, owner: "lane:banana" })).toEqual(
+      refused(ledgerOwnerText("lane:banana")),
+    );
+    expect(store.flightLedger("s1")).toEqual(saved);
+    expect(decisions()).toEqual([]);
+    expect(seen).toContain("flight");
+  });
+
+  it("clears nullable fields, validates lines and accepts session, operator and lane owners", async () => {
+    for (const owner of ["guido-1", "operator", "lane:home", "lane:work"]) {
+      expect(await call("track", { ...entry, owner, refs: ["#1", "PR #2"] })).not.toHaveProperty(
+        "isError",
+      );
+    }
+    expect(
+      await call("track", { ...entry, next: null, owner: null, refs: null, priority: null }),
+    ).not.toHaveProperty("isError");
+    expect(store.flightLedger("s1")[0]).toMatchObject({
+      next: null,
+      owner: null,
+      refs: [],
+      priority: null,
+    });
+    expect(await call("track", { ...entry, title: "a\nb" })).toEqual(refused(ledgerTitleText(3)));
+    expect(await call("track", { ...entry, next: "a\rb" })).toEqual(refused(ledgerNextText(3)));
+    expect(await call("track", { ...entry, next: "x".repeat(121) })).toEqual(
+      refused(ledgerNextText(121)),
+    );
+    for (const invalid of [
+      { key: "bad key" },
+      { refs: ["#0"] },
+      { due: -1 },
+      { priority: "P3" },
+      { extra: true },
+    ]) {
+      expect((await call("track", { ...entry, ...invalid })).isError).toBe(true);
+    }
+  });
+
+  it.each(["done", "dropped"])(
+    "refuses status %s and directs closing through untrack",
+    async (status) => {
+      expect(await call("track", { ...entry, status })).toEqual(refused(LEDGER_TRACK_CLOSED_TEXT));
+      expect(store.flightLedger("s1")).toEqual([]);
+      await call("track", entry);
+      const saved = store.flightLedger("s1");
+      expect(await call("track", { ...entry, status })).toEqual(refused(LEDGER_TRACK_CLOSED_TEXT));
+      expect(store.flightLedger("s1")).toEqual(saved);
+    },
+  );
+
+  it("refuses changing an existing key's kind, including when reopening", async () => {
+    await call("track", entry);
+    const saved = store.flightLedger("s1");
+    expect(await call("track", { ...entry, kind: "watch" })).toEqual(
+      refused(LEDGER_KIND_CHANGE_TEXT),
+    );
+    expect(store.flightLedger("s1")).toEqual(saved);
+    await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" });
+    const closed = store.flightLedger("s1");
+    expect(await call("track", { ...entry, kind: "watch" })).toEqual(
+      refused(LEDGER_KIND_CHANGE_TEXT),
+    );
+    expect(store.flightLedger("s1")).toEqual(closed);
+  });
+
+  it("shares an hourly edit cap with untrack, without recording decisions", async () => {
+    for (let n = 0; n < FLIGHT_LEDGER_EDITS_PER_HOUR; n++) await call("track", entry);
+    const capped = refused(capText("changed your ledger", FLIGHT_LEDGER_EDITS_PER_HOUR));
+    expect(await call("track", entry)).toEqual(capped);
+    expect(await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" })).toEqual(
+      capped,
+    );
+    nowMs += 61 * 60_000;
+    expect(await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" })).toEqual({
+      text: untrackedText(entry.key),
+    });
+    expect(decisions()).toEqual([]);
+  });
+
+  it("caps open entries but allows updating and closing them", async () => {
+    await call("track", entry);
+    const saved = store.flightLedger("s1")[0];
+    if (!saved) throw new Error("no entry");
+    for (let n = 1; n < FLIGHT_LEDGER_OPEN_MAX; n++)
+      store.putFlightLedgerEntry("s1", { ...saved, key: `w${n}` }, 0);
+    expect(await call("track", { ...entry, key: "overflow" })).toEqual(refused(LEDGER_FULL_TEXT));
+    expect(await call("track", { ...entry, status: "waiting" })).toEqual({
+      text: trackedText(entry.key, false),
+    });
+    await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" });
+    expect(await call("track", { ...entry, key: "new" })).toEqual({
+      text: trackedText("new", true),
+    });
+  });
+
+  it("lists ordered entries with optional kind and status filters", async () => {
+    await call("track", { ...entry, kind: "watch", key: "watch" });
+    await call("track", { ...entry, key: "work" });
+    const all = JSON.parse((await call("ledger", {})).text);
+    expect(all.entries.map((e: { key: string }) => e.key)).toEqual(["work", "watch"]);
+    const filtered = JSON.parse((await call("ledger", { kind: "watch", status: "active" })).text);
+    expect(filtered.entries.map((e: { key: string }) => e.key)).toEqual(["watch"]);
+    live("guido-1", "r-guido");
+    for (const [name, args] of [
+      ["track", entry],
+      ["untrack", { key: "work", outcome: "done", basis: "ticket" }],
+      ["ledger", {}],
+    ] as const) {
+      expect(await call(name, args, ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
+    }
+  });
+});
+
+describe("untrack", () => {
+  it("can drop an entry and refuses open statuses", async () => {
+    await call("track", {
+      kind: "work",
+      key: "w1",
+      title: "Work",
+      status: "active",
+      basis: "ticket",
+    });
+    const args = { key: "w1", outcome: "No longer needed", basis: "scope changed" };
+    for (const status of ["active", "waiting", "blocked"]) {
+      expect((await call("untrack", { ...args, status })).isError).toBe(true);
+    }
+    expect(await call("untrack", { ...args, status: "dropped" })).toEqual({
+      text: untrackedText("w1"),
+    });
+    expect(store.flightLedger("s1")[0]).toMatchObject({ status: "dropped", outcome: args.outcome });
+  });
+  it("closes with an outcome, refuses closed and missing keys, and clears the outcome on reopening", async () => {
+    const entry = { kind: "work", key: "w1", title: "Work", status: "active", basis: "ticket" };
+    await call("track", entry);
+    const close = (key: string) => call("untrack", { key, outcome: "merged", basis: "PR merged" });
+    expect(await close("w1")).toEqual({ text: untrackedText("w1") });
+    expect(store.flightLedger("s1")[0]).toMatchObject({ status: "done", outcome: "merged" });
+    expect(await close("w1")).toEqual(refused(ledgerClosedText("w1")));
+    expect(await close("nope")).toEqual(refused(ledgerNoKeyText("nope")));
+    await call("track", entry);
+    expect(store.flightLedger("s1")[0]?.outcome).toBeNull();
+  });
+});
+
+describe("headline", () => {
+  it("saves, limits and clears the headline separately from the nine brief sections", async () => {
+    const save = (text: string) =>
+      call("update_brief", { section: FLIGHT_HEADLINE, text, basis: "wake" });
+    expect(await save("H")).toEqual({ text: headlineSavedText(1) });
+    expect(await save("x".repeat(FLIGHT_HEADLINE_MAX + 1))).toEqual(
+      refused(headlineText(FLIGHT_HEADLINE_MAX + 1)),
+    );
+    expect(await save("a\nb")).toEqual(refused(headlineText(3)));
+    expect(store.flightBrief("s1").find((r) => r.section === FLIGHT_HEADLINE)?.text).toBe("H");
+    expect(await save("")).toEqual({ text: briefClearedText(FLIGHT_HEADLINE_TITLE) });
   });
 });

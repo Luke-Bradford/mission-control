@@ -38,6 +38,9 @@ export const MC_TOOL_NAMES = {
   listTickets: "list_tickets",
   updateBrief: "update_brief",
   draftReply: "draft_reply",
+  track: "track",
+  untrack: "untrack",
+  ledger: "ledger",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -78,6 +81,9 @@ export const MC_TOOLS = {
   listTickets: mcTool(MC_TOOL_NAMES.listTickets),
   updateBrief: mcTool(MC_TOOL_NAMES.updateBrief),
   draftReply: mcTool(MC_TOOL_NAMES.draftReply),
+  track: mcTool(MC_TOOL_NAMES.track),
+  untrack: mcTool(MC_TOOL_NAMES.untrack),
+  ledger: mcTool(MC_TOOL_NAMES.ledger),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */

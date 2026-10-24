@@ -34,7 +34,10 @@ import {
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
+  FLIGHT_HEADLINE,
   type FlightBriefView,
+  type FlightLedgerEntry,
+  type FlightSummaryView,
   type FlightView,
   fullAt5h,
   type MachineSample,
@@ -468,6 +471,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/flight/brief"],
   ["GET", "/api/flight/incoming"],
   ["GET", "/api/flight/schedule"],
+  ["GET", "/api/flight/summary"],
+  ["GET", "/api/flight/ledger"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
@@ -4880,5 +4885,89 @@ describe("operator token", () => {
     expect(remote.json()).toEqual({ error: BOOTSTRAP_REFUSED });
     expect((await fromAddress("::1")).statusCode).toBe(200);
     expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
+  });
+});
+
+describe("FLIGHT ledger views", () => {
+  it("returns empty views without a FLIGHT session", async () => {
+    expect((await get("/api/flight/ledger")).json()).toEqual({ session: null, entries: [] });
+    expect((await get("/api/flight/summary")).json()).toMatchObject({
+      session: null,
+      headline: "",
+      now: [],
+      next: [],
+      incoming: 0,
+      watching: { top: [] },
+    });
+  });
+
+  it("orders now by priority then age, orders next by due time, and caps each list at five", async () => {
+    withCrew();
+    config.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    const entry = (key: string, over: Partial<FlightLedgerEntry> = {}): FlightLedgerEntry => ({
+      key,
+      kind: "work",
+      title: key,
+      status: "active",
+      next: null,
+      owner: null,
+      waitsOn: null,
+      due: null,
+      refs: [],
+      priority: null,
+      createdAt: 0,
+      updatedAt: NOW,
+      outcome: null,
+      basis: "ticket",
+      ...over,
+    });
+    const put = (e: FlightLedgerEntry) => store.putFlightLedgerEntry("s1", e, 0);
+    for (const [priority, createdAt] of [
+      ["P2", 1],
+      [null, 0],
+      ["P0", 5],
+      ["P0", 2],
+      ["P1", 3],
+      ["P2", 4],
+      ["P2", 6],
+    ] as const) {
+      put(entry(`w${createdAt}`, { priority, createdAt }));
+    }
+    for (const due of [60, 10, 50, 20, 40, 30]) put(entry(`c${due}`, { kind: "commitment", due }));
+    for (let n = 0; n < 7; n++)
+      put(entry(`watch${n}`, { kind: "watch", status: n === 6 ? "blocked" : "active" }));
+    put(entry("watch-done", { kind: "watch", status: "done" }));
+    put(entry("incoming", { kind: "incoming" }));
+    put(entry("incoming-done", { kind: "incoming", status: "done" }));
+    put(entry("waiting-work", { status: "waiting", priority: "P0" }));
+    store.setFlightBriefSection({
+      sessionId: "s1",
+      section: FLIGHT_HEADLINE,
+      text: "H",
+      updatedAt: NOW,
+      updatedBy: "flight-1",
+    });
+    const summary = (await get("/api/flight/summary")).json<FlightSummaryView>();
+    expect(summary.session).toBe("s1");
+    expect(summary.headline).toBe("H");
+    expect(summary.now.map((e) => e.key)).toEqual(["w2", "w5", "w3", "w1", "w4"]);
+    expect(summary.next.map((e) => e.due)).toEqual([10, 20, 30, 40, 50]);
+    expect(summary.watching.top).toHaveLength(5);
+    expect(summary.watching.top[0]?.key).toBe("watch6");
+    expect(summary.watching.counts).toEqual({
+      active: 6,
+      waiting: 0,
+      blocked: 1,
+      done: 1,
+      dropped: 0,
+    });
+    expect(summary.incoming).toBe(1);
+    expect((await get("/api/flight/ledger")).json().entries).toHaveLength(24);
   });
 });

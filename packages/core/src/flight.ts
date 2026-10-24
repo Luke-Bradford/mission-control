@@ -1,3 +1,4 @@
+import { priorityRank } from "./board.ts";
 import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
 import { pathsText, RULING_PARK } from "./loop.ts";
 import type { Verdict } from "./review.ts";
@@ -105,6 +106,138 @@ export const briefNoItemText = (key: string): string =>
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
 export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling for at most 24 hours. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original in full. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. Texts accept ${BRIEF_INPUT_MAX} characters without truncation. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
 
+export const FLIGHT_LEDGER_KINDS = ["work", "watch", "commitment", "incoming"] as const;
+export type FlightLedgerKind = (typeof FLIGHT_LEDGER_KINDS)[number];
+export const FLIGHT_LEDGER_STATUSES = ["active", "waiting", "blocked", "done", "dropped"] as const;
+export type FlightLedgerStatus = (typeof FLIGHT_LEDGER_STATUSES)[number];
+export const FLIGHT_LEDGER_OPEN: readonly FlightLedgerStatus[] = ["active", "waiting", "blocked"];
+export const FLIGHT_LEDGER_KEY = /^[A-Za-z0-9:#._-]{1,100}$/;
+export const FLIGHT_LEDGER_REF = /^(?:PR )?#[1-9][0-9]{0,9}$/;
+export const FLIGHT_LEDGER_TITLE_MAX = 80;
+export const FLIGHT_LEDGER_NEXT_MAX = 120;
+export const FLIGHT_LEDGER_OUTCOME_MAX = 300;
+export const FLIGHT_LEDGER_REFS_MAX = 10;
+export const FLIGHT_LEDGER_OPEN_MAX = 200;
+export const FLIGHT_LEDGER_INDEX_MAX = 60;
+export const FLIGHT_LEDGER_KEEP_MS = 7 * 24 * 60 * 60_000;
+export const FLIGHT_LEDGER_EDITS_PER_HOUR = 60;
+export const FLIGHT_SUMMARY_LISTED = 5;
+export const FLIGHT_METRICS_DAY_MS = 24 * 60 * 60_000;
+export const FLIGHT_DECISIONS_SCAN_LIMIT = 1000;
+export const FLIGHT_WATCH_ORDER: Record<FlightLedgerStatus, number> = {
+  blocked: 0,
+  active: 1,
+  waiting: 2,
+  done: 3,
+  dropped: 4,
+};
+export const FLIGHT_HEADLINE = "headline";
+export const FLIGHT_HEADLINE_MAX = 140;
+export const FLIGHT_HEADLINE_TITLE = "Headline";
+export const FLIGHT_NOTE_SECTIONS = ["project", "crew", "operator", "lessons"] as const;
+export const FOR_THE_CONTROLLER = "For the controller:";
+
+export interface FlightLedgerEntry {
+  kind: FlightLedgerKind;
+  key: string;
+  title: string;
+  status: FlightLedgerStatus;
+  owner: string | null;
+  next: string | null;
+  waitsOn: string | null;
+  due: number | null;
+  refs: string[];
+  priority: string | null;
+  createdAt: number;
+  updatedAt: number;
+  outcome: string | null;
+  basis: string;
+}
+export type FlightLedgerIndexEntry = Pick<
+  FlightLedgerEntry,
+  "kind" | "key" | "title" | "status" | "next"
+>;
+export interface FlightLedgerView {
+  session: string | null;
+  entries: FlightLedgerEntry[];
+}
+export interface FlightSummaryItem {
+  key: string;
+  kind: FlightLedgerKind | "plan";
+  title: string;
+  status: string;
+  next: string | null;
+  due: number | null;
+  priority: string | null;
+  ageMin: number;
+}
+/**
+ * Daily and live hub metrics. A run's whole cost and tokens are attributed when it was
+ * active in the window (still open or ended at or after `since`); the hub has no per-turn cost.
+ */
+export interface FlightMetrics {
+  since: number;
+  merged: number;
+  opened: number;
+  inReview: number;
+  inCi: number;
+  /** Failure events, including failed re-runs and failures that park a run; not unique commits. */
+  ciFailures: number;
+  reruns: number;
+  parks: { day: number; live: { kind: string; n: number }[] };
+  seats: { seat: string; tokens: number; costUsd: number }[];
+  flight: { wakes: number; costUsd: number };
+  readyToMergedMin: number | null;
+  forTheController: number;
+}
+export interface FlightSummaryView {
+  session: string | null;
+  headline: string;
+  now: FlightSummaryItem[];
+  watching: { counts: Record<FlightLedgerStatus, number>; top: FlightSummaryItem[] };
+  next: FlightSummaryItem[];
+  incoming: number;
+  metrics: FlightMetrics;
+}
+
+export function orderLedger(entries: readonly FlightLedgerEntry[]): FlightLedgerEntry[] {
+  return [...entries].sort(
+    (a, b) =>
+      FLIGHT_LEDGER_KINDS.indexOf(a.kind) - FLIGHT_LEDGER_KINDS.indexOf(b.kind) ||
+      Number(FLIGHT_LEDGER_OPEN.includes(b.status)) -
+        Number(FLIGHT_LEDGER_OPEN.includes(a.status)) ||
+      priorityRank(a.priority) - priorityRank(b.priority) ||
+      a.createdAt - b.createdAt ||
+      a.key.localeCompare(b.key),
+  );
+}
+
+export const ledgerTitleText = (n: number): string =>
+  `Not tracked: the title is one line of at most ${FLIGHT_LEDGER_TITLE_MAX} characters; this one is ${n}.`;
+export const ledgerNextText = (n: number): string =>
+  `Not tracked: next is one line of at most ${FLIGHT_LEDGER_NEXT_MAX} characters; this one is ${n}.`;
+export const ledgerOwnerText = (o: string): string =>
+  `Not tracked: ${o} is not a seat in your session, operator, or a supported lane name.`;
+export const LEDGER_TRACK_CLOSED_TEXT =
+  "Not tracked: use mc untrack with an outcome to mark an entry done or dropped.";
+export const LEDGER_KIND_CHANGE_TEXT =
+  "Not tracked: an existing key cannot change kind. Use a new key.";
+export const LEDGER_FULL_TEXT = `Not tracked: you have ${FLIGHT_LEDGER_OPEN_MAX} open entries, the most allowed.`;
+export const ledgerNoKeyText = (k: string): string => `Not closed: ${k} is not in your ledger.`;
+export const ledgerClosedText = (k: string): string => `Not closed: ${k} is already closed.`;
+export const trackedText = (k: string, created: boolean): string =>
+  `${created ? "Tracked" : "Updated"} ${k} in your ledger.`;
+export const untrackedText = (k: string): string => `Closed ${k} in your ledger.`;
+export const headlineText = (n: number): string =>
+  `Not saved: the headline is one line of at most ${FLIGHT_HEADLINE_MAX} characters; this one is ${n}.`;
+export const headlineSavedText = (n: number): string =>
+  `Saved your headline (${n} of ${FLIGHT_HEADLINE_MAX} characters).`;
+export const TRACK_DESCRIPTION =
+  "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it.";
+export const UNTRACK_DESCRIPTION =
+  "Close a ledger entry by key with its outcome and status done (default) or dropped.";
+export const LEDGER_DESCRIPTION = "List your ledger as JSON, optionally by kind and status.";
+
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
 export const FLIGHT_BRIEF_SECTIONS = [
   "goals",
@@ -158,7 +291,7 @@ export const briefAboutText = (title: string): string => `Brief: ${title}`;
 export const BRIEF_CLEARED_DECISION = "Cleared";
 /** A saved section in the decision log: its size, not its text (the brief itself holds that). */
 export const briefSavedDecision = (chars: number): string => `Saved (${chars} characters)`;
-export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, which comes back in every wake (brief in mc flight_state). Sections: ${FLIGHT_BRIEF_SECTIONS.join(", ")}. text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. Optional watch upsert/remove maintains at most 100 structured entries with stable ids; actions reference an exact lock hold or draft, never prose commands. Optional planned upsert maintains at most 100 scheduled entries: stable id, dueAt (epoch milliseconds), kind (report, PR recheck, brief), target, label and status (pending, completed, cancelled). Schedule only agreed work, never guessed agent finish times. A due plan stays pending until its outcome is observed; completed requires detail describing that observation. Cancel obsolete plans explicitly. Optional arrival records No action with a reason, or Queued only for an already queued Board arrival; copy its source identity/version (Board version is createdAt, person version is source.revision). At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
+export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, which comes back in every wake (brief in mc flight_state). Sections: ${FLIGHT_HEADLINE} (one line, at most ${FLIGHT_HEADLINE_MAX} characters), ${FLIGHT_NOTE_SECTIONS.join(", ")}; keep status in your ledger (mc track). text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. Optional watch upsert/remove maintains at most 100 structured entries with stable ids; actions reference an exact lock hold or draft, never prose commands. Optional planned upsert maintains at most 100 scheduled entries: stable id, dueAt (epoch milliseconds), kind (report, PR recheck, brief), target, label and status (pending, completed, cancelled). Schedule only agreed work, never guessed agent finish times. A due plan stays pending until its outcome is observed; completed requires detail describing that observation. Cancel obsolete plans explicitly. Optional arrival records No action with a reason, or Queued only for an already queued Board arrival; copy its source identity/version (Board version is createdAt, person version is source.revision). At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
 
 export const READ_OTHER_REPO =
   "Not read: you read only your session's repo, or the issue of an open loop escalation in another configured repo.";
@@ -532,6 +665,10 @@ export interface FlightSeatState {
 
 /** The crew as FLIGHT reads it: in a wake line, and from the `flight_state` tool. */
 export interface FlightState {
+  headline: string;
+  ledger: FlightLedgerIndexEntry[];
+  /** Open ledger entries omitted from the index; read them with mc ledger. */
+  ledgerMore: number;
   time: string;
   repo: string;
   /** This hub's lane (`crew.lane`); null when it has none. */
@@ -611,7 +748,7 @@ export interface FlightState {
   limits: { startsLeft: number; messagesLeft: number };
   /** Pending scheduled work; only due entries prompt a wake. */
   planned?: FlightScheduleEntry[];
-  /** Your brief, all nine sections in order; `text` is "" for a section never written. */
+  /** Your brief, only FLIGHT_NOTE_SECTIONS in order; `text` is "" for a section never written. */
   brief: { section: FlightBriefSectionKey; title: string; text: string; ageMin: number | null }[];
 }
 

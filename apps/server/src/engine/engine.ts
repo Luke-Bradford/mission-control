@@ -14,7 +14,9 @@ import {
   asideInCiEventText,
   BLOCKING_SEVERITIES,
   blockedNoteKey,
+  CI_FAILED_EVENT_PREFIX,
   CI_FAILED_TEXT,
+  CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
   COMMS_MC,
   cardMark,
@@ -752,8 +754,8 @@ export function createEngine(deps: EngineDeps): Engine {
           `${run.id}:rerun:${a.sha}`,
           run.id,
           runs === null || runs.length === 0
-            ? `CI failed on ${a.sha.slice(0, 7)}; no run could be re-run`
-            : `CI failed on ${a.sha.slice(0, 7)}; re-ran ${runs.map((r) => r.name).join(", ")}`,
+            ? `${CI_FAILED_EVENT_PREFIX}${a.sha.slice(0, 7)}; no run could be re-run`
+            : `${CI_FAILED_EVENT_PREFIX}${a.sha.slice(0, 7)}; re-ran ${runs.map((r) => r.name).join(", ")}`,
           at,
         );
         return;
@@ -1866,7 +1868,7 @@ export function createEngine(deps: EngineDeps): Engine {
           run.id,
           passed
             ? `CI passed on the re-run of ${sha.slice(0, 7)}; FLIGHT accepted the ruling`
-            : `CI failed again on the re-run of ${sha.slice(0, 7)}`,
+            : `${CI_RERUN_FAILED_EVENT_PREFIX}${sha.slice(0, 7)}`,
           at,
         );
         bus.emit("agents");
