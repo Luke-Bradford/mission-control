@@ -139,6 +139,7 @@ import {
 import { readRepoClaudeMd, reviewBrief, rolePrompt, ticketBrief, watchBrief } from "./brief.ts";
 import {
   existingCheckout,
+  existingDetached,
   existingScratch,
   installAfterSync,
   prepareCheckout,
@@ -823,21 +824,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const how = e.code ?? e.signal;
       const resumeWindow = deps.resumeWindowMs ?? RESUME_WINDOW_MS;
       const failedResume = l.spawnedAt !== null && Date.now() - l.spawnedAt < resumeWindow;
-      const why = failedResume
-        ? RESUME_FAILED
-        : how === null
-          ? CANNOT_START
-          : `process exited ${how}`;
+      const why = how === null ? CANNOT_START : `process exited ${how}`;
       // A CLI that ran and failed: its own last word (already cleaned and cut) says why. One that
       // never started keeps the fixed text (the spawn error names the command's path; it is logged).
       const said =
         how !== null &&
-        l.lastStderr !== null &&
+        l.lastStderr &&
         l.lastStderrAt !== null &&
         now() - l.lastStderrAt <= STDERR_RECENT_MS
-          ? `: ${l.lastStderr}`
-          : "";
-      setSeat(seatId, { state: "error", reason: `${why}${said}` });
+          ? l.lastStderr
+          : null;
+      const reason = failedResume
+        ? `${RESUME_FAILED}: ${said ?? why}`
+        : `${why}${said === null ? "" : `: ${said}`}`;
+      setSeat(seatId, { state: "error", reason });
     }
     emit({ kind: "run-ended", seatId, runId: l.run.id, endedBy: l.endedBy ?? "exit" });
   }
@@ -1520,7 +1520,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       log(`${row.seatId}: could not resume: ${errText(e)}`);
       try {
-        failResume(row, RESUME_FAILED);
+        failResume(row, `${RESUME_FAILED}: ${cleanText(errText(e), STDERR_TEXT_MAX).trim()}`);
       } catch {
         // the store is failing too: already logged
       }
@@ -1598,7 +1598,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (moved()) return;
     if (!ended) {
       log(`${row.seatId}: could not end the old keeper`);
-      return failResume(row, RESUME_FAILED);
+      return failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
     }
     return resumeOne(row);
   }
@@ -1617,19 +1617,23 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   ): Promise<void> {
     const info = findSeat(row.seatId);
     const run = store.run(runId);
+    const refuse = async (reason: string) => {
+      dropGrant(row.seatId, runId);
+      await session.close();
+      return failResume(row, reason, { record: reason !== RESUME_MODE_CHANGED });
+    };
+    if (info === undefined) return refuse("could not resume: seat removed");
+    if (run === null) return refuse(`${RESUME_FAILED}: run missing`);
+    // No branch is needed: nothing is checked out again (a watch or plan run has none).
     let refusal: string | null = null;
-    if (info === undefined) refusal = "could not resume: seat removed";
-    else if (run === null || run.endedAt !== null || row.cliSessionId === null) {
-      // no branch is needed: nothing is checked out again (a watch or plan run has none)
-      refusal = RESUME_FAILED;
+    if (run.endedAt !== null) {
+      refusal = `${RESUME_FAILED}: run already ended`;
+    } else if (row.cliSessionId === null) {
+      refusal = `${RESUME_FAILED}: CLI session ID missing`;
     } else if ((modeOfSeat(info.seat) === "scratch") !== (run.reviewId != null)) {
       refusal = RESUME_MODE_CHANGED; // a scratch seat takes back only review runs
     }
-    if (refusal !== null || info === undefined || run === null) {
-      dropGrant(row.seatId, runId);
-      await session.close();
-      return failResume(row, refusal ?? RESUME_FAILED, { record: refusal !== RESUME_MODE_CHANGED });
-    }
+    if (refusal !== null) return refuse(refusal);
     // restoreRuns has put the token back; this makes sure of it for a hub that did not run it
     try {
       deps.tokens.adopt(row.seatId, runId, readFileSync(crewTokenPath(deps.dbPath, runId), "utf8"));
@@ -1673,7 +1677,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       starting.add(seatId);
       void l.session
         .close()
-        .then(() => failResume(row, RESUME_FAILED))
+        .then(() => failResume(row, `${RESUME_FAILED}: initial brief was not sent`))
         .finally(() => starting.delete(seatId));
       return;
     }
@@ -1698,13 +1702,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const info = findSeat(row.seatId);
     if (!info) return failResume(row, "could not resume: seat removed");
     const run = row.runId === null ? null : store.run(row.runId);
-    if (
-      run === null ||
-      run.endedAt !== null ||
-      row.cliSessionId === null ||
-      (run.branch === null && run.reviewId == null)
-    ) {
-      return failResume(row, RESUME_FAILED); // an ended run is left as it ended
+    if (run === null) return failResume(row, `${RESUME_FAILED}: run missing`);
+    if (run.endedAt !== null) return failResume(row, `${RESUME_FAILED}: run already ended`);
+    if (row.cliSessionId === null) {
+      return failResume(row, `${RESUME_FAILED}: CLI session ID missing`);
+    }
+    if (run.branch === null && run.reviewId == null && seatDef(info.seat).loop !== "watch") {
+      return failResume(row, `${RESUME_FAILED}: no branch recorded for the run`);
     }
     if ((modeOfSeat(info.seat) === "scratch") !== (run.reviewId != null)) {
       return failResume(row, RESUME_MODE_CHANGED, { record: false }); // a scratch seat resumes only review runs
@@ -1722,6 +1726,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       } else if (run.branch !== null) {
         // still the clone's worktree, its git dirs not redirected, still on the run's branch
         checkout = await existingCheckout(info.session.checkout, row.worktree, run.branch);
+      } else if (seatDef(info.seat).loop === "watch") {
+        checkout = {
+          branch: "",
+          ...(await existingDetached(info.session.checkout, row.worktree)),
+        };
       }
     } catch {
       // failed below, unless the run was ended meanwhile
@@ -1738,7 +1747,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       l = launch(info, run, row.cliSessionId, checkout, true, null);
     } catch (e) {
       log(`${row.seatId}: could not start: ${errText(e)}`);
-      return failResume(row, RESUME_FAILED);
+      return failResume(row, `${RESUME_FAILED}: ${CANNOT_START}`);
     }
     // Keep the error that the successful resume is about to replace in Activity.
     if (row.state === "error") {
@@ -2553,7 +2562,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });
       };
-      if (run.branch === null || run.sessionId === null) return fail(RESUME_FAILED);
+      if (run.branch === null) return fail(`${RESUME_FAILED}: no branch recorded for the run`);
+      if (run.sessionId === null) return fail(`${RESUME_FAILED}: CLI session ID missing`);
       // a seat changed to scratch mode, or off the build loop, cannot take a writer run back
       if (modeOfSeat(info.seat) === "scratch" || seatDef(info.seat).loop !== "build") {
         return fail(RESUME_MODE_CHANGED);

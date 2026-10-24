@@ -48,7 +48,9 @@ export function AgentTag({
   return (
     <span className={`ag${sm ? " sm" : ""}`} style={style} title={title}>
       <i aria-hidden="true" />
-      <span id={domId}>{row?.displayCallSign ?? id}</span>
+      <span id={domId} title={row?.displayCallSign ?? id}>
+        {row?.displayCallSign ?? id}
+      </span>
       {suffix !== null && <span className="rt">{` · ${suffix}`}</span>}
     </span>
   );

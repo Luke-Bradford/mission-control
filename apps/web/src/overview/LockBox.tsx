@@ -1,4 +1,4 @@
-import { type CrewRow, LOCK_FREE_TEXT, LOCK_NOBODY_WAITING } from "@mc/core";
+import { type CrewRow, LOCK_NOBODY_WAITING } from "@mc/core";
 import { useState } from "react";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useSecond } from "../clock.ts";
@@ -11,15 +11,13 @@ import { TicketRef } from "../hud/RepoRef.tsx";
 import { agentPath, navigate } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
 
-const LOCK_FREE_NEXT = "The next verify step takes it straight away.";
-
 /** A seat's ticket as a chip; nothing for a seat the crew does not list or one without a ticket. */
 const TicketChip = ({ row }: { row: CrewRow | undefined }) =>
   row?.ticket ? <TicketRef ticket={row.ticket} /> : null;
 
 /**
  * The test lock (catalogue 2.1.4): who holds it, how long, with Stop the run and Open, and the
- * seats in line; or that it is free. A stalled holder gives the box an amber border and a pulse.
+ * seats in line. Hidden when free; a stalled holder gives the box an amber border and a pulse.
  */
 export function LockBox() {
   const nameOf = useSeatName();
@@ -29,34 +27,15 @@ export function LockBox() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const heading = <h3>Full test suite · one at a time</h3>;
-  if (lock === undefined) {
-    return (
-      <div className="lock">
-        <div className="row">{heading}</div>
-      </div>
-    );
-  }
+  if (!lock || (!lock.holder && lock.waiting.length === 0)) return null;
   const h = lock.holder;
-  if (h === null) {
-    return (
-      <div className="lock">
-        <div className="row">
-          {heading}
-          <span className="spacer" />
-          <Pill tone="neutral">Free</Pill>
-        </div>
-        <div className="s muted">
-          {LOCK_FREE_TEXT} {LOCK_FREE_NEXT}
-        </div>
-      </div>
-    );
-  }
   const rowOf = (id: string) => crew?.rows.find((r) => r.id === id);
-  const holder = rowOf(h.seatId);
+  const holder = h ? rowOf(h.seatId) : undefined;
   const stalled = holder?.hudState === "stalled";
   const quiet = holder?.lastOutputAt ?? null;
-  const call = nameOf(h.seatId);
+  const call = h ? nameOf(h.seatId) : null;
   const stop = async () => {
+    if (!h) return;
     setBusy(true);
     setError(null);
     try {
@@ -73,36 +52,48 @@ export function LockBox() {
       <div className="row">
         {heading}
         <span className="spacer" />
-        {stalled ? <Pill tone="warn">No output</Pill> : <Pill tone="ok">Running</Pill>}
-      </div>
-      <div className="row">
-        <AgentTag id={h.seatId} index={holder?.index ?? 0} sm />
-        <span className="chipref">{h.command}</span>
-        <TicketChip row={holder} />
-      </div>
-      <div className="s fg2">
-        <span className="num">{mss(now - h.since)}</span> elapsed
-        <LockUsual command={h.command} since={h.since} prefix=" · " />
-        {stalled && quiet !== null && (
-          <>
-            {" · nothing printed for "}
-            <span className="num">{mss(now - quiet)}</span>
-          </>
+        {h ? (
+          stalled ? (
+            <Pill tone="warn">No output</Pill>
+          ) : (
+            <Pill tone="ok">Running</Pill>
+          )
+        ) : (
+          <Pill tone="warn">Waiting</Pill>
         )}
       </div>
-      <div className="row">
-        <button type="button" className="sm warn" disabled={busy} onClick={() => void stop()}>
-          Stop the run
-        </button>
-        <button type="button" className="sm" onClick={() => navigate(agentPath(h.seatId))}>
-          Open {call}
-        </button>
-        {error && (
-          <span className="crit-t s" role="alert">
-            {error}
-          </span>
-        )}
-      </div>
+      {h && (
+        <>
+          <div className="row">
+            <AgentTag id={h.seatId} index={holder?.index ?? 0} sm />
+            <span className="chipref">{h.command}</span>
+            <TicketChip row={holder} />
+          </div>
+          <div className="s fg2">
+            <span className="num">{mss(now - h.since)}</span> elapsed
+            <LockUsual command={h.command} since={h.since} prefix=" · " />
+            {stalled && quiet !== null && (
+              <>
+                {" · nothing printed for "}
+                <span className="num">{mss(now - quiet)}</span>
+              </>
+            )}
+          </div>
+          <div className="row">
+            <button type="button" className="sm warn" disabled={busy} onClick={() => void stop()}>
+              Stop the run
+            </button>
+            <button type="button" className="sm" onClick={() => navigate(agentPath(h.seatId))}>
+              Open {call}
+            </button>
+            {error && (
+              <span className="crit-t s" role="alert">
+                {error}
+              </span>
+            )}
+          </div>
+        </>
+      )}
       {lock.waiting.length > 0 ? (
         <>
           <div className="qsec">Waiting</div>
