@@ -2,6 +2,7 @@
 import {
   CI_FAILED_EVENT_PREFIX,
   CI_PARK_FAILED_PREFIX,
+  CI_PASSED_EVENT_PREFIX,
   type LoopEvent,
   type LoopTry,
   parkedEventText,
@@ -14,7 +15,6 @@ import {
 
 /** The event texts that move a run between steps; core's loop writes them. */
 const REPORTED_TEXT = "reported; pushing";
-const CI_PASSED_PREFIX = "CI passed on ";
 const MERGED_TEXT = "merged";
 const PARKED_PREFIX = parkedEventText("");
 /** The engine's flake re-run is another execution, without charging a failure to the limit. */
@@ -35,7 +35,8 @@ function reviewIdOf(runId: string, key: string, step: string): string | null {
 function impliedStep(runId: string, e: LoopEvent): Step | null {
   if (e.text === REPORTED_TEXT) return "working";
   if (e.key.startsWith(RERUN_KEY(runId))) return "ci";
-  if (e.text.startsWith(CI_PASSED_PREFIX) || e.text.startsWith(CI_FAILED_EVENT_PREFIX)) return "ci";
+  if (e.text.startsWith(CI_PASSED_EVENT_PREFIX) || e.text.startsWith(CI_FAILED_EVENT_PREFIX))
+    return "ci";
   if (
     reviewIdOf(runId, e.key, "fix") !== null ||
     e.text === MERGED_TEXT ||
@@ -123,7 +124,7 @@ export function loopTries(
     } else if (e.key.startsWith(`${run.id}:update-conflict:`)) {
       close(e.at, "fail", e.text);
       begin("working", e.at);
-    } else if (e.text.startsWith(CI_PASSED_PREFIX)) {
+    } else if (e.text.startsWith(CI_PASSED_EVENT_PREFIX)) {
       close(e.at, "pass");
       ciFailures = 0;
       begin("review", e.at);

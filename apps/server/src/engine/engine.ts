@@ -25,6 +25,7 @@ import {
   blockedNoteKey,
   CI_FAILED_EVENT_PREFIX,
   CI_FAILED_TEXT,
+  CI_PASSED_EVENT_PREFIX,
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
   COMMS_MC,
@@ -2012,7 +2013,7 @@ export function createEngine(deps: EngineDeps): Engine {
           `${run.id}:ruling-rerun:${sha}:${state.outcome}`,
           run.id,
           passed
-            ? `CI passed on the re-run of ${sha.slice(0, 7)}; FLIGHT accepted the ruling`
+            ? `${CI_PASSED_EVENT_PREFIX}the re-run of ${sha.slice(0, 7)}; FLIGHT accepted the ruling`
             : `${CI_RERUN_FAILED_EVENT_PREFIX}${sha.slice(0, 7)}`,
           at,
         );
