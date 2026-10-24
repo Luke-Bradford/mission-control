@@ -39,6 +39,7 @@ import {
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import type { CardNow } from "../collectors/github.ts";
+import { USAGE_STALE_MAX_MS } from "../collectors/usage-claude.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -635,7 +636,7 @@ export function awayQuotaUnknown(
   if (!config.accounts.some((a) => a.id === accountId)) return true;
   return (["5h", "7d"] as const).some((window) => {
     const reading = store.latestUsage(accountId, window);
-    return reading === null || reading.resetAt <= at;
+    return reading === null || reading.resetAt <= at || at - reading.at > USAGE_STALE_MAX_MS;
   });
 }
 
@@ -647,7 +648,12 @@ export function awayQuotaReserve(
 ): boolean {
   if (!activeAway(store, at, config.operator.timezone)) return false;
   const reading = store.latestUsage(accountId, "7d");
-  return reading !== null && reading.resetAt > at && reading.pct >= AWAY_WEEKLY_STOP_PCT;
+  return (
+    reading !== null &&
+    reading.resetAt > at &&
+    at - reading.at <= USAGE_STALE_MAX_MS &&
+    reading.pct >= AWAY_WEEKLY_STOP_PCT
+  );
 }
 
 const atQuotaStop = (deps: TakeDeps, accountId: string): boolean =>

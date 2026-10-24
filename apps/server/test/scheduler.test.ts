@@ -19,6 +19,16 @@ import { ChangeBus, type Topic } from "../src/bus.ts";
 import { FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
 import type { RateLimits } from "../src/collectors/rate-limit.ts";
+import {
+  OAUTH_USAGE_SOURCE,
+  sampleClaude,
+  USAGE_BACKOFF_CAP_MS,
+  USAGE_BACKOFF_FACTOR,
+  USAGE_BACKOFF_SETTING,
+  USAGE_RATE_LIMIT_MAX_AGE_MS,
+  USAGE_RETRY_AFTER_MAX_MS,
+} from "../src/collectors/usage-claude.ts";
+import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
 import * as hud from "../src/hud.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -1989,4 +1999,287 @@ it("maintenance prunes hub history on the existing sweep", async () => {
   const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
   await s.tick("maintenance");
   expect(prune).toHaveBeenCalledWith(NOW);
+});
+
+describe("Claude usage back-off", () => {
+  const MINUTE_MS = 60_000;
+  const HOUR_MS = 60 * MINUTE_MS;
+  const DAY_MS = 24 * HOUR_MS;
+  const TOKEN = "test-secret-token";
+  const usageMs = () => config.poll.usageMinutes * MINUTE_MS;
+  const slackMs = () => usageMs() / 2;
+  const savedBackoff = (): { waitMs: number; notBefore: number } | null =>
+    JSON.parse(store.getSetting(USAGE_BACKOFF_SETTING) ?? "null");
+
+  function setup(retryAfter: string | null = null) {
+    vi.useFakeTimers({ now: NOW });
+    let status = 429;
+    const fetch = vi.fn(async () => {
+      if (status === 0) throw new Error(`network failed: ${TOKEN}`);
+      return new Response(
+        status === 200
+          ? JSON.stringify({
+              five_hour: {
+                utilization: 10,
+                resets_at: new Date(Date.now() + HOUR_MS).toISOString(),
+              },
+              seven_day: {
+                utilization: 86,
+                resets_at: new Date(Date.now() + DAY_MS).toISOString(),
+              },
+            })
+          : TOKEN,
+        { status, headers: retryAfter === null ? {} : { "Retry-After": retryAfter } },
+      );
+    });
+    const c = stubs({
+      claude: (acct, onError, now) =>
+        sampleClaude(
+          acct,
+          {
+            fetchUsage: () =>
+              fetchUsage({
+                exec: async () => ({
+                  stdout: JSON.stringify({ claudeAiOauth: { accessToken: TOKEN } }),
+                }),
+                fetch,
+              }),
+            latestTranscriptLimits: () => [],
+            onError,
+          },
+          now,
+        ),
+    });
+    const s = createScheduler({ config, store, bus, now: Date.now, collectors: c });
+    return {
+      s,
+      c,
+      fetch,
+      setStatus: (next: number) => {
+        status = next;
+      },
+    };
+  }
+
+  it.each([
+    ["600", 10 * MINUTE_MS],
+    [new Date(NOW + 17 * MINUTE_MS).toUTCString(), 17 * MINUTE_MS],
+    [new Date(NOW - MINUTE_MS).toUTCString(), 5 * MINUTE_MS],
+    [String(USAGE_BACKOFF_CAP_MS / 1000), USAGE_BACKOFF_CAP_MS],
+  ])("honours Retry-After %s with half an interval of timer slack", async (header, delay) => {
+    config.poll.usageMinutes = 5;
+    const { s, fetch } = setup(header);
+    await s.tick("usage");
+    expect(savedBackoff()?.notBefore).toBe(NOW + delay);
+    vi.setSystemTime(NOW + delay - slackMs() - 1);
+    await s.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(NOW + delay - slackMs());
+    await s.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await s.stop();
+  });
+
+  it.each([String(1e20), "Fri, 31 Dec 9999 23:59:59 GMT"])(
+    "caps Retry-After %s at 24 hours and keeps a healthy reading as a note",
+    async (header) => {
+      store.addUsage(sample({ window: "7d", pct: 86 }));
+      const { s } = setup(header);
+      await s.tick("usage");
+      expect(savedBackoff()?.notBefore).toBe(NOW + USAGE_RETRY_AFTER_MAX_MS);
+      expect(row("usage:claude-main")).toMatchObject({
+        ok: true,
+        error: "rate limited by Anthropic; last reading 13:00 (86% 7d); next try 18 Oct 2026 13:00",
+      });
+      expect(row("usage:claude-main")?.error).not.toContain(TOKEN);
+      await s.stop();
+    },
+  );
+
+  it.each(["1e20", "-1", "1.5", "2026-10-18", "tomorrow"])(
+    "falls back to doubling for invalid Retry-After %s",
+    async (header) => {
+      const { s } = setup(header);
+      await s.tick("usage");
+      expect(savedBackoff()).toEqual({ waitMs: usageMs(), notBefore: NOW + usageMs() });
+      vi.setSystemTime(NOW + usageMs());
+      await s.tick("usage");
+      expect(savedBackoff()?.waitMs).toBe(usageMs() * USAGE_BACKOFF_FACTOR);
+      await s.stop();
+    },
+  );
+
+  it("doubles consecutive waits up to the cap and resets after success", async () => {
+    const { s, fetch, setStatus } = setup();
+    await s.tick("usage");
+    let calls = 1;
+    let at = NOW;
+    for (const wait of [
+      usageMs(),
+      usageMs() * USAGE_BACKOFF_FACTOR,
+      usageMs() * USAGE_BACKOFF_FACTOR ** 2,
+      USAGE_BACKOFF_CAP_MS,
+      USAGE_BACKOFF_CAP_MS,
+    ]) {
+      at += wait;
+      vi.setSystemTime(at - slackMs() - 1);
+      await s.tick("usage");
+      expect(fetch).toHaveBeenCalledTimes(calls);
+      vi.setSystemTime(at);
+      await s.tick("usage");
+      expect(fetch).toHaveBeenCalledTimes(++calls);
+    }
+    setStatus(200);
+    at += USAGE_BACKOFF_CAP_MS;
+    vi.setSystemTime(at);
+    await s.tick("usage");
+    expect(row("usage:claude-main")).toMatchObject({ ok: true, error: null });
+    expect(savedBackoff()).toBeNull();
+    setStatus(429);
+    at += usageMs();
+    vi.setSystemTime(at);
+    await s.tick("usage");
+    expect(savedBackoff()).toEqual({ waitMs: usageMs(), notBefore: at + usageMs() });
+    await s.stop();
+  });
+
+  it("loads shared back-off on restart even with an old reading", async () => {
+    store.addUsage(sample({ at: NOW - DAY_MS }));
+    const { s, fetch, c, setStatus } = setup(String(USAGE_BACKOFF_CAP_MS / 1000));
+    await s.tick("usage");
+    await s.stop();
+    const second = createScheduler({ config, store, bus, now: Date.now, collectors: c });
+    second.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(savedBackoff()?.notBefore).toBe(NOW + USAGE_BACKOFF_CAP_MS);
+    vi.setSystemTime(NOW + USAGE_BACKOFF_CAP_MS - 1);
+    await second.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(savedBackoff()?.waitMs).toBe(usageMs() * USAGE_BACKOFF_FACTOR);
+    setStatus(200);
+    vi.setSystemTime(savedBackoff()?.notBefore ?? 0);
+    await second.tick("usage");
+    expect(savedBackoff()).toBeNull();
+    await second.stop();
+  });
+
+  it.each([
+    [10, OAUTH_USAGE_SOURCE, 0],
+    [30, OAUTH_USAGE_SOURCE, 1],
+    [10, "transcript", 1],
+  ])("at start, a %i-minute-old %s sample makes %i requests", async (minutes, source, calls) => {
+    store.addUsage(sample({ at: NOW - minutes * MINUTE_MS, source }));
+    const { s, fetch, c } = setup();
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(calls);
+    expect(c.codex).toHaveBeenCalledTimes(1);
+    if (calls === 0) {
+      const notBefore = NOW - minutes * MINUTE_MS + usageMs();
+      vi.setSystemTime(notBefore - slackMs() - 1);
+      await s.tick("usage");
+      expect(fetch).not.toHaveBeenCalled();
+      vi.setSystemTime(notBefore - 1);
+      await s.tick("usage");
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
+    await s.stop();
+  });
+
+  it("finds a recent OAuth sample even behind a newer transcript", async () => {
+    store.addUsage(sample({ at: NOW - 10 * MINUTE_MS }));
+    store.addUsage(sample({ at: NOW - 5 * MINUTE_MS, source: "transcript" }));
+    const { s, fetch } = setup();
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).not.toHaveBeenCalled();
+    await s.stop();
+  });
+
+  it("prefers the weekly reading even when the five-hour reading is newer", async () => {
+    const last = sample({ window: "7d", at: NOW - 10 * MINUTE_MS, pct: 86 });
+    store.addUsage(sample({ at: NOW }));
+    store.addUsage(last);
+    const { s } = setup();
+    await s.tick("usage");
+    expect(row("usage:claude-main")).toMatchObject({
+      ok: true,
+      error: "rate limited by Anthropic; last reading 12:50 (86% 7d); next try 13:30",
+    });
+    expect(store.latestUsage("claude-main", "7d")).toEqual(last);
+    expect(row("usage:claude-main")?.error).not.toContain(TOKEN);
+    await s.stop();
+  });
+
+  it("dates older readings and turns the note into a failure at the age limit", async () => {
+    store.addUsage(sample({ at: NOW - USAGE_RATE_LIMIT_MAX_AGE_MS + 1 }));
+    const { s, fetch } = setup(String(USAGE_BACKOFF_CAP_MS / 1000));
+    await s.tick("usage");
+    expect(row("usage:claude-main")).toMatchObject({
+      ok: true,
+      error: "rate limited by Anthropic; last reading 16 Oct 2026 13:00 (10% 5h); next try 17:00",
+    });
+    vi.setSystemTime(NOW + 1);
+    await s.tick("usage");
+    expect(row("usage:claude-main")?.ok).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await s.stop();
+  });
+
+  it("backs off every Claude account sharing the token", async () => {
+    config.accounts.push({ id: "claude-other", vendor: "claude", alertAt: 85, stopAt: 95 });
+    store.addUsage(sample({ accountId: "claude-other", at: NOW - usageMs() }));
+    const { s, fetch, c } = setup();
+    await s.tick("usage");
+    expect(row("usage:claude-main")).toMatchObject({
+      ok: false,
+      error: "rate limited by Anthropic; no previous reading; next try 13:30",
+    });
+    expect(row("usage:claude-other")).toMatchObject({
+      ok: true,
+      error: "rate limited by Anthropic; last reading 12:30 (10% 5h); next try 13:30",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(NOW + usageMs() - slackMs() - 1);
+    await s.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(c.codex).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(NOW + usageMs() - 1);
+    await s.tick("usage");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(savedBackoff()?.waitMs).toBe(usageMs() * USAGE_BACKOFF_FACTOR);
+    await s.stop();
+  });
+
+  it.each([
+    [503, "HTTP 503"],
+    [0, "Error"],
+  ])(
+    "clears an expired back-off on %s and retries each poll with a plain failure",
+    async (status, error) => {
+      const { s, fetch, setStatus } = setup();
+      await s.tick("usage");
+      vi.setSystemTime(NOW + usageMs());
+      await s.tick("usage");
+      const due = savedBackoff()?.notBefore ?? 0;
+      setStatus(status);
+      for (let poll = 0; poll < 2; poll++) {
+        vi.setSystemTime(due + poll * usageMs());
+        await s.tick("usage");
+        expect(fetch).toHaveBeenCalledTimes(3 + poll);
+        expect(savedBackoff()).toBeNull();
+        expect(row("usage:claude-main")).toMatchObject({
+          ok: false,
+          error: `oauth-usage: oauth usage request failed: ${error}`,
+        });
+        expect(row("usage:claude-main")?.error).not.toContain(TOKEN);
+      }
+      setStatus(429);
+      vi.setSystemTime(due + 2 * usageMs());
+      await s.tick("usage");
+      expect(savedBackoff()?.waitMs).toBe(usageMs());
+      await s.stop();
+    },
+  );
 });

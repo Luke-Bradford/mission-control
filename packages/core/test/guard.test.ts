@@ -296,10 +296,19 @@ describe("guardDecision: the full suite", () => {
 });
 
 describe("guardDecision: read-only seats", () => {
-  it("lists commit as the only mc tool that writes", () => {
-    expect(MC_WRITER_TOOLS).toEqual(["mcp__mc__commit"]);
+  it("keeps FLIGHT's granted sync_main while refusing scratch and other read-only seats", () => {
+    const event = { tool: MC_TOOLS.syncMain, input: {} };
+    expect(ruleOf(event, { ...readOnly, mcTools: ["sync_main"] })).toBe("allow");
+    expect(ruleOf(event, readOnly)).toBe("read-only");
+    expect(ruleOf(event, { ...readOnly, mode: "scratch", mcTools: ["sync_main"] })).toBe(
+      "read-only",
+    );
   });
-  it.each(["Edit", "Write", "NotebookEdit", "mcp__mc__commit"])("denies %s", (tool) => {
+
+  it("lists the writer tools that write through the hub", () => {
+    expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
+  });
+  it.each(["Edit", "Write", "NotebookEdit", ...MC_WRITER_TOOLS])("denies %s", (tool) => {
     expect(ruleOf({ tool, input: {} }, readOnly)).toBe("read-only");
     expect(ruleOf({ tool, input: {} }, writer)).toBe("allow");
   });

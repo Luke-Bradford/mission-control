@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "@mc/core";
+import { NEW_LOOP, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import {
@@ -12,6 +12,7 @@ import {
   prDiffKey,
   UPDATE_MERGE_IN_PROGRESS,
   UPDATE_NO_WORKTREE,
+  UPDATE_UP_TO_DATE,
 } from "../src/engine/publish.ts";
 import type { McToolsDeps } from "../src/mcp/tools.ts";
 import { Store } from "../src/store.ts";
@@ -158,6 +159,56 @@ describe("worktreeChanges (real git)", () => {
 });
 
 describe("updateBranch (real git)", () => {
+  it("does not make a pointless merge when main contains the working branch tip", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    git(worktree, "reset", "--hard", "HEAD~1");
+    const before = git(worktree, "rev-parse", "HEAD");
+    const working = run({ loop: { ...NEW_LOOP } });
+    store.upsertRun(working);
+    expect(await publisher().mainTip(working)).toEqual({ ok: true, sha: mainSha });
+    expect(await publisher().updateBranch(working, mainSha, worktree)).toMatchObject({
+      ok: false,
+      text: UPDATE_UP_TO_DATE,
+    });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+    expect(store.runCommits(working.id)).toEqual([]);
+  });
+
+  it.each(["installed", "unsafe", "failed"])(
+    "handles dependency changes after a recorded merge: %s",
+    async (outcome) => {
+      setup((root) => {
+        write(root, "package.json", '{"name":"sync-test","private":true}\n');
+        write(
+          root,
+          "pnpm-lock.yaml",
+          outcome === "failed"
+            ? "garbage: [\n"
+            : "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+        );
+      });
+      if (outcome === "unsafe") {
+        write(worktree, "nested/.npmrc", "unsafe=true\n");
+        git(worktree, "add", "-A");
+        git(worktree, "commit", "-qm", "branch install input");
+      }
+      store.upsertRun(run());
+      const r = await publisher().updateBranch(run(), mainSha, worktree);
+      expect(r).toMatchObject({ ok: true, kind: "merged" });
+      if (!r.ok || r.kind !== "merged") throw new Error("expected merge");
+      expect(store.runCommits(run().id)).toContain(r.sha);
+      if (outcome === "installed") {
+        expect(r.installNote).toBeUndefined();
+        expect(existsSync(join(worktree, "node_modules"))).toBe(true);
+      } else {
+        expect(r.installNote).toContain("dependencies changed; install refused:");
+        expect(r.installNote).toContain(
+          outcome === "unsafe" ? "nested/.npmrc" : "pnpm install failed",
+        );
+      }
+    },
+  );
+
   it("a clean merge makes an engine commit with both parents, and records it", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     store.upsertRun(run());

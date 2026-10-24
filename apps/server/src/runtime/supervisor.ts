@@ -44,6 +44,8 @@ import {
   carriedFrom,
   clockHm,
   compactUtc,
+  conflictKey,
+  conflictText,
   crewCliArgs,
   crewMcpConfig,
   crewPnpmStoreDir,
@@ -58,6 +60,8 @@ import {
   inferTicket,
   LOOPBACK_HOST,
   MCP_PATH,
+  mainConflictText,
+  mergedMainText,
   modeOfSeat,
   NOT_ASIDE,
   notOnBoardText,
@@ -131,12 +135,14 @@ import { readRepoClaudeMd, reviewBrief, rolePrompt, ticketBrief, watchBrief } fr
 import {
   existingCheckout,
   existingScratch,
+  installAfterSync,
   prepareCheckout,
   prepareDetachedCheckout,
   preparePlanCheckout,
   prepareScratch,
   type RepoPeer,
   removeCheckout,
+  syncReusedWorktree,
   writeReviewInputs,
 } from "./checkouts.ts";
 import { endKeeper, KEEPER_ENTRY, type KeeperHello, keeperAlive, pidAlive } from "./keeper.ts";
@@ -1848,6 +1854,59 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      let installNote: string | undefined;
+      const synced = await inClone(info.session.checkout, async () => {
+        const result = await syncReusedWorktree(info.session.checkout, checkout, {
+          syncMain: opts?.loop !== undefined,
+        });
+        if (result?.kind === "merged") {
+          store.addRunCommit({
+            runId,
+            repoId: info.repo.id,
+            branch: checkout.branch,
+            sha: result.sha,
+            at: startedAt,
+          });
+          store.addLoopEvent(
+            `${runId}:update:${result.sha}`,
+            runId,
+            mergedMainText(checkout.baseSha),
+            startedAt,
+          );
+          installNote = await installAfterSync(info.session.checkout, checkout, result.before);
+          if (installNote) {
+            log(`${seatId}: ${installNote}`);
+            store.addLoopEvent(
+              `${runId}:update-install:${result.sha}`,
+              runId,
+              installNote,
+              startedAt,
+            );
+          }
+        } else if (result?.kind === "conflict") {
+          const loop = store.run(runId)?.loop;
+          if (loop) {
+            run.loop = { ...loop, mainMerge: { mainSha: result.mainSha, files: result.files } };
+            store.setRunLoop(runId, run.loop);
+          }
+          store.claimLine(conflictKey(runId, result.mainSha), {
+            runId,
+            seatId,
+            origin: "engine",
+            text: conflictText(result.files),
+            at: startedAt,
+          });
+          store.addLoopEvent(
+            `${runId}:update-conflict:${result.mainSha}`,
+            runId,
+            mainConflictText(result.mainSha, result.files.length),
+            startedAt,
+          );
+        } else if (result?.kind === "skipped") {
+          log(`${seatId}: main not brought into the reused worktree (${result.why})`);
+        }
+        return result;
+      });
       let l: Live;
       try {
         l = launch(info, run, cliSessionId, checkout, false, claudeMd);
@@ -1875,7 +1934,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktree: checkout.path,
       });
       // The CLI prints nothing (not even init) until its first line: the brief goes at once.
-      const brief = ticketBrief({
+      let brief = ticketBrief({
         call: call(info),
         role: info.seat.role,
         mode: def.mode,
@@ -1897,6 +1956,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(run.profile ? { profile: run.profile } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
+      if (installNote) brief += `\n\n${installNote}`;
+      if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       await enqueue(l, () => writeLine(l, brief)).catch(() => {});
       // The keeper starts the CLI and reports a failure (no such command, a bad cwd) once it has
       // answered: wait for that, so the exit that marks the run failed and the seat in error

@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import {
   branchFor,
   DIFF_CUT_LINE,
+  PNPM_STORE_DIR_NAME,
   REVIEW_DIFF_FILE,
   REVIEW_DIFF_MAX,
   REVIEW_DIFF_MAX_BUFFER,
@@ -28,6 +29,22 @@ const execFileP = promisify(execFile);
 
 /** fetch, ls-remote, worktree add and remove (a whole tree written or deleted) can take over 5 s. */
 export const CREW_GIT_SLOW_MS = 120_000;
+/** The author and committer of the merge commit the hub makes. */
+export const MC_MERGE_AUTHOR = "Mission Control";
+export const mainMergeArgs = (branch: string, mainSha: string): string[] => [
+  "-c",
+  "commit.gpgsign=false",
+  "-c",
+  "rerere.enabled=false",
+  "merge",
+  "--no-ff",
+  "--no-edit",
+  "--no-verify",
+  "-m",
+  `Merge main into ${branch}`,
+  mainSha,
+];
+
 export const INSTALL_TIMEOUT_MS = 5 * 60_000;
 const INSTALL_MAX_BUFFER = 16 * 1024 * 1024;
 /**
@@ -92,6 +109,23 @@ export interface RepoPeer {
   dir: string;
 }
 
+/**
+ * What the commit tool's `add -A` stages: the whole worktree but any `.pnpm-store/`, at the top or
+ * nested. A sandboxed pnpm that cannot write its global store makes one inside the worktree; the
+ * seat's env points the store elsewhere (`crewPnpmStoreDir`), and this is the backstop.
+ */
+export const COMMIT_ADD_PATHSPEC = [
+  "--",
+  ":(top)",
+  `:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`,
+] as const;
+
+export type ReuseSync =
+  | { kind: "up-to-date" }
+  | { kind: "merged"; sha: string; before: string }
+  | { kind: "conflict"; mainSha: string; files: string[] }
+  | { kind: "skipped"; why: "dirty" | "merging" | "failed" };
+
 export interface CheckoutInput {
   /** Mission Control's clone of the repo (a session's `checkout`). */
   checkout: string;
@@ -110,7 +144,7 @@ export interface Checkout {
   branch: string;
   /** `{worktreesRoot}/{sessionId}/{seatId}-{issue}`; an older run's is the flat `{worktreesRoot}/{seatId}-{issue}`. */
   path: string;
-  /** false: this ticket's worktree already existed and is reused as it is. */
+  /** false: this ticket's worktree already existed and is reused. */
   created: boolean;
   /** origin's default branch as origin reported it at the start; a new branch starts here. */
   baseSha: string;
@@ -616,6 +650,120 @@ export async function prepareDetachedCheckout(i: {
     );
   }
   return { branch: "", path, created: true, baseSha, gitDir };
+}
+
+async function syncReused(
+  path: string,
+  common: string,
+  gitDir: string,
+  branch: string,
+  baseSha: string,
+): Promise<ReuseSync> {
+  const w = (args: string[], env?: NodeJS.ProcessEnv) =>
+    crewGit(path, args, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS, env });
+  try {
+    const merging = await w(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).then(
+      (s) => s.trim(),
+      (e: unknown) => {
+        if ((e as { code?: unknown } | null)?.code === 1) return null;
+        throw e;
+      },
+    );
+    if (merging !== null) {
+      const files = (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
+        .split("\0")
+        .filter(Boolean);
+      if (
+        files.length > 0 &&
+        (await succeeds(w(["merge-base", "--is-ancestor", merging, baseSha])))
+      ) {
+        return { kind: "conflict", mainSha: merging, files };
+      }
+      return { kind: "skipped", why: "merging" };
+    }
+    const current = await w(["merge-base", "--is-ancestor", baseSha, "HEAD"]).then(
+      () => true,
+      (e: unknown) => {
+        if ((e as { code?: unknown } | null)?.code === 1) return false;
+        throw e;
+      },
+    );
+    if (current) return { kind: "up-to-date" };
+    const status = await w([
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=all",
+      ...COMMIT_ADD_PATHSPEC,
+    ]);
+    if (status !== "") return { kind: "skipped", why: "dirty" };
+    const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+    try {
+      await w(mainMergeArgs(branch, baseSha), {
+        GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
+        GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
+      });
+    } catch (e) {
+      if ((e as { code?: unknown } | null)?.code === 1) {
+        const files = (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
+          .split("\0")
+          .filter(Boolean);
+        if (files.length > 0) return { kind: "conflict", mainSha: baseSha, files };
+      }
+      await w(["merge", "--abort"]).catch(() => {});
+      return { kind: "skipped", why: "failed" };
+    }
+    return { kind: "merged", sha: (await w(["rev-parse", "--verify", "HEAD"])).trim(), before };
+  } catch {
+    return { kind: "skipped", why: "failed" };
+  }
+}
+
+/** Sync only after the caller has stored the run, under its clone lock; record the result immediately. */
+export async function syncReusedWorktree(
+  checkout: string,
+  worktree: Checkout,
+  opts: { syncMain: boolean },
+): Promise<ReuseSync | undefined> {
+  if (!opts.syncMain || worktree.created) return undefined;
+  const common = await realpath(join(checkout, ".git"));
+  return syncReused(worktree.path, common, worktree.gitDir, worktree.branch, worktree.baseSha);
+}
+
+/**
+ * After a recorded merge, install if its diff changed an install input. Retains checkout trust
+ * checks; a refusal or failure is returned for the caller's answer, without hiding the merge.
+ * The caller holds the clone lock.
+ */
+export async function installAfterSync(
+  checkout: string,
+  worktree: Pick<Checkout, "path" | "gitDir" | "branch" | "baseSha">,
+  before: string,
+): Promise<string | undefined> {
+  try {
+    const common = await realpath(join(checkout, ".git"));
+    const w = (args: string[]) => crewGit(worktree.path, args, common, { gitDir: worktree.gitDir });
+    const changed = (
+      await w(["diff", "--name-only", "--no-renames", "-z", `${before}..HEAD`, "--"])
+    ).split("\0");
+    if (!changed.some((file) => INSTALL_INPUTS.has(file.split("/").pop() ?? ""))) return;
+    const g = (args: string[]) => crewGit(checkout, args, common, { gitDir: common });
+    const subject = `branch ${worktree.branch}`;
+    await refuseUnsafeTree(w, "HEAD", subject);
+    await refuseInstallInputs(w, worktree.baseSha, "HEAD", subject);
+    const inputs: string[] = [];
+    const unsafe = await inspectDisk(worktree.path, inputs);
+    if (unsafe !== null) throw refuse(subject, unsafe);
+    const format = (await g(["rev-parse", "--show-object-format"])).trim();
+    if (format !== "sha1") throw refuse(subject, `is in a ${format} repository`);
+    const read = verifiedObjects((args, maxBuffer) =>
+      crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer }),
+    );
+    await refuseChangedInputs(worktree.path, inputs, read, worktree.baseSha, subject);
+    await install(worktree.path, worktree.branch);
+  } catch (e) {
+    return `dependencies changed; install refused: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 /**

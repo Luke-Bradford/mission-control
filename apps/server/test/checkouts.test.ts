@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { deflateSync } from "node:zlib";
 import {
   DIFF_CUT_LINE,
+  PNPM_STORE_DIR_NAME,
   REVIEW_DIFF_FILE,
   REVIEW_DIFF_MAX,
   REVIEW_INPUT_DIR,
@@ -26,12 +27,15 @@ import {
   existingCheckout,
   existingScratch,
   INSTALL_ARGS,
+  installAfterSync,
   installEnv,
+  MC_MERGE_AUTHOR,
   prepareCheckout,
   prepareDetachedCheckout,
   preparePlanCheckout,
   prepareScratch,
   removeCheckout,
+  syncReusedWorktree,
   writeReviewInputs,
 } from "../src/runtime/checkouts.ts";
 
@@ -111,7 +115,116 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+async function syncCheckout() {
+  const checkout = await prepareCheckout(input());
+  return { ...checkout, synced: await syncReusedWorktree(clone, checkout, { syncMain: true }) };
+}
+
 describe("prepareCheckout", () => {
+  it("brings origin's tip into a reused worktree when asked", async () => {
+    const first = await prepareCheckout(input());
+    const tip = commit(first.path, { "b.txt": "branch\n" });
+    const main = commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await syncCheckout();
+    expect(r.synced).toEqual({
+      kind: "merged",
+      sha: git(r.path, "rev-parse", "HEAD"),
+      before: tip,
+    });
+    expect(git(r.path, "log", "-1", "--format=%P")).toBe(`${tip} ${main}`);
+    expect(git(r.path, "log", "-1", "--format=%an|%cn")).toBe(
+      `${MC_MERGE_AUTHOR}|${MC_MERGE_AUTHOR}`,
+    );
+    expect(readFileSync(join(r.path, "m.txt"), "utf8")).toBe("main\n");
+  });
+
+  it("leaves a reused worktree's conflicts for the seat", async () => {
+    const first = await prepareCheckout(input());
+    commit(first.path, { "README.md": "branch\n" });
+    const mainSha = commit(seed, { "README.md": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await syncCheckout();
+    expect(r.synced).toEqual({ kind: "conflict", mainSha, files: ["README.md"] });
+    expect(git(r.path, "rev-parse", "MERGE_HEAD")).toBe(mainSha);
+    expect(readFileSync(join(r.path, "README.md"), "utf8")).toContain("<<<<<<<");
+    commit(seed, { "later.txt": "new main tip\n" });
+    git(seed, "push", "-q", "origin", "main");
+    expect((await syncCheckout()).synced).toEqual({
+      kind: "conflict",
+      mainSha,
+      files: ["README.md"],
+    });
+  });
+
+  it("skips a dirty reused worktree", async () => {
+    const first = await prepareCheckout(input());
+    writeFileSync(join(first.path, "new.txt"), "uncommitted\n");
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    expect((await syncCheckout()).synced).toEqual({
+      kind: "skipped",
+      why: "dirty",
+    });
+    expect(readFileSync(join(first.path, "new.txt"), "utf8")).toBe("uncommitted\n");
+  });
+
+  it("leaves a reused worktree unchanged without the sync flag", async () => {
+    const first = await prepareCheckout(input());
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await prepareCheckout(input());
+    expect(await syncReusedWorktree(clone, r, { syncMain: false })).toBeUndefined();
+    expect(git(r.path, "rev-parse", "HEAD")).toBe(first.baseSha);
+  });
+
+  it("ignores local pnpm stores when syncing a reused worktree", async () => {
+    const first = await prepareCheckout(input());
+    for (const folder of [PNPM_STORE_DIR_NAME, `nested/${PNPM_STORE_DIR_NAME}`]) {
+      mkdirSync(join(first.path, folder), { recursive: true });
+      writeFileSync(join(first.path, folder, "cache"), "local cache\n");
+    }
+    commit(seed, { "m.txt": "main\n" });
+    git(seed, "push", "-q", "origin", "main");
+    const r = await syncCheckout();
+    expect(r.synced?.kind).toBe("merged");
+    expect(git(r.path, "ls-tree", "-r", "--name-only", "HEAD")).not.toContain(PNPM_STORE_DIR_NAME);
+  });
+
+  it("answers up-to-date when the reused branch contains main", async () => {
+    const first = await prepareCheckout(input());
+    const tip = commit(first.path, { "b.txt": "branch\n" });
+    expect((await syncCheckout()).synced).toEqual({
+      kind: "up-to-date",
+    });
+    expect(git(first.path, "rev-parse", "HEAD")).toBe(tip);
+  });
+
+  it.each(["installed", "unsafe", "failed"])(
+    "checks changed install inputs after a sync: %s",
+    async (outcome) => {
+      const first = await prepareCheckout(input());
+      if (outcome === "unsafe") commit(first.path, { "nested/.npmrc": "unsafe=true\n" });
+      commit(seed, {
+        "package.json": PKG,
+        "pnpm-lock.yaml": outcome === "failed" ? "garbage: [\n" : EMPTY_LOCK,
+      });
+      git(seed, "push", "-q", "origin", "main");
+      const checkout = await syncCheckout();
+      expect(checkout.synced?.kind).toBe("merged");
+      if (checkout.synced?.kind !== "merged") throw new Error("expected merge");
+      const note = await installAfterSync(clone, checkout, checkout.synced.before);
+      if (outcome === "installed") {
+        expect(note).toBeUndefined();
+        expect(existsSync(join(checkout.path, "node_modules"))).toBe(true);
+      } else {
+        expect(note).toContain("dependencies changed; install refused:");
+        expect(note).toContain(outcome === "unsafe" ? "nested/.npmrc" : "pnpm install failed");
+      }
+      expect(git(checkout.path, "rev-parse", "HEAD")).toBe(checkout.synced.sha);
+    },
+  );
+
   it("creates a fresh branch from origin's default branch, read from origin itself", async () => {
     // origin moved on since the clone, and a seat pointed the local origin/HEAD at its own ref
     const tip = commit(seed, { "b.txt": "b\n" });
