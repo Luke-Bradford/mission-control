@@ -263,6 +263,7 @@ describe("the allowlist in phase 2b", () => {
       briefItem: "mcp__mc__brief_item",
       readPr: "mcp__mc__read_pr",
       readCiLog: "mcp__mc__read_ci_log",
+      ghRead: "mcp__mc__gh_read",
       listTickets: "mcp__mc__list_tickets",
       updateBrief: "mcp__mc__update_brief",
     });
@@ -556,6 +557,7 @@ describe("crew constants", () => {
           "brief_item",
           "read_pr",
           "read_ci_log",
+          "gh_read",
           "list_tickets",
           "update_brief",
           "draft_reply",
@@ -653,6 +655,7 @@ describe("mc tool grants", () => {
       "brief_item",
       "read_pr",
       "read_ci_log",
+      "gh_read",
       "list_tickets",
       "update_brief",
       "draft_reply",

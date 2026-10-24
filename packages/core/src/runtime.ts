@@ -64,6 +64,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.briefItem,
   MC_TOOL_NAMES.readPr,
   MC_TOOL_NAMES.readCiLog,
+  MC_TOOL_NAMES.ghRead,
   MC_TOOL_NAMES.listTickets,
   MC_TOOL_NAMES.updateBrief,
   MC_TOOL_NAMES.draftReply,

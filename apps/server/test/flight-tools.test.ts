@@ -30,6 +30,8 @@ import {
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
   FLIGHT_DECISION_MAX,
+  FLIGHT_GH_API_READS_PER_HOUR,
+  FLIGHT_GH_READ_MAX,
   FLIGHT_GH_READS_PER_HOUR,
   FLIGHT_HANDLING_MAX_MS,
   FLIGHT_HEADLINE,
@@ -54,6 +56,10 @@ import {
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
+  GH_READ_BAD_PATH,
+  GH_READ_CUT,
+  GH_READ_NOT_FOUND,
+  GH_READ_UNTRUSTED,
   GITHUB_WRITES_OFF,
   GUARD_ACK_PREFIX,
   headlineSavedText,
@@ -530,6 +536,11 @@ const addDecision = (over: Partial<FlightDecision>) =>
   });
 const refused = (text: string) => ({ text, isError: true });
 
+const need = <T>(value: T | null | undefined): T => {
+  if (value == null) throw new Error("Missing test fixture");
+  return value;
+};
+
 describe("tool list", () => {
   it("adds the six tools, each shown only to a granted role", () => {
     expect(tools.map((t) => t.name)).toEqual([
@@ -548,6 +559,7 @@ describe("tool list", () => {
       "brief_item",
       "read_pr",
       "read_ci_log",
+      "gh_read",
       "list_tickets",
       "update_brief",
       "merge_pr",
@@ -4753,10 +4765,6 @@ describe("scheduled FLIGHT work", () => {
 });
 
 describe("superuser housekeeping", () => {
-  const need = <T>(value: T | null | undefined): T => {
-    if (value == null) throw new Error("Missing test fixture");
-    return value;
-  };
   const call = (name: string, a: object) => {
     const t = tools.find((t) => t.name === name);
     expect(t, name).toBeDefined();
@@ -5632,5 +5640,186 @@ describe("repo memory", () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+describe("gh_read", () => {
+  const path = "repos/o/mc/pulls/9/reviews";
+  beforeEach(() => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    ghImpl = async (args) => ({
+      code: 0,
+      stdout: args[0] === "auth" ? "hub-token-for-github" : "review evidence",
+      stderr: "",
+    });
+  });
+
+  it("reads evidence with an explicit GET, marked untrusted", async () => {
+    expect(await call("gh_read", { path })).toEqual({
+      text: `${GH_READ_UNTRUSTED}review evidence`,
+    });
+    expect(ghCalls).toEqual([
+      ["auth", "token", "--hostname", "github.com"],
+      ["api", "--hostname", "github.com", "--method", "GET", path],
+    ]);
+  });
+
+  it("checks live powers, the run and the watch role before invoking gh", async () => {
+    need(cfg.repos[0]).flightPowers = "standard";
+    expect(await call("gh_read", { path })).toEqual(refused(needsSuperuserText("o/mc")));
+    need(cfg.repos[0]).flightPowers = "superuser";
+    live("guido-1", "r-guido");
+    expect(await call("gh_read", { path }, ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+    expect(await call("gh_read", { path }, ctx("flight-1", "foreign"))).toEqual(
+      refused(MC_RUN_ENDED),
+    );
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("uses the calling seat's session repo and powers", async () => {
+    need(cfg.crew?.sessions[1]).seats.push(seat("flight-2", "FLIGHT"));
+    live("flight-2", "r-flight-2");
+    expect(await call("gh_read", { path }, ctx("flight-2", "r-flight-2"))).toEqual(
+      refused(needsSuperuserText("o/other")),
+    );
+    need(cfg.repos[1]).flightPowers = "superuser";
+    expect(await call("gh_read", { path }, ctx("flight-2", "r-flight-2"))).toEqual(
+      refused(GH_READ_BAD_PATH),
+    );
+    expect(
+      (await call("gh_read", { path: "repos/o/other/pulls" }, ctx("flight-2", "r-flight-2")))
+        .isError,
+    ).toBeUndefined();
+  });
+
+  it.each([
+    { path, method: "POST" },
+    { path, method: "DELETE" },
+    { path, "-f": "body=x" },
+    { path, "-F": "body=@file" },
+    { path, "--input": "file" },
+    { path: `POST ${path}` },
+    { path: `${path} -f body=x` },
+    { path: `${path} -F body=@file` },
+    { path: `${path} --input file` },
+    { path: "graphql" },
+    { path: "repos/o/mc/settings" },
+    { path: "repos/o/other/pulls" },
+    { path: "repos/o/mc/pulls/../issues" },
+    { path: "repos/o/mc/commits/%2e%2e" },
+    { path: "repos/o/mc/commits/%252e%252e" },
+    { path: `${path}?_method=POST` },
+    { path: `${path}?method=DELETE` },
+  ])("refuses unsafe arguments %j without running gh", async (args) => {
+    expect((await call("gh_read", args)).isError).toBe(true);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("cuts oversized output with a marker, preserving the untrusted label", async () => {
+    ghImpl = async (args) => ({
+      code: 0,
+      stdout: args[0] === "auth" ? "hub-token" : "🚀".repeat(FLIGHT_GH_READ_MAX),
+      stderr: "",
+    });
+    const result = await call("gh_read", { path });
+    expect(result.text.startsWith(GH_READ_UNTRUSTED)).toBe(true);
+    expect(result.text.endsWith(GH_READ_CUT)).toBe(true);
+    expect(result.text.length).toBeLessThanOrEqual(FLIGHT_GH_READ_MAX);
+  });
+
+  it("redacts known and patterned secrets, including the API token", async () => {
+    secrets = ["local-secret-to-redact"];
+    ghImpl = async (args) => ({
+      code: 0,
+      stdout:
+        args[0] === "auth"
+          ? "hub-token"
+          : `evidence\nlocal-secret-to-redact\nhub-token\nghp_${"a".repeat(36)}`,
+      stderr: "",
+    });
+    expect((await call("gh_read", { path })).text).toBe(
+      `${GH_READ_UNTRUSTED}evidence\n[redacted]\n[redacted]\n[redacted]`,
+    );
+  });
+
+  it("does not spend the hourly cap on refused paths", async () => {
+    for (let i = 0; i < FLIGHT_GH_API_READS_PER_HOUR; i++) {
+      expect(await call("gh_read", { path: "repos/o/mc/pulls?head=x:owner" })).toEqual(
+        refused(GH_READ_BAD_PATH),
+      );
+    }
+    expect(ghCalls).toEqual([]);
+    for (let i = 0; i < FLIGHT_GH_API_READS_PER_HOUR; i++) {
+      expect((await call("gh_read", { path })).isError).toBeUndefined();
+    }
+    expect(await call("gh_read", { path })).toEqual(
+      refused(capText("read GitHub", FLIGHT_GH_API_READS_PER_HOUR)),
+    );
+  });
+
+  it("tells FLIGHT when GitHub returns not found", async () => {
+    ghImpl = async (args) =>
+      args[0] === "auth"
+        ? { code: 0, stdout: "private-token", stderr: "" }
+        : {
+            code: 1,
+            stdout: '{"status":"404","message":"private-token"}',
+            stderr: "private-token",
+          };
+    expect(await call("gh_read", { path })).toEqual(refused(GH_READ_NOT_FOUND));
+    expect(logs).toEqual(["mc gh_read: gh api failed (1)"]);
+  });
+
+  it("serializes reads per seat while allowing other seats to read", async () => {
+    need(cfg.crew?.sessions[0]).seats.push(seat("flight-2", "FLIGHT"));
+    live("flight-2", "r-flight-2");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = () => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let auths = 0;
+    ghImpl = async (args) => {
+      if (args[0] === "auth") {
+        auths++;
+        if (auths === 1) {
+          entered();
+          await gate;
+        }
+      }
+      return { code: 0, stdout: args[0] === "auth" ? "hub-token" : "evidence", stderr: "" };
+    };
+    const first = call("gh_read", { path });
+    await started;
+    const second = call("gh_read", { path });
+    try {
+      expect(
+        (await call("gh_read", { path }, ctx("flight-2", "r-flight-2"))).isError,
+      ).toBeUndefined();
+      expect(auths).toBe(2);
+    } finally {
+      release();
+    }
+    await Promise.all([first, second]);
+    expect(auths).toBe(3);
+  });
+
+  it("caps attempts at 120 per hour, counts failures, and expires the cap", async () => {
+    ghImpl = async () => ({ code: 1, stdout: "", stderr: "private auth failure" });
+    for (let i = 0; i < FLIGHT_GH_API_READS_PER_HOUR; i++) {
+      expect(await call("gh_read", { path })).toEqual(refused(READ_NO_GITHUB));
+    }
+    expect(await call("gh_read", { path })).toEqual(
+      refused(capText("read GitHub", FLIGHT_GH_API_READS_PER_HOUR)),
+    );
+    expect(ghCalls).toHaveLength(FLIGHT_GH_API_READS_PER_HOUR);
+    nowMs += 3600_000;
+    expect(await call("gh_read", { path })).toEqual(refused(READ_NO_GITHUB));
+    expect(ghCalls).toHaveLength(FLIGHT_GH_API_READS_PER_HOUR + 1);
   });
 });
