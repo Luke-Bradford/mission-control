@@ -136,15 +136,22 @@ function FlightRow({
           </Pill>
         )}
       </span>
-      <span className="min0">
+      <span className="agent-doing">
         {row ? (
           <span className="ellip xs fg2 doing" title={doingLine(row, now, tz, undefined)}>
             <DoingLine row={row} now={now} tz={tz} repoPrs={undefined} />
           </span>
         ) : (
-          <span className="ellip s muted">{configPending ? "Loading…" : FLIGHT_NO_SEAT}</span>
+          <span className="ellip s muted" title={configPending ? undefined : FLIGHT_NO_SEAT}>
+            {configPending ? "Loading…" : FLIGHT_NO_SEAT}
+          </span>
         )}
-        <span className="xs muted block">coordinates the crew and brings you decisions</span>
+        <span
+          className="xs muted block doing"
+          title="coordinates the crew and brings you decisions"
+        >
+          coordinates the crew and brings you decisions
+        </span>
       </span>
       <span className="xs fg2">{turns ? flightTurnShort(turns.n, turns.max) : DASH}</span>
       {row ? <AgentActivity row={row} now={now} max={max} /> : <span>{DASH}</span>}

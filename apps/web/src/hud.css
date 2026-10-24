@@ -1507,12 +1507,23 @@ summary.agent-group-title,
 }
 .quotarow {
   display: grid;
-  grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   padding: 3px 0;
   font-size: var(--fs-s);
 }
+.quota-window .meter {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+.quota-window .num {
+  overflow-wrap: anywhere;
+}
+.agent-doing {
+  min-width: 0;
+}
+
 .arow {
   display: grid;
   grid-template-columns: 44px 16px minmax(0, 1fr) auto;
