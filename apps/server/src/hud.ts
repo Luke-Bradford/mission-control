@@ -75,6 +75,7 @@ import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from 
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
+import { loopTries } from "./loophistory.ts";
 import {
   type PrCache,
   parseTicket,
@@ -337,7 +338,14 @@ export function runWait(
 
 /** The current step's try and its limit, else null. */
 function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewLoop["tries"] {
-  if (loop.phase === "ci") return { n: loop.ciFails + 1, max: CI_TRIES };
+  if (loop.phase === "ci")
+    return {
+      n: loop.ciFails + 1,
+      max: run.profile?.profile.tries ?? CI_TRIES,
+      failures: loop.ciFails,
+      runs: loopTries(run, store.loopEventsOfRun(run.id), null).filter((t) => t.step === "ci")
+        .length,
+    };
   if (loop.phase === "review") {
     const sent = fixesSent(store.claimedKeys(run.id), run.id, loop.epoch);
     return { n: Math.min(REVIEW_ROUNDS, 1 + sent), max: REVIEW_ROUNDS };

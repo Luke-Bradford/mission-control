@@ -167,12 +167,19 @@ import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./
 import type { RunTokens } from "./mcp/tokens.ts";
 import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
-import { profilesView } from "./profiles.ts";
+import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "./runview.ts";
+import {
+  type BoardTitleCache,
+  type PrCache,
+  runPrs,
+  runTicket,
+  runUsage,
+  runView,
+} from "./runview.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
@@ -1390,10 +1397,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/config", async () =>
         configView(
           config,
-          deps.profilesPath === undefined ? undefined : profilesView(deps.profilesPath),
+          deps.profilesPath === undefined
+            ? undefined
+            : profilesView(
+                deps.profilesPath,
+                crew(config, store, now(), deps.lock?.state() ?? NO_LOCK).rows.filter(
+                  (row) => row.run?.endedAt === null,
+                ),
+              ),
           await readGithubLogin(),
         ),
       );
+
+      // Reader: apps/web/src/setup/Loops.tsx (Setup template creation)
+      api.post("/profiles", async (req, reply) => {
+        if (!deps.profilesPath)
+          return reply.code(409).send({ error: "template writes are unavailable" });
+        const body = NewProfileBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await createProfile(
+            deps.profilesPath,
+            body.data.profile,
+            body.data.base,
+            now(),
+          );
+          bus.emit("config");
+          return reply.code(201).send(result);
+        } catch (e) {
+          if (e instanceof ConfigWriteError)
+            return reply.code(e.kind === "invalid" ? 400 : 409).send({ error: e.message });
+          return reply.code(500).send({ error: "could not save template" });
+        }
+      });
 
       // Re-reads the config.yaml the server started with now (no request names a path); a file that
       // does not load changes nothing.
@@ -2099,6 +2135,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
         const view: RunLoopView = {
           runId: run.id,
+          usage: runUsage(store, run, now()),
           noReport: run.noReport ?? null,
           loop,
           events,
@@ -2114,7 +2151,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
             : null,
           budget:
-            loop && config.crew?.runTokenBudget !== undefined
+            loop &&
+            config.crew?.runTokenBudget !== undefined &&
+            run.tokens !== null &&
+            run.tokens.cacheRead + run.tokens.cacheCreate === 0
               ? config.crew.runTokenBudget + loop.budgetExtra
               : null,
           review,

@@ -126,6 +126,39 @@ describe("runTicket", () => {
   });
 });
 
+it("serves full recorded usage with model, turns and duration", async () => {
+  const { runView } = await import("../src/runview.ts");
+  const r = run({
+    tokens: { input: 2, output: 3, cacheRead: 100, cacheCreate: 20 },
+    costUsd: 0.4,
+    model: "model-a",
+  });
+  // A transcript result provides a persisted digest with a completed turn.
+  const { foldTranscript } = await import("../src/streamjson.ts");
+  const f = foldTranscript(
+    null,
+    [
+      JSON.stringify({
+        type: "assistant",
+        message: { id: "m", content: [], usage: { input_tokens: 2 } },
+      }),
+    ],
+    1,
+  );
+  store.upsertRun(r);
+  store.setDigest(r.id, f.digest);
+  expect(runView(config, store, r, new Map()).usage).toEqual({
+    input: 2,
+    output: 3,
+    cacheRead: 100,
+    cacheCreate: 20,
+    costUsd: 0.4,
+    model: "model-a",
+    turns: 1,
+    durationMs: 1000,
+  });
+});
+
 describe("run plan", () => {
   it.each([
     { by: "fao-1", at: 100, ref: "shop-app#42" },

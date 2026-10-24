@@ -1057,3 +1057,32 @@ it("retains two hours of token buckets for the shared Overview axis", () => {
     foldTranscript(null, lines, now).digest.minuteTokens.map(([at]) => (now - at) / 60_000),
   ).toEqual([100, 90, 0]);
 });
+
+it("retains all four token measures and model for attempt attribution", () => {
+  const f = foldTranscript(
+    null,
+    [
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-01-01T00:00:00Z",
+        message: {
+          id: "msg",
+          model: "model-a",
+          content: [],
+          usage: {
+            input_tokens: 2,
+            output_tokens: 3,
+            cache_read_input_tokens: 100,
+            cache_creation_input_tokens: 20,
+          },
+        },
+      }),
+    ],
+    1,
+  );
+  expect(f.digest.attemptUsage?.[0]).toMatchObject({
+    tokens: 5,
+    usage: { input: 2, output: 3, cacheRead: 100, cacheCreate: 20 },
+    model: "model-a",
+  });
+});

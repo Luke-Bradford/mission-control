@@ -1524,6 +1524,30 @@ describe("The operator's message", () => {
     });
   });
 
+  it("display gates, checks and max tries cannot bypass the executable CI gate", async () => {
+    giveProfile({
+      tries: 1,
+      steps: [
+        {
+          name: "verify",
+          phase: "ci",
+          gate: false,
+          max: 10,
+          checks: [{ kind: "agent", text: "Finished" }],
+        },
+      ],
+    });
+    report();
+    await h.engine.reconcileRun(RUN);
+    await failCi();
+    await h.engine.reconcileRun(RUN);
+    expect(store.run(RUN)?.loop?.parked).toMatchObject({
+      kind: "ci",
+      reason: "CI failed 1 times; last on aaaaaaa",
+    });
+    expect(h.steps).not.toContain("merge");
+  });
+
   it("un-parks a parked run, and its next park has a new blocked key", async () => {
     await parkOnCi();
     expect(noteKeys()).toContain(`blocked:${RUN}:0`);

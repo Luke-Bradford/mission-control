@@ -165,6 +165,7 @@ describe("the route table", () => {
     expect(routes).toContain("GET /api/accounts/status");
     expect(routes).toContain("POST /api/accounts/:id/check");
     expect(routes).toContain("POST /api/accounts");
+    expect(routes).toContain("POST /api/profiles");
     expect(routes).toContain("GET /api/flight/incoming");
     expect(routes).toContain("GET /api/flight/schedule");
     expect(routes).toContain("GET /api/flight/summary");
