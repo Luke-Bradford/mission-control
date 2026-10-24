@@ -34,6 +34,8 @@ interface RecordState {
       failedAttempt: number | null;
       runId: string | null;
       name: string;
+      job?: string;
+      observedFailure?: boolean;
       at: number;
     }
   >;
@@ -106,14 +108,22 @@ function raiseSignal(state: RecordState, signal: FlightSignal, now: number): voi
 }
 
 function mainEvidence(store: Store, repo: string, main: MainCi): string {
-  const merged = store
-    .pullRequests(repo)
-    .filter(
-      (pr) =>
-        pr.mergedAt !== null && main.committedAt !== undefined && pr.mergedAt < main.committedAt,
-    )
-    .sort((a, b) => (b.mergedAt ?? 0) - (a.mergedAt ?? 0))[0];
-  return `${repo} default branch ${main.sha}: ${main.ci}; ${(main.checks ?? []).map((c) => `${c.name}${c.url ? ` ${c.url}` : ""}`).join("; ")}${merged ? `; last PR merged before commit: #${merged.number} ${merged.url}` : ""}`;
+  const prs = store.pullRequests(repo);
+  const firstSha = main.episode ?? main.sha;
+  const matched =
+    prs.find((pr) => pr.mergeCommitSha === firstSha) ??
+    prs.find((pr) => pr.mergeCommitSha === main.sha);
+  const merged =
+    matched ??
+    prs
+      .filter(
+        (pr) =>
+          pr.mergedAt !== null &&
+          main.committedAt !== undefined &&
+          pr.mergedAt <= main.committedAt + 5_000,
+      )
+      .sort((a, b) => (b.mergedAt ?? 0) - (a.mergedAt ?? 0))[0];
+  return `${repo} default branch: first red SHA ${firstSha}; latest SHA ${main.sha}: ${main.ci}; ${(main.checks ?? []).map((c) => `${c.name}${c.url ? ` ${c.url}` : ""}`).join("; ")}${merged ? `; ${matched ? "episode merge" : "last PR merged by commit time (5s tolerance)"}: #${merged.number} ${merged.url}` : ""}`;
 }
 
 /** Retain an episode's first red SHA until a passing reading resets it. */
@@ -135,7 +145,12 @@ export function observeFlightMain(store: Store, repo: string, main: MainCi): voi
     delete state.signals[`main_red:${episode}`];
   raiseSignal(
     state,
-    { kind: "main_red", key: episode, since: main.at, evidence: mainEvidence(store, repo, main) },
+    {
+      kind: "main_red",
+      key: episode,
+      since: main.at,
+      evidence: mainEvidence(store, repo, { ...main, episode }),
+    },
     main.at,
   );
   save(store, repo, state);
@@ -153,7 +168,7 @@ export function observeFlightChecks(
     if (!pr.headSha || pr.state !== "open") continue;
     for (const check of pr.checks ?? []) {
       if (check.kind !== "check") continue;
-      const key = `${repo}:${check.workflow ?? check.name}`;
+      const key = `${repo}:${check.workflow ?? check.name}/${check.name}`;
       const id = `${pr.number}:${check.url?.match(/\/actions\/runs\/(\d+)(?:\/|$)/)?.[1] ?? "check"}:${check.name}`;
       const previous = state.checks[id];
       if (previous && previous.at > now) continue;
@@ -176,6 +191,11 @@ export function observeFlightChecks(
       state.checks[id] = {
         sha: pr.headSha,
         name: check.workflow ?? check.name,
+        job: check.name,
+        observedFailure:
+          check.state === "failing" ||
+          (previous?.sha === pr.headSha &&
+            (previous.observedFailure === true || previous.failedAt !== null)),
         runId: check.url?.match(/\/actions\/runs\/(\d+)(?:\/|$)/)?.[1] ?? null,
         failedAttempt:
           check.state === "passing"
@@ -293,7 +313,7 @@ export function flightSignals(i: {
     if (planned) triage(run.ticket, "plan", event.at, event.text);
     if (parked) {
       const reason = event.text.slice(parkPrefix.length).replace(/\b[0-9a-f]{7,40}\b/g, "<sha>");
-      const key = `${run.ticket}:${run.loop?.parked?.kind ?? reason}`;
+      const key = `${run.ticket}:${reason}`;
       const entries = parks.get(key) ?? [];
       entries.push({
         at: event.at,
@@ -323,8 +343,15 @@ export function flightSignals(i: {
             ),
           ].map((m) => ({ name: m[1] as string, id: m[2] as string }));
     const names = noteRuns.flatMap((r) => {
-      const observed = Object.values(state.checks).filter((c) => c.runId === r.id && c.sha === sha);
-      return observed.length ? observed.map((c) => c.name) : [r.name];
+      return Object.values(state.checks)
+        .filter(
+          (c) =>
+            c.runId === r.id &&
+            c.sha === sha &&
+            c.job &&
+            (c.observedFailure || c.failedAt !== null),
+        )
+        .map((c) => `${c.name}/${c.job}`);
     });
     for (const name of new Set(names)) {
       const key = `${repo}:${name}`;
@@ -407,12 +434,8 @@ export function flightSignals(i: {
   for (const seat of session.seats) {
     const row = store.seatSession(seat.id);
     if (seatDef(seat).loop === "watch" && row?.state === "error" && row.reason) {
-      raise(
-        "hub_error",
-        `watch:${seat.id}:${row.updatedAt}`,
-        row.updatedAt,
-        `${seat.id}: ${row.reason}`,
-      );
+      const errorSince = row.errorSince ?? row.updatedAt;
+      raise("hub_error", `watch:${seat.id}:${errorSince}`, errorSince, `${seat.id}: ${row.reason}`);
     }
   }
   for (const run of store.runsOverlapping(cutoff, now + 1)) {
@@ -420,6 +443,9 @@ export function flightSignals(i: {
     const seat = session.seats.find((s) => s.id === run.agentId);
     if (!seat) continue;
     const loop = seatDef(seat).loop;
+    const review = run.reviewId == null ? null : store.review(run.reviewId);
+    if (loop === "review" && (!review || !["queued", "starting", "running"].includes(review.state)))
+      continue;
     const stoppedWithoutReport = /stopped.*without reporting/i.test(run.loop?.parked?.reason ?? "");
     if (run.endedAt === null && !stoppedWithoutReport) continue;
     const missing =
@@ -432,9 +458,7 @@ export function flightSignals(i: {
               (store.latestEvidence(run.id)?.id ?? 0) <= run.loop.reportedEvidenceId))
         : loop === "plan"
           ? !store.planLanded(run)
-          : loop === "review" && run.reviewId != null
-            ? store.review(run.reviewId)?.state !== "reported"
-            : false);
+          : loop === "review");
     if (missing)
       raise(
         "hub_error",
@@ -461,7 +485,13 @@ export function flightSignals(i: {
     }
   }
   if (!state.initialized) {
-    for (const signal of Object.values(state.signals)) signal.toldAt = now;
+    for (const signal of Object.values(state.signals))
+      if (
+        signal.kind === "repeat_park" ||
+        signal.kind === "flaky_test" ||
+        (signal.kind === "hub_error" && signal.key.startsWith("report:"))
+      )
+        signal.toldAt = now;
     for (const entry of Object.values(state.triage)) entry.told = true;
     state.initialized = true;
   }

@@ -305,6 +305,8 @@ export interface PullRequestView {
   createdAt: number;
   updatedAt: number;
   mergedAt: number | null;
+  /** Merge commit SHA; absent on PRs collected before merge commit metadata. */
+  mergeCommitSha?: string | null;
   /** The head commit's sha; null when GitHub gave none or the row was stored before it. */
   headSha: string | null;
   /** UNKNOWN: GitHub has not computed it yet, so poll again. When it was read is the row's `read_at`. */
@@ -1000,6 +1002,8 @@ export interface SeatSessionRow {
   reason: string | null;
   worktree: string | null;
   updatedAt: number;
+  /** Start of the current error, preserved across seat updates until recovery. */
+  errorSince?: number;
   /** When the seat's last turn ended; `setSeatSession` never writes it. Absent on a row not read. */
   lastTurnEndedAt?: number | null;
 }

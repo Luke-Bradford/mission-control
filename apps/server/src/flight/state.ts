@@ -57,7 +57,7 @@ import {
   type TestLockState,
   wakeKeyPrefix,
 } from "@mc/core";
-import { flightQuestion, threadMessages } from "../comms.ts";
+import { flightQuestion } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_LOCK } from "../hud.ts";
@@ -694,30 +694,11 @@ export function flightState(i: {
         !ownReply(x, flightId) &&
         (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
     )
-    .flatMap((item): (AttentionItem & { wakeKey?: string })[] => {
-      if (item.kind !== "message" || !item.agentId) return [item];
-      const question = threadMessages(
-        store,
-        item.agentId,
-        !config.loops.some((l) => l.id === item.agentId),
-        "attention",
-      ).findLast((m) => !m.seen && m.direct && flightQuestion(m.text));
-      return question
-        ? [
-            {
-              ...item,
-              wakeKey: `message:${item.agentId}:${question.id}`,
-              text: question.text,
-              at: question.at ?? item.at,
-            },
-          ]
-        : [];
-    })
+    .filter((item) => item.kind !== "message" || flightQuestion(item.text))
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
       key: x.key,
-      ...(x.wakeKey ? { wakeKey: x.wakeKey } : {}),
       kind: x.kind,
       ticket: x.ticket,
       text: cut(x.text, FLIGHT_STATE_TEXT_MAX),
@@ -827,7 +808,12 @@ export function flightWake(
     snapshot,
     digest: {
       ...rest,
-      signals: changed("signals", signals, (s) => `${s.kind}:${s.key}`),
+      signals: changed(
+        "signals",
+        signals,
+        (s) => `${s.kind}:${s.key}`,
+        (s) => (s.told ? { kind: s.kind, key: s.key, told: s.told } : s),
+      ),
       ...(changedNotes.length > 0 ? { brief: changedNotes } : {}),
       ...(changedHeadline ? { headline } : {}),
       briefVersion,

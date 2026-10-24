@@ -673,6 +673,7 @@ describe("Store", () => {
       updatedAt: 2,
       mergedAt: 3,
       headSha: "0123abc",
+      mergeCommitSha: "merge-sha",
       mergeable: "MERGEABLE" as const,
       author: "octo",
       assignees: ["a", "b"],

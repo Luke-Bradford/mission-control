@@ -102,6 +102,28 @@ const busyBoard = (): FlightState => ({
 });
 
 describe("wake deltas", () => {
+  it("ignores changing evidence on told signals but includes changes while untold", () => {
+    const state = busyBoard();
+    state.signals = [
+      { kind: "github_budget", key: "reset", since: 1, evidence: "100/5000", told: false },
+    ];
+    const untold = flightWake(state);
+    const signal = state.signals[0];
+    if (!signal) throw new Error("missing signal");
+    signal.evidence = "99/5000";
+    expect(flightWake(state, untold.snapshot).digest.signals.entries).toHaveLength(1);
+    signal.told = true;
+    const told = flightWake(state, untold.snapshot);
+    expect(told.digest.signals.entries).toHaveLength(1);
+    signal.evidence = "98/5000";
+    signal.since = 2;
+    expect(flightWake(state, told.snapshot).digest.signals).toEqual({
+      entries: [],
+      unchanged: 1,
+      removed: [],
+    });
+  });
+
   it("deltas signals and names the changed wake facts in the stored header", () => {
     const state = busyBoard();
     const before = wakeFacts(state);

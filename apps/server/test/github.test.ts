@@ -1584,12 +1584,27 @@ describe("sweepPullRequests", () => {
     store.upsertPullRequests(
       repo.id,
       [
-        await one(pull(6, { state: "MERGED", mergedAt: new Date(NOW - 1000).toISOString() })),
-        await one(pull(8, { state: "MERGED", mergedAt: new Date(NOW + 1000).toISOString() })),
+        await one(
+          pull(6, {
+            state: "MERGED",
+            mergedAt: new Date(NOW).toISOString(),
+            mergeCommit: { oid: "trunk-red" },
+          }),
+        ),
+        await one(
+          pull(8, {
+            state: "MERGED",
+            mergedAt: new Date(NOW + 1000).toISOString(),
+            mergeCommit: { oid: "other" },
+          }),
+        ),
       ],
       NOW - 1,
     );
     const first = prPage([pull(7)], "next");
+    expect(store.pullRequests(repo.id).find((pr) => pr.number === 6)?.mergeCommitSha).toBe(
+      "trunk-red",
+    );
     const { gql, calls } = stub({
       prPages: [
         {
@@ -1627,7 +1642,8 @@ describe("sweepPullRequests", () => {
     const evidence = saved.signals["main_red:trunk-red"].evidence;
     expect(evidence).toContain("unit tests https://github.com/o/r/actions/runs/1/job/2");
     expect(evidence).toContain("deploy https://ci.test/deploy");
-    expect(evidence).toContain("last PR merged before commit: #6");
+    expect(calls[0]?.q).toContain("mergeCommit { oid }");
+    expect(evidence).toContain("episode merge: #6");
     expect(evidence).not.toContain("#8");
     const response = prPage([pull(7)]);
     const nullRollup = stub({
