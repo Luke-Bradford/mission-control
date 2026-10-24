@@ -1709,6 +1709,7 @@ describe("closesIssue", () => {
     "Fixes`example`#42",
     "Fixes `example` #42",
     "Fix`example`es #42",
+    "fi`code`es #42",
     "Fixes o/`example`mc#42",
     "Fixes #4`example`2",
     "Fixes`example` GH-42",
@@ -1716,6 +1717,17 @@ describe("closesIssue", () => {
   ])("does not assemble a closing reference across a code span: %j", (md) => {
     expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(false);
   });
+
+  it("does not forge a repository name from the code-span placeholder", () => {
+    expect(closesIssue("Fixes o/`example`mc#42", { repo: "o/xmc", issue: 42 })).toBe(false);
+  });
+
+  it.each(["Fixes #42 and `code`", "`code` and Fixes #42"])(
+    "recognizes a closing reference separated from a code span: %j",
+    (md) => {
+      expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(true);
+    },
+  );
 
   it.each(["`example\nFixes #42`", "`example\r\nFixes #42`", "``example\nFixes #42 ` x``"])(
     "blanks a code span across one line break: %j",

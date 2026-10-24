@@ -1837,9 +1837,8 @@ function blankCodeSpans(md: string): string {
   let end = 0;
   for (const run of runs) {
     if (run.start < end || run.next === undefined) continue;
-    // A word character preserves boundary blockers on both sides without joining a reference:
-    // x is not separator whitespace, starts no closing keyword, and ends no issue number.
-    parts.push(md.slice(end, run.start), "x");
+    // closesIssue rejects references containing or directly touching this sentinel.
+    parts.push(md.slice(end, run.start), "\0");
     end = run.next.end;
   }
   parts.push(md.slice(end));
@@ -1861,7 +1860,13 @@ export function closesIssue(md: string, { repo, issue }: { repo: string; issue: 
       "",
     ),
   ).replace(/<!--[\s\S]*?-->/g, "");
-  return [...text.matchAll(STRICT_CLOSING_REF)].some((m) => closesOwn(m, own, issue));
+  return [...text.matchAll(STRICT_CLOSING_REF)].some(
+    (m) =>
+      !m[0].includes("\0") &&
+      text[m.index - 1] !== "\0" &&
+      text[m.index + m[0].length] !== "\0" &&
+      closesOwn(m, own, issue),
+  );
 }
 
 /**
