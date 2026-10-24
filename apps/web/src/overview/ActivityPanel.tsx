@@ -21,7 +21,10 @@ import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { itemPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
+
+type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
 
 type Filter = "steps" | "comms" | "all" | "reviews" | "merges" | "guard" | "needs";
 const FILTERS: { value: Filter; label: string }[] = [
@@ -147,11 +150,13 @@ function ActivityText({
   prRepoId,
   split,
   red,
+  attentionKey,
 }: {
   event: ActivityEvent;
   prRepoId: string | null;
   split: [string, string] | null;
   red: boolean;
+  attentionKey?: string;
 }) {
   const pr = e.kind === "pr-opened" || e.kind === "pr-merged" ? PR_EVENT.exec(e.text) : null;
   return (
@@ -167,6 +172,14 @@ function ActivityText({
           <TicketRef ticket={e.ref} url={e.kind === "escalation" ? e.url : null} />
           {split[1]}
         </>
+      ) : attentionKey && !e.ref ? (
+        <a
+          href={e.url ?? itemPath(attentionKey)}
+          target={e.url ? "_blank" : undefined}
+          rel={e.url ? "noreferrer" : undefined}
+        >
+          {e.text}
+        </a>
       ) : (
         <MarkdownInline text={e.text} />
       )}
@@ -179,11 +192,11 @@ export function ActivityPanel() {
   const events = useResource<ActivityRow[]>(RESOURCES.activity);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention);
   const tz = useTz();
   const { inView, inRepo } = useSessionScope();
   const [filter, setFilter] = useState<Filter>(rememberedFilter);
-  const [frozen, setFrozen] = useState<ActivityRow[] | null>(null);
+  const [frozen, setFrozen] = useState<LogRow[] | null>(null);
   const list = useRef<HTMLDivElement>(null);
 
   const agents = new Map(crew?.rows.map((r) => [r.id, r]));
@@ -195,7 +208,16 @@ export function ActivityPanel() {
   const repoOf = (who: string): string | null =>
     agents.get(who)?.repoId ?? [who, ...who.split(":")].find((p) => repoIds.has(p)) ?? null;
 
-  const needs: ActivityRow[] = operatorItems(attention ?? []).map((i) => ({
+  const needs: LogRow[] = [
+    ...new Map(
+      operatorItems(attention.data ?? []).map((i) => [
+        i.escalationId && i.ticket ? `escalation:${i.ticket}` : `attention:${i.key}`,
+        i,
+      ]),
+    ).values(),
+  ].map((i) => ({
+    attentionKey: i.key,
+    escalationRef: i.escalationId ? i.ticket : null,
     at: i.messageAt ?? i.at,
     who: i.agentId ?? i.repoId ?? "Needs you",
     kind: "escalation",
@@ -206,12 +228,23 @@ export function ActivityPanel() {
     prs: [],
     summary: null,
   }));
-  const source =
+  const escalationRefs = new Set(
+    (events.data ?? []).filter((e) => e.kind === "escalation").map((e) => e.ref),
+  );
+  const usesAttention = filter === "needs" || filter === "all";
+  const resources = [
+    ...(filter === "needs" ? [] : [{ name: "activity", ...events }]),
+    ...(usesAttention ? [{ name: "attention", ...attention }] : []),
+  ];
+  const source: LogRow[] =
     frozen ??
     (filter === "needs"
       ? needs
       : filter === "all"
-        ? [...(events.data ?? []), ...needs]
+        ? [
+            ...(events.data ?? []),
+            ...needs.filter((i) => !i.escalationRef || !escalationRefs.has(i.escalationRef)),
+          ]
         : (events.data ?? []));
   const rows = source
     .filter((e) => {
@@ -342,6 +375,7 @@ export function ActivityPanel() {
                     prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
                     split={split}
                     red={red}
+                    attentionKey={e.attentionKey}
                   />
                 </span>
               </Expandable>
@@ -360,10 +394,20 @@ export function ActivityPanel() {
             </div>
           );
         })}
-        {rows.length === 0 && !events.error && events.data && (
+        {rows.length === 0 && resources.every((r) => r.data && !r.error && !r.loading) && (
           <div className="pb muted">No events yet.</div>
         )}
-        {events.error && !events.data && <div className="pb crit-t">Could not load activity.</div>}
+        {resources.map((r) =>
+          r.error ? (
+            <div key={r.name} className="pb crit-t">
+              {r.data
+                ? `Could not refresh ${r.name}. Showing last known items.`
+                : `Could not load ${r.name}.`}
+            </div>
+          ) : r.loading ? (
+            <div key={r.name} className="pb muted">{`Loading ${r.name}…`}</div>
+          ) : null,
+        )}
       </div>
     </Panel>
   );
