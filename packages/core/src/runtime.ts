@@ -1,4 +1,3 @@
-import { isAbsolute, relative, resolve } from "node:path";
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
 import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
 import { ROLES } from "./roles.ts";
@@ -794,7 +793,7 @@ export const CODEX_SEAT_PROFILE = "mc_seat";
 export const CODEX_SEAT_TOKEN_ENV = "MC_SEAT_TOKEN";
 
 /** TOML strings in a seat config never need escaping; refuse input that would. */
-function tomlString(value: string): string {
+export function tomlString(value: string): string {
   if (
     [...value].some(
       (c) => c === '"' || c === "\\" || c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
@@ -803,61 +802,6 @@ function tomlString(value: string): string {
     throw new Error("codex seat config: unsafe TOML string");
   }
   return `"${value}"`;
-}
-
-/** The hub-written config in one run's isolated CODEX_HOME. */
-export function codexSeatConfig(
-  i: CrewSandboxInput,
-  mode: CrewMode,
-  mcpUrl: string,
-  tmpDir: string,
-): string {
-  const denied = sandboxReadDenies(i);
-  for (const path of [
-    i.cwd,
-    i.gitCommonDir,
-    i.worktreeGitDir,
-    i.home,
-    i.dataDir,
-    ...denied,
-    tmpDir,
-  ]) {
-    tomlString(path);
-  }
-  if (!isAbsolute(tmpDir)) throw new Error("codex seat config: tmpDir must be absolute");
-  const contains = (parent: string, path: string) => {
-    const rel = relative(resolve(parent), resolve(path));
-    return rel === "" || (!rel.startsWith("../") && rel !== ".." && !isAbsolute(rel));
-  };
-  if (denied.some((path) => contains(path, tmpDir)))
-    throw new Error("codex seat config: tmpDir is inside a denied path");
-  if ([i.cwd, i.home, i.gitCommonDir, i.worktreeGitDir, "/"].some((path) => contains(tmpDir, path)))
-    throw new Error("codex seat config: tmpDir contains a seat or operator path");
-  const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
-  return [
-    `approvals_reviewer = ${tomlString("user")}`,
-    "project_doc_max_bytes = 0",
-    `web_search = ${tomlString("disabled")}`,
-    `default_permissions = ${tomlString(CODEX_SEAT_PROFILE)}`,
-    "[features]",
-    "unified_exec = false",
-    "[shell_environment_policy]",
-    `exclude = [${tomlString(CODEX_SEAT_TOKEN_ENV)}]`,
-    `[mcp_servers.${MC_MCP_SERVER}]`,
-    `url = ${tomlString(mcpUrl)}`,
-    `bearer_token_env_var = ${tomlString(CODEX_SEAT_TOKEN_ENV)}`,
-    `[permissions.${CODEX_SEAT_PROFILE}.filesystem]`,
-    grant(":root", "read"),
-    ...denied.map((path) => grant(path, "deny")),
-    grant(tmpDir, "write"),
-    ...[...new Set([i.gitCommonDir, i.worktreeGitDir])].map((path) => grant(path, "read")),
-    `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
-    grant(".", mode === "read-only" ? "read" : "write"),
-    grant(".git", "read"),
-    `[permissions.${CODEX_SEAT_PROFILE}.network]`,
-    "enabled = false",
-    "",
-  ].join("\n");
 }
 
 /** The guard hook as a seat's settings name it: its command line and the CLI's timeout on it. */
@@ -886,7 +830,7 @@ function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
 }
 
 /** Absolute sandbox inputs and the shared credential, data and extra read denies. */
-function sandboxReadDenies(i: CrewSandboxInput): string[] {
+export function sandboxReadDenies(i: CrewSandboxInput): string[] {
   // A relative path would be resolved against the CLI's cwd, not mean what the rules below say.
   for (const [k, v] of [
     ["cwd", i.cwd],

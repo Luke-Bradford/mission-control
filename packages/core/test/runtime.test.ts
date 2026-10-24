@@ -23,7 +23,6 @@ import {
   CREW_CLI_ENV,
   CREW_ISOLATION_FLAGS,
   type CrewCliInput,
-  codexSeatConfig,
   crewAuthorName,
   crewCliArgs,
   crewPnpmStoreDir,
@@ -46,7 +45,6 @@ import {
   pathInArea,
   protectedFileRules,
   READONLY_TOOLS,
-  SANDBOX_DENY_READ_HOME,
   SCRATCH_TOOLS,
   SEAT_STATES,
   STOP_GRACE_MS,
@@ -79,109 +77,6 @@ const base: CrewCliInput = {
 
 const count = (args: string[], x: string) => args.filter((a) => a === x).length;
 
-describe("codexSeatConfig", () => {
-  const url = "http://127.0.0.1:7420/mcp";
-  const tmp = "/tmp/claude-501/seat-1";
-
-  it("writes the isolated profile, MCP auth and command environment", () => {
-    const config = codexSeatConfig(base.sandbox, "writer", url, tmp);
-    expect(config).toContain('approvals_reviewer = "user"');
-    expect(config).toContain("project_doc_max_bytes = 0");
-    // codex-cli 0.154.0 generate-json-schema: Config.web_search → WebSearchMode.disabled.
-    // Config permits extra keys; features.unified_exec is listed but false does not take effect
-    // on 0.154.0. Keep the harmless key; refusing & and declining writeStdin enforce the floor.
-    expect(config).toContain('web_search = "disabled"');
-    expect(config).toContain("[features]\nunified_exec = false");
-    expect(config).toContain('[shell_environment_policy]\nexclude = ["MC_SEAT_TOKEN"]');
-    expect(config).toContain(`[mcp_servers.mc]\nurl = "${url}"`);
-    expect(config).toContain('bearer_token_env_var = "MC_SEAT_TOKEN"');
-    expect(config).toContain('default_permissions = "mc_seat"');
-    expect(config).toContain('[permissions.mc_seat.filesystem]\n":root"="read"');
-    for (const path of SANDBOX_DENY_READ_HOME) {
-      expect(config).toContain(`"/home/you/${path}"="deny"`);
-    }
-    expect(config).toContain(`"${base.sandbox.dataDir}"="deny"`);
-    expect(config).toContain(`"${tmp}"="write"`);
-    expect(config).toContain(
-      '[permissions.mc_seat.filesystem.":workspace_roots"]\n"."="write"\n".git"="read"',
-    );
-    expect(config).toContain("[permissions.mc_seat.network]\nenabled = false");
-    expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
-  });
-
-  it("keeps the read-only workspace read-only", () => {
-    const config = codexSeatConfig(base.sandbox, "read-only", url, tmp);
-    expect(config).toContain('"."="read"');
-    expect(config).toContain(`"${tmp}"="write"`);
-    expect(config).not.toContain('"."="write"');
-  });
-
-  it("lets a scratch seat write its throwaway worktree", () => {
-    expect(codexSeatConfig(base.sandbox, "scratch", url, tmp)).toContain('"."="write"');
-  });
-
-  it.each(["writer", "read-only", "scratch"] as const)(
-    "explicitly keeps both git dirs read-only for %s",
-    (mode) => {
-      const sandbox = {
-        ...base.sandbox,
-        gitCommonDir: `${tmp}/clone/.git`,
-        worktreeGitDir: `${tmp}/clone/.git/worktrees/seat`,
-      };
-      const config = codexSeatConfig(sandbox, mode, url, `${tmp}/temp`);
-      expect(config).toContain(`"${sandbox.gitCommonDir}"="read"`);
-      expect(config).toContain(`"${sandbox.worktreeGitDir}"="read"`);
-    },
-  );
-
-  it.each([
-    "/",
-    "/home",
-    base.sandbox.home,
-    "/mc",
-    base.sandbox.cwd,
-    base.sandbox.gitCommonDir,
-    base.sandbox.worktreeGitDir,
-    "/mc/clone",
-    "/mc/clone/.git/worktrees",
-    "/tmp/..",
-  ])("rejects a temp dir containing a seat or operator path: %s", (tmpDir) => {
-    expect(() => codexSeatConfig(base.sandbox, "writer", url, tmpDir)).toThrow();
-  });
-
-  it("includes additional denies once", () => {
-    const config = codexSeatConfig(
-      { ...base.sandbox, denyRead: ["/other", "/other"] },
-      "writer",
-      url,
-      tmp,
-    );
-    expect(config.match(/"\/other"="deny"/g)).toHaveLength(1);
-  });
-
-  it.each(['"', "\\", "\0", "\n", "\r", "\t", "\u001f", "\u007f"])(
-    "rejects unsafe TOML characters %j",
-    (c) => {
-      expect(() =>
-        codexSeatConfig({ ...base.sandbox, denyRead: [`/other${c}`] }, "writer", url, tmp),
-      ).toThrow();
-      expect(() => codexSeatConfig(base.sandbox, "writer", `${url}${c}`, tmp)).toThrow();
-      expect(() => codexSeatConfig(base.sandbox, "writer", url, `${tmp}${c}`)).toThrow();
-    },
-  );
-
-  it.each([
-    "relative",
-    "/home/you/.ssh/seat",
-    "/home/you/.ssh",
-    `${base.sandbox.dataDir}/tmp`,
-    "/other/tmp",
-  ])("rejects relative or denied temp dir %s", (tmpDir) => {
-    expect(() =>
-      codexSeatConfig({ ...base.sandbox, denyRead: ["/other"] }, "writer", url, tmpDir),
-    ).toThrow();
-  });
-});
 /** The allowlist as it reaches argv: Edit and Write come out anchored to the worktree (#41). */
 const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));

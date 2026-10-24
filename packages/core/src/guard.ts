@@ -1,21 +1,9 @@
 /**
  * The guard's pure core: the command rules, the full-suite matcher and the secret scan. The hub
- * route (`POST /api/guard/check`) and Mission Control's push and PR build on these. Codex path
- * checks also resolve filesystem paths, without changing them.
+ * route (`POST /api/guard/check`) and Mission Control's push and PR build on these; nothing here does I/O.
  */
-import { lstatSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { MC_TOOL_NAMES, MC_TOOLS, type McToolName, mcTool, READ_ONLY_CANNOT_WRITE } from "./mcp.ts";
-import {
-  CODEX_SHELL,
-  type CrewMode,
-  DENIED_TOOLS,
-  GIT_READ_TOOLS,
-  isProtectedPath,
-  pathInArea,
-  type SeatCommands,
-  seatCommands,
-} from "./runtime.ts";
+import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
@@ -1084,6 +1072,14 @@ function lineCommands(cmd: string, walk: Walk): Cmd[] {
   }
 }
 
+/** The Codex walk preserves exact argv and refuses empty or background command lines. */
+export function codexLineCommands(script: string): Cmd[] | null {
+  const walk = newWalk();
+  walk.codex = true;
+  const parsed = lineCommands(script, walk);
+  return walk.lineBackground || parsed.length === 0 ? null : parsed;
+}
+
 /** Strict POSIX words for an approval envelope, without evaluating shell syntax. */
 function codexWords(text: string): string[] | null {
   const words: string[] = [];
@@ -1143,106 +1139,6 @@ export function codexCommand(raw: string, parsed: readonly string[] | null): str
   return script;
 }
 
-/** Resolve missing leaves through their nearest existing parent; dangling links fail closed. */
-function realPathOrParent(path: string): string | null {
-  const missing: string[] = [];
-  let parent = path;
-  for (;;) {
-    try {
-      return resolve(realpathSync(parent), ...missing.reverse());
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
-      try {
-        lstatSync(parent);
-        return null;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
-      }
-      const next = dirname(parent);
-      if (next === parent) return null;
-      missing.push(basename(parent));
-      parent = next;
-    }
-  }
-}
-
-/** The relative real path inside an existing worktree, or null. */
-function codexRelativePath(path: string, cwd: string): string | null {
-  try {
-    const root = realpathSync(cwd);
-    const real = realPathOrParent(isAbsolute(path) ? path : `${root}/${path}`);
-    if (real === null) return null;
-    const rel = relative(root, real);
-    return rel.split("/").includes("..") || isAbsolute(rel) ? null : rel;
-  } catch {
-    return null;
-  }
-}
-
-export function codexReadAllowed(path: string, cwd: string): boolean {
-  return codexRelativePath(path, cwd) !== null;
-}
-
-export function codexEditAllowed(
-  path: string,
-  cwd: string,
-  area: readonly string[],
-  protectedFiles: readonly string[],
-): boolean {
-  if (path === "" || path === ".") return false;
-  const real = codexRelativePath(path, cwd);
-  if (real === null || real === "") return false;
-  try {
-    const rel = isAbsolute(path)
-      ? relative(realpathSync(cwd), path)
-      : relative(cwd, resolve(cwd, path));
-    return (
-      !rel.split("/").includes("..") &&
-      [rel, real].every((p) => pathInArea(area, p) && !isProtectedPath(p, protectedFiles))
-    );
-  } catch {
-    return false;
-  }
-}
-
-export interface CodexApprovalContext {
-  cwd: string;
-}
-
-/** Only local commands and file edits can become ordinary guard events. */
-export function codexApproval(
-  req: { method: string; params: unknown },
-  paths: readonly string[] | undefined,
-  ctx: CodexApprovalContext,
-): GuardEvent[] | null {
-  if (req.params === null || typeof req.params !== "object" || Array.isArray(req.params))
-    return null;
-  const p = req.params as Record<string, unknown>;
-  if (req.method === "item/fileChange/requestApproval") {
-    if (p.grantRoot != null || paths === undefined || paths.length === 0) return null;
-    return paths.map((file_path) => ({ tool: "Edit", input: { file_path } }));
-  }
-  if (
-    req.method !== "item/commandExecution/requestApproval" ||
-    p.kind !== "command" ||
-    typeof p.command !== "string" ||
-    typeof p.cwd !== "string"
-  )
-    return null;
-  if (p.networkApprovalContext != null || (p.environmentId != null && p.environmentId !== "local"))
-    return null;
-  try {
-    if (!isAbsolute(p.cwd) || !codexReadAllowed(realpathSync(p.cwd), ctx.cwd)) return null;
-  } catch {
-    return null;
-  }
-  const parsed = p.proposedExecpolicyAmendment;
-  if (parsed != null && (!Array.isArray(parsed) || !parsed.every((w) => typeof w === "string")))
-    return null;
-  const script = codexCommand(p.command, parsed == null ? null : (parsed as string[]));
-  return script === null ? null : [{ tool: "Bash", input: { command: script } }];
-}
-
 type ReadOption = "value" | "path" | "pattern";
 interface ReadOptions {
   flags: readonly string[];
@@ -1251,7 +1147,7 @@ interface ReadOptions {
 }
 
 /** Known read-only options only: unknown options may run a helper, follow links or write files. */
-const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
+export const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
   ls: {
     flags: [
       "-a",
@@ -1436,13 +1332,14 @@ function codexPositionalPattern(argv: readonly string[], spec: ReadOptions): boo
   return true;
 }
 
-/** Check file operands relative to the approved cwd, confined to the seat's worktree. */
-function codexReadCommand(argv: readonly string[], approvalCwd: string, root: string): boolean {
+/** Check read-command options and pass every file operand to the caller's path check. */
+export function codexReadCommand(
+  argv: readonly string[],
+  allowedPath: (path: string) => boolean,
+): boolean {
   const program = argv[0];
   const spec = CODEX_READ_COMMANDS[program];
   if (spec === undefined) return false;
-  const allowedPath = (path: string) =>
-    codexReadAllowed(isAbsolute(path) ? path : `${approvalCwd}/${path}`, root);
   if (program === "find" && argv.some((w) => FIND_EXEC.has(w) || w === "-delete")) return false;
   let pattern = codexPositionalPattern(argv, spec);
   let options = true;
@@ -1481,58 +1378,6 @@ function codexReadCommand(argv: readonly string[], approvalCwd: string, root: st
     else if (word !== "-" && !allowedPath(word)) return false;
   }
   return !pattern && !sedScript;
-}
-
-/** Match the existing CLI's Bash permission entries, including the --output* denies. */
-function codexBashEntry(argv: readonly string[], entry: string): boolean {
-  if (!entry.startsWith("Bash(")) return false;
-  const pattern = entry.slice(5, -1).replace(/:\*$/, "");
-  const words = pattern.split(" ");
-  return (
-    argv.length >= words.length &&
-    words.every((w, n) => (w.endsWith("*") ? argv[n].startsWith(w.slice(0, -1)) : argv[n] === w))
-  );
-}
-
-export function codexCommandAllowed(
-  script: string,
-  mode: CrewMode,
-  commands: SeatCommands,
-  approvalCwd: string,
-  root: string,
-): boolean {
-  if (
-    [...script].some(
-      (c) => c !== "\n" && c !== "\t" && (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
-    )
-  )
-    return false;
-  let allowed: readonly string[];
-  let cwd: string;
-  try {
-    if (!isAbsolute(approvalCwd)) return false;
-    cwd = realpathSync(approvalCwd);
-    if (!codexReadAllowed(cwd, root)) return false;
-    allowed = seatCommands(mode, commands);
-  } catch {
-    return false;
-  }
-  const walk = newWalk();
-  walk.codex = true;
-  const parsed = lineCommands(script, walk);
-  if (walk.lineBackground || parsed.length === 0) return false;
-  return parsed.every(({ argv, background, braces }) => {
-    if (background || braces || DENIED_TOOLS.some((entry) => codexBashEntry(argv, entry)))
-      return false;
-    if (Object.hasOwn(CODEX_READ_COMMANDS, argv[0])) return codexReadCommand(argv, cwd, root);
-    return (
-      GIT_READ_TOOLS.some((entry) => codexBashEntry(argv, entry)) ||
-      allowed.some((entry) => {
-        const words = entry.split(" ");
-        return argv.length >= words.length && words.every((w, n) => argv[n] === w);
-      })
-    );
-  });
 }
 
 function commands(cmd: string, walk: Walk, depth: number, background: boolean, mux: Mux): Cmd[] {
