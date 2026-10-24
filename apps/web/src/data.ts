@@ -16,6 +16,7 @@ import {
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet } from "./api.ts";
+import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
   data: T | undefined;
@@ -479,6 +480,11 @@ export function parseTopic(data: unknown): Topic | null {
   }
 }
 
+export const streamStatus = store<{ connected: boolean; lastMessageAt: number | null }>({
+  connected: false,
+  lastMessageAt: null,
+});
+
 const RETRY_MS = 5000;
 
 /**
@@ -492,19 +498,26 @@ export function startStream(): () => void {
   let connectedBefore = false;
   let stopped = false;
 
+  streamStatus.set({ connected: false, lastMessageAt: null });
+  const received = () => streamStatus.set({ connected: true, lastMessageAt: Date.now() });
+
   const connect = () => {
     if (stopped) return;
     const source = new EventSource("/api/stream");
     es = source;
     source.addEventListener("open", () => {
+      streamStatus.set({ ...streamStatus.get(), connected: true });
       if (connectedBefore) hub.refetchAll();
       connectedBefore = true;
     });
+    source.addEventListener("message", received);
     source.addEventListener("changed", (ev) => {
+      received();
       const topic = parseTopic((ev as MessageEvent).data);
       if (topic) hub.refetchTopic(topic);
     });
     source.addEventListener("error", () => {
+      streamStatus.set({ ...streamStatus.get(), connected: false });
       if (source.readyState !== EventSource.CLOSED) return; // the browser is reconnecting
       source.close();
       retry = setTimeout(() => {
@@ -517,6 +530,7 @@ export function startStream(): () => void {
   connect();
   return () => {
     stopped = true;
+    streamStatus.set({ connected: false, lastMessageAt: null });
     clearTimeout(retry);
     es?.close();
   };
