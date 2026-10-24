@@ -746,6 +746,7 @@ describe("POST /api/guard/check", () => {
     ]);
     expect(view.counts).toEqual({
       "git-write": 2,
+      "codex-allowlist": 0,
       "github-write": 0,
       "merge-push": 0,
       "flight-powers": 0,

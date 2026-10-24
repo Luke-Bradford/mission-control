@@ -166,10 +166,10 @@ Each is pinned by a test in the named step.
 
   - **Handshake:**
     1. `initialize`, then `initialized`.
-    2. `thread/start` (or `thread/resume` when `resumeThreadId` is set) with `{cwd, model, approvalPolicy:"untrusted", approvalsReviewer:"user", developerInstructions, ephemeral:false}`.
+    2. `thread/start` (or `thread/resume` when `resumeThreadId` is set) with `{cwd, model, approvalPolicy:"untrusted", approvalsReviewer:"user", developerInstructions, config:{project_doc_max_bytes:0}, ephemeral:false}`. The per-thread config override is required: the same setting in the run's `config.toml` alone did not exclude `AGENTS.md` in the hostile-project handshake probe on 0.154.0.
   - **Start check** on the response:
     - `approvalPolicy === "untrusted"` and `approvalsReviewer === "user"`;
-    - `permissionProfile.id === "mc_seat"`;
+    - `activePermissionProfile.id === "mc_seat"`;
     - `sandbox.networkAccess === false`;
     - `instructionSources` is empty.
 

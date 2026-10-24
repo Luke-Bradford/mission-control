@@ -251,6 +251,7 @@ function make(
     enabled?: boolean;
     fetchTicket?: FetchTicket;
     command?: string;
+    codexCommand?: string;
     worktrees?: string;
     extraArgs?: string[];
     resumeWindowMs?: number;
@@ -313,6 +314,7 @@ function make(
     rules: over.rules ?? (async () => START_RULES),
     login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,
+    codexCommand: over.codexCommand,
     commandArgs:
       over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,

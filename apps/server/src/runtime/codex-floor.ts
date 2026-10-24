@@ -2,6 +2,8 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
+  CODEX_MIN_VERSION,
+  CODEX_PROJECT_DOC_CONFIG,
   CODEX_READ_COMMANDS,
   CODEX_SEAT_PROFILE,
   CODEX_SEAT_TOKEN_ENV,
@@ -53,11 +55,12 @@ export function codexSeatConfig(
   const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
   return [
     `approvals_reviewer = ${tomlString("user")}`,
-    "project_doc_max_bytes = 0",
+    `project_doc_max_bytes = ${CODEX_PROJECT_DOC_CONFIG.project_doc_max_bytes}`,
     `web_search = ${tomlString("disabled")}`,
     `default_permissions = ${tomlString(CODEX_SEAT_PROFILE)}`,
     "[features]",
     "unified_exec = false",
+    "shell_snapshot = false",
     "[shell_environment_policy]",
     `exclude = [${tomlString(CODEX_SEAT_TOKEN_ENV)}]`,
     `[mcp_servers.${MC_MCP_SERVER}]`,
@@ -229,4 +232,16 @@ export function codexCommandAllowed(
       })
     );
   });
+}
+
+/** Only a readable, stable CLI release at or above the floor may start a seat. */
+export function codexVersionAllowed(output: string): boolean {
+  const match = /^codex-cli (\d+)\.(\d+)\.(\d+)\s*$/.exec(output.trim());
+  if (match === null) return false;
+  const version = match.slice(1).map(Number);
+  const floor = CODEX_MIN_VERSION.split(".").map(Number);
+  for (let n = 0; n < floor.length; n++) {
+    if (version[n] !== floor[n]) return version[n] > floor[n];
+  }
+  return true;
 }

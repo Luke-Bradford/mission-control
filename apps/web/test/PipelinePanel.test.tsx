@@ -53,6 +53,20 @@ describe("Pipeline", () => {
     }
   });
 
+  it("says merged, not waiting on you, for a merged card with no seat", async () => {
+    const merged = pipeline[5] as PipelineStage;
+    const card = merged.cards[0];
+    if (!card) throw new Error("missing merged card");
+    stubFetch({
+      "/api/overview": summary([{ ...merged, cards: [{ ...card, who: null }] }]),
+    });
+    render(<PipelinePanel />);
+    const stage = await screen.findByRole("region", { name: "Merged today" });
+    const link = within(stage).getByRole("link");
+    expect(link.textContent).toContain("merged");
+    expect(link.textContent).not.toContain("waiting on you");
+  });
+
   it("keeps multiple merged PRs for one ticket distinct across live updates", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     try {

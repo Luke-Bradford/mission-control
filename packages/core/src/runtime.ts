@@ -788,10 +788,14 @@ export const SANDBOX_DENY_READ_HOME = [
   "Library/Keychains",
 ] as const;
 
-/** The shell Step B sets in the Codex process environment and command approvals must name. */
+export const CODEX_MIN_VERSION = "0.154.0";
+export const CODEX_COMMAND = "codex";
+/** The shell the Codex process environment and command approvals must name. */
 export const CODEX_SHELL = "/bin/zsh";
 export const CODEX_SEAT_PROFILE = "mc_seat";
 export const CODEX_SEAT_TOKEN_ENV = "MC_SEAT_TOKEN";
+/** Apply at thread start/resume too: the run config alone does not exclude project docs. */
+export const CODEX_PROJECT_DOC_CONFIG = Object.freeze({ project_doc_max_bytes: 0 });
 
 /** TOML strings in a seat config never need escaping; refuse input that would. */
 export function tomlString(value: string): string {
@@ -1018,14 +1022,18 @@ export function crewCliArgs(i: CrewCliInput): string[] {
 export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
+  /** A rejected request is not evidence that any executing turn has ended. */
+  | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
   | { kind: "rate-limit"; status: string; resetsAt: number | null }
   | { kind: "tool-result"; toolUseId: string }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null }
+  | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
+
+export const CANNOT_START = "could not start the CLI";
 
 /** Where operator-facing stderr and failure reasons are cut. */
 export const STDERR_TEXT_MAX = 2000;

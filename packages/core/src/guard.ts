@@ -7,6 +7,7 @@ import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
+  "codex-allowlist": "The Codex request is outside the seat’s allowed commands or files",
   "git-write":
     "git writes only through the mc commit tool; report with mc report_evidence and Mission Control pushes and opens the PR",
   "github-write":
