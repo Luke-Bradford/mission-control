@@ -37,6 +37,17 @@ export interface NoReport {
   lastStderr: string | null;
 }
 
+/** The plan the ticket had when the run started, or its Size waiver. */
+/**
+ * Where a build run's plan came from: the latest recorded report_plan for its ticket (which may
+ * predate a hand edit of the plan), a plan on the ticket the hub never recorded (by and at null),
+ * or the Size that let it start without one. Planner and review runs carry none.
+ */
+export type RunPlan =
+  | { by: AgentId; at: number; ref: string }
+  | { by: null; at: null; ref: string }
+  | { skipped: `Size ${string}` };
+
 export interface Run {
   id: string;
   agentId: AgentId;
@@ -68,6 +79,8 @@ export interface Run {
   loop?: RunLoop | null;
   /** The template profile the run started with, as it was then; absent on a run without one. */
   profile?: RunProfile | null;
+  /** Snapshotted at creation; absent on older runs or when no plan or Size waiver applies. */
+  plan?: RunPlan;
   /** The `claude` CLI version the run started on; absent on a run that did not record it. */
   cliVersion?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
