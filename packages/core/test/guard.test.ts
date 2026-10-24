@@ -1696,6 +1696,34 @@ describe("Task 9 fix round 1: unclosedMarkdown and namesIssue (finding 8)", () =
 });
 
 describe("closesIssue", () => {
+  it.each(["`example\nFixes #42`", "``example\nFixes #42 ` x``"])(
+    "blanks a code span across one line break: %j",
+    (md) => {
+      expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(false);
+    },
+  );
+
+  it.each(["\n\n", "\n \t\n"])("ends a code span's paragraph at %j", (separator) => {
+    expect(closesIssue(`\`example${separator}Fixes #42\``, { repo: "o/mc", issue: 42 })).toBe(true);
+  });
+
+  it.each(["distinct runs", "one long run"])(
+    "scans a 100k-character line with 10k unmatched backticks in under 50 ms (%s)",
+    (shape) => {
+      const runs = Array.from({ length: 139 }, (_, i) => "`".repeat(i + 1));
+      runs.push("`".repeat(270));
+      const md = (shape === "distinct runs" ? runs.join("x") : "`".repeat(10_000)).padEnd(
+        100_000,
+        "x",
+      );
+      const start = performance.now();
+      const closes = closesIssue(md, { repo: "o/mc", issue: 42 });
+      const elapsed = performance.now() - start;
+      expect(closes).toBe(false);
+      expect(elapsed).toBeLessThan(50);
+    },
+  );
+
   it.each([
     ["Refs #42", false],
     ["#42", false],

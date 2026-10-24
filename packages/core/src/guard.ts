@@ -1816,6 +1816,34 @@ export function unclosedMarkdown(md: string): boolean {
   return fence !== null || rawEnd !== null;
 }
 
+/** Link equal-length runs in one scan, then blank spans in opening order without rescanning text. */
+function blankCodeSpans(md: string): string {
+  type Run = { start: number; end: number; next?: Run };
+  const runs: Run[] = [];
+  const open = new Map<number, Run>();
+  for (const match of md.matchAll(/`+|\n[ \t]*\n/g)) {
+    const marks = match[0];
+    if (marks.charAt(0) !== "`") {
+      open.clear();
+      continue;
+    }
+    const run: Run = { start: match.index, end: match.index + marks.length };
+    const previous = open.get(marks.length);
+    if (previous !== undefined) previous.next = run;
+    open.set(marks.length, run);
+    runs.push(run);
+  }
+  const parts: string[] = [];
+  let end = 0;
+  for (const run of runs) {
+    if (run.start < end || run.next === undefined) continue;
+    parts.push(md.slice(end, run.start), " ");
+    end = run.next.end;
+  }
+  parts.push(md.slice(end));
+  return parts.join("");
+}
+
 /**
  * Whether markdown has a closing keyword (`Fixes #n`, `Closes owner/repo#n`, …) aimed at the run's
  * own issue in the run's own repo (character references decoded). A plain mention does not close
@@ -1825,14 +1853,12 @@ export function unclosedMarkdown(md: string): boolean {
  */
 export function closesIssue(md: string, { repo, issue }: { repo: string; issue: number }): boolean {
   const own = repo.toLowerCase();
-  const text = decodeCharRefs(md)
-    .replace(
-      /^ {0,3}(?:(`{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1`*[ \t]*(?=\n|$)|(?![\s\S]))|(~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\2~*[ \t]*(?=\n|$)|(?![\s\S])))/gm,
+  const text = blankCodeSpans(
+    decodeCharRefs(md).replace(
+      /^ {0,3}(?:(`{3,})(?!`)[^\n]*\n[\s\S]*?(?:\n {0,3}\1`*[ \t]*(?=\n|$)|(?![\s\S]))|(~{3,})(?!~)[^\n]*\n[\s\S]*?(?:\n {0,3}\2~*[ \t]*(?=\n|$)|(?![\s\S])))/gm,
       "",
-    )
-    // a span opens with a run of n backticks and closes at the next run of exactly n
-    .replace(/(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g, "")
-    .replace(/<!--[\s\S]*?-->/g, "");
+    ),
+  ).replace(/<!--[\s\S]*?-->/g, "");
   return [...text.matchAll(STRICT_CLOSING_REF)].some((m) => closesOwn(m, own, issue));
 }
 
