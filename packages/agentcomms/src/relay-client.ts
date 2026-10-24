@@ -1,6 +1,7 @@
 import { WebSocket } from "ws";
 import { sign } from "./auth.ts";
 import type { Identity } from "./keys.ts";
+import { FRAME_MAX, HELLO_TIMEOUT_MS } from "./limits.ts";
 import type { Invite, Member } from "./membership.ts";
 import {
   type ClientMessage,
@@ -8,7 +9,6 @@ import {
   type RelayMessage,
   relayMessageSchema,
 } from "./protocol.ts";
-import { FRAME_MAX } from "./relay-session.ts";
 
 export function relayUrl(relay: string, room: string, http = false): string {
   const url = new URL(relay);
@@ -43,7 +43,7 @@ export async function relayControl(
 ) {
   const socket = new WebSocket(relayUrl(invite.relay, invite.room), {
     maxPayload: FRAME_MAX,
-    handshakeTimeout: 10000,
+    handshakeTimeout: HELLO_TIMEOUT_MS,
   });
   const queue: RelayMessage[] = [];
   let failure: Error | undefined;

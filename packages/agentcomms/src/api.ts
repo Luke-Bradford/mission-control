@@ -19,7 +19,10 @@ export const sendSchema = z.strictObject({
   replyBy: z.string().optional(),
   needsHuman: z.boolean().optional(),
   reason: z.string().optional(),
-  requestedBy: z.strictObject({ kind: z.enum(["human", "agent"]), name: z.string() }).optional(),
+  requestedBy: z
+    .strictObject({ kind: z.enum(["human", "agent"]), name: z.string() })
+    .describe("Claimed by the sender; not verified identity or human approval")
+    .optional(),
 });
 
 export async function startApi(opts: { home: string; daemon: Daemon; port?: number }) {

@@ -314,6 +314,7 @@ export async function runCli(
         const key = keys.get(epoch);
         if (!key) throw new Error("Current room key unavailable");
         members = [...members, member];
+        // Approval shares the current epoch, including its retained history.
         grants = await wrapMemberKeys(key, epoch, member);
       } else {
         if (memberId === identity.id || !members.some((m) => m.id === memberId))

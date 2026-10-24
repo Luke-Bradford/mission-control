@@ -15,8 +15,13 @@ export function threadMessages(
   crew: boolean,
   scope: "thread" | "attention" = "thread",
 ): CommsThreadMessage[] {
-  const rows = store.threadComms(id).sort((a, b) => a.at - b.at);
-  const prompt = rows.findLast((m) => m.from === COMMS_CAPCOM && m.to === id);
+  const cursors = store.threadReadCursors(id);
+  const after = scope === "attention" ? (cursors.get("comms")?.offset ?? 0) : 0;
+  const rows = store.threadComms(id, after).sort((a, b) => a.at - b.at);
+  const prompt =
+    scope === "attention"
+      ? store.threadPrompt(id)
+      : rows.findLast((m) => m.from === COMMS_CAPCOM && m.to === id);
   const messages: Omit<CommsThreadMessage, "seen">[] = rows.map((m) => ({
     ...m,
     tagged: m.from !== COMMS_CAPCOM && m.from !== COMMS_MC && /@CAPCOM\b/i.test(m.text),
@@ -68,7 +73,6 @@ export function threadMessages(
     if (m.at !== null) sourceTimes.set(p.source, m.at);
     if (!orderTimes.has(m.id)) orderTimes.set(m.id, sourceTimes.get(p.source) ?? 0);
   }
-  const cursors = store.threadReadCursors(id);
   return messages
     .sort((a, b) => {
       const time = (orderTimes.get(a.id) ?? 0) - (orderTimes.get(b.id) ?? 0);

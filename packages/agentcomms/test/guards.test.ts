@@ -55,7 +55,7 @@ it("persists sequence order, deduplicates replay, and merges only open questions
   inbox.dispose();
   const reopened = openInbox(path);
   expect(reopened.lastSeq("room")).toBe(2);
-  reopened.close("thread");
+  reopened.close("room", "thread");
   expect(similarOpen("room", question.body, reopened)).toBeUndefined();
   expect(reopened.threads("room")).toContainEqual(
     expect.objectContaining({ thread: "thread", closed: true }),
@@ -71,4 +71,18 @@ it("answers close their question's thread without closing the same id in another
   expect(similarOpen("room", question.body, inbox)).toBeUndefined();
   expect(similarOpen("other", question.body, inbox)).toBe("thread");
   inbox.dispose();
+});
+
+it("scopes explicit thread closure to its room", () => {
+  const inbox = openInbox(":memory:");
+  try {
+    const sender = { id: "human", kind: "human" as const };
+    inbox.add(1, "room", question, sender);
+    inbox.add(1, "other", { ...question, room: "other" }, sender);
+    inbox.close("room", question.thread);
+    expect(inbox.threads("room")[0].closed).toBe(true);
+    expect(inbox.threads("other")[0].closed).toBe(false);
+  } finally {
+    inbox.dispose();
+  }
 });

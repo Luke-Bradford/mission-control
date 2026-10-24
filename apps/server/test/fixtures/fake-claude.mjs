@@ -158,7 +158,7 @@ function userTurn(text) {
     hang = true;
     process.on("SIGTERM", () => {});
   }
-  if (text.includes("STDERR")) process.stderr.write(`\x1b[31mfake stderr ${"x".repeat(600)}\n`);
+  if (text.includes("STDERR")) process.stderr.write(`\x1b[31mfake stderr ${"x".repeat(3000)}\n`);
   if (text.includes("NONJSON")) process.stdout.write("this line is not json\n");
   if (text.includes("ORPHAN")) {
     spawn(process.execPath, ["-e", "setTimeout(() => {}, 3000)"], {

@@ -975,8 +975,8 @@ export type SessionEvent =
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
 
-/** Where a crew process's stderr line is cut. */
-export const STDERR_TEXT_MAX = 500;
+/** Where operator-facing stderr and failure reasons are cut. */
+export const STDERR_TEXT_MAX = 2000;
 
 /** The control requests a crew session sends (spike 2026-10-20). */
 export type ControlSubtype = "interrupt" | "get_context_usage" | "get_usage";

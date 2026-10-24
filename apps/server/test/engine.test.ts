@@ -6,14 +6,19 @@ import {
   asideEventText,
   asideInCiEventText,
   type BoardItem,
+  CI_EXCERPT_MAX,
+  COMMS_TEXT_MAX,
   cleanupBranchNoteKey,
   closedIssueText,
+  commsCutMarker,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
+  FINDING_FIX_MAX,
+  FIX_TEXT_MAX,
   fixSentText,
   globMatches,
   hardRulesBySettingKey,
@@ -839,6 +844,29 @@ describe("CI and review", () => {
     ]);
   });
 
+  it.each([CI_EXCERPT_MAX, COMMS_TEXT_MAX + 1])(
+    "delivers a %i-character CI excerpt whole without parking and bounds only its stored copy",
+    async (length) => {
+      await inCi();
+      await failCi();
+      const excerpt = "x".repeat(length);
+      h.excerptTexts = [excerpt];
+      await h.engine.reconcileRun(RUN);
+      expect(h.sent).toHaveLength(1);
+      const text = h.sent[0]?.text ?? "";
+      expect(text.endsWith(excerpt)).toBe(true);
+      expect(store.comms(0)[0]?.text).toBe(
+        text.length <= COMMS_TEXT_MAX
+          ? text
+          : `${text.slice(0, COMMS_TEXT_MAX)}${commsCutMarker(COMMS_TEXT_MAX, text.length)}`,
+      );
+      expect(loopOf()).toMatchObject({ phase: "working", parked: null, relayedSha: SHA });
+      await h.engine.reconcileRun(RUN);
+      expect(h.sent).toHaveLength(1);
+      expect(store.comms(0)).toHaveLength(1);
+    },
+  );
+
   it("a PR that shows up seconds after its push is not parked as missing ten minutes later", async () => {
     await inCi();
     expect(loopOf()).toMatchObject({ phase: "ci", prNumber: 12 });
@@ -967,6 +995,21 @@ describe("CI and review", () => {
 });
 
 describe("refusals", () => {
+  it("keeps a 1000-character refusal in CI through to the park, note and loop event", async () => {
+    const text = `CI refused: ${"x".repeat(988)}`;
+    expect(text).toHaveLength(1000);
+    const refused = { ok: false, text, transient: true } as const;
+    h.pushResults = [refused, refused, refused];
+    report();
+    for (let i = 0; i < 3; i++) {
+      await h.engine.reconcileRun(RUN);
+      clock += ENGINE_TICK_MS;
+    }
+    expect(loopOf().parked?.reason).toBe(text);
+    expect(store.notes()[0]?.text).toContain(text);
+    expect(loopTexts().some((line) => line.includes(text))).toBe(true);
+  });
+
   it("a refusal that cannot clear parks with its text, the card Blocked and one note", async () => {
     h.pushResults = [{ ok: false, text: "Push refused: the branch moved.", transient: false }];
     report();
@@ -2320,6 +2363,14 @@ describe("the engine runs reviews", () => {
     await h.engine.reconcileRun(RUN2);
   }
 
+  it("keeps a long review-start failure in the review row and loop event", async () => {
+    const failure = "x".repeat(1000);
+    h.startError = new Error(failure);
+    await toReview();
+    expect(first()).toMatchObject({ state: "failed", failure });
+    expect(loopTexts().some((line) => line.includes(failure))).toBe(true);
+  });
+
   it("queues and starts one review", async () => {
     await toReview();
     const rv = first();
@@ -2543,6 +2594,22 @@ describe("the engine runs reviews", () => {
         text: expect.stringMatching(/^RETRO-1 reviewed aaaaaaa and found 2 issues/),
       },
     ]);
+  });
+
+  it("stores a long review hand-off whole without parking the author", async () => {
+    await toReview();
+    const findings = Array.from({ length: 6 }, () => ({
+      ...finding("Important"),
+      fix: "x".repeat(FINDING_FIX_MAX),
+    }));
+    reported(first().id, findings);
+    await vi.waitFor(() => expect(h.sent).toHaveLength(1));
+    const text = need(h.sent[0]).text;
+    expect(text.length).toBeGreaterThan(CI_EXCERPT_MAX);
+    expect(text.length).toBeLessThanOrEqual(FIX_TEXT_MAX);
+    expect(FIX_TEXT_MAX).toBeLessThan(COMMS_TEXT_MAX);
+    expect(store.comms(0)[0]?.text).toBe(text);
+    expect(loopOf().parked).toBeNull();
   });
 
   it("a fix round: the new push is reviewed as round 2", async () => {
@@ -3955,11 +4022,10 @@ describe("the engine runs reviews", () => {
 
     it("a failed wake is an Activity row, and the ended run is parked ended", async () => {
       await setAside();
-      h.wakeError = new SupervisorError(500, "could not resume: checkout missing");
+      const failure = `could not resume: ${"x".repeat(1000)}`;
+      h.wakeError = new SupervisorError(500, failure);
       reported(first().id, [finding("Important")]);
-      await vi.waitFor(() =>
-        expect(loopTexts()).toContain(wakeFailedText("could not resume: checkout missing")),
-      );
+      await vi.waitFor(() => expect(loopTexts()).toContain(wakeFailedText(failure)));
       // the supervisor ended the run
       store.setRunEnded(RUN, clock, "failed", "exit");
       await h.engine.reconcileRun(RUN);

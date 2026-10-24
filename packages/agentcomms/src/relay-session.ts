@@ -1,4 +1,11 @@
 import { controlPayload, verify } from "./auth.ts";
+import {
+  AUTH_CLOCK_SKEW_MS,
+  FRAME_MAX,
+  HELLO_TIMEOUT_MS,
+  LOG_PAGE_SIZE,
+  PRESENCE_INTERVAL_MS,
+} from "./limits.ts";
 import type { Member } from "./membership.ts";
 import {
   clientMessageSchema,
@@ -12,7 +19,8 @@ import { ready } from "./sodium.ts";
 
 const sodium = await ready();
 const variant = sodium.base64_variants.URLSAFE_NO_PADDING;
-export const FRAME_MAX = 256_000;
+
+export { FRAME_MAX } from "./limits.ts";
 
 export function verifyHello(
   hello: Hello,
@@ -40,12 +48,28 @@ export function verifyHello(
   }
 }
 
-export type RelayPeer = { send(message: RelayMessage): void; close(): void };
-export function createRelaySession(room: string, core: RoomCore, _now = Date.now) {
-  const peers = new Map<
-    RelayPeer,
-    { id?: string; seq?: number; challenge: string; timer: ReturnType<typeof setTimeout> }
-  >();
+export type PeerState = {
+  id?: string;
+  seq?: number;
+  challenge: string;
+  deadline: number;
+  presenceAt?: number;
+  status?: string;
+  seenAt?: number;
+  replaying?: boolean;
+};
+export type RelayPeer = {
+  send(message: RelayMessage): void;
+  close(): void;
+  save?(state: PeerState): void;
+};
+export function createRelaySession(
+  room: string,
+  core: RoomCore,
+  now = Date.now,
+  hibernating = false,
+) {
+  const peers = new Map<RelayPeer, PeerState & { timer?: ReturnType<typeof setTimeout> }>();
   const known = (id: string) =>
     core.members().some((m) => m.id === id || m.agents.some((a) => a.id === id));
   const disconnect = (peer: RelayPeer) => {
@@ -64,8 +88,8 @@ export function createRelaySession(room: string, core: RoomCore, _now = Date.now
       disconnect(peer);
     }
   };
-  const refuse = (peer: RelayPeer, reason: string, close = false) => {
-    send(peer, { t: "refused", reason });
+  const refuse = (peer: RelayPeer, reason: string, close = false, id?: string) => {
+    send(peer, { t: "refused", reason, ...(id ? { id } : {}) });
     if (close) disconnect(peer);
   };
   const broadcast = (message: RelayMessage) => {
@@ -74,9 +98,22 @@ export function createRelaySession(room: string, core: RoomCore, _now = Date.now
   return {
     connect(peer: RelayPeer) {
       const challenge = sodium.to_base64(sodium.randombytes_buf(32), variant);
-      const timer = setTimeout(() => disconnect(peer), 10000);
-      peers.set(peer, { challenge, timer });
+      const timer = hibernating
+        ? undefined
+        : setTimeout(() => refuse(peer, "auth-timeout", true), HELLO_TIMEOUT_MS);
+      const state = { challenge, deadline: now() + HELLO_TIMEOUT_MS, timer };
+      peers.set(peer, state);
+      peer.save?.({ challenge, deadline: state.deadline });
       send(peer, { t: "challenge", challenge });
+    },
+    restore(peer: RelayPeer, state: PeerState) {
+      peers.set(peer, { ...state });
+      if (state.id && state.status !== undefined && state.seenAt !== undefined)
+        core.restorePresence(state.id, { status: state.status, seenAt: state.seenAt });
+    },
+    expire() {
+      for (const [peer, state] of peers)
+        if (!state.id && state.deadline <= now()) refuse(peer, "auth-timeout", true);
     },
     disconnect(peer: RelayPeer) {
       clearTimeout(peers.get(peer)?.timer);
@@ -85,28 +122,42 @@ export function createRelaySession(room: string, core: RoomCore, _now = Date.now
     receive(peer: RelayPeer, raw: string) {
       const auth = peers.get(peer);
       if (!auth) return;
+      if (!auth.id && auth.deadline <= now()) {
+        refuse(peer, "auth-timeout", true);
+        return;
+      }
       let parsed: ReturnType<typeof clientMessageSchema.safeParse>;
+      let postId: string | undefined;
       try {
         if (new TextEncoder().encode(raw).length > FRAME_MAX) throw new Error("Frame too large");
-        parsed = clientMessageSchema.safeParse(JSON.parse(raw));
+        const value = JSON.parse(raw);
+        if (value?.t === "post" && typeof value.id === "string" && value.id.length <= 200)
+          postId = value.id;
+        parsed = clientMessageSchema.safeParse(value);
       } catch {
-        refuse(peer, "invalid-message");
+        refuse(peer, "invalid-message", false, postId);
         return;
       }
       if (!parsed.success) {
-        refuse(peer, "invalid-message");
+        refuse(peer, "invalid-message", false, postId);
         return;
       }
       const msg = parsed.data;
       try {
         if (msg.t === "hello") {
-          if (auth.id || !verifyHello(msg, room, core.members(), auth.challenge)) {
+          if (auth.id || !verifyHello(msg, room, core.identities(), auth.challenge)) {
             refuse(peer, "bad-hello", true);
+            return;
+          }
+          if (!known(msg.memberId)) {
+            send(peer, { t: "directory", ...core.directory() });
+            refuse(peer, "removed", true);
             return;
           }
           clearTimeout(auth.timer);
           auth.challenge = "";
           auth.id = msg.memberId;
+          peer.save?.({ id: auth.id, challenge: "", deadline: auth.deadline });
           send(peer, { t: "directory", ...core.directory() });
           if (auth.id === core.members()[0]?.id)
             send(peer, { t: "pending", members: core.pending() });
@@ -130,33 +181,78 @@ export function createRelaySession(room: string, core: RoomCore, _now = Date.now
         }
         if (msg.t === "post") {
           if (msg.sealed.sender.id !== auth.id) {
-            refuse(peer, "wrong-sender");
+            refuse(peer, "wrong-sender", false, msg.id);
+            return;
+          }
+          if (
+            new TextEncoder().encode(
+              JSON.stringify({ t: "msg", seq: Number.MAX_SAFE_INTEGER, sealed: msg.sealed }),
+            ).length > FRAME_MAX
+          ) {
+            refuse(peer, "too-large", false, msg.id);
             return;
           }
           const result = core.post(msg.sealed);
           if ("refused" in result) {
-            refuse(peer, result.refused);
+            refuse(peer, result.refused, false, msg.id);
             return;
           }
           // since establishes a cursor before live delivery, preventing replay/live races.
           for (const [recipient, state] of peers) {
-            if (state.id && known(state.id) && state.seq !== undefined && result.seq > state.seq) {
+            if (
+              state.id &&
+              known(state.id) &&
+              state.seq !== undefined &&
+              !state.replaying &&
+              result.seq > state.seq
+            ) {
               send(recipient, { t: "msg", seq: result.seq, sealed: msg.sealed });
               state.seq = result.seq;
+              const { timer: _, ...saved } = state;
+              recipient.save?.(saved);
             }
           }
           return;
         }
         if (msg.t === "since") {
           auth.seq = Math.max(auth.seq ?? 0, msg.seq);
-          for (const entry of core.since(auth.id, auth.seq)) {
+          if (auth.seq > core.seq()) {
+            send(peer, { t: "reset", relaySeq: core.seq() });
+            disconnect(peer);
+            return;
+          }
+          const oldest = core.oldestSeq();
+          if (auth.seq < oldest - 1) {
+            send(peer, { t: "gap", from: auth.seq + 1, to: oldest - 1 });
+            auth.seq = oldest - 1;
+          }
+          const page = core.since(auth.id, auth.seq, LOG_PAGE_SIZE);
+          for (const entry of page) {
+            if (!peers.has(peer)) break;
             send(peer, { t: "msg", ...entry });
             auth.seq = entry.seq;
           }
+          auth.replaying = auth.seq < core.seq();
+          if (auth.replaying) send(peer, { t: "more", seq: auth.seq });
+          const { timer: _, ...saved } = auth;
+          peer.save?.(saved);
           return;
         }
         if (msg.t === "presence") {
-          core.setPresence(auth.id, msg.status);
+          for (const state of peers.values())
+            if (
+              state.id === auth.id &&
+              state.presenceAt !== undefined &&
+              now() - state.presenceAt < 0.8 * PRESENCE_INTERVAL_MS
+            )
+              return;
+          if (!core.setPresence(auth.id, msg.status)) return;
+          const presence = core.presence()[auth.id];
+          auth.presenceAt = presence.seenAt;
+          auth.status = presence.status;
+          auth.seenAt = presence.seenAt;
+          const { timer: _, ...saved } = auth;
+          peer.save?.(saved);
           broadcast({ t: "presence", map: core.presence() });
           return;
         }
@@ -170,6 +266,7 @@ export function createRelaySession(room: string, core: RoomCore, _now = Date.now
         for (const [recipient, state] of peers) {
           if (!state.id) continue;
           if (!known(state.id)) {
+            send(recipient, { t: "directory", ...core.directory() });
             refuse(recipient, "removed", true);
             continue;
           }
@@ -180,7 +277,7 @@ export function createRelaySession(room: string, core: RoomCore, _now = Date.now
         }
         broadcast({ t: "presence", map: core.presence() });
       } catch (error) {
-        refuse(peer, error instanceof Error ? error.message : "invalid-message");
+        refuse(peer, error instanceof Error ? error.message : "invalid-message", false, postId);
       }
     },
   };
@@ -241,10 +338,17 @@ export function roomHttp(opts: {
     const { sig, ...payload } = parsed.data;
     if (
       payload.memberId !== opts.core.members()[0]?.id ||
-      Math.abs(now() - payload.at) > 120000 ||
-      !verify(controlPayload("token", opts.room, payload), sig, payload.memberId) ||
-      !opts.core.useRequest(payload.nonce)
+      !verify(controlPayload("token", opts.room, payload), sig, payload.memberId)
     )
+      return { status: 403, body: { error: "bad-hello" } };
+    if (Math.abs(now() - payload.at) > AUTH_CLOCK_SKEW_MS)
+      return {
+        status: 403,
+        body: {
+          error: `Authentication expired: clock skew exceeds ${AUTH_CLOCK_SKEW_MS / 1000} seconds; synchronize the client clock`,
+        },
+      };
+    if (!opts.core.useRequest(payload.nonce, payload.at))
       return { status: 403, body: { error: "bad-hello" } };
     try {
       return { status: 200, body: { token: opts.core.issueToken(parsed.data.memberId) } };
