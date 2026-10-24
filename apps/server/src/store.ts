@@ -913,6 +913,7 @@ export class Store {
     this.addColumn("pull_requests", "author", "TEXT");
     this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
+    // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
     this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
@@ -1137,6 +1138,14 @@ export class Store {
         )
         .get(repoId, branch) !== undefined
     );
+  }
+
+  /** Every run on the ticket, ended ones too; review runs do not count. */
+  runsOnTicket(repoId: RepoId, ticket: string): Run[] {
+    const rows = this.db
+      .prepare("SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL")
+      .all(repoId, ticket) as Row[];
+    return rows.map(toRun);
   }
 
   /** Whether a run is still going on the ticket (`repo#number`); a review run does not count. */

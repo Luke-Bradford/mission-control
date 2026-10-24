@@ -1240,6 +1240,42 @@ describe("collectGithub pull requests", () => {
     expect(calls.find((c) => c.q.includes("query PullRequests"))?.q).toContain("nameWithOwner");
   });
 
+  it("matches closing references to the repo regardless of casing", async () => {
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(1, {
+            closingIssuesReferences: {
+              nodes: [
+                { number: 77, repository: { nameWithOwner: "Octo-Org/Shop-App" } },
+                { number: 78, repository: { nameWithOwner: "OTHER/Shop-App" } },
+              ],
+            },
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(prs()[0]?.closingIssues).toEqual([77]);
+  });
+
+  it("does not use another repo's closing reference as the ticket fallback", async () => {
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(1, {
+            headRefName: "chore/tidy",
+            closingIssuesReferences: {
+              nodes: [{ number: 77, repository: { nameWithOwner: "other/shop-app" } }],
+            },
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(prs()[0]).toMatchObject({ ticket: null, closingIssues: [] });
+  });
+
   it("stores each PR's author and assignees", async () => {
     const { gql } = stub({
       prPages: [
@@ -1441,7 +1477,12 @@ describe("collectGithub pull requests", () => {
         prPage([
           pull(1, {
             headRefName: "chore/tidy",
-            closingIssuesReferences: { nodes: [{ number: 77 }, { number: 78 }] },
+            closingIssuesReferences: {
+              nodes: [
+                { number: 77, repository: { nameWithOwner: "octo-org/shop-app" } },
+                { number: 78, repository: { nameWithOwner: "octo-org/shop-app" } },
+              ],
+            },
           }),
           pull(2, { headRefName: "fix/5-x", closingIssuesReferences: { nodes: [{ number: 77 }] } }),
         ]),

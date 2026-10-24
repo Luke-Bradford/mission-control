@@ -498,6 +498,7 @@ describe("pull request head sha and mergeable", () => {
     author: null,
     assignees: [],
     checks: [],
+    closingIssues: [],
     ...over,
   });
 
