@@ -606,7 +606,8 @@ interface LimitRowBase {
  * and a `fullAt`. `fullAt`: when the window reaches 100% at its current pace (null when it will
  * not before the reset); the 7d pace is `pace24h`, the 5h pace `pace5h`. A 5h row's `paceReady` is
  * false when the server had too few samples to compute that pace (so a null `fullAt` means "too
- * little history", not "not filling"). Optional only until the web reads it.
+ * little history", not "not filling"). Optional because older hubs omit it; the web treats a
+ * missing value as ready.
  */
 export type LimitRow =
   | (LimitRowBase & {
