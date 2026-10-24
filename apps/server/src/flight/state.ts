@@ -57,6 +57,7 @@ import {
   type TestLockState,
   wakeKeyPrefix,
 } from "@mc/core";
+import { flightQuestion } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_LOCK } from "../hud.ts";
@@ -64,6 +65,7 @@ import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
+import { flightSignals } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
 interface TeamsDigestState {
@@ -353,6 +355,8 @@ export function markPrsShown(store: Store, s: FlightState): void {
 export const deliveredFacts = (s: FlightState): string =>
   wakeFacts({
     ...s,
+    signals: [],
+    triage: [],
     prs: s.prs.filter((p) => p.state === "open"),
     holds: s.holds.map((h) => ({ ...h, told: true })),
   });
@@ -417,6 +421,8 @@ export function flightState(i: {
   if (found === null) {
     return {
       discussions,
+      signals: [],
+      triage: [],
       time: clockHm(now, tz),
       repo: "",
       lane: config.crew?.lane ?? null,
@@ -688,6 +694,7 @@ export function flightState(i: {
         !ownReply(x, flightId) &&
         (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
     )
+    .filter((item) => item.kind !== "message" || flightQuestion(item.text))
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -704,6 +711,7 @@ export function flightState(i: {
 
   const planned = flightScheduleView(config, store, now).entries;
   return {
+    ...flightSignals({ config, store, session, seats, now }),
     ...(planned.length > 0 ? { planned } : {}),
     discussions,
     time: clockHm(now, tz),
@@ -735,6 +743,7 @@ export function flightState(i: {
 }
 
 export interface FlightWakeSnapshot {
+  signals: Map<string, string>;
   brief: Map<string, string>;
   headlineHash: string;
   briefVersion: number;
@@ -753,7 +762,7 @@ export function flightWake(
   state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   previous?: FlightWakeSnapshot,
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
-  const { brief, headline, recent, prs, seats, ledger, tickets, ...rest } = state;
+  const { brief, headline, recent, prs, seats, ledger, tickets, signals, ...rest } = state;
   const briefHashes = new Map(
     brief.map(({ ageMin: _ageMin, ...note }) => [note.section, entryHash(note)]),
   );
@@ -765,6 +774,7 @@ export function flightWake(
   const briefVersion =
     (previous?.briefVersion ?? 0) + (changedHeadline || changedNotes.length > 0 ? 1 : 0);
   const snapshot: FlightWakeSnapshot = {
+    signals: new Map(),
     brief: briefHashes,
     headlineHash,
     briefVersion,
@@ -775,7 +785,7 @@ export function flightWake(
     tickets: new Map(),
   };
   const changed = <T>(
-    list: "recent" | "prs" | "seats" | "ledger" | "tickets",
+    list: "recent" | "prs" | "seats" | "ledger" | "tickets" | "signals",
     entries: T[],
     key: (entry: T) => string,
     // Poll times and age counters stay in sent entries, but do not make an entry new.
@@ -798,6 +808,12 @@ export function flightWake(
     snapshot,
     digest: {
       ...rest,
+      signals: changed(
+        "signals",
+        signals,
+        (s) => `${s.kind}:${s.key}`,
+        (s) => (s.told ? { kind: s.kind, key: s.key, told: s.told } : s),
+      ),
       ...(changedNotes.length > 0 ? { brief: changedNotes } : {}),
       ...(changedHeadline ? { headline } : {}),
       briefVersion,
@@ -850,6 +866,11 @@ export function wakeFacts(
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
   return JSON.stringify({
+    signals: s.signals
+      .filter((s) => !s.told)
+      .map((s) => `${s.kind}:${s.key}`)
+      .sort(),
+    triage: s.triage.map((t) => `${t.ref}:${t.cause}`).sort(),
     discussions: s.discussions?.map((t) => [t.id, t.messages.map((m) => m.id)]),
     planned: (s.planned ?? [])
       .filter((p) => p.minutesFromNow <= 0)
@@ -870,7 +891,11 @@ export function wakeFacts(
     prs: s.prs
       .map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}`)
       .sort(),
-    items: s.items.map((x) => x.key).sort(),
+    items: s.items
+      .map((x) =>
+        x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : (x.wakeKey ?? x.key),
+      )
+      .sort(),
     release: releasable(s),
   });
 }
@@ -900,6 +925,8 @@ export function pending(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
 ): boolean {
   return (
+    s.signals.some((s) => !s.told) ||
+    s.triage.length > 0 ||
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
     (s.discussions?.length ?? 0) > 0 ||
     (s.teamsDigest?.matches.length ?? 0) > 0 ||

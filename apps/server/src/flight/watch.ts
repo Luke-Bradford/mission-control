@@ -24,6 +24,7 @@ import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { markFlightSignalsShown } from "./signals.ts";
 import {
   deliveredFacts,
   type FlightWakeSnapshot,
@@ -72,6 +73,22 @@ export interface FlightWatch {
 /** Whether any list of a `wakeFacts` string has an entry. */
 const hasFacts = (facts: string): boolean =>
   Object.values(JSON.parse(facts) as Record<string, unknown[]>).some((l) => l.length > 0);
+
+/** Describe changes against the same baseline used to decide whether a wake is due. */
+export const changedWakeFacts = (previous: string, current: string): string[] => {
+  const before = JSON.parse(previous || "{}") as Record<string, unknown[]>;
+  const after = JSON.parse(current) as Record<string, unknown[]>;
+  return Object.keys(after)
+    .filter((key) => JSON.stringify(before[key] ?? []) !== JSON.stringify(after[key]))
+    .map((key) => {
+      const old = new Set((before[key] ?? []).map((v) => JSON.stringify(v)));
+      const current = new Set((after[key] ?? []).map((v) => JSON.stringify(v)));
+      const count =
+        [...current].filter((v) => !old.has(v)).length +
+        [...old].filter((v) => !current.has(v)).length;
+      return `${key} (${count})`;
+    });
+};
 
 export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const { config, store, bus, supervisor, enabled } = deps;
@@ -156,8 +173,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotationRequested = false; // the fresh session already sees the current config
       try {
         const { digest, snapshot } = flightWake(state);
-        const { runId } = await supervisor.startWatch(id, { first: wakeLine(state, digest) });
+        const causes = changedWakeFacts(lastFacts, wakeFacts(state));
+        const { runId } = await supervisor.startWatch(id, {
+          first: wakeLine(state, digest, causes.length > 0 ? causes : ["initial"]),
+        });
         delivered = { runId, snapshot };
+        markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
@@ -207,9 +228,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered?.runId === runId ? delivered.snapshot : undefined,
       );
       if (
-        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest))) === "sent"
+        (await supervisor.send(
+          runId,
+          wakeKey(runId, n + 1),
+          wakeLine(state, digest, changedWakeFacts(lastFacts, wake)),
+        )) === "sent"
       ) {
         delivered = { runId, snapshot };
+        markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;

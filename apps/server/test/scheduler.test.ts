@@ -5,6 +5,7 @@ import {
   BACKFILL_COLLECTOR,
   type CrewRow,
   ENGINE_TICK_MS,
+  FLIGHT_LOOPS_SETTING,
   GITHUB_SLOWED_PREFIX,
   type HudState,
   MACHINE_COLLECTOR,
@@ -1092,6 +1093,33 @@ describe("scheduler", () => {
   });
 
   describe("engine job", () => {
+    it("leaves a hung loop's heartbeat unchanged, then refreshes it on completion", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+      const s = createScheduler({ config, store, bus, now: Date.now, collectors: stubs() });
+      const e = hooks();
+      let release = () => {};
+      e.tick.mockImplementationOnce(
+        () =>
+          new Promise<undefined>((resolve) => {
+            release = () => resolve(undefined);
+          }),
+      );
+      s.setEngine(e);
+      s.start();
+      await vi.advanceTimersByTimeAsync(ENGINE_FIRST_DELAY_MS);
+      const heartbeat = () => JSON.parse(store.getSetting(FLIGHT_LOOPS_SETTING) ?? "{}").engine;
+      const first = heartbeat();
+      await vi.advanceTimersByTimeAsync(2 * ENGINE_TICK_MS);
+      expect(heartbeat()).toEqual(first);
+      expect(Date.now() - first.at).toBeGreaterThanOrEqual(2 * first.interval);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(heartbeat().at).toBe(Date.now());
+      await s.stop();
+      expect(store.getSetting(FLIGHT_LOOPS_SETTING)).toBe("{}");
+    });
+
     const hooks = () => ({
       tick: vi.fn(async () => undefined),
       reconcileRepo: vi.fn(async () => undefined),

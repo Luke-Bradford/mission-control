@@ -670,8 +670,38 @@ export interface FlightSeatState {
   atStop: boolean;
 }
 
+export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
+export const FLIGHT_IDLE_MS = 15 * 60_000;
+export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
+export const FLIGHT_SIGNALS_SETTING = "flight.signals";
+export const FLIGHT_LOOPS_SETTING = "flight.loops";
+export const FLIGHT_MAIN_SETTING = "flight.main";
+export const FLIGHT_SIGNAL_KINDS = [
+  "flaky_test",
+  "repeat_park",
+  "main_red",
+  "idle_seat",
+  "github_budget",
+  "hub_error",
+] as const;
+export interface FlightSignal {
+  told?: boolean;
+  kind: (typeof FLIGHT_SIGNAL_KINDS)[number];
+  key: string;
+  since: number;
+  evidence: string;
+}
+export interface FlightTriage {
+  ref: string;
+  cause: "new" | "plan" | "dependency";
+  since: number;
+  evidence: string;
+}
+
 /** The full crew state returned by the `flight_state` tool. */
 export interface FlightState {
+  signals: FlightSignal[];
+  triage: FlightTriage[];
   headline: string;
   ledger: FlightLedgerIndexEntry[];
   /** Open ledger entries omitted from the index; read them with mc ledger. */
@@ -731,6 +761,8 @@ export interface FlightState {
   /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {
     key: string;
+    /** A stream question's identity, independent of later progress messages in its thread. */
+    wakeKey?: string;
     kind: AttentionKind;
     ticket: string | null;
     text: string;
@@ -770,7 +802,7 @@ export interface FlightWakeList<T> {
 export interface FlightWake
   extends Omit<
     FlightState,
-    "brief" | "headline" | "recent" | "prs" | "seats" | "ledger" | "tickets"
+    "brief" | "headline" | "recent" | "prs" | "seats" | "ledger" | "tickets" | "signals"
   > {
   brief?: FlightState["brief"];
   headline?: string;
@@ -781,6 +813,7 @@ export interface FlightWake
   seats: FlightWakeList<FlightSeatState>;
   ledger: FlightWakeList<FlightLedgerIndexEntry>;
   tickets: FlightWakeList<FlightState["tickets"][number] | string>;
+  signals: FlightWakeList<FlightSignal>;
   facts: Record<string, unknown[]>;
 }
 
@@ -831,6 +864,8 @@ export function wakeSummary(s: FlightState): string {
   const toRelease = s.holds.filter((h) => h.prState !== "open" && !h.told).length;
   const duePlans = s.planned?.filter((p) => p.minutesFromNow <= 0).length ?? 0;
   const parts = [
+    s.signals.length > 0 ? counted(s.signals.length, "signal", "signals") : "",
+    s.triage.length > 0 ? `${counted(s.triage.length, "ticket", "tickets")} to triage` : "",
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
     stopped > 0 ? `${stopped} stopped` : "",
@@ -843,8 +878,12 @@ export function wakeSummary(s: FlightState): string {
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }
 
-export function wakeLine(s: FlightState, digest: FlightWake | FlightState = s): string {
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)}\n${WAKE_ASK}\n${JSON.stringify(digest)}`;
+export function wakeLine(
+  s: FlightState,
+  digest: FlightWake | FlightState = s,
+  causes: string[] = ["initial"],
+): string {
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || "reminder"}\n${WAKE_ASK}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

@@ -494,6 +494,7 @@ describe("pull request head sha and mergeable", () => {
     updatedAt: 2,
     mergedAt: null,
     headSha: "a".repeat(40),
+    mergeCommitSha: null,
     mergeable: "CONFLICTING",
     author: null,
     assignees: [],
@@ -526,7 +527,11 @@ describe("pull request head sha and mergeable", () => {
     );
     db.close();
     const migrated = new Store(old);
-    expect(migrated.pullRequests("r1")[0]).toMatchObject({ headSha: null, mergeable: null });
+    expect(migrated.pullRequests("r1")[0]).toMatchObject({
+      headSha: null,
+      mergeCommitSha: null,
+      mergeable: null,
+    });
     migrated.close();
   });
 });

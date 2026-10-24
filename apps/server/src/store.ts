@@ -753,6 +753,7 @@ const seatRow = (r: Row): SeatSessionRow => ({
   worktree: r.worktree as string | null,
   updatedAt: r.updated_at as number,
   lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
+  ...(r.state === "error" ? { errorSince: (r.error_since ?? r.updated_at) as number } : {}),
 });
 
 /** The sha256 identifies a wake, nothing more: the hub keeps no past wake JSON to retrieve. */
@@ -938,6 +939,7 @@ export class Store {
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
+    this.addColumn("seat_sessions", "error_since", "INTEGER");
     this.addColumn("board_items", "item_id", "TEXT");
     this.addColumn("board_items", "project_id", "TEXT");
     // When FLIGHT passed the question to the operator (it stays open until they answer).
@@ -948,6 +950,7 @@ export class Store {
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
     this.addColumn("holds", "told_state", "TEXT");
     this.addColumn("pull_requests", "head_sha", "TEXT");
+    this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
     // Who opened the PR and who is assigned: a PR run by another hub's login is that lane's.
     this.addColumn("pull_requests", "author", "TEXT");
@@ -1734,8 +1737,8 @@ export class Store {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
-         assignees, checks, closing_issues)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         assignees, checks, closing_issues, merge_commit_sha)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -1743,7 +1746,7 @@ export class Store {
          merged_at = excluded.merged_at, read_at = excluded.read_at,
          head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
          assignees = excluded.assignees, checks = excluded.checks,
-         closing_issues = excluded.closing_issues, stale = 0`,
+         closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha, stale = 0`,
     );
     for (const p of prs) {
       ins.run(
@@ -1767,6 +1770,7 @@ export class Store {
         JSON.stringify(p.assignees ?? []),
         JSON.stringify(p.checks ?? []),
         JSON.stringify(p.closingIssues ?? []),
+        p.mergeCommitSha ?? null,
       );
     }
   }
@@ -1790,6 +1794,7 @@ export class Store {
       updatedAt: r.updated_at as number,
       mergedAt: r.merged_at as number | null,
       headSha: r.head_sha as string | null,
+      mergeCommitSha: r.merge_commit_sha as string | null,
       mergeable: r.mergeable as PullRequestView["mergeable"],
       author: (r.author as string | null) ?? null,
       assignees: JSON.parse(r.assignees as string) as string[],
@@ -2795,11 +2800,14 @@ export class Store {
   setSeatSession(row: SeatSessionRow): void {
     this.db
       .prepare(
-        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(seat_id) DO UPDATE SET run_id = excluded.run_id,
            cli_session_id = excluded.cli_session_id, state = excluded.state,
-           reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at`,
+           reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
+           error_since = CASE WHEN excluded.state != 'error' THEN NULL
+             WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
+             ELSE excluded.updated_at END`,
       )
       .run(
         row.seatId,
@@ -2809,6 +2817,7 @@ export class Store {
         row.reason,
         row.worktree,
         row.updatedAt,
+        row.state === "error" ? row.updatedAt : null,
       );
   }
 

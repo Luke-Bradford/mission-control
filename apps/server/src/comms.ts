@@ -93,3 +93,11 @@ export function threadMessages(
       return { ...m, seen };
     });
 }
+
+/** Direct messages that need a decision, excluding punctuation in links and code. */
+export function flightQuestion(text: string): boolean {
+  const prose = text.replace(/```[\s\S]*?```|`[^`]*`/g, " ").replace(/https?:\/\/\S+/g, " ");
+  return /\?|\b(please confirm|let me know|should I|which (one|option)|need (your|a) (decision|approval)|waiting (on|for) you)\b/i.test(
+    prose,
+  );
+}

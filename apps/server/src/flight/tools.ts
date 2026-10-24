@@ -295,6 +295,7 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
+import { markFlightSignalsShown } from "./signals.ts";
 import {
   flightArrivalSource,
   flightSeat,
@@ -1622,6 +1623,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       hubLogin: deps.login,
       lock: deps.lockState?.(),
     });
+    markFlightSignalsShown(store, state, now());
     markPrsShown(store, state);
     deps.seen?.(ctx.runId, state);
     return {

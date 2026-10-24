@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -6,11 +6,16 @@ import {
   COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_HEADLINE,
+  FLIGHT_IDLE_MS,
+  FLIGHT_LOOPS_SETTING,
+  FLIGHT_MAIN_SETTING,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_REWAKE_MS,
+  FLIGHT_SIGNAL_KEEP_MS,
+  FLIGHT_SIGNALS_SETTING,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
@@ -19,6 +24,7 @@ import {
   type FlightState,
   type FlightWake,
   flightStartFailedText,
+  GITHUB_RATE_SETTING,
   NEW_LOOP,
   type PullRequestView,
   type Run,
@@ -27,8 +33,16 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { flightQuestion } from "../src/comms.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import {
+  flightLoopHeartbeat,
+  markFlightSignalsShown,
+  observeFlightChecks,
+  observeFlightMain,
+} from "../src/flight/signals.ts";
+import {
+  deliveredFacts,
   flightOwnSeatIds,
   flightSeat,
   flightStartCap,
@@ -39,6 +53,7 @@ import {
   wakeFacts,
 } from "../src/flight/state.ts";
 import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
+import { attentionItems } from "../src/hud.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
@@ -651,7 +666,7 @@ describe("FLIGHT's items to brief", () => {
     say(T0, COMMS_CAPCOM, "flight-1", "status?");
     say(T0 + MIN, "flight-1", COMMS_CAPCOM, "No change @CAPCOM");
     say(T0, COMMS_CAPCOM, "guido-1", "how is it going?");
-    say(T0 + MIN, "guido-1", COMMS_CAPCOM, "tests pass");
+    say(T0 + MIN, "guido-1", COMMS_CAPCOM, "Please confirm the target branch.");
     const listed = items();
     expect(listed.map((i) => i.kind)).toEqual(["message"]);
     expect(listed.some((i) => i.key.includes("flight-1"))).toBe(false);
@@ -1151,7 +1166,9 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0]?.key).toBe("flight:wake:r-flight:1");
     expect(
-      sendCalls[0]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 1 question · 1 item to brief\n`),
+      sendCalls[0]?.text.startsWith(
+        `${FLIGHT_WAKE_HEAD} 1 question · 1 item to brief · woke on: q (1), items (1)\n`,
+      ),
     ).toBe(true);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
@@ -1470,6 +1487,8 @@ describe("wakeSummary", () => {
     failingChecks: [],
   };
   const state = (over: Partial<FlightState>): FlightState => ({
+    signals: [],
+    triage: [],
     time: "12:00",
     repo: "mc",
     lane: null,
@@ -1627,5 +1646,975 @@ describe("ownReply", () => {
     expect(ownReply({ kind: "tag", agentId: "flight-1" }, "flight-1")).toBe(true);
     expect(ownReply({ kind: "question", agentId: "flight-1" }, "flight-1")).toBe(false);
     expect(ownReply({ kind: "message", agentId: "flight-1" }, null)).toBe(false);
+  });
+});
+
+const triageCard = (over: Partial<BoardItem> = {}): BoardItem => ({
+  repoId: "mc",
+  issueNumber: 176,
+  title: "Ops signals",
+  status: "Backlog",
+  state: "planned",
+  labels: [],
+  priority: null,
+  prioritySource: null,
+  updatedAt: T0,
+  createdAt: T0,
+  url: "u",
+  stage: null,
+  owner: null,
+  parent: null,
+  subIssues: null,
+  blockedBy: [],
+  milestone: null,
+  size: null,
+  closed: false,
+  itemId: "I176",
+  projectId: "P1",
+  ...over,
+});
+const signalState = () => flightState({ config, store, busy: [], now: nowMs });
+const observeCheck = (
+  sha: string,
+  state: "failing" | "passing" | "pending",
+  attempt = 1,
+  runId = 1,
+) => {
+  observeFlightChecks(
+    store,
+    "mc",
+    [
+      stored(7, {
+        headSha: sha,
+        checks: [
+          {
+            name: "unit (linux)",
+            workflow: "keeper",
+            kind: "check",
+            state,
+            conclusion: state,
+            attempt,
+            url: `https://github.com/o/mc/actions/runs/${runId}/job/7`,
+          },
+        ],
+      }),
+    ],
+    nowMs,
+  );
+};
+const flake = (sha: string) => {
+  observeCheck(sha, "failing");
+  observeCheck(sha, "pending", 2);
+  observeCheck(sha, "passing", 2);
+};
+
+describe("ops signals", () => {
+  beforeEach(() => {
+    signalState();
+  });
+  const setup = {
+    flaky_test() {
+      flake("head-a");
+      flake("head-b");
+    },
+    repeat_park() {
+      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+      store.upsertRun(run("r-build", "guido-1", { ticket: "mc#176" }));
+      store.addLoopEvent("park-1", "r-build", "parked: push stuck", T0 - MIN);
+      store.addLoopEvent("park-2", "r-build", "parked: push stuck", T0);
+    },
+    main_red() {
+      store.setSetting(
+        `${FLIGHT_MAIN_SETTING}:mc`,
+        JSON.stringify({ sha: "main-sha", ci: "failing", at: T0 }),
+      );
+    },
+    idle_seat() {
+      store.setSeatSession({ ...row("guido-1", null), updatedAt: T0 - FLIGHT_IDLE_MS });
+      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+      store.replaceQueue("guido-1", [{ repoId: "mc", issue: 176 }]);
+    },
+    github_budget() {
+      store.setSetting(
+        GITHUB_RATE_SETTING,
+        JSON.stringify({
+          queries: {
+            PullRequests: { cost: 1, limit: 5000, remaining: 1249, resetAt: T0 + 60 * MIN, at: T0 },
+          },
+          pollCost: 1,
+        }),
+      );
+    },
+    hub_error() {
+      flightLoopHeartbeat(store, "engine", T0 - 3 * MIN, MIN);
+      flightLoopHeartbeat(store, "sessions", T0, MIN);
+    },
+  };
+
+  it.each(Object.keys(setup) as (keyof typeof setup)[])(
+    "delivers %s once per key, including across a hub restart",
+    async (kind) => {
+      live("flight-1", "r-flight");
+      facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+      setup[kind]();
+      expect(signalState().signals.map((s) => s.kind)).toContain(kind);
+      await watch.check();
+      const digest = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "{}");
+      expect(digest.signals.entries).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind, evidence: expect.any(String) })]),
+      );
+      expect(sendCalls[0]?.text.split("\n")[0]).toContain("woke on: signals");
+      expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+      nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+      watch.stop();
+      store.close();
+      store = new Store(join(dir, "mc.sqlite"));
+      makeWatch();
+      expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+      await watch.check();
+      expect(
+        sendCalls
+          .flatMap((c) => JSON.parse(c.text.split("\n").at(-1) ?? "{}").signals.entries)
+          .filter((s: { told?: boolean }) => !s.told),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("needs two fail-then-pass cases within seven days, never just two failures or a new head", () => {
+    observeCheck("head-a", "failing");
+    observeCheck("head-a", "failing");
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    observeCheck("head-b", "passing", 2);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    flake("head-c");
+    observeCheck("head-c", "passing", 2);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    flake("head-d");
+    expect(signalState().signals).toEqual([
+      expect.objectContaining({ kind: "flaky_test", key: "mc:keeper/unit (linux)" }),
+    ]);
+  });
+
+  it("delivers red main already present on the first run", async () => {
+    liveCrew();
+    store.setSetting(`${FLIGHT_SIGNALS_SETTING}:mc`, "");
+    observeFlightMain(store, "mc", { sha: "first-red", ci: "failing", at: nowMs });
+    await watch.check();
+    const digest = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "{}");
+    expect(digest.signals.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "main_red",
+        key: "first-red",
+        told: false,
+      }),
+    );
+    expect(signalState().signals[0]?.told).toBe(true);
+  });
+
+  it.each(["main_red", "github_budget", "idle_seat", "hub_error"] as const)(
+    "leaves live %s untold during first-run seeding",
+    (kind) => {
+      store.setSetting(`${FLIGHT_SIGNALS_SETTING}:mc`, "");
+      setup[kind]();
+      expect(signalState().signals).toContainEqual(expect.objectContaining({ kind, told: false }));
+    },
+  );
+
+  it("seeds historical flakes and missing reports but leaves watch errors untold", () => {
+    setup.flaky_test();
+    store.upsertRun(
+      run("old-report", "guido-1", {
+        ticket: "mc#176",
+        loop: { ...NEW_LOOP },
+        endedAt: T0,
+        endedBy: "engine",
+        status: "failed",
+      }),
+    );
+    store.setSeatSession({ ...row("flight-1", null, "error"), reason: "resume failed" });
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+    store.setSetting(
+      `${FLIGHT_SIGNALS_SETTING}:mc`,
+      JSON.stringify({ ...saved, initialized: false }),
+    );
+    expect(signalState().signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "flaky_test", told: true }),
+        expect.objectContaining({ key: "report:old-report", told: true }),
+        expect.objectContaining({ key: `watch:flight-1:${T0}`, told: false }),
+      ]),
+    );
+  });
+
+  it.each(["checks", "notes"])(
+    "tracks flaky jobs separately within one workflow using %s",
+    (source) => {
+      for (const n of [1, 2]) {
+        const sha = `head-${n}`;
+        const observe = (passing: boolean) =>
+          observeFlightChecks(
+            store,
+            "mc",
+            [
+              stored(7, {
+                headSha: sha,
+                checks: ["unit", "integration", "healthy"].map((name, job) => ({
+                  name,
+                  workflow: "CI",
+                  kind: "check",
+                  state: passing || name === "healthy" ? "passing" : "failing",
+                  conclusion: passing || name === "healthy" ? "success" : "failure",
+                  attempt: passing ? 2 : 1,
+                  url: `https://github.com/o/mc/actions/runs/${n}/job/${job}`,
+                })),
+              }),
+            ],
+            nowMs,
+          );
+        observe(false);
+        if (source === "checks") observe(true);
+        const runId = `flake-${n}`;
+        store.upsertRun(
+          run(runId, "guido-1", {
+            loop: {
+              ...NEW_LOOP,
+              rerun: { sha, at: T0, runs: [{ id: n, name: "CI" }], flaked: true },
+            },
+          }),
+        );
+        store.raiseNote({
+          key: `flake:${runId}:${sha}`,
+          kind: "flag",
+          repoId: "mc",
+          seatId: "guido-1",
+          runId,
+          text: `CI failed on ${sha} then passed`,
+          at: nowMs,
+        });
+        if (n === 1) expect(signalState().signals).toEqual([]);
+      }
+      expect(
+        signalState()
+          .signals.map((s) => s.key)
+          .sort(),
+      ).toEqual(["mc:CI/integration", "mc:CI/unit"]);
+      const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+      expect(Object.values(saved.flakes)).toHaveLength(4);
+    },
+  );
+
+  it("counts two distinct re-run attempts on the same head", () => {
+    flake("head-a");
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    observeCheck("head-a", "failing", 3);
+    observeCheck("head-a", "passing", 4);
+    expect(signalState().signals[0]?.kind).toBe("flaky_test");
+  });
+
+  it("reads flake records and does not count a check observation of the same flake twice", () => {
+    const note = (sha: string, n: number) => {
+      const id = `flake-run-${n}`;
+      store.upsertRun(
+        run(id, "guido-1", {
+          loop: {
+            ...NEW_LOOP,
+            rerun: { sha, at: T0, runs: [{ id: n, name: "keeper" }], flaked: true },
+          },
+        }),
+      );
+      store.raiseNote({
+        key: `flake:${id}:${sha}`,
+        kind: "flag",
+        repoId: "mc",
+        seatId: "guido-1",
+        runId: id,
+        text: `keeper failed on ${sha} then passed`,
+        at: T0,
+      });
+    };
+    flake("head-a");
+    note("head-a", 1);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    observeCheck("head-b", "failing", 1, 2);
+    note("head-b", 2);
+    expect(signalState().signals[0]).toMatchObject({
+      kind: "flaky_test",
+      evidence: expect.stringContaining("head-b"),
+    });
+  });
+
+  it("prunes fired keys and old flake cases after seven days", () => {
+    flake("old-head");
+    setup.main_red();
+    const state = signalState();
+    markFlightSignalsShown(store, state, nowMs);
+    nowMs += FLIGHT_SIGNAL_KEEP_MS + 1;
+    flake("new-head");
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+    expect(Object.values(saved.signals)).toHaveLength(1); // Main is still red and remains told.
+    expect(Object.values(saved.flakes)).toHaveLength(1);
+  });
+
+  it("does not spend a signal on a failed delivery", async () => {
+    liveCrew();
+    setup.main_red();
+    sendFails = true;
+    await watch.check();
+    expect(signalState().signals).toHaveLength(1);
+    sendFails = false;
+    await watch.check();
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    expect(sendCalls).toHaveLength(2);
+  });
+
+  it("retains a fired key for seven days from delivery, not from the fault's onset", () => {
+    store.setSetting(
+      `${FLIGHT_MAIN_SETTING}:mc`,
+      JSON.stringify({ sha: "old-fault", ci: "failing", at: T0 - 6 * 24 * 60 * MIN }),
+    );
+    markFlightSignalsShown(store, signalState(), nowMs);
+    nowMs += 2 * 24 * 60 * MIN;
+    store.setSetting(
+      `${FLIGHT_MAIN_SETTING}:mc`,
+      JSON.stringify({ sha: "old-fault", ci: "failing", at: nowMs }),
+    );
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+  });
+
+  it("keeps the first red SHA until green resets the episode, including null rollups", () => {
+    observeFlightMain(store, "mc", { sha: "first-red", ci: "failing", at: nowMs });
+    expect(signalState().signals[0]).toMatchObject({ key: "first-red", told: false });
+    markFlightSignalsShown(store, signalState(), nowMs);
+    observeFlightMain(store, "mc", { sha: "second-red", ci: "failing", at: ++nowMs });
+    expect(signalState().signals).toEqual([
+      expect.objectContaining({
+        key: "first-red",
+        told: true,
+        evidence: expect.stringContaining("second-red"),
+      }),
+    ]);
+    expect(JSON.parse(wakeFacts(signalState())).signals).toEqual([]);
+    observeFlightMain(store, "mc", { sha: "pending", ci: null, at: ++nowMs });
+    observeFlightMain(store, "mc", { sha: "third-red", ci: "failing", at: ++nowMs });
+    expect(signalState().signals[0]).toMatchObject({ key: "first-red", told: true });
+    observeFlightMain(store, "mc", { sha: "green", ci: "passing", at: ++nowMs });
+    expect(signalState().signals).toEqual([]);
+    observeFlightMain(store, "mc", { sha: "next-red", ci: "failing", at: ++nowMs });
+    expect(signalState().signals[0]).toMatchObject({ key: "next-red", told: false });
+  });
+
+  it("retains a collected main failure that recovers before FLIGHT reads it", () => {
+    observeFlightMain(store, "mc", { sha: "main-sha", ci: "failing", at: T0 });
+    observeFlightMain(store, "mc", { sha: "main-sha", ci: "passing", at: T0 + 1 });
+    nowMs++;
+    expect(signalState().signals).toEqual([
+      expect.objectContaining({ kind: "main_red", key: "main-sha", since: T0, told: false }),
+    ]);
+    markFlightSignalsShown(store, signalState(), nowMs);
+    expect(signalState().signals).toEqual([]);
+    observeFlightMain(store, "mc", { sha: "main-sha", ci: "failing", at: ++nowMs });
+    expect(signalState().signals[0]).toMatchObject({ key: "main-sha", told: false });
+  });
+
+  it("prefers the first red merge SHA over newer merges and names both episode SHAs", () => {
+    store.upsertPullRequests(
+      "mc",
+      [
+        stored(7, { state: "merged", mergedAt: T0, mergeCommitSha: "first-red" }),
+        stored(8, { state: "merged", mergedAt: T0 + MIN, mergeCommitSha: "latest-red" }),
+      ],
+      T0,
+    );
+    observeFlightMain(store, "mc", { sha: "first-red", ci: "failing", at: nowMs, committedAt: T0 });
+    observeFlightMain(store, "mc", {
+      sha: "latest-red",
+      ci: "failing",
+      at: ++nowMs,
+      committedAt: T0 + MIN,
+    });
+    const evidence = signalState().signals[0]?.evidence;
+    expect(evidence).toContain("first red SHA first-red");
+    expect(evidence).toContain("latest SHA latest-red");
+    expect(evidence).toContain("episode merge: #7");
+    expect(evidence).not.toContain("#8");
+  });
+
+  it.each([0, 5_000, 5_001])(
+    "uses a five-second fallback tolerance for merge time +%i",
+    (offset) => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          stored(7, { state: "merged", mergedAt: T0 - MIN }),
+          stored(8, { state: "merged", mergedAt: T0 + offset }),
+        ],
+        T0,
+      );
+      observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: nowMs, committedAt: T0 });
+      expect(signalState().signals[0]?.evidence).toContain(offset <= 5_000 ? ": #8" : ": #7");
+    },
+  );
+
+  it("keeps distinct park reasons and tickets separate", () => {
+    store.replaceBoard("mc", [
+      triageCard({ issueNumber: 1, status: "Ready" }),
+      triageCard({ issueNumber: 2, status: "Ready" }),
+    ]);
+    store.upsertRun(
+      run("r1", "guido-1", {
+        ticket: "mc#1",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "push", reason: "push stuck", ended: false },
+        },
+      }),
+    );
+    store.upsertRun(run("r2", "inco-1", { ticket: "mc#2" }));
+    store.addLoopEvent("p1", "r1", "parked: push stuck", T0);
+    store.addLoopEvent("p2", "r2", "parked: push stuck", T0);
+    store.addLoopEvent("p3", "r1", "parked: no report", T0);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    store.addLoopEvent("p4", "r1", "parked: push stuck", T0);
+    expect(signalState().signals[0]?.key).toBe("mc#1:push stuck");
+  });
+
+  it("requires fifteen idle minutes and eligible queued work", () => {
+    setup.idle_seat();
+    nowMs = T0 - 1;
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    nowMs = T0;
+    store.replaceBoard("mc", [
+      triageCard({ status: "Ready", blockedBy: [{ ref: "mc#1", closed: false }] }),
+    ]);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    expect(signalState().signals[0]?.kind).toBe("idle_seat");
+  });
+
+  it("does not count a previous run's last turn as time idle after the seat is freed", () => {
+    setup.idle_seat();
+    store.setSeatTurnEnded("guido-1", T0 - 30 * MIN);
+    store.setSeatSession({ ...row("guido-1", null), updatedAt: T0 });
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+  });
+
+  it("checks every token reading with a strict 25% threshold, once per reset", () => {
+    const rate = (remaining: number, resetAt: number) =>
+      store.setSetting(
+        GITHUB_RATE_SETTING,
+        JSON.stringify({
+          queries: {
+            old: { limit: 5000, remaining: 0, at: T0 - 1, resetAt: T0 },
+            new: { limit: 5000, remaining, at: T0, resetAt },
+          },
+          pollCost: 1,
+        }),
+      );
+    rate(1250, T0 + 60 * MIN);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    rate(1249, T0 + 60 * MIN);
+    markFlightSignalsShown(store, signalState(), nowMs);
+    rate(0, T0 + 60 * MIN);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    rate(1249, T0 + 120 * MIN);
+    expect(signalState().signals[0]?.kind).toBe("github_budget");
+  });
+
+  it("reports watch failures, missing run reports and silent hub loops by source", () => {
+    store.setSeatSession({
+      ...row("flight-1", "watch-failed", "error"),
+      reason: "failed to resume session",
+    });
+    store.upsertRun(
+      run("no-report", "guido-1", {
+        ticket: "mc#176",
+        loop: { ...NEW_LOOP },
+        endedAt: T0,
+        endedBy: "engine",
+        status: "failed",
+      }),
+    );
+    store.upsertRun(run("reported", "inco-1", { endedAt: T0, endedBy: "engine", status: "ok" }));
+    store.setRunEnded("no-report", T0, "failed", "engine");
+    store.setRunEnded("reported", T0, "ok", "engine");
+    store.addEvidence("reported", "Done", T0);
+    flightLoopHeartbeat(store, "engine", T0 - 3 * MIN, MIN);
+    flightLoopHeartbeat(store, "sessions", T0, MIN);
+
+    expect(
+      signalState()
+        .signals.map((s) => s.key)
+        .sort(),
+    ).toEqual([`loop:engine:${T0 - 3 * MIN}`, "report:no-report", `watch:flight-1:${T0}`]);
+    markFlightSignalsShown(store, signalState(), nowMs);
+    expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
+    expect(store.getSetting(FLIGHT_LOOPS_SETTING)).toContain("sessions");
+  });
+});
+
+describe("triage and quiet wakes", () => {
+  beforeEach(() => {
+    signalState();
+  });
+  it("wakes once for a new Backlog ticket with Ready empty, also across restart", async () => {
+    liveCrew();
+    store.replaceBoard("mc", [triageCard()]);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("woke on: triage");
+    expect(signalState().triage).toEqual([]);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    watch.stop();
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    makeWatch();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("keeps new, finished plan and resolved dependency causes separate per ticket", () => {
+    const card = triageCard({ status: "Refinement", blockedBy: [{ ref: "mc#1", closed: false }] });
+    store.replaceBoard("mc", [card]);
+    const initial = signalState();
+    expect(initial.triage[0]?.cause).toBe("new");
+    markFlightSignalsShown(store, initial, nowMs);
+    store.upsertRun(run("planner", "guido-1", { ticket: "mc#176" }));
+    store.addLoopEvent("planner:plan", "planner", "Plan written for mc#176", T0);
+    store.replaceBoard("mc", [{ ...card, blockedBy: [{ ref: "mc#1", closed: true }] }]);
+    const next = signalState();
+    expect(next.triage.map((t) => t.cause).sort()).toEqual(["dependency", "plan"]);
+    markFlightSignalsShown(store, next, nowMs);
+    expect(signalState().triage).toEqual([]);
+  });
+
+  it("keeps the stored PR list and wake facts stable on a phase-only move and metadata timestamp change", () => {
+    liveCrew();
+    const build = run("r-guido", "guido-1", {
+      ticket: "mc#176",
+      loop: { ...NEW_LOOP, phase: "ci", prNumber: 7 },
+    });
+    store.upsertRun(build);
+    store.setRunLoop(build.id, build.loop ?? null);
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    const before = signalState();
+    store.setRunLoop(build.id, {
+      ...NEW_LOOP,
+      prNumber: 7,
+      phase: "review",
+      aside: { worktree: "/tmp/aside", wake: false },
+    });
+    store.upsertPullRequests("mc", [stored(7, { updatedAt: T0 + MIN })], T0 + MIN);
+    const after = signalState();
+    expect(after.prs.map(({ readAt: _readAt, ...pr }) => pr)).toEqual(
+      before.prs.map(({ readAt: _readAt, ...pr }) => pr),
+    );
+    expect(wakeFacts(after)).toBe(wakeFacts(before));
+    expect(deliveredFacts(after)).toBe(deliveredFacts(before));
+  });
+
+  it("ignores PR attention timestamps but wakes on a different action", () => {
+    store.replaceBoard("mc", [triageCard()]);
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { ticket: "mc#176", isDraft: false, updatedAt: T0 - 120 * MIN })],
+      T0,
+    );
+    const before = signalState();
+    store.upsertPullRequests(
+      "mc",
+      [stored(7, { ticket: "mc#176", isDraft: false, updatedAt: T0 - 60 * MIN })],
+      T0,
+    );
+    expect(wakeFacts(signalState())).toBe(wakeFacts(before));
+    store.upsertPullRequests(
+      "mc",
+      [
+        stored(7, {
+          ticket: "mc#176",
+          isDraft: false,
+          updatedAt: T0 - 60 * MIN,
+          review: "approved",
+        }),
+      ],
+      T0,
+    );
+    expect(wakeFacts(signalState())).not.toBe(wakeFacts(before));
+  });
+
+  it("only wakes for a stream question, whose key survives later progress messages", () => {
+    liveCrew();
+    const path = join(dir, "guido.jsonl");
+    store.upsertRun(run("r-guido", "guido-1", { transcriptPath: path }));
+    store.addComms({
+      from: COMMS_CAPCOM,
+      to: "guido-1",
+      text: "How is it going?",
+      ticket: null,
+      at: T0 - MIN,
+    });
+    const messages = (texts: string[]) =>
+      writeFileSync(
+        path,
+        `${texts
+          .map((text, n) =>
+            JSON.stringify({
+              type: "assistant",
+              timestamp: new Date(T0 + n).toISOString(),
+              message: { content: [{ type: "text", text }] },
+            }),
+          )
+          .join("\n")}\n`,
+      );
+    messages(["Tests are running. https://example.test/?q=1 `?`"]);
+    expect(signalState().items).toEqual([]);
+    expect(attentionItems(config, store, nowMs).find((i) => i.kind === "message")).toMatchObject({
+      owner: "operator",
+    });
+    expect(
+      attentionItems(config, store, nowMs).find((i) => i.kind === "message")?.flightTriage,
+    ).toBeUndefined();
+    messages(["Tests are running.", "Please confirm the target branch."]);
+    const question = signalState();
+    const hudQuestion = attentionItems(config, store, nowMs).find((i) => i.kind === "message");
+    expect(hudQuestion).toMatchObject({ owner: "flight", flightTriage: "waiting" });
+    expect(question.items).toHaveLength(1);
+    expect(question.items[0]?.text).toBe("Please confirm the target branch.");
+    messages(["Tests are running.", "Please confirm the target branch.", "Still waiting."]);
+    expect(signalState().items[0]?.key).toBe(question.items[0]?.key);
+    expect(signalState().items[0]?.wakeKey).toBe(question.items[0]?.wakeKey);
+    expect(wakeFacts(signalState())).toBe(wakeFacts(question));
+    store.addBrief({
+      key: question.items[0]?.key ?? "",
+      context: "Checking branch",
+      recommendation: "I will handle it",
+      options: [],
+      basis: "question",
+      at: T0 + 2,
+      for: "flight",
+    });
+    expect(attentionItems(config, store, nowMs).find((i) => i.kind === "message")).toMatchObject({
+      key: question.items[0]?.key,
+      owner: "flight",
+      flightTriage: "handling",
+      brief: { context: "Checking branch" },
+    });
+  });
+});
+
+describe("ops review regressions", () => {
+  beforeEach(() => {
+    signalState();
+  });
+
+  it("normalizes SHA evidence and keys repeated parks by ticket and reason, excluding closed and absent tickets", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    for (const [id, sha] of [
+      ["push-a", "abcdef123"],
+      ["push-b", "fedcba321"],
+    ]) {
+      const reason = `CI pending for 20 minutes on ${sha}`;
+      store.upsertRun(
+        run(id as string, "guido-1", {
+          ticket: "mc#176",
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            parked: { kind: "ci-pending", reason, ended: false },
+          },
+        }),
+      );
+      store.addLoopEvent(`${id}:park`, id as string, `parked: ${reason}`, T0);
+    }
+    const current = signalState();
+    expect(current.signals).toEqual([
+      expect.objectContaining({
+        kind: "repeat_park",
+        key: "mc#176:CI pending for 20 minutes on <sha>",
+        told: false,
+        evidence: expect.stringContaining("<sha>"),
+      }),
+    ]);
+    expect(current.signals[0]?.evidence).not.toMatch(/abcdef123|fedcba321/);
+    markFlightSignalsShown(store, current, nowMs);
+    store.setRunLoop("push-a", {
+      ...NEW_LOOP,
+      phase: "parked",
+      parked: { kind: "push", reason: "push stuck", ended: false },
+    });
+    expect(signalState().signals).toHaveLength(1);
+    expect(signalState().signals[0]?.key).toBe(current.signals[0]?.key);
+    expect(signalState().signals[0]?.told).toBe(true);
+    expect(JSON.parse(wakeFacts(signalState())).signals).toEqual([]);
+    store.replaceBoard("mc", [triageCard({ closed: true })]);
+    expect(signalState().signals).toEqual([]);
+    store.replaceBoard("mc", []);
+    expect(signalState().signals).toEqual([]);
+  });
+
+  it("seeds existing backlog, plans and parks as told and prunes closed/off-board triage", () => {
+    store.setSetting(`${FLIGHT_SIGNALS_SETTING}:mc`, "");
+    store.replaceBoard("mc", [triageCard(), triageCard({ issueNumber: 177, closed: true })]);
+    for (const n of [176, 177, 178]) {
+      const id = `plan-${n}`;
+      store.upsertRun(run(id, "guido-1", { ticket: `mc#${n}` }));
+      store.addLoopEvent(`${id}:plan`, id, "plan landed", T0);
+      store.addLoopEvent(`${id}:park:1`, id, "parked: push stuck", T0);
+      store.addLoopEvent(`${id}:park:2`, id, "parked: push stuck", T0);
+    }
+    const initial = signalState();
+    expect(initial.triage).toEqual([]);
+    expect(initial.signals).toEqual([expect.objectContaining({ kind: "repeat_park", told: true })]);
+    expect(JSON.parse(wakeFacts(initial)).signals).toEqual([]);
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+    expect(Object.keys(saved.triage).sort()).toEqual(["mc#176:new", "mc#176:plan"]);
+    store.replaceBoard("mc", [triageCard({ issueNumber: 179 })]);
+    expect(signalState().triage).toEqual([
+      expect.objectContaining({ ref: "mc#179", cause: "new" }),
+    ]);
+    expect(
+      Object.keys(JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").triage),
+    ).toEqual(["mc#179:new"]);
+  });
+
+  it("names only the facts that cause the second wake", async () => {
+    liveCrew();
+    observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: T0 });
+    await watch.check();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    ask();
+    await watch.check();
+    const header = sendCalls[1]?.text.split("\n")[0] ?? "";
+    expect(header).toContain("woke on: q (1), items (1)");
+    expect(header).not.toContain("signals (");
+    expect(Buffer.byteLength(header)).toBeLessThan(1000);
+  });
+
+  it("observes both token budgets even when the latest reading is healthy", () => {
+    store.setSetting(
+      GITHUB_RATE_SETTING,
+      JSON.stringify({
+        queries: {
+          first: { limit: 5000, remaining: 100, resetAt: T0 + MIN, at: T0 - 1 },
+          second: { limit: 5000, remaining: 4500, resetAt: T0 + 2 * MIN, at: T0 },
+          third: { limit: 5000, remaining: 50, resetAt: T0 + 3 * MIN, at: T0 - 2 },
+        },
+        pollCost: 3,
+      }),
+    );
+    expect(
+      signalState()
+        .signals.map((s) => s.key)
+        .sort(),
+    ).toEqual([String(T0 + MIN), String(T0 + 3 * MIN)]);
+    markFlightSignalsShown(store, signalState(), nowMs);
+    nowMs += 4 * MIN;
+    expect(signalState().signals).toEqual([]);
+  });
+
+  it("requires the pass to follow the latest failing attempt", () => {
+    for (const sha of ["a", "b"]) {
+      observeCheck(sha, "failing", 1);
+      observeCheck(sha, "failing", 2);
+      observeCheck(sha, "passing", 2);
+    }
+    expect(signalState().signals).toEqual([]);
+  });
+
+  it("ignores statuses, same-attempt passes and closed PR checks", () => {
+    for (const kind of ["status", "check"] as const) {
+      for (const sha of ["a", "b"]) {
+        for (const state of ["failing", "passing"] as const) {
+          observeFlightChecks(
+            store,
+            "mc",
+            [
+              stored(7, {
+                headSha: sha,
+                checks: [
+                  { name: "mc/review", kind, state, conclusion: state, attempt: 1, url: null },
+                ],
+              }),
+            ],
+            nowMs,
+          );
+        }
+      }
+    }
+    for (const state of ["failing", "passing"] as const) {
+      observeFlightChecks(
+        store,
+        "mc",
+        [
+          stored(8, {
+            state: "closed",
+            headSha: "a",
+            checks: [
+              {
+                name: "test",
+                kind: "check",
+                state,
+                conclusion: state,
+                attempt: state === "failing" ? 1 : 2,
+                url: null,
+              },
+            ],
+          }),
+        ],
+        nowMs,
+      );
+    }
+    expect(signalState().signals).toEqual([]);
+    expect(JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}").flakes).toEqual({});
+  });
+
+  it("detects engine-ended missing reports and live silent parks, excluding operator stops", () => {
+    for (const [id, endedBy] of [
+      ["engine-ended", "engine"],
+      ["operator-ended", "operator"],
+    ] as const) {
+      store.upsertRun(
+        run(id, "guido-1", {
+          ticket: "mc#176",
+          loop: { ...NEW_LOOP },
+          status: "failed",
+          endedAt: T0,
+          endedBy,
+        }),
+      );
+      store.setRunEnded(id, T0, "failed", endedBy);
+    }
+    store.upsertRun(
+      run("silent", "inco-1", {
+        ticket: "mc#176",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "silent", reason: "stopped twice without reporting", ended: false },
+        },
+      }),
+    );
+    expect(
+      signalState()
+        .signals.map((s) => s.key)
+        .sort(),
+    ).toEqual(["report:engine-ended", "report:silent"]);
+  });
+
+  it.each(["queued", "starting", "running", "reported", "superseded", "failed"] as const)(
+    "only treats pending reviews as missing reports: %s",
+    (state) => {
+      const reviewId = store.requestReview({
+        authorRunId: "author",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: "head",
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      });
+      expect(reviewId).not.toBeNull();
+      store.setReviewState(reviewId as number, ["queued"], state, { at: T0, runId: "review-run" });
+      store.upsertRun(
+        run("review-run", "retro-1", {
+          reviewId,
+          ticket: "mc#176",
+          endedAt: T0,
+          endedBy: "engine",
+          status: "failed",
+        }),
+      );
+      const signals = signalState().signals;
+      if (["queued", "starting", "running"].includes(state))
+        expect(signals).toContainEqual(expect.objectContaining({ key: "report:review-run" }));
+      else expect(signals).toEqual([]);
+    },
+  );
+
+  it("keeps watch errors stable across updates and restart, and keys a new error after recovery", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.replaceQueue("guido-1", [{ repoId: "mc", issue: 176 }]);
+    store.setSeatSession({ ...row("guido-1", null), updatedAt: T0 - FLIGHT_IDLE_MS });
+    store.setSeatSession({ ...row("flight-1", null, "error"), reason: "resume failed" });
+    markFlightSignalsShown(store, signalState(), nowMs);
+    store.setSeatSession({ ...row("guido-1", null), updatedAt: T0 });
+    store.setSeatSession({
+      ...row("flight-1", null, "error"),
+      reason: "resume failed",
+      updatedAt: T0 + 1,
+    });
+    nowMs += FLIGHT_IDLE_MS;
+    expect(
+      signalState()
+        .signals.filter((s) => !s.told)
+        .map((s) => s.key)
+        .sort(),
+    ).toEqual([`guido-1:${T0}`]);
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    expect(signalState().signals.filter((s) => s.key.startsWith("watch:"))).toEqual([
+      expect.objectContaining({ key: `watch:flight-1:${T0}`, told: true }),
+    ]);
+    store.setSeatSession({ ...row("flight-1", null), updatedAt: nowMs });
+    store.setSeatSession({
+      ...row("flight-1", null, "error"),
+      reason: "resume failed",
+      updatedAt: ++nowMs,
+    });
+    expect(signalState().signals.filter((s) => s.key.startsWith("watch:"))).toEqual([
+      expect.objectContaining({ key: `watch:flight-1:${nowMs}`, told: false }),
+    ]);
+  });
+
+  it("guards sleep/wake silence and writes each source heartbeat at most once a minute", () => {
+    const write = vi.spyOn(store, "setSetting");
+    flightLoopHeartbeat(store, "engine", T0, MIN);
+    flightLoopHeartbeat(store, "sessions", T0, MIN);
+    for (let n = 1; n < 60; n++) flightLoopHeartbeat(store, "sessions", T0 + n * 1000, MIN);
+    expect(write.mock.calls.filter(([key]) => key === FLIGHT_LOOPS_SETTING)).toHaveLength(2);
+    nowMs += 10 * MIN;
+    expect(signalState().signals).toEqual([]);
+    flightLoopHeartbeat(store, "sessions", nowMs, MIN);
+    expect(signalState().signals[0]?.key).toBe(`loop:engine:${T0}`);
+    markFlightSignalsShown(store, signalState(), nowMs);
+    flightLoopHeartbeat(store, "engine", nowMs, MIN);
+    expect(signalState().signals).toEqual([]);
+    nowMs += 3 * MIN;
+    flightLoopHeartbeat(store, "sessions", nowMs, MIN);
+    expect(signalState().signals[0]).toMatchObject({
+      key: `loop:engine:${T0 + 10 * MIN}`,
+      told: false,
+    });
+  });
+
+  it("recovers from malformed settings", () => {
+    for (const key of [
+      `${FLIGHT_SIGNALS_SETTING}:mc`,
+      `${FLIGHT_MAIN_SETTING}:mc`,
+      FLIGHT_LOOPS_SETTING,
+      GITHUB_RATE_SETTING,
+    ])
+      store.setSetting(key, "{broken");
+    expect(signalState().signals).toEqual([]);
+    flightLoopHeartbeat(store, "engine", T0, MIN);
+    observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: T0 });
+    expect(signalState().signals[0]?.told).toBe(false);
+  });
+
+  it.each([
+    ["Tests pass. https://example.com/?q=1", false],
+    ["`should I?` is code", false],
+    ["Please confirm the target branch.", true],
+    ["Let me know when ready.", true],
+    ["Waiting on you", true],
+    ["Need your approval", true],
+  ])("classifies direct message %s", (text, question) => {
+    expect(flightQuestion(text as string)).toBe(question);
   });
 });
