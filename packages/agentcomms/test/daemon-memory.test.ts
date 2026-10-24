@@ -334,8 +334,10 @@ it("advances past epochs predating approval and resumes readable history after r
   };
   const joined = await startDaemon(newcomerOpts);
   daemons.push(joined);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(joined.read("test-room")).toMatchObject([{ quarantined: true, msg: null }]);
+  await expect
+    .poll(() => joined.read("test-room"))
+    .toMatchObject([{ quarantined: true, msg: null }]);
+  expect(joined.read("test-room")).toHaveLength(1);
   await joined.stop();
   const restarted = await startDaemon(newcomerOpts);
   daemons.push(restarted);
