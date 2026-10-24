@@ -4,7 +4,7 @@ import { OPERATOR_BOOTSTRAP_PATH, OPERATOR_HEADER, OPERATOR_TOKEN_REQUIRED } fro
 let operatorToken: string | undefined;
 let operatorTokenLoad: Promise<void> | undefined;
 
-/** Share the page-load bootstrap with early POSTs; an unavailable bootstrap is harmless. */
+/** Share the page-load bootstrap with early writes; an unavailable bootstrap is harmless. */
 export function loadOperatorToken(): Promise<void> {
   if (operatorTokenLoad) return operatorTokenLoad;
   if (operatorToken !== undefined) return Promise.resolve();
@@ -66,20 +66,37 @@ export const apiGet = <T>(path: string): Promise<T> =>
 
 /** POSTs always send a JSON body (`{}` when there is nothing to say): the server requires both. */
 export async function apiPost<T>(path: string, body: unknown = {}): Promise<T> {
+  return apiWrite<T>("POST", path, body);
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  return apiWrite<T>("PUT", path, body);
+}
+
+/** DELETE has no body or content type, as required by the server's CSRF hooks. */
+export async function apiDelete<T>(path: string): Promise<T> {
+  return apiWrite<T>("DELETE", path);
+}
+
+async function apiWrite<T>(
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<T> {
   if (operatorTokenLoad) await operatorTokenLoad;
-  const jsonBody = JSON.stringify(body);
-  const post = () =>
+  const jsonBody = method === "DELETE" ? undefined : JSON.stringify(body);
+  const write = () =>
     request<T>(path, {
-      method: "POST",
+      method,
       headers: {
-        "content-type": "application/json",
+        ...(method === "DELETE" ? {} : { "content-type": "application/json" }),
         accept: "application/json",
         ...(operatorToken === undefined ? {} : { [OPERATOR_HEADER]: operatorToken }),
       },
-      body: jsonBody,
+      ...(method === "DELETE" ? {} : { body: jsonBody }),
     });
   try {
-    return await post();
+    return await write();
   } catch (error) {
     // request parsed the error body once; preserve it for callers if this is not recoverable.
     if (
@@ -90,6 +107,6 @@ export async function apiPost<T>(path: string, body: unknown = {}): Promise<T> {
       throw error;
     forgetOperatorToken();
     await loadOperatorToken();
-    return post(); // Only one retry, including when the bootstrap failed.
+    return write(); // Only one retry, including when the bootstrap failed.
   }
 }

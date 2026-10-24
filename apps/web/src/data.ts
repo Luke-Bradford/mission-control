@@ -38,6 +38,7 @@ export const SEAT_CONTEXT_REFRESH_MS = 30_000;
 // Full loads reconcile mutable activity rows and arrivals older than the delta cursor.
 const ACTIVITY_FULL_LOAD_MS = 60_000;
 const enc = encodeURIComponent;
+const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
@@ -69,6 +70,10 @@ export const RESOURCES = {
   flightBrief: { path: "/api/flight/brief", topic: "flight" },
   flightSummary: { path: "/api/flight/summary", topic: "flight" },
   flightLedger: { path: "/api/flight/ledger?status=all", topic: "flight" },
+  flightMemory: (repoId: string): ResourceRef => ({
+    path: `${FLIGHT_MEMORY_PATH}?repo=${enc(repoId)}`,
+    topic: "flight",
+  }),
   machine: { path: "/api/machine", topic: "machine" },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
@@ -152,8 +157,10 @@ export const RESOURCES = {
   | ((id: string, s: string) => ResourceRef)
 >;
 
-/** POST endpoints. */
+/** Mutation endpoints. */
 export const ACTIONS = {
+  flightMemory: (repoId: string, topic: string) =>
+    `${FLIGHT_MEMORY_PATH}/${enc(repoId)}/${enc(topic)}`,
   notificationPreferences: RESOURCES.notificationPreferences.path,
   notificationTest: "/api/notifications/test",
   commsRead: (agentId: string) => `/api/comms/${enc(agentId)}/read`,

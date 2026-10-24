@@ -3871,7 +3871,8 @@ button.nrow.thread.tagged {
   scrollbar-gutter: stable;
 }
 /* FLIGHT's notes open at full height, like the brief panel they replaced. */
-.flight-notes .disclosure[open] > .expandable-content {
+.flight-notes .disclosure[open] > .expandable-content,
+.flight-memory > .disclosure[open] > .expandable-content {
   max-height: none;
   overflow: visible;
 }
@@ -3951,10 +3952,48 @@ button.nrow.thread.tagged {
 .flight-ledger > summary {
   cursor: pointer;
 }
-.flight-notes > .disclosure > summary {
+.flight-notes > .disclosure > summary,
+.flight-memory > .disclosure > summary {
   padding: 12px 14px;
   font-weight: 600;
 }
-.flight-notes h2 {
+.flight-notes h2,
+.flight-memory h2 {
   display: inline;
+}
+
+.flight-memory,
+.flight-memory section,
+.memory-note {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.memory-list {
+  list-style: none;
+  padding: 0;
+}
+.memory-note {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.memory-note .expandable-text {
+  white-space: pre-wrap;
+}
+.memory-form,
+.memory-form label,
+.memory-repo {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.flight-memory input,
+.flight-memory select,
+.flight-memory textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.flight-memory textarea {
+  resize: vertical;
 }
