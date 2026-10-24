@@ -10,9 +10,16 @@ export default defineConfig({
     projects: [
       {
         test: {
-          name: "node",
+          name: "server",
           environment: "node",
-          include: ["packages/**/test/**/*.test.ts", "apps/server/test/**/*.test.ts"],
+          include: ["apps/server/test/**/*.test.ts"],
+        },
+      },
+      {
+        test: {
+          name: "core",
+          environment: "node",
+          include: ["packages/**/test/**/*.test.ts"],
         },
       },
       "apps/web",

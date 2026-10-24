@@ -1736,6 +1736,49 @@ describe("board and PR cadence", () => {
   const githubPrs = () =>
     vi.fn<Collectors["githubPrs"]>(async () => ({ boards: false, escalations: false }));
 
+  it.each(["github", "prs"] as const)(
+    "follows PRs for every repo after a changed %s poll",
+    async (job) => {
+      config.repos.push({ ...config.repos[0], id: "other", github: "o/other" });
+      const c = stubs();
+      const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
+      await s.tick(job);
+      expect(vi.mocked(c.followPrs).mock.calls.map((call) => call[1])).toEqual([
+        "shop-app",
+        "other",
+      ]);
+      const poll = job === "github" ? c.github : c.prSweep;
+      expect(vi.mocked(poll).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(c.followPrs).mock.invocationCallOrder[0],
+      );
+      await s.stop();
+    },
+  );
+
+  it("follows PRs after a waited PR poll and emits a board move", async () => {
+    vi.useFakeTimers({ now: NOW });
+    config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };
+    const c = stubs({ followPrs: vi.fn(async () => true) });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: Date.now,
+      collectors: c,
+      waitedPrs: () => [7],
+    });
+    await s.tick("github");
+    flushEmits();
+    topics.length = 0;
+    vi.mocked(c.followPrs).mockClear();
+    await s.tick("github");
+    expect(c.githubPrs).toHaveBeenCalledTimes(1);
+    expect(c.followPrs).toHaveBeenCalledTimes(1);
+    flushEmits();
+    expect(topics).toContain("boards");
+    await s.stop();
+  });
+
   function cadence(over: { waited?: (repoId: string) => number[] } = {}) {
     vi.useFakeTimers({ now: NOW });
     config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };

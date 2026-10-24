@@ -148,7 +148,7 @@ describe("the keeper's transcript writer", () => {
     // Without the guard record() would spin on 0 forever; the throw turns that into a failure.
     let calls = 0;
     const folder = folderFor(
-      `setTimeout(() => { console.log("a"); console.log("b"); }, 400); process.stdin.resume();
+      `process.stdin.once("data", () => { console.log("a"); console.log("b"); });
        process.stdin.on("end", () => process.exit(0));`,
     );
     const k = keep(folder, {
@@ -159,6 +159,7 @@ describe("the keeper's transcript writer", () => {
     });
     const c = await client(folder);
     c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    c.say({ t: "in", line: "write", user: false });
     await until(() => expect(c.outs()).toHaveLength(2));
     c.say({ t: "close", graceMs: 300 });
     await k.done;
@@ -176,8 +177,8 @@ describe("the keeper's transcript writer", () => {
 
   it("reports a failing writer once", async () => {
     const folder = folderFor(
-      `console.log("a"); setTimeout(() => console.log("b"), 100);
-       process.stdin.resume(); process.stdin.on("end", () => process.exit(0));`,
+      `process.stdin.once("data", () => { console.log("a"); console.log("b"); });
+       process.stdin.on("end", () => process.exit(0));`,
     );
     const k = keep(folder, {
       write: () => {
@@ -186,9 +187,11 @@ describe("the keeper's transcript writer", () => {
     });
     const c = await client(folder);
     c.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    c.say({ t: "in", line: "write", user: false });
     await until(() => expect(c.outs()).toHaveLength(2));
     c.say({ t: "close", graceMs: 300 });
     await k.done;
+    await c.closed;
     expect(c.msgs.filter((m) => m.t === "err")).toEqual([
       { t: "err", text: "transcript write failed: disk full" },
     ]);
@@ -221,13 +224,14 @@ describe("the keeper", () => {
     const folder = folderFor(
       `const out = (s) => process.stdout.write(s + "\\n");
        out("l0"); out("l1"); out("l2");
-       setTimeout(() => out("l3"), 300);
-       setTimeout(() => out("l4"), 700);
+       require("node:readline").createInterface({ input: process.stdin }).on("line", out);
        process.stdin.resume(); process.stdin.on("end", () => setTimeout(() => process.exit(0), 50));`,
     );
     const k = keep(folder);
     const a = await client(folder);
     a.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 0 });
+    await until(() => expect(a.outs()).toHaveLength(3));
+    a.say({ t: "in", line: "l3", user: false });
     await until(() => expect(a.outs()).toHaveLength(4));
     expect(a.outs()).toEqual([
       [0, "l0"],
@@ -240,6 +244,8 @@ describe("the keeper", () => {
     expect(b.msgs[0]).toMatchObject({ t: "hello", lines: expect.any(Number) });
     b.say({ t: "hello", version: KEEPER_PROTOCOL_VERSION, from: 2 });
     await a.closed;
+    await until(() => expect(b.outs()).toHaveLength(2));
+    b.say({ t: "in", line: "l4", user: false });
     await until(() => expect(b.outs()).toHaveLength(3));
     expect(b.outs()).toEqual([
       [2, "l2"],
@@ -557,14 +563,17 @@ describe("endKeeper", () => {
   });
 
   it("ends the live pids its files name: SIGTERM first, SIGKILL after the wait", async () => {
-    const folder = folderFor(`process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);`);
+    const folder = folderFor(
+      `process.on("SIGTERM", () => {}); console.log("up"); setInterval(() => {}, 1000);`,
+    );
     const k = keep(folder);
     await until(() => expect(readPidFile(folder, "cli.pid")).not.toBeNull());
+    await until(() => expect(lines()).toEqual(["up"]));
     const cliPid = readPidFile(folder, "cli.pid") as number;
     // the keeper here is this very process: a file naming a dead pid stands in for it
     writeFileSync(join(folder, "keeper.pid"), "99999999\n");
     expect(await endKeeper(folder, 200)).toBe(true);
-    expect(() => process.kill(cliPid, 0)).toThrow();
     await k.done;
+    expect(() => process.kill(cliPid, 0)).toThrow();
   });
 });
