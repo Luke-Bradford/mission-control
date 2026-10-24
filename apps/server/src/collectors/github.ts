@@ -240,22 +240,29 @@ export class GqlError extends Error {
 
 /**
  * The request never got an answer (`status` null: fetch failed) or got an HTTP error status. A
- * caller may retry a lost request or a 5xx (`isTransient`), never a 401/403/429.
+ * caller may retry a lost request or a 5xx (`isTransient`), never a rate-limited answer.
  */
 export class GqlTransportError extends Error {
   readonly status: number | null;
   /** The response's X-GitHub-SSO header (SAML single sign-on), or null. */
   readonly sso: string | null;
-  constructor(message: string, status: number | null, sso: string | null = null) {
+  readonly rateLimited: boolean;
+  constructor(
+    message: string,
+    status: number | null,
+    sso: string | null = null,
+    rateLimited = false,
+  ) {
     super(message);
     this.name = "GqlTransportError";
     this.status = status;
     this.sso = sso;
+    this.rateLimited = rateLimited;
   }
 }
 
 export const isTransient = (e: unknown): boolean =>
-  e instanceof GqlTransportError && (e.status === null || e.status >= 500);
+  e instanceof GqlTransportError && !e.rateLimited && (e.status === null || e.status >= 500);
 
 /** Read the body separately from parsing so an interrupted response keeps its cause. */
 export async function readGithubJson(res: Response): Promise<unknown> {
@@ -334,8 +341,13 @@ export function makeGql(
         body: JSON.stringify({ query, variables }),
         signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       });
-    } catch {
-      throw new GqlTransportError("github: request failed", null);
+    } catch (e) {
+      throw new GqlTransportError(
+        isObj(e) && e.name === "TimeoutError"
+          ? `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`
+          : "github: request failed",
+        null,
+      );
     }
     // An exhausted budget answers with no rateLimit block: record it, or the poll never slows.
     if (!res.ok && isRateLimitedResponse(res.status, res.headers)) {
@@ -346,6 +358,7 @@ export function makeGql(
         `github: HTTP ${res.status}`,
         res.status,
         res.headers.get("x-github-sso"),
+        isRateLimitedResponse(res.status, res.headers),
       );
     }
     const body = (await readGithubJson(res)) as {

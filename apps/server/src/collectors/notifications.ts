@@ -119,8 +119,13 @@ export function makeRest(token: string, doFetch: typeof fetch = fetch): Rest {
         },
         signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       });
-    } catch {
-      throw new GqlTransportError("github: request failed", null);
+    } catch (e) {
+      throw new GqlTransportError(
+        isObj(e) && e.name === "TimeoutError"
+          ? `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`
+          : "github: request failed",
+        null,
+      );
     }
     if (res.status === 304) return { status: 304, headers: res.headers, body: null };
     if (!res.ok) {
