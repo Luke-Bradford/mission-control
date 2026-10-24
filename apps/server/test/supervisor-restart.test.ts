@@ -1088,20 +1088,27 @@ describe("a seat keeps running through a restart", () => {
     first.sup.start();
     const { runId } = await first.sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
-    await first.sup.message("guido-1", "SLOW", { interrupt: false });
+    await first.sup.message("guido-1", "TOOLGAP", { interrupt: false });
     await until(() => expect(seatState("guido-1")).toBe("running"));
     await first.sup.stopAll();
     // as if the hub had died before it stored the lines: all of them, the first turn's result among
-    // them, are replayed to the next hub while the SLOW turn is still open
+    // them, are replayed to the next hub while the TOOLGAP turn waits for our cues
     const cursor = store.keeperCursor(runId);
-    if (cursor) store.setKeeperCursor({ ...cursor, line: 0 });
+    if (cursor === null) throw new Error("missing keeper cursor");
+    store.setKeeperCursor({ ...cursor, line: 0 });
     await lock.acquire({ runId, toolUseId: "toolu_held" }, "guido-1", "pnpm -s test", 1000, live());
     const { sup } = make({ lock });
     sup.start();
-    await until(() => expect(store.keeperCursor(runId)?.line).toBeGreaterThan(0)); // the replay is in
-    expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: true });
+    // The first replayed result advances the cursor before the later turn is restored.
+    await until(() => {
+      // the keeper may have written lines after the cursor saved at stopAll, so the replay can pass it
+      expect(store.keeperCursor(runId)?.line).toBeGreaterThanOrEqual(cursor.line);
+      expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: true });
+    });
     expect(lock.state().holder?.runId).toBe(runId);
-    // the turn's own result, live, frees it
+    // the cues end the tool call, then the turn: its own result, live, frees the unrelated hold
+    await sup.message("guido-1", "cue", { interrupt: false });
+    await sup.message("guido-1", "cue", { interrupt: false });
     await until(() => expect(lock.state().holder).toBeNull());
   });
 

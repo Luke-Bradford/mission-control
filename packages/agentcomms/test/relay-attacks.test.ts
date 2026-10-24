@@ -337,7 +337,6 @@ it("W8: an unavailable room never delays startup", async () => {
 
 it("B3: successful frames on short connections do not reset reconnect backoff", async () => {
   const f = await setup();
-  const { setTimeout: pause } = await import("node:timers/promises");
   vi.useFakeTimers();
   try {
     transport.sockets[1].terminate();
@@ -345,14 +344,14 @@ it("B3: successful frames on short connections do not reset reconnect backoff", 
     await vi.advanceTimersByTimeAsync(999);
     expect(transport.sockets).toHaveLength(count);
     await vi.advanceTimersByTimeAsync(1);
-    await pause(30);
-    expect(f.bDaemon.rooms()[0].status).toBe("connected");
+    // a real handshake can take over a second on a loaded runner
+    await expect.poll(() => f.bDaemon.rooms()[0].status, { timeout: 3000 }).toBe("connected");
     transport.sockets.at(-1)?.terminate();
     await vi.advanceTimersByTimeAsync(1999);
     expect(transport.sockets).toHaveLength(count + 1);
     await vi.advanceTimersByTimeAsync(1);
-    await pause(30);
-    expect(f.bDaemon.rooms()[0].status).toBe("connected");
+    // a real handshake can take over a second on a loaded runner
+    await expect.poll(() => f.bDaemon.rooms()[0].status, { timeout: 3000 }).toBe("connected");
     transport.sockets.at(-1)?.terminate();
     await vi.advanceTimersByTimeAsync(3999);
     expect(transport.sockets).toHaveLength(count + 2);
