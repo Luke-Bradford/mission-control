@@ -408,7 +408,6 @@ describe("startWatch", () => {
       "mcp__mc__rerun_ci",
       "mcp__mc__edit_card",
       "mcp__mc__dismiss_item",
-      "mcp__mc__restart_seat",
       "mcp__mc__sync_main",
       "mcp__mc__create_ticket",
       "mcp__mc__comment_ticket",

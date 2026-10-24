@@ -2042,6 +2042,13 @@ export class Store {
       .run(key, value);
   }
 
+  pruneCollaborators(before: number): void {
+    this.db
+      .prepare(`DELETE FROM settings WHERE key LIKE 'collaborator:%'
+      AND CASE WHEN json_valid(value) THEN coalesce(json_extract(value, '$.at'), 0) < ? ELSE 1 END`)
+      .run(before);
+  }
+
   deleteSetting(key: string): void {
     this.db.prepare("DELETE FROM settings WHERE key = ?").run(key);
   }

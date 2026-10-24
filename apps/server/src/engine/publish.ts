@@ -47,7 +47,7 @@ import {
 import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { crewDir } from "../store.ts";
-import { mcBlock } from "./rules.ts";
+import { mcSection } from "./rules.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
 export const NO_FAILED_RUN = "(no failed Actions run to read)";
@@ -828,7 +828,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           try {
             const before = await g(["show", `${base}:CLAUDE.md`]);
             const after = await g(["show", `${sha}:CLAUDE.md`]);
-            missionControlChanged = mcBlock(before) !== mcBlock(after);
+            missionControlChanged = mcSection(before) !== mcSection(after);
           } catch {
             /* an unreadable rules block stays protected */
           }

@@ -2913,7 +2913,7 @@ describe("the engine runs reviews", () => {
     it("FLIGHT clears a hard-rule run, and the engine merges it", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       h.touches = ["apps/server/src/flight/tools.ts"];
-      h.gate = { ...need(h.gate), strays: h.touches };
+      h.gate = { ...need(h.gate), strays: [] };
       await gateOpen();
       await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
       expect(h.steps).toEqual([]);
@@ -2963,6 +2963,85 @@ describe("the engine runs reviews", () => {
         } else expect(loopOf().phase).toBe("parked");
       },
     );
+
+    it.each(["review", "review-ruling", "ruling", "review-failed"])(
+      "accept requires a reported floor review (%s)",
+      async (kind) => {
+        need(config.repos[0]).flightPowers = "superuser";
+        h.touches = ["apps/server/src/guard/x.ts"];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: [kind], action: "accept" }),
+        ).toBe(false);
+      },
+    );
+    it.each(["ruling", "review-failed"])(
+      "accept refuses %s even with a passing RETRO review",
+      async (kind) => {
+        need(config.repos[0]).flightPowers = "superuser";
+        h.touches = ["apps/server/src/guard/x.ts"];
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, []);
+        await h.engine.reconcileRun(RUN);
+        setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: [kind], action: "accept" }),
+        ).toBe(false);
+      },
+    );
+    it("accept permits floor code after a reported unblocked RETRO review", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      h.touches = ["apps/server/src/guard/x.ts"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      setLoop({ phase: "parked", parked: { kind: "review", reason: "held", ended: false } });
+      expect(
+        await h.engine.onOperatorMessage(RUN, "FLIGHT", { kinds: ["review"], action: "accept" }),
+      ).toBe(true);
+    });
+
+    it("a plain FLIGHT message cannot lift a failed review", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review-failed", reason: "failed", ended: false },
+      });
+      expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toBe(false);
+    });
+
+    it("caps fresh RETRO requests at two per head", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      for (let i = 0; i < 3; i++) {
+        await h.engine.reconcileRun(RUN);
+        setLoop({
+          phase: "parked",
+          parked: { kind: "review-failed", reason: "failed", ended: false },
+        });
+        const result = await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+          kinds: ["review-failed"],
+          action: "rereview",
+        });
+        expect(result).toBe(i < 2);
+      }
+    });
+    it("a refused CI rerun costs no per-head attempt", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      setPr({ ci: "failing" });
+      h.rerunResults = [{ ok: false, text: "no failed jobs", transient: false }];
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(false);
+    });
 
     it("an accepted head waits until the waived status has been written", async () => {
       need(config.repos[0]).flightPowers = "superuser";

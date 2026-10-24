@@ -6,6 +6,7 @@ import {
   type BoardItem,
   BRIEF_CLEARED_DECISION,
   BRIEFED_TEXT,
+  blockedNoteKey,
   briefClearedText,
   briefSavedDecision,
   briefSavedText,
@@ -36,6 +37,7 @@ import {
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   GITHUB_WRITES_OFF,
+  GUARD_ACK_PREFIX,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
@@ -82,6 +84,7 @@ import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
+import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
 const SHA = "a".repeat(40);
@@ -143,6 +146,8 @@ let endCalls: string[];
 let messageCalls: unknown[][];
 let engineCalls: unknown[][];
 let clearanceCalls: unknown[][];
+let clearanceOk: boolean;
+let rerunOk: boolean;
 let editCalls: unknown[][];
 let fetchCalls: number[];
 let fetchRepos: string[];
@@ -221,6 +226,8 @@ beforeEach(() => {
   messageCalls = [];
   engineCalls = [];
   clearanceCalls = [];
+  clearanceOk = true;
+  rerunOk = true;
   editCalls = [];
   fetchCalls = [];
   fetchRepos = [];
@@ -287,9 +294,9 @@ beforeEach(() => {
     engine: {
       clearFlight: async (...args) => {
         clearanceCalls.push(args);
-        return true;
+        return clearanceOk;
       },
-      rerunCi: async () => ({ ok: true, text: "Reran CI." }),
+      rerunCi: async () => ({ ok: rerunOk, text: "Reran CI." }),
       onOperatorMessage: async (...a) => {
         engineCalls.push(a);
         return lifts;
@@ -495,7 +502,6 @@ describe("tool list", () => {
       "rerun_ci",
       "edit_card",
       "dismiss_item",
-      "restart_seat",
       "draft_reply",
     ]);
     for (const t of tools) {
@@ -855,6 +861,12 @@ describe("start_seat", () => {
   beforeEach(() => {
     board(sc(7));
     fetchImpl = async (n) => ticket(n, { body: DONE });
+  });
+
+  it("respects an operator stop", async () => {
+    store.setSeatSession({ ...row("guido-1", ""), runId: null, state: "stopped" });
+    expect(await start()).toHaveProperty("isError", true);
+    expect(startCalls).toEqual([]);
   });
 
   it("starts the seat with the loop when the engine is on", async () => {
@@ -1533,8 +1545,8 @@ describe("message_seat unpark", () => {
     expect(messageCalls).toEqual([]);
   });
 
-  it.each(["review", "review-ruling", "ruling"])(
-    "leaves a %s park to the operator",
+  it.each(["review", "review-ruling", "ruling", "review-failed"])(
+    "cannot lift a %s park with a message",
     async (kind) => {
       parked(kind);
       expect((await call("message_seat", U())).isError).toBe(true);
@@ -1543,7 +1555,7 @@ describe("message_seat unpark", () => {
     },
   );
 
-  it.each(["nothing", "gate", "conflict", "review-failed"])("lifts a %s park", async (kind) => {
+  it.each(["nothing", "gate", "conflict"])("lifts a %s park", async (kind) => {
     parked(kind);
     expect(await call("message_seat", U())).toEqual({
       text: "Sent to GUIDO-1, and its run is un-parked.",
@@ -4396,7 +4408,6 @@ describe("superuser housekeeping", () => {
     ["rerun_ci", { pr: 12 }],
     ["edit_card", { issue: 7, size: "S" }],
     ["dismiss_item", { key: "note:x" }],
-    ["restart_seat", { seat: "guido-1" }],
   ])("%s requires superuser", async (name, a) => {
     expect(await call(name as string, a as object)).toMatchObject({
       isError: true,
@@ -4452,6 +4463,89 @@ describe("superuser housekeeping", () => {
       stderr: "",
     });
   };
+  it("does not announce a refused clearance", async () => {
+    elevated();
+    runPr();
+    clearanceOk = false;
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(ghCalls.some((a) => a[1] === "comment")).toBe(false);
+  });
+  it("clears before posting the basis", async () => {
+    elevated();
+    runPr();
+    const prior = ghImpl;
+    ghImpl = async (a) => {
+      if (a[1] === "comment") expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+      return prior(a);
+    };
+    expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+  });
+  it.each(["ruling", "review-failed", "conflict"])("cannot accept a %s park", async (kind) => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind, reason: "held", ended: false },
+    });
+    expect(await call("settle_park", { runId: "r-pr", action: "accept" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(engineCalls).toEqual([]);
+  });
+  it("settle_park respects the merge lane check", async () => {
+    elevated();
+    runPr();
+    need(cfg.crew).lane = "home";
+    board(card(7, { labels: ["lane:work"] }));
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: "review", reason: "held", ended: false },
+    });
+    expect(await call("settle_park", { runId: "r-pr", action: "accept" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(engineCalls).toEqual([]);
+  });
+  it("lift only settles stuck parks and shares message_seat's run cap", async () => {
+    elevated();
+    runPr();
+    const park = (kind: string) =>
+      store.setRunLoop("r-pr", {
+        ...need(store.run("r-pr")?.loop),
+        phase: "parked",
+        parked: { kind, reason: "held", ended: false },
+      });
+    park("conflict");
+    expect(await call("settle_park", { runId: "r-pr", action: "lift" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    park("stuck");
+    addDecision({ kind: "unpark", targetRunId: "r-pr" });
+    expect(await call("settle_park", { runId: "r-pr", action: "lift" })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(await call("settle_park", { runId: "r-pr", action: "lift" })).toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(engineCalls).toHaveLength(1);
+  });
+  it("refused reruns cost no shared budget", async () => {
+    elevated();
+    runPr();
+    rerunOk = false;
+    for (let i = 0; i < 5; i++)
+      expect(await call("rerun_ci", { pr: 12 })).toHaveProperty("isError", true);
+    expect(decisions().filter((d) => d.kind === "rerun")).toHaveLength(0);
+    rerunOk = true;
+    expect(await call("rerun_ci", { pr: 12 })).not.toHaveProperty("isError", true);
+  });
   it("posts a checked basis and clears exactly the head it read", async () => {
     elevated();
     runPr();
@@ -4459,20 +4553,22 @@ describe("superuser housekeeping", () => {
     expect(ghCalls.at(-1)).toContain("FLIGHT clearance: Checked the current state");
     expect(clearanceCalls).toEqual([["r-pr", SHA]]);
   });
-  it.each([".github/workflows/ci.yml", "CLAUDE.md"])(
-    "merge_pr refuses %s even on a stale awaiting-flight record",
-    async (path) => {
-      elevated();
-      runPr();
-      store.setRunLoop("r-pr", {
-        ...need(store.run("r-pr")?.loop),
-        touches: { sha: SHA, paths: [path] },
-      });
-      expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
-      expect(clearanceCalls).toEqual([]);
-      expect(ghCalls).toEqual([]);
-    },
-  );
+  it.each([
+    ".github/workflows/ci.yml",
+    ".github/actions/setup/action.yml",
+    ".github/CODEOWNERS",
+    "CLAUDE.md",
+  ])("merge_pr refuses %s even on a stale awaiting-flight record", async (path) => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      touches: { sha: SHA, paths: [path] },
+    });
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([]);
+    expect(ghCalls).toEqual([]);
+  });
   it("merge_pr refuses an operator stop and another lane", async () => {
     elevated();
     runPr();
@@ -4540,26 +4636,6 @@ describe("superuser housekeeping", () => {
     expect(editCalls).toEqual([["mc", 7, { size: "S", priority: "P0" }]]);
     expect(JSON.parse(need(ghInputs.at(-1)))).toEqual({ assignees: ["work-account"] });
   });
-  it("restarts an errored crew seat through startRun", async () => {
-    elevated();
-    live("guido-1", "failed", { ticket: "mc#7", endedAt: NOW, status: "failed" });
-    store.setSeatSession({ ...row("guido-1", "failed"), state: "error" });
-    expect(await call("restart_seat", { seat: "guido-1" })).not.toHaveProperty("isError", true);
-    expect(startCalls).toEqual([["guido-1", 7, { loop: NEW_LOOP }]]);
-  });
-  it.each(["stopped", "idle"] as const)("never restarts %s seats", async (state) => {
-    elevated();
-    live("guido-1", "failed", { ticket: "mc#7", endedAt: NOW });
-    store.setSeatSession({ ...row("guido-1", "failed"), state });
-    expect(await call("restart_seat", { seat: "guido-1" })).toHaveProperty("isError", true);
-    expect(startCalls).toEqual([]);
-  });
-  it("refuses observed loops and FLIGHT", async () => {
-    elevated();
-    for (const seat of ["observed", "flight-1"])
-      expect(await call("restart_seat", { seat })).toHaveProperty("isError", true);
-    expect(startCalls).toEqual([]);
-  });
   it("never dismisses operator items or guard acknowledgements", async () => {
     elevated();
     store.raiseNote({
@@ -4619,7 +4695,13 @@ describe("superuser housekeeping", () => {
       ],
       NOW,
     );
-    for (const key of ["ready:r", "budget:r", "hub-update-held"])
+    for (const key of [
+      "ready:r",
+      "update:docs",
+      blockedNoteKey("r", 0),
+      `${GUARD_ACK_PREFIX}1`,
+      HUB_UPDATE_HELD_KEY,
+    ])
       store.raiseNote({
         key,
         kind: "ready",
@@ -4631,9 +4713,57 @@ describe("superuser housekeeping", () => {
       });
     expect(await call("dismiss_item", { key: "note:ready:r" })).not.toHaveProperty("isError", true);
     expect(store.notes().find((n) => n.key === "ready:r")?.dismissedAt).toBe(NOW);
-    for (const key of ["note:budget:r", "note:hub-update-held"])
+    expect(await call("dismiss_item", { key: "note:update:docs" })).not.toHaveProperty(
+      "isError",
+      true,
+    );
+    for (const key of [`note:${GUARD_ACK_PREFIX}1`, `note:${HUB_UPDATE_HELD_KEY}`])
       expect(await call("dismiss_item", { key })).toHaveProperty("isError", true);
+    store.setRunLoop("r", {
+      ...need(store.run("r")?.loop),
+      phase: "parked",
+      parked: { kind: "budget", reason: "budget", ended: false },
+    });
+    expect(await call("dismiss_item", { key: `note:${blockedNoteKey("r", 0)}` })).toHaveProperty(
+      "isError",
+      true,
+    );
   });
+  it.each(["stopped", "account", "approval"])(
+    "dismiss_item respects real %s records even for ended runs",
+    async (hold) => {
+      elevated();
+      live("guido-1", "r-held", { endedAt: NOW, loop: NEW_LOOP });
+      if (hold === "stopped")
+        store.setSeatSession({ ...row("guido-1", "r-held"), state: "stopped" });
+      if (hold === "account")
+        store.addUsage({
+          accountId: "claude-main",
+          window: "5h",
+          at: NOW,
+          pct: 96,
+          resetAt: NOW + 1000,
+          source: "t",
+        });
+      if (hold === "approval")
+        store.addQuestion({
+          agentId: "guido-1",
+          runId: "r-held",
+          text: "Approval",
+          at: NOW - 20 * 60_000,
+        });
+      store.raiseNote({
+        key: "resolved",
+        kind: "flag",
+        runId: "r-held",
+        seatId: "guido-1",
+        repoId: "mc",
+        text: "Resolved subject",
+        at: NOW,
+      });
+      expect(await call("dismiss_item", { key: "note:resolved" })).toHaveProperty("isError", true);
+    },
+  );
   it("marks a non-collaborator's ticket text and digest, while caching permissions", async () => {
     elevated();
     board(card(7, { author: "outsider" }));
@@ -4647,6 +4777,9 @@ describe("superuser housekeeping", () => {
     );
     const state = JSON.parse((await named("flight_state").call(ctx(), {})).text);
     expect(state.tickets[0]).toMatchObject({ untrustedAuthor: true });
+    nowMs += 23 * 3600_000;
+    await named("flight_state").call(ctx(), {});
+    await named("flight_state").call(ctx(), {});
     expect(
       ghCalls.filter((a) => a.includes("repos/o/mc/collaborators/outsider/permission")),
     ).toHaveLength(1);

@@ -28,7 +28,6 @@ export const MC_TOOL_NAMES = {
   rerunCi: "rerun_ci",
   editCard: "edit_card",
   dismissItem: "dismiss_item",
-  restartSeat: "restart_seat",
 
   syncMain: "sync_main",
   createTicket: "create_ticket",
@@ -69,7 +68,6 @@ export const MC_TOOLS = {
   rerunCi: mcTool(MC_TOOL_NAMES.rerunCi),
   editCard: mcTool(MC_TOOL_NAMES.editCard),
   dismissItem: mcTool(MC_TOOL_NAMES.dismissItem),
-  restartSeat: mcTool(MC_TOOL_NAMES.restartSeat),
 
   syncMain: mcTool(MC_TOOL_NAMES.syncMain),
   createTicket: mcTool(MC_TOOL_NAMES.createTicket),

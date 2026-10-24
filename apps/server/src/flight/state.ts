@@ -738,7 +738,9 @@ const stoppedSeats = (s: FlightState): string[] =>
 
 /** A park FLIGHT acts on: one it may lift, or a CI ruling it may settle. */
 const flightParkKind = (kind: string): boolean =>
-  kind === RULING_PARK || (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
+  kind === RULING_PARK ||
+  kind === "review-failed" ||
+  (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind);
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
 export function pending(

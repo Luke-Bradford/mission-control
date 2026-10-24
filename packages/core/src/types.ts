@@ -76,6 +76,8 @@ export interface RunLoop {
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
   flightReruns?: Record<string, number>;
+  /** Fresh RETRO requests by FLIGHT, at most two per head. */
+  flightRereviews?: Record<string, number>;
   phase: LoopPhase;
   reportedEvidenceId: number;
   prNumber: number | null;

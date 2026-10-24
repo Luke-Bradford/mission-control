@@ -108,6 +108,7 @@ import {
   type FlightPrRead,
   flightFloorBlocked,
   GITHUB_WRITES_OFF,
+  GUARD_ACK_PREFIX,
   globMatches,
   HUD_COLUMNS,
   hasDoneWhenSection,
@@ -255,6 +256,7 @@ import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { crewDir, type Store } from "../store.ts";
+import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import {
   flightArrivalSource,
@@ -885,6 +887,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
     const planner = loopKind === "plan";
+    if (store.seatSession(seat)?.state === "stopped")
+      return fail(`${call} is stopped by the operator.`);
     if (!seatFree(store, deps.supervisor.busy(), seat)) return fail(seatHasRunText(call));
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
@@ -1957,7 +1961,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           if (denied) return denied;
           if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
           const result = await act(c.args, repo, ctx);
-          record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
+          if (kind !== "rerun" || !result.isError)
+            record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
           bus.emit("flight");
           return result;
         }),
@@ -1970,7 +1975,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       !seat ||
       run.repoId !== repoOf()?.id ||
       store.seatSession(run.agentId)?.state === "stopped" ||
-      ["budget", "account", "operator", "operator-hold"].includes(run.loop?.parked?.kind ?? "") ||
+      run.loop?.parked?.kind === "budget" ||
       store
         .openQuestions()
         .some(
@@ -1995,16 +2000,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           r.branch === row?.branch,
       );
     if (!run || !row || isRefusal(devRun(run.id)) || held(run)) return null;
+    return inRunLane(run) ? run : null;
+  }
+  function inRunLane(run: Run): boolean {
     const card = store
       .board(run.repoId)
       .find((b) => `${run.repoId}#${b.issueNumber}` === run.ticket);
     const lanes = card?.labels.filter((l) => l.startsWith(LANE_LABEL_PREFIX)) ?? [];
-    if (
-      lanes.length > 1 ||
-      (config.crew?.lane && lanes.length === 1 && lanes[0] !== `lane:${config.crew.lane}`)
-    )
-      return null;
-    return run;
+    return (
+      lanes.length <= 1 &&
+      !(config.crew?.lane && lanes.length === 1 && lanes[0] !== `lane:${config.crew.lane}`)
+    );
   }
 
   const superTools = [
@@ -2058,6 +2064,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (problem) return fail(problem);
         if (requirePowers(config, repo.id, "superuser") || held(store.run(run.id) ?? run))
           return fail("Run is held.");
+        if (!(await deps.engine.clearFlight(run.id, sha)))
+          return fail("The merge gates changed; refresh the PR.");
         const posted = await deps.gh(
           [
             "pr",
@@ -2069,10 +2077,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           ],
           { cwd: crewDir(deps.dbPath) },
         );
-        if (posted.code !== 0) return fail("Could not post the clearance basis.");
-        return (await deps.engine.clearFlight(run.id, sha))
-          ? { text: `Cleared PR #${a.pr}; the engine handles the merge.` }
-          : fail("The merge gates changed; refresh the PR.");
+        return {
+          text: `Cleared PR #${a.pr}; the engine handles the merge.${posted.code !== 0 ? " Could not post the clearance basis." : ""}`,
+        };
       },
     ),
     superTool(
@@ -2084,14 +2091,36 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const found = devRun(a.runId);
         if (isRefusal(found)) return found;
         const run = found.run;
-        if (held(run) || !run.loop?.parked) return fail("Run is held or not parked.");
+        if (held(run) || !inRunLane(run) || !run.loop?.parked)
+          return fail("Run is held, in another lane or not parked.");
         const kinds =
           a.action === "lift"
-            ? FLIGHT_UNPARK_KINDS
-            : ["ruling", "review-ruling", "review", "review-failed"];
-        return (await deps.engine?.onOperatorMessage(run.id, "FLIGHT", { kinds, action: a.action }))
-          ? { text: `Settled ${run.id}: ${a.action}.` }
-          : fail("Park cannot be settled: check the head, hold or independent RETRO review.");
+            ? ["stuck"]
+            : a.action === "rereview"
+              ? ["review", "review-ruling", "review-failed"]
+              : ["review", "review-ruling"];
+        if (!kinds.includes(run.loop.parked.kind))
+          return fail("This action cannot settle this park.");
+        if (a.action === "lift") {
+          const n = store.countFlightDecisions({
+            kinds: ["unpark"],
+            since: 0,
+            targetRunId: run.id,
+          });
+          if (n >= FLIGHT_UNPARKS_PER_RUN) return fail(unparkCapText(n));
+        }
+        if (!(await deps.engine?.onOperatorMessage(run.id, "FLIGHT", { kinds, action: a.action })))
+          return fail("Park cannot be settled: check the head, hold or independent RETRO review.");
+        if (a.action === "lift")
+          record(now(), {
+            kind: "unpark",
+            targetRunId: run.id,
+            seatId: run.agentId,
+            about: run.id,
+            decision: "Lifted stuck park",
+            basis: a.basis,
+          });
+        return { text: `Settled ${run.id}: ${a.action}.` };
       },
     ),
     superTool(
@@ -2180,16 +2209,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           .find((n) => n.key === key && n.repoId === repo.id && n.dismissedAt === null);
         if (
           !note ||
-          /(?:^|:)(?:guard|budget|account|approval|update|hub-update)(?:[:_-]|$)/i.test(key) ||
+          key.startsWith(GUARD_ACK_PREFIX) ||
+          key === HUB_UPDATE_HELD_KEY ||
           note.kind === "ratelimit"
         )
           return fail("This item is protected or unavailable.");
         const run = note.runId ? store.run(note.runId) : null;
-        if (
-          run &&
-          ["budget", "account", "operator", "operator-hold"].includes(run.loop?.parked?.kind ?? "")
-        )
-          return fail("This hold belongs to the operator.");
+        if (run && held(run)) return fail("This hold belongs to the operator.");
         const pr = store.pullRequests(repo.id).find((p) => p.number === run?.loop?.prNumber);
         const card = store
           .board(repo.id)
@@ -2207,40 +2233,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (!store.dismissNote(key, now())) return fail("This note has already gone.");
         bus.emit("attention");
         return { text: `Dismissed ${a.key}.` };
-      },
-    ),
-    superTool(
-      MC_TOOL_NAMES.restartSeat,
-      "Restart an errored crew seat on its last ticket. Never restarts FLIGHT, observed loops, operator stops, account stops or budget parks.",
-      z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg }),
-      "restart",
-      async (a, _repo, ctx) => {
-        const seat = seatCfg(a.seat);
-        const row = store.seatSession(a.seat);
-        const run = row?.runId ? store.run(row.runId) : store.runs(a.seat, 1)[0];
-        if (
-          !seat ||
-          a.seat === ctx.seatId ||
-          config.loops.some((l) => l.id === a.seat) ||
-          row?.state !== "error" ||
-          !run ||
-          held(run)
-        )
-          return fail("Only an errored crew seat without a hold can restart.");
-        const issue = /^([^#]+)#([1-9][0-9]*)$/.exec(run.ticket ?? "");
-        if (!issue || issue[1] !== run.repoId || seatDef(seat).loop === "watch")
-          return fail("No restartable ticket on this seat.");
-        try {
-          await deps.supervisor.startRun(
-            a.seat,
-            Number(issue[2]),
-            seatDef(seat).loop === "build" ? { loop: NEW_LOOP } : undefined,
-          );
-        } catch (e) {
-          return fail(e instanceof Error ? e.message : "Seat restart failed.");
-        }
-        bus.emit("agents");
-        return { text: `Restarted ${a.seat}.` };
       },
     ),
   ];

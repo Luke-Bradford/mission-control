@@ -488,8 +488,7 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     s.pr?.state === "open" &&
     s.pr.headSha === P &&
     s.headCommit === P &&
-    (s.pr.ci === "passing" ||
-      (s.flightPowers === "superuser" && rv.waived && loop.ciFailedSha === P)) &&
+    s.pr.ci === "passing" &&
     s.pr.reviewStatus === "passing" &&
     ((s.flightPowers === "superuser" && rv.waived) ||
       (loop.ciFailedSha !== P &&
@@ -512,7 +511,7 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     s.pr?.mergeable !== "CONFLICTING" &&
     s.hardRulesSet === true &&
     gate?.hubOnly === true &&
-    gate.strays.every((p) => touches?.paths.includes(p)) &&
+    gate.strays.length === 0 &&
     (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || loop.aside != null)));
   const awaiting =
     elevated && otherGates && touches !== null && touches.paths.length > 0 && !floor && !cleared;

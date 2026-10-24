@@ -40,7 +40,6 @@ export const FLIGHT_DECISION_KINDS = [
   "settle",
   "card",
   "dismiss",
-  "restart",
   "brief",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
@@ -184,7 +183,6 @@ export const FLIGHT_UNPARK_KINDS = [
   "ci",
   "gate",
   "conflict",
-  "review-failed",
 ] as const;
 /** The tickets FLIGHT may start in an hour, per developer (build) seat in its session; at least this many. */
 export const FLIGHT_STARTS_PER_HOUR = 4;

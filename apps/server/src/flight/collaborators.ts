@@ -1,7 +1,7 @@
 import type { GhRunner } from "../mcp/gh.ts";
 import type { Store } from "../store.ts";
 
-const TTL = 60 * 60_000;
+const TTL = 24 * 60 * 60_000;
 const key = (repo: string, login: string) => `collaborator:${repo}:${login.toLowerCase()}`;
 
 /** Missing and expired permissions are untrusted; cached results are evidence, never grants. */
@@ -31,6 +31,7 @@ export async function collaborator(
   now: number,
 ): Promise<boolean> {
   if (!login || !/^[A-Za-z0-9-]{1,39}$/.test(login)) return false;
+  store.pruneCollaborators(now - 7 * TTL);
   const saved = store.getSetting(key(repo, login));
   if (saved) {
     try {
@@ -46,9 +47,7 @@ export async function collaborator(
   let trusted = false;
   if (result.code === 0) {
     try {
-      trusted = ["read", "triage", "write", "maintain", "admin"].includes(
-        JSON.parse(result.stdout).permission,
-      );
+      trusted = ["write", "maintain", "admin"].includes(JSON.parse(result.stdout).permission);
     } catch {
       /* fail closed */
     }
@@ -66,6 +65,7 @@ export async function refreshAuthors(
   github: string,
   now: number,
 ): Promise<void> {
+  store.pruneCollaborators(now - 7 * TTL);
   const authors = new Set(
     [...store.board(repoId), ...store.pullRequests(repoId)]
       .map((x) => x.author)

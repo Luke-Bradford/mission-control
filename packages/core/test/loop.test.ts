@@ -2108,7 +2108,7 @@ describe("merge workspace", () => {
       { flightPowers: "superuser" },
       {
         touches: { sha: SHA, paths: ["apps/server/src/flight/tools.ts"] },
-        gate: gateOf({ strays: ["apps/server/src/flight/tools.ts"] }),
+        gate: gateOf(),
       },
     );
     const held = reconcile(base);
@@ -2124,7 +2124,12 @@ describe("merge workspace", () => {
     expect(reconcile({ ...base, flightPowers: "standard" }).loop.awaitingFlight).toBeNull();
   });
 
-  it.each(["CLAUDE.md", ".github/workflows/ci.yml"])("FLIGHT clearance cannot waive %s", (path) => {
+  it.each([
+    "CLAUDE.md",
+    ".github/workflows/ci.yml",
+    ".github/CODEOWNERS",
+    ".github/actions/setup/action.yml",
+  ])("FLIGHT clearance cannot waive %s", (path) => {
     const s = merge(
       { flightPowers: "superuser" },
       {
@@ -2141,11 +2146,33 @@ describe("merge workspace", () => {
       {
         touches: { sha: SHA, paths: ["CLAUDE.md"] },
         flightClearedSha: SHA,
-        gate: gateOf({ missionControlChanged: false, strays: ["CLAUDE.md"] }),
+        gate: gateOf({ missionControlChanged: false }),
       },
     );
     expect(kindsOf(reconcile(s).actions)).toContain("merge");
   });
+
+  it("a review waiver still requires passing CI", () => {
+    const s = merge(
+      { flightPowers: "superuser", pr: pr({ ci: "failing" }) },
+      { reviewWaivedSha: SHA, ciFailedSha: SHA },
+    );
+    expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
+  });
+  it.each(["apps/other/hard-rule.ts", "package.json"])(
+    "clearance never hides a stray: %s",
+    (path) => {
+      const s = merge(
+        { flightPowers: "superuser" },
+        {
+          flightClearedSha: SHA,
+          touches: { sha: SHA, paths: [path] },
+          gate: gateOf({ strays: [path] }),
+        },
+      );
+      expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
+    },
+  );
 
   it("superuser accepted review merges, but operator stops still hold", () => {
     const s = merge({ flightPowers: "superuser" }, { reviewWaivedSha: SHA });

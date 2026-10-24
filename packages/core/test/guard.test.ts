@@ -86,7 +86,7 @@ describe("scratch mode", () => {
     });
   });
 
-  it.each(["merge_pr", "settle_park", "rerun_ci", "edit_card", "dismiss_item", "restart_seat"])(
+  it.each(["merge_pr", "settle_park", "rerun_ci", "edit_card", "dismiss_item"])(
     "guards %s with the live repo powers",
     (name) => {
       const event = { tool: `mcp__mc__${name}`, input: {} };

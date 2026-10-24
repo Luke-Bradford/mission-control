@@ -59,7 +59,6 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "rerun_ci",
   "edit_card",
   "dismiss_item",
-  "restart_seat",
 ];
 
 /** What a power-gated tool says when the repo is not `superuser`. */

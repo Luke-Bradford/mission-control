@@ -71,7 +71,8 @@ export const hardRulesBySettingKey = (repoId: string): string => `hard_rules_by:
 export const hardRulesUnsetText = (repo: string): string =>
   `${repo}: set \`hard_rules\` in the repo's Mission Control block (a list of paths that never auto-merge, or \`[]\`) before the hub merges there.`;
 
-export const DEFAULT_HARD_RULES: string[] = Object.freeze([
+/** Code that enforces FLIGHT's floors requires independent RETRO review. */
+export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
   "apps/server/src/guard/**",
   "apps/server/src/mcp/**",
   "apps/server/src/runtime/**",
@@ -80,12 +81,16 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
   "packages/core/src/guard.ts",
   "packages/core/src/flight.ts",
   "packages/core/src/loop.ts",
-  "packages/core/src/review.ts",
   "packages/core/src/repo-rules.ts",
   "packages/core/src/runtime.ts",
   "apps/server/src/update.ts",
   "apps/server/src/config.ts",
   "apps/server/src/crew-apply.ts",
+]);
+
+export const DEFAULT_HARD_RULES: string[] = Object.freeze([
+  ...FLIGHT_FLOOR_ENFORCING_PATHS,
+  "packages/core/src/review.ts",
   "loops/**",
   "roles/**",
   "CLAUDE.md",
@@ -98,10 +103,7 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
  * operator or the delegate does (floor 7). CLAUDE.md is held unless the engine verifies
  * that its `## Mission Control` block is unchanged.
  */
-export const FLIGHT_FLOOR_PATHS: readonly string[] = Object.freeze([
-  "CLAUDE.md",
-  ".github/workflows/**",
-]);
+export const FLIGHT_FLOOR_PATHS: readonly string[] = Object.freeze(["CLAUDE.md", ".github/**"]);
 
 /**
  * The hard-rule globs the engine flags PRs by. On a `superuser` repo a repo's own list can only add

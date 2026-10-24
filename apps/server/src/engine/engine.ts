@@ -29,6 +29,7 @@ import {
   EVIDENCE_RULING_PREFIX,
   effectiveHardRules,
   FLIGHT_ANSWER_WAIT_MS,
+  FLIGHT_FLOOR_ENFORCING_PATHS,
   fillLoopText,
   fixSentText,
   fixText,
@@ -303,7 +304,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const seat = seatConfig(run.agentId);
     return (
       store.seatSession(run.agentId)?.state === "stopped" ||
-      ["budget", "account", "operator", "operator-hold"].includes(run.loop?.parked?.kind ?? "") ||
+      run.loop?.parked?.kind === "budget" ||
       store
         .openQuestions()
         .some(
@@ -1590,7 +1591,8 @@ export function createEngine(deps: EngineDeps): Engine {
           loop.parked === null ||
           loop.parked.ended ||
           kind === "pr-closed" ||
-          (by === "FLIGHT" && kind === "budget") ||
+          (by === "FLIGHT" &&
+            (kind === "budget" || (kind === "review-failed" && opts?.action !== "rereview"))) ||
           (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
         ) {
           return;
@@ -1606,34 +1608,28 @@ export function createEngine(deps: EngineDeps): Engine {
           )
             return;
           if (opts.action === "lift") {
+            if (kind !== "stuck") return;
             const head = store.newestRunCommit(run.id)?.sha;
             if (!head || !(await publisher.isDescendant(run, pushed.sha, head))) return;
-          } else if (!["review", "review-ruling", "ruling", "review-failed"].includes(kind ?? ""))
+          } else if (
+            kind !== "review" &&
+            kind !== "review-ruling" &&
+            !(kind === "review-failed" && opts.action === "rereview")
+          )
             return;
+          if (opts.action === "rereview" && (loop.flightRereviews?.[pushed.sha] ?? 0) >= 2) return;
           if (opts.action === "accept") {
             if (pr?.state !== "open" || pr.headSha !== pushed.sha) return;
-            const blocked = store
+            const review = store
               .reviewsOfRun(run.id)
-              .some(
-                (r) =>
-                  (r.sha === pushed.sha ||
-                    (loop.carry?.to === pushed.sha && r.sha === loop.carry.from)) &&
-                  r.blocking > 0,
+              .filter((r) => r.sha === pushed.sha && r.state === "reported")
+              .at(-1);
+            if (!review || review.blocking > 0) {
+              const paths = await publisher.hardRuleTouches(
+                run,
+                pushed.sha,
+                FLIGHT_FLOOR_ENFORCING_PATHS,
               );
-            if (blocked) {
-              const paths = await publisher.hardRuleTouches(run, pushed.sha, [
-                "apps/server/src/guard/**",
-                "apps/server/src/flight/**",
-                "apps/server/src/mcp/**",
-                "apps/server/src/engine/**",
-                "apps/server/src/runtime/**",
-                "apps/server/src/update.ts",
-                "apps/server/src/config.ts",
-                "apps/server/src/crew-apply.ts",
-                ...["guard", "flight", "runtime", "loop", "repo-rules"].map(
-                  (p) => `packages/core/src/${p}.ts`,
-                ),
-              ]);
               if (paths.length > 0) return;
             }
           }
@@ -1677,6 +1673,11 @@ export function createEngine(deps: EngineDeps): Engine {
           next.reviewWaivedSha = null;
           next.flightClearedSha = null;
           next.phase = opts.action === "rereview" ? "review" : "working";
+          if (opts.action === "rereview" && pushed)
+            next.flightRereviews = {
+              ...loop.flightRereviews,
+              [pushed.sha]: (loop.flightRereviews?.[pushed.sha] ?? 0) + 1,
+            };
           if (opts.action === "rework") {
             if (next.aside) {
               try {
@@ -1762,16 +1763,14 @@ export function createEngine(deps: EngineDeps): Engine {
           return no("No failed CI on this run's current head.");
         const count = run.loop.flightReruns?.[sha] ?? 0;
         if (count >= 2) return no("Already re-run twice on this head.");
-        // Reserve before the write; a partial GitHub failure must not grant extra attempts.
+        const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
+        const result = await publisher.rerunRuling(github, sha);
+        if (!result.ok) return no(result.text);
         store.setRunLoop(runId, {
           ...run.loop,
           flightReruns: { ...run.loop.flightReruns, [sha]: count + 1 },
         });
-        const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
-        const result = await publisher.rerunRuling(github, sha);
-        return result.ok
-          ? { ok: true, text: `Re-ran failed CI on ${sha.slice(0, 7)}.` }
-          : no(result.text);
+        return { ok: true, text: `Re-ran failed CI on ${sha.slice(0, 7)}.` };
       });
     },
 
