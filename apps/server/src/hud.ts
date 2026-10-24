@@ -73,7 +73,7 @@ import { flightLive, flightOwnSeatIds } from "./flight/state.ts";
 import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
-import { runEvents } from "./views.ts";
+import { runEvents, runEventsIndex } from "./views.ts";
 
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
 export const CREW_ERROR_KEY = "crew-error:";
@@ -383,6 +383,7 @@ export function crew(
             : {}),
         }
       : null;
+  const eventIndex = runEventsIndex(store, now);
   const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
   const rows = loopViews(config, store, now, lock).map(
@@ -437,7 +438,7 @@ export function crew(
         repoId: agent.repoId,
         index,
         hudState: state,
-        events: latest ? runEvents(store, latest, now) : [],
+        events: latest ? runEvents(store, latest, now, eventIndex) : [],
         stateSince,
         accountId: agent.accountId,
         kind: view.kind,
@@ -474,7 +475,7 @@ export function crew(
                     ? [
                         {
                           runId: r.id,
-                          events: runEvents(store, r, now),
+                          events: runEvents(store, r, now, eventIndex),
                           stateSince:
                             store.loopEventsOfRun(r.id).at(-1)?.at ?? r.endedAt ?? r.startedAt,
                           ticket: t,

@@ -6,10 +6,10 @@ import {
   type FlightBriefView,
   flightTurnShort,
   type LimitRow,
-  startOfLocalDay,
   type TestLockState,
 } from "@mc/core";
 import { SeatControls } from "../agent/Header.tsx";
+import { isOperatorItem } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
@@ -36,6 +36,7 @@ import {
 } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flight/flightTypes.ts";
+import { cutText } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { DoingLine } from "../hud/DoingLine.tsx";
@@ -102,11 +103,14 @@ function FlightRow({
             : row?.hudState === "parked"
               ? "Held"
               : status?.label;
-  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${last.kind})` : "no action recorded"} · ${label === "Held" || label === "Stopped" ? "next check paused" : `next check within ${FLIGHT_TICK_MS / 60_000}m`}`;
-  const wakes =
-    turns && row?.run && tz && row.run.startedAt >= startOfLocalDay(now, tz)
-      ? `Wakes today: at least ${Math.max(0, turns.n - 1)} (this session)`
-      : "Wakes today: unavailable";
+  const midTurn = row?.hudState === "running" || row?.hudState === "stalled";
+  const nextCheck = midTurn
+    ? ""
+    : label === "Held" || label === "Stopped"
+      ? " · next check paused"
+      : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
+  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
+  const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const go = () => toggleDock(true);
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the call-sign button is the keyboard route
@@ -162,7 +166,7 @@ function FlightRow({
           </a>
         </div>
       )}
-      {row && <AgentMetadata row={row} wakeCount={wakes} />}
+      {row && <AgentMetadata row={row} sessionTurns={sessionTurns} />}
     </div>
   );
 }
@@ -426,38 +430,51 @@ export function AgentsPanel() {
           tz={tz}
         />
         <CrewOff className="pb muted s" />
-        {groups.map((group) => {
-          const children = group.rows.map((row) => (
-            <AgentRow
-              key={row.id}
-              row={row}
-              items={items}
-              max={max}
-              now={now}
-              tz={tz}
-              selected={row.id === selected}
-              lock={lock}
-            />
-          ));
-          return group.name === "Crew" ? (
-            <section className="agent-group" aria-label={group.name} key={group.name}>
-              <h3 className="agent-group-title">Crew · {group.rows.length}</h3>
-              {children}
-            </section>
-          ) : (
-            <details
-              className="agent-group"
-              aria-label={group.name}
-              key={group.name}
-              open={group.name === "Observed loops"}
-            >
-              <summary className="agent-group-title">
-                {group.name} · {group.rows.length}
-              </summary>
-              {children}
-            </details>
-          );
-        })}
+        {groups
+          .filter((group) => group.rows.length > 0)
+          .map((group) => {
+            const needsYou = group.rows.filter((row) =>
+              seatItems(row, items).some(isOperatorItem),
+            ).length;
+            const badge =
+              needsYou > 0 ? (
+                <Pill key={group.name} tone="warn">
+                  Needs you · {needsYou}
+                </Pill>
+              ) : null;
+            const children = group.rows.map((row) => (
+              <AgentRow
+                key={row.id}
+                row={row}
+                items={items}
+                max={max}
+                now={now}
+                tz={tz}
+                selected={row.id === selected}
+                lock={lock}
+              />
+            ));
+            return group.name === "Crew" ? (
+              <section className="agent-group" aria-label={group.name} key={group.name}>
+                <h3 className="agent-group-title">
+                  Crew · {group.rows.length} {badge}
+                </h3>
+                {children}
+              </section>
+            ) : (
+              <details
+                className="agent-group"
+                aria-label={group.name}
+                key={group.name}
+                open={group.name === "Observed loops" || needsYou > 0}
+              >
+                <summary className="agent-group-title">
+                  {group.name} · {group.rows.length} {badge}
+                </summary>
+                {children}
+              </details>
+            );
+          })}
         {crew.error && !rows && <div className="pb crit-t">Could not load the crew.</div>}
         {!rows && !crew.error && <div className="pb muted">Loading…</div>}
       </div>

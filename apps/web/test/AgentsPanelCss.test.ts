@@ -15,3 +15,9 @@ it("keeps narrow agent cells shrinkable, folds progress and metadata, and aligns
   expect(css).toMatch(/\.trow \.asideline \{[^}]*grid-template-columns: subgrid/);
   expect(css).toMatch(/\.trow > \*,\s*\.trow \.asideline > \* \{\s*min-width: 0/);
 });
+
+it("hides the column headers and empty set-aside context cell on phones", () => {
+  const phone = css.slice(css.lastIndexOf("@media (max-width: 760px)"));
+  expect(phone).toMatch(/#agentsList \.trow\.head[^{]*\{\s*display: none/);
+  expect(phone).toMatch(/#agentsList \.asideline > :nth-child\(6\)[^{]*\{\s*display: none/);
+});

@@ -2131,6 +2131,64 @@ describe("the engine's notes in Needs you", () => {
 });
 
 describe("crew heartbeat", () => {
+  it("fetches each whole-hub event query once for multiple rows and keeps their events separate", () => {
+    config.loops.forEach((agent, i) => {
+      const runId = `r${i}`;
+      store.upsertRun(run({ id: runId, agentId: agent.id }));
+      store.addRunCommit({
+        runId,
+        repoId: agent.repoId,
+        branch: "work",
+        sha: `sha${i}`,
+        at: NOW - (i + 1) * MIN,
+      });
+      store.addLockHold({
+        runId,
+        seatId: agent.id,
+        toolUseId: `tool${i}`,
+        command: "test",
+        since: NOW - (i + 2) * MIN,
+      });
+      store.addComms({
+        from: agent.id,
+        to: "CAPCOM",
+        ticket: null,
+        text: "Update",
+        at: NOW - (i + 3) * MIN,
+      });
+    });
+    const queries = ["runCommitsSince", "lockRuns", "comms"] as const;
+    const spies = queries.map((query) => vi.spyOn(store, query));
+    const rows = crew(config, store, NOW).rows;
+    expect(rows).toHaveLength(config.loops.length);
+    rows.forEach((row, i) => {
+      expect(row.events).toEqual([
+        { kind: "message", at: NOW - (i + 3) * MIN },
+        { kind: "test", at: NOW - (i + 2) * MIN },
+        { kind: "commit", at: NOW - (i + 1) * MIN },
+      ]);
+    });
+    for (const spy of spies) {
+      expect(spy).toHaveBeenCalledExactlyOnceWith(NOW - 2 * HOUR);
+    }
+  });
+
+  it("includes ticketless messages from the seat only within the ticketed run's window", () => {
+    store.upsertRun(run({ ticket: "shop-app#42", endedAt: NOW - 5 * MIN, status: "ok" }));
+    const message = { from: "shop-app-ta", to: "CAPCOM", ticket: null, text: "Update" };
+    for (const at of [NOW - HOUR - 1, NOW - HOUR, NOW - 5 * MIN, NOW - 4 * MIN, NOW + MIN]) {
+      store.addComms({ ...message, at });
+    }
+    store.addComms({ ...message, ticket: "shop-app#42", at: NOW - 10 * MIN });
+    store.addComms({ ...message, ticket: "shop-app#99", at: NOW - 9 * MIN });
+    store.addComms({ ...message, from: "studio-builder", at: NOW - 8 * MIN });
+    expect(rowOf("shop-app-ta")?.events).toEqual([
+      { kind: "message", at: NOW - HOUR },
+      { kind: "message", at: NOW - 10 * MIN },
+      { kind: "message", at: NOW - 5 * MIN },
+    ]);
+  });
+
   it("uses real run events, clips the window and does not mix runs", () => {
     store.upsertRun(run({}));
     store.upsertRun(run({ id: "other", agentId: "studio-builder" }));

@@ -1,4 +1,4 @@
-import type { CrewRow, RunDigest } from "@mc/core";
+import type { AttentionItem, CrewRow, RunDigest } from "@mc/core";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
@@ -21,14 +21,19 @@ const digest = (minuteTokens: [number, number][]): RunDigest => ({
   background: [],
   compactions: 0,
 });
-function stub(rows: CrewRow[], enabled = true) {
+function stub(
+  rows: CrewRow[],
+  enabled = true,
+  items: AttentionItem[] = [item({ agentId: "need", ticket: null })],
+  about = "CI",
+) {
   stubFetch({
     "/api/crew": { rows, firstRunToday: null },
     "/api/config": {
       ...CONFIG,
       crew: { sessions: [{ id: "s1", seats: [{ id: "flight", loop: "watch" }] }] },
     },
-    "/api/attention": [item({ agentId: "need", ticket: null })],
+    "/api/attention": items,
     "/api/limits": [limit5h({ used: 14 })],
     "/api/test-lock": { holder: null, waiting: [] },
     "/api/crew/status": { enabled, note: null },
@@ -39,7 +44,7 @@ function stub(rows: CrewRow[], enabled = true) {
           id: 1,
           at: NOW - 3 * MIN,
           kind: "message",
-          about: "CI",
+          about,
           decision: "Asked GUIDO to check CI",
         },
       ],
@@ -63,8 +68,8 @@ it("pins Watching FLIGHT with coverage, a last action and a decision link", asyn
   const flight = container.querySelector(".flight") as HTMLElement;
   await within(flight).findByText("Watching");
   await within(flight).findByText(/watching 1 · triaging/);
-  expect(flight.textContent).toContain("last action 3m ago");
-  expect(flight.textContent).toContain("next check");
+  expect(flight.textContent).toContain("last action 3m ago (CI)");
+  expect(flight.textContent).toContain("next check within 5m");
   expect(
     within(flight)
       .getByRole("link", { name: /Asked GUIDO/ })
@@ -200,4 +205,71 @@ it("leaves an idle heartbeat empty and hides future or expired events", async ()
   const { container } = render(<AgentsPanel />);
   await screen.findByText("No events in 2h");
   expect(container.querySelectorAll(".heartbeat-tick")).toHaveLength(0);
+});
+
+it.each(["stopped", "observed"])(
+  "opens the %s group for operator questions and counts rows, not items",
+  async (kind) => {
+    const makeRow =
+      kind === "stopped"
+        ? (id: string) => seatRow({ id, hudState: "stopped" })
+        : (id: string) => crewRow({ id });
+    stub([makeRow("need"), makeRow("second"), makeRow("auto")], true, [
+      item({ key: "ask:1", agentId: "need", kind: "question", text: "Which port?", ticket: null }),
+      item({ key: "ask:2", agentId: "need", kind: "question", ticket: null }),
+      item({ key: "ask:3", agentId: "second", kind: "question", ticket: null, owner: undefined }),
+      item({ key: "ask:4", agentId: "auto", kind: "question", ticket: null, owner: "flight" }),
+    ]);
+    const { container } = render(<AgentsPanel />);
+    await screen.findByText("Needs you · 2");
+    const group = container.querySelector("details.agent-group") as HTMLDetailsElement;
+    expect(group.open).toBe(true);
+    expect(within(group).getByRole("link", { name: "need" })).toBeTruthy();
+    expect(within(group).getAllByText("Question for you")).toHaveLength(3);
+    expect(
+      within(group.querySelector("summary") as HTMLElement).getByText("Needs you · 2"),
+    ).toBeTruthy();
+    expect(container.querySelectorAll(".agent-group")).toHaveLength(1);
+  },
+);
+
+it("hides empty groups", async () => {
+  stub([]);
+  const { container } = render(<AgentsPanel />);
+  await screen.findByText("0 working · 0 agents · FLIGHT not counted");
+  expect(container.querySelectorAll(".agent-group")).toHaveLength(0);
+});
+
+it("shows FLIGHT turns for the whole session, even when it started yesterday", async () => {
+  const row = seatRow({ id: "flight", hudState: "idle" });
+  if (!row.run) throw new Error("fixture needs a run");
+  row.run.startedAt = NOW - 2 * 24 * 60 * MIN;
+  stub([row]);
+  const { container } = render(<AgentsPanel />);
+  const flight = container.querySelector(".flight") as HTMLElement;
+  await within(flight).findByText("Watching");
+  fireEvent.click(within(flight).getByText("Run details"));
+  await within(flight).findByText(/Turns this session: 3/);
+  expect(flight.textContent).not.toContain("Wakes today");
+});
+
+it.each(["running", "stalled"] as const)(
+  "omits next check while FLIGHT is %s mid-turn",
+  async (hudState) => {
+    stub([seatRow({ id: "flight", hudState })]);
+    const { container } = render(<AgentsPanel />);
+    const flight = container.querySelector(".flight") as HTMLElement;
+    await within(flight).findByText("Thinking");
+    expect(flight.querySelector(".flight-coverage")?.textContent).not.toContain("next check");
+  },
+);
+
+it("cuts the latest decision's about to 60 characters in coverage", async () => {
+  stub([seatRow({ id: "flight", hudState: "idle" })], true, [], "a".repeat(80));
+  const { container } = render(<AgentsPanel />);
+  const flight = container.querySelector(".flight") as HTMLElement;
+  await within(flight).findByText("Watching");
+  expect(flight.querySelector(".flight-coverage")?.textContent).toContain(
+    `last action 3m ago (${"a".repeat(59)}…)`,
+  );
 });

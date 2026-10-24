@@ -6,7 +6,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { cost, kTokens } from "../fmt.ts";
 import { PrChip } from "../hud/PrChip.tsx";
 
-export function AgentMetadata({ row, wakeCount }: { row: CrewRow; wakeCount?: string }) {
+export function AgentMetadata({ row, sessionTurns }: { row: CrewRow; sessionTurns?: string }) {
   const [open, setOpen] = useState(false);
   const loop = useResource<RunLoopView>(
     open && row.run && row.loop ? RESOURCES.runLoop(row.run.id) : null,
@@ -22,7 +22,7 @@ export function AgentMetadata({ row, wakeCount }: { row: CrewRow; wakeCount?: st
         <div className="xs fg2">
           <span>
             {modelLine(row)} · Account {row.accountId} · {row.digest?.turns ?? "—"} turns
-            {wakeCount && ` · ${wakeCount}`}
+            {sessionTurns && ` · ${sessionTurns}`}
           </span>
           <span className="block">
             Input {t ? kTokens(t.input) : "—"} · Output {t ? kTokens(t.output) : "—"} · Cache read{" "}
