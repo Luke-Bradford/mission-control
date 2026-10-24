@@ -2,8 +2,10 @@ import { OPERATOR_BOOTSTRAP_PATH, OPERATOR_HEADER, OPERATOR_TOKEN_REQUIRED } fro
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  apiDelete,
   apiGet,
   apiPost,
+  apiPut,
   errorNote,
   forgetOperatorToken,
   loadOperatorToken,
@@ -95,7 +97,7 @@ describe("api", () => {
     await loadOperatorToken();
     const paths = [
       ...Object.values(ACTIONS).map((action) =>
-        typeof action === "string" ? action : action("id"),
+        typeof action === "string" ? action : action("id", "topic"),
       ),
       RESOURCES.discussion("key").path,
       RESOURCES.teamsSelection.path,
@@ -203,6 +205,43 @@ describe("api", () => {
     expect(new Headers(init.headers).get("content-type")).toBe("application/json");
     expect(init.body).toBe("{}");
   });
+
+  it.each(["PUT", "DELETE"] as const)(
+    "%s sends the operator token and preserves its body and headers on a token retry",
+    async (method) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      fetchMock.mockResolvedValueOnce(json(200, { token: "stale" }));
+      await loadOperatorToken();
+      fetchMock.mockClear();
+      fetchMock
+        .mockResolvedValueOnce(json(401, { error: OPERATOR_TOKEN_REQUIRED }))
+        .mockResolvedValueOnce(json(200, { token: "fresh" }))
+        .mockResolvedValueOnce(json(200, { ok: true }));
+      const path = ACTIONS.flightMemory("shop-app", "tests/locks");
+      const body = { kind: "lesson", body: "Use the lock", source: "PR #450" };
+      await (method === "PUT" ? apiPut(path, body) : apiDelete(path));
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      for (const [index, token] of [
+        [0, "stale"],
+        [2, "fresh"],
+      ] as const) {
+        const [url, init] = fetchMock.mock.calls[index] as [string, RequestInit];
+        const headers = new Headers(init.headers);
+        expect(url).toBe(path);
+        expect(init.method).toBe(method);
+        expect(init.credentials).toBe("same-origin");
+        expect(headers.get(OPERATOR_HEADER)).toBe(token);
+        if (method === "PUT") {
+          expect(headers.get("content-type")).toBe("application/json");
+          expect(init.body).toBe(JSON.stringify(body));
+        } else {
+          expect(headers.has("content-type")).toBe(false);
+          expect(init).not.toHaveProperty("body");
+        }
+      }
+    },
+  );
 
   it("carries the server's status and error text for other failures", async () => {
     vi.stubGlobal(

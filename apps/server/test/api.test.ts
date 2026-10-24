@@ -4947,6 +4947,28 @@ it.each([false, true])(
   },
 );
 
+it("builds without Fastify's request-logging deprecation warning", async () => {
+  const warn = vi.spyOn(process, "emitWarning").mockImplementation(() => {});
+  try {
+    const quiet = buildApp({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      configPath,
+      crewReloader: stubReloader(),
+      supervisor: stubSupervisor(),
+      updater: stubUpdater(),
+    });
+    await quiet.ready();
+    await quiet.close();
+    // Fastify calls emitWarning(message, name, code).
+    expect(warn.mock.calls.filter((call) => (call as unknown[])[2] === "FSTDEP023")).toEqual([]);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
 describe("operator token", () => {
   let guarded: FastifyInstance;
 

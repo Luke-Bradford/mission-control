@@ -78,7 +78,12 @@ import {
   type VersionInfo,
   watchStartRefusedText,
 } from "@mc/core";
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  LogController,
+} from "fastify";
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
 import {
@@ -491,7 +496,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   const app = Fastify({
     bodyLimit: 16 * 1024,
-    disableRequestLogging: true,
+    logController: new LogController({ disableRequestLogging: true }),
     logger: deps.logger
       ? {
           level: "info",
