@@ -51,7 +51,7 @@ beforeAll(async () => {
 
 async function resign(s: Sealed, identity = human): Promise<Sealed> {
   const sodium = await ready();
-  const payload = `${s.room}|${s.sender.id}|${s.keyEpoch}|${s.nonce}|${s.ciphertext}`;
+  const payload = `agentcomms/message/v1|${s.room}|${s.sender.id}|${s.keyEpoch}|${s.nonce}|${s.ciphertext}`;
   return {
     ...s,
     sig: sodium.to_base64(
@@ -155,7 +155,7 @@ describe("sealed envelopes", () => {
     expect(
       sodium.crypto_sign_verify_detached(
         Buffer.from(s.sig, "base64url"),
-        `${s.room}|${s.sender.id}|${s.keyEpoch}|${s.nonce}|${s.ciphertext}`,
+        `agentcomms/message/v1|${s.room}|${s.sender.id}|${s.keyEpoch}|${s.nonce}|${s.ciphertext}`,
         human.sign.publicKey,
       ),
     ).toBe(true);

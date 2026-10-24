@@ -2,7 +2,6 @@ import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { rotate, wrapMemberKeys } from "../src/membership.ts";
 import type { ClientMessage } from "../src/protocol.ts";
 import { createRoomCore } from "../src/relay-core.ts";
 import { createRelaySession, type RelayPeer } from "../src/relay-session.ts";
@@ -65,12 +64,18 @@ async function setup(answer?: string) {
   const core = createRoomCore({
     room: "test-room",
     owner: f.a.member,
+    directory: f.directory,
     now: Date.now,
-    grants: await wrapMemberKeys(f.key, 0, f.a.member),
+    grants: await f.grants(f.key, 0, f.a.member),
   });
   const token = core.issueToken(f.a.identity.id);
   core.requestJoin(token, f.b.member);
-  core.approve(f.a.identity.id, f.b.identity.id, await wrapMemberKeys(f.key, 0, f.b.member));
+  core.approve(
+    f.a.identity.id,
+    f.b.identity.id,
+    await f.grants(f.key, 0, f.b.member),
+    f.nextDirectory(core),
+  );
   transport.session = createRelaySession("test-room", core);
   home = await mkdtemp(join(tmpdir(), "comms-memory-"));
   for (const [name, person] of [
@@ -83,7 +88,9 @@ async function setup(answer?: string) {
         agent: person.agent,
         delegation: person.delegation,
         member: person.member,
-        rooms: [{ invite: { room: "test-room", relay: "ws://memory", token } }],
+        rooms: [
+          { invite: { ownerId: f.a.identity.id, room: "test-room", relay: "ws://memory", token } },
+        ],
         answer,
       }),
     );
@@ -128,7 +135,7 @@ it("runs both answer hooks without a ping-pong loop or answering its own questio
   });
   await expect.poll(() => f.aDaemon.read("test-room").length).toBe(2);
   await new Promise((resolve) => setTimeout(resolve, 100));
-  expect(f.aDaemon.read("test-room").map((entry) => entry.msg.auto)).toEqual([false, true]);
+  expect(f.aDaemon.read("test-room").map((entry) => entry.msg?.auto)).toEqual([false, true]);
   expect(f.aDaemon.read("test-room")[1].sender.id).toBe(f.b.agent.id);
 });
 it.each([
@@ -147,8 +154,8 @@ it.each([
     knowledge: knowledge ?? { kind: "cannot-confirm" },
     auto: true,
     kind: "answer",
-    thread: question.msg.thread,
-    inReplyTo: question.msg.id,
+    thread: question.msg?.thread,
+    inReplyTo: question.msg?.id,
   });
 });
 it.each(["ok", "42", "true", "null", "[1,2]"])(
@@ -220,7 +227,16 @@ it("reopens a persisted inbox and requests only the missed messages", async () =
     agent: f.b.agent,
     delegation: f.b.delegation,
     member: f.b.member,
-    rooms: [{ invite: { room: "test-room", relay: "ws://memory", token: "unused" } }],
+    rooms: [
+      {
+        invite: {
+          ownerId: f.a.identity.id,
+          room: "test-room",
+          relay: "ws://memory",
+          token: "unused",
+        },
+      },
+    ],
   });
   daemons.push(restarted);
   await expect.poll(() => restarted.read("test-room").map((entry) => entry.seq)).toEqual([1, 2]);
@@ -235,13 +251,19 @@ it("persists room keys only under keys with private permissions", async () => {
     expect((await stat(join(home, "a", "keys", key))).mode & 0o777).toBe(0o600);
 });
 
-it("unwraps agent grants after offline rotation and verifies backlog from a removed sender", async () => {
+it("unwraps agent grants after offline rotation and quarantines backlog from a removed sender", async () => {
   const f = await setup();
   transport.sockets[0].terminate();
   await f.bDaemon.send("test-room", draft("before removal while Alice is offline"));
-  const rotation = await rotate(f.core.members(), f.b.identity.id, 1);
-  f.core.remove(f.a.identity.id, f.b.identity.id, rotation.grants);
+  const rotation = await f.rotate(f.core.members(), f.b.identity.id, 1);
+  f.core.remove(
+    f.a.identity.id,
+    f.b.identity.id,
+    rotation.grants,
+    f.nextDirectory(f.core, f.b.identity.id),
+  );
   await expect.poll(() => f.aDaemon.read("test-room").length, { timeout: 4000 }).toBe(1);
+  expect(f.aDaemon.read("test-room")[0]).toMatchObject({ quarantined: true, msg: null });
   expect(await f.aDaemon.send("test-room", draft("new epoch"))).toEqual({ seq: 2 });
   expect(transport.sent.filter((m) => m.t === "post").at(-1)).toMatchObject({
     sealed: { keyEpoch: 1 },
@@ -270,38 +292,59 @@ it("rejects valid signatures from identities absent from the authenticated direc
   );
   transport.sockets[1].peer.send({ t: "msg", seq: 1, sealed });
   await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(f.bDaemon.read("test-room")).toEqual([]);
+  expect(f.bDaemon.read("test-room")).toMatchObject([{ quarantined: true, msg: null }]);
 });
 
 it("advances past epochs predating approval and resumes readable history after reconnect", async () => {
   const f = await setup();
   await f.aDaemon.send("test-room", draft("old epoch"));
-  const rotated = await rotate(f.core.members(), f.b.identity.id, 1);
-  f.core.remove(f.a.identity.id, f.b.identity.id, rotated.grants);
+  const rotated = await f.rotate(f.core.members(), f.b.identity.id, 1);
+  f.core.remove(
+    f.a.identity.id,
+    f.b.identity.id,
+    rotated.grants,
+    f.nextDirectory(f.core, f.b.identity.id),
+  );
   const newcomer = await person("newcomer");
   f.core.requestJoin(f.core.issueToken(f.a.identity.id), newcomer.member);
   f.core.approve(
     f.a.identity.id,
     newcomer.identity.id,
-    await wrapMemberKeys(rotated.roomKey, 1, newcomer.member),
+    await f.grants(rotated.roomKey, 1, newcomer.member),
+    f.nextDirectory(f.core),
   );
   const newcomerOpts = {
     home: join(home, "newcomer"),
     agent: newcomer.agent,
     delegation: newcomer.delegation,
     member: newcomer.member,
-    rooms: [{ invite: { room: "test-room", relay: "ws://memory", token: "unused" } }],
+    rooms: [
+      {
+        invite: {
+          ownerId: f.a.identity.id,
+          room: "test-room",
+          relay: "ws://memory",
+          token: "unused",
+        },
+      },
+    ],
   };
   const joined = await startDaemon(newcomerOpts);
   daemons.push(joined);
   await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(joined.read("test-room")).toEqual([]);
+  expect(joined.read("test-room")).toMatchObject([{ quarantined: true, msg: null }]);
   await joined.stop();
   const restarted = await startDaemon(newcomerOpts);
   daemons.push(restarted);
+  await expect.poll(() => restarted.rooms()[0].status).toBe("connected");
   expect(transport.sent.filter((m) => m.t === "since").at(-1)).toEqual({ t: "since", seq: 1 });
   expect(await restarted.send("test-room", draft("readable epoch"))).toEqual({ seq: 2 });
-  expect(restarted.read("test-room").map((m) => m.seq)).toEqual([2]);
+  expect(
+    restarted
+      .read("test-room")
+      .filter((m) => !m.quarantined)
+      .map((m) => m.seq),
+  ).toEqual([2]);
 });
 
 it("refuses oversized automatic answers whole", async () => {

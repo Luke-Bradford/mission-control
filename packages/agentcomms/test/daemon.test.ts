@@ -56,7 +56,7 @@ it("answers once automatically with hooks on both sides", async () => {
     kind: "answer",
     body: "ok",
     auto: true,
-    inReplyTo: messages[0].msg.id,
+    inReplyTo: messages[0].msg?.id,
   });
 });
 it("resumes every sequence exactly once after B's socket is killed mid-stream", async () => {

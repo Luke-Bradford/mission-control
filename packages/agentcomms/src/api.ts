@@ -60,7 +60,12 @@ export async function startApi(opts: { home: string; daemon: Daemon; port?: numb
             reply(400, { error: "Invalid since" });
             return;
           }
-          reply(200, opts.daemon.read(room, since));
+          const limit = Number(url.searchParams.get("limit") ?? "50");
+          if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+            reply(400, { error: "Invalid limit" });
+            return;
+          }
+          reply(200, opts.daemon.read(room, since, limit));
         }
         return;
       }

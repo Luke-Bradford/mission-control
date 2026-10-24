@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import { sign } from "./auth.ts";
 import type { Identity } from "./keys.ts";
 import type { Invite, Member } from "./membership.ts";
 import {
@@ -8,7 +9,6 @@ import {
   relayMessageSchema,
 } from "./protocol.ts";
 import { FRAME_MAX } from "./relay-session.ts";
-import { ready } from "./sodium.ts";
 
 export function relayUrl(relay: string, room: string, http = false): string {
   const url = new URL(relay);
@@ -22,24 +22,24 @@ export function relayUrl(relay: string, room: string, http = false): string {
   return url.toString();
 }
 
-export async function makeHello(room: string, identity: Identity): Promise<Hello> {
-  const sodium = await ready();
-  const at = Date.now();
+export async function makeHello(
+  room: string,
+  identity: Identity,
+  challenge: string,
+): Promise<Hello> {
   return {
     t: "hello",
     room,
     memberId: identity.id,
-    at,
-    sig: Buffer.from(
-      sodium.crypto_sign_detached(`${room}|${identity.id}|${at}`, identity.sign.privateKey),
-    ).toString("base64url"),
+    challenge,
+    sig: sign(`agentcomms/hello/v1|${room}|${identity.id}|${challenge}`, identity),
   };
 }
 
 // Human CLI control sessions never subscribe to message bodies.
 export async function relayControl(
   invite: Pick<Invite, "relay" | "room">,
-  first: Hello | Extract<ClientMessage, { t: "join" }>,
+  first: Identity | Extract<ClientMessage, { t: "join" }>,
 ) {
   const socket = new WebSocket(relayUrl(invite.relay, invite.room), {
     maxPayload: FRAME_MAX,
@@ -104,7 +104,13 @@ export async function relayControl(
       socket.once("error", reject);
       socket.once("close", () => reject(new Error("Relay connection closed")));
     });
-    socket.send(JSON.stringify(first));
+    const challenge = await next();
+    if (challenge.t !== "challenge") throw new Error("Missing relay challenge");
+    socket.send(
+      JSON.stringify(
+        "kind" in first ? await makeHello(invite.room, first, challenge.challenge) : first,
+      ),
+    );
     const initial = await snapshot();
     return {
       ...initial,

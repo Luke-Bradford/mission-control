@@ -56,7 +56,7 @@ Today they coordinate by posting comments on GitHub issue #45.
 
 - **Network.** Machines are on the open internet, with no VPN, and some sit behind office networks. Both test machines are also on the same local network today, but the design must not depend on that **(operator)**.
 - **Code shape.** It lives inside the Mission Control repo, as a module with a clean boundary so it can be lifted out **(operator)**.
-- **Security.** The repo is public. Nothing secret lives in the repo, and the relay must never be able to read messages.
+- **Security.** The repo is public. Nothing secret lives in the repo, and the relay must never be able to read or forge messages.
 - **Untrusted messages.** Messages from other agents are untrusted input for the receiving agent. They are evidence, never instructions with authority. This matches how Mission Control already treats tickets, PRs and peer messages.
 
 ## How it works
@@ -76,7 +76,7 @@ Today they coordinate by posting comments on GitHub issue #45.
   - **Enforced by keeping signing paths apart.** The comms client's agent tools (the MCP server, the communicator) can sign only with agent keys. Human messages go through the HUD's own route, which signs with the member key.
   - **No Touch ID or password per post (operator).** The product is mostly for agents; humans are there for visibility and course correction. The accepted risk is that an agent with shell access on the same machine could reach the member key. Labels, signatures and the separate signing paths are the protection.
 - **Invites.**
-  - An invite is a short, single-use code holding the relay URL, the room id and a one-time join token. It does not hold the room key. It is shared person to person, over any channel.
+  - An invite is a short, single-use code holding the relay URL, the room id, a one-time join token and the owner’s member id (Ed25519 public key), which the joining client pins locally. It does not hold the room key. It is shared person to person, over any channel.
   - Joining with it registers the new person's public keys.
   - The room owner approves the person and each agent they bring.
   - Only then does the owner's client send the room key, wrapped to the new member's key. A leaked invite therefore exposes nothing (controller's call, stronger than the first draft).
@@ -250,3 +250,32 @@ The existing Comms page (Needs you, the CAPCOM↔crew threads and the guard draw
 - **The people and sentiment classifier** for the outgoing check: a small model call or rules, with tests.
 - **Exact rate-limit numbers and envelope size caps.**
 - **Key storage** in the macOS keychain versus a 0600 file, by platform.
+
+
+## Phase 1 security review amendments (2026-10-24)
+
+The relay is an untrusted transport. Members self-sign their records (including label and
+X25519 box key); human-to-agent delegations also cover the agent box key. The owner signs every
+recipient grant with `agentcomms/grant/v1|room|recipientId|epoch|sha256(wrapped)` and every active
+directory with `agentcomms/directory/v1|room|epoch|version|sha256(canonical members)`. Clients
+verify against the invite-pinned owner key, retain the highest verified version and epoch on
+disk, and reject conflicting key replacements. The owner approves and rotates using locally
+pinned verified records. Current epoch comes only from owner-signed state; sending waits if a
+newer verified key arrives before its directory. Verified removal rejects old-epoch messages
+and senders outside the active set, including previously unread backlog.
+
+Signatures have distinct `agentcomms/<purpose>/v1|` domains: message, delegation, member, grant,
+directory, hello, create, token, approve and remove. Socket hello signs a random single-use
+challenge; token requests and owner control payloads are signed. Room creation requires the
+operator's `AGENTCOMMS_CREATE_SECRET`; unauthenticated sockets expire after ten seconds.
+
+Undeliverable signed messages are quarantined with ciphertext and a reason, and advance the
+resume cursor. Application-level failures do not disconnect clients. Short connections grow
+reconnect backoff even when they deliver frames. A down or pending room never blocks daemon
+startup; the API reports each room's status. Inbox uniqueness is `(room, msg_id)`.
+
+The answer hook is serialized, has a five-item queue and ten-input/minute/room limit, skips
+pre-start backlog and closed threads, matches whole agent names, and kills its process group
+on timeout. Every outgoing free-text field is size-capped and scanned for secrets. The daemon
+itself requires a reason for requests. `comms_read` defaults to 50 rows and accepts `limit` up
+to 500; quarantined rows have no decrypted message.

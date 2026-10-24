@@ -7,7 +7,10 @@ import { sendSchema } from "./api.ts";
 const roomSchema = z.strictObject({ room: z.string().min(1) });
 const schemas = {
   comms_rooms: z.strictObject({}),
-  comms_read: roomSchema.extend({ since: z.number().int().nonnegative().optional() }),
+  comms_read: roomSchema.extend({
+    since: z.number().int().nonnegative().optional(),
+    limit: z.number().int().min(1).max(500).default(50),
+  }),
   comms_send: sendSchema.omit({ urgency: true, replyBy: true }).extend({ room: z.string().min(1) }),
   comms_presence: roomSchema,
   comms_threads: roomSchema,
@@ -86,7 +89,7 @@ export async function mcpRequest(home: string, input: unknown): Promise<object |
     const name = call.data.name;
     const path =
       name === "comms_read"
-        ? `${base}/messages?since=${"since" in data ? (data.since ?? 0) : 0}`
+        ? `${base}/messages?since=${"since" in data ? (data.since ?? 0) : 0}&limit=${"limit" in data ? data.limit : 50}`
         : name === "comms_send"
           ? `${base}/messages`
           : name === "comms_presence"

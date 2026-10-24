@@ -1,14 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { controlPayload, sign, signDirectory } from "../src/auth.ts";
 import type { Identity } from "../src/keys.ts";
-import { rotate, unwrapRoomKey, wrapMemberKeys } from "../src/membership.ts";
+import { unwrapRoomKey } from "../src/membership.ts";
 import { type ClientMessage, type RelayMessage, relayMessageSchema } from "../src/protocol.ts";
+import { makeHello } from "../src/relay-client.ts";
 import { startNodeRelay } from "../src/relay-node.ts";
-import { ready } from "../src/sodium.ts";
 import { fixture } from "./relay-fixtures.ts";
 
 let dir: string;
@@ -40,27 +42,48 @@ class Client {
     await closed;
   }
 }
-async function hello(
-  identity = f.a.identity,
-  at = Date.now(),
-): Promise<Extract<ClientMessage, { t: "hello" }>> {
-  const sodium = await ready();
-  return {
-    t: "hello",
-    room: "test-room",
-    memberId: identity.id,
-    at,
-    sig: Buffer.from(
-      sodium.crypto_sign_detached(`test-room|${identity.id}|${at}`, identity.sign.privateKey),
-    ).toString("base64url"),
+async function hello(identity = f.a.identity, challenge = "invalid") {
+  return makeHello("test-room", identity, challenge);
+}
+function challenge(c: Client): string {
+  const msg = c.messages.find((m) => m.t === "challenge");
+  if (msg?.t !== "challenge") throw new Error("Missing challenge");
+  return msg.challenge;
+}
+function change(
+  t: "approve" | "remove",
+  grants: Awaited<ReturnType<typeof f.grants>>,
+  owner = f.a.identity,
+) {
+  const directory = signDirectory(
+    "test-room",
+    t === "remove" ? 1 : 0,
+    t === "remove" ? 2 : 1,
+    t === "remove" ? [f.a.member] : [f.a.member, f.b.member],
+    f.a.identity,
+  );
+  const payload = { memberId: f.b.identity.id, grants, directory };
+  return { t, ...payload, sig: sign(controlPayload(t, "test-room", payload), owner) };
+}
+function tokenRequest() {
+  const payload = {
+    memberId: f.a.identity.id,
+    at: Date.now(),
+    nonce: randomBytes(32).toString("base64url"),
   };
+  return { ...payload, sig: sign(controlPayload("token", "test-room", payload), f.a.identity) };
+}
+function creation() {
+  const payload = { owner: f.a.member, directory: f.directory };
+  return { ...payload, sig: sign(controlPayload("create", "test-room", payload), f.a.identity) };
 }
 async function connect(identity?: Identity, since = 0) {
   const c = new Client(relay.url);
   clients.push(c);
   await once(c.socket, "open");
+  await c.wait("challenge");
   if (identity) {
-    c.send(await hello(identity));
+    c.send(await hello(identity, challenge(c)));
     await c.wait("grants");
     c.send({ t: "since", seq: since });
   }
@@ -69,7 +92,7 @@ async function connect(identity?: Identity, since = 0) {
 async function joinBob() {
   const res = await fetch(`${relay.url.replace("ws:", "http:")}/rooms/test-room/tokens`, {
     method: "POST",
-    body: JSON.stringify(await hello()),
+    body: JSON.stringify(tokenRequest()),
   });
   expect(res.status).toBe(200);
   const { token } = (await res.json()) as { token: string };
@@ -77,13 +100,9 @@ async function joinBob() {
   b.send({ t: "join", token, member: f.b.member });
   await b.wait("grants");
   const a = await connect(f.a.identity);
-  a.send({
-    t: "approve",
-    memberId: f.b.identity.id,
-    grants: await wrapMemberKeys(f.key, 0, f.b.member),
-  });
+  a.send(change("approve", await f.grants(f.key, 0, f.b.member)));
   await a.wait("grants", 2);
-  b.send(await hello(f.b.identity));
+  b.send(await hello(f.b.identity, challenge(b)));
   await b.wait("grants", 2);
   b.send({ t: "since", seq: 0 });
   return { a, b };
@@ -92,10 +111,11 @@ beforeEach(async () => {
   clients = [];
   f = await fixture();
   dir = await mkdtemp(join(tmpdir(), "agentcomms-relay-"));
-  relay = await startNodeRelay({ port: 0, dataDir: dir });
+  relay = await startNodeRelay({ createSecret: "test-secret", port: 0, dataDir: dir });
   const response = await fetch(`${relay.url.replace("ws:", "http:")}/rooms/test-room`, {
     method: "PUT",
-    body: JSON.stringify({ owner: f.a.member, hello: await hello() }),
+    headers: { authorization: "Bearer test-secret" },
+    body: JSON.stringify(creation()),
   });
   expect(response.status).toBe(201);
 });
@@ -118,7 +138,7 @@ it("broadcasts seq 1 and resumes exactly seq 2 and 3 across disconnect and relay
   await resumed.wait("presence", 2);
   expect(resumed.messages.filter((m) => m.t === "msg").map((m) => m.seq)).toEqual([2, 3]);
   await relay.close();
-  relay = await startNodeRelay({ port: 0, dataDir: dir });
+  relay = await startNodeRelay({ createSecret: "test-secret", port: 0, dataDir: dir });
   const restarted = await connect(f.b.identity, 1);
   restarted.send({ t: "since", seq: 1 });
   await restarted.wait("msg", 2);
@@ -138,14 +158,14 @@ it.each(["signature", "stale", "future", "room"])(
     const c = await connect();
     const auth = await hello(
       f.a.identity,
-      Date.now() + (kind === "stale" ? -121_000 : kind === "future" ? 121_000 : 0),
+      kind === "stale" || kind === "future" ? "anotherChallenge" : challenge(c),
     );
     if (kind === "signature") auth.sig = Buffer.alloc(64).toString("base64url");
     if (kind === "room") auth.room = "other-room";
     const closed = once(c.socket, "close");
     c.send(auth);
     await closed;
-    expect(c.messages).toEqual([expect.objectContaining({ t: "refused" })]);
+    expect(c.messages.at(-1)).toMatchObject({ t: "refused" });
   },
 );
 it("requires authentication for history and rejects malformed frames", async () => {
@@ -159,8 +179,10 @@ it("requires authentication for history and rejects malformed frames", async () 
 it("allows delegated agent connections but denies owner actions and sender impersonation", async () => {
   const { a } = await joinBob();
   const agent = await connect(f.a.agent);
-  agent.send({ t: "approve", memberId: f.b.identity.id, grants: [] });
-  expect((await agent.wait("refused"))[0]).toMatchObject({ reason: "Owner only" });
+  agent.send(change("approve", [], f.a.agent));
+  expect((await agent.wait("refused"))[0]).toMatchObject({
+    reason: "Invalid owner control signature",
+  });
   agent.send({ t: "post", sealed: await f.post(1) });
   expect((await agent.wait("refused", 2))[1]).toMatchObject({ reason: "wrong-sender" });
   agent.send({ t: "post", sealed: await f.post(2, f.a.agent) });
@@ -168,9 +190,9 @@ it("allows delegated agent connections but denies owner actions and sender imper
 });
 it("revokes connected members and sends rotated grants to remaining clients", async () => {
   const { a, b } = await joinBob();
-  const rotation = await rotate([f.a.member, f.b.member], f.b.identity.id, 1);
+  const rotation = await f.rotate([f.a.member, f.b.member], f.b.identity.id, 1);
   const closed = once(b.socket, "close");
-  a.send({ t: "remove", memberId: f.b.identity.id, grants: rotation.grants });
+  a.send(change("remove", rotation.grants));
   await closed;
   await a.wait("grants", 3);
   a.send({ t: "post", sealed: await f.post(1, f.a.identity, 1) });
@@ -184,7 +206,8 @@ it("does not overwrite an existing room or accept unsigned provisioning", async 
   const url = relay.url.replace("ws:", "http:");
   const existing = await fetch(`${url}/rooms/test-room`, {
     method: "PUT",
-    body: JSON.stringify({ owner: f.a.member, hello: await hello() }),
+    headers: { authorization: "Bearer test-secret" },
+    body: JSON.stringify(creation()),
   });
   expect(existing.status).toBe(409);
   const invalid = await hello();
@@ -199,7 +222,7 @@ it("does not overwrite an existing room or accept unsigned provisioning", async 
 it("restores agent-addressed grants and the authenticated directory over Node sockets", async () => {
   await joinBob();
   await relay.close();
-  relay = await startNodeRelay({ port: 0, dataDir: dir });
+  relay = await startNodeRelay({ createSecret: "test-secret", port: 0, dataDir: dir });
   for (const identity of [f.b.identity, f.b.agent]) {
     const client = await connect(identity);
     const directory = client.messages.find((m) => m.t === "directory");

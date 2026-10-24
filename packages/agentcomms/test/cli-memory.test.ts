@@ -2,10 +2,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { newRoomKey, wrapMemberKeys } from "../src/membership.ts";
+import type { RelayMessage } from "../src/protocol.ts";
 import type { RoomCore, RoomState } from "../src/relay-core.ts";
 import type { createRelaySession, RelayPeer } from "../src/relay-session.ts";
+import { readRoomKeys } from "../src/room-keys.ts";
 
 const transport = vi.hoisted(() => ({
+  mutate: (message: RelayMessage): RelayMessage => message,
   session: undefined as ReturnType<typeof createRelaySession> | undefined,
 }));
 vi.mock("ws", async () => {
@@ -18,7 +22,13 @@ vi.mock("ws", async () => {
       super();
       this.peer = {
         send: (message) =>
-          queueMicrotask(() => this.emit("message", Buffer.from(JSON.stringify(message)), false)),
+          queueMicrotask(() =>
+            this.emit(
+              "message",
+              Buffer.from(JSON.stringify(transport.mutate(structuredClone(message)))),
+              false,
+            ),
+          ),
         close: () => this.close(),
       };
       queueMicrotask(() => {
@@ -53,6 +63,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   if (home) await rm(home, { recursive: true, force: true });
   transport.session = undefined;
+  transport.mutate = (message) => message;
 });
 it("runs human provisioning through the real core/session and wraps all recipients, including multiple agents", async () => {
   home = await mkdtemp(join(tmpdir(), "comms-cli-memory-"));
@@ -69,6 +80,8 @@ it("runs human provisioning through the real core/session and wraps all recipien
     vi.fn(async (input: string, init: RequestInit) => {
       const result = roomHttp({
         room: "room",
+        createSecret: "test-secret",
+        authorization: new Headers(init.headers).get("authorization") ?? undefined,
         tokens: input.endsWith("/tokens"),
         method: init.method ?? "GET",
         body: JSON.parse(String(init.body)),
@@ -99,12 +112,31 @@ it("runs human provisioning through the real core/session and wraps all recipien
     await cli(dir, "agent", "add", "helper", "--subscription", label);
   }
   await cli(b, "agent", "add", "other", "--subscription", "Bob");
-  await cli(a, "room", "create", "ws://memory", "room");
+  await cli(a, "room", "create", "ws://memory", "room", "--create-secret", "test-secret");
   const invite = await cli(a, "invite", "room");
   // join only needs the public member directory, never its private key.
   const configB = JSON.parse(await readFile(join(b, "config.json"), "utf8"));
   await rm(join(b, "keys", `${configB.member.id}.json`));
   const bob = await cli(b, "join", invite);
+  const initialKeys = await readRoomKeys(a, "room");
+  for (const field of ["boxPublicKey", "label"] as const) {
+    transport.mutate = (message) => {
+      if (message.t === "pending")
+        message.members[0][field] = field === "label" ? "fake label" : configB.member.signPublicKey;
+      return message;
+    };
+    await expect(cli(a, "approve", "room", bob)).rejects.toThrow("Invalid member signature");
+    expect(await readRoomKeys(a, "room")).toEqual(initialKeys);
+  }
+  const ownerRecord = JSON.parse(await readFile(join(a, "config.json"), "utf8")).member;
+  const forged = await wrapMemberKeys(await newRoomKey(), 0, ownerRecord);
+  transport.mutate = (message) =>
+    message.t === "grants"
+      ? { t: "grants", grants: forged.filter((g) => g.memberId === ownerRecord.id) }
+      : message;
+  await expect(cli(a, "approve", "room", bob)).rejects.toThrow("Invalid owner grant");
+  expect(await readRoomKeys(a, "room")).toEqual(initialKeys);
+  transport.mutate = (message) => message;
   await cli(a, "approve", "room", bob);
   expect(core?.members()).toHaveLength(2);
   if (!core) throw new Error("Missing core");
@@ -117,6 +149,14 @@ it("runs human provisioning through the real core/session and wraps all recipien
   const configA = JSON.parse(await readFile(join(a, "config.json"), "utf8"));
   const ownerAgent = await loadIdentity(a, configA.member.agents[0].id);
   const oldKey = await unwrapRoomKey(core.grantsFor(ownerAgent.id)[0], ownerAgent);
+  const beforeRemove = await readRoomKeys(a, "room");
+  transport.mutate = (message) => {
+    if (message.t === "directory") message.members[0].boxPublicKey = configB.member.boxPublicKey;
+    return message;
+  };
+  await expect(cli(a, "remove", "room", bob)).rejects.toThrow("Invalid owner-signed directory");
+  expect(await readRoomKeys(a, "room")).toEqual(beforeRemove);
+  transport.mutate = (message) => message;
   await cli(a, "remove", "room", bob);
   expect(core?.members()).toHaveLength(1);
   expect(core?.grantsFor(configB.member.agents[0].id)).toEqual([]);

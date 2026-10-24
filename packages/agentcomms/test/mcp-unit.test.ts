@@ -110,7 +110,9 @@ it("uses only the bearer token to call loopback and returns actionable held/merg
   expect(await call("comms_read", { room: "r", since: 2 })).toMatchObject({
     result: { content: [{ text: '[{"seq":3}]' }] },
   });
-  expect(String(fetcher.mock.calls[2][0])).toBe("http://127.0.0.1:7481/rooms/r/messages?since=2");
+  expect(String(fetcher.mock.calls[2][0])).toBe(
+    "http://127.0.0.1:7481/rooms/r/messages?since=2&limit=50",
+  );
   expect(fetcher.mock.calls[0][1]).toMatchObject({
     headers: { authorization: "Bearer test-token" },
     redirect: "error",
@@ -125,4 +127,24 @@ it("refuses a non-loopback URL without disclosing the bearer token", async () =>
     result: { isError: true },
   });
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("N8: forwards explicit read limits and rejects out-of-range limits", async () => {
+  await writeFile(join(home, "api-url"), "http://127.0.0.1:7481");
+  await writeFile(join(home, "api-token"), "test-token");
+  const fetcher = vi.fn().mockResolvedValue(Response.json([]));
+  vi.stubGlobal("fetch", fetcher);
+  await mcpRequest(
+    home,
+    request("tools/call", { name: "comms_read", arguments: { room: "r", limit: 7 } }),
+  );
+  expect(String(fetcher.mock.calls[0][0])).toContain("limit=7");
+  for (const limit of [0, -1, 501, 1.5])
+    expect(
+      await mcpRequest(
+        home,
+        request("tools/call", { name: "comms_read", arguments: { room: "r", limit } }),
+      ),
+    ).toHaveProperty("error");
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });

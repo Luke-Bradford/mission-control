@@ -15,6 +15,7 @@ export type Identity = {
 };
 
 export type Delegation = {
+  boxPublicKey: string;
   agentId: string;
   memberId: string;
   subscription: string;
@@ -114,12 +115,13 @@ export async function loadIdentity(dir: string, id: string): Promise<Identity> {
 }
 
 function delegationPayload(d: Omit<Delegation, "sig">): string {
-  return canonicalJson({
+  return `agentcomms/delegation/v1|${canonicalJson({
+    boxPublicKey: d.boxPublicKey,
     agentId: d.agentId,
     memberId: d.memberId,
     subscription: d.subscription,
     agentName: d.agentName,
-  });
+  })}`;
 }
 
 export async function delegate(
@@ -132,7 +134,13 @@ export async function delegate(
     throw new Error("Delegation requires a human member and an agent");
   }
   const sodium = await ready();
-  const payload = { agentId: agent.id, memberId: member.id, subscription, agentName };
+  const payload = {
+    boxPublicKey: sodium.to_base64(agent.box.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+    agentId: agent.id,
+    memberId: member.id,
+    subscription,
+    agentName,
+  };
   const sig = sodium.crypto_sign_detached(delegationPayload(payload), member.sign.privateKey);
   return { ...payload, sig: sodium.to_base64(sig, sodium.base64_variants.URLSAFE_NO_PADDING) };
 }

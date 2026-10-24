@@ -1,4 +1,13 @@
 export { startApi } from "./api.ts";
+export {
+  type Directory,
+  signDirectory,
+  signGrant,
+  signMember,
+  verifyDirectory,
+  verifyGrant,
+  verifyMember,
+} from "./auth.ts";
 export { type Daemon, type Draft, type SendResult, startDaemon } from "./daemon.ts";
 export {
   BadCiphertext,

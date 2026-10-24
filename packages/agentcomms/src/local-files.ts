@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { link, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export async function writePrivate(path: string, text: string): Promise<void> {
@@ -29,5 +29,22 @@ export async function readOptional(path: string): Promise<string | undefined> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
+  }
+}
+
+// Publish an immutable record atomically. Concurrent writers can agree, never overwrite.
+export async function writePrivateOnce(path: string, text: string): Promise<void> {
+  const temporary = `${path}.${randomUUID()}.pending`;
+  await writePrivate(temporary, text);
+  try {
+    try {
+      await link(temporary, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if ((await readFile(path, "utf8")) !== text)
+        throw new Error("Conflicting immutable local record");
+    }
+  } finally {
+    await rm(temporary, { force: true });
   }
 }

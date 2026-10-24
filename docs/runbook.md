@@ -914,8 +914,11 @@ need to preserve rooms across machines.
 Deploy the Cloudflare relay from your own account, by hand:
 
 ```sh
+# From the repository root, install before the relay build.
+pnpm install
 cd apps/relay
 npx wrangler@4 login
+npx wrangler@4 secret put AGENTCOMMS_CREATE_SECRET
 npx wrangler@4 deploy
 ```
 
@@ -927,8 +930,16 @@ operator tool, not a project dependency.
 For a LAN relay, with Node 25 and `packages/agentcomms/bin` on `PATH`:
 
 ```sh
+# Set a strong operator secret in the environment (do not commit it).
+export AGENTCOMMS_CREATE_SECRET='REPLACE-WITH-A-RANDOM-OPERATOR-SECRET'
 agentcomms relay --port 7480 --data "$HOME/.local/share/agentcomms/relay"
 ```
+
+Room creation fails closed when `AGENTCOMMS_CREATE_SECRET` is unset. Set the same secret on
+the creating operator's CLI, or pass `--create-secret <secret>` to `relay` and `room create`.
+The secret authorizes room creation only; joining and ordinary daemon operation do not need it.
+Use the environment to keep it out of command history. The Worker uses a Wrangler secret,
+not a committed `wrangler.toml` value.
 
 The Node relay listens on all interfaces; use the host's LAN address from the other machine.
 The returned URL uses loopback for local clients. Internet clients use the deployed Worker URL
@@ -936,25 +947,34 @@ with `wss:`. WebSockets connect at `/rooms/<URL-encoded room>` on either transpo
 
 The transport bootstrap API supplies the CLI's room and invite operations:
 
-- `PUT /rooms/:room` creates a new room with JSON `{owner, hello, grants}`. `owner` is the public `Member`
-  record. `hello` is `{t:"hello", room, memberId, at, sig}`, signed by that owner's member key.
-  The CLI includes epoch-0 grants for the owner and every registered agent.
+- `PUT /rooms/:room` requires `Authorization: Bearer <AGENTCOMMS_CREATE_SECRET>` and JSON
+  `{owner, directory, grants, sig}`. The owner signs the complete creation payload with the
+  `agentcomms/create/v1|` domain. The directory and each epoch-0 grant are separately signed.
   An existing room returns 409 and is never overwritten.
-- `POST /rooms/:room/tokens` takes the owner's signed `hello` as JSON and returns `{token}`.
-  Tokens are 32 random bytes in base64url and can be used once.
-- `at` is Unix time in milliseconds. The hello signature covers the UTF-8 string
-  `room|memberId|at`; it must be within 120 seconds of the relay's clock.
-- A joining socket sends `{t:"join", token, member}` before authentication. `{t:"grants",grants:[]}`
-  acknowledges the pending request. It has no access to history until owner approval.
-- A member or approved delegated agent authenticates with `hello`; the reply carries the public
-  member/agent directory, grants addressed to that identity and the current presence map.
-  Immediately send `{t:"since",seq:lastStoredSequence}` (`0` for
-  a new client). This establishes the replay cursor before live delivery, so a concurrent post
-  cannot overtake or duplicate replayed messages. Subsequent `since` requests on the same socket
-  do not redeliver sequences already sent there.
-- The owner sends `approve` with grants wrapped to the pending member and each of their agents,
-  or `remove` with grants for every remaining member and agent at the next epoch. The initial
-  epoch is `0`. Removed sockets are closed.
+- `POST /rooms/:room/tokens` takes `{memberId, nonce, at, sig}`, owner-signed in the
+  `agentcomms/token/v1|` domain. Requests expire after 120 seconds and nonces cannot be reused.
+  Returned join tokens contain 32 random bytes in base64url and can be used once.
+- Every socket receives a random `{t:"challenge", challenge}`. A member or agent signs
+  `agentcomms/hello/v1|room|id|challenge` and sends `{t:"hello", room, memberId, challenge, sig}`.
+  Challenges are single-use and socket-specific. Sockets without hello close after 10 seconds.
+- A joining socket sends `{t:"join", token, member}` with its self-signed member record.
+  `{t:"grants",grants:[]}` acknowledges the pending request; it grants no access to history.
+- Authenticated clients receive the owner-signed active directory, grants addressed to their
+  identity and presence. Clients verify the directory against the owner id pinned from the
+  invite and persist the highest verified version and epoch. Relay claims cannot lower either.
+- Each grant signs `agentcomms/grant/v1|room|recipientId|epoch|sha256(wrapped)`;
+  each directory signs `agentcomms/directory/v1|room|epoch|version|sha256(canonical members)`.
+  Digests use unpadded base64url. Members sign their own records, including labels and box keys;
+  agent delegations bind their box keys too. The owner uses locally pinned, verified records
+  for approval and rotation. Clients never overwrite a cached key with a conflicting relay key.
+- The owner's `approve` and `remove` payloads are signed, including their grants and next
+  directory version. Removal increments the epoch and wraps a new key to remaining members
+  and agents. Receivers quarantine messages from removed senders and earlier epochs once
+  they verify the rotation.
+- Clients send `{t:"since",seq:lastStoredSequence}` before live delivery. Signed messages that
+  cannot be delivered become quarantined rows with a reason and advance the cursor. Inbox
+  uniqueness is `(room, msg_id)`; replaying a message at another sequence cannot run the hook
+  twice. A quarantined row has `msg: null` and must never be treated as an agent instruction.
 
 The relay accepts agent-signed connections under approved delegations, so a communicator never
 needs the human's private key. Only a human owner connection can approve or remove members.
@@ -964,7 +984,16 @@ needs the human's private key. Only a human owner connection can approve or remo
 **Phase 1's home side is a standalone communicator.** `FLIGHT-comms` is its delegated agent
 name; it is not the running FLIGHT session. FLIGHT and HUD integration come later, in phases 2
 and 3. The daemon keeps the relay connection and inbox alive; a Claude session uses MCP to
-read and send. Automatic answers require an explicit `--answer` hook.
+read and send. Automatic answers require an explicit `--answer` hook. The daemon starts even
+when rooms are pending or offline; `comms_rooms` and `GET /rooms` report each room's status.
+Each room retries independently with increasing backoff after short connections.
+
+The answer hook runs one process at a time, with at most five queued inputs and ten admitted
+inputs per minute per room. Backlog predating daemon startup, closed threads and duplicate
+messages do not run it. Mentions match the complete agent name. On POSIX systems the hook
+runs in its own process group, which is killed after 30 seconds. Windows uses `taskkill /T /F`
+to terminate the hook process tree. `comms_read` accepts `limit`
+(default 50, maximum 500), and returns undeliverable rows alongside delivered messages.
 
 Use Node 25 and a checkout with workspace dependencies installed on both machines. Deploy the
 Worker using [Agent comms relay](#agent-comms-relay) above, then use its base URL, for example
@@ -978,14 +1007,20 @@ export PATH="$PWD/packages/agentcomms/bin:$PATH"
 export AGENTCOMMS_HOME="$HOME/.local/share/agentcomms"
 agentcomms init --member 'Luke home'
 agentcomms agent add FLIGHT-comms --subscription 'Claude · home'
+# Set this to the operator secret configured on the relay.
+export AGENTCOMMS_CREATE_SECRET='REPLACE-WITH-THE-RELAY-OPERATOR-SECRET'
 agentcomms room create wss://agentcomms-relay.YOUR-SUBDOMAIN.workers.dev home-work
 agentcomms invite home-work
 ```
 
 `init` prints the member id (`--github <handle>` is optional metadata). `agent add` prints the
 agent id. Add all agents before creating or joining any room: phase 1 cannot update registered
-agents after that. `invite` prints a single-use `ac1.` code containing only the relay, room and
-token, never the room key. Transfer that code to the work machine.
+agents after that. `invite` prints a single-use `ac1.` code containing the relay, room, token and
+owner member id (the Ed25519 public key), never the room key. Transfer the entire invite over
+an authenticated person-to-person channel and confirm the owner id with its issuer. `join`
+pins that owner id locally; a relay-supplied replacement is never trusted. Old invites without
+an owner id and unsigned phase-1 state are incompatible: recreate the room and exchange fresh
+invites. Do not reset local trust files to accept a relay's older state.
 
 On a Windows work PC, use PowerShell and the CLI's TypeScript entry point directly (the `bin`
 shim requires a POSIX shell). Replace these example installation paths with your own:
@@ -1020,10 +1055,12 @@ one daemon per home:
 
 | File | Contents |
 |---|---|
-| `config.json` | Public member and agent records, delegations, optional GitHub handle and joined relay/room/token records. |
+| `config.json` | Self-signed member and agent records, delegations, optional GitHub handle and joined relay/room/token/ownerId records. |
+| `trust/<sha256-of-room-name>/<version>.json` | Immutable owner-signed directories; the highest verified version sets the epoch, mode `0600`. |
+| `member-<member-id>.json` | Owner’s locally pinned self-signed approval record, mode `0600`. |
 | `keys/<identity-id>.json` | Private signing and box keys for a member or agent, mode `0600`. |
-| `keys/room-<sha256-of-room-name>.json` | Cached room keys by epoch, mode `0600`. |
-| `inbox.sqlite` (and SQLite sidecars) | Local decrypted messages, thread state and resume cursors. |
+| `keys/room-<sha256-of-room-name>-<epoch>.json` | Immutable cached room keys by epoch, mode `0600`. |
+| `inbox.sqlite` (and SQLite sidecars) | Local decrypted messages, quarantined ciphertext/reasons, thread state and resume cursors. |
 | `api-url`, `api-token` | Daemon's loopback URL and bearer token, mode `0600`; rewritten when it starts. |
 | `relay/` | Default Node relay data directory; `relay --data <dir>` overrides it. |
 

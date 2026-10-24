@@ -1,5 +1,26 @@
 # Agent Comms Phase 1 Implementation Plan
 
+> **Security review amendment (2026-10-24):** The review requirements below supersede the
+> original unsigned wire shapes and timestamp-only hello in this historical plan. The
+> follow-up is implemented without commits, per the operator's instruction.
+>
+> - B1/B2: invite-pinned owner id; self-signed member records and box-bound delegations;
+>   owner-signed grants and versioned active directories; locally pinned owner records;
+>   persistent monotonic trust; no sending below the highest verified key; removed/old-epoch
+>   traffic rejected after verified rotation.
+> - B3: quarantine poison messages with a reason and advance the cursor; application errors
+>   keep the connection; short-connection backoff is not reset by received messages.
+> - W1/W3/N3: single-use socket challenges, signed token/control requests, signature domains,
+>   operator creation secret and ten-second hello timeout.
+> - W4/W5/W6/W8: bounded serialized hooks, backlog/thread/mention checks and process-group
+>   timeout; message-id uniqueness; scanning/caps on all outgoing text; independent room
+>   retries and API status without blocking startup.
+> - N7/N8: enforce request reasons in daemon send; read limit defaults to 50 (maximum 500).
+> - Validation starts with fake-relay attack regressions, followed by Biome write/check on
+>   both packages, workspace typecheck and the agentcomms suite with two workers. Socket
+>   failures caused by sandbox bind restrictions are reported separately. No network access.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Two machines on different subscriptions (the home Mac and the work PC) join one invite-only room through a relay, and their agents exchange signed, end-to-end encrypted messages. A Claude or Codex session takes part through MCP tools, and an always-on communicator keeps each side connected.

@@ -71,6 +71,7 @@ export class HeldMessage extends Error {
 }
 
 const delegationSchema = z.strictObject({
+  boxPublicKey: z.string(),
   agentId: z.string(),
   memberId: z.string(),
   subscription: z.string(),
@@ -78,32 +79,62 @@ const delegationSchema = z.strictObject({
   sig: z.string(),
 });
 const senderSchema = z.strictObject({
-  id: z.string(),
+  id: z.string().max(200),
   kind: z.enum(["human", "agent"]),
   delegation: delegationSchema.optional(),
 });
 export const knowledgeSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("checked"), source: z.string(), asOf: z.string() }),
-  z.strictObject({ kind: z.literal("from-notes"), asOf: z.string() }),
+  z.strictObject({
+    kind: z.literal("checked"),
+    source: z.string().max(2000),
+    asOf: z.string().max(100),
+  }),
+  z.strictObject({ kind: z.literal("from-notes"), asOf: z.string().max(100) }),
   z.strictObject({ kind: z.literal("cannot-confirm") }),
 ]);
-const messageSchema = z.strictObject({
-  id: z.string(),
-  room: z.string(),
-  thread: z.string(),
-  inReplyTo: z.string().optional(),
+export const messageSchema = z.strictObject({
+  id: z.string().max(200),
+  room: z.string().max(200),
+  thread: z.string().max(200),
+  inReplyTo: z.string().max(200).optional(),
   kind: z.enum(["question", "answer", "fyi", "request", "decision"]),
   body: z.string(),
-  refs: z.array(z.string()).optional(),
+  refs: z.array(z.string().max(2000)).max(50).optional(),
   knowledge: knowledgeSchema.optional(),
   urgency: z.enum(["low", "normal", "high"]).optional(),
-  replyBy: z.string().optional(),
+  replyBy: z.string().max(100).optional(),
   needsHuman: z.boolean().optional(),
   auto: z.boolean(),
-  reason: z.string().optional(),
-  requestedBy: z.strictObject({ kind: z.enum(["human", "agent"]), name: z.string() }).optional(),
-  sentAt: z.string(),
+  reason: z.string().max(2000).optional(),
+  requestedBy: z
+    .strictObject({ kind: z.enum(["human", "agent"]), name: z.string().max(200) })
+    .optional(),
+  sentAt: z.string().max(100),
 });
+
+export function scanMessage(message: Partial<Message>): boolean {
+  const fields: [string, string | undefined][] = [
+    ["body", message.body],
+    ["reason", message.reason],
+    ["thread", message.thread],
+    ["inReplyTo", message.inReplyTo],
+    ["requestedBy.name", message.requestedBy?.name],
+    [
+      "knowledge.source",
+      message.knowledge?.kind === "checked" ? message.knowledge.source : undefined,
+    ],
+    [
+      "knowledge.asOf",
+      message.knowledge && "asOf" in message.knowledge ? message.knowledge.asOf : undefined,
+    ],
+    ["replyBy", message.replyBy],
+    ["room", message.room],
+    ["id", message.id],
+    ["sentAt", message.sentAt],
+    ...(message.refs ?? []).map((ref): [string, string] => ["refs", ref]),
+  ];
+  return fields.some(([name, text]) => text !== undefined && scanText(name, text, []).length > 0);
+}
 
 type PublicKeyOf = (id: string) => Uint8Array | undefined;
 
@@ -119,7 +150,7 @@ function decode(sodium: Sodium, value: string): Uint8Array {
 }
 
 function signaturePayload(s: Sealed): string {
-  return `${s.room}|${s.sender.id}|${s.keyEpoch}|${s.nonce}|${s.ciphertext}`;
+  return `agentcomms/message/v1|${s.room}|${s.sender.id}|${s.keyEpoch}|${s.nonce}|${s.ciphertext}`;
 }
 
 function aad(s: Pick<Sealed, "room" | "sender" | "keyEpoch">): string {
@@ -149,7 +180,7 @@ async function checkSender(sender: Sender, publicKeyOf: PublicKeyOf): Promise<vo
   if (!memberKey || !(await verifyDelegation(d, memberKey))) throw new WrongSender();
 }
 
-function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf, sodium: Sodium): void {
+function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf, sodium: Sodium, framing = true): void {
   if (
     !s ||
     typeof s.room !== "string" ||
@@ -176,6 +207,7 @@ function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf, sodium: Sodium): vo
   )
     throw new BadSignature();
   if (!sodium.crypto_sign_verify_detached(sig, signaturePayload(s), key)) throw new BadSignature();
+  if (!framing) return;
   try {
     if (
       decode(sodium, s.nonce).length !== sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES ||
@@ -198,7 +230,7 @@ export async function seal(
   if (!parsed.success) throw new BadCiphertext();
   const message = parsed.data;
   if (Buffer.byteLength(message.body, "utf8") > BODY_MAX) throw new BodyTooLarge();
-  if (scanText("message body", message.body, []).length > 0) throw new HeldMessage();
+  if (scanMessage(message)) throw new HeldMessage();
   if (!Number.isSafeInteger(keyEpoch) || keyEpoch < 0) throw new BadCiphertext();
   const parsedSender = senderSchema.safeParse({ id: from.id, kind: from.kind, delegation });
   if (!parsedSender.success) throw new WrongSender();
@@ -297,4 +329,18 @@ export function verifySealedSync(s: Sealed, publicKeyOf: PublicKeyOf, sodium: So
 export async function verifySealed(s: Sealed, publicKeyOf: PublicKeyOf): Promise<boolean> {
   const sealed = snapshotSealed(s);
   return verifySealedSync(sealed, publicKeyOf, await ready());
+}
+
+// Authentication alone lets the inbox quarantine signed, malformed metadata/ciphertext.
+export async function verifyEnvelopeSignature(
+  s: Sealed,
+  publicKeyOf: PublicKeyOf,
+): Promise<boolean> {
+  try {
+    const sealed = snapshotSealed(s);
+    checkSignature(sealed, publicKeyOf, await ready(), false);
+    return true;
+  } catch {
+    return false;
+  }
 }

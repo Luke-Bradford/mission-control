@@ -1,3 +1,4 @@
+import { type Directory, verifyDirectory, verifyGrant, verifyMember } from "./auth.ts";
 import { canonicalJson } from "./canonical.ts";
 import { type Sealed, verifySealedSync } from "./envelope.ts";
 import type { KeyGrant, Member } from "./membership.ts";
@@ -15,6 +16,8 @@ export type RoomState = {
   members: Member[];
   // Retain public identities after removal so offline clients can verify older ciphertext.
   directory?: Member[];
+  signedDirectory?: Directory;
+  usedRequests?: string[];
   pending: Member[];
   tokens: Record<string, "unused" | "used">;
   grants: KeyGrant[];
@@ -33,13 +36,14 @@ export type PostResult =
 export interface RoomCore {
   issueToken(by: string): string;
   requestJoin(token: string, member: Member): "pending" | "used" | "unknown";
-  approve(by: string, memberId: string, grants: KeyGrant[]): void;
-  remove(by: string, memberId: string, grants: KeyGrant[]): void;
+  approve(by: string, memberId: string, grants: KeyGrant[], directory: Directory): void;
+  remove(by: string, memberId: string, grants: KeyGrant[], directory: Directory): void;
   post(s: Sealed): PostResult;
   since(memberId: string, seq: number): Entry[];
   grantsFor(recipientId: string): KeyGrant[];
   members(): Member[];
-  directory(): { members: Member[]; activeMemberIds: string[]; keyEpoch: number };
+  directory(): Directory;
+  useRequest(nonce: string): boolean;
   pending(): Member[];
   setPresence(id: string, status: "online" | "busy" | "away"): void;
   presence(): Presence;
@@ -54,6 +58,7 @@ export function validateMember(member: Member): void {
   };
   if (member.kind !== "human" || member.id !== member.signPublicKey)
     throw new Error("Invalid member");
+  if (!verifyMember(member)) throw new Error("Invalid member signature");
   const publicKey = key(member.signPublicKey);
   key(member.boxPublicKey);
   const ids = new Set([member.id]);
@@ -67,13 +72,14 @@ export function validateMember(member: Member): void {
       agent.id !== agent.signPublicKey ||
       ids.has(agent.id) ||
       names.has(name) ||
+      payload.boxPublicKey !== agent.boxPublicKey ||
       payload.agentId !== agent.id ||
       payload.memberId !== member.id ||
       payload.agentName !== agent.name ||
       payload.subscription !== agent.subscription ||
       !sodium.crypto_sign_verify_detached(
         sodium.from_base64(sig, variant),
-        canonicalJson(payload),
+        `agentcomms/delegation/v1|${canonicalJson(payload)}`,
         publicKey,
       )
     ) {
@@ -91,6 +97,7 @@ export function createRoomCore(opts: {
   maxPerMinute?: number;
   storage?: RoomStorage;
   grants?: KeyGrant[];
+  directory?: Directory;
 }): RoomCore {
   validateMember(opts.owner);
   const loaded = opts.storage?.load();
@@ -98,6 +105,7 @@ export function createRoomCore(opts: {
     loaded ?? {
       room: opts.room,
       keyEpoch: 0,
+      signedDirectory: opts.directory,
       seq: 0,
       owner: opts.owner,
       members: [opts.owner],
@@ -110,6 +118,8 @@ export function createRoomCore(opts: {
   );
   if (state.room !== opts.room || state.owner.id !== opts.owner.id)
     throw new Error("Room storage mismatch");
+  if (!state.signedDirectory || !verifyDirectory(state.signedDirectory, opts.room, opts.owner.id))
+    throw new Error("Invalid signed directory");
   state.directory ??= structuredClone(state.members);
   const rates = new Map<string, number[]>();
   const save = () => opts.storage?.save(structuredClone(state));
@@ -141,7 +151,13 @@ export function createRoomCore(opts: {
     if (
       grants.length !== recipients.length ||
       new Set(grants.map((g) => g.memberId)).size !== recipients.length ||
-      grants.some((g) => g.keyEpoch !== epoch || !recipients.includes(g.memberId) || !g.wrapped)
+      grants.some(
+        (g) =>
+          g.keyEpoch !== epoch ||
+          !recipients.includes(g.memberId) ||
+          !g.wrapped ||
+          !verifyGrant(opts.room, g, state.owner.id),
+      )
     )
       throw new Error("Invalid key grants");
   };
@@ -149,7 +165,23 @@ export function createRoomCore(opts: {
     if (opts.grants) checkGrants(opts.grants, [opts.owner], 0);
     save();
   }
+  const checkDirectory = (directory: Directory, members: Member[], epoch: number) => {
+    if (
+      !verifyDirectory(directory, state.room, state.owner.id) ||
+      directory.keyEpoch !== epoch ||
+      directory.version !== (state.signedDirectory?.version ?? 0) + 1 ||
+      canonicalJson(directory.members) !== canonicalJson(members)
+    )
+      throw new Error("Invalid directory update");
+  };
   return {
+    useRequest(nonce) {
+      state.usedRequests ??= [];
+      if (state.usedRequests.includes(nonce)) return false;
+      state.usedRequests.push(nonce);
+      save();
+      return true;
+    },
     issueToken(by) {
       ownerOnly(by);
       const token = sodium.to_base64(sodium.randombytes_buf(32), variant);
@@ -166,23 +198,27 @@ export function createRoomCore(opts: {
       save();
       return "pending";
     },
-    approve(by, memberId, grants) {
+    approve(by, memberId, grants, directory) {
       ownerOnly(by);
       const member = state.pending.find((m) => m.id === memberId);
       if (!member) throw new Error("Unknown pending member");
       checkGrants(grants, [member], state.keyEpoch);
+      checkDirectory(directory, [...state.members, member], state.keyEpoch);
+      state.signedDirectory = structuredClone(directory);
       state.pending = state.pending.filter((m) => m.id !== memberId);
       state.members.push(member);
       state.directory?.push(structuredClone(member));
       state.grants.push(...structuredClone(grants));
       save();
     },
-    remove(by, memberId, grants) {
+    remove(by, memberId, grants, directory) {
       ownerOnly(by);
       if (memberId === state.owner.id || !state.members.some((m) => m.id === memberId))
         throw new Error("Cannot remove member");
       const remaining = state.members.filter((m) => m.id !== memberId);
       checkGrants(grants, remaining, state.keyEpoch + 1);
+      checkDirectory(directory, remaining, state.keyEpoch + 1);
+      state.signedDirectory = structuredClone(directory);
       state.members = remaining;
       state.keyEpoch++;
       state.grants = [
@@ -233,11 +269,7 @@ export function createRoomCore(opts: {
         : [];
     },
     members: () => structuredClone(state.members),
-    directory: () => ({
-      members: structuredClone(state.directory ?? state.members),
-      activeMemberIds: state.members.map((m) => m.id),
-      keyEpoch: state.keyEpoch,
-    }),
+    directory: () => structuredClone(state.signedDirectory as Directory),
     pending: () => structuredClone(state.pending),
     setPresence(id, status) {
       if (!memberOf(id)) throw new Error("Unknown member");

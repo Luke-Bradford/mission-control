@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { signMember } from "../src/auth.ts";
 import { BadCiphertext, type Message, open, seal } from "../src/envelope.ts";
 import { type Identity, newIdentity } from "../src/keys.ts";
 import {
@@ -37,14 +38,18 @@ let offline: Identity;
 let invite: Invite;
 
 function member(identity: Identity): Member {
-  return {
-    id: identity.id,
-    kind: "human",
-    label: identity.label,
-    boxPublicKey: Buffer.from(identity.box.publicKey).toString("base64url"),
-    signPublicKey: Buffer.from(identity.sign.publicKey).toString("base64url"),
-    agents: [],
-  };
+  return signMember(
+    {
+      sig: "",
+      id: identity.id,
+      kind: "human",
+      label: identity.label,
+      boxPublicKey: Buffer.from(identity.box.publicKey).toString("base64url"),
+      signPublicKey: Buffer.from(identity.sign.publicKey).toString("base64url"),
+      agents: [],
+    },
+    identity,
+  );
 }
 
 function code(value: unknown): string {
@@ -57,6 +62,7 @@ beforeAll(async () => {
   offline = await newIdentity("human", "Offline member");
   const sodium = await ready();
   invite = {
+    ownerId: alice.id,
     relay: "wss://relay.example.test",
     room: "room-1",
     token: sodium.to_base64(sodium.randombytes_buf(32), sodium.base64_variants.URLSAFE_NO_PADDING),
@@ -75,7 +81,7 @@ describe("invites", () => {
     const extra = { ...invite, roomKey: await newRoomKey(), identity: alice };
     const encoded = encodeInvite(extra);
     const payload = JSON.parse(Buffer.from(encoded.slice(4), "base64url").toString("utf8"));
-    expect(Object.keys(payload).sort()).toEqual(["relay", "room", "token"]);
+    expect(Object.keys(payload).sort()).toEqual(["ownerId", "relay", "room", "token"]);
     expect(payload).toEqual(invite);
     expect(decodeInvite(encoded)).toEqual(invite);
   });

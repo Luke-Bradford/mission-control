@@ -1,9 +1,11 @@
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { startApi } from "./api.ts";
+import { controlPayload, sign, signDirectory, signGrant, signMember, verifyGrant } from "./auth.ts";
 import { startDaemon } from "./daemon.ts";
 import { delegate, loadIdentity, newIdentity, saveIdentity } from "./keys.ts";
 import { readOptional, writePrivate } from "./local-files.ts";
@@ -12,21 +14,25 @@ import {
   decodeInvite,
   encodeInvite,
   type Invite,
+  type KeyGrant,
   newRoomKey,
   rotate,
   unwrapRoomKey,
   wrapMemberKeys,
 } from "./membership.ts";
 import { memberSchema } from "./protocol.ts";
-import { makeHello, relayControl, relayUrl } from "./relay-client.ts";
+import { relayControl, relayUrl } from "./relay-client.ts";
 import { validateMember } from "./relay-core.ts";
 import { startNodeRelay } from "./relay-node.ts";
 import { readRoomKeys, saveRoomKeys } from "./room-keys.ts";
+import { acceptDirectory, readTrust } from "./trust.ts";
 
 const configSchema = z.strictObject({
   member: memberSchema,
   github: z.string().optional(),
-  rooms: z.array(z.strictObject({ relay: z.string(), room: z.string(), token: z.string() })),
+  rooms: z.array(
+    z.strictObject({ ownerId: z.string(), relay: z.string(), room: z.string(), token: z.string() }),
+  ),
 });
 type Config = z.infer<typeof configSchema>;
 const defaultHome = () =>
@@ -64,6 +70,7 @@ export async function runCli(
       port: { type: "string" },
       data: { type: "string" },
       help: { type: "boolean" },
+      "create-secret": { type: "string" },
     },
   });
   const [command, ...rest] = positionals;
@@ -87,7 +94,11 @@ export async function runCli(
     arity(0);
     const port = Number(values.port ?? "7480");
     if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid port");
-    const relay = await startNodeRelay({ port, dataDir: values.data ?? join(home, "relay") });
+    const relay = await startNodeRelay({
+      port,
+      dataDir: values.data ?? join(home, "relay"),
+      createSecret: values["create-secret"] ?? process.env.AGENTCOMMS_CREATE_SECRET,
+    });
     print(relay.url);
     await waitForSignal(() => relay.close());
     return;
@@ -101,14 +112,18 @@ export async function runCli(
     const identity = await newIdentity("human", required(values.member, "--member"));
     await saveIdentity(home, identity);
     await save({
-      member: {
-        id: identity.id,
-        kind: "human",
-        label: identity.label,
-        signPublicKey: identity.id,
-        boxPublicKey: Buffer.from(identity.box.publicKey).toString("base64url"),
-        agents: [],
-      },
+      member: signMember(
+        {
+          sig: "",
+          id: identity.id,
+          kind: "human",
+          label: identity.label,
+          signPublicKey: identity.id,
+          boxPublicKey: Buffer.from(identity.box.publicKey).toString("base64url"),
+          agents: [],
+        },
+        identity,
+      ),
       github: values.github,
       rooms: [],
     });
@@ -138,7 +153,14 @@ export async function runCli(
   const http = async (url: string, method: string, body: unknown) => {
     const response = await fetch(url, {
       method,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(method === "PUT"
+          ? {
+              authorization: `Bearer ${values["create-secret"] ?? process.env.AGENTCOMMS_CREATE_SECRET ?? ""}`,
+            }
+          : {}),
+      },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10000),
       redirect: "error",
@@ -169,6 +191,7 @@ export async function runCli(
       boxPublicKey: Buffer.from(agent.box.publicKey).toString("base64url"),
       delegation,
     });
+    config.member = signMember(config.member, member);
     await save(config);
     print(agent.id);
     return;
@@ -180,14 +203,19 @@ export async function runCli(
     if (config.rooms.some((r) => r.room === room)) throw new Error("Room already configured");
     const owner = await memberIdentity();
     const key = await newRoomKey();
-    const grants = await wrapMemberKeys(key, 0, config.member);
+    const grants = (await wrapMemberKeys(key, 0, config.member)).map((g) =>
+      signGrant(room, g, owner),
+    );
+    const directory = signDirectory(room, 0, 0, [config.member], owner);
+    const payload = { owner: config.member, grants, directory };
     await http(relayUrl(relay, room, true), "PUT", {
-      owner: config.member,
-      hello: await makeHello(room, owner),
-      grants,
+      ...payload,
+      sig: sign(controlPayload("create", room, payload), owner),
     });
+    const invite = { relay, room, token: "", ownerId: owner.id };
+    await acceptDirectory(home, invite, directory);
     await saveRoomKeys(home, room, new Map([[0, key]]));
-    await addRoom({ relay, room, token: "" });
+    await addRoom(invite);
     print(room);
     return;
   }
@@ -210,11 +238,16 @@ export async function runCli(
     arity(1);
     const room = roomFor(rest[0]);
     const identity = await memberIdentity();
-    const result = await http(
-      `${relayUrl(room.relay, room.room, true)}/tokens`,
-      "POST",
-      await makeHello(room.room, identity),
-    );
+    if (identity.id !== room.ownerId) throw new Error("Owner only");
+    const payload = {
+      memberId: identity.id,
+      at: Date.now(),
+      nonce: randomBytes(32).toString("base64url"),
+    };
+    const result = await http(`${relayUrl(room.relay, room.room, true)}/tokens`, "POST", {
+      ...payload,
+      sig: sign(controlPayload("token", room.room, payload), identity),
+    });
     print(encodeInvite({ ...room, token: required(result.token, "invite token") }));
     return;
   }
@@ -222,32 +255,64 @@ export async function runCli(
     arity(2);
     const room = roomFor(rest[0]);
     const identity = await memberIdentity();
-    const control = await relayControl(room, await makeHello(room.room, identity));
+    if (identity.id !== room.ownerId) throw new Error("Owner only");
+    // The owner's disk is authoritative. Never rotate or approve using relay copies of active records.
+    const directory = await readTrust(home, room);
+    if (!directory) throw new Error("Missing locally pinned owner directory");
+    const control = await relayControl(room, identity);
     try {
-      const directory = control.directory;
-      if (!directory) throw new Error("Missing room directory");
-      if (directory.activeMemberIds[0] !== identity.id) throw new Error("Owner only");
+      if (!control.directory) throw new Error("Missing room directory");
+      const verified = await acceptDirectory(home, room, control.directory, directory);
+      if (verified.version !== directory.version)
+        throw new Error("Owner state changed; retry using persisted state");
       const keys = await readRoomKeys(home, room.room);
-      for (const grant of control.grants)
-        keys.set(grant.keyEpoch, await unwrapRoomKey(grant, identity));
-      const memberId = rest[1];
-      if (command === "approve") {
-        const member = control.pending.find((m) => m.id === memberId);
-        if (!member) throw new Error("Unknown pending member");
-        const key = keys.get(directory.keyEpoch);
-        if (!key) throw new Error("Current room key unavailable");
-        await control.change({
-          t: "approve",
-          memberId,
-          grants: await wrapMemberKeys(key, directory.keyEpoch, member),
-        });
-      } else {
-        const members = directory.members.filter((m) => directory.activeMemberIds.includes(m.id));
-        const rotation = await rotate(members, memberId, directory.keyEpoch + 1);
-        await control.change({ t: "remove", memberId, grants: rotation.grants });
-        keys.set(directory.keyEpoch + 1, rotation.roomKey);
+      for (const grant of control.grants) {
+        if (!verifyGrant(room.room, grant, room.ownerId) || grant.keyEpoch > directory.keyEpoch)
+          throw new Error("Invalid owner grant");
+        const key = await unwrapRoomKey(grant, identity);
+        const old = keys.get(grant.keyEpoch);
+        if (old && !Buffer.from(old).equals(key)) throw new Error("Conflicting room key grant");
+        if (!old) keys.set(grant.keyEpoch, key);
       }
+      const memberId = rest[1];
+      let members = directory.members;
+      let epoch = directory.keyEpoch;
+      let grants: KeyGrant[];
+      if (command === "approve") {
+        const candidate = control.pending.find((m) => m.id === memberId);
+        if (!candidate) throw new Error("Unknown pending member");
+        validateMember(candidate);
+        // Pin the self-signed record selected by the human's member id before using any box key.
+        const pinPath = join(home, `member-${memberId}.json`);
+        const pinned = await readOptional(pinPath);
+        if (pinned && pinned !== JSON.stringify(candidate))
+          throw new Error("Member record changed");
+        if (!pinned) await writePrivate(pinPath, JSON.stringify(candidate));
+        const member = memberSchema.parse(JSON.parse((await readOptional(pinPath)) as string));
+        validateMember(member);
+        const key = keys.get(epoch);
+        if (!key) throw new Error("Current room key unavailable");
+        members = [...members, member];
+        grants = await wrapMemberKeys(key, epoch, member);
+      } else {
+        if (memberId === identity.id || !members.some((m) => m.id === memberId))
+          throw new Error("Cannot remove member");
+        const rotation = await rotate(members, memberId, ++epoch);
+        grants = rotation.grants;
+        members = members.filter((m) => m.id !== memberId);
+        keys.set(epoch, rotation.roomKey);
+      }
+      grants = grants.map((g) => signGrant(room.room, g, identity));
+      const next = signDirectory(room.room, epoch, directory.version + 1, members, identity);
+      const payload = { memberId, grants, directory: next };
+      // Persist before publishing: a lost acknowledgement must not roll local state backwards.
       await saveRoomKeys(home, room.room, keys);
+      await acceptDirectory(home, room, next, directory);
+      await control.change({
+        t: command,
+        ...payload,
+        sig: sign(controlPayload(command, room.room, payload), identity),
+      });
       print(`${command === "approve" ? "Approved" : "Removed"} ${memberId}`);
     } finally {
       control.close();

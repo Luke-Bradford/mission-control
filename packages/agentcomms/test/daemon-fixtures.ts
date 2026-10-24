@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { expect } from "vitest";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import type { Message } from "../src/envelope.ts";
-import { wrapMemberKeys } from "../src/membership.ts";
 import { createRoomCore } from "../src/relay-core.ts";
 import { startNodeRelay } from "../src/relay-node.ts";
 import { fixture } from "./relay-fixtures.ts";
@@ -23,6 +23,7 @@ export async function daemonFixture(home: string, answer?: string) {
   const core = createRoomCore({
     room: "test-room",
     owner: f.a.member,
+    directory: f.directory,
     now: Date.now,
     storage: {
       load: () => undefined,
@@ -33,7 +34,12 @@ export async function daemonFixture(home: string, answer?: string) {
   });
   const token = core.issueToken(f.a.identity.id);
   core.requestJoin(token, f.b.member);
-  core.approve(f.a.identity.id, f.b.identity.id, await wrapMemberKeys(f.key, 0, f.b.member));
+  core.approve(
+    f.a.identity.id,
+    f.b.identity.id,
+    await f.grants(f.key, 0, f.b.member),
+    f.nextDirectory(core),
+  );
   await writeFile(path, saved);
   const relay = await startNodeRelay({ port: 0, dataDir });
   const daemons: Daemon[] = [];
@@ -49,7 +55,12 @@ export async function daemonFixture(home: string, answer?: string) {
           delegation: person.delegation,
           member: person.member,
           answer,
-          rooms: [{ invite: { relay: relay.url, room: "test-room", token }, roomKey: f.key }],
+          rooms: [
+            {
+              invite: { ownerId: f.a.identity.id, relay: relay.url, room: "test-room", token },
+              roomKey: f.key,
+            },
+          ],
         }),
       );
     }
@@ -58,6 +69,7 @@ export async function daemonFixture(home: string, answer?: string) {
     await relay.close();
     throw error;
   }
+  await expect.poll(() => daemons.every((d) => d.rooms()[0].status === "connected")).toBe(true);
   return {
     ...f,
     aDaemon: daemons[0],

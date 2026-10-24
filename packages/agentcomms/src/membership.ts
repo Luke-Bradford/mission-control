@@ -3,6 +3,7 @@ import type { Delegation, Identity } from "./keys.ts";
 import { ready } from "./sodium.ts";
 
 export type Invite = {
+  ownerId: string;
   relay: string;
   room: string;
   // The issuer supplies 32 random bytes encoded as unpadded base64url.
@@ -11,6 +12,7 @@ export type Invite = {
 
 export type Member = {
   id: string;
+  sig: string;
   kind: "human";
   label: string;
   boxPublicKey: string;
@@ -26,7 +28,7 @@ export type Member = {
 };
 
 // memberId is the wire recipient id: either a member or an approved agent.
-export type KeyGrant = { memberId: string; keyEpoch: number; wrapped: string };
+export type KeyGrant = { memberId: string; keyEpoch: number; wrapped: string; sig?: string };
 
 export class BadInvite extends Error {
   override name = "BadInvite";
@@ -36,6 +38,7 @@ export class BadInvite extends Error {
 }
 
 const inviteSchema = z.strictObject({
+  ownerId: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   relay: z.string().min(1),
   room: z.string().min(1),
   token: z.string(),
@@ -58,7 +61,12 @@ function parseInvite(value: unknown): Invite {
 
 export function encodeInvite(i: Invite): string {
   try {
-    const invite = parseInvite({ relay: i.relay, room: i.room, token: i.token });
+    const invite = parseInvite({
+      ownerId: i.ownerId,
+      relay: i.relay,
+      room: i.room,
+      token: i.token,
+    });
     return `ac1.${Buffer.from(JSON.stringify(invite)).toString("base64url")}`;
   } catch {
     throw new BadInvite();

@@ -12,7 +12,10 @@ let root: string;
 let relay: Awaited<ReturnType<typeof startNodeRelay>> | undefined;
 const children: ChildProcess[] = [];
 const cli = (home: string, ...args: string[]) =>
-  exec(shim, args, { env: { ...process.env, AGENTCOMMS_HOME: home }, timeout: 10000 });
+  exec(shim, args, {
+    env: { ...process.env, AGENTCOMMS_CREATE_SECRET: "test-secret", AGENTCOMMS_HOME: home },
+    timeout: 10000,
+  });
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "comms-cli-"));
 });
@@ -53,12 +56,16 @@ it("rejects an agent entry pointing to the member identity before loading that k
   config.member.agents[0].signPublicKey = config.member.id;
   await writeFile(path, JSON.stringify(config));
   await rm(join(root, "keys", `${config.member.id}.json`));
-  await expect(cli(root, "daemon")).rejects.toThrow(/Invalid agent delegation/);
+  await expect(cli(root, "daemon")).rejects.toThrow(/Invalid member signature/);
 });
 it("creates, invites, joins, approves, exchanges, and rotates on removal", async () => {
   const a = join(root, "a");
   const b = join(root, "b");
-  relay = await startNodeRelay({ port: 0, dataDir: join(root, "relay") });
+  relay = await startNodeRelay({
+    createSecret: "test-secret",
+    port: 0,
+    dataDir: join(root, "relay"),
+  });
   for (const [home, label] of [
     [a, "Alice"],
     [b, "Bob"],
@@ -77,7 +84,7 @@ it("creates, invites, joins, approves, exchanges, and rotates on removal", async
     const memberPath = join(home, "keys", `${config.member.id}.json`);
     await rename(memberPath, `${memberPath}.hidden`);
     const child = spawn(shim, ["daemon"], {
-      env: { ...process.env, AGENTCOMMS_HOME: home },
+      env: { ...process.env, AGENTCOMMS_CREATE_SECRET: "test-secret", AGENTCOMMS_HOME: home },
       stdio: "pipe",
     });
     children.push(child);
@@ -105,7 +112,7 @@ it("creates, invites, joins, approves, exchanges, and rotates on removal", async
         },
         { timeout: 5000 },
       )
-      .toBeDefined();
+      .toMatchObject([{ status: "connected" }]);
   expect(
     await api(a, "/rooms/test-room/messages", { kind: "fyi", body: "before removal" }),
   ).toEqual({ seq: 1 });

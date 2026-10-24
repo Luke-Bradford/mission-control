@@ -5,15 +5,17 @@ import type {
 } from "../../../packages/agentcomms/src/relay-session.ts";
 import { createDOStorage } from "./storage.ts";
 
-type Env = { ROOMS: DurableObjectNamespace };
+type Env = { ROOMS: DurableObjectNamespace; AGENTCOMMS_CREATE_SECRET?: string };
 
 export class RoomDO {
+  private createSecret?: string;
   private storage: ReturnType<typeof createDOStorage>;
   private core?: RoomCore;
   private session?: ReturnType<typeof createRelaySession>;
   private room?: string;
 
   constructor(ctx: DurableObjectState, _env: Env) {
+    this.createSecret = _env.AGENTCOMMS_CREATE_SECRET;
     this.storage = createDOStorage(ctx.storage);
   }
 
@@ -89,6 +91,8 @@ export class RoomDO {
       const body = JSON.parse(new TextDecoder().decode(bytes) || "null");
       const result = roomHttp({
         ...route,
+        createSecret: this.createSecret,
+        authorization: request.headers.get("authorization") ?? undefined,
         method: request.method,
         body,
         core: this.core,

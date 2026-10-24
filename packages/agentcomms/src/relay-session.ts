@@ -1,10 +1,11 @@
+import { controlPayload, verify } from "./auth.ts";
 import type { Member } from "./membership.ts";
 import {
   clientMessageSchema,
   createRoomSchema,
   type Hello,
-  helloSchema,
   type RelayMessage,
+  tokenSchema,
 } from "./protocol.ts";
 import { createRoomCore, type RoomCore, type RoomStorage } from "./relay-core.ts";
 import { ready } from "./sodium.ts";
@@ -13,8 +14,13 @@ const sodium = await ready();
 const variant = sodium.base64_variants.URLSAFE_NO_PADDING;
 export const FRAME_MAX = 256_000;
 
-export function verifyHello(hello: Hello, room: string, members: Member[], now: number): boolean {
-  if (hello.room !== room || Math.abs(now - hello.at) > 120_000) return false;
+export function verifyHello(
+  hello: Hello,
+  room: string,
+  members: Member[],
+  challenge: string,
+): boolean {
+  if (hello.room !== room || hello.challenge !== challenge) return false;
   const member = members.find(
     (m) => m.id === hello.memberId || m.agents.some((a) => a.id === hello.memberId),
   );
@@ -26,7 +32,7 @@ export function verifyHello(hello: Hello, room: string, members: Member[], now: 
   try {
     return sodium.crypto_sign_verify_detached(
       sodium.from_base64(hello.sig, variant),
-      `${hello.room}|${hello.memberId}|${hello.at}`,
+      `agentcomms/hello/v1|${hello.room}|${hello.memberId}|${hello.challenge}`,
       sodium.from_base64(key, variant),
     );
   } catch {
@@ -35,11 +41,15 @@ export function verifyHello(hello: Hello, room: string, members: Member[], now: 
 }
 
 export type RelayPeer = { send(message: RelayMessage): void; close(): void };
-export function createRelaySession(room: string, core: RoomCore, now = Date.now) {
-  const peers = new Map<RelayPeer, { id?: string; seq?: number }>();
+export function createRelaySession(room: string, core: RoomCore, _now = Date.now) {
+  const peers = new Map<
+    RelayPeer,
+    { id?: string; seq?: number; challenge: string; timer: ReturnType<typeof setTimeout> }
+  >();
   const known = (id: string) =>
     core.members().some((m) => m.id === id || m.agents.some((a) => a.id === id));
   const disconnect = (peer: RelayPeer) => {
+    clearTimeout(peers.get(peer)?.timer);
     peers.delete(peer);
     try {
       peer.close();
@@ -63,9 +73,13 @@ export function createRelaySession(room: string, core: RoomCore, now = Date.now)
   };
   return {
     connect(peer: RelayPeer) {
-      peers.set(peer, {});
+      const challenge = sodium.to_base64(sodium.randombytes_buf(32), variant);
+      const timer = setTimeout(() => disconnect(peer), 10000);
+      peers.set(peer, { challenge, timer });
+      send(peer, { t: "challenge", challenge });
     },
     disconnect(peer: RelayPeer) {
+      clearTimeout(peers.get(peer)?.timer);
       peers.delete(peer);
     },
     receive(peer: RelayPeer, raw: string) {
@@ -86,10 +100,12 @@ export function createRelaySession(room: string, core: RoomCore, now = Date.now)
       const msg = parsed.data;
       try {
         if (msg.t === "hello") {
-          if (auth.id || !verifyHello(msg, room, core.members(), now())) {
+          if (auth.id || !verifyHello(msg, room, core.members(), auth.challenge)) {
             refuse(peer, "bad-hello", true);
             return;
           }
+          clearTimeout(auth.timer);
+          auth.challenge = "";
           auth.id = msg.memberId;
           send(peer, { t: "directory", ...core.directory() });
           if (auth.id === core.members()[0]?.id)
@@ -144,7 +160,13 @@ export function createRelaySession(room: string, core: RoomCore, now = Date.now)
           broadcast({ t: "presence", map: core.presence() });
           return;
         }
-        core[msg.t](auth.id, msg.memberId, msg.grants);
+        const { t, sig, ...payload } = msg;
+        if (
+          auth.id !== core.members()[0]?.id ||
+          !verify(controlPayload(t, room, payload), sig, auth.id)
+        )
+          throw new Error("Invalid owner control signature");
+        core[msg.t](auth.id, msg.memberId, msg.grants, msg.directory);
         for (const [recipient, state] of peers) {
           if (!state.id) continue;
           if (!known(state.id)) {
@@ -184,17 +206,29 @@ export function roomHttp(opts: {
   storage: RoomStorage;
   core?: RoomCore;
   now?: () => number;
+  createSecret?: string;
+  authorization?: string;
 }): { status: number; body: unknown; core?: RoomCore } {
   const now = opts.now ?? Date.now;
   if (!opts.tokens && opts.method === "PUT") {
+    if (!opts.createSecret || opts.authorization !== `Bearer ${opts.createSecret}`)
+      return { status: 403, body: { error: "Creation secret required" } };
     if (opts.core) return { status: 409, body: { error: "Room already exists" } };
     const parsed = createRoomSchema.safeParse(opts.body);
     if (!parsed.success) return { status: 400, body: { error: "Invalid room" } };
-    const { owner, hello, grants } = parsed.data;
-    if (hello.memberId !== owner.id || !verifyHello(hello, opts.room, [owner], now()))
+    const { sig, ...payload } = parsed.data;
+    const { owner, grants, directory } = payload;
+    if (!verify(controlPayload("create", opts.room, payload), sig, owner.id))
       return { status: 403, body: { error: "bad-hello" } };
     try {
-      const core = createRoomCore({ room: opts.room, owner, now, storage: opts.storage, grants });
+      const core = createRoomCore({
+        room: opts.room,
+        owner,
+        now,
+        storage: opts.storage,
+        grants,
+        directory,
+      });
       return { status: 201, body: { room: opts.room }, core };
     } catch {
       return { status: 400, body: { error: "Invalid owner" } };
@@ -202,8 +236,15 @@ export function roomHttp(opts: {
   }
   if (opts.tokens && opts.method === "POST") {
     if (!opts.core) return { status: 404, body: { error: "Unknown room" } };
-    const parsed = helloSchema.safeParse(opts.body);
-    if (!parsed.success || !verifyHello(parsed.data, opts.room, opts.core.members(), now()))
+    const parsed = tokenSchema.safeParse(opts.body);
+    if (!parsed.success) return { status: 403, body: { error: "Invalid token request" } };
+    const { sig, ...payload } = parsed.data;
+    if (
+      payload.memberId !== opts.core.members()[0]?.id ||
+      Math.abs(now() - payload.at) > 120000 ||
+      !verify(controlPayload("token", opts.room, payload), sig, payload.memberId) ||
+      !opts.core.useRequest(payload.nonce)
+    )
       return { status: 403, body: { error: "bad-hello" } };
     try {
       return { status: 200, body: { token: opts.core.issueToken(parsed.data.memberId) } };

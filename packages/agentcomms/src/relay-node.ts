@@ -15,6 +15,7 @@ import {
 export async function startNodeRelay(opts: {
   port: number;
   dataDir: string;
+  createSecret?: string;
 }): Promise<{ url: string; close(): Promise<void> }> {
   mkdirSync(opts.dataDir, { recursive: true, mode: 0o700 });
   const rooms = new Map<
@@ -72,6 +73,8 @@ export async function startNodeRelay(opts: {
       }
       const result = roomHttp({
         ...route,
+        createSecret: opts.createSecret ?? process.env.AGENTCOMMS_CREATE_SECRET,
+        authorization: req.headers.authorization,
         method: req.method ?? "GET",
         body: JSON.parse(Buffer.concat(chunks).toString("utf8") || "null"),
         core: load(route.room)?.core,

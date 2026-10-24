@@ -14,7 +14,10 @@ const children: ChildProcessWithoutNullStreams[] = [];
 let root: string;
 let relay: Awaited<ReturnType<typeof startNodeRelay>> | undefined;
 const cli = (home: string, ...args: string[]) =>
-  exec(shim, args, { env: { ...process.env, AGENTCOMMS_HOME: home }, timeout: 10000 });
+  exec(shim, args, {
+    env: { ...process.env, AGENTCOMMS_CREATE_SECRET: "test-secret", AGENTCOMMS_HOME: home },
+    timeout: 10000,
+  });
 
 afterEach(async () => {
   await Promise.all(
@@ -33,7 +36,9 @@ afterEach(async () => {
 });
 
 function start(home: string, ...args: string[]) {
-  const child = spawn(shim, args, { env: { ...process.env, AGENTCOMMS_HOME: home } });
+  const child = spawn(shim, args, {
+    env: { ...process.env, AGENTCOMMS_CREATE_SECRET: "test-secret", AGENTCOMMS_HOME: home },
+  });
   children.push(child);
   return child;
 }
@@ -43,7 +48,11 @@ it("connects home and work through CLI, agent grants, daemons and stdio MCP", as
   const home = join(root, "home");
   const work = join(root, "work");
   const room = "home-work";
-  relay = await startNodeRelay({ port: 0, dataDir: join(root, "relay") });
+  relay = await startNodeRelay({
+    createSecret: "test-secret",
+    port: 0,
+    dataDir: join(root, "relay"),
+  });
   const homeMember = (await cli(home, "init", "--member", "Luke home")).stdout.trim();
   const homeAgent = (
     await cli(home, "agent", "add", "FLIGHT-comms", "--subscription", "Claude · home")
@@ -78,11 +87,11 @@ it("connects home and work through CLI, agent grants, daemons and stdio MCP", as
           try {
             const url = (await readFile(join(directory, "api-url"), "utf8")).trim();
             const token = (await readFile(join(directory, "api-token"), "utf8")).trim();
-            return (
-              await fetch(`${url}/rooms`, {
-                headers: { authorization: `Bearer ${token}` },
-              })
-            ).ok;
+            const response = await fetch(`${url}/rooms`, {
+              headers: { authorization: `Bearer ${token}` },
+            });
+            const rooms = (await response.json()) as { status: string }[];
+            return response.ok && rooms.every((room) => room.status === "connected");
           } catch {
             return false;
           }
@@ -152,7 +161,7 @@ it("connects home and work through CLI, agent grants, daemons and stdio MCP", as
       knowledge: { kind: "cannot-confirm" },
       auto: true,
       thread: "first-test",
-      inReplyTo: question.msg.id,
+      inReplyTo: question.msg?.id,
     },
     sender: {
       kind: "agent",

@@ -130,18 +130,25 @@ describe("delegations", () => {
     const canonical = JSON.stringify({
       agentId: agent.id,
       agentName: "Helper",
+      boxPublicKey: Buffer.from(agent.box.publicKey).toString("base64url"),
       memberId: member.id,
       subscription: "team",
     });
     expect(
       sodium.crypto_sign_verify_detached(
         Buffer.from(delegation.sig, "base64url"),
-        canonical,
+        `agentcomms/delegation/v1|${canonical}`,
         member.sign.publicKey,
       ),
     ).toBe(true);
     expect(await verifyDelegation(delegation, agent.sign.publicKey)).toBe(false);
-    for (const field of ["agentId", "memberId", "subscription", "agentName"] as const) {
+    for (const field of [
+      "agentId",
+      "memberId",
+      "subscription",
+      "agentName",
+      "boxPublicKey",
+    ] as const) {
       expect(
         await verifyDelegation(
           { ...delegation, [field]: `${delegation[field]}changed` },

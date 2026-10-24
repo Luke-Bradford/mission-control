@@ -81,7 +81,7 @@ it("authenticates before parsing bodies, binds loopback, and validates sends and
   expect(await request("GET", "/rooms/test-room/messages?since=3", "", auth)).toMatchObject({
     status: 200,
   });
-  expect(daemon.read).toHaveBeenCalledWith("test-room", 3);
+  expect(daemon.read).toHaveBeenCalledWith("test-room", 3, 50);
   expect(
     await request(
       "POST",

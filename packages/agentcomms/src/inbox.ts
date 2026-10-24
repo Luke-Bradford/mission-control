@@ -1,17 +1,20 @@
 import { chmodSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import type { Message, Sender } from "./envelope.ts";
+import type { Message, Sealed, Sender } from "./envelope.ts";
 
 export type InboxEntry = {
   seq: number;
   room: string;
-  msg: Message;
+  msg: Message | null;
+  quarantined?: boolean;
+  reason?: string;
   sender: Sender & { member?: { id: string; label: string } };
 };
 export type Thread = { thread: string; closed: boolean; question?: Message };
 export interface Inbox {
-  add(seq: number, room: string, msg: Message, sender: InboxEntry["sender"]): void;
-  list(room: string, sinceSeq?: number): InboxEntry[];
+  add(seq: number, room: string, msg: Message, sender: InboxEntry["sender"]): boolean;
+  quarantine(seq: number, room: string, sealed: Sealed, reason: string): void;
+  list(room: string, sinceSeq?: number, limit?: number): InboxEntry[];
   lastSeq(room: string): number;
   advance(room: string, seq: number): void;
   threads(room: string): Thread[];
@@ -29,11 +32,28 @@ export function openInbox(path: string): Inbox {
       room TEXT NOT NULL, seq INTEGER NOT NULL, msg TEXT NOT NULL, sender TEXT NOT NULL,
       PRIMARY KEY (room, seq)
     );
+    CREATE TABLE IF NOT EXISTS quarantine (
+      room TEXT NOT NULL, seq INTEGER NOT NULL, sealed TEXT NOT NULL, reason TEXT NOT NULL,
+      PRIMARY KEY (room, seq)
+    );
     CREATE TABLE IF NOT EXISTS threads (
       room TEXT NOT NULL, thread TEXT NOT NULL, closed INTEGER NOT NULL DEFAULT 0,
       question TEXT, PRIMARY KEY (room, thread)
     );
   `);
+  if (
+    !db
+      .prepare("PRAGMA table_info(messages)")
+      .all()
+      .some((row) => row.name === "msg_id")
+  ) {
+    db.exec("ALTER TABLE messages ADD COLUMN msg_id TEXT");
+    db.exec("UPDATE messages SET msg_id = json_extract(msg, '$.id')");
+    db.exec(
+      "DELETE FROM messages WHERE rowid NOT IN (SELECT MIN(rowid) FROM messages GROUP BY room, msg_id)",
+    );
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS messages_id ON messages(room, msg_id)");
   const advance = (room: string, seq: number) => {
     if (!Number.isSafeInteger(seq) || seq < 1) throw new Error("Invalid inbox cursor");
     db.prepare(
@@ -42,14 +62,32 @@ export function openInbox(path: string): Inbox {
   };
   return {
     advance,
+    quarantine(seq, room, sealed, reason) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare("INSERT OR IGNORE INTO quarantine VALUES (?, ?, ?, ?)").run(
+          room,
+          seq,
+          JSON.stringify(sealed),
+          reason.slice(0, 500),
+        );
+        advance(room, seq);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
     add(seq, room, msg, sender) {
       if (!Number.isSafeInteger(seq) || seq < 1 || msg.room !== room)
         throw new Error("Invalid inbox entry");
       db.exec("BEGIN IMMEDIATE");
       try {
         const added = db
-          .prepare("INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?)")
-          .run(room, seq, JSON.stringify(msg), JSON.stringify(sender));
+          .prepare(
+            "INSERT OR IGNORE INTO messages (room, seq, msg, sender, msg_id) VALUES (?, ?, ?, ?, ?)",
+          )
+          .run(room, seq, JSON.stringify(msg), JSON.stringify(sender), msg.id);
         if (added.changes) {
           db.prepare("INSERT OR IGNORE INTO threads (room, thread) VALUES (?, ?)").run(
             room,
@@ -69,20 +107,25 @@ export function openInbox(path: string): Inbox {
         }
         advance(room, seq);
         db.exec("COMMIT");
+        return Boolean(added.changes);
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
       }
     },
-    list(room, sinceSeq = 0) {
+    list(room, sinceSeq = 0, limit = 50) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+        throw new Error("Invalid limit");
       return db
-        .prepare("SELECT * FROM messages WHERE room = ? AND seq > ? ORDER BY seq")
-        .all(room, sinceSeq)
+        .prepare(`SELECT seq, msg, sender, NULL AS reason FROM messages WHERE room = ? AND seq > ?
+        UNION ALL SELECT seq, NULL AS msg, json_extract(sealed, '$.sender') AS sender, reason FROM quarantine WHERE room = ? AND seq > ? ORDER BY seq LIMIT ?`)
+        .all(room, sinceSeq, room, sinceSeq, limit)
         .map((row) => ({
           seq: Number(row.seq),
-          room: String(row.room),
-          msg: JSON.parse(String(row.msg)),
+          room,
+          msg: row.msg ? JSON.parse(String(row.msg)) : null,
           sender: JSON.parse(String(row.sender)),
+          ...(row.reason ? { quarantined: true, reason: String(row.reason) } : {}),
         }));
     },
     lastSeq(room) {
