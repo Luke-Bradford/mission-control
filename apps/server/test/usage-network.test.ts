@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { USAGE_RETRY_AFTER_MAX_MS } from "../src/collectors/usage-claude.ts";
+import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_MIN_MS } from "../src/collectors/usage-claude.ts";
 import {
   appServer,
   fetchUsage,
@@ -33,7 +33,11 @@ describe("fetchUsage", () => {
   afterEach(() => vi.useRealTimers());
   it.each([
     [String(RETRY_SECONDS), RETRY_SECONDS * SECOND_MS, null],
-    ["Sat, 24 Oct 2026 12:00:00 GMT", null, Date.parse("2026-10-24T12:00:00Z")],
+    [
+      "Sat, 24 Oct 2026 12:00:00 GMT",
+      null,
+      Date.parse("2026-10-24T12:00:00Z") + USAGE_BACKOFF_MIN_MS,
+    ],
     [null, null, null],
     ["invalid", null, null],
     ["1e20", null, null],
@@ -42,8 +46,8 @@ describe("fetchUsage", () => {
     ["2026-10-24", null, null],
     ["Sat, 01 Jan 10000 00:00:00 GMT", null, null],
     ["Sat, 31 Feb 2026 12:00:00 GMT", null, null],
-    [String(1e20), USAGE_RETRY_AFTER_MAX_MS, null],
-    ["9".repeat(400), USAGE_RETRY_AFTER_MAX_MS, null],
+    [String(1e20), USAGE_BACKOFF_CAP_MS, null],
+    ["9".repeat(400), USAGE_BACKOFF_CAP_MS, null],
   ])(
     "carries parsed Retry-After %s on a typed 429 without response secrets",
     async (header, ms, at) => {
@@ -66,8 +70,8 @@ describe("fetchUsage", () => {
   it("clamps distant HTTP dates in the constructor", () => {
     const now = Date.parse("2026-10-24T12:00:00Z");
     const e = new UsageRateLimited("Fri, 31 Dec 9999 23:59:59 GMT", now);
-    expect(e.retryAt).toBe(now + USAGE_RETRY_AFTER_MAX_MS);
-    expect(e.notBefore(now)).toBe(now + USAGE_RETRY_AFTER_MAX_MS);
+    expect(e.retryAt).toBe(now + USAGE_BACKOFF_CAP_MS);
+    expect(e.notBefore(now)).toBe(now + USAGE_BACKOFF_CAP_MS);
   });
 
   it.each([
@@ -76,7 +80,7 @@ describe("fetchUsage", () => {
     "Sat Oct 24 12:00:00 2026",
   ])("accepts the HTTP date format %s", (value) => {
     const now = Date.parse("2026-10-24T12:00:00Z");
-    expect(new UsageRateLimited(value, now).retryAt).toBe(now);
+    expect(new UsageRateLimited(value, now).retryAt).toBe(now + USAGE_BACKOFF_MIN_MS);
   });
 
   it("sends the keychain token to the exact URL with the beta header, no redirects", async () => {

@@ -108,6 +108,7 @@ import {
 } from "./collectors/notifications.ts";
 import { isPaused, PAUSE_FILE } from "./collectors/ta-loop.ts";
 import { teamsStatus } from "./collectors/teams.ts";
+import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import { COMMS_SNAPSHOT_LIMIT, threadMessages } from "./comms.ts";
 import {
@@ -2599,6 +2600,23 @@ export function githubRate(store: Store): GithubRateState {
 export function limitRows(config: CcConfig, store: Store, now: number): LimitRow[] {
   const rows: LimitRow[] = [];
   for (const acct of config.accounts) {
+    let nextTryAt: number | undefined;
+    if (acct.vendor === "claude") {
+      try {
+        const backoff = JSON.parse(store.getSetting(USAGE_BACKOFF_SETTING) ?? "null");
+        if (
+          backoff &&
+          Number.isFinite(backoff.waitMs) &&
+          backoff.waitMs > 0 &&
+          Number.isFinite(backoff.notBefore)
+        ) {
+          const capped = Math.min(backoff.notBefore, now + USAGE_BACKOFF_CAP_MS);
+          if (capped > now) nextTryAt = capped;
+        }
+      } catch {
+        // An invalid scheduler setting is ignored here; the scheduler removes it on start.
+      }
+    }
     for (const window of WINDOWS) {
       const latest = store.latestUsage(acct.id, window);
       if (!latest) continue;
@@ -2612,6 +2630,7 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
         stale: now - latest.at > DEFAULT_MAX_AGE_MS,
         source: latest.source,
         sampledAt: latest.at,
+        ...(nextTryAt === undefined ? {} : { nextTryAt }),
       };
       if (window === "5h") {
         const fiveH: UsageSample[] = store.usage(acct.id, window, resetAt - FIVE_HOURS_MS);
