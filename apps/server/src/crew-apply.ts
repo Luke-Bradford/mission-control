@@ -8,10 +8,13 @@ import {
   type CrewSeatConfig,
   type CrewSessionConfig,
   flightPowersOf,
+  isInside,
   loadConfig,
+  realish,
   seatInput,
   writerAreaConflict,
 } from "./config.ts";
+import { ConfigWriteError, noSessionText, sessionActiveText } from "./config-write.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 
@@ -214,6 +217,11 @@ export interface CrewReloader {
   /** Applies what waited for a seat to be free; returns what it did. */
   settle(): string[];
   status(): CrewChanges;
+  /** Holds live removal across the save; a failed save restores the exact session. */
+  removeSession?<T extends { config: CcConfig }>(
+    id: string,
+    save: (stopped: (id: string) => boolean, session: CrewSessionConfig) => Promise<T>,
+  ): Promise<T>;
 }
 
 interface FileStat {
@@ -250,6 +258,7 @@ export function createCrewReloader(deps: {
   let chain: Promise<unknown> = Promise.resolve();
   let timer: NodeJS.Timeout | undefined;
   let off: (() => void) | undefined;
+  let removing = false;
 
   const statFile = (): FileStat => {
     const s = statSync(configPath);
@@ -277,6 +286,7 @@ export function createCrewReloader(deps: {
     try {
       return (
         supervisor.seatBusy(seatId) ||
+        store.seatRun(seatId)?.endedAt === null ||
         store.queue(seatId).some((q) => q.takenAt !== null) ||
         // an aside run has no process or seat row, but the seat is working
         store.asideRuns().some((r) => r.agentId === seatId)
@@ -287,6 +297,7 @@ export function createCrewReloader(deps: {
   };
 
   function settle(): string[] {
+    if (removing) return [];
     // Guards read powers per call. Apply them even if unrelated crew edits cannot settle.
     const powersApplied: string[] = [];
     for (const repo of config.repos) {
@@ -302,6 +313,32 @@ export function createCrewReloader(deps: {
       bus.emit("agents");
     }
     try {
+      // A newly created session has no agents or runtime state to migrate.
+      if (
+        config.crew &&
+        target.crew &&
+        isDeepStrictEqual(config.loops, target.loops) &&
+        config.crew.worktrees === target.crew.worktrees &&
+        isDeepStrictEqual(config.crew.denyRead, target.crew.denyRead)
+      ) {
+        for (const session of target.crew.sessions) {
+          if (
+            session.seats.length === 0 &&
+            config.crew.sessions.every((s) => s.seats.every((seat) => !busy(seat.id))) &&
+            !config.crew.sessions.some((s) => s.id === session.id) &&
+            config.repos.some((r) => r.id === session.repoId) &&
+            config.crew.sessions.every(
+              (s) =>
+                !isInside(realish(s.checkout), realish(session.checkout)) &&
+                !isInside(realish(session.checkout), realish(s.checkout)),
+            )
+          ) {
+            config.crew.sessions.push(structuredClone(session));
+            powersApplied.push(`session ${session.id} added`);
+            bus.emit("config");
+          }
+        }
+      }
       const plan = planCrew(config, target, busy);
       const nextRestart = restartNeeded(config, target);
       // all reads are done: from here nothing awaits, and the swap is last
@@ -403,6 +440,38 @@ export function createCrewReloader(deps: {
       timer = undefined;
       off?.();
       off = undefined;
+    },
+    removeSession(id, save) {
+      const run = chain.then(async () => {
+        const sessions = config.crew?.sessions;
+        const index = sessions?.findIndex((s) => s.id === id) ?? -1;
+        const session = sessions?.[index];
+        if (!sessions || !session) throw new ConfigWriteError("missing", noSessionText(id));
+        const stopped = (seatId: string) =>
+          store.seatSession(seatId)?.state === "stopped" && !busy(seatId);
+        const active = session.seats.filter((s) => !stopped(s.id)).length;
+        if (active) throw new ConfigWriteError("conflict", sessionActiveText(id, active));
+        // Removing it synchronously prevents any new supervisor start during the file write.
+        removing = true;
+        sessions.splice(index, 1);
+        let saved = false;
+        try {
+          const result = await save(stopped, session);
+          saved = true;
+          target = structuredClone(result.config);
+          pending = pending.filter((p) => p.sessionId !== id);
+          restart = restartNeeded(config, target);
+          store.replaceQueues(session.seats.map((s) => ({ seatId: s.id, items: [] })));
+          bus.emit("config");
+          bus.emit("agents");
+          return result;
+        } finally {
+          if (!saved) sessions.splice(index, 0, session);
+          removing = false;
+        }
+      });
+      chain = run.catch(() => undefined);
+      return run;
     },
     reload,
     settle,

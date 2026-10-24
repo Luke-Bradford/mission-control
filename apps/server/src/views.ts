@@ -473,6 +473,8 @@ export function configView(
             id: x.id,
             repoId: x.repoId,
             checkout: x.checkout,
+            ...(x.branch === undefined ? {} : { branch: x.branch }),
+            managedCheckout: x.managedCheckout !== undefined,
             seats: x.seats.map((seat) => ({
               id: seat.id,
               role: seat.role,

@@ -626,6 +626,26 @@ Setup's board action also creates the board's fields and the repo's type labels,
     runs on. Fix the path and restart the hub.
   - A start is refused if the path holds a `'` or a line break.
 
+### Adding and closing sessions
+
+Session add and close use POST /api/crew/sessions and
+POST /api/crew/sessions/:id/close. Adding applies live only when other sessions
+have no active seats; otherwise crew.sessions remains restart-pending.
+Close requires stopped seats with no unended or aside review runs.
+The close response includes retainedPath and an outcome explaining unproven
+removal or removal that failed partway.
+
+Separate session clones are cloned on the selected branch without source-local tags, then fetch every branch of origin.
+Close retains dirty, untracked or ignored files (except .DS_Store), stashes,
+unpushed commits on other branches or in reflogs, clones without upstream evidence,
+registered seat worktrees, and clones whose ownership cannot be proven.
+A failed removal may leave a partial clone. Recover retained data manually;
+re-creating the same session refuses an existing destination and names its path.
+
+Moving crew.worktrees or its sibling -sessions folder breaks managed sessions'
+confined paths and ownership checks. Restore the original paths, or close sessions
+before moving and re-create them afterward. Recover any retained clones first.
+
 ### Reloading the config
 
 Seat and role changes in `config.yaml` apply without a restart.

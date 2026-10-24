@@ -107,6 +107,8 @@ export interface CrewSessionConfig {
   repoId: RepoId;
   /** Mission Control's own clone of the repo. */
   checkout: string;
+  branch?: string;
+  managedCheckout?: { token: string; device: number; inode: number };
   seats: CrewSeatConfig[];
 }
 
@@ -488,6 +490,14 @@ const fileSchema = z
             id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
             repo_id: nonEmpty,
             checkout: nonEmpty,
+            branch: nonEmpty.optional(),
+            managed_checkout: z
+              .strictObject({
+                token: z.string().uuid(),
+                device: z.number().int().nonnegative(),
+                inode: z.number().int().nonnegative(),
+              })
+              .optional(),
             seats: z.array(
               z.strictObject({
                 id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
@@ -577,6 +587,10 @@ const fileSchema = z
                 id: x.id,
                 repoId: x.repo_id,
                 checkout: expandHome(x.checkout),
+                ...(x.branch === undefined ? {} : { branch: x.branch }),
+                ...(x.managed_checkout === undefined
+                  ? {}
+                  : { managedCheckout: x.managed_checkout }),
                 seats: x.seats.map((seat) => ({
                   id: seat.id,
                   ...(seat.display_call_sign === undefined
@@ -659,6 +673,9 @@ export function realish(p: string): string {
     }
   }
 }
+
+export const managedSessionPath = (worktrees: string, id: string): string =>
+  join(realish(`${worktrees}-sessions`), id);
 
 /** Whether `child` is `parent` or lies inside it (paths compared as given). */
 export function isInside(child: string, parent: string): boolean {
@@ -875,6 +892,15 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
       throw new ConfigError(`${at}.repoId`, `unknown repo "${session.repoId}"`);
     }
     checkPath(`${at}.checkout`, session.checkout);
+    if (
+      session.managedCheckout &&
+      (!session.branch || session.checkout !== managedSessionPath(crew.worktrees, session.id))
+    ) {
+      throw new ConfigError(
+        `${at}.managed_checkout`,
+        "managed sessions need a branch and their confined checkout path; moving crew.worktrees or its -sessions folder breaks managed sessions. Restore the original paths, or close the sessions before moving and re-create them afterward",
+      );
+    }
     const shared = sharedRepo(session.checkout);
     if (shared !== null) {
       throw new ConfigError(
