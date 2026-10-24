@@ -30,6 +30,9 @@ import { flightSummary } from "./flightSummaryFixture.ts";
 
 const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
   fetchStub({
+    "/api/repos": [],
+    "/api/flight/memory?repo=shop-app": { notes: [] },
+    "/api/flight/memory?repo=site-builder": { notes: [] },
     "/api/drafts": [],
     "/api/drafts/history": [],
     "/api/flight/incoming": { entries: [] },
@@ -967,6 +970,9 @@ describe("FLIGHT's brief", () => {
     expect(situation.textContent).not.toContain("Wiring the page.");
     const notes = container.querySelector("#briefP details") as HTMLDetailsElement;
     expect(notes.open).toBe(false);
+    const memory = container.querySelector("#memoryP") as HTMLElement;
+    expect(container.querySelector("#briefP")?.nextElementSibling).toBe(memory);
+    expect(memory.querySelector("details")?.open).toBe(false);
     fireEvent.click(within(notes).getByText("FLIGHT's notes"));
     expect(notes.open).toBe(true);
     expect(notes.textContent).toContain("Ship the brief.");

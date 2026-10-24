@@ -3,6 +3,7 @@ import { BriefPanel, WatchList } from "../flight/Brief.tsx";
 import { Decided } from "../flight/Decided.tsx";
 import { Drafts } from "../flight/Drafts.tsx";
 import { Incoming } from "../flight/Incoming.tsx";
+import { MemoryPanel } from "../flight/Memory.tsx";
 import { Situation } from "../flight/Situation.tsx";
 import { WorkInFlight } from "../flight/WorkInFlight.tsx";
 import { WorkingLog } from "../flight/WorkingLog.tsx";
@@ -14,6 +15,7 @@ export function Flight() {
     <section id="page-flight">
       <Situation />
       <BriefPanel />
+      <MemoryPanel />
       <Panel
         id="askP"
         title="Asked of you"
