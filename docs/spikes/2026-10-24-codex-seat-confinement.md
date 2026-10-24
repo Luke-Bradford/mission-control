@@ -109,3 +109,38 @@ Every approval was answered `accept`, to see what runs.
 | Denied read | Unchanged from the first run: denied. |
 
 The run folder, including the copied `auth.json`, was deleted after the turn.
+
+## Handshake correction (24 October, Step B live check)
+
+The controller's hostile-project check on 0.154.0 returned `AGENTS.md` in
+`instructionSources` despite `project_doc_max_bytes = 0` in the isolated run config.
+The original profile field name above was also incorrect: the generated
+`ThreadStartResponse` and `ThreadResumeResponse` schemas name it
+`activePermissionProfile`, with `{id, extends}`, not `permissionProfile`.
+
+`apps/server/test/live/codex-doc-probe.ts` reproduces the document failure using a
+throwaway git repo, the hostile configuration fixture, an isolated home without
+credentials, and a custom provider that avoids OpenAI model-catalog refreshes.
+It sends only `initialize`, `initialized` and `thread/start` with `ephemeral:true`;
+it never sends `turn/start` or spends model tokens.
+
+The local 0.154.0 handshake results were:
+
+| Candidate | `instructionSources` |
+|---|---|
+| Run config: max bytes 0 | Repo `AGENTS.md` |
+| Run config: empty fallback filenames, alone or with max bytes 0 | Repo `AGENTS.md` |
+| `thread/start.config: {project_doc_max_bytes:0}` | `[]`, original repo cwd retained |
+| Same thread override plus empty fallback filenames | `[]`, original repo cwd retained |
+| Run config: empty instructions, speculative disable keys, or empty root markers | Repo `AGENTS.md` |
+| Legacy `profile` setting | Rejected as unsupported |
+| `--profile` with a separate profile config file | Rejected for `app-server` |
+| Empty process cwd, explicit repo thread cwd | Repo `AGENTS.md` |
+| Empty thread cwd with repo runtime workspace roots | `[]`, but changes the cwd; not used |
+
+The successful response included `activePermissionProfile:{id:"mc_seat",extends:null}`
+even without the experimental API capability. `Config` allows additional properties
+but does not declare a project-document disable field. Step B now supplies the
+proven max-bytes override at start and resume, checks the schema's actual profile
+field, and still refuses any nonempty instruction sources. These handshakes do not
+replace the controller's full confinement check.
