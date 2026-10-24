@@ -76,6 +76,22 @@ describe("planCrew", () => {
     expect(plan.sessions.get("s1")).toEqual(a.crew?.sessions[0]?.seats);
   });
 
+  it.each([false, true])("moves a free seat in one plan (reverse: %s)", (reverse) => {
+    const sessions = [
+      { id: "s1", seats: [] as CrewSeatConfig[] },
+      { id: "s2", seats: [seat("guido-1")] },
+    ];
+    if (reverse) sessions.reverse();
+    const a = config(sessions, { maxSeats: 1 });
+    const t = structuredClone(a);
+    for (const session of t.crew?.sessions ?? [])
+      session.seats = session.id === "s1" ? [seat("guido-1")] : [];
+    const plan = planCrew(a, t, none);
+    expect(plan.pending).toEqual([]);
+    expect(plan.sessions.get("s1")).toEqual([seat("guido-1")]);
+    expect(plan.sessions.get("s2")).toEqual([]);
+  });
+
   it("adds a seat", () => {
     const a = config([{ id: "s1", seats: [seat("guido-1", { area: ["y/**"] })] }]);
     const t = config([
@@ -152,7 +168,7 @@ describe("planCrew", () => {
         { id: "s1", seats: [seat("guido-1"), seat("guido-2")] },
         { id: "s2", seats: [] },
       ]);
-      const plan = planCrew(a, t, none);
+      const plan = planCrew(a, t, () => true);
       expect(plan.pending).toEqual([
         {
           sessionId: "s1",
@@ -160,6 +176,7 @@ describe("planCrew", () => {
           change: "add",
           reason: seatMovingText("guido-2", "s2"),
         },
+        { sessionId: "s2", seatId: "guido-2", change: "remove", reason: RETIRE_WAIT },
       ]);
       expect(seatMovingText("guido-2", "s2")).toBe("waits for guido-2 to leave s/s2");
     });
@@ -398,7 +415,19 @@ describe("the reloader", () => {
   let rotateFlight: ReturnType<typeof vi.fn<() => void>>;
   let endRunByEngine: ReturnType<typeof vi.fn<(runId: string) => Promise<void>>>;
 
+  let holdsLock = true;
+  const endedRemoval = vi.fn();
   const supervisor = () => ({
+    holdsCrewLock: () => holdsLock,
+    endRemovedAside: (runId: string) => {
+      const run = store.run(runId);
+      if (!run) return false;
+      store.setRunEnded(runId, 2000, "ok", "operator");
+      const event = { kind: "run-ended", seatId: run.agentId, runId, endedBy: "operator" } as const;
+      endedRemoval(event);
+      listener?.(event);
+      return true;
+    },
     on: (fn: (e: SupervisorEvent) => void) => {
       listener = fn;
       return () => {
@@ -440,6 +469,8 @@ describe("the reloader", () => {
     topics = [];
     bus.subscribe((t) => topics.push(t));
     busy = new Set();
+    holdsLock = true;
+    endedRemoval.mockClear();
     endRunByEngine = vi.fn(async () => {});
     rotateFlight = vi.fn();
     listener = null;
@@ -608,6 +639,29 @@ describe("the reloader", () => {
     expect(listener).toBeNull();
   });
 
+  it("settles once when an ending emits both lifecycle events", () => {
+    const r = make();
+    r.start();
+    vi.spyOn(store, "run").mockReturnValue({ endedAt: 2000 } as Run);
+    const reads = vi.spyOn(store, "openQuestions");
+    listener?.({ kind: "run-ended", seatId: "guido-1", runId: "r", endedBy: "engine" });
+    listener?.({ kind: "seat-free", seatId: "guido-1", runId: "r" });
+    expect(reads).toHaveBeenCalledTimes(1);
+    r.stop();
+  });
+
+  it("seat-free settles before the next poll", async () => {
+    const r = make();
+    r.start();
+    busy.add("guido-1");
+    loaded = config([{ id: "s1", seats: [seat("guido-1", { model: "opus" })] }]);
+    await r.reload();
+    busy.clear();
+    listener?.({ kind: "seat-free", seatId: "guido-1", runId: "r" });
+    expect(applied.crew?.sessions[0]?.seats[0]?.model).toBe("opus");
+    r.stop();
+  });
+
   it("a waiting edit is settled on the poll once the seat is free", async () => {
     const r = make();
     r.start();
@@ -737,45 +791,128 @@ describe("the reloader", () => {
     expect(r.status().pending[0]?.change).toBe("remove");
   });
 
-  it("an aside run keeps its seat busy: an edit waits, a removal retires", async () => {
-    applied = config([{ id: "s1", seats: [seat("guido-1"), seat("guido-2")] }]);
-    const aside: Run = {
-      id: "guido-1:1",
-      agentId: "guido-1",
-      repoId: "shop-app",
-      seq: 1,
-      startedAt: 1000,
-      endedAt: null,
-      status: "running",
-      sessionId: "s",
-      model: "sonnet",
-      branch: null,
-      ticket: "shop-app#9",
-      costUsd: null,
-      tokens: null,
-      transcriptPath: "",
-      prs: [],
-      summary: null,
-      loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
-    };
-    store.upsertRun(aside);
-    expect(store.seatSession("guido-1")).toBeNull();
-    const r = make();
-    loaded = config([{ id: "s1", seats: [seat("guido-1", { model: "opus" }), seat("guido-2")] }]);
-    let out = await r.reload();
-    expect(out.applied).toEqual([]);
-    expect(out.pending).toEqual([
-      { sessionId: "s1", seatId: "guido-1", change: "edit", reason: EDIT_WAIT },
-    ]);
-    expect(applied.crew?.sessions[0]?.seats[0]?.model).toBe("sonnet");
-    loaded = config([{ id: "s1", seats: [seat("guido-2")] }]);
-    out = await r.reload();
-    expect(out.pending).toEqual([
-      { sessionId: "s1", seatId: "guido-1", change: "remove", reason: RETIRE_WAIT },
-    ]);
-    expect(seatsOf(applied)).toEqual(["guido-2", "guido-1"]);
-    expect(applied.crew?.sessions[0]?.seats[1]?.retiring).toBe(true);
-  });
+  it.each(["live", "open", "parked", "aside", "unlocked"])(
+    "preserves absent-seat attention while %s",
+    async (state) => {
+      const seatId = "absent";
+      store.addQuestion({ agentId: seatId, runId: "r", text: "Continue?", at: 1000 });
+      store.raiseNote({
+        key: "absent",
+        kind: "blocked",
+        seatId,
+        runId: null,
+        repoId: "shop-app",
+        text: "Waiting",
+        at: 1000,
+      });
+      if (state === "live" || state === "aside") busy.add(seatId);
+      if (state === "unlocked") holdsLock = false;
+      if (["open", "parked", "aside"].includes(state)) {
+        store.upsertRun({
+          id: "r",
+          agentId: seatId,
+          repoId: "shop-app",
+          seq: 1,
+          startedAt: 1000,
+          endedAt: null,
+          status: "running",
+          sessionId: "s",
+          model: "sonnet",
+          branch: null,
+          ticket: null,
+          costUsd: null,
+          tokens: null,
+          transcriptPath: "",
+          prs: [],
+          summary: null,
+          ...(state === "aside"
+            ? { loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } } }
+            : {}),
+          ...(state === "parked"
+            ? { loop: { ...NEW_LOOP, parked: { kind: "silent", reason: "waiting", ended: false } } }
+            : {}),
+        });
+      }
+      await make().reload();
+      expect(store.openQuestions()).toHaveLength(1);
+      expect(store.notes()).toHaveLength(1);
+    },
+  );
+
+  it.each([false, true])(
+    "ends removed-seat aside runs (already absent at startup: %s)",
+    async (restart) => {
+      applied = config([{ id: "s1", seats: [seat("guido-1"), seat("guido-2")] }]);
+      const aside: Run = {
+        id: "guido-1:1",
+        agentId: "guido-1",
+        repoId: "shop-app",
+        seq: 1,
+        startedAt: 1000,
+        endedAt: null,
+        status: "running",
+        sessionId: "s",
+        model: "sonnet",
+        branch: null,
+        ticket: "shop-app#9",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+        loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+      };
+      store.upsertRun(aside);
+      expect(store.seatSession("guido-1")).toBeNull();
+      const r = make();
+      loaded = config([{ id: "s1", seats: [seat("guido-1", { model: "opus" }), seat("guido-2")] }]);
+      let out = await r.reload();
+      expect(out.applied).toEqual([]);
+      expect(out.pending).toEqual([
+        { sessionId: "s1", seatId: "guido-1", change: "edit", reason: EDIT_WAIT },
+      ]);
+      expect(applied.crew?.sessions[0]?.seats[0]?.model).toBe("sonnet");
+      loaded = config([{ id: "s1", seats: [seat("guido-2")] }]);
+      busy.add("guido-1");
+      out = await r.reload();
+      expect(out.pending).toEqual([
+        { sessionId: "s1", seatId: "guido-1", change: "remove", reason: RETIRE_WAIT },
+      ]);
+      expect(seatsOf(applied)).toEqual(["guido-2", "guido-1"]);
+      expect(applied.crew?.sessions[0]?.seats[1]?.retiring).toBe(true);
+      store.addQuestion({ agentId: "guido-1", runId: aside.id, text: "Continue?", at: 1000 });
+      store.raiseNote({
+        key: "old",
+        kind: "blocked",
+        seatId: "guido-1",
+        runId: null,
+        repoId: "shop-app",
+        text: "Waiting",
+        at: 1000,
+      });
+      busy.clear();
+      if (restart) {
+        applied = config([{ id: "s1", seats: [seat("guido-2")] }]);
+        const restarted = make();
+        restarted.start();
+        restarted.stop();
+      } else {
+        r.settle();
+      }
+      expect(seatsOf(applied)).toEqual(["guido-2"]);
+      expect(store.openQuestions()).toEqual([]);
+      expect(store.notes()).toEqual([]);
+      expect(store.run(aside.id)).toMatchObject({ endedBy: "operator", status: "ok" });
+      expect(store.asideRuns()).toEqual([]);
+      expect(endedRemoval).toHaveBeenCalledExactlyOnceWith({
+        kind: "run-ended",
+        seatId: "guido-1",
+        runId: aside.id,
+        endedBy: "operator",
+      });
+      expect(store.threadComms("guido-1").some((c) => c.text.includes(aside.id))).toBe(true);
+    },
+  );
 
   it("start twice registers one interval and one listener", async () => {
     const on = vi.fn(supervisor().on);

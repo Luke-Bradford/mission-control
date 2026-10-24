@@ -11,6 +11,9 @@ export const DOCK_KEY = "mc-dock";
 export const LANE_KEY = "mc-lane";
 /** The Board's All-repos layout: `together` or `apart`. */
 export const BOARD_LAYOUT_KEY = "mc-board-layout";
+/** The away period whose digest this viewer acknowledged. */
+export const AWAY_DIGEST_KEY = "mc-away-digest";
+
 /** The footer's build-status toggle. */
 export const BUILD_STATUS_KEY = "mc-build-status";
 

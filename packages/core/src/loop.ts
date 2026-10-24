@@ -789,7 +789,12 @@ function stateStep(s: LoopSnapshot): Step {
   }
 
   if (loop.phase === "working" && s.tokens > s.budget + loop.budgetExtra) {
-    return park(loop, "budget", `over its ${s.budget + loop.budgetExtra}-token budget`);
+    // s.tokens is input + output tokens, as the engine supplies them (cache reads are not counted)
+    return park(
+      loop,
+      "budget",
+      `used ${s.tokens} input + output tokens of a ${s.budget + loop.budgetExtra}-token budget`,
+    );
   }
   if (owesReport(s)) {
     const t = s.claimed[nudgeKey(s)];
