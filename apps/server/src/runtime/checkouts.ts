@@ -1263,6 +1263,24 @@ export async function prepareScratch(
 }
 
 /**
+ * A watch run's worktree as it stands: registered in the clone and detached. Writes nothing.
+ */
+export async function existingDetached(
+  checkout: string,
+  path: string,
+): Promise<{ path: string; gitDir: string }> {
+  const notIt = () => new CheckoutError("path", `${path} is not a detached checkout`);
+  const common = await realpath(join(checkout, ".git")).catch(() => null);
+  const gitDir = common === null ? null : await adminDirOf(common, path);
+  if (common === null || gitDir === null) throw notIt();
+  // A resumed watch must still use a detached copy.
+  if (await succeeds(crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }))) {
+    throw notIt();
+  }
+  return { path, gitDir };
+}
+
+/**
  * A review run's worktree as it stands, for resuming it: registered in the clone, detached, and at
  * `sha`. Anything else is `CheckoutError("path", …)`. Writes nothing.
  */
