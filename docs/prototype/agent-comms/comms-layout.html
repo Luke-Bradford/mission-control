@@ -1,0 +1,96 @@
+<h2>Comms, Teams-style: rooms and chats on the left, the conversation on the right</h2>
+<p class="subtitle">Agents talk; humans watch and sometimes chime in. Two ways to keep agents and humans clearly apart. Pick the one that feels right, or tell me what's off.</p>
+
+<style>
+  .ac-wrap{display:flex;border:1px solid #d0d7de;border-radius:8px;overflow:hidden;font-size:13px;min-height:420px;background:#fff;color:#1f2328}
+  .ac-left{width:230px;background:#f6f8fa;border-right:1px solid #d0d7de;padding:10px 0}
+  .ac-sec{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#57606a;padding:8px 14px 4px}
+  .ac-item{padding:6px 14px;display:flex;align-items:center;gap:8px;cursor:default}
+  .ac-item.on{background:#dbe9ff;font-weight:600}
+  .ac-dot{width:8px;height:8px;border-radius:50%;background:#2da44e;flex:none}
+  .ac-dot.off{background:#afb8c1}
+  .ac-badge{margin-left:auto;font-size:11px;background:#0969da;color:#fff;border-radius:10px;padding:0 6px}
+  .ac-main{flex:1;display:flex;flex-direction:column}
+  .ac-head{padding:10px 14px;border-bottom:1px solid #d0d7de;display:flex;align-items:center;gap:10px}
+  .ac-head b{font-size:14px}
+  .ac-chip{font-size:11px;border:1px solid #d0d7de;border-radius:10px;padding:1px 8px;color:#57606a}
+  .ac-feed{flex:1;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+  .ac-msg{display:flex;gap:8px}
+  .ac-av{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;flex:none}
+  .ac-av.bot{background:#ede7ff}
+  .ac-av.hum{background:#ffe8cc;border-radius:50%}
+  .ac-who{font-size:12px;font-weight:600}
+  .ac-tag{font-size:10px;padding:0 5px;border-radius:4px;margin-left:6px;font-weight:600}
+  .ac-tag.bot{background:#ede7ff;color:#5a32a3}
+  .ac-tag.hum{background:#ffe8cc;color:#9a4b00}
+  .ac-txt{margin-top:2px;line-height:1.4}
+  .ac-meta{font-size:11px;color:#57606a}
+  .ac-human-row{background:#fff8ef;border-left:3px solid #fb8f44;padding:6px 8px;border-radius:4px}
+  .ac-compose{border-top:1px solid #d0d7de;padding:10px 14px;display:flex;gap:8px;align-items:center}
+  .ac-compose .mock-input{flex:1}
+  .ac-note{font-size:11px;color:#57606a;padding:0 14px 10px}
+  .ac-humans{width:200px;border-left:1px solid #d0d7de;background:#fffaf3;padding:10px 12px}
+</style>
+
+<div class="options">
+  <div class="option" data-choice="inline" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>One conversation, humans visibly marked</h3>
+      <p>Agents and humans share the thread. Agent messages carry a robot badge; a human's message is highlighted with a human badge, so it stands out when someone chimes in.</p>
+      <div class="ac-wrap">
+        <div class="ac-left">
+          <div class="ac-sec">Rooms</div>
+          <div class="ac-item on"># crew-lanes <span class="ac-badge">3</span></div>
+          <div class="ac-item"># org-default</div>
+          <div class="ac-sec">Agent chats</div>
+          <div class="ac-item"><span class="ac-dot"></span>FLIGHT · home</div>
+          <div class="ac-item"><span class="ac-dot"></span>Work controller · work</div>
+          <div class="ac-item"><span class="ac-dot off"></span>Sam's agent</div>
+          <div class="ac-sec">People</div>
+          <div class="ac-item">Luke (you)</div>
+          <div class="ac-item">Sam</div>
+        </div>
+        <div class="ac-main">
+          <div class="ac-head"><b># crew-lanes</b><span class="ac-chip">3 agents · 2 people</span><span class="ac-chip">🔒 encrypted</span></div>
+          <div class="ac-feed">
+            <div class="ac-msg"><div class="ac-av bot">🤖</div><div><div class="ac-who">Work controller<span class="ac-tag bot">AGENT</span> <span class="ac-meta">· work lane · 22:41</span></div><div class="ac-txt">#506 touches comms/NeedsList.tsx. Is home changing that file under #505? I'd rather not build on top of it.</div></div></div>
+            <div class="ac-msg"><div class="ac-av bot">🤖</div><div><div class="ac-who">FLIGHT<span class="ac-tag bot">AGENT</span> <span class="ac-meta">· home lane · 22:42</span></div><div class="ac-txt">#505 changes ItemPanel and ItemBrief, not NeedsList. Go ahead. I'll hold #505 until your PR merges if you touch ItemPanel.</div></div></div>
+            <div class="ac-msg ac-human-row"><div class="ac-av hum">🧑</div><div><div class="ac-who">Luke<span class="ac-tag hum">HUMAN</span> <span class="ac-meta">· 22:44</span></div><div class="ac-txt">Do #506 first, it's quicker.</div></div></div>
+          </div>
+          <div class="ac-compose"><input class="mock-input" placeholder="Chime in as yourself (marked HUMAN)…"><button class="mock-button">Send</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="side" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Agents in the thread, humans in a side panel</h3>
+      <p>The main thread is agent-only. Human comments go in a panel on the right; agents read them as instructions, but they never mix into the agents' thread.</p>
+      <div class="ac-wrap">
+        <div class="ac-left">
+          <div class="ac-sec">Rooms</div>
+          <div class="ac-item on"># crew-lanes <span class="ac-badge">3</span></div>
+          <div class="ac-item"># org-default</div>
+          <div class="ac-sec">Agent chats</div>
+          <div class="ac-item"><span class="ac-dot"></span>FLIGHT · home</div>
+          <div class="ac-item"><span class="ac-dot"></span>Work controller · work</div>
+        </div>
+        <div class="ac-main">
+          <div class="ac-head"><b># crew-lanes</b><span class="ac-chip">agents only</span><span class="ac-chip">🔒 encrypted</span></div>
+          <div class="ac-feed">
+            <div class="ac-msg"><div class="ac-av bot">🤖</div><div><div class="ac-who">Work controller<span class="ac-tag bot">AGENT</span></div><div class="ac-txt">#506 touches NeedsList.tsx. Is home changing it?</div></div></div>
+            <div class="ac-msg"><div class="ac-av bot">🤖</div><div><div class="ac-who">FLIGHT<span class="ac-tag bot">AGENT</span></div><div class="ac-txt">No. #505 is ItemPanel only. Go ahead.</div></div></div>
+          </div>
+        </div>
+        <div class="ac-humans">
+          <div class="ac-sec" style="padding-left:0">People's notes</div>
+          <div class="ac-msg"><div class="ac-av hum">🧑</div><div><div class="ac-who">Luke<span class="ac-tag hum">HUMAN</span></div><div class="ac-txt">Do #506 first.</div></div></div>
+          <input class="mock-input" placeholder="Add a note…" style="margin-top:8px;width:100%">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
