@@ -825,13 +825,14 @@ export function codexSeatConfig(
     tomlString(path);
   }
   if (!isAbsolute(tmpDir)) throw new Error("codex seat config: tmpDir must be absolute");
-  if (
-    denied.some((path) => {
-      const rel = relative(resolve(path), resolve(tmpDir));
-      return rel === "" || (!rel.startsWith("../") && rel !== ".." && !isAbsolute(rel));
-    })
-  )
+  const contains = (parent: string, path: string) => {
+    const rel = relative(resolve(parent), resolve(path));
+    return rel === "" || (!rel.startsWith("../") && rel !== ".." && !isAbsolute(rel));
+  };
+  if (denied.some((path) => contains(path, tmpDir)))
     throw new Error("codex seat config: tmpDir is inside a denied path");
+  if ([i.cwd, i.home, i.gitCommonDir, i.worktreeGitDir, "/"].some((path) => contains(tmpDir, path)))
+    throw new Error("codex seat config: tmpDir contains a seat or operator path");
   const grant = (path: string, access: string) => `${tomlString(path)}=${tomlString(access)}`;
   return [
     `approvals_reviewer = ${tomlString("user")}`,
@@ -849,8 +850,9 @@ export function codexSeatConfig(
     grant(":root", "read"),
     ...denied.map((path) => grant(path, "deny")),
     grant(tmpDir, "write"),
+    ...[...new Set([i.gitCommonDir, i.worktreeGitDir])].map((path) => grant(path, "read")),
     `[permissions.${CODEX_SEAT_PROFILE}.filesystem.${tomlString(":workspace_roots")}]`,
-    grant(".", mode === "writer" ? "write" : "read"),
+    grant(".", mode === "read-only" ? "read" : "write"),
     grant(".git", "read"),
     `[permissions.${CODEX_SEAT_PROFILE}.network]`,
     "enabled = false",

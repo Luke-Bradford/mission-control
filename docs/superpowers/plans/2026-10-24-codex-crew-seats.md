@@ -59,16 +59,16 @@ Each is pinned by a test in the named step.
 
 - `codexSeatConfig(i: CrewSandboxInput, mode: CrewMode, mcpUrl: string, tmpDir: string): string`, in `runtime.ts`. It returns the run's `config.toml` text:
   - `approvals_reviewer = "user"`, `project_doc_max_bytes = 0`, and `web_search = "disabled"`;
-  - no `notify`, no `[features]` except as below, and the unified/background exec feature off. Confirm the key names on 0.154 with `codex app-server generate-json-schema` (the `Config` definition), and record them in a test comment;
+  - no `notify`, no `[features]` except as below, and `unified_exec = false`. This key does not disable unified exec on 0.154; keep it, but the floor relies on refusing `&` and declining `writeStdin`. Record the key names and this limitation in a test comment;
   - `shell_environment_policy.exclude = ["MC_SEAT_TOKEN"]`;
   - `[mcp_servers.mc]` with `url = mcpUrl` and `bearer_token_env_var = "MC_SEAT_TOKEN"`;
   - `default_permissions = "mc_seat"` and the `[permissions.mc_seat]` profile:
     - **filesystem:**
       - `":root"="read"`;
       - every path in the seat's `denyRead` (`SANDBOX_DENY_READ_HOME` under `home`, `dataDir`, then `CrewSandboxInput.denyRead`) is `"deny"`;
-      - under `":workspace_roots"`, writer mode gets `"."="write"` and read-only/scratch modes get `"."="read"`. The area is **not** used here: it is checked at approval (`codexEditAllowed`), so builds and tests can write `dist/` and caches as a Claude seat's Bash can;
-      - `".git"="read"`. `gitCommonDir` and `worktreeGitDir` sit outside the workspace and stay read-only through `":root"`;
-      - `tmpDir` (the seat's own temp dir, an absolute path Step B passes) gets `"write"`. That's a per-run dir under `crewSandboxTmp`, which `TMPDIR`, the pnpm store and the Python caches point at, as `crewEnv` does today;
+      - under `":workspace_roots"`, writer and scratch modes get `"."="write"` and read-only mode gets `"."="read"`. The area is **not** used here: it is checked at approval (`codexEditAllowed`), so builds and tests can write `dist/` and caches as a Claude seat's Bash can;
+      - `".git"="read"`. Always add explicit `"read"` entries for `gitCommonDir` and `worktreeGitDir`;
+      - `tmpDir` (the seat's own temp dir, an absolute path Step B passes) gets `"write"`. That's a per-run dir under `crewSandboxTmp`, which `TMPDIR`, the pnpm store and the Python caches point at, as `crewEnv` does today. Throw if it is inside a denied path, or equals or contains `cwd`, `home`, `gitCommonDir`, `worktreeGitDir` or `/`;
     - **network:** off, with no `features.network_proxy`.
   - Every string goes through one TOML-quoting helper, which throws on `"`, `\` and characters U+0000–001F and U+007F.
 - `codexCommand(raw: string, parsed: readonly string[] | null): string | null`, in `guard.ts`. It returns the shell script a command approval will run, or `null`, which means decline.
@@ -82,18 +82,19 @@ Each is pinned by a test in the named step.
   - `parsed` is `params.proposedExecpolicyAmendment`. When it is `[shell, "-lc", s]`, `s` must equal the script. When it is a plain argv, its words must equal the script split by the same parser. Any mismatch returns `null`.
 - `codexApproval(req: { method: string; params: unknown }, paths: readonly string[] | undefined, ctx: CodexApprovalContext): GuardEvent[] | null`, in `guard.ts`. It maps an approval request to the guard events to check, or returns `null` (decline) unless all of these hold:
   - **Command approval:** `kind === "command"`, `command !== null`, `networkApprovalContext` and `environmentId` are absent or `null`/`"local"`, `realpath(cwd)` is inside `ctx.cwd`, and `codexCommand` succeeds. It yields `[{ tool: "Bash", input: { command: script } }]`.
-  - **File-change approval:** `grantRoot` is null and `paths` is known. It yields one `{ tool: "Edit", input: { file_path } }` per path.
+  - **File-change approval:** `grantRoot` is absent or null and `paths` is known and nonempty. It yields one `{ tool: "Edit", input: { file_path } }` per path.
   - **Any other method:** `null`.
-- `codexCommandAllowed(script: string, mode: CrewMode, commands: SeatCommands, cwd: string): boolean`, in `guard.ts`.
-  - It parses the script with the guard's existing `lineCommands` walker. It refuses on anything that walker flags as unreadable, and on any substitution, background (`&`), or redirect to a file.
+- `codexCommandAllowed(script: string, mode: CrewMode, commands: SeatCommands, approvalCwd: string, root: string): boolean`, in `guard.ts`.
+  - It parses the script with the guard's existing `lineCommands` walker. It refuses on anything that walker flags as unreadable, and on any substitution, unquoted `=` at the start of a word (zsh EQUALS expansion), background (`&`), or redirect to a file.
   - Every argv must token-prefix-match an entry from the right list:
     - **writer:** `commands.writer` plus `GIT_READ_TOOLS`;
     - **read-only and scratch:** `commands.review` plus `GIT_READ_TOOLS`;
-    - **plus a fixed read set:** `ls`, `cat`, `head`, `tail`, `wc`, `rg`, `grep`, `sed -n`, `find` without `-exec`/`-delete`, `diff` and `stat`, whose path operands are checked by `codexReadAllowed`.
+    - **plus a fixed read set:** `ls`, `cat`, `head`, `tail`, `wc`, `rg`, `grep`, `sed -n`, `find` without `-exec`/`-delete`, `diff` and `stat`, whose path operands are resolved against `approvalCwd` and checked by `codexReadAllowed(path, root)`. The approval cwd must resolve inside the seat worktree `root`, otherwise decline. For `rg` and `grep`, pre-scan for pattern options so every positional is checked as a path when any explicit pattern option is present.
   - The repo's commands are picked exactly as `crewCliArgs` picks them. `DENIED_TOOLS` still apply.
 - `codexReadAllowed(path: string, cwd: string): boolean`: `realpath` (or the nearest existing parent's) is inside `realpath(cwd)`, so a Codex seat reads only what a Claude seat's `--restricted` Read could. The OS profile still denies the credential paths on top.
 - `codexEditAllowed(path: string, cwd: string, area: readonly string[], protectedFiles: readonly string[]): boolean`:
   - the realpath of the path, or of its nearest existing parent, is inside `realpath(cwd)`;
+  - `"."` and `""` are refused; for an absolute path, compute its relative path against `realpath(cwd)`;
   - the relative path has no `..`;
   - `pathInArea(area, rel)` holds;
   - `!isProtectedPath(rel, protectedFiles)` holds;
@@ -193,13 +194,13 @@ Each is pinned by a test in the named step.
   - **`launch()`** picks the driver by the seat's account vendor. `claude` keeps today's path exactly. For `codex`:
     - **Binary:** `deps.codexCommand ?? "codex"`.
     - **Version:** checked with `codex --version` against `CODEX_MIN_VERSION = "0.154.0"`. Older or unreadable refuses with `CANNOT_START`.
-    - **Shell:** fixed to `/bin/zsh`, by setting `SHELL=/bin/zsh` in the app-server's env. The same constant feeds `codexCommand`'s word-1 check.
+    - **Shell:** fixed to `/bin/zsh`, by setting `SHELL=/bin/zsh` in the app-server's env. The same constant feeds `codexCommand`'s word-1 check. Point `ZDOTDIR` at an empty directory so `zsh -l` loads no operator startup files.
     - **Args:** `["app-server", "-c", 'mc_run="<runId>"']`.
-    - **Env:** `CODEX_HOME=<run dir>/codex-home`, `MC_SEAT_TOKEN`, `SHELL`, and `crewEnv`'s keys without the `CLAUDE_*` ones. `TMPDIR`, the pnpm store and the Python caches point at the seat's temp dir.
-    - **Run folder:** written before spawn, 0700. It holds `config.toml` from `codexSeatConfig` and `auth.json` copied from `~/.codex/auth.json` at 0600, and is removed when the run ends.
+    - **Env:** `CODEX_HOME=<run dir>/codex-home`, `MC_SEAT_TOKEN`, `SHELL`, `ZDOTDIR=<run dir>/zsh-empty`, and `crewEnv`'s keys without the `CLAUDE_*` ones. `TMPDIR`, the pnpm store and the Python caches point at the seat's temp dir.
+    - **Run folder:** written before spawn, 0700. It holds `config.toml` from `codexSeatConfig`, with `features.shell_snapshot = false`, and `auth.json` copied from `~/.codex/auth.json` at 0600. Create the empty `zsh-empty` directory there before spawn. The run folder is removed when the run ends.
   - **`approve`** runs four checks in order:
     1. `codexApproval`;
-    2. for commands, `codexCommandAllowed`;
+    2. for commands, `codexCommandAllowed`, passing the approval request's cwd and the seat worktree root;
     3. for edits, `codexEditAllowed`;
     4. then `crewGuardDecision` (`apps/server/src/guard/decision.ts`) for each event, passing `superuserTools` and `seatGrants` as `api.ts` does for the hook.
 
@@ -231,7 +232,8 @@ Each is pinned by a test in the named step.
   - a denied-path read from a script fails;
   - loopback to the hub's port fails;
   - `env` shows no `MC_SEAT_TOKEN`;
-  - `git commit` and `sleep 1 &` are declined.
+  - `git commit` and `sleep 1 &` are declined;
+  - check whether unified exec is actually off with `unified_exec = false`, and record the result. On 0.154 the setting does not take effect; background commands and `writeStdin` must still be declined.
 
   Record the results in the PR.
 - [ ] **Commit:** `feat(#426): a Codex crew seat starts confined and reports its stream`.

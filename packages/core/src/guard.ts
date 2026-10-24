@@ -615,7 +615,8 @@ class Reader {
     for (let i = from; i < s.length; i++) {
       const c = s.charAt(i);
       const next = s.charAt(i + 1);
-      if (this.walk.codex && "$`*?[]~{}()".includes(c)) throw new Unreadable();
+      if (this.walk.codex && ("$`*?[]~{}()".includes(c) || (c === "=" && word === null)))
+        throw new Unreadable();
       if (c === "'") {
         const end = s.indexOf("'", i + 1);
         if (end === -1) throw new Unreadable();
@@ -1188,13 +1189,20 @@ export function codexEditAllowed(
   area: readonly string[],
   protectedFiles: readonly string[],
 ): boolean {
+  if (path === "" || path === ".") return false;
   const real = codexRelativePath(path, cwd);
-  const rel = relative(cwd, isAbsolute(path) ? path : resolve(cwd, path));
-  return (
-    real !== null &&
-    !rel.split("/").includes("..") &&
-    [rel, real].every((p) => pathInArea(area, p) && !isProtectedPath(p, protectedFiles))
-  );
+  if (real === null || real === "") return false;
+  try {
+    const rel = isAbsolute(path)
+      ? relative(realpathSync(cwd), path)
+      : relative(cwd, resolve(cwd, path));
+    return (
+      !rel.split("/").includes("..") &&
+      [rel, real].every((p) => pathInArea(area, p) && !isProtectedPath(p, protectedFiles))
+    );
+  } catch {
+    return false;
+  }
 }
 
 export interface CodexApprovalContext {
@@ -1211,7 +1219,7 @@ export function codexApproval(
     return null;
   const p = req.params as Record<string, unknown>;
   if (req.method === "item/fileChange/requestApproval") {
-    if (p.grantRoot !== null || paths === undefined) return null;
+    if (p.grantRoot != null || paths === undefined || paths.length === 0) return null;
     return paths.map((file_path) => ({ tool: "Edit", input: { file_path } }));
   }
   if (
@@ -1390,13 +1398,53 @@ const CODEX_READ_COMMANDS: Readonly<Record<string, ReadOptions>> = {
   },
 };
 
-/** Check file operands, including option values that read pattern files. */
-function codexReadCommand(argv: readonly string[], cwd: string): boolean {
+/** A known valued option, with its inline value or a value still owed by the next word. */
+function codexReadOption(
+  word: string,
+  spec: ReadOptions,
+): { kind: ReadOption; value: string | undefined } | null {
+  if (!word.startsWith("-")) return null;
+  const exact = spec.values?.[word];
+  if (exact !== undefined) return { kind: exact, value: undefined };
+  if (word.startsWith("--")) {
+    const equal = word.indexOf("=");
+    const kind = spec.values?.[equal === -1 ? word : word.slice(0, equal)];
+    return kind === undefined
+      ? null
+      : { kind, value: equal === -1 ? undefined : word.slice(equal + 1) };
+  }
+  const cluster = clusterValue(word, Object.keys(spec.values ?? {}));
+  if (cluster === null) return null;
+  const at = word.indexOf(cluster.letter, 1);
+  if (![...word.slice(1, at)].every((c) => spec.flags.includes(`-${c}`))) return null;
+  const kind = spec.values?.[`-${cluster.letter}`];
+  return kind === undefined ? null : { kind, value: cluster.inline || undefined };
+}
+
+/** Explicit patterns apply to all positionals, even those before the option. */
+function codexPositionalPattern(argv: readonly string[], spec: ReadOptions): boolean {
+  if (!spec.pattern) return false;
+  for (let i = 1; i < argv.length; i++) {
+    const word = argv[i];
+    if (word === "--") break;
+    if (word === "--files") return false;
+    const option = codexReadOption(word, spec);
+    if (option === null) continue;
+    if (option.kind === "pattern" || option.kind === "path") return false;
+    if (option.value === undefined) i++;
+  }
+  return true;
+}
+
+/** Check file operands relative to the approved cwd, confined to the seat's worktree. */
+function codexReadCommand(argv: readonly string[], approvalCwd: string, root: string): boolean {
   const program = argv[0];
   const spec = CODEX_READ_COMMANDS[program];
-  if (spec === undefined || !codexReadAllowed(".", cwd)) return false;
+  if (spec === undefined) return false;
+  const allowedPath = (path: string) =>
+    codexReadAllowed(isAbsolute(path) ? path : `${approvalCwd}/${path}`, root);
   if (program === "find" && argv.some((w) => FIND_EXEC.has(w) || w === "-delete")) return false;
-  let pattern = spec.pattern === true && !argv.includes("--files");
+  let pattern = codexPositionalPattern(argv, spec);
   let options = true;
   let sedScript = program === "sed";
   if (sedScript && argv[1] !== "-n") return false;
@@ -1411,25 +1459,12 @@ function codexReadCommand(argv: readonly string[], cwd: string): boolean {
       options &&
       ((word.startsWith("-") && word !== "-") || (program === "find" && spec.flags.includes(word)))
     ) {
-      const equal = word.indexOf("=");
-      const name = equal === -1 ? word : word.slice(0, equal);
-      let kind = spec.values?.[name];
-      let value = equal === -1 ? undefined : word.slice(equal + 1);
-      if (kind === undefined && equal === -1 && word.startsWith("-") && !word.startsWith("--")) {
-        const cluster = clusterValue(word, Object.keys(spec.values ?? {}));
-        if (cluster !== null) {
-          const at = word.indexOf(cluster.letter, 1);
-          if (![...word.slice(1, at)].every((c) => spec.flags.includes(`-${c}`))) return false;
-          kind = spec.values?.[`-${cluster.letter}`];
-          value = cluster.inline || undefined;
-        }
-      }
-      if (kind !== undefined) {
-        value ??= argv[++i];
-        if (value === undefined || (kind === "path" && !codexReadAllowed(value, cwd))) return false;
-        if (kind === "pattern" || (kind === "path" && spec.pattern)) pattern = false;
+      const option = codexReadOption(word, spec);
+      if (option !== null) {
+        const value = option.value ?? argv[++i];
+        if (value === undefined || (option.kind === "path" && !allowedPath(value))) return false;
       } else if (
-        equal !== -1 ||
+        word.includes("=") ||
         (!spec.flags.includes(word) &&
           !(
             word.startsWith("-") &&
@@ -1443,7 +1478,7 @@ function codexReadCommand(argv: readonly string[], cwd: string): boolean {
       if (!/^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(word)) return false;
       sedScript = false;
     } else if (pattern) pattern = false;
-    else if (word !== "-" && !codexReadAllowed(word, cwd)) return false;
+    else if (word !== "-" && !allowedPath(word)) return false;
   }
   return !pattern && !sedScript;
 }
@@ -1463,7 +1498,8 @@ export function codexCommandAllowed(
   script: string,
   mode: CrewMode,
   commands: SeatCommands,
-  cwd: string,
+  approvalCwd: string,
+  root: string,
 ): boolean {
   if (
     [...script].some(
@@ -1472,7 +1508,11 @@ export function codexCommandAllowed(
   )
     return false;
   let allowed: readonly string[];
+  let cwd: string;
   try {
+    if (!isAbsolute(approvalCwd)) return false;
+    cwd = realpathSync(approvalCwd);
+    if (!codexReadAllowed(cwd, root)) return false;
     allowed = seatCommands(mode, commands);
   } catch {
     return false;
@@ -1484,7 +1524,7 @@ export function codexCommandAllowed(
   return parsed.every(({ argv, background, braces }) => {
     if (background || braces || DENIED_TOOLS.some((entry) => codexBashEntry(argv, entry)))
       return false;
-    if (Object.hasOwn(CODEX_READ_COMMANDS, argv[0])) return codexReadCommand(argv, cwd);
+    if (Object.hasOwn(CODEX_READ_COMMANDS, argv[0])) return codexReadCommand(argv, cwd, root);
     return (
       GIT_READ_TOOLS.some((entry) => codexBashEntry(argv, entry)) ||
       allowed.some((entry) => {

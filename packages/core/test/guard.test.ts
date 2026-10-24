@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -172,6 +172,131 @@ describe("Codex seat floor", () => {
     }
   });
 
+  it("accepts an omitted grantRoot but declines an empty file-change list", () => {
+    const req = { method: "item/fileChange/requestApproval", params: {} };
+    expect(codexApproval(req, ["apps/web/a.ts"], { cwd })).toEqual([
+      { tool: "Edit", input: { file_path: "apps/web/a.ts" } },
+    ]);
+    expect(codexApproval(req, [], { cwd })).toBeNull();
+    expect(codexApproval({ ...req, params: { grantRoot: null } }, [], { cwd })).toBeNull();
+  });
+
+  it.each(["rg", "grep"])(
+    "checks every %s positional when a later option supplies the pattern",
+    (program) => {
+      for (const option of [
+        "-e .",
+        "--regexp .",
+        "--regexp=.",
+        "-e.",
+        "-e=.",
+        "-ie .",
+        "-ie.",
+        "-ie=.",
+        "-f apps/web/a.ts",
+        "--file apps/web/a.ts",
+        "--file=apps/web/a.ts",
+        "-fapps/web/a.ts",
+        "-if apps/web/a.ts",
+        "-ifapps/web/a.ts",
+        "-f=patterns",
+        "-if=patterns",
+      ]) {
+        for (const path of ["../x", "/etc/passwd", "../x __proto__", "../x constructor"]) {
+          const script = `${program} ${path} ${option}`;
+          expect(
+            codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd),
+            script,
+          ).toBe(false);
+        }
+        const script = `${program} apps/web/a.ts ${option}`;
+        expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd), script).toBe(
+          true,
+        );
+      }
+      expect(
+        codexCommandAllowed(
+          `${program} /etc/passwd -e root`,
+          "writer",
+          DEFAULT_SEAT_COMMANDS,
+          cwd,
+          cwd,
+        ),
+      ).toBe(false);
+      expect(
+        codexCommandAllowed(
+          `${program} -- ../pattern -e`,
+          "writer",
+          DEFAULT_SEAT_COMMANDS,
+          cwd,
+          cwd,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("distinguishes option values from options in the pattern pre-scan", () => {
+    expect(
+      codexCommandAllowed("rg -g -e ../pattern apps", "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd),
+    ).toBe(true);
+    expect(
+      codexCommandAllowed(
+        "rg -g --files ../pattern apps",
+        "writer",
+        DEFAULT_SEAT_COMMANDS,
+        cwd,
+        cwd,
+      ),
+    ).toBe(true);
+  });
+
+  it("resolves relative reads from the approval cwd and confines every command to the root", () => {
+    const approvalCwd = join(cwd, "apps/web");
+    symlinkSync(join(root, "outside"), join(approvalCwd, "escape"));
+    for (const script of ["cat a.ts", "cat ../web/a.ts", "rg . ../../apps", "rg -f a.ts ."]) {
+      expect(
+        codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, approvalCwd, cwd),
+        script,
+      ).toBe(true);
+    }
+    for (const script of [
+      "cat escape/secret",
+      "cat ../../../outside/secret",
+      "rg -f escape/patterns .",
+      "grep . --file=escape/patterns",
+    ]) {
+      expect(
+        codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, approvalCwd, cwd),
+        script,
+      ).toBe(false);
+    }
+    for (const approvalCwd of [
+      join(root, "outside"),
+      join(cwd, "escape"),
+      join(cwd, "missing"),
+      "apps/web",
+    ]) {
+      for (const script of ["ls", "git status", "pnpm -s test"]) {
+        expect(
+          codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, approvalCwd, cwd),
+          script,
+        ).toBe(false);
+      }
+    }
+    expect(
+      codexCommandAllowed("cat a.ts", "writer", DEFAULT_SEAT_COMMANDS, join(cwd, "inside"), cwd),
+    ).toBe(true);
+  });
+
+  it("refuses zsh EQUALS expansion while allowing quoted or escaped equals", () => {
+    expect(codexCommandAllowed("cat =zsh", "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd)).toBe(false);
+    for (const script of ["cat '=zsh'", 'cat "=zsh"', "cat \\=zsh", "cat a=zsh"]) {
+      expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd), script).toBe(
+        true,
+      );
+    }
+  });
+
   it("allows configured commands by mode, git reads and confined read commands", () => {
     for (const script of [
       "pnpm -s test",
@@ -194,19 +319,23 @@ describe("Codex seat floor", () => {
       "cat <<'E'\nline1\nE",
       "cat apps/web/a.ts | grep foo",
     ]) {
-      expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd), script).toBe(true);
+      expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd), script).toBe(
+        true,
+      );
     }
     for (const mode of ["read-only", "scratch"] as const) {
-      expect(codexCommandAllowed("pnpm -s test", mode, DEFAULT_SEAT_COMMANDS, cwd)).toBe(false);
+      expect(codexCommandAllowed("pnpm -s test", mode, DEFAULT_SEAT_COMMANDS, cwd, cwd)).toBe(
+        false,
+      );
       expect(
-        codexCommandAllowed("pnpm -s vitest run a.test.ts", mode, DEFAULT_SEAT_COMMANDS, cwd),
+        codexCommandAllowed("pnpm -s vitest run a.test.ts", mode, DEFAULT_SEAT_COMMANDS, cwd, cwd),
       ).toBe(true);
     }
     const custom = { writer: ["make check"], review: ["make inspect"] };
-    expect(codexCommandAllowed("make check unit", "writer", custom, cwd)).toBe(true);
-    expect(codexCommandAllowed("pnpm -s test", "writer", custom, cwd)).toBe(false);
-    expect(codexCommandAllowed("make checkmate", "writer", custom, cwd)).toBe(false);
-    expect(codexCommandAllowed("make inspect", "scratch", custom, cwd)).toBe(true);
+    expect(codexCommandAllowed("make check unit", "writer", custom, cwd, cwd)).toBe(true);
+    expect(codexCommandAllowed("pnpm -s test", "writer", custom, cwd, cwd)).toBe(false);
+    expect(codexCommandAllowed("make checkmate", "writer", custom, cwd, cwd)).toBe(false);
+    expect(codexCommandAllowed("make inspect", "scratch", custom, cwd, cwd)).toBe(true);
   });
 
   it("declines substitutions, background work, file redirection and allowlist escapes", () => {
@@ -256,7 +385,9 @@ describe("Codex seat floor", () => {
       "git show --output=out",
       "",
     ])
-      expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd), script).toBe(false);
+      expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd), script).toBe(
+        false,
+      );
   });
 
   it("keeps denies and read path checks even for a custom command", () => {
@@ -268,7 +399,7 @@ describe("Codex seat floor", () => {
             ? "find . -delete"
             : `${command} x`;
       expect(
-        codexCommandAllowed(script, "writer", { writer: [command], review: [] }, cwd),
+        codexCommandAllowed(script, "writer", { writer: [command], review: [] }, cwd, cwd),
         script,
       ).toBe(false);
     }
@@ -298,6 +429,18 @@ describe("Codex seat floor", () => {
     symlinkSync(join(cwd, "package.json"), join(cwd, "apps/web/alias.ts"));
     writeFileSync(join(cwd, "package.json"), "{}");
     expect(codexEditAllowed("apps/web/alias.ts", cwd, ["apps/web/**"], [])).toBe(false);
+  });
+
+  it("rejects edits of the root and checks absolute edits against a canonical cwd", () => {
+    for (const path of ["", ".", cwd]) {
+      expect(codexEditAllowed(path, cwd, [], []), path).toBe(false);
+    }
+    const alias = join(root, "worktree-alias");
+    symlinkSync(cwd, alias);
+    const path = join(realpathSync(cwd), "apps/web/a.ts");
+    expect(codexEditAllowed(path, alias, ["apps/web/**"], [])).toBe(true);
+    expect(codexEditAllowed(path, alias, ["other/**"], [])).toBe(false);
+    expect(codexEditAllowed(path, alias, [], ["apps/web/a.ts"])).toBe(false);
   });
 });
 

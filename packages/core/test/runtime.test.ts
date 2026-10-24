@@ -88,7 +88,8 @@ describe("codexSeatConfig", () => {
     expect(config).toContain('approvals_reviewer = "user"');
     expect(config).toContain("project_doc_max_bytes = 0");
     // codex-cli 0.154.0 generate-json-schema: Config.web_search → WebSearchMode.disabled.
-    // Config permits extra keys; `codex features list` confirms features.unified_exec.
+    // Config permits extra keys; features.unified_exec is listed but false does not take effect
+    // on 0.154.0. Keep the harmless key; refusing & and declining writeStdin enforce the floor.
     expect(config).toContain('web_search = "disabled"');
     expect(config).toContain("[features]\nunified_exec = false");
     expect(config).toContain('[shell_environment_policy]\nexclude = ["MC_SEAT_TOKEN"]');
@@ -108,11 +109,44 @@ describe("codexSeatConfig", () => {
     expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
   });
 
-  it.each(["read-only", "scratch"] as const)("keeps the %s workspace read-only", (mode) => {
-    const config = codexSeatConfig(base.sandbox, mode, url, tmp);
+  it("keeps the read-only workspace read-only", () => {
+    const config = codexSeatConfig(base.sandbox, "read-only", url, tmp);
     expect(config).toContain('"."="read"');
     expect(config).toContain(`"${tmp}"="write"`);
     expect(config).not.toContain('"."="write"');
+  });
+
+  it("lets a scratch seat write its throwaway worktree", () => {
+    expect(codexSeatConfig(base.sandbox, "scratch", url, tmp)).toContain('"."="write"');
+  });
+
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "explicitly keeps both git dirs read-only for %s",
+    (mode) => {
+      const sandbox = {
+        ...base.sandbox,
+        gitCommonDir: `${tmp}/clone/.git`,
+        worktreeGitDir: `${tmp}/clone/.git/worktrees/seat`,
+      };
+      const config = codexSeatConfig(sandbox, mode, url, `${tmp}/temp`);
+      expect(config).toContain(`"${sandbox.gitCommonDir}"="read"`);
+      expect(config).toContain(`"${sandbox.worktreeGitDir}"="read"`);
+    },
+  );
+
+  it.each([
+    "/",
+    "/home",
+    base.sandbox.home,
+    "/mc",
+    base.sandbox.cwd,
+    base.sandbox.gitCommonDir,
+    base.sandbox.worktreeGitDir,
+    "/mc/clone",
+    "/mc/clone/.git/worktrees",
+    "/tmp/..",
+  ])("rejects a temp dir containing a seat or operator path: %s", (tmpDir) => {
+    expect(() => codexSeatConfig(base.sandbox, "writer", url, tmpDir)).toThrow();
   });
 
   it("includes additional denies once", () => {
