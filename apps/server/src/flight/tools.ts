@@ -86,6 +86,7 @@ import {
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
+  FLIGHT_POWERS,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
   FLIGHT_PROMOTES_PER_HOUR,
@@ -102,6 +103,7 @@ import {
   type FlightDecision,
   type FlightDecisionKind,
   type FlightMoveColumn,
+  type FlightPowers,
   type FlightPrRead,
   GITHUB_WRITES_OFF,
   HUD_COLUMNS,
@@ -135,6 +137,7 @@ import {
   NEW_LOOP,
   NOT_ON_BOARD,
   needsPlanText,
+  needsSuperuserText,
   noOpenQuestionText,
   notAcceptedText,
   notDevRunText,
@@ -175,6 +178,7 @@ import {
   READ_OTHER_REPO,
   READ_PR_DESCRIPTION,
   READY_LABEL,
+  type RepoId,
   type RepoRules,
   RUN_ID_NEEDS_UNPARK,
   type Run,
@@ -221,7 +225,7 @@ import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -514,6 +518,18 @@ const SEAT_SCHEMA = {
   pattern: SEAT_ID.source,
   description: "The seat (e.g. guido-1).",
 };
+
+/**
+ * What a FLIGHT tool checks, against the config as it is now: null when the repo has at least
+ * `need`, else the refusal to give. Read per call, so a lowered repo loses its tools at once.
+ * A tool acting on another repo must check that target repo's powers, not its own seat's repo.
+ */
+export function requirePowers(config: CcConfig, repoId: RepoId, need: FlightPowers): Result | null {
+  if (FLIGHT_POWERS.indexOf(flightPowersOf(config, repoId)) >= FLIGHT_POWERS.indexOf(need))
+    return null;
+  const github = config.repos.find((r) => r.id === repoId)?.github;
+  return { text: needsSuperuserText(github ?? repoId), isError: true };
+}
 
 /** The seat row holds no unended run, and `busy` (in-memory starts and turns) does not name it. */
 export function seatFree(store: Store, busy: readonly SeatBusy[], seatId: string): boolean {

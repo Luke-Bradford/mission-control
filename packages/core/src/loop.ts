@@ -1145,7 +1145,7 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
   const loop: RunLoop = {
     ...step.loop,
     parked: parked === null ? null : { ...parked },
-    touches: touches === null ? null : { sha: touches.sha, paths: [...touches.paths] },
+    touches: touches === null ? null : { ...touches, paths: [...touches.paths] },
     ...(aside ? { aside: { ...aside } } : {}),
     ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
     ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),

@@ -74,6 +74,7 @@ import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
+import * as views from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 const HOUR = 3600e3;
@@ -112,6 +113,7 @@ let updaterResult: () => Promise<{ upToDate: true } | { restarting: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
 const stubUpdater = (): Updater => ({
+  changes: async () => null,
   version: async () => {
     updaterCalls.push("version");
     return updaterVersion;
@@ -632,6 +634,7 @@ describe("add a repo (POST /api/repos)", () => {
       commands: DEFAULT_SEAT_COMMANDS,
       protectedFiles: [],
       autonomy: "draft",
+      flightPowers: "standard",
     });
     expect(events).toContain("config");
     expect(events).toContain("boards");
@@ -646,6 +649,7 @@ describe("add a repo (POST /api/repos)", () => {
       { statusMap: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`s${i}`, "done"])) },
     ],
     ["an extra key", { path: "/etc/passwd" }],
+    ["flightPowers (only the config file sets it)", { flightPowers: "superuser" }],
   ])("400 for %s, nothing written", async (_name, over) => {
     const r = await postBody("/api/repos", { ...NEW_REPO, ...over });
     expect(r.statusCode).toBe(400);
@@ -2570,6 +2574,36 @@ describe("boards, escalations, health", () => {
 });
 
 describe("activity", () => {
+  it("takes an exclusive since timestamp and an optional limit", async () => {
+    store.upsertRun(run({ startedAt: NOW - 3000, endedAt: NOW - 1000, status: "ok" }));
+    const delta = (await get(`/api/activity?since=${NOW - 3000}`)).json() as ActivityEvent[];
+    expect(delta.map((r) => r.at)).toEqual([NOW - 1000]);
+    expect((await get("/api/activity?limit=1")).json()).toHaveLength(1);
+    expect((await get(`/api/activity?since=${NOW}`)).json()).toEqual([]);
+    for (const query of ["since=no", "since=-1", "since=1.5", "limit=0", "limit=no"]) {
+      expect((await get(`/api/activity?${query}`)).statusCode).toBe(400);
+    }
+  });
+
+  it("reuses slow responses until a topic changes or ten seconds pass", async () => {
+    for (const path of ["/api/telemetry", "/api/attention", "/api/config"]) {
+      const spy =
+        path === "/api/config" ? vi.spyOn(views, "configView") : vi.spyOn(store, "runsOverlapping");
+      await get(path);
+      spy.mockClear();
+      await get(path);
+      expect(spy, path).not.toHaveBeenCalled();
+      bus.emit("agents");
+      await get(path);
+      expect(spy, path).toHaveBeenCalled();
+      spy.mockClear();
+      clock += 10_000;
+      await get(path);
+      expect(spy, path).toHaveBeenCalled();
+      spy.mockRestore();
+    }
+  });
+
   it("lists run starts/ends, new escalations and failing collectors from the last 24h, newest first", async () => {
     store.upsertRun(
       run({
@@ -3216,6 +3250,33 @@ describe("SSE stream", () => {
     expect(bus.size).toBe(1); // the notification subscriber lives until app.close()
     await app.close();
     expect(bus.size).toBe(0);
+  });
+
+  it("batches machine pushes to one event per ten seconds and cancels on close", async () => {
+    const s = await open();
+    await s.until(": connected");
+    const write = vi.spyOn(s.res.raw.res, "write");
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < 30; i++) bus.emit("machine");
+      expect(
+        write.mock.calls.filter(([chunk]) => String(chunk).includes('"machine"')),
+      ).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(
+        write.mock.calls.filter(([chunk]) => String(chunk).includes('"machine"')),
+      ).toHaveLength(1);
+      bus.emit("machine");
+      bus.emit("boards");
+      expect(write.mock.calls.some(([chunk]) => String(chunk).includes('"boards"'))).toBe(true);
+      s.res.raw.res.emit("close");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(
+        write.mock.calls.filter(([chunk]) => String(chunk).includes('"machine"')),
+      ).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("app.close() ends open streams", async () => {

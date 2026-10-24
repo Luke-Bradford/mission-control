@@ -226,6 +226,7 @@ export const Card = memo(function Card({
       </div>
       <a
         className="ktitle"
+        title={item.title}
         href={to}
         onClick={(e) => followLink(e, to)}
         onKeyDown={(e) => {
@@ -242,10 +243,15 @@ export const Card = memo(function Card({
       {item.labels.length > 0 && (
         <div className="labels">
           {item.labels.slice(0, MAX_LABELS).map((l) => (
-            <span key={l} className="lb">
+            <span key={l} className="lb" title={l}>
               {l}
             </span>
           ))}
+          {item.labels.length > MAX_LABELS && (
+            <span className="lb" title={item.labels.join(", ")}>
+              +{item.labels.length - MAX_LABELS}
+            </span>
+          )}
         </div>
       )}
       {overlay.length > 0 && <div className="overlay">{overlay}</div>}

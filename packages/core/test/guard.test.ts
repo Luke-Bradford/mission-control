@@ -24,8 +24,18 @@ import {
 import { MC_TOOLS } from "../src/mcp.ts";
 
 const FULL = ["pnpm -s test", "pnpm -s vitest run", "pnpm -s vitest"];
-const writer: GuardContext = { mode: "writer", repo: "dev", fullSuite: FULL };
-const readOnly: GuardContext = { mode: "read-only", repo: "dev", fullSuite: FULL };
+const writer: GuardContext = {
+  mode: "writer",
+  repo: "dev",
+  flightPowers: "standard",
+  fullSuite: FULL,
+};
+const readOnly: GuardContext = {
+  mode: "read-only",
+  repo: "dev",
+  flightPowers: "standard",
+  fullSuite: FULL,
+};
 const bash = (command: string, extra: Partial<GuardEvent["input"]> = {}): GuardEvent => ({
   tool: "Bash",
   input: { command, ...extra },
@@ -36,7 +46,12 @@ const ruleOf = (e: GuardEvent, ctx = writer) => {
 };
 
 describe("scratch mode", () => {
-  const scratch: GuardContext = { mode: "scratch", repo: "dev", fullSuite: ["pnpm -s test"] };
+  const scratch: GuardContext = {
+    mode: "scratch",
+    repo: "dev",
+    flightPowers: "standard",
+    fullSuite: ["pnpm -s test"],
+  };
 
   it("scratch: edits allowed, commit and suite denied", () => {
     expect(guardDecision({ tool: "Edit", input: { file_path: "/w/a.ts" } }, scratch)).toEqual({
@@ -70,6 +85,19 @@ describe("scratch mode", () => {
       kind: "allow",
     });
   });
+
+  it("a superuser-only tool is denied on a standard repo and allowed on a superuser one", () => {
+    const e = { tool: "mcp__mc__promote", input: {} };
+    expect(guardDecision(e, writer, ["promote"])).toEqual({
+      kind: "deny",
+      rule: "flight-powers",
+      text: `${GUARD_RULES["flight-powers"]}: mcp__mc__promote (needs flight_powers: superuser)`,
+    });
+    expect(guardDecision(e, { ...writer, flightPowers: "superuser" }, ["promote"])).toEqual({
+      kind: "allow",
+    });
+    expect(guardDecision(e, writer)).toEqual({ kind: "allow" });
+  });
 });
 
 describe("GUARD_RULES", () => {
@@ -84,7 +112,10 @@ describe("GUARD_RULES", () => {
     );
     expect(GUARD_RULES.network).toBe("No network from a crew's commands");
     expect(GUARD_RULES.secret).toBe("No secrets in a push");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(7);
+    expect(GUARD_RULES["flight-powers"]).toBe(
+      "Only repos with flight_powers: superuser may use these tools",
+    );
+    expect(Object.keys(GUARD_RULES)).toHaveLength(8);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
@@ -1428,7 +1459,12 @@ describe("guard targeted fix 3 (Plan 7a review): vitest arguments after --", () 
     expect(ruleOf(bash(c))).toBe("allow");
   });
   describe("a repo's own suite command", () => {
-    const py: GuardContext = { mode: "writer", repo: "dev", fullSuite: ["uv run pytest"] };
+    const py: GuardContext = {
+      mode: "writer",
+      repo: "dev",
+      flightPowers: "standard",
+      fullSuite: ["uv run pytest"],
+    };
     it.each([
       "uv run pytest tests/unit",
       "uv run pytest ./tests",
@@ -1951,7 +1987,12 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
   });
 
   it("locks a full suite spelled with a brace word", () => {
-    const ctx: GuardContext = { mode: "writer", repo: "dev", fullSuite: ["pnpm -s test"] };
+    const ctx: GuardContext = {
+      mode: "writer",
+      repo: "dev",
+      flightPowers: "standard",
+      fullSuite: ["pnpm -s test"],
+    };
     const lock = { kind: "lock", command: "pnpm -s test" };
     expect(guardDecision(bash("pnpm -s {test,}"), ctx)).toEqual(lock);
     expect(guardDecision(bash("pnpm -s test{,}"), ctx)).toEqual(lock);

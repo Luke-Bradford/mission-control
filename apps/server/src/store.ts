@@ -767,6 +767,11 @@ export class Store {
     this.migrate();
   }
 
+  /** Cache token for local writes and commits made by another SQLite connection. */
+  readVersion(): string {
+    return `${this.db.prepare("SELECT total_changes() AS n").get()?.n}:${this.db.prepare("PRAGMA data_version").get()?.data_version}`;
+  }
+
   private closed = false;
 
   /** Closes the database; the store is unusable after. Closing again does nothing. */

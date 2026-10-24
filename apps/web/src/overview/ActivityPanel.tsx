@@ -10,6 +10,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useTz } from "../clock.ts";
 import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
+import { Expandable } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
@@ -237,10 +238,12 @@ export function ActivityPanel() {
               <div key={key} className="arow k-comms">
                 <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
                 <span className="g">{GLYPH.comms}</span>
-                <span className="txt">
-                  <CommsEnd id={e.who} /> <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
-                  <MentionText text={e.text} />
-                </span>
+                <Expandable lines={2}>
+                  <span className="txt">
+                    <CommsEnd id={e.who} /> <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
+                    <MentionText text={e.text} />
+                  </span>
+                </Expandable>
                 {e.ref ? (
                   <span className="arefs">
                     <TicketRef ticket={e.ref} url={null} />
@@ -261,19 +264,21 @@ export function ActivityPanel() {
             <div key={key} className={`arow ${KIND_CLASS[e.kind] ?? FALLBACK_CLASS}`}>
               <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
               <span className={red ? "g crit-t" : "g"}>{GLYPH[e.kind] ?? FALLBACK_GLYPH}</span>
-              <span className="txt">
-                {agent ? (
-                  <AgentTag id={agent.id} index={agent.index} sm />
-                ) : (
-                  <span className="muted">{e.who}</span>
-                )}{" "}
-                <ActivityText
-                  event={e}
-                  prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
-                  split={split}
-                  red={red}
-                />
-              </span>
+              <Expandable lines={2}>
+                <span className="txt">
+                  {agent ? (
+                    <AgentTag id={agent.id} index={agent.index} sm />
+                  ) : (
+                    <span className="muted">{e.who}</span>
+                  )}{" "}
+                  <ActivityText
+                    event={e}
+                    prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
+                    split={split}
+                    red={red}
+                  />
+                </span>
+              </Expandable>
               {e.ref || e.prs.length > 0 ? (
                 <span className="arefs">
                   {e.ref && !split && (

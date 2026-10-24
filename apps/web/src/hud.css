@@ -3639,3 +3639,38 @@ button.nrow.thread.tagged {
   width: 100%;
   min-width: 0;
 }
+
+.expandable {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.expandable-content {
+  line-height: 1.5;
+  min-width: 0;
+  overflow: hidden;
+}
+.expandable-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.expandable.open .expandable-content {
+  max-height: min(50vh, 24rem);
+  overflow: auto;
+}
+.expandable .expandable-text {
+  white-space: pre-wrap;
+}
+.expandable .sm {
+  margin-top: 4px;
+}
+#cHandled .nrow > div {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.dmsg:has(.expandable) {
+  grid-template-columns: minmax(0, 1fr);
+}

@@ -63,7 +63,7 @@ export function Toolbar({
           </button>
         ))}
       </div>
-      <span className="query">
+      <span className="query" title={lane.query}>
         <code>{lane.query}</code>
         <button
           type="button"

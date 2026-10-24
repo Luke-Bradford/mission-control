@@ -7,6 +7,7 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { Clamp } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { BUILD_LOOP_TEMPLATE, isLoopInFlight, runElapsed, runPrs } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -222,9 +223,9 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
                   onKeyDown={noChord}
                   onKeyUp={noChord}
                 >
-                  <span className="rtext">
+                  <Clamp className="rtext" lines={2} open={open.has(r.id)}>
                     <MarkdownInline text={r.summary} />
-                  </span>
+                  </Clamp>
                 </button>
               )}
             </div>

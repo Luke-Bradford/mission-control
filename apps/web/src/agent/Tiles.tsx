@@ -7,7 +7,7 @@ import {
   type LimitRow,
   type RunLoopView,
 } from "@mc/core";
-import { type ReactNode, useEffect, useRef } from "react";
+import { Children, isValidElement, type ReactNode, useEffect, useRef } from "react";
 import { useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import {
@@ -29,6 +29,24 @@ const DASH = "—";
 /** The mockup's `m:ss` reads badly past an hour (`160:48`); from there it is `2h 41m`. */
 const HOUR_MS = 3_600_000;
 
+const nodeText = (node: ReactNode): string =>
+  Children.toArray(node)
+    .map((child) =>
+      isValidElement<{ children?: ReactNode }>(child)
+        ? nodeText(child.props.children)
+        : String(child),
+    )
+    .join("");
+
+function Value({ children, className }: { children: ReactNode; className: string }) {
+  const text = nodeText(children);
+  return (
+    <span className={className} title={text}>
+      {children}
+    </span>
+  );
+}
+
 function Tile({
   label,
   className,
@@ -40,7 +58,9 @@ function Tile({
 }) {
   return (
     <div className={className ? `tile2 ${className}` : "tile2"}>
-      <span className="lbl">{label}</span>
+      <span className="lbl" title={label}>
+        {label}
+      </span>
       {children}
     </div>
   );
@@ -90,10 +110,10 @@ function SeatContext({ row }: { row: CrewRow }) {
       usage && window !== null && window > 0 ? (100 * usage.total) / window : contextPct(row);
     return (
       <Tile label="Context">
-        <span className="v num">
+        <Value className="v num">
           {pct === null ? DASH : `${Math.round(pct)}%`}
           {pct !== null && window !== null && <small> of {Math.round(window / 1000)}k</small>}
-        </span>
+        </Value>
         <span className={`ctxbar${meterLevel(pct)}`}>
           {pct !== null && <i style={{ width: `${Math.min(100, pct)}%` }} />}
         </span>
@@ -110,9 +130,9 @@ function SeatContext({ row }: { row: CrewRow }) {
     n > 0 && <i className={cls} style={{ width: `${Math.min(100, (100 * n) / window)}%` }} />;
   return (
     <Tile label="Context">
-      <span className="v num">
+      <Value className="v num">
         {Math.round(pct)}%<small> of {k(window)}k</small>
-      </span>
+      </Value>
       <span className="ctxbar seg">
         {seg("sys", s.system)}
         {seg("tools", s.tools)}
@@ -208,12 +228,12 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
         <SeatContext key={row.id} row={row} />
       ) : (
         <Tile label="Context">
-          <span className="v num">
+          <Value className="v num">
             {pct === null ? DASH : `${Math.round(pct)}%`}
             {pct !== null && row.contextWindow !== null && (
               <small> of {Math.round(row.contextWindow / 1000)}k</small>
             )}
-          </span>
+          </Value>
           <span className={`ctxbar${meterLevel(pct)}`}>
             {pct !== null && <i style={{ width: `${Math.min(100, pct)}%` }} />}
           </span>
@@ -223,7 +243,7 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
         </Tile>
       )}
       <Tile label="Tokens this run">
-        <span className="v num">{t ? kTokens(t.input + t.output) : DASH}</span>
+        <Value className="v num">{t ? kTokens(t.input + t.output) : DASH}</Value>
         <span className="d">
           {t
             ? `${kTokens(t.input)} in · ${kTokens(t.output)} out · ${hit === null ? DASH : `${Math.round(hit)}%`} cache hit`
@@ -231,26 +251,26 @@ export function Tiles({ row, limits, now }: { row: CrewRow; limits: LimitRow[]; 
         </span>
       </Tile>
       <Tile label="~Cost">
-        <span className="v num">
+        <Value className="v num">
           {cost(running ? (run?.costEstimateUsd ?? run?.costUsd ?? null) : (run?.costUsd ?? null))}
-        </span>
+        </Value>
         <span className="d">API-equivalent, this run</span>
       </Tile>
       <Tile label="Speed">
-        <span className="v num">
+        <Value className="v num">
           {typeof speed?.tokensPerSec === "number" ? Math.round(speed.tokensPerSec) : DASH}
           <small>tokens/s</small>
-        </span>
+        </Value>
         <span className="d">
           first token {typeof speed?.firstTokenMs === "number" ? dur(speed.firstTokenMs) : DASH} ·
           turn {typeof speed?.turnMs === "number" ? dur(speed.turnMs) : DASH}
         </span>
       </Tile>
       <Tile label="Work">
-        <span className="v num">
+        <Value className="v num">
           {d ? d.toolCalls : DASH}
           <small>tool calls</small>
-        </span>
+        </Value>
         <span className="d">
           {d || work ? (
             <>

@@ -273,21 +273,29 @@ export function Header({ row, limits, now }: { row: CrewRow; limits: LimitRow[];
         <span className="chips">
           {row.kind === "crew" ? (
             <>
-              <span>{row.role}</span>
-              <span>{row.mode}</span>
-              <span>s/{row.sessionId}</span>
+              <span title={row.role ?? undefined}>{row.role}</span>
+              <span title={row.mode ?? undefined}>{row.mode}</span>
+              <span title={`s/${row.sessionId}`}>s/{row.sessionId}</span>
             </>
           ) : (
             <>
-              <span>observed loop · {row.loopKind}</span>
-              <span>s/{row.repoId}</span>
+              <span title={`observed loop · ${row.loopKind}`}>observed loop · {row.loopKind}</span>
+              <span title={`s/${row.repoId}`}>s/{row.repoId}</span>
             </>
           )}
-          <span>
+          <span title={`${row.accountId} · ${modelLine(row)}`}>
             {row.accountId} · {modelLine(row)}
           </span>
-          {row.kind === "crew" && <span className="mono">area: {seatAreaText(row)}</span>}
-          {branch !== null && <span className="mono">{branch}</span>}
+          {row.kind === "crew" && (
+            <span className="mono" title={`area: ${seatAreaText(row)}`}>
+              area: {seatAreaText(row)}
+            </span>
+          )}
+          {branch !== null && (
+            <span className="mono" title={branch}>
+              {branch}
+            </span>
+          )}
         </span>
         <BuildChips panel="ahead" />
         <span className="ctl">
