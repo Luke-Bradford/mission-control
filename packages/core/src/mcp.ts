@@ -174,6 +174,12 @@ export const ASKED_OPERATOR =
 
 /** The hub's address: loopback only. The guard hook sends its token nowhere else. */
 export const LOOPBACK_HOST = "127.0.0.1";
+/** The header carrying the per-boot operator token on every mutating /api request. */
+export const OPERATOR_HEADER = "x-mc-operator";
+/** Where the HUD reads the operator token at page load. */
+export const OPERATOR_BOOTSTRAP_PATH = "/api/operator/bootstrap";
+/** The 401 answer to a mutating /api request without the operator token. */
+export const OPERATOR_TOKEN_REQUIRED = "operator token required";
 /** The hub's MCP endpoint. */
 export const MCP_PATH = "/mcp";
 /**

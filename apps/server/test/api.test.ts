@@ -39,6 +39,9 @@ import {
   fullAt5h,
   type MachineSample,
   NEW_LOOP,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
   otherLaneText,
   type PrCheck,
   projectAtReset,
@@ -69,6 +72,7 @@ import type { CrewReloader } from "../src/crew-apply.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
@@ -4784,3 +4788,78 @@ it.each([false, true])(
     expect(completed[0].err).toMatchObject({ message: error.message, stack: error.stack });
   },
 );
+
+describe("operator token", () => {
+  let guarded: FastifyInstance;
+
+  beforeEach(async () => {
+    guarded = buildApp({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      configPath,
+      crewReloader: stubReloader(),
+      supervisor: stubSupervisor(),
+      updater: stubUpdater(),
+      operatorToken: "tok-1",
+    });
+    await guarded.ready();
+  });
+
+  afterEach(async () => {
+    await guarded.close();
+  });
+
+  const guardedPost = (url: string, headers: Record<string, string>, payload: object = {}) =>
+    guarded.inject({ method: "POST", url, headers: { ...json, ...headers }, payload });
+
+  it("refuses a mutating route without the operator token (401)", async () => {
+    const pause = "/api/agents/shop-app-ta/pause";
+    const bare = await guardedPost(pause, {});
+    expect(bare.statusCode).toBe(401);
+    expect(bare.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
+    expect(existsSync(join(stateDir, "PAUSE"))).toBe(false);
+    expect((await guardedPost(pause, { [OPERATOR_HEADER]: "wrong" })).statusCode).toBe(401);
+    const away = await guardedPost("/api/settings/away", {}, { ...DEFAULT_AWAY, on: true });
+    expect(away.statusCode).toBe(401);
+    const read = await guarded.inject({ method: "GET", url: "/api/settings/away" });
+    expect(read.json()).toEqual(DEFAULT_AWAY);
+  });
+
+  it("leaves GET routes and the guard check as they were", async () => {
+    expect((await guarded.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+    const check = await guardedPost(
+      "/api/guard/check",
+      {},
+      { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "t1", tool_input: {} },
+    );
+    expect(check.statusCode).toBe(401);
+    expect(check.json().error).not.toBe(OPERATOR_TOKEN_REQUIRED);
+  });
+
+  it("runs a mutating route with the operator token", async () => {
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const paused = await guardedPost("/api/agents/shop-app-ta/pause", key);
+    expect(paused.statusCode).toBe(200);
+    expect(existsSync(join(stateDir, "PAUSE"))).toBe(true);
+    const away = await guardedPost("/api/settings/away", key, { ...DEFAULT_AWAY, on: true });
+    expect(away.statusCode).toBe(200);
+    const read = await guarded.inject({ method: "GET", url: "/api/settings/away" });
+    expect(read.json()).toMatchObject({ on: true });
+  });
+
+  it("hands the token to a same-origin page only", async () => {
+    const boot = (headers: Record<string, string>) =>
+      guarded.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers });
+    const ok = await boot({ "sec-fetch-site": "same-origin" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ token: "tok-1" });
+    expect(ok.headers["cache-control"]).toBe("no-store");
+    const bare = await boot({});
+    expect(bare.statusCode).toBe(403);
+    expect(bare.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect((await boot({ "sec-fetch-site": "cross-site" })).statusCode).toBe(403);
+    expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
+  });
+});

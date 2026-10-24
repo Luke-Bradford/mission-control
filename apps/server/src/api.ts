@@ -45,6 +45,9 @@ import {
   type McToolName,
   METER_FULL_PCT,
   NEW_LOOP,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
   pace5h,
   projectAtReset,
   READONLY_FILES_NOTE,
@@ -142,6 +145,7 @@ import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
 import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from "./mcp/tools.ts";
+import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
@@ -163,6 +167,12 @@ const TELEMETRY_COMMIT_CONCURRENCY = 4;
 const MAX_ISSUE_NUMBER = 2 ** 31 - 1;
 
 export const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", LOOPBACK_HOST]);
+/** The socket addresses of a caller on this machine. */
+const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set([
+  LOOPBACK_HOST,
+  "::1",
+  `::ffff:${LOOPBACK_HOST}`,
+]);
 
 /** Every API route is under this prefix. */
 const API_PREFIX = "/api";
@@ -201,6 +211,8 @@ export const LOG_REDACT = {
     'res.headers["set-cookie"]',
     "headers.cookie",
     "headers.authorization",
+    'req.headers["x-mc-operator"]',
+    'headers["x-mc-operator"]',
     'headers["set-cookie"]',
   ],
   censor: "[redacted]",
@@ -211,6 +223,8 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
   config: CcConfig;
+  /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
+  operatorToken?: string;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -557,6 +571,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return reply.code(403).send({ error: "cross-site request refused" });
     }
   });
+
+  // Code on the machine and a bad HUD bundle can reach every mutating route; only the page the
+  // hub served can read the operator token (bootstrap route), so holding it is the key. The guard
+  // check keeps its own run token; /mcp is outside /api.
+  const operatorToken = deps.operatorToken;
+  if (operatorToken !== undefined) {
+    app.addHook("onRequest", async (req, reply) => {
+      const path = req.routeOptions.url ?? req.url;
+      if (
+        req.method !== "GET" &&
+        req.method !== "HEAD" &&
+        req.method !== "OPTIONS" &&
+        path.startsWith("/api/") &&
+        path !== GUARD_CHECK_PATH &&
+        !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+      ) {
+        return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+      }
+    });
+  }
 
   // Unmatched GET/HEAD outside /api: the web app.
   const serveWeb = deps.webRoot ? webHandler(deps.webRoot) : null;
@@ -1295,6 +1329,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       api.get("/escalations", async () => store.escalations());
+
+      if (operatorToken !== undefined) {
+        // Reader: apps/web/src/api.ts#loadOperatorToken (the HUD reads the token at page load)
+        api.get(OPERATOR_BOOTSTRAP_PATH.slice(API_PREFIX.length), async (req, reply) => {
+          if (
+            !LOOPBACK_ADDRESSES.has(req.socket.remoteAddress ?? "") ||
+            req.headers["sec-fetch-site"] !== "same-origin"
+          ) {
+            return reply.code(403).send({ error: BOOTSTRAP_REFUSED });
+          }
+          return reply.header("cache-control", "no-store").send({ token: operatorToken });
+        });
+      }
 
       api.get("/health", async () => store.status());
       api.get("/machine", async (): Promise<MachineView> => {
