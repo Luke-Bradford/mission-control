@@ -55,12 +55,12 @@ describe("DEFAULT_REPO_RULES", () => {
       "packages/core/src/guard.ts",
       "packages/core/src/flight.ts",
       "packages/core/src/loop.ts",
-      "packages/core/src/review.ts",
       "packages/core/src/repo-rules.ts",
       "packages/core/src/runtime.ts",
       "apps/server/src/update.ts",
       "apps/server/src/config.ts",
       "apps/server/src/crew-apply.ts",
+      "packages/core/src/review.ts",
       "loops/**",
       "roles/**",
       "CLAUDE.md",
@@ -82,7 +82,7 @@ describe("DEFAULT_REPO_RULES", () => {
       expect.arrayContaining([...FLIGHT_FLOOR_PATHS]),
     );
     // The fixed floor is included even when the repo omits it.
-    expect(FLIGHT_FLOOR_PATHS).toEqual(["CLAUDE.md", ".github/workflows/**"]);
+    expect(FLIGHT_FLOOR_PATHS).toEqual(["CLAUDE.md", ".github/**"]);
     expect(DEFAULT_HARD_RULES).toEqual(expect.arrayContaining(["CLAUDE.md", ".github/**"]));
   });
 

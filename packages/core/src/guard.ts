@@ -53,7 +53,13 @@ export const FLIGHT_POWERS = ["standard", "superuser"] as const;
 export type FlightPowers = (typeof FLIGHT_POWERS)[number];
 
 /** FLIGHT's mc tools only a superuser repo's seats may call; the power tickets add them. */
-export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [];
+export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
+  "merge_pr",
+  "settle_park",
+  "rerun_ci",
+  "edit_card",
+  "dismiss_item",
+];
 
 /** What a power-gated tool says when the repo is not `superuser`. */
 export const needsSuperuserText = (repo: string): string =>

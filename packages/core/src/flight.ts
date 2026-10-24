@@ -40,6 +40,10 @@ export const FLIGHT_DECISION_KINDS = [
   "rerun",
   "ruling",
   "sync",
+  "merge",
+  "settle",
+  "card",
+  "dismiss",
   "brief",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
@@ -183,7 +187,6 @@ export const FLIGHT_UNPARK_KINDS = [
   "ci",
   "gate",
   "conflict",
-  "review-failed",
 ] as const;
 /** The tickets FLIGHT may start in an hour, per developer (build) seat in its session; at least this many. */
 export const FLIGHT_STARTS_PER_HOUR = 4;
@@ -547,6 +550,7 @@ export interface FlightState {
   questions: { id: number; seat: string; ticket: string | null; text: string; ageMin: number }[];
   tickets: {
     ref: string;
+    untrustedAuthor?: boolean;
     title: string;
     column: HudColumn;
     arrival?: FlightArrivalIdentity;
@@ -564,11 +568,13 @@ export interface FlightState {
    */
   prs: {
     ref: string;
+    untrustedAuthor?: boolean;
     pr: number;
     seat: string;
     /** The run holding the PR; "" when none does. */
     runId: string;
     ready: boolean;
+    awaitingFlight?: string | null;
     state: "open" | "merged" | "closed";
     headSha: string | null;
     readAt: string;

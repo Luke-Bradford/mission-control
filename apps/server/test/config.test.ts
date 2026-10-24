@@ -93,6 +93,15 @@ describe("loadConfig", () => {
     expect(loadConfig(omitted).operator.id).toBe("operator");
   });
 
+  it("reads the assignee allowlist only from user config", () => {
+    const file = tmpConfig((y) =>
+      y.replace("github_logins: []", "github_logins: [work-user, home-user]"),
+    );
+    expect(loadConfig(file).operator.githubLogins).toEqual(["work-user", "home-user"]);
+    const bad = tmpConfig((y) => y.replace("github_logins: []", 'github_logins: ["someone/else"]'));
+    expect(() => loadConfig(bad)).toThrow(ConfigError);
+  });
+
   it("still accepts a legacy operator.password_hash, and ignores it", () => {
     const legacy = tmpConfig((y) =>
       y.replace("  id: operator\n", '  id: operator\n  password_hash: "scrypt$1$2$3$s$h"\n'),

@@ -47,6 +47,7 @@ import {
 import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { crewDir } from "../store.ts";
+import { mcSection } from "./rules.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
 export const NO_FAILED_RUN = "(no failed Actions run to read)";
@@ -101,6 +102,7 @@ export type OpenPrResult =
 
 /** The merge gate's reads for one sha (see `RunLoop.gate`). */
 export interface GateFacts {
+  missionControlChanged?: boolean;
   mainSha: string;
   containsMain: boolean;
   hubOnly: boolean;
@@ -143,6 +145,7 @@ export function prDiffKey(diff: string): string {
 }
 
 export interface Publisher {
+  isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
   /** Opens the run's draft PR, or finds the one it already opened. */
@@ -763,6 +766,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
 
+    async isDescendant(run, ancestor, head) {
+      if (!SHA.test(ancestor) || !SHA.test(head)) return false;
+      const result = await inGit(run, async (g) => ({
+        ok: true as const,
+        descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
+      }));
+      return result.ok && result.descends;
+    },
+
     async hardRuleTouches(run, sha, hardRules) {
       const place = seatPlace(deps.config, run.agentId);
       if (place === null || !SHA.test(sha) || hardRules.length === 0) return [];
@@ -786,8 +798,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return inGit(run, async (g, { seat }): Promise<GateResult> => {
         const { defaultBranch, mainSha } = await originNow(g, null);
         if (known?.sha === sha && known.mainSha === mainSha) {
-          const { containsMain, hubOnly, strays } = known;
-          return { ok: true, facts: { mainSha, containsMain, hubOnly, strays: [...strays] } };
+          const { containsMain, hubOnly, strays, missionControlChanged } = known;
+          return {
+            ok: true,
+            facts: {
+              mainSha,
+              containsMain,
+              hubOnly,
+              strays: [...strays],
+              ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
+            },
+          };
         }
         await fetchMain(g, defaultBranch, mainSha);
         const containsMain = await yes(g, ["merge-base", "--is-ancestor", mainSha, sha]);
@@ -801,9 +822,29 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
           .split("\0")
           .filter((p) => p !== "");
+        let missionControlChanged: boolean | undefined;
+        if (names.some((p) => p.toLowerCase() === "claude.md")) {
+          missionControlChanged = true;
+          try {
+            const before = await g(["show", `${base}:CLAUDE.md`]);
+            const after = await g(["show", `${sha}:CLAUDE.md`]);
+            missionControlChanged = mcSection(before) !== mcSection(after);
+          } catch {
+            /* an unreadable rules block stays protected */
+          }
+        }
         const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
         const strays = names.filter((p) => !pathInArea(seat.area, p) || isProtectedPath(p, extra));
-        return { ok: true, facts: { mainSha, containsMain, hubOnly, strays } };
+        return {
+          ok: true,
+          facts: {
+            mainSha,
+            containsMain,
+            hubOnly,
+            strays,
+            ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
+          },
+        };
       });
     },
 

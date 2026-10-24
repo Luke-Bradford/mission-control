@@ -242,6 +242,7 @@ export interface ReloadResult extends CrewChanges {
 
 /** One issue in full, read live from GitHub for the board's detail pane. */
 export interface TicketView {
+  author?: string | null;
   number: number;
   title: string;
   url: string;

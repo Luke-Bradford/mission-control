@@ -74,6 +74,11 @@ export interface CiRerun {
 
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
+  awaitingFlight?: string | null;
+  flightClearedSha?: string | null;
+  flightReruns?: Record<string, number>;
+  /** Fresh RETRO requests by FLIGHT, at most two per head. */
+  flightRereviews?: Record<string, number>;
   phase: LoopPhase;
   reportedEvidenceId: number;
   prNumber: number | null;
@@ -109,6 +114,7 @@ export interface RunLoop {
   gate?: {
     sha: string;
     mainSha: string;
+    missionControlChanged?: boolean;
     containsMain: boolean;
     hubOnly: boolean;
     strays: string[];
@@ -233,6 +239,7 @@ export interface Escalation {
 }
 
 export interface BoardItem {
+  author?: string | null;
   repoId: RepoId;
   issueNumber: number;
   title: string;

@@ -3595,3 +3595,12 @@ describe("commit: a merge of main in progress", () => {
     }
   });
 });
+
+it("the gh runner sends structured card edits on stdin without a shell", async () => {
+  const payload = JSON.stringify({ labels: ["lane:work", "literal-$(echo-no)"], assignees: [] });
+  const result = await createGh(process.execPath)(["-e", "process.stdin.pipe(process.stdout)"], {
+    cwd: tmpdir(),
+    input: payload,
+  });
+  expect(result).toMatchObject({ code: 0, stdout: payload });
+});

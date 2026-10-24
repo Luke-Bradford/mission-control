@@ -1,4 +1,5 @@
 operator:
+  github_logins: [] # GitHub logins FLIGHT may assign on superuser repos
   # The operator's id (default "operator").
   id: operator
   timezone: UTC

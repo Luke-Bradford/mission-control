@@ -37,9 +37,10 @@ import { createEngine } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { refreshAuthors } from "./flight/collaborators.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
-import { type Move, moveCard } from "./github-board.ts";
+import { editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -51,7 +52,7 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
-import { Store } from "./store.ts";
+import { crewDir, Store } from "./store.ts";
 import {
   createAutoUpdate,
   createHeldUpdateNote,
@@ -205,6 +206,8 @@ async function main(): Promise<void> {
   /** Each seat's consecutive transient take failures; one map for the hub's life. */
   const transientTakes = new Map<string, number>();
   const engineBoard = {
+    edit: async (repoId: string, issue: number, fields: { size?: string; priority?: string }) =>
+      editCardFields({ gql: makeGql(await githubToken()), store, config }, repoId, issue, fields),
     move: async (m: Move) => {
       const moved = await moveCard({ gql: makeGql(await githubToken()), store, config }, m);
       // a card that moved shows on the boards now, not at the next poll
@@ -282,6 +285,10 @@ async function main(): Promise<void> {
 
   // Keeps FLIGHT running and wakes it with a digest; off with the engine (preview, no loop writes).
   const flightWatch = createFlightWatch({
+    refreshAuthors: async (repoId) => {
+      const repo = config.repos.find((r) => r.id === repoId);
+      if (repo) await refreshAuthors(store, gh, crewDir(dbPath), repoId, repo.github, Date.now());
+    },
     config,
     store,
     bus,

@@ -86,6 +86,17 @@ describe("scratch mode", () => {
     });
   });
 
+  it.each(["merge_pr", "settle_park", "rerun_ci", "edit_card", "dismiss_item"])(
+    "guards %s with the live repo powers",
+    (name) => {
+      const event = { tool: `mcp__mc__${name}`, input: {} };
+      expect(guardDecision(event, writer)).toMatchObject({ kind: "deny", rule: "flight-powers" });
+      expect(guardDecision(event, { ...writer, flightPowers: "superuser" })).toEqual({
+        kind: "allow",
+      });
+    },
+  );
+
   it("a superuser-only tool is denied on a standard repo and allowed on a superuser one", () => {
     const e = { tool: "mcp__mc__promote", input: {} };
     expect(guardDecision(e, writer, ["promote"])).toEqual({

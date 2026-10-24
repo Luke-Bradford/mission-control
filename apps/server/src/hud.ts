@@ -28,6 +28,7 @@ import {
   FLIGHT_HANDLING_MAX_MS,
   FLIGHT_TRIAGE_WAIT_MS,
   fixesSent,
+  flightFloorBlocked,
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
@@ -811,7 +812,18 @@ function endedParkGone(
  * Who an engine note waits on: housekeeping is the controller's; a hard-rule flag is the
  * operator's, unless the repo's rules say the controller merges hard-rule PRs.
  */
-function noteOwner(store: Store, n: Pick<AttentionNote, "key" | "repoId">): AttentionOwner {
+function noteOwner(
+  store: Store,
+  n: Pick<AttentionNote, "key" | "repoId" | "runId">,
+): AttentionOwner {
+  if (
+    n.repoId !== null &&
+    store.getSetting(hardRulesBySettingKey(n.repoId)) === "flight" &&
+    (isHardRulesFlagKey(n.key) || n.key.startsWith("ready:"))
+  ) {
+    const loop = n.runId === null ? null : store.run(n.runId)?.loop;
+    return loop && !flightFloorBlocked(loop) ? OWNER_FLIGHT : OWNER_OPERATOR;
+  }
   if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key)) return OWNER_CONTROLLER;
   if (
     isHardRulesFlagKey(n.key) &&

@@ -2103,6 +2103,85 @@ describe("merge workspace", () => {
   const kindsOf = (a: LoopAction[]): string[] => a.map((x) => x.kind);
   const readyKey = `ready:r1:${SHA}`;
 
+  it("superuser hard rules await FLIGHT, then merge only the cleared diff", () => {
+    const base = merge(
+      { flightPowers: "superuser" },
+      {
+        touches: { sha: SHA, paths: ["apps/server/src/flight/tools.ts"] },
+        gate: gateOf(),
+      },
+    );
+    const held = reconcile(base);
+    expect(held.loop.awaitingFlight).toBe(SHA);
+    expect(kindsOf(held.actions)).not.toContain("merge");
+    const cleared = { ...base.loop, flightClearedSha: SHA };
+    expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
+    const changed = { ...cleared, flightClearedSha: SHA2 };
+    expect(kindsOf(reconcile({ ...base, loop: changed }).actions)).not.toContain("merge");
+    expect(
+      kindsOf(reconcile({ ...base, loop: { ...changed, carry: { from: SHA2, to: SHA } } }).actions),
+    ).toContain("merge");
+    expect(reconcile({ ...base, flightPowers: "standard" }).loop.awaitingFlight).toBeNull();
+  });
+
+  it.each([
+    "CLAUDE.md",
+    ".github/workflows/ci.yml",
+    ".github/CODEOWNERS",
+    ".github/actions/setup/action.yml",
+  ])("FLIGHT clearance cannot waive %s", (path) => {
+    const s = merge(
+      { flightPowers: "superuser" },
+      {
+        touches: { sha: SHA, paths: [path] },
+        flightClearedSha: SHA,
+      },
+    );
+    expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
+  });
+
+  it("CLAUDE prose outside the Mission Control block can be cleared", () => {
+    const s = merge(
+      { flightPowers: "superuser" },
+      {
+        touches: { sha: SHA, paths: ["CLAUDE.md"] },
+        flightClearedSha: SHA,
+        gate: gateOf({ missionControlChanged: false }),
+      },
+    );
+    expect(kindsOf(reconcile(s).actions)).toContain("merge");
+  });
+
+  it("a review waiver still requires passing CI", () => {
+    const s = merge(
+      { flightPowers: "superuser", pr: pr({ ci: "failing" }) },
+      { reviewWaivedSha: SHA, ciFailedSha: SHA },
+    );
+    expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
+  });
+  it.each(["apps/other/hard-rule.ts", "package.json"])(
+    "clearance never hides a stray: %s",
+    (path) => {
+      const s = merge(
+        { flightPowers: "superuser" },
+        {
+          flightClearedSha: SHA,
+          touches: { sha: SHA, paths: [path] },
+          gate: gateOf({ strays: [path] }),
+        },
+      );
+      expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
+    },
+  );
+
+  it("superuser accepted review merges, but operator stops still hold", () => {
+    const s = merge({ flightPowers: "superuser" }, { reviewWaivedSha: SHA });
+    expect(kindsOf(reconcile(s).actions)).toContain("merge");
+    expect(
+      kindsOf(reconcile({ ...s, seat: { ...s.seat, state: "stopped" } }).actions),
+    ).not.toContain("merge");
+  });
+
   it("all six facts: mark-ready then merge, and no ready note", () => {
     const r = reconcile(merge());
     expect(r.loop.phase).toBe("review");

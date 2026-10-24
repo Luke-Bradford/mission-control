@@ -271,3 +271,43 @@ export async function moveCard(deps: MoveDeps, m: Move): Promise<MoveResult> {
     return fail(e instanceof Error ? e.message : String(e));
   }
 }
+
+/** Size and Priority use the same project-field read and mutation as Status. */
+export async function editCardFields(
+  deps: MoveDeps,
+  repoId: string,
+  issue: number,
+  fields: { size?: string; priority?: string },
+): Promise<MoveResult> {
+  const repo = deps.config.repos.find((r) => r.id === repoId);
+  if (repo?.flightPowers !== "superuser") return { ok: false, reason: "Superuser required." };
+  try {
+    const edits = [];
+    for (const [name, value] of [
+      ["Size", fields.size],
+      ["Priority", fields.priority],
+    ] as const) {
+      if (value === undefined) continue;
+      const field = await readStatusField(
+        deps.gql,
+        repo.github.split("/")[0] ?? "",
+        repo.project,
+        name,
+      );
+      const option = field.options.find((o) => o.name === value);
+      if (!option) return { ok: false, reason: `No ${name} option ${value}.` };
+      const card = await findCard(deps.gql, repo, issue, field.projectId);
+      if (!card) return { ok: false, reason: "Card not on project." };
+      edits.push({
+        projectId: field.projectId,
+        itemId: card.itemId,
+        fieldId: field.fieldId,
+        value: { singleSelectOptionId: option.id },
+      });
+    }
+    for (const input of edits) await deps.gql(SET_STATUS, { input });
+    return { ok: true, changed: edits.length > 0 };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+}
