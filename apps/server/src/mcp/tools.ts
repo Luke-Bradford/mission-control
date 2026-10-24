@@ -1,15 +1,14 @@
 /**
  * The mc tools the hub serves at `/mcp`: `commit`, the only way a seat's work becomes a
  * commit, and `ask_operator`. Each call is already tied to one seat and one run by its token, and
- * serialised per run by the MCP server; nothing in a call's arguments names a path, a branch or a
- * repo. Those come from the run's own rows.
+ * serialised per run by the MCP server; the worktree, branch and repo come from the run's own rows.
  *
  * The commit runs inside the session clone's queue (`inClone`), so it never interleaves with a
  * checkout or another seat's commit in the same clone. Every git call goes through `crewGit` with
  * the worktree's git dir named from the clone's side, so a rewritten `.git` pointer stops it.
  */
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   ASKED_OPERATOR,
   AWAY_PLAN_REFUSED,
@@ -157,11 +156,17 @@ import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import type { ProfilesError } from "../profiles.ts";
-import { adminDirOf, COMMIT_ADD_PATHSPEC, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
+import {
+  adminDirOf,
+  COMMIT_ADD_PATHSPEC,
+  CREW_GIT_SLOW_MS,
+  readBaseEntry,
+} from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
 import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
+import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";
 import type { McTool, McToolContext } from "./server.ts";
 
 export interface McToolsDeps {
@@ -173,6 +178,8 @@ export interface McToolsDeps {
   now?: () => number;
   /** Default `crewGit`; tests wrap it to change the worktree between two steps. */
   git?: typeof crewGit;
+  /** Defaults to sandbox-exec; tests may supply an isolated helper runner. */
+  restoreSandbox?: RestoreSandboxRunner;
   /** gh, through its one wrapper (`createGh`): draft_pr lists and opens PRs with it. */
   gh: GhRunner;
   /** The DB's path: draft_pr writes its PR body file into `{DB dir}/crew/`. */
@@ -1082,6 +1089,82 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { run, worktree: row.worktree };
   }
 
+  async function restoreFile(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = z.strictObject({ path: removePath }).safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const place = seatPlace(config, ctx.seatId);
+    if (place === null || config.crew === undefined) return ENDED;
+    const worktreesRoot = config.crew.worktrees;
+    if (seatDef(place.seat).mode !== "scratch") {
+      return { text: "Not restored: restore_file is for scratch seats only.", isError: true };
+    }
+    const { path } = parsed.data;
+    if (path.split("/").some((part) => part.toLowerCase() === ".git")) {
+      return { text: "Not restored: paths under .git are forbidden.", isError: true };
+    }
+    return deps.inClone(place.session.checkout, async () => {
+      const live = liveRun(ctx);
+      if (live === null || live.worktree === null) return ENDED;
+      const review = live.run.reviewId == null ? null : store.review(live.run.reviewId);
+      if (review === null || review.runId !== live.run.id || review.state !== "running") {
+        return { text: FINDINGS_NOT_A_REVIEW, isError: true };
+      }
+      try {
+        const entry = await readBaseEntry(place.session.checkout, review.sha, path);
+        if (entry !== null && entry.body === null) {
+          return {
+            text: "Not restored: the review head entry is not a regular file.",
+            isError: true,
+          };
+        }
+        const common = await realpath(join(place.session.checkout, ".git"));
+        const gitDir = await adminDirOf(common, live.worktree);
+        if (gitDir === null)
+          return {
+            text: "Not restored: the scratch worktree is not registered in the crew clone.",
+            isError: true,
+          };
+        if (entry === null) {
+          const tracked = await git(
+            live.worktree,
+            ["ls-files", "-z", "--", `:(literal)${path}`],
+            common,
+            { gitDir },
+          );
+          if (tracked !== "") {
+            return {
+              text: "Not restored: path is absent from the review head but is tracked in the index.",
+              isError: true,
+            };
+          }
+        }
+        await restoreWorktreeFile(
+          live.worktree,
+          path,
+          entry === null ? null : { mode: entry.mode, body: entry.body as Buffer },
+          {
+            worktreesRoot,
+            gitCommonDir: common,
+            worktreeGitDir: gitDir,
+            dataDir: dirname(deps.dbPath),
+          },
+          deps.restoreSandbox,
+        );
+        return {
+          text:
+            entry === null
+              ? `Removed untracked file ${path}; it is absent from the review head.`
+              : `Restored ${path} at review head ${review.sha}.`,
+        };
+      } catch (e) {
+        return {
+          text: `Not restored: ${e instanceof Error ? e.message : String(e)}`,
+          isError: true,
+        };
+      }
+    });
+  }
+
   async function syncMain(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = z.strictObject({}).safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -1887,6 +1970,19 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       },
       modes: ["writer", "read-only"],
       call: reportEvidence,
+    },
+    {
+      name: MC_TOOL_NAMES.restoreFile,
+      description:
+        "Undo an experiment in your scratch worktree: restore a regular file at the review head, including its mode, or remove an untracked regular file absent from that head.",
+      inputSchema: {
+        type: "object",
+        properties: { path: { type: "string", minLength: 1, maxLength: MC_REMOVE_PATH_MAX } },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      modes: ["scratch"],
+      call: restoreFile,
     },
     {
       name: MC_TOOL_NAMES.reportFindings,

@@ -89,7 +89,7 @@ export const MC_TOOL_GRANTS: Readonly<
     base: ["ask_operator", "report_evidence"],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
   },
-  scratch: { base: ["report_findings"], grantable: [] },
+  scratch: { base: [MC_TOOL_NAMES.reportFindings, MC_TOOL_NAMES.restoreFile], grantable: [] },
 };
 
 /** A role: what a seat of it runs as, unless its own config says otherwise. */
@@ -283,6 +283,7 @@ export const SCRATCH_TOOLS = [
   ...GIT_READ_TOOLS,
   ...bashEntries(DEFAULT_SEAT_COMMANDS.review),
   MC_TOOLS.reportFindings,
+  MC_TOOLS.restoreFile,
 ] as const;
 
 /** A scratch seat starts only on a review Mission Control hands it. */
