@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { clockHm, type Run, type RunLoop } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
+import { buildApp } from "../src/api.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import type { Supervisor, SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -524,11 +525,114 @@ describe("supervisor events (Plan 7a)", () => {
       expect(await sup.send(second.runId, "k", "x")).toBe("sent");
     });
 
-    it("answers busy for a seat with no live process yet", async () => {
+    it("answers busy while crew is not started", async () => {
       const runId = await leftActive();
       const { sup } = make(); // not started: the run is not resumed
       expect(await sup.send(runId, "k", "x")).toBe("busy");
       expect(store.claimedKeys(runId)).toEqual({});
+    });
+
+    it("answers no-session when the CLI is gone, without claiming the line", async () => {
+      const { sup, runId } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      expect(await sup.send(runId, "k", "fix it")).toBe("no-session");
+      expect(store.claimedKeys(runId)).toEqual({});
+      expect(store.run(runId)?.endedAt).toBeNull();
+    });
+
+    it("answers no-session on a started hub with no process for the held run", async () => {
+      const runId = await leftActive();
+      const row = store.seatSession("guido-1");
+      if (row === null) throw new Error("missing seat");
+      store.setSeatSession({ ...row, runId: null, state: "stopped" });
+      const { sup } = make();
+      sup.start();
+      await Promise.resolve();
+      store.setSeatSession(row);
+      expect(await sup.send(runId, "k", "x")).toBe("no-session");
+      expect(store.claimedKeys(runId)).toEqual({});
+    });
+
+    it("resumes a missing CLI through the API message route and asks CAPCOM to retry", async () => {
+      const { sup, cfg, runId } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      const release = holdResume();
+      const app = buildApp({ config: cfg, store, bus, supervisor: sup });
+      try {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/message",
+          headers: { "content-type": "application/json" },
+          payload: { text: "fix it" },
+        });
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toEqual({
+          error: "GUIDO-1 is being resumed; try again in a moment",
+        });
+        release();
+        await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+        expect(store.seatSession("guido-1")?.runId).toBe(runId);
+        expect(prep.sessions).toHaveLength(2);
+        expect(userLines()).not.toContain("fix it");
+      } finally {
+        release();
+        await app.close();
+      }
+    });
+
+    it("keeps the previous error in Activity when resuming a held run", async () => {
+      const { sup, runId } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      const row = store.seatSession("guido-1");
+      if (row === null) throw new Error("missing seat");
+      store.setSeatSession({ ...row, state: "error", reason: "CLI disappeared" });
+      await sup.resumeRun(runId);
+      expect(store.agentEvents(0)).toContainEqual(
+        expect.objectContaining({
+          agentId: "guido-1",
+          from: "error",
+          to: "idle",
+          text: expect.stringContaining("CLI disappeared"),
+        }),
+      );
+    });
+
+    it("resumes a missing CLI once on its run, then sends the pending line", async () => {
+      const { sup, runId } = await idleRun();
+      const sessionId = store.seatSession("guido-1")?.cliSessionId;
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      const release = holdResume();
+      try {
+        const resume = sup.resumeRun(runId);
+        await sup.resumeRun(runId);
+        expect(await sup.send(runId, "k", "fix it")).toBe("busy");
+        release();
+        await resume;
+      } finally {
+        release();
+      }
+      expect(prep.sessions).toHaveLength(2);
+      expect(store.seatSession("guido-1")).toMatchObject({ runId, cliSessionId: sessionId });
+      expect(await sup.send(runId, "k", "fix it")).toBe("sent");
+      await until(() => expect(userLines()).toContain("fix it"));
+      expect(userLines().filter((line) => line === "fix it")).toHaveLength(1);
+    });
+
+    it("fails a missing session whose checkout is gone, and does not retry it", async () => {
+      const { sup, runId, seen } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+      await sup.resumeRun(runId);
+      await sup.resumeRun(runId);
+      expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
+      expect(store.seatSession("guido-1")?.reason).toBe("could not resume: checkout missing");
+      expect(ended(seen)).toHaveLength(1);
+      expect(await sup.send(runId, "k", "fix it")).toBe("gone");
     });
 
     it("sends to a seat parked by a rate limit", async () => {

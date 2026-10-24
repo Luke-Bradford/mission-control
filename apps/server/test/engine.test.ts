@@ -277,6 +277,9 @@ interface Harness {
   duringRerun: (() => void) | null;
   rerunRuns: { id: number; name: string }[] | null | "running";
   busy: boolean;
+  noSession: boolean;
+  resumes: string[];
+  resumeFails: boolean;
   facts: SeatFacts | null;
   /** The review seat's process facts. */
   retroFacts: SeatFacts | null;
@@ -351,6 +354,9 @@ function harness(): Harness {
     duringRerun: null,
     rerunRuns: [{ id: 77, name: "CI" }],
     busy: false,
+    noSession: false,
+    resumes: [],
+    resumeFails: false,
     facts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
     retroFacts: { inTurn: false, resumedAt: null, rateLimitedUntil: null },
     busyList: [],
@@ -473,6 +479,7 @@ function harness(): Harness {
             if (x.busy) return "busy";
             const r = store.run(runId);
             if (r === null || r.endedAt !== null) return "gone";
+            if (x.noSession) return "no-session";
             const claimed = store.claimLine(key, {
               runId,
               seatId: r.agentId,
@@ -483,6 +490,23 @@ function harness(): Harness {
             if (!claimed) return "dup";
             x.sent.push({ runId, key, text });
             return "sent";
+          },
+          async resumeRun(runId) {
+            x.resumes.push(runId);
+            if (x.resumeFails) {
+              store.setRunEnded(runId, clock, "failed", "exit");
+              const row = store.seatSession(SEAT);
+              if (row !== null) {
+                store.setSeatSession({
+                  ...row,
+                  state: "error",
+                  reason: "could not resume the session",
+                });
+              }
+              return;
+            }
+            x.noSession = false;
+            x.facts = { inTurn: false, resumedAt: clock, rateLimitedUntil: null };
           },
           seat: (id) => {
             // like the real one: a refusal before the lock is held, and for a seat not in the config
@@ -712,6 +736,54 @@ describe("CI and review", () => {
     await h.engine.reconcileRun(RUN);
     h.moves.length = 0;
   }
+
+  it("does not resume a missing CLI while its loop is parked", async () => {
+    h.facts = null;
+    h.noSession = true;
+    setLoop({ phase: "parked", parked: { kind: "ruling", reason: "wait", ended: false } });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.tick();
+    expect(h.resumes).toEqual([]);
+    expect(loopOf().phase).toBe("parked");
+  });
+
+  it("ends a run whose PR merged without resuming its missing CLI", async () => {
+    await inCi();
+    h.facts = null;
+    h.noSession = true;
+    setPr({ state: "merged", mergedAt: clock, ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    expect(h.ended).toEqual([RUN]);
+    expect(h.resumes).toEqual([]);
+  });
+
+  it("updates PR state without resuming a missing CLI", async () => {
+    await inCi();
+    h.facts = null;
+    h.noSession = true;
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("review");
+    expect(h.resumes).toEqual([]);
+  });
+
+  it("does not resume a missing CLI when its account is at a stop", async () => {
+    await inCi();
+    await failCi();
+    h.facts = null;
+    h.noSession = true;
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: clock,
+      pct: 96,
+      resetAt: clock + 60 * MIN,
+      source: "test",
+    });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.tick();
+    expect(h.resumes).toEqual([]);
+  });
 
   it("passing CI on the pushed sha moves the card to In review and raises one review note", async () => {
     await inCi();
@@ -1923,6 +1995,19 @@ describe("review round", () => {
       h.busy = true;
     }
 
+    it("recovers a CLI lost before the CI line and keeps its excerpt for delivery", async () => {
+      await failedAndBusy();
+      h.busy = false;
+      h.noSession = true;
+      await h.engine.reconcileRun(RUN);
+      expect(h.resumes).toEqual([RUN]);
+      expect(h.sent).toEqual([]);
+      await h.engine.reconcileRun(RUN);
+      expect(h.excerpts).toHaveLength(1);
+      expect(h.sent[0]?.text.endsWith("EXCERPT")).toBe(true);
+      expect(h.engine.excerptsHeld()).toBe(0);
+    });
+
     it("keeps only a real excerpt: a failed read or an empty answer is asked for again", async () => {
       await failedAndBusy();
       h.excerptTexts = [
@@ -2384,6 +2469,50 @@ describe("the engine runs reviews", () => {
     expect(h.ended).toContain(`${RETRO}:${one.id}`);
   });
 
+  it.each(["missing", "lost during send"])(
+    "resumes a CLI %s and delivers the fix on a later pass",
+    async (when) => {
+      await toReview();
+      const id = first().id;
+      h.noSession = true;
+      if (when === "missing") h.facts = null;
+      reported(id, [finding("Important")]);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.tick();
+      expect(h.resumes).toEqual([RUN]);
+      expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
+      expect(h.sent[0]?.text).toContain("a Important thing");
+      await h.engine.tick();
+      expect(sentKeys()).toEqual([`fix:${RUN}:0:${id}`]);
+    },
+  );
+
+  it("a failed resume raises one blocked note across ticks and an engine restart", async () => {
+    await toReview();
+    const id = first().id;
+    h.noSession = true;
+    h.facts = null;
+    h.resumeFails = true;
+    reported(id, [finding("Important")]);
+    await h.engine.reconcileRun(RUN);
+    await h.engine.tick();
+    expect(h.resumes).toEqual([RUN]);
+    expect(h.sent).toEqual([]);
+    expect(store.notes()).toHaveLength(1);
+    const note = store.notes()[0];
+    expect(note).toMatchObject({ kind: "blocked", runId: RUN });
+    for (let i = 0; i < 3; i++) {
+      clock += MIN;
+      await h.engine.tick();
+    }
+    h.engine.stop();
+    h.engine = h.make();
+    h.engine.start();
+    await h.engine.tick();
+    expect(h.resumes).toEqual([RUN]);
+    expect(store.notes()).toEqual([note]);
+  });
+
   it("blocking findings go to the author once, and the review run ends", async () => {
     await toReview();
     const id = first().id;
@@ -2498,6 +2627,18 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       await h.engine.tick();
       expect(h.steps).toEqual(ALL);
+    });
+
+    it("merges without resuming the author's missing CLI", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      h.facts = null;
+      h.noSession = true;
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(authorEnded()).toEqual([RUN]);
+      expect(h.resumes).toEqual([]);
     });
 
     it("does not merge while the rules leave hard_rules unset, and says which key to add", async () => {

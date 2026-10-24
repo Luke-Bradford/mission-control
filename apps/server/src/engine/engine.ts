@@ -116,6 +116,7 @@ export interface EngineDeps {
     Supervisor,
     | "on"
     | "send"
+    | "resumeRun"
     | "seat"
     | "seatFacts"
     | "endRunByEngine"
@@ -279,6 +280,22 @@ export function createEngine(deps: EngineDeps): Engine {
     return p;
   }
 
+  /** A missing CLI leaves the line unclaimed; the next pass sends it after the take-back. */
+  async function send(runId: string, key: string, text: string) {
+    const sent = await supervisor.send(runId, key, text);
+    if (sent === "no-session") {
+      const run = store.run(runId);
+      const accountId = run === null ? undefined : seatConfig(run.agentId)?.accountId;
+      if (
+        run?.loop?.phase !== "parked" &&
+        (accountId === undefined || !accountAtStop(config, store, accountId, now()))
+      ) {
+        await supervisor.resumeRun(runId);
+      }
+    }
+    return sent;
+  }
+
   /** Like `onChain`, resolving to what `fn` returned (`fallback` when it threw). */
   function onChainResult<T>(runId: string, fallback: T, fn: () => Promise<T>): Promise<T> {
     let result = fallback;
@@ -428,7 +445,8 @@ export function createEngine(deps: EngineDeps): Engine {
         // a run off its seat is on no seat: the row is another run's, and so is its rate limit
         state: loop.aside ? "stopped" : (row?.state ?? "stopped"),
         holdsRun: current,
-        inTurn: !current || facts === null ? true : facts.inTurn,
+        // With no CLI, plan between turns; only a due line asks the supervisor to resume.
+        inTurn: !current || (facts?.inTurn ?? false),
         lastTurnEndedAt:
           current && turnEnded !== null && turnEnded >= run.startedAt ? turnEnded : null,
         resumedAt: current ? (facts?.resumedAt ?? null) : null,
@@ -646,7 +664,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "send": {
-        const sent = await supervisor.send(run.id, a.key, a.text);
+        const sent = await send(run.id, a.key, a.text);
         if (sent === "sent" && a.key.startsWith("fix:")) {
           const id = Number(a.key.slice(a.key.lastIndexOf(":") + 1));
           const rv = store.review(id);
@@ -670,7 +688,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const text = fillLoopText(head, { sha7: a.sha.slice(0, 7) }) + excerpt;
-        const sent = await supervisor.send(run.id, a.key, text);
+        const sent = await send(run.id, a.key, text);
         if (sent === "sent") handOff(COMMS_MC, text);
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
@@ -1330,7 +1348,7 @@ export function createEngine(deps: EngineDeps): Engine {
             .busy()
             .some((b) => b.seatId === row.seatId && b.state === "starting"),
           state: seatRow?.state ?? "stopped",
-          inTurn: holdsRun && facts !== null ? facts.inTurn : true,
+          inTurn: !holdsRun || (facts?.inTurn ?? false),
           lastTurnEndedAt:
             holdsRun && turnEnded !== null && turnEnded >= rrun.startedAt ? turnEnded : null,
           resumedAt: holdsRun ? (facts?.resumedAt ?? null) : null,
@@ -1341,7 +1359,7 @@ export function createEngine(deps: EngineDeps): Engine {
       });
       if (action === null) continue;
       if (action.kind === "send") {
-        await supervisor.send(rrun.id, action.key, action.text);
+        await send(rrun.id, action.key, action.text);
         continue;
       }
       if (store.setReviewState(row.id, ["running"], "failed", { at, failure: action.reason })) {

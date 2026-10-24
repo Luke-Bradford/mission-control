@@ -182,6 +182,7 @@ const stubSupervisor = (): Supervisor => {
     wakeRun: call("wakeRun", undefined),
     endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
+    resumeRun: call("resumeRun", undefined),
     on: () => () => {},
     emitEvidence: () => {},
     emitFindings: () => {},
