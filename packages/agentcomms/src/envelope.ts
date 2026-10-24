@@ -150,7 +150,7 @@ async function checkSender(sender: Sender, publicKeyOf: PublicKeyOf): Promise<vo
   if (!memberKey || !(await verifyDelegation(d, memberKey))) throw new WrongSender();
 }
 
-async function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf): Promise<Sodium> {
+function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf, sodium: Sodium): void {
   if (
     !s ||
     typeof s.room !== "string" ||
@@ -162,7 +162,6 @@ async function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf): Promise<Sodi
     typeof s.ciphertext !== "string"
   )
     throw new BadCiphertext();
-  const sodium = await ready();
   let sig: Uint8Array;
   try {
     sig = decode(sodium, s.sig);
@@ -177,8 +176,7 @@ async function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf): Promise<Sodi
     encode(sodium, key) !== s.sender.id
   )
     throw new BadSignature();
-  // A well-formed signature that fails authentication is a corrupt envelope.
-  if (!sodium.crypto_sign_verify_detached(sig, signaturePayload(s), key)) throw new BadCiphertext();
+  if (!sodium.crypto_sign_verify_detached(sig, signaturePayload(s), key)) throw new BadSignature();
   try {
     if (
       decode(sodium, s.nonce).length !== sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES ||
@@ -188,7 +186,6 @@ async function checkSignature(s: Sealed, publicKeyOf: PublicKeyOf): Promise<Sodi
   } catch {
     throw new BadCiphertext();
   }
-  return sodium;
 }
 
 export async function seal(
@@ -258,7 +255,8 @@ export async function open(
   } catch {
     throw new BadCiphertext();
   }
-  const sodium = await checkSignature(sealed, publicKeyOf);
+  const sodium = await ready();
+  checkSignature(sealed, publicKeyOf, sodium);
   await checkSender(sealed.sender, publicKeyOf);
   let payload: unknown;
   try {
@@ -286,12 +284,18 @@ export async function open(
   return result.data;
 }
 
-export async function verifySealed(s: Sealed, publicKeyOf: PublicKeyOf): Promise<boolean> {
+// The synchronous relay uses the same checks after awaiting sodium at module initialization.
+export function verifySealedSync(s: Sealed, publicKeyOf: PublicKeyOf, sodium: Sodium): boolean {
   try {
     const sealed = snapshotSealed(s);
-    await checkSignature(sealed, publicKeyOf);
+    checkSignature(sealed, publicKeyOf, sodium);
     return senderSchema.safeParse(sealed.sender).success;
   } catch {
     return false;
   }
+}
+
+export async function verifySealed(s: Sealed, publicKeyOf: PublicKeyOf): Promise<boolean> {
+  const sealed = snapshotSealed(s);
+  return verifySealedSync(sealed, publicKeyOf, await ready());
 }

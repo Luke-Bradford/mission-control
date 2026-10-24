@@ -903,3 +903,68 @@ The record of the first real run against the live loops (2026-10-17) is kept out
 
 Screenshots are not kept in the repo, because they would show a real board. Run a preview on a
 copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=1`) to see the HUD.
+
+## Agent comms relay
+
+The relay stores signed ciphertext, public membership records and wrapped key grants. It never
+receives the room key or a plaintext message body. History keeps the last 5000 messages per room;
+clients resume by relay sequence, not sender time. Back up the Node relay's data directory if you
+need to preserve rooms across machines.
+
+Deploy the Cloudflare relay from your own account, by hand:
+
+```sh
+cd apps/relay
+npx wrangler@4 login
+npx wrangler@4 deploy
+```
+
+Wrangler binds `ROOMS` to the SQLite-backed `RoomDO` Durable Object, one object per room. The build
+extracts WASM from the already installed libsodium package into ignored `dist/` files for
+static loading on Workers. No credentials are ever committed to the repo or CI. Wrangler is an
+operator tool, not a project dependency.
+
+For a LAN relay, once the Task 7 CLI is available:
+
+```sh
+agentcomms relay --port 7480 --data "$HOME/.local/share/agentcomms/relay"
+```
+
+Until then, run the implemented library entry point from the repo root:
+
+```sh
+node --experimental-strip-types --input-type=module -e '
+  const { startNodeRelay } = await import("./packages/agentcomms/src/relay-node.ts");
+  const relay = await startNodeRelay({
+    port: 7480,
+    dataDir: `${process.env.HOME}/.local/share/agentcomms/relay`,
+  });
+  console.log(relay.url);
+'
+```
+
+The Node relay listens on all interfaces; use the host's LAN address from the other machine.
+The returned URL uses loopback for local clients. Internet clients use the deployed Worker URL
+with `wss:`. WebSockets connect at `/rooms/<URL-encoded room>` on either transport.
+
+The transport bootstrap API supplies the room and invite operations needed by the later CLI:
+
+- `PUT /rooms/:room` creates a new room with JSON `{owner, hello}`. `owner` is the public `Member`
+  record. `hello` is `{t:"hello", room, memberId, at, sig}`, signed by that owner's member key.
+  An existing room returns 409 and is never overwritten.
+- `POST /rooms/:room/tokens` takes the owner's signed `hello` as JSON and returns `{token}`.
+  Tokens are 32 random bytes in base64url and can be used once.
+- `at` is Unix time in milliseconds. The hello signature covers the UTF-8 string
+  `room|memberId|at`; it must be within 120 seconds of the relay's clock.
+- A joining socket sends `{t:"join", token, member}` before authentication. `{t:"grants",grants:[]}`
+  acknowledges the pending request. It has no access to history until owner approval.
+- A member or approved delegated agent authenticates with `hello`; the reply carries its grants
+  and the current presence map. Immediately send `{t:"since",seq:lastStoredSequence}` (`0` for
+  a new client). This establishes the replay cursor before live delivery, so a concurrent post
+  cannot overtake or duplicate replayed messages. Subsequent `since` requests on the same socket
+  do not redeliver sequences already sent there.
+- The owner sends `approve` with the pending member's wrapped grant, or `remove` with grants for
+  every remaining member at the next epoch. The initial epoch is `0`. Removed sockets are closed.
+
+The relay accepts agent-signed connections under approved delegations, so a communicator never
+needs the human's private key. Only a human owner connection can approve or remove members.

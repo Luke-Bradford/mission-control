@@ -182,7 +182,7 @@ describe("sealed envelopes", () => {
     const sodium = await ready();
     const decrypt = vi.spyOn(sodium, "crypto_aead_xchacha20poly1305_ietf_decrypt");
     try {
-      await expect(open(s, roomKey, lookup)).rejects.toBeInstanceOf(BadCiphertext);
+      await expect(open(s, roomKey, lookup)).rejects.toBeInstanceOf(BadSignature);
       expect(await verifySealed(s, lookup)).toBe(false);
       expect(decrypt).not.toHaveBeenCalled();
     } finally {
@@ -218,7 +218,7 @@ describe("sealed envelopes", () => {
       if (field === "keyEpoch") s.keyEpoch = 2;
       if (field === "nonce") s.nonce = Buffer.alloc(24, 7).toString("base64url");
       expect(await verifySealed(s, lookup)).toBe(false);
-      await expect(open(s, roomKey, lookup)).rejects.toBeInstanceOf(BadCiphertext);
+      await expect(open(s, roomKey, lookup)).rejects.toBeInstanceOf(BadSignature);
       const signed = await resign(s, field === "sender" ? other : human);
       expect(await verifySealed(signed, lookup)).toBe(true);
       await expect(open(signed, roomKey, lookup)).rejects.toBeInstanceOf(BadCiphertext);
@@ -284,10 +284,10 @@ describe("sealed envelopes", () => {
     }
   });
 
-  it("rejects a well-formed but invalid signature as BadCiphertext", async () => {
+  it("rejects a well-formed but invalid signature as BadSignature", async () => {
     const s = await seal(message, human, roomKey, 1);
     s.sig = Buffer.alloc(64).toString("base64url");
-    await expect(open(s, roomKey, lookup)).rejects.toBeInstanceOf(BadCiphertext);
+    await expect(open(s, roomKey, lookup)).rejects.toBeInstanceOf(BadSignature);
     expect(await verifySealed(s, lookup)).toBe(false);
   });
 

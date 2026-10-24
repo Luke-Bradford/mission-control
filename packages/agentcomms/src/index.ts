@@ -36,4 +36,12 @@ export {
   unwrapRoomKey,
   wrapRoomKey,
 } from "./membership.ts";
+export {
+  type ClientMessage,
+  clientMessageSchema,
+  type RelayMessage,
+  relayMessageSchema,
+} from "./protocol.ts";
+export { createRoomCore, type RoomCore, type RoomState, type RoomStorage } from "./relay-core.ts";
+export { startNodeRelay } from "./relay-node.ts";
 export { ready, type Sodium } from "./sodium.ts";

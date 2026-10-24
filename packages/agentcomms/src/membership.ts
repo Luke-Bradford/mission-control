@@ -66,7 +66,9 @@ export function encodeInvite(i: Invite): string {
 export function decodeInvite(code: string): Invite {
   try {
     if (typeof code !== "string" || !code.startsWith("ac1.")) throw new BadInvite();
-    const json = new TextDecoder("utf-8", { fatal: true }).decode(decodeBase64url(code.slice(4)));
+    const json = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(
+      decodeBase64url(code.slice(4)),
+    );
     return parseInvite(JSON.parse(json));
   } catch {
     throw new BadInvite();
