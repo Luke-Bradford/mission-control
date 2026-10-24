@@ -1,12 +1,12 @@
 import { type AwaySettings, awayIsOn, type AwayDigest as Digest } from "@mc/core";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { draftRowId } from "../flight/Drafts.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { parseTicket } from "../hud/RepoRef.tsx";
-import { followLink, itemPath, ticketPath } from "../router.ts";
+import { followLink, itemPath, ticketPath, usePath } from "../router.ts";
 import { AWAY_DIGEST_KEY, readKey, writeKey } from "../storage.ts";
 
 const LABELS = [
@@ -25,21 +25,31 @@ export function AwayDigest({ children = null }: { children?: ReactNode }) {
   const tz = useTz();
   const now = useNow();
   const [acknowledged, setAcknowledged] = useState(() => readKey(AWAY_DIGEST_KEY));
-  const [openedItem, setOpenedItem] = useState<number | null>(null);
-  const started = digest?.startedAt;
+  const path = usePath();
+  const [openedItem, setOpenedItem] = useState<{ started: number; path: string } | null>(null);
+  const active = away && tz ? awayIsOn(away, now, tz) : null;
+  const [observed, setObserved] = useState<{ active: boolean; started: number } | null>(null);
+  useEffect(() => {
+    if (active === null) return;
+    setObserved((previous) => {
+      if (previous?.active === active) return previous;
+      return { active, started: active ? Date.now() : (previous?.started ?? 0) };
+    });
+  }, [active]);
+  const started = digest?.startedAt ?? (observed && !observed.active ? observed.started : null);
   if (
     !away ||
     !tz ||
     !started ||
-    awayIsOn(away, now, tz) ||
+    active ||
     acknowledged === String(started) ||
-    openedItem === started
+    (openedItem?.started === started && openedItem.path !== path)
   )
     return children;
   return (
     <ReturnDigest
       started={started}
-      openItem={() => setOpenedItem(started)}
+      openItem={() => setOpenedItem({ started, path })}
       acknowledge={() => {
         writeKey(AWAY_DIGEST_KEY, String(started));
         setAcknowledged(String(started));

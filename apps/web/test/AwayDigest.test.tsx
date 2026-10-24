@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, expect, it, vi } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { AwayDigest } from "../src/shell/AwayDigest.tsx";
+import { AWAY_DIGEST_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, NOW } from "./fixtures.ts";
 
@@ -202,4 +203,92 @@ it("expires after the whole end date in the configured timezone without a settin
     await vi.advanceTimersByTimeAsync(5000);
   });
   await screen.findByRole("region", { name: "When you come back" });
+});
+
+it("returns to the unacknowledged digest with Back after opening an item", async () => {
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/settings/away": DEFAULT_AWAY,
+    "/api/away/digest": digest,
+    [`/api/away/digest?since=${digest.startedAt}`]: digest,
+  });
+  render(
+    <AwayDigest>
+      <p>Item page</p>
+    </AwayDigest>,
+  );
+  await screen.findByRole("region", { name: "When you come back" });
+  fireEvent.click(screen.getByRole("link", { name: "Please decide" }));
+  expect(window.location.pathname).toBe("/comms/ask");
+  expect(screen.getByText("Item page")).toBeTruthy();
+  act(() => window.history.back());
+  await waitFor(() => expect(window.location.pathname).toBe("/"));
+  await screen.findByRole("region", { name: "When you come back" });
+  expect(screen.getAllByRole("link")).toHaveLength(6);
+  expect(localStorage.getItem(AWAY_DIGEST_KEY)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Acknowledge digest" }));
+  expect(screen.queryByRole("region")).toBeNull();
+});
+
+it("uses the observed away start when the server omits startedAt and acknowledges that period", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+  let on = true;
+  const withoutStart = { ...digest, startedAt: undefined };
+  const fetch = stubFetch({
+    "/api/config": CONFIG,
+    "/api/settings/away": () => ({ status: 200, body: { ...DEFAULT_AWAY, on } }),
+    "/api/away/digest": withoutStart,
+    [`/api/away/digest?since=${NOW}`]: withoutStart,
+    [`/api/away/digest?since=${NOW + 1000}`]: withoutStart,
+  });
+  render(<AwayDigest />);
+  await waitFor(() =>
+    expect(hub.snapshot(RESOURCES.away.path, RESOURCES.away.topic).data).toBeDefined(),
+  );
+  expect(screen.queryByRole("region")).toBeNull();
+  on = false;
+  act(() => hub.refetch(RESOURCES.away.path));
+  await screen.findByRole("region", { name: "When you come back" });
+  const periodPath = fetch.mock.calls
+    .map(([path]) => String(path))
+    .find((path) => path.startsWith("/api/away/digest?since="));
+  expect(periodPath).toBeDefined();
+  expect(periodPath).toBe(`/api/away/digest?since=${NOW}`);
+  await screen.findByRole("button", { name: "Acknowledge digest" });
+  fireEvent.click(screen.getByRole("button", { name: "Acknowledge digest" }));
+  expect(localStorage.getItem(AWAY_DIGEST_KEY)).toBe(periodPath?.split("since=")[1]);
+  expect(screen.queryByRole("region")).toBeNull();
+  act(() => hub.refetch(RESOURCES.away.path));
+  await waitFor(() =>
+    expect(hub.snapshot(RESOURCES.away.path, RESOURCES.away.topic).data).toBeDefined(),
+  );
+  expect(screen.queryByRole("region")).toBeNull();
+  vi.setSystemTime(NOW + 1000);
+  on = true;
+  act(() => hub.refetch(RESOURCES.away.path));
+  await waitFor(() =>
+    expect(hub.snapshot(RESOURCES.away.path, RESOURCES.away.topic).data).toMatchObject({
+      on: true,
+    }),
+  );
+  on = false;
+  act(() => hub.refetch(RESOURCES.away.path));
+  await screen.findByRole("button", { name: "Acknowledge digest" });
+  expect(fetch).toHaveBeenCalledWith(`/api/away/digest?since=${NOW + 1000}`, expect.anything());
+  fireEvent.click(screen.getByRole("button", { name: "Acknowledge digest" }));
+  expect(localStorage.getItem(AWAY_DIGEST_KEY)).toBe(String(NOW + 1000));
+});
+
+it("does not invent a return period when mounted back without startedAt", async () => {
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/settings/away": DEFAULT_AWAY,
+    "/api/away/digest": { ...digest, startedAt: undefined },
+  });
+  render(<AwayDigest />);
+  await waitFor(() =>
+    expect(hub.snapshot(RESOURCES.awayDigest().path, "settings").data).toBeDefined(),
+  );
+  expect(screen.queryByRole("region")).toBeNull();
 });
