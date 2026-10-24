@@ -7,6 +7,7 @@ import {
   OWNER_OPERATOR,
   type PrCheck,
   type PullRequestView,
+  priorityRank,
   prYouAction,
   REVIEW_STATUS_CONTEXT,
   startOfLocalDay,
@@ -22,11 +23,7 @@ export const statusOutOfDateTitle = (item: Pick<BoardItem, "closed" | "status">)
 export const ticketRef = (i: Pick<BoardItem, "repoId" | "issueNumber">): string =>
   `${i.repoId}#${i.issueNumber}`;
 
-/** P0 is 0, P1 is 1; no priority (or a label that is not `P<n>`) sorts last. */
-export function priorityRank(p: string | null): number {
-  const m = p === null ? null : /^P(\d+)$/.exec(p);
-  return m?.[1] ? Number(m[1]) : 99;
-}
+export { priorityRank } from "@mc/core";
 
 /** Priority (P0 first, none last), then the most recently updated. */
 export function sortCards(items: BoardItem[]): BoardItem[] {
