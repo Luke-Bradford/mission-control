@@ -507,6 +507,14 @@ describe("startRun", () => {
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "DISABLE_AUTOUPDATER",
       PNPM_STORE_ENV,
+      "UV_NO_SYNC",
+      "UV_OFFLINE",
+      "UV_CACHE_DIR",
+      "PYTHONPYCACHEPREFIX",
+      "RUFF_CACHE_DIR",
+      "MYPY_CACHE_DIR",
+      "COVERAGE_FILE",
+      "PYTEST_ADDOPTS",
     ]);
     expect(env.DISABLE_AUTOUPDATER).toBe("1");
     // macOS adds __CF_USER_TEXT_ENCODING to every process's environment
@@ -537,6 +545,36 @@ describe("startRun", () => {
     const rel = relative(start.cwd as string, store);
     expect(rel.startsWith("..") || isAbsolute(rel)).toBe(true);
     expect(relative(realpathSync(root), store).startsWith("..")).toBe(true);
+  });
+
+  it("points uv's cache and Python's tool caches at the seat's own folders in the sandbox's temp root", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const [start] = recorded();
+    const env = start.env as Record<string, string>;
+    const tmp = `/tmp/claude-${process.getuid?.()}`;
+    expect(env).toMatchObject({
+      UV_NO_SYNC: "1",
+      UV_OFFLINE: "1",
+      UV_CACHE_DIR: `${tmp}/mc-uv-cache/guido-1`,
+      PYTHONPYCACHEPREFIX: `${tmp}/mc-pycache/guido-1`,
+      RUFF_CACHE_DIR: `${tmp}/mc-ruff-cache/guido-1`,
+      MYPY_CACHE_DIR: `${tmp}/mc-mypy-cache/guido-1`,
+      COVERAGE_FILE: `${tmp}/mc-pycache/guido-1/.coverage`,
+      PYTEST_ADDOPTS: "-p no:cacheprovider",
+    });
+    for (const key of [
+      "UV_CACHE_DIR",
+      "PYTHONPYCACHEPREFIX",
+      "RUFF_CACHE_DIR",
+      "MYPY_CACHE_DIR",
+      "COVERAGE_FILE",
+    ]) {
+      const rel = relative(start.cwd as string, env[key]);
+      expect(rel.startsWith("..") || isAbsolute(rel)).toBe(true);
+    }
   });
 
   it("writes the prompt file beside the transcript: role brief, then the repo's CLAUDE.md", async () => {
