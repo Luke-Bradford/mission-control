@@ -1870,6 +1870,23 @@ export class Store {
     }));
   }
 
+  /** Latest successful Ready move before each merge, falling back to the collected flow start. */
+  readyToMergedMinutes(repoId: RepoId, since: number): number[] {
+    const rows = this.db
+      .prepare(`
+      SELECT p.merged_at, COALESCE(MAX(m.at), f.start_at) AS ready_at
+      FROM pull_requests p
+      LEFT JOIN board_moves m ON p.ticket = m.repo_id || '#' || m.issue
+        AND m.board_column = 'Ready' AND m.state = 'done' AND m.at <= p.merged_at
+      LEFT JOIN flow_issues f ON p.ticket = f.repo_id || '#' || f.number
+      WHERE p.repo_id = ? AND p.state = 'merged' AND p.merged_at >= ?
+      GROUP BY p.number, p.merged_at, f.start_at
+      HAVING ready_at IS NOT NULL AND ready_at <= p.merged_at
+    `)
+      .all(repoId, since) as { merged_at: number; ready_at: number }[];
+    return rows.map((r) => (r.merged_at - r.ready_at) / 60_000);
+  }
+
   /** PRs merged at or after `sinceMs`, across repos, oldest first. */
   flowPrs(sinceMs: number): FlowPr[] {
     const rows = this.db
@@ -3465,7 +3482,8 @@ export class Store {
 
   /** Validate the whole update before writing any part of it. */
   updateFlightBrief(
-    section: FlightBriefRow,
+    section: Omit<FlightBriefRow, "section" | "text"> &
+      Partial<Pick<FlightBriefRow, "section" | "text">>,
     planned?: FlightPlanOperation,
     watch?: FlightWatchOperation,
     arrival?: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">,
@@ -3480,7 +3498,8 @@ export class Store {
       plansWrite?.();
       watchWrite?.();
       if (arrival) this.writeFlightArrival(arrival);
-      this.setFlightBriefSection(section);
+      if (section.section !== undefined && section.text !== undefined)
+        this.setFlightBriefSection({ ...section, section: section.section, text: section.text });
     });
   }
 
@@ -3704,7 +3723,7 @@ export class Store {
     ).map((r) => JSON.parse(r.entry) as FlightLedgerEntry);
   }
 
-  /** Save an entry and prune old closed entries in its session, in one transaction. */
+  /** Save an entry and prune old closed entries across all sessions, in one transaction. */
   putFlightLedgerEntry(session: string, entry: FlightLedgerEntry, pruneBefore: number): void {
     this.transaction(() => {
       this.db
@@ -3713,9 +3732,9 @@ export class Store {
         kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at, entry = excluded.entry`)
         .run(session, entry.key, entry.kind, entry.status, entry.updatedAt, JSON.stringify(entry));
       this.db
-        .prepare(`DELETE FROM flight_ledger WHERE session_id = ? AND updated_at < ?
+        .prepare(`DELETE FROM flight_ledger WHERE updated_at < ?
         AND status NOT IN (${FLIGHT_LEDGER_OPEN.map(() => "?").join(", ")})`)
-        .run(session, pruneBefore, ...FLIGHT_LEDGER_OPEN);
+        .run(pruneBefore, ...FLIGHT_LEDGER_OPEN);
     });
   }
 

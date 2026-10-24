@@ -168,6 +168,8 @@ export type FlightLedgerIndexEntry = Pick<
 export interface FlightLedgerView {
   session: string | null;
   entries: FlightLedgerEntry[];
+  more: boolean;
+  nextOffset: number | null;
 }
 export interface FlightSummaryItem {
   key: string;
@@ -195,14 +197,18 @@ export interface FlightMetrics {
   parks: { day: number; live: { kind: string; n: number }[] };
   seats: { seat: string; tokens: number; costUsd: number }[];
   flight: { wakes: number; costUsd: number };
+  /** Latest successful Ready move at or before merge, falling back to the flow issue start. */
   readyToMergedMin: number | null;
   forTheController: number;
 }
 export interface FlightSummaryView {
   session: string | null;
   headline: string;
+  /** Minutes since the headline was written; null when the headline is empty. */
+  headlineAgeMin: number | null;
   now: FlightSummaryItem[];
   watching: { counts: Record<FlightLedgerStatus, number>; top: FlightSummaryItem[] };
+  /** Items of kind plan resolve by id through GET /api/flight/schedule. */
   next: FlightSummaryItem[];
   incoming: number;
   metrics: FlightMetrics;
@@ -244,7 +250,8 @@ export const TRACK_DESCRIPTION =
   "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it.";
 export const UNTRACK_DESCRIPTION =
   "Close a ledger entry by key with its outcome and status done (default) or dropped.";
-export const LEDGER_DESCRIPTION = "List your ledger as JSON, optionally by kind and status.";
+export const LEDGER_DESCRIPTION =
+  "List your ledger as JSON, open entries by default. Filter by kind or status (all includes closed entries). Page with limit and offset; more and nextOffset identify the next page.";
 
 export const FLIGHT_MEMORY_KINDS = ["lesson", "repo", "crew", "playbook"] as const;
 export type FlightMemoryKind = (typeof FLIGHT_MEMORY_KINDS)[number];
@@ -311,6 +318,8 @@ export const FLIGHT_BRIEF_TITLES: Readonly<Record<FlightBriefSectionKey, string>
   operator: "The operator",
   lessons: "Lessons",
 };
+export const retiredBriefText = (section: FlightBriefSectionKey): string =>
+  `Not saved: ${section} is retired. Use mc track to keep status in your ledger.`;
 export const FLIGHT_BRIEF_SECTION_MAX = 4000;
 /** Over the section cap, so an over-long text gets briefTooLongText, not a bare argument error. */
 export const FLIGHT_BRIEF_INPUT_MAX = 20_000;
@@ -340,7 +349,7 @@ export const briefAboutText = (title: string): string => `Brief: ${title}`;
 export const BRIEF_CLEARED_DECISION = "Cleared";
 /** A saved section in the decision log: its size, not its text (the brief itself holds that). */
 export const briefSavedDecision = (chars: number): string => `Saved (${chars} characters)`;
-export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, whose changed sections come back in wakes (full brief in mc flight_state). Sections: ${FLIGHT_HEADLINE} (one line, at most ${FLIGHT_HEADLINE_MAX} characters), ${FLIGHT_NOTE_SECTIONS.join(", ")}; keep status in your ledger (mc track). text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. Optional watch upsert/remove maintains at most 100 structured entries with stable ids; actions reference an exact lock hold or draft, never prose commands. Optional planned upsert maintains at most 100 scheduled entries: stable id, dueAt (epoch milliseconds), kind (report, PR recheck, brief), target, label and status (pending, completed, cancelled). Schedule only agreed work, never guessed agent finish times. A due plan stays pending until its outcome is observed; completed requires detail describing that observation. Cancel obsolete plans explicitly. Optional arrival records No action with a reason, or Queued only for an already queued Board arrival; copy its source identity/version (Board version is createdAt, person version is source.revision). At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
+export const UPDATE_BRIEF_DESCRIPTION = `Update structured entries or replace one section of your brief, your working memory, whose changed sections come back in wakes (full brief in mc flight_state). Sections: ${FLIGHT_HEADLINE} (one line, at most ${FLIGHT_HEADLINE_MAX} characters), ${FLIGHT_NOTE_SECTIONS.join(", ")}; keep status in your ledger (mc track). Provide at least one of section, planned, watch or arrival. section and text are optional together; omit both for structured updates. text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. Optional watch upsert/remove maintains at most 100 structured entries with stable ids; actions reference an exact lock hold or draft, never prose commands. Optional planned upsert maintains at most 100 scheduled entries: stable id, dueAt (epoch milliseconds), kind (report, PR recheck, brief), target, label and status (pending, completed, cancelled). Schedule only agreed work, never guessed agent finish times. A due plan stays pending until its outcome is observed; completed requires detail describing that observation. Cancel obsolete plans explicitly. Optional arrival records No action with a reason, or Queued only for an already queued Board arrival; copy its source identity/version (Board version is createdAt, person version is source.revision). At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} section edits an hour; structured-only updates do not spend a brief edit.`;
 
 export const READ_OTHER_REPO =
   "Not read: you read only your session's repo, or the issue of an open loop escalation in another configured repo.";
@@ -770,7 +779,11 @@ export interface FlightState {
   retrospective?: FlightRetrospective;
   signals: FlightSignal[];
   triage: FlightTriage[];
+  /** Current one-line brief, written with update_brief; empty until set or after clearing. */
   headline: string;
+  /** Minutes since the headline was written; null when the headline is empty. */
+  headlineAgeMin: number | null;
+  /** Open-entry index, capped at FLIGHT_LEDGER_INDEX_MAX; mc ledger reads full entries. */
   ledger: FlightLedgerIndexEntry[];
   /** Open ledger entries omitted from the index; read them with mc ledger. */
   ledgerMore: number;
