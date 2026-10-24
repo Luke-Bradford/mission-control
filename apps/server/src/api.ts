@@ -2025,6 +2025,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
         const view: RunLoopView = {
           runId: run.id,
+          noReport: run.noReport ?? null,
           loop,
           events,
           tries: loopTries(run, events, review, [

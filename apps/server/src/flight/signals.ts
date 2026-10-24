@@ -15,6 +15,7 @@ import {
   hudColumnOf,
   inLane,
   isFlakeNoteKey,
+  noReportExitReason,
   type PullRequestView,
   parkedEventText,
   seatDef,
@@ -457,11 +458,17 @@ export function flightSignals(i: {
     if (!seat) continue;
     const loop = seatDef(seat).loop;
     const review = run.reviewId == null ? null : store.review(run.reviewId);
-    if (loop === "review" && (!review || !["queued", "starting", "running"].includes(review.state)))
+    if (review?.state === "superseded") continue;
+    if (
+      !run.noReport &&
+      loop === "review" &&
+      (!review || !["queued", "starting", "running"].includes(review.state))
+    )
       continue;
     const stoppedWithoutReport = /stopped.*without reporting/i.test(run.loop?.parked?.reason ?? "");
     if (run.endedAt === null && !stoppedWithoutReport) continue;
     const missing =
+      run.noReport != null ||
       stoppedWithoutReport ||
       (loop === "build"
         ? run.loop != null &&
@@ -477,7 +484,7 @@ export function flightSignals(i: {
         "hub_error",
         `report:${run.id}`,
         run.endedAt ?? store.seatSession(run.agentId)?.updatedAt ?? now,
-        `${run.agentId} ${loop} run ${run.id} (${run.ticket ?? "no ticket"}) ${run.endedAt === null ? "stopped" : "ended"} without its report`,
+        `${run.agentId} ${loop} run ${run.id} (${run.ticket ?? "no ticket"}) ${run.endedAt === null ? "stopped" : "ended"} without its report${run.noReport ? `: ${noReportExitReason(run.noReport)}` : ""}`,
       );
   }
   const loops = heartbeats(store).loops;
