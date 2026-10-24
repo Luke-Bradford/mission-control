@@ -1,10 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CANNOT_START, type SessionEvent } from "@mc/core";
+import { CANNOT_START, MC_MCP_SERVER, MC_TOOL_NAMES, type SessionEvent } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachCodexSession,
+  CODEX_MCP_ELICITATION,
   CODEX_OUTBOX_FILE,
   type CodexSessionInput,
 } from "../src/runtime/codex-session.ts";
@@ -110,7 +111,126 @@ const request = (id: string | number, itemId = "item") => ({
 const started = { method: "turn/started", params: { turn: { id: "turn" } } };
 const settled = () => vi.waitFor(() => {}, { interval: 1 });
 
+const mcpStarted = (id = "mcp") => ({
+  method: "item/started",
+  params: {
+    threadId: "thread",
+    turnId: "turn",
+    item: { id, type: "mcpToolCall", server: MC_MCP_SERVER, tool: MC_TOOL_NAMES.commit },
+  },
+});
+const mcpRequest = () => ({
+  id: "elicitation",
+  method: CODEX_MCP_ELICITATION,
+  params: {
+    threadId: "thread",
+    turnId: "turn",
+    serverName: MC_MCP_SERVER,
+    mode: "form",
+    requestedSchema: { type: "object", properties: {} },
+  },
+});
+
 describe("Codex lifecycle without a socket", () => {
+  it.each([false, true])(
+    "correlates MCP elicitations with their active tool, including replay (%s)",
+    async (replay) => {
+      const h = attached();
+      if (!replay) {
+        h.caughtUp();
+        await h.session.ready;
+      }
+      h.line(started);
+      h.line(mcpStarted());
+      h.line(mcpRequest());
+      if (replay) {
+        expect(h.approve).not.toHaveBeenCalled();
+        h.caughtUp();
+      }
+      await vi.waitFor(() =>
+        expect(h.write).toHaveBeenCalledWith({
+          id: "elicitation",
+          result: { action: "accept", content: {} },
+        }),
+      );
+      expect(h.approve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mcpCall: expect.objectContaining({
+            itemId: "mcp",
+            server: MC_MCP_SERVER,
+            tool: MC_TOOL_NAMES.commit,
+          }),
+        }),
+        undefined,
+        expect.any(AbortSignal),
+      );
+      h.session.detach();
+    },
+  );
+
+  it.each(["missing", "ambiguous", "completed", "wrong turn", "wrong thread", "foreign server"])(
+    "declines %s MCP correlation even if the callback accepts",
+    async (kind) => {
+      const h = attached();
+      h.caughtUp();
+      await h.session.ready;
+      h.line(started);
+      if (kind !== "missing") h.line(mcpStarted());
+      if (kind === "ambiguous") h.line(mcpStarted("other"));
+      if (kind === "completed")
+        h.line({ method: "item/completed", params: { item: { id: "mcp", type: "mcpToolCall" } } });
+      const req = mcpRequest();
+      if (kind === "wrong turn") req.params.turnId = "other";
+      if (kind === "wrong thread") req.params.threadId = "other";
+      if (kind === "foreign server") req.params.serverName = "other";
+      h.line(req);
+      await vi.waitFor(() =>
+        expect(h.write).toHaveBeenCalledWith({
+          id: "elicitation",
+          result: { action: "decline", content: null },
+        }),
+      );
+      expect(h.approve.mock.calls[0]?.[0].mcpCall).toBeUndefined();
+      h.session.detach();
+    },
+  );
+
+  it.each([false, true])(
+    "declines a completed MCP approval with the elicitation response shape (replay: %s)",
+    async (replay) => {
+      let resolve: (decision: "accept") => void = () => {};
+      const approve = vi.fn<CodexSessionInput["approve"]>(async (_req, _paths, signal) => {
+        if (signal.aborted) return "decline";
+        return new Promise<"accept">((done) => {
+          resolve = done;
+        });
+      });
+      const h = attached(approve);
+      if (!replay) {
+        h.caughtUp();
+        await h.session.ready;
+      }
+      h.line(started);
+      h.line(mcpStarted());
+      h.line(mcpRequest());
+      if (!replay) await vi.waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+      h.line({ method: "item/completed", params: { item: { id: "mcp", type: "mcpToolCall" } } });
+      if (replay) h.caughtUp();
+      resolve("accept");
+      await vi.waitFor(() =>
+        expect(h.write).toHaveBeenCalledWith({
+          id: "elicitation",
+          result: { action: "decline", content: null },
+        }),
+      );
+      expect(h.write).not.toHaveBeenCalledWith({
+        id: "elicitation",
+        result: { action: "accept", content: {} },
+      });
+      h.session.detach();
+    },
+  );
+
   it("waits for replay, then checks only unresolved requests and remembers rename paths", async () => {
     const h = attached();
     h.line(started);

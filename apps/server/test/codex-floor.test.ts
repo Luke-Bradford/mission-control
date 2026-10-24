@@ -365,6 +365,11 @@ describe("Codex seat floor", () => {
       "stat apps/web/a.ts",
       "ls",
       "git status && rg foo src",
+      "sed -n 1,5p a && sed -n 1,5p b",
+      "sed -n 1,5p a; sed -n 1,5p b",
+      "sed -n 1,5p a || sed -n 1,5p b",
+      'rg -n "a|b" docs',
+      'rg -n "a|b" docs | head',
       "pnpm -s test 2>&1",
       "cat <<'E'\nline1\nE",
       "cat apps/web/a.ts | grep foo",
@@ -390,6 +395,12 @@ describe("Codex seat floor", () => {
 
   it("declines substitutions, background work, file redirection and allowlist escapes", () => {
     for (const script of [
+      "sed -n 1p a && curl x",
+      "a; rm -rf /",
+      "$(id)",
+      "sleep 1 &",
+      "sed -n 1p a || curl x",
+      "rg -n foo docs | sh",
       "pnpm -s test && rm x",
       "pnpm -s test $(id)",
       "git status; curl x",
@@ -438,6 +449,35 @@ describe("Codex seat floor", () => {
       expect(codexCommandAllowed(script, "writer", DEFAULT_SEAT_COMMANDS, cwd, cwd), script).toBe(
         false,
       );
+  });
+
+  it("checks every segment after decoding the CLI's segment amendment", () => {
+    for (const [script, amendment, allowed] of [
+      ["sed -n 1,5p a && sed -n 1,5p b", ["sed", "-n", "1,5p", "a"], true],
+      ['rg -n "a|b" docs && sed -n 1p a', ["rg", "-n", "a|b", "docs"], true],
+      ["sed -n 1p a && curl x", ["sed", "-n", "1p", "a"], false],
+    ] as const) {
+      const events = codexApproval(
+        request({
+          kind: "command",
+          cwd,
+          command: `/bin/zsh -lc '${script}'`,
+          proposedExecpolicyAmendment: amendment,
+        }),
+        undefined,
+        { cwd },
+      );
+      expect(events).toEqual([{ tool: "Bash", input: { command: script } }]);
+      expect(
+        codexCommandAllowed(
+          events?.[0]?.input.command ?? "",
+          "writer",
+          DEFAULT_SEAT_COMMANDS,
+          cwd,
+          cwd,
+        ),
+      ).toBe(allowed);
+    }
   });
 
   it("keeps denies and read path checks even for a custom command", () => {

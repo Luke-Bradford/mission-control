@@ -34,7 +34,7 @@ export const engineHitText = (
   action: "push" | "draft PR" | "PR body edit",
 ): string => `${GUARD_RULES[rule]}: Mission Control's ${action}`;
 
-/** One recorded refusal. `text` is the rule's text plus the program and subcommand, never argv. */
+/** One recorded refusal. Codex includes a bounded command or file-path excerpt. */
 export interface GuardHit {
   id: number;
   agentId: string;
@@ -1129,11 +1129,14 @@ export function codexCommand(raw: string, parsed: readonly string[] | null): str
   if (words?.length !== 3 || words[0] !== CODEX_SHELL || words[1] !== "-lc") return null;
   const script = words[2];
   if (parsed !== null) {
-    const expected = parsed[0] === CODEX_SHELL && parsed[1] === "-lc" ? words : codexWords(script);
+    const candidates =
+      parsed[0] === CODEX_SHELL && parsed[1] === "-lc"
+        ? [words]
+        : (codexLineCommands(script)?.map((c) => c.argv) ?? []);
     if (
-      expected === null ||
-      expected.length !== parsed.length ||
-      !expected.every((w, n) => w === parsed[n])
+      !candidates.some(
+        (argv) => argv.length === parsed.length && argv.every((w, n) => w === parsed[n]),
+      )
     )
       return null;
   }

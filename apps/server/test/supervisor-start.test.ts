@@ -39,6 +39,8 @@ import {
   guardDenyOutput,
   HOOK_RETRY_ENV,
   lockBusyText,
+  MC_MCP_SERVER,
+  MC_TOOL_NAMES,
   mergedMainText,
   NEW_LOOP,
   notOnBoardText,
@@ -71,6 +73,7 @@ import { createMcTools } from "../src/mcp/tools.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
+import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -2127,6 +2130,8 @@ import(${JSON.stringify(fixture)});
     const home = join(folder, "codex-home");
     expect(spawn.env.CODEX_HOME).toBe(home);
     expect(spawn.env.SHELL).toBe(CODEX_SHELL);
+    expect(spawn.env.pnpm_config_pm_on_fail).toBe("ignore");
+    expect(spawn.env.npm_config_update_notifier).toBe("false");
     expect(spawn.env.ZDOTDIR).toBe(join(folder, "zsh-empty"));
     expect(readdirSync(spawn.env.ZDOTDIR)).toEqual([]);
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
@@ -2186,7 +2191,6 @@ import(${JSON.stringify(fixture)});
     { command: "sleep 1 &" },
     { method: "item/permissions/requestApproval" },
     { method: "item/tool/requestUserInput" },
-    { method: "mcpServer/elicitation/request" },
     { method: "execCommandApproval" },
     { method: "applyPatchApproval" },
     { method: "unknown/request" },
@@ -2201,6 +2205,36 @@ import(${JSON.stringify(fixture)});
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(decision()).toBe("decline"));
+    expect(store.guardHits(0)).toContainEqual(
+      expect.objectContaining({ runId, rule: "codex-allowlist" }),
+    );
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.endRunByEngine(runId);
+  });
+
+  it.each([
+    { name: "uncorrelated mc", server: MC_MCP_SERVER, correlated: false },
+    { name: "non-mc", server: "other", correlated: true },
+  ])("declines a $name elicitation and records its refusal", async ({ server, correlated }) => {
+    const { sup } = codex({
+      method: CODEX_MCP_ELICITATION,
+      ...(correlated ? { mcp: { server, tool: MC_TOOL_NAMES.commit } } : {}),
+      params: {
+        itemId: null,
+        serverName: server,
+        mode: "form",
+        _meta: { codex_approval_kind: "mcp_tool_call" },
+        requestedSchema: { type: "object", properties: {} },
+      },
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() =>
+      expect(recorded()).toContainEqual({
+        id: "approval-1",
+        result: { action: "decline", content: null },
+      }),
+    );
     expect(store.guardHits(0)).toContainEqual(
       expect.objectContaining({ runId, rule: "codex-allowlist" }),
     );
@@ -2367,7 +2401,7 @@ import(${JSON.stringify(fixture)});
       expect.objectContaining({
         runId,
         rule: "full-suite",
-        text: lockBusyText("another seat", "a full suite"),
+        text: `${lockBusyText("another seat", "a full suite")}: pnpm -s test`,
       }),
     );
     await until(() => expect(seatState("guido-1")).toBe("idle"));
