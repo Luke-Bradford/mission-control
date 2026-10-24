@@ -16,6 +16,7 @@ import {
   BUILTIN_ROLES,
   CREW_EFFORTS,
   DEFAULT_CREW_NODE,
+  DEFAULT_REPO_RULES,
   DEFAULT_SEAT_COMMANDS,
   FLIGHT_TOOLS,
 } from "@mc/core";
@@ -1204,6 +1205,76 @@ describe("guard config", () => {
       expect(c.crew?.nodeNote).toBe(`crew.node: ${bad} is not an executable file`);
       expect(c.loops.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("repo rules in user config", () => {
+  const text = readFileSync(EXAMPLE, "utf8");
+  const load = (rules: string) =>
+    parseConfig(
+      text.replace(
+        "    github: octo-org/shop-app\n",
+        `    github: octo-org/shop-app\n    rules: ${rules}\n`,
+      ),
+      "test",
+    ).repos[0]?.rules;
+
+  it("loads every rule without a target repo file", () => {
+    const rules = load(`
+      templates: {bug: bugfix}
+      pick_from: [Todo]
+      promote_backlog: true
+      needs: [size]
+      areas: {"area:api": ["src/**"]}
+      hard_rules: ["policy/**"]
+      hard_rules_by: controller
+      always_ask: [deps]`);
+    expect(rules).toEqual({
+      templates: { bug: "bugfix" },
+      pickFrom: ["Todo"],
+      promoteBacklog: true,
+      needs: ["size"],
+      areas: { "area:api": ["src/**"] },
+      hardRules: ["policy/**"],
+      hardRulesSet: true,
+      hardRulesBy: "controller",
+      alwaysAsk: ["deps"],
+      userSet: [
+        "templates",
+        "pick_from",
+        "promote_backlog",
+        "needs",
+        "areas",
+        "hard_rules",
+        "hard_rules_by",
+        "always_ask",
+      ],
+    });
+    expect(Object.isFrozen(rules)).toBe(true);
+    expect(Object.isFrozen(rules?.areas["area:api"])).toBe(true);
+    expect(Object.isFrozen(rules?.templates)).toBe(true);
+  });
+
+  it("only an explicit list sets hardRulesSet", () => {
+    expect(load("{}")).toEqual({ ...DEFAULT_REPO_RULES, userSet: [] });
+    // null names the key (inherit) without setting a list; hard rules overlay by hardRulesSet
+    expect(load("{hard_rules: null}")).toEqual({ ...DEFAULT_REPO_RULES, userSet: ["hard_rules"] });
+    expect(load("{hard_rules: []}")).toMatchObject({ hardRules: [], hardRulesSet: true });
+  });
+
+  it.each([
+    ["{hard_rules: path}", "hardRules"],
+    ["{hard_rules_by: flight}", "hardRulesBy"],
+    ["{flight_powers: superuser}", "flight_powers"],
+    ["{templates: {bug: {profile: bugfix}}}", "templates"],
+    ["{pick_from: []}", "pickFrom"],
+    ["{needs: [owner]}", "needs"],
+    ['{areas: {"area:api": ["/src/**"]}}', "areas"],
+    ['{areas: {__proto__: ["src/**"]}}', "areas"],
+  ])("refuses invalid rules %s", (rules, key) => {
+    const error = errorOf(() => load(rules));
+    expect(error.message).toContain(key);
+    expect(error.path).toContain("repos[0].rules");
   });
 });
 

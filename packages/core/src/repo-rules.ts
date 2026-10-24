@@ -1,5 +1,5 @@
 /**
- * A repo's board rules, read from the `## Mission Control` section of its `CLAUDE.md`: which
+ * A repo's board rules, from user config with an optional `## Mission Control` override: which
  * statuses a seat may pick from, which area labels match a seat, and which paths are hard-rule
  * files. The parser is the server's; this is the shape, the defaults and the label match.
  */
@@ -32,7 +32,9 @@ export const HARD_RULES_BY = ["operator", "controller"] as const;
 export type HardRulesBy = (typeof HARD_RULES_BY)[number];
 
 export interface RepoRules {
-  /** Label to template mapping from the repo's Mission Control block. */
+  /** Explicit user-config keys, preserved across copies of these rules. */
+  userSet?: readonly string[];
+  /** Label to template mapping from the resolved repo rules. */
   templates?: Record<string, string>;
   /** Board statuses a seat may pick a ticket from. */
   pickFrom: string[];
@@ -44,7 +46,7 @@ export interface RepoRules {
   areas: Record<string, string[]>;
   /** Globs of files that need the operator's sign-off. */
   hardRules: string[];
-  /** Whether the repo's block set `hard_rules` itself (`[]` counts); false on the defaults. */
+  /** Whether user config or the repo block set a `hard_rules` list (`[]` counts). */
   hardRulesSet: boolean;
   /** Who merges a PR that touches hard-rule files: the operator by hand, or the controller. */
   hardRulesBy: HardRulesBy | "flight";
@@ -63,6 +65,7 @@ export function freezeRules(rules: RepoRules): RepoRules {
   Object.freeze(rules.needs);
   Object.freeze(rules.hardRules);
   Object.freeze(rules.alwaysAsk);
+  if (rules.userSet) Object.freeze(rules.userSet);
   return Object.freeze(rules);
 }
 
@@ -73,7 +76,7 @@ export const hardRulesUnsetNoteKey = (repoId: string): string => `hard-rules-uns
 export const hardRulesBySettingKey = (repoId: string): string => `hard_rules_by:${repoId}`;
 
 export const hardRulesUnsetText = (repo: string): string =>
-  `${repo}: set \`hard_rules\` in the repo's Mission Control block (a list of paths that never auto-merge, or \`[]\`) before the hub merges there.`;
+  `${repo}: set \`repos[].rules.hard_rules\` for this repo in \`~/.config/mission-control/config.yaml\` (or \`MC_CONFIG\`) before the hub merges there: a list of paths that never auto-merge, or \`[]\`.`;
 
 /** Code that enforces FLIGHT's floors requires independent RETRO review. */
 export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
