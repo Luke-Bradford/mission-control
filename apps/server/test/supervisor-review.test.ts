@@ -25,7 +25,7 @@ import { CliHold } from "../src/cli-update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
-import { CREW_LOCK_FILE, clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
+import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store.ts";
 import {
   BRANCH,
@@ -543,11 +543,12 @@ describe("startReview", () => {
     const worktrees = join(dir, "db", "scratch");
     const { sup } = make({ scratchRetro: true, worktrees });
     sup.start();
+    // start() makes the folder (crew lock, managed clones); the refused review adds nothing to it
+    const before = existsSync(worktrees) ? readdirSync(worktrees).sort() : [];
     await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow(
       "outside the hub data directory",
     );
-    // start() makes the folder for the crew lock; no review checkout was prepared in it
-    expect(readdirSync(worktrees).filter((f) => f !== CREW_LOCK_FILE)).toEqual([]);
+    expect(existsSync(worktrees) ? readdirSync(worktrees).sort() : []).toEqual(before);
     expect(store.runs("retro", 1)).toEqual([]);
   });
 
