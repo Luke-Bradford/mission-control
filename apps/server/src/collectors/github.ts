@@ -240,22 +240,52 @@ export class GqlError extends Error {
 
 /**
  * The request never got an answer (`status` null: fetch failed) or got an HTTP error status. A
- * caller may retry a lost request or a 5xx (`isTransient`), never a 401/403/429.
+ * caller may retry a lost request or a 5xx (`isTransient`), never a rate-limited answer.
  */
 export class GqlTransportError extends Error {
   readonly status: number | null;
   /** The response's X-GitHub-SSO header (SAML single sign-on), or null. */
   readonly sso: string | null;
-  constructor(message: string, status: number | null, sso: string | null = null) {
+  readonly rateLimited: boolean;
+  constructor(
+    message: string,
+    status: number | null,
+    sso: string | null = null,
+    rateLimited = false,
+  ) {
     super(message);
     this.name = "GqlTransportError";
     this.status = status;
     this.sso = sso;
+    this.rateLimited = rateLimited;
   }
 }
 
 export const isTransient = (e: unknown): boolean =>
-  e instanceof GqlTransportError && (e.status === null || e.status >= 500);
+  e instanceof GqlTransportError && !e.rateLimited && (e.status === null || e.status >= 500);
+
+/** Read the body separately from parsing so an interrupted response keeps its cause. */
+export async function readGithubJson(res: Response): Promise<unknown> {
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (e) {
+    if (isObj(e) && e.name === "TimeoutError") {
+      throw new GqlTransportError(
+        `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`,
+        null,
+      );
+    }
+    throw new GqlTransportError(`github: response cut off (${errMsg(e)})`, null);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `github: response was not JSON (${res.headers.get("content-type") ?? "unknown"})`,
+    );
+  }
+}
 
 /** Starts the one line a token missing a scope gets; the scheduler looks for it to log at start-up. */
 export const MISSING_SCOPE_PREFIX = "gh token lacks the ";
@@ -311,8 +341,13 @@ export function makeGql(
         body: JSON.stringify({ query, variables }),
         signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
       });
-    } catch {
-      throw new GqlTransportError("github: request failed", null);
+    } catch (e) {
+      throw new GqlTransportError(
+        isObj(e) && e.name === "TimeoutError"
+          ? `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`
+          : "github: request failed",
+        null,
+      );
     }
     // An exhausted budget answers with no rateLimit block: record it, or the poll never slows.
     if (!res.ok && isRateLimitedResponse(res.status, res.headers)) {
@@ -323,14 +358,13 @@ export function makeGql(
         `github: HTTP ${res.status}`,
         res.status,
         res.headers.get("x-github-sso"),
+        isRateLimitedResponse(res.status, res.headers),
       );
     }
-    let body: { data?: unknown; errors?: { message?: unknown }[] };
-    try {
-      body = (await res.json()) as typeof body;
-    } catch {
-      throw new Error("github: response was not JSON");
-    }
+    const body = (await readGithubJson(res)) as {
+      data?: unknown;
+      errors?: { message?: unknown }[];
+    };
     if (Array.isArray(body.errors) && body.errors.length > 0) {
       if (body.errors.some(isRateLimitedError)) {
         rates?.record(queryName(query), exhaustedReading(res.headers, now()));
@@ -1040,7 +1074,12 @@ export async function sweepPullRequests(
   const collector = prSweepCollector(repo.id);
   let boards = false;
   try {
-    const { prs, nodes } = await fetchPrs(repo, gql, now, true, store, observe);
+    const read = () => fetchPrs(repo, gql, now, true, store, observe);
+    const { prs, nodes } = await read().catch(async (e: unknown) => {
+      if (!isTransient(e)) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      return read();
+    });
     // GitHub returning no nodes at all is no data, not "no PRs": it must not wipe the rows until
     // the next poll. Nodes that are all older than the keep window do prune.
     if (nodes > 0) boards = store.sweepPullRequests(repo.id, prs, now);
