@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AWAY_SETTING,
+  AWAY_WRITES_REFUSED,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
   BRIEF_INPUT_MAX,
@@ -20,6 +22,7 @@ import {
   ciNotActionsText,
   ciNotFailedText,
   claimedText,
+  DEFAULT_AWAY,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_BRIEF_EDITS_PER_HOUR,
@@ -951,6 +954,15 @@ describe("start_seat", () => {
   beforeEach(() => {
     board(sc(7));
     fetchImpl = async (n) => ticket(n, { body: DONE });
+  });
+
+  it("FLIGHT explicitly starts otherwise excluded work as a draft while away", async () => {
+    store.setSetting(
+      AWAY_SETTING,
+      JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, pickUp: false } }),
+    );
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls[0]?.[2]).toMatchObject({ flight: true });
   });
 
   it("respects an operator stop", async () => {
@@ -3028,6 +3040,47 @@ describe("comment_ticket", () => {
   });
   beforeEach(() => {
     engineOn = true;
+  });
+
+  it("keeps comments as drafts while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(
+      (await call("draft_reply", { target: "mc#12", kind: "issue", text: "Ready for your review" }))
+        .isError,
+    ).toBeUndefined();
+    expect(store.drafts()).toMatchObject([{ text: "Ready for your review", state: "pending" }]);
+    expect(ghCalls).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "refuses away posts and allows them after off or expiry (%s)",
+    async (expired) => {
+      store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+      expect(await call("comment_ticket", K())).toEqual(refused(AWAY_WRITES_REFUSED));
+      expect(ghCalls).toEqual([]);
+      store.setSetting(
+        AWAY_SETTING,
+        JSON.stringify({ ...DEFAULT_AWAY, on: expired, until: expired ? "2020-01-01" : "" }),
+      );
+      expect((await call("comment_ticket", K())).isError).toBeUndefined();
+      expect(ghCalls).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    "merge_pr",
+    "promote",
+    "edit_card",
+    "create_ticket",
+    "rerun_ci",
+    "accept_ruling",
+    "settle_park",
+    "sync_main",
+  ])("refuses the external writes of %s while away", async (name) => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await call(name, {})).toEqual(refused(AWAY_WRITES_REFUSED));
+    expect(ghCalls).toEqual([]);
+    expect(moveCalls).toEqual([]);
   });
 
   it("writes nothing while the engine is off", async () => {

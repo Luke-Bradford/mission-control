@@ -897,6 +897,37 @@ step through agents; `/` opens the selected agent (its composer is off for an ob
 smallest panels do not fit, the work area scrolls); below that the page scrolls; at 390 px nothing
 scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
+## Away mode
+
+The server reads the settings saved by `POST /api/settings/away` before starting work or marking
+PRs ready. An end date includes that whole day in the operator's configured timezone. Turning
+away off, or passing that date, restores the repo's usual behaviour.
+
+Automatic starts require **Pick up safe tickets**, Size XS or S, and a bug, chore, test or docs
+label mapped through the repo's `mc.templates` (the built-in profile labels when absent).
+`bugfix` maps to bug; `small-change` maps to test or docs for those labels, otherwise chore.
+FLIGHT can explicitly start other work, which stays draft. Existing seat, memory and verify
+limits still apply; an account with current weekly usage at 70% or above starts nothing new.
+
+**Take a safe PR out of draft** requires the safe metadata, green CI, a clean RETRO review with
+no Minor findings or waiver, and an allowed diff inside the seat's area. Test tickets add only
+test files; docs tickets change only documentation. Existing tests, hard-rule files, migrations,
+settings, CI, infrastructure, dependencies, auth and API paths hold the PR in draft. Dependency
+manifests are held whole. For bugs, FLIGHT records a `log_decision` with the reproducing test's
+results on the base and branch; the tool describes the commit-specific key the gate requires.
+Away mode blocks merging in every repo and FLIGHT's external posting and settings changes.
+`draft_reply` remains available; comments wait for approval in the existing drafts list.
+
+Read `GET /api/away/digest` (for example, open `http://127.0.0.1:7420/api/away/digest` on the hub).
+It returns `active` and six ordered `groups`: `needYouNow`, `safePrsReady`,
+`draftsToWalkThrough`, `failures`, `flightDecisions`, and `messagesDrafted`. Each has `items`.
+This is current outstanding work and retained FLIGHT decision history, not a saved report or a
+new visit window; repeated reads acknowledge nothing and pending messages remain drafts.
+
+When the server ticket goes Ready, file the **lane:work** web follow-up: replace the Away modal's
+"phase 4" text and show this single digest when away switches off or its end date passes.
+The follow-up should use the configured timezone and preserve the six groups' urgency order.
+
 ## Verification
 
 The record of the first real run against the live loops (2026-10-17) is kept outside the repo.

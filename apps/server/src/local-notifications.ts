@@ -6,6 +6,7 @@ import type {
   NotificationPreferences,
 } from "@mc/core";
 import { z } from "zod";
+import { activeAway } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { CcConfig } from "./config.ts";
 import type { Store } from "./store.ts";
@@ -200,7 +201,7 @@ export class LocalNotifications {
           this.emit("quota", `Quota above 90% · ${account.id} · ${window}`);
       }
     }
-    const away = JSON.parse(this.store.getSetting("away") ?? '{"on":false}').on === true;
+    const away = activeAway(this.store, this.now(), this.config.operator.timezone) !== null;
     if (this.state.away && !away) this.emit("awayDigest", "The away-mode digest when I come back");
     this.state.away = away;
     this.state.seen = seen;

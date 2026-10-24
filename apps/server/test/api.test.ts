@@ -22,6 +22,7 @@ import {
   type ActivityEvent,
   type AgentStream,
   type AttentionItem,
+  type AwayDigest,
   type AwaySettings,
   type BoardItem,
   type ChangedFiles,
@@ -49,6 +50,7 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   otherLaneText,
   type PrCheck,
+  type PullRequestView,
   projectAtReset,
   READONLY_FILES_NOTE,
   type ReloadResult,
@@ -538,6 +540,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/notifications/events"],
   ["POST", "/api/notifications/test", {}],
   ["GET", "/api/settings/away"],
+  ["GET", "/api/away/digest"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
     "POST",
@@ -2129,6 +2132,69 @@ describe("away settings", () => {
     until: "2026-10-28",
     may: { pickUp: true, research: false, check: true, status: false, safePr: true },
   };
+
+  it("GET /api/away/digest assembles one item per group without saving a digest", async () => {
+    store.replaceEscalations("shop-app", [escalation({})]);
+    const pr: PullRequestView = {
+      repoId: "shop-app",
+      number: 41,
+      title: "Safe docs",
+      url: "https://github.com/o/shop-app/pull/41",
+      branch: "docs/guide",
+      ticket: "shop-app#7",
+      state: "open",
+      isDraft: false,
+      review: null,
+      ci: "passing",
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: null,
+      mergeable: null,
+    };
+    store.upsertPullRequests(
+      "shop-app",
+      [pr, { ...pr, number: 42, isDraft: true, ticket: "shop-app#8" }],
+      NOW,
+    );
+    store.upsertRun(
+      run({
+        id: "failed",
+        ticket: "shop-app#8",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "stuck", reason: "Verify stopped producing output", ended: false },
+        },
+      }),
+    );
+    store.addFlightDecision({
+      at: NOW,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "shop-app#7",
+      decision: "Ready for review",
+      basis: "CI and RETRO passed",
+    });
+    store.addDraft("shop-app#7", "issue", "Review is ready", NOW);
+    const result = await get("/api/away/digest");
+    expect(result.statusCode).toBe(200);
+    const digest = result.json() as AwayDigest;
+    expect(digest.active).toBe(false);
+    expect(digest.groups.map((g) => [g.kind, g.items.length])).toEqual([
+      ["needYouNow", 1],
+      ["safePrsReady", 1],
+      ["draftsToWalkThrough", 1],
+      ["failures", 1],
+      ["flightDecisions", 1],
+      ["messagesDrafted", 1],
+    ]);
+    expect(digest.groups[3].items[0]?.reason).toBe("Verify stopped producing output");
+    expect((await get("/api/away/digest")).json()).toEqual(digest);
+  });
 
   it("GET answers the defaults when nothing is stored", async () => {
     const r = await get("/api/settings/away");

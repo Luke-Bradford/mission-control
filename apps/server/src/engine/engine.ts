@@ -10,8 +10,13 @@
  * crew is disabled, in a preview, or with `MC_NO_LOOP_WRITES=1` (`enabled`).
  */
 import {
+  AWAY_BUG_VERIFIED,
+  AWAY_WRITES_REFUSED,
   asideEventText,
   asideInCiEventText,
+  awayBugDecisionAbout,
+  awayDiffSafe,
+  awayTicketType,
   BLOCKING_SEVERITIES,
   blockedNoteKey,
   CI_FAILED_EVENT_PREFIX,
@@ -85,6 +90,7 @@ import {
   wakeFailedText,
   wokenEventText,
 } from "@mc/core";
+import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf } from "../config.ts";
 import type { Move, MoveResult } from "../github-board.ts";
@@ -513,7 +519,8 @@ export function createEngine(deps: EngineDeps): Engine {
                   ? "pending"
                   : checkState(pr.checks ?? [], REVIEW_STATUS_CONTEXT),
             },
-      autoMerge: repo?.autonomy === "merge",
+      autoMerge:
+        repo?.autonomy === "merge" && activeAway(store, at, config.operator.timezone) === null,
       hardRulesSet: mergeAllowed,
       flightPowers: flightPowersOf(config, run.repoId),
       flightHeld: flightHeld(run),
@@ -579,6 +586,44 @@ export function createEngine(deps: EngineDeps): Engine {
         at,
       );
     }
+  }
+
+  async function safeAwayPr(run: Run, cur: RunLoop): Promise<boolean> {
+    const away = activeAway(store, now(), config.operator.timezone);
+    if (!away?.may.safePr || flightHeld(run)) return false;
+    const rules = await rulesFor(run.repoId);
+    const card = store.board(run.repoId).find((b) => b.issueNumber === issueOf(run));
+    const type = card && rules ? awayTicketType(card, rules.templates) : null;
+    const sha = store.runPush(run.id)?.sha;
+    if (!rules || type === null || !sha) return false;
+    const diff = await publisher.awayDiff(run, sha);
+    if (!diff || !awayDiffSafe(type, diff, rules)) return false;
+    if (
+      type === "bug" &&
+      !store
+        .flightDecisions(run.startedAt, -1)
+        .some(
+          (d) =>
+            d.kind === "note" &&
+            d.about === awayBugDecisionAbout(run.ticket ?? "", diff.base, sha) &&
+            d.decision === AWAY_BUG_VERIFIED &&
+            d.basis.trim() !== "",
+        )
+    )
+      return false;
+    const current = store.run(run.id);
+    if (!current || flightHeld(current) || store.runPush(run.id)?.sha !== sha) return false;
+    const snap = snapshot(current, cur, now(), true);
+    if (!snap || !activeAway(store, now(), config.operator.timezone)?.may.safePr) return false;
+    // No waiver or Minor findings qualify as a clean RETRO review while away.
+    const review = reviewFor(snap.review?.rows ?? [], cur.epoch, sha, null);
+    return (
+      review?.state === "reported" &&
+      review.blocking === 0 &&
+      review.minor === 0 &&
+      cur.reviewWaivedSha !== sha &&
+      gateView({ ...snap, autoMerge: true }, cur).passes
+    );
   }
 
   /** The actions only a `merge` workspace takes, whatever the loop planned. */
@@ -657,8 +702,18 @@ export function createEngine(deps: EngineDeps): Engine {
     };
     const mergedSha = (): string =>
       cur.merging?.sha ?? findPr(run, cur)?.headSha ?? store.runPush(run.id)?.sha ?? "";
-    if (MERGE_STEP_KINDS.has(a.kind) && repo?.autonomy !== "merge") return;
+    const away = activeAway(store, now(), config.operator.timezone);
+    if (away && a.kind === "merge") return;
+    if (away && a.kind === "move-card" && !away.may.status) return;
+    if (away && a.kind === "mark-ready" && !(await safeAwayPr(live(), cur))) return;
     if (
+      MERGE_STEP_KINDS.has(a.kind) &&
+      repo?.autonomy !== "merge" &&
+      !(away && a.kind === "mark-ready")
+    )
+      return;
+    if (
+      !away &&
       (a.kind === "merge" || a.kind === "mark-ready") &&
       flightPowersOf(config, run.repoId) === "superuser"
     ) {
@@ -921,13 +976,18 @@ export function createEngine(deps: EngineDeps): Engine {
       case "mark-ready": {
         const sha = store.runPush(run.id)?.sha;
         if (sha === undefined) return;
-        const r = await publisher.markReady(live());
+        const r = await publisher.markReady(live(), away ? sha : undefined);
+        if (!r.ok && away && r.text === MERGE_HEAD_MOVED) {
+          deps.pollGithub?.();
+          return;
+        }
         if (!r.ok) return refused(r, "ready");
         stepDone("ready", sha, readyMarkedText(cur.prNumber));
         return;
       }
       case "merge": {
         const r = await publisher.merge(live(), a.sha);
+        if (!r.ok && r.text === AWAY_WRITES_REFUSED) return;
         if (!r.ok && r.text === MERGE_HEAD_MOVED) {
           // the PR moved on since the gate: its facts are for a head that is gone, and the new
           // head goes through CI and review again; nothing is refused
@@ -1142,7 +1202,8 @@ export function createEngine(deps: EngineDeps): Engine {
       (input.phase === "review" || conflicting) &&
       pr?.state === "open" &&
       pr.headSha === pushed.sha &&
-      config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
+      (config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" ||
+        activeAway(store, now(), config.operator.timezone) !== null) &&
       (conflicting || reviewerOf(config, run.agentId, reviewRoleOf(run)) !== null)
     ) {
       // origin's tip is read every pass; the other reads only when the sha or the tip changed
@@ -1164,6 +1225,16 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
+    if (
+      activeAway(store, now(), config.operator.timezone)?.may.safePr &&
+      cur.phase === "review" &&
+      pr?.state === "open" &&
+      pr.isDraft &&
+      pushed &&
+      !(cur.merging?.sha === pushed.sha && cur.merging.done.includes("ready"))
+    ) {
+      step.actions.push({ kind: "mark-ready" });
+    }
     const planned = { phase: cur.phase, epoch: cur.epoch };
     // a new commit in ci is a new push: its refusals are counted afresh
     if (cur.pushFor !== stored.pushFor) lastTransient.delete(run.id);

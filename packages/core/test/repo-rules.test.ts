@@ -45,13 +45,15 @@ describe("DEFAULT_REPO_RULES", () => {
     });
   });
 
-  it("holds exactly the nineteen hard-rule globs", () => {
+  it("holds the fixed hard-rule globs", () => {
     expect(DEFAULT_HARD_RULES).toEqual([
+      "apps/server/src/away.ts",
       "apps/server/src/guard/**",
       "apps/server/src/mcp/**",
       "apps/server/src/runtime/**",
       "apps/server/src/engine/**",
       "apps/server/src/flight/**",
+      "packages/core/src/away.ts",
       "packages/core/src/guard.ts",
       "packages/core/src/flight.ts",
       "packages/core/src/loop.ts",

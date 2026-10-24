@@ -3,14 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AWAY_BUG_VERIFIED,
+  AWAY_SETTING,
+  type AwayDiff,
   asideEventText,
   asideInCiEventText,
+  awayBugDecisionAbout,
   type BoardItem,
   CI_EXCERPT_MAX,
   COMMS_TEXT_MAX,
   cleanupBranchNoteKey,
   closedIssueText,
   commsCutMarker,
+  DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   deletedLocalText,
@@ -254,6 +259,7 @@ interface Harness {
   pushResults: PublishResult[];
   prResults: OpenPrResult[];
   touches: string[];
+  awayDiff?: AwayDiff | null;
   descends?: boolean;
   hardRuleLists: string[][];
   /** The merge gate's facts (null: unreadable), and the gate reads made. */
@@ -387,6 +393,10 @@ function harness(): Harness {
     rules: async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true }),
     make: (over = {}) => {
       const publisher: Publisher = {
+        awayDiff: async () =>
+          h.awayDiff === undefined
+            ? { base: SHA_B, changes: [{ path: "docs/guide.md", status: "A" }] }
+            : h.awayDiff,
         isDescendant: async (_run, ancestor, head) => x.descends ?? ancestor === head,
         async push(r) {
           x.pushes.push(r.id);
@@ -2667,6 +2677,88 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       reported(first().id, []);
     }
+
+    it.each([false, true])(
+      "away never merges a ready PR; off or expiry restores merging (%s)",
+      async (expired) => {
+        store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+        await gateOpen();
+        setPr({ isDraft: false, ci: "passing" });
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).not.toContain("merge");
+        expect(loopOf().phase).toBe("review");
+        store.setSetting(
+          AWAY_SETTING,
+          JSON.stringify({ ...DEFAULT_AWAY, on: expired, until: expired ? "2026-10-20" : "" }),
+        );
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toContain("merge");
+      },
+    );
+
+    it.each(["draft", "merge"] as const)(
+      "away marks a safe PR ready in a %s repo, without merging",
+      async (autonomy) => {
+        need(config.repos[0]).autonomy = autonomy;
+        store.replaceBoard(REPO, [item({ labels: ["docs"], size: "S" })]);
+        store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+        await gateOpen();
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual(["ready"]);
+      },
+    );
+
+    it.each(["metadata", "toggle", "diff", "unreadable", "minor"])(
+      "away holds a PR with unsafe %s",
+      async (reason) => {
+        store.replaceBoard(REPO, [
+          item({ labels: ["docs"], size: reason === "metadata" ? "M" : "S" }),
+        ]);
+        store.setSetting(
+          AWAY_SETTING,
+          JSON.stringify({
+            ...DEFAULT_AWAY,
+            on: true,
+            may: { ...DEFAULT_AWAY.may, safePr: reason !== "toggle" },
+          }),
+        );
+        if (reason === "diff")
+          h.awayDiff = { base: SHA_B, changes: [{ path: "src/main.ts", status: "M" }] };
+        if (reason === "unreadable") h.awayDiff = null;
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, reason === "minor" ? [finding("Minor")] : []);
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual([]);
+      },
+    );
+
+    it("away requires a bug decision for the current base and head", async () => {
+      store.replaceBoard(REPO, [item({ labels: ["bug"], size: "S" })]);
+      store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+      await gateOpen();
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
+      const decision = {
+        at: clock,
+        kind: "note" as const,
+        seatId: null,
+        targetRunId: null,
+        ref: null,
+        questionId: null,
+        decision: AWAY_BUG_VERIFIED,
+        basis: "reproduce.test.ts fails on base, passes on branch",
+      };
+      store.addFlightDecision({ ...decision, about: awayBugDecisionAbout(`${REPO}#7`, SHA, SHA) });
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual([]);
+      store.addFlightDecision({
+        ...decision,
+        about: awayBugDecisionAbout(`${REPO}#7`, SHA_B, SHA),
+      });
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual(["ready"]);
+    });
 
     it("a merge workspace merges, then closes, deletes and takes the next ticket", async () => {
       await gateOpen();

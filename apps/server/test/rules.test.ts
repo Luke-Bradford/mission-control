@@ -46,6 +46,7 @@ const EXAMPLE = `mc:
 describe("parseRepoRules", () => {
   it("parses the example block", () => {
     const r = parseRepoRules(block(EXAMPLE));
+    expect(r.templates).toEqual({ "type:feature": "feature", bug: "bugfix" });
     expect(r.pickFrom).toEqual(["Ready"]);
     expect(r.promoteBacklog).toBe(true);
     expect(r.areas).toEqual({

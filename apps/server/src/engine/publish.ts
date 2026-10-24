@@ -6,6 +6,8 @@
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AWAY_WRITES_REFUSED,
+  type AwayDiff,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
   type CiRerun,
@@ -31,6 +33,7 @@ import {
   type Run,
   STDERR_TEXT_MAX,
 } from "@mc/core";
+import { activeAway } from "../away.ts";
 import {
   COMMIT_ADD_PATHSPEC,
   editRunPrBody,
@@ -142,6 +145,7 @@ export function prDiffKey(diff: string): string {
 }
 
 export interface Publisher {
+  awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
@@ -200,7 +204,7 @@ export interface Publisher {
    */
   worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
-  markReady(run: Run): Promise<PublishResult>;
+  markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
   /** Merges the run's PR with a merge commit, only if its head is `sha`. */
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
@@ -763,6 +767,27 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
 
+    async awayDiff(run, sha) {
+      if (!SHA.test(sha)) return null;
+      const result = await inGit(run, async (g) => {
+        const base = (await g(["merge-base", "refs/remotes/origin/HEAD", sha])).trim();
+        if (!SHA.test(base)) throw new Error("no merge base with origin/HEAD");
+        const fields = (
+          await g(["diff", "--name-status", "-z", "--no-renames", base, sha, "--"])
+        ).split("\0");
+        if (fields.pop() !== "" || fields.length % 2 !== 0) throw new Error("unreadable diff");
+        const changes: AwayDiff["changes"] = [];
+        for (let i = 0; i < fields.length; i += 2) {
+          const status = fields[i];
+          const path = fields[i + 1];
+          if (!status || !path) throw new Error("unreadable diff path");
+          changes.push({ status, path });
+        }
+        return { ok: true as const, diff: { base, changes } };
+      });
+      return result.ok ? result.diff : null;
+    },
+
     async isDescendant(run, ancestor, head) {
       if (!SHA.test(ancestor) || !SHA.test(head)) return false;
       const result = await inGit(run, async (g) => ({
@@ -999,10 +1024,19 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       }
     },
 
-    async markReady(run) {
+    async markReady(run, expectedSha) {
       const repo = repoOf(run);
       const n = run.loop?.prNumber ?? null;
       if (repo === undefined || n === null) return final(MERGE_NO_PR);
+      if (expectedSha !== undefined) {
+        const pr = await ghJson(
+          ["pr", "view", String(n), `--repo=${repo}`, "--json", "state,headRefOid"],
+          "pr view",
+        );
+        if (isRefusal(pr)) return pr;
+        if (pr.state !== "OPEN") return final(MERGE_PR_NOT_OPEN);
+        if (pr.headRefOid !== expectedSha) return final(MERGE_HEAD_MOVED);
+      }
       return ghDo(["pr", "ready", String(n), `--repo=${repo}`], "pr ready");
     },
 
@@ -1038,6 +1072,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           return pr.baseRefName === defaultBranch ? { ok: true } : final(MERGE_PR_NOT_RUNS);
         });
         if (!base.ok) return base;
+        if (activeAway(deps.store, (deps.now ?? Date.now)(), deps.config.operator.timezone))
+          return final(AWAY_WRITES_REFUSED);
         const merged = await ghDo(
           ["pr", "merge", String(n), `--repo=${repo}`, "--merge", `--match-head-commit=${sha}`],
           "pr merge",

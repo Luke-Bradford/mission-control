@@ -2,7 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AWAY_SETTING,
+  AWAY_START_REFUSED,
   type BoardItem,
+  DEFAULT_AWAY,
   DEFAULT_PROFILES,
   fillLoopText,
   freezeRules,
@@ -293,6 +296,62 @@ afterEach(() => {
 });
 
 describe("refillQueues", () => {
+  it.each([false, true])(
+    "away excludes an untyped ticket until off or expired (%s)",
+    async (expired) => {
+      store.replaceBoard(REPO, [card(1)]);
+      store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+      await refill();
+      await take();
+      expect(started).toEqual([]);
+      store.setSetting(
+        AWAY_SETTING,
+        JSON.stringify({ ...DEFAULT_AWAY, on: expired, until: expired ? "2026-10-20" : "" }),
+      );
+      await refill();
+      await take();
+      expect(started.map((r) => r.issue)).toEqual([1]);
+    },
+  );
+
+  it("a start refused after away changes is retried without a permanent ticket failure", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    await refill();
+    startFails = () => new SupervisorError(422, AWAY_START_REFUSED);
+    await take();
+    expect(started).toEqual([]);
+    expect(store.notes()).toEqual([]);
+    startFails = () => null;
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
+  it("away picks mapped safe tickets only while pickUp is enabled", async () => {
+    store.replaceBoard(REPO, [card(1, { labels: ["area:server", "docs"] })]);
+    store.setSetting(
+      AWAY_SETTING,
+      JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, pickUp: false } }),
+    );
+    await refill();
+    expect(issues(SERVER)).toEqual([]);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: NOW,
+      pct: 70,
+      resetAt: NOW + DAY,
+      source: "test",
+    });
+    await take();
+    expect(started).toEqual([]);
+    store.setSetting(AWAY_SETTING, JSON.stringify(DEFAULT_AWAY));
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
   it("deals no card without a done-when, Size M without a plan, or a ticket GitHub lacks", async () => {
     store.replaceBoard(REPO, [
       card(1, { size: "S" }),

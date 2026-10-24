@@ -11,8 +11,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AWAY_SETTING,
+  AWAY_WRITES_REFUSED,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
+  DEFAULT_AWAY,
   MC_PR_BODY_MAX,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
@@ -36,6 +39,7 @@ import {
   EARLIER_PR_OPEN,
   EMPTY_LOG,
   MERGE_CONFLICTING,
+  MERGE_HEAD_MOVED,
   MERGE_PR_NOT_RUNS,
   NO_FAILED_RUN,
   REVIEW_STATUS_FAILED,
@@ -695,6 +699,33 @@ describe("hardRuleTouches", () => {
     mkdirSync(join(dir, "clone", ".git"), { recursive: true });
   });
 
+  it("reads NUL-delimited away diff statuses, keeping deletions from renames", async () => {
+    const calls: string[][] = [];
+    const git = (async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      return args[0] === "merge-base"
+        ? `${BASE}\n`
+        : "D\0src/old.test.ts\0A\0src/new.test.ts\0M\0docs/with space.md\0";
+    }) as never;
+    expect(await createPublisher(deps({ git })).awayDiff(run(), SHA)).toEqual({
+      base: BASE,
+      changes: [
+        { status: "D", path: "src/old.test.ts" },
+        { status: "A", path: "src/new.test.ts" },
+        { status: "M", path: "docs/with space.md" },
+      ],
+    });
+    expect(calls[1]).toEqual(["diff", "--name-status", "-z", "--no-renames", BASE, SHA, "--"]);
+  });
+
+  it("an unreadable diff never establishes away safety", async () => {
+    const git = (async () => {
+      throw new Error("unreadable");
+    }) as never;
+    expect(await createPublisher(deps({ git })).awayDiff(run(), SHA)).toBeNull();
+    expect(await createPublisher(deps({ git })).awayDiff(run(), "--bad-sha")).toBeNull();
+  });
+
   it("lists the paths between origin's default branch and the sha that match a hard rule", async () => {
     const calls: string[][] = [];
     const git = (async (_cwd: string, args: string[]) => {
@@ -1213,6 +1244,26 @@ describe("merge steps", () => {
       expect(ghCalls).toEqual([["pr", "ready", "12", "--repo=o/mc"]]);
     });
 
+    it("checks the live PR head before marking an away PR ready", async () => {
+      ghAnswers = [
+        () => ({
+          code: 0,
+          stdout: JSON.stringify({ state: "OPEN", headRefOid: BASE }),
+          stderr: "",
+        }),
+      ];
+      expect(await publisher().markReady(R, SHA)).toMatchObject({
+        ok: false,
+        text: MERGE_HEAD_MOVED,
+      });
+      expect(ghCalls.some((a) => a[1] === "ready")).toBe(false);
+      ghAnswers = [
+        () => ({ code: 0, stdout: JSON.stringify({ state: "OPEN", headRefOid: SHA }), stderr: "" }),
+        ok,
+      ];
+      expect(await publisher().markReady(R, SHA)).toEqual({ ok: true });
+    });
+
     it("answers a transient refusal when gh fails, a final one with no PR", async () => {
       ghAnswers = [() => ({ code: 1, stdout: "", stderr: "boom" })];
       expect(await publisher().markReady(R)).toMatchObject({ ok: false, transient: true });
@@ -1228,6 +1279,21 @@ describe("merge steps", () => {
         [`merge-base --is-ancestor ${MAIN} ${SHA}`]: "",
       };
     };
+
+    it("rechecks away mode after reading GitHub and before the merge write", async () => {
+      mainSame();
+      ghAnswers = [
+        () => {
+          store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+          return view("OPEN")();
+        },
+      ];
+      expect(await publisher().merge(R, SHA)).toMatchObject({
+        ok: false,
+        text: AWAY_WRITES_REFUSED,
+      });
+      expect(ghCalls.some((a) => a[1] === "merge")).toBe(false);
+    });
 
     it("merges with a merge commit, matching the head, and none of the forbidden flags", async () => {
       mainSame();

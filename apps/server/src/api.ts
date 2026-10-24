@@ -7,6 +7,7 @@ import {
   type AgentStream,
   API_PREFIX,
   type AttentionItem,
+  AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
   type ChangedFiles,
@@ -20,7 +21,6 @@ import {
   type CrewChanges,
   type CrewMode,
   type CrewSessionFolders,
-  DEFAULT_AWAY,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
   type FileDiff,
@@ -81,6 +81,7 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
+import { AwayBody, activeAway, awayDigest, readAwaySettings } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
@@ -193,8 +194,8 @@ export const CONFIG_WRITES_UNAVAILABLE = "config writes are not available on thi
 export const CONFIG_WRITE_FAILED = "could not write config.yaml";
 /** The check route's answer to a failure outside the updater's own (502) errors. */
 export const CHECK_FAILED = "could not check for updates";
-/** The settings-table key of the Away settings. */
-export const AWAY_SETTING = "away";
+export { AWAY_SETTING } from "@mc/core";
+
 const DEFAULT_RUNS_LIMIT = 50;
 const MAX_RUNS_LIMIT = 500;
 const DEFAULT_STREAM_LIMIT = 200;
@@ -379,29 +380,6 @@ const AckBody = z.strictObject({
 
 /** The answer to a dismiss of a key that is not an open note (a seat's question is not a note). */
 export const NO_OPEN_NOTE = "no such open note";
-
-/** `YYYY-MM-DD` naming a real calendar day. */
-const isCalendarDate = (s: string): boolean => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (!m) return false;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  return d.toISOString().slice(0, 10) === s;
-};
-
-/** A full AwaySettings: `until` is empty (until turned off) or a real `YYYY-MM-DD`. */
-const AwayBody = z.strictObject({
-  on: z.boolean(),
-  until: z.string().refine((s) => s === "" || isCalendarDate(s), {
-    message: "must be empty or a calendar date YYYY-MM-DD",
-  }),
-  may: z.strictObject({
-    pickUp: z.boolean(),
-    research: z.boolean(),
-    check: z.boolean(),
-    status: z.boolean(),
-    safePr: z.boolean(),
-  }),
-}) satisfies z.ZodType<AwaySettings>;
 
 /** The first zod issue as `path: message`, for a 400 body. */
 const zodError = (e: z.ZodError): string => {
@@ -2343,18 +2321,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
       });
 
-      api.get("/settings/away", async (): Promise<AwaySettings> => {
-        const raw = store.getSetting(AWAY_SETTING);
-        if (raw === null) return DEFAULT_AWAY;
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          return DEFAULT_AWAY;
-        }
-        const stored = AwayBody.safeParse(parsed);
-        return stored.success ? stored.data : DEFAULT_AWAY;
-      });
+      api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
+
+      // Reader: docs/runbook.md#away-mode (operator reads the digest; HUD follow-up is lane:work)
+      api.get("/away/digest", async () =>
+        awayDigest(
+          store,
+          activeAway(store, now(), config.operator.timezone) !== null,
+          attentionItems(
+            config,
+            store,
+            now(),
+            deps.lock?.state() ?? NO_LOCK,
+            undefined,
+            deps.hubLogin?.() ?? null,
+          ),
+          config.repos.map((r) => r.id),
+        ),
+      );
 
       api.post("/settings/away", async (req, reply) => {
         const body = AwayBody.safeParse(req.body);
