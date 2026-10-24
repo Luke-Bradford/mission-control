@@ -96,6 +96,7 @@ import {
   SEAT_ID,
 } from "../src/config.ts";
 import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
+import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightBriefView } from "../src/flight/state.ts";
 import { createFlightTools, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
@@ -1975,6 +1976,17 @@ describe("sync_main", () => {
 describe("flight_state", () => {
   const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
 
+  it("marks signals delivered by flight_state while retaining active faults as told", async () => {
+    await state(); // Seed pre-existing state.
+    observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: NOW });
+    expect(await state()).toMatchObject({
+      signals: [expect.objectContaining({ key: "red", told: false })],
+    });
+    expect(await state()).toMatchObject({
+      signals: [expect.objectContaining({ key: "red", told: true })],
+    });
+  });
+
   it("is FLIGHT's alone, read-only and takes no arguments", async () => {
     expect(named("flight_state")).toMatchObject({ modes: [], grantable: ["read-only"] });
     live("guido-1", "r-guido");
@@ -2136,6 +2148,8 @@ describe("flight_state", () => {
       atStop: false,
     };
     expect(await state()).toEqual({
+      signals: [],
+      triage: [],
       discussions: [],
       time: "13:00",
       repo: "mc",

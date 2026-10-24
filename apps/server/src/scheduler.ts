@@ -6,6 +6,7 @@ import {
   BACKFILL_COLLECTOR,
   type CrewRow,
   ENGINE_TICK_MS,
+  FLIGHT_LOOPS_SETTING,
   flowCollector,
   GITHUB_SLOWED_PREFIX,
   githubCollector,
@@ -74,6 +75,8 @@ import {
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
+import { flightLoopHeartbeat } from "./flight/signals.ts";
+import { flightSeat } from "./flight/state.ts";
 import { followPrs } from "./github-board.ts";
 import { attentionItems, crew, NO_LOCK } from "./hud.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
@@ -95,6 +98,8 @@ export type Job =
   | "engine"
   | "update"
   | "cli";
+const SIGNAL_LOOPS: readonly Job[] = ["engine", "ta", "studio", "sessions"];
+
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
 export const JOBS: readonly Job[] = [
   "sessions",
@@ -594,7 +599,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           const numbers = waitedPrs(repo.id);
           if (numbers.length === 0) continue;
           await guarded(githubCollector(repo.id), async () => {
-            const r = await c.githubPrs(repo, store, client, numbers, now);
+            const r = await c.githubPrs(
+              repo,
+              store,
+              client,
+              numbers,
+              now,
+              flightSeat(config)?.session.repoId === repo.id,
+            );
             changed.boards ||= r.boards;
             if (await c.followPrs({ gql: client, store, config, now }, repo.id))
               changed.boards = true;
@@ -606,7 +618,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         if (client instanceof Error) recordStatus(collector, false, client.message);
         else {
           await guarded(collector, async () => {
-            const r = await c.github(repo, store, client, now(), now);
+            const r = await c.github(
+              repo,
+              store,
+              client,
+              now(),
+              now,
+              flightSeat(config)?.session.repoId === repo.id,
+            );
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
             // Whoever opened a ticket's PR, its card follows (the engine moves only its runs').
@@ -746,7 +765,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         if (client instanceof Error) recordStatus(collector, false, client.message);
         else {
           await guarded(collector, async () => {
-            if ((await c.prSweep(repo, store, client, now())).boards) boards = true;
+            if (
+              (
+                await c.prSweep(
+                  repo,
+                  store,
+                  client,
+                  now(),
+                  flightSeat(config)?.session.repoId === repo.id,
+                )
+              ).boards
+            )
+              boards = true;
             if (await c.followPrs({ gql: client, store, config, now }, repo.id)) boards = true;
           });
         }
@@ -849,6 +879,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     })();
     inFlight.set(job, p);
     await p;
+    if (SIGNAL_LOOPS.includes(job)) {
+      flightLoopHeartbeat(store, job, now(), intervals[job]);
+    }
     inFlight.delete(job);
     return "ran";
   };
@@ -900,6 +933,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     refreshBoards,
     start() {
       if (timers.length > 0) return;
+      store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       unsubscribeCrew = bus.subscribe((t) => {
         if (t === "agents") recordCrewSoon();
       });
@@ -921,6 +955,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           timers.push(t);
         };
         const delay = FIRST_DELAY_MS[job];
+        if (SIGNAL_LOOPS.includes(job)) {
+          flightLoopHeartbeat(store, job, now() + (delay ?? 0), intervals[job], false);
+        }
         if (delay === undefined) {
           void tick(job);
           every();
@@ -949,6 +986,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (crewTimer !== null) clearTimeout(crewTimer);
       crewTimer = null;
       await Promise.all([...inFlight.values()]);
+      store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       flushEmits();
     },
     tick,

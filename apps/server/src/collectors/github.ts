@@ -35,6 +35,7 @@ import {
   type TitleMarker,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
+import { observeFlightChecks, observeFlightMain } from "../flight/signals.ts";
 import { singleSelectField } from "../github-fields.ts";
 import { hasQuestionFence, parseAutonomyQuestion } from "../sd32.ts";
 import type { Store } from "../store.ts";
@@ -158,7 +159,7 @@ export const TICKET_BODY_MAX = 20_000;
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
 /** The head commit's rollup: its state and each check run or commit status by name. */
-export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl checkSuite { workflowRun { runAttempt } } } ... on StatusContext { context state targetUrl } } } }`;
+export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { name status conclusion detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state targetUrl } } } }`;
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
@@ -169,9 +170,15 @@ const PR_FIELDS = `
         commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
       `;
 
-const PRS_QUERY = `query PullRequests($owner: String!, $name: String!, $after: String) {
+const MAIN_SELECTION = `defaultBranchRef {
+      target { ... on Commit { oid committedDate statusCheckRollup { state contexts(first: 10) { nodes { ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } } } }
+    }`;
+const prsQuery = (
+  observe: boolean,
+) => `query PullRequests($owner: String!, $name: String!, $after: String) {
   ${RATE_LIMIT_SELECTION}
   repository(owner: $owner, name: $name) {
+    ${observe ? MAIN_SELECTION : ""}
     pullRequests(first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {${PR_FIELDS}}
@@ -873,6 +880,9 @@ export function parseChecks(rollup: unknown): PrCheck[] {
       const attempt = path(n, "checkSuite", "workflowRun", "runAttempt");
       out.push({
         name,
+        ...(typeof path(n, "checkSuite", "workflowRun", "workflow", "name") === "string"
+          ? { workflow: path(n, "checkSuite", "workflowRun", "workflow", "name") as string }
+          : {}),
         kind: "check",
         state:
           n.status !== "COMPLETED"
@@ -957,13 +967,31 @@ async function fetchPrs(
   gql: Gql,
   now: number,
   all: boolean,
+  store: Store,
+  observe: boolean,
 ): Promise<{ prs: PullRequestView[]; nodes: number }> {
   const [owner = "", name = ""] = repo.github.split("/");
   const out: PullRequestView[] = [];
   let nodes = 0;
   let after: string | null = null;
   for (let p = 0; p < (all ? PR_MAX_PAGES : 1); p++) {
-    const data = await call(gql, PRS_QUERY, { owner, name, after });
+    const data = await call(gql, prsQuery(observe && p === 0), { owner, name, after });
+    if (observe && p === 0) {
+      const head = path(data, "repository", "defaultBranchRef", "target");
+      const sha = path(head, "oid");
+      if (typeof sha === "string" && sha !== "") {
+        observeFlightMain(store, repo.id, {
+          sha,
+          ci: lookup(CHECKS, path(head, "statusCheckRollup", "state")),
+          at: now,
+          committedAt:
+            typeof path(head, "committedDate") === "string"
+              ? Date.parse(path(head, "committedDate") as string)
+              : undefined,
+          checks: mainFailures(path(head, "statusCheckRollup", "contexts", "nodes")),
+        });
+      }
+    }
     const conn = path(data, "repository", "pullRequests");
     if (!isObj(conn) || !Array.isArray(conn.nodes))
       throw new Error("unexpected pull requests response");
@@ -983,6 +1011,7 @@ async function fetchPrs(
     if (reachedOld || pi.hasNextPage !== true || typeof pi.endCursor !== "string") break;
     after = pi.endCursor;
   }
+  if (observe) observeFlightChecks(store, repo.id, out, now);
   return { prs: out, nodes };
 }
 
@@ -1004,11 +1033,12 @@ export async function sweepPullRequests(
   store: Store,
   gql: Gql,
   now: number,
+  observe = false,
 ): Promise<GithubChanges> {
   const collector = prSweepCollector(repo.id);
   let boards = false;
   try {
-    const { prs, nodes } = await fetchPrs(repo, gql, now, true);
+    const { prs, nodes } = await fetchPrs(repo, gql, now, true, store, observe);
     // GitHub returning no nodes at all is no data, not "no PRs": it must not wipe the rows until
     // the next poll. Nodes that are all older than the keep window do prune.
     if (nodes > 0) boards = store.sweepPullRequests(repo.id, prs, now);
@@ -1030,6 +1060,7 @@ export async function collectWaitedPrs(
   gql: Gql,
   numbers: number[],
   clock: () => number,
+  observe = false,
 ): Promise<GithubChanges> {
   const [owner = "", name = ""] = repo.github.split("/");
   const readAt = clock();
@@ -1048,6 +1079,7 @@ export async function collectWaitedPrs(
   } catch (e) {
     failure = errMsg(e);
   }
+  if (observe) observeFlightChecks(store, repo.id, prs, readAt);
   const boards = prs.length > 0 && store.upsertPullRequests(repo.id, prs, readAt);
   if (failure !== null) {
     store.setStatus(
@@ -1078,6 +1110,7 @@ export async function collectGithub(
   gql: Gql,
   now: number,
   clock: () => number = () => now,
+  observe = false,
 ): Promise<GithubChanges> {
   const failures: string[] = [];
   const changes: GithubChanges = { boards: false, escalations: false };
@@ -1122,7 +1155,13 @@ export async function collectGithub(
     // Stamped just before the read, not at the poll's start: the board and escalation reads above
     // can take seconds, and a sweep that began in between must not count as newer than this read.
     const readAt = clock();
-    if (store.upsertPullRequests(repo.id, (await fetchPrs(repo, gql, now, false)).prs, readAt)) {
+    if (
+      store.upsertPullRequests(
+        repo.id,
+        (await fetchPrs(repo, gql, readAt, false, store, observe)).prs,
+        readAt,
+      )
+    ) {
       changes.boards = true;
     }
   } catch (e) {
@@ -1147,3 +1186,24 @@ export async function collectGithub(
 }
 
 export { isObj } from "@mc/core";
+
+/** The default branch query deliberately fetches only the evidence needed by FLIGHT. */
+function mainFailures(nodes: unknown): { name: string; url: string | null }[] {
+  if (!Array.isArray(nodes)) return [];
+  return nodes.flatMap((node) => {
+    if (!isObj(node)) return [];
+    if (
+      typeof node.name === "string" &&
+      typeof node.conclusion === "string" &&
+      ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"].includes(
+        node.conclusion,
+      )
+    ) {
+      return [{ name: node.name, url: str(node.detailsUrl, "") || null }];
+    }
+    if (typeof node.context === "string" && ["FAILURE", "ERROR"].includes(str(node.state, ""))) {
+      return [{ name: node.context, url: str(node.targetUrl, "") || null }];
+    }
+    return [];
+  });
+}

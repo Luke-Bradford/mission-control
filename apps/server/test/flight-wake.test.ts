@@ -17,9 +17,12 @@ import {
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { flightWake, wakeFacts } from "../src/flight/state.ts";
+import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
 
 const busyBoard = (): FlightState => ({
+  signals: [],
+  triage: [],
   time: "12:00",
   repo: "mc",
   lane: null,
@@ -99,6 +102,42 @@ const busyBoard = (): FlightState => ({
 });
 
 describe("wake deltas", () => {
+  it("deltas signals and names the changed wake facts in the stored header", () => {
+    const state = busyBoard();
+    const before = wakeFacts(state);
+    const first = flightWake(state);
+    state.signals = [
+      { kind: "main_red", key: "main-sha", since: 1, evidence: "main-sha CI failing" },
+    ];
+    state.items = [
+      {
+        key: "item",
+        kind: "blocked",
+        ticket: null,
+        text: "blocked",
+        ageMin: 0,
+        triageRemainingMs: 0,
+      },
+    ];
+    const next = flightWake(state, first.snapshot);
+    expect(next.digest.signals).toEqual({ entries: state.signals, unchanged: 0, removed: [] });
+    expect(flightWake(state, next.snapshot).digest.signals).toEqual({
+      entries: [],
+      unchanged: 1,
+      removed: [],
+    });
+    const causes = changedWakeFacts(before, wakeFacts(state));
+    expect(causes).toEqual(["signals (1)", "items (1)"]);
+    const header = wakeLine(state, next.digest, causes).split("\n")[0] ?? "";
+    expect(header).toContain("woke on: signals (1), items (1)");
+    expect(
+      Buffer.byteLength(header) + Buffer.byteLength(`\nsha256:${"0".repeat(64)}`),
+    ).toBeLessThan(FLIGHT_WAKE_STORED_BYTES);
+    expect(flightWake({ ...state, signals: [] }, next.snapshot).digest.signals.removed).toEqual([
+      "main_red:main-sha",
+    ]);
+  });
+
   it("omits unchanged entries and the brief, keeping facts and compact candidates", () => {
     const state = busyBoard();
     const first = flightWake(state);

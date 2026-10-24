@@ -279,6 +279,7 @@ export interface BoardItem {
 
 /** A check run or a commit status on a PR's head commit. */
 export interface PrCheck {
+  workflow?: string; // Actions workflow name, shared with the engine’s flake notes
   name: string; // a check run's name, or a status's context
   kind: "check" | "status";
   state: "passing" | "failing" | "pending";

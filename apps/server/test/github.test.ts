@@ -1,4 +1,4 @@
-import { type BoardItem, columnOf, hudColumnOf } from "@mc/core";
+import { type BoardItem, columnOf, FLIGHT_MAIN_SETTING, hudColumnOf } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   call,
@@ -1549,6 +1549,111 @@ async function one(node: unknown) {
 }
 
 describe("sweepPullRequests", () => {
+  it("collects main's SHA and CI verdict in the existing PR request", async () => {
+    const response = prPage([pull(7)]);
+    const { gql, calls } = stub({
+      prPages: [
+        {
+          repository: {
+            ...response.repository,
+            defaultBranchRef: {
+              name: "trunk",
+              target: { oid: "main-sha", statusCheckRollup: { state: "FAILURE" } },
+            },
+          },
+        },
+      ],
+    });
+    await sweepPullRequests(repo, store, gql, NOW, true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.q).toContain("defaultBranchRef");
+    expect(calls[0]?.q).toContain("contexts(first: 10)");
+    expect(JSON.parse(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`) ?? "null")).toEqual({
+      sha: "main-sha",
+      ci: "failing",
+      at: NOW,
+      episode: "main-sha",
+      checks: [],
+    });
+    const previous = store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`);
+    await sweepPullRequests(repo, store, gql, NOW - 1, true);
+    expect(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`)).toBe(previous);
+  });
+
+  it("reads default branch evidence only on page zero and tolerates a null rollup", async () => {
+    store.upsertPullRequests(
+      repo.id,
+      [
+        await one(pull(6, { state: "MERGED", mergedAt: new Date(NOW - 1000).toISOString() })),
+        await one(pull(8, { state: "MERGED", mergedAt: new Date(NOW + 1000).toISOString() })),
+      ],
+      NOW - 1,
+    );
+    const first = prPage([pull(7)], "next");
+    const { gql, calls } = stub({
+      prPages: [
+        {
+          repository: {
+            ...first.repository,
+            defaultBranchRef: {
+              name: "trunk",
+              target: {
+                oid: "trunk-red",
+                committedDate: new Date(NOW).toISOString(),
+                statusCheckRollup: {
+                  state: "FAILURE",
+                  contexts: {
+                    nodes: [
+                      {
+                        name: "unit tests",
+                        conclusion: "FAILURE",
+                        detailsUrl: "https://github.com/o/r/actions/runs/1/job/2",
+                      },
+                      { context: "deploy", state: "ERROR", targetUrl: "https://ci.test/deploy" },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+        prPage([pull(9)]),
+      ],
+    });
+    await sweepPullRequests(repo, store, gql, NOW, true);
+    expect(calls[0]?.q).toContain("defaultBranchRef");
+    expect(calls[1]?.q).not.toContain("defaultBranchRef");
+    const saved = JSON.parse(store.getSetting(`flight.signals:${repo.id}`) ?? "{}");
+    const evidence = saved.signals["main_red:trunk-red"].evidence;
+    expect(evidence).toContain("unit tests https://github.com/o/r/actions/runs/1/job/2");
+    expect(evidence).toContain("deploy https://ci.test/deploy");
+    expect(evidence).toContain("last PR merged before commit: #6");
+    expect(evidence).not.toContain("#8");
+    const response = prPage([pull(7)]);
+    const nullRollup = stub({
+      prPages: [
+        {
+          repository: {
+            ...response.repository,
+            defaultBranchRef: { target: { oid: "no-rollup", statusCheckRollup: null } },
+          },
+        },
+      ],
+    });
+    await sweepPullRequests(repo, store, nullRollup.gql, NOW + 1, true);
+    expect(JSON.parse(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`) ?? "{}")).toMatchObject(
+      { sha: "no-rollup", ci: null, episode: "trunk-red" },
+    );
+  });
+
+  it("does not observe ops signals for an unselected repo", async () => {
+    const { gql, calls } = stub({ prPages: [prPage([pull(7)])] });
+    await sweepPullRequests(repo, store, gql, NOW);
+    expect(calls[0]?.q).not.toContain("defaultBranchRef");
+    expect(store.getSetting(`flight.signals:${repo.id}`)).toBeNull();
+    expect(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`)).toBeNull();
+  });
+
   const sweepStatus = () => store.status().find((s) => s.collector === "github:shop-app:prs");
   const recent = (n: number) => pull(n, { updatedAt: new Date(NOW - 2 * DAY).toISOString() });
   const old = (n: number) => pull(n, { updatedAt: new Date(NOW - 31 * DAY).toISOString() });
