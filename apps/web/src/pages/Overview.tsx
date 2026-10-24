@@ -3,6 +3,7 @@ import { AgentsPanel } from "../overview/AgentsPanel.tsx";
 import { KpiStrip } from "../overview/KpiStrip.tsx";
 import { MachinePanel } from "../overview/MachinePanel.tsx";
 import { NeedsBanner } from "../overview/NeedsBanner.tsx";
+import { PipelinePanel } from "../overview/PipelinePanel.tsx";
 import { QuotaPanel } from "../overview/QuotaPanel.tsx";
 import { TimelinePanel } from "../overview/TimelinePanel.tsx";
 
@@ -16,6 +17,7 @@ export function Overview() {
         <AgentsPanel />
         <TimelinePanel />
       </div>
+      <PipelinePanel />
       <div className="ov">
         <ActivityPanel />
         <div className="col">

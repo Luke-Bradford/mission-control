@@ -87,6 +87,7 @@ interface Data {
 function stub(d: Data = {}) {
   return stubFetch({
     ...d.extra,
+    "/api/overview": { pipeline: [] },
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
@@ -126,7 +127,7 @@ describe("Overview panels", () => {
   it("every panel carries its mockup id", async () => {
     stub();
     const { container } = render(<Overview />);
-    for (const id of ["agentsP", "timelineP", "actP", "machP", "quotaP"]) {
+    for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"]) {
       expect(container.querySelector(`#${id}`), id).toBeTruthy();
     }
     await screen.findByText("Nothing is waiting on you.");
