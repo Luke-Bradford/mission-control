@@ -13,6 +13,8 @@ export default defineConfig({
           name: "server",
           environment: "node",
           include: ["apps/server/test/**/*.test.ts"],
+          // A loaded CI shard ran tests that take 0.1–0.5 s here past vitest's 5 s default (24 Oct).
+          testTimeout: 15_000,
         },
       },
       {
