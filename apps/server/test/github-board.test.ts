@@ -5,7 +5,13 @@ import type { BoardItem, PullRequestView, Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gql, GqlError, GqlTransportError } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
-import { BOARD_IDS_TTL_MS, clearBoardIds, followPrs, moveCard } from "../src/github-board.ts";
+import {
+  BOARD_IDS_TTL_MS,
+  clearBoardIds,
+  editCardFields,
+  followPrs,
+  moveCard,
+} from "../src/github-board.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = 1_000_000_000;
@@ -475,4 +481,56 @@ describe("followPrs", () => {
     await followPrs({ gql: b.gql, store, config, now: () => now }, "dr");
     expect(b.mutations()).toHaveLength(0);
   });
+});
+
+it("edits Size and Priority through the existing project field mutation", async () => {
+  const c = {
+    ...config,
+    repos: config.repos.map((r) => ({ ...r, flightPowers: "superuser" as const })),
+  };
+  const writes: unknown[] = [];
+  const gql: Gql = async (query, vars) => {
+    if (query.includes("updateProjectV2ItemFieldValue")) {
+      writes.push(vars.input);
+      return {};
+    }
+    if (query.includes("projectItems"))
+      return {
+        repository: {
+          issue: { projectItems: { nodes: [{ id: "item", project: { id: "project" } }] } },
+        },
+      };
+    return {
+      repositoryOwner: {
+        __typename: "User",
+        projectV2: {
+          id: "project",
+          fields: {
+            pageInfo: { hasNextPage: false },
+            nodes: [
+              { id: "size", name: "Size", options: [{ id: "small", name: "S" }] },
+              { id: "priority", name: "Priority", options: [{ id: "high", name: "P0" }] },
+            ],
+          },
+        },
+      },
+    };
+  };
+  expect(
+    await editCardFields({ config: c, store, gql }, "mc", 7, { size: "S", priority: "P0" }),
+  ).toEqual({ ok: true, changed: true });
+  expect(writes).toEqual([
+    {
+      projectId: "project",
+      itemId: "item",
+      fieldId: "size",
+      value: { singleSelectOptionId: "small" },
+    },
+    {
+      projectId: "project",
+      itemId: "item",
+      fieldId: "priority",
+      value: { singleSelectOptionId: "high" },
+    },
+  ]);
 });

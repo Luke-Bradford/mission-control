@@ -52,6 +52,13 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.promote,
   MC_TOOL_NAMES.endRun,
   MC_TOOL_NAMES.acceptRuling,
+  MC_TOOL_NAMES.mergePr,
+  MC_TOOL_NAMES.settlePark,
+  MC_TOOL_NAMES.rerunCi,
+  MC_TOOL_NAMES.editCard,
+  MC_TOOL_NAMES.dismissItem,
+  MC_TOOL_NAMES.restartSeat,
+
   MC_TOOL_NAMES.syncMain,
   MC_TOOL_NAMES.createTicket,
   MC_TOOL_NAMES.commentTicket,

@@ -28,8 +28,11 @@ import {
   ENGINE_TICK_MS,
   EVIDENCE_RULING_PREFIX,
   effectiveHardRules,
+  FLIGHT_ANSWER_WAIT_MS,
   fillLoopText,
   fixSentText,
+  fixText,
+  gateView,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
@@ -52,6 +55,7 @@ import {
   parkedEventText,
   REFUSAL_TRIES,
   REVIEW_STATUS_CONTEXT,
+  REVIEW_STATUS_WAIVED,
   type RepoId,
   type RepoRules,
   type ReviewFact,
@@ -95,7 +99,7 @@ import {
   type UpdateBranchResult,
 } from "./publish.ts";
 import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
-import type { RepoRulesError } from "./rules.ts";
+import { hardRulesBy, type RepoRulesError } from "./rules.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
@@ -161,7 +165,7 @@ export interface Engine {
   onOperatorMessage(
     runId: string,
     by?: "CAPCOM" | "FLIGHT",
-    opts?: { kinds?: readonly string[] },
+    opts?: { kinds?: readonly string[]; action?: "lift" | "rereview" | "accept" | "rework" },
   ): Promise<boolean>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
@@ -169,6 +173,8 @@ export interface Engine {
    * calls read the result: a pass accepts the ruling and the run goes to review, a fail sends the
    * author the failure.
    */
+  clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
+  rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string, opts: { mayRerun: boolean }): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
   syncMain(runId: string): Promise<SyncMainResult>;
@@ -293,6 +299,22 @@ export function createEngine(deps: EngineDeps): Engine {
     return loop.aside?.worktree ?? (seatRow?.runId === run.id ? (seatRow.worktree ?? null) : null);
   }
 
+  function flightHeld(run: Run): boolean {
+    const seat = seatConfig(run.agentId);
+    return (
+      store.seatSession(run.agentId)?.state === "stopped" ||
+      ["budget", "account", "operator", "operator-hold"].includes(run.loop?.parked?.kind ?? "") ||
+      store
+        .openQuestions()
+        .some(
+          (q) =>
+            q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
+        ) ||
+      seat === undefined ||
+      accountAtStop(config, store, seat.accountId, now())
+    );
+  }
+
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
   function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
     const prs = store.pullRequests(run.repoId);
@@ -316,8 +338,8 @@ export function createEngine(deps: EngineDeps): Engine {
     hardRulesSet.set(repoId, r.hardRulesSet);
     // kept for Needs you, which says who a hard-rule flag waits on without reading the rules
     const bySetting = hardRulesBySettingKey(repoId);
-    if (store.getSetting(bySetting) !== r.hardRulesBy) {
-      store.setSetting(bySetting, r.hardRulesBy);
+    if (store.getSetting(bySetting) !== hardRulesBy(r, flightPowersOf(config, repoId))) {
+      store.setSetting(bySetting, hardRulesBy(r, flightPowersOf(config, repoId)));
       bus.emit("attention");
     }
     noteHardRules(repoId, r.hardRulesSet);
@@ -462,10 +484,17 @@ export function createEngine(deps: EngineDeps): Engine {
                 pending: verdict.pending,
                 missing: verdict.missing,
               },
-              reviewStatus: checkState(pr.checks ?? [], REVIEW_STATUS_CONTEXT),
+              reviewStatus:
+                flightPowersOf(config, run.repoId) === "superuser" &&
+                loop.reviewWaivedSha === pr.headSha &&
+                reviewStatuses.get(run.id) !== `${pr.headSha}:success:${REVIEW_STATUS_WAIVED}`
+                  ? "pending"
+                  : checkState(pr.checks ?? [], REVIEW_STATUS_CONTEXT),
             },
       autoMerge: repo?.autonomy === "merge",
       hardRulesSet: mergeAllowed,
+      flightPowers: flightPowersOf(config, run.repoId),
+      flightHeld: flightHeld(run),
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),
       openNotes: store.openNoteKeys(run.id),
@@ -607,6 +636,15 @@ export function createEngine(deps: EngineDeps): Engine {
     const mergedSha = (): string =>
       cur.merging?.sha ?? findPr(run, cur)?.headSha ?? store.runPush(run.id)?.sha ?? "";
     if (MERGE_STEP_KINDS.has(a.kind) && repo?.autonomy !== "merge") return;
+    if (
+      (a.kind === "merge" || a.kind === "mark-ready") &&
+      flightPowersOf(config, run.repoId) === "superuser"
+    ) {
+      const current = store.run(run.id);
+      if (current === null || flightHeld(current)) return;
+      const snap = snapshot(current, cur, now(), hardRulesSet.get(run.repoId) === true);
+      if (snap === null || !gateView(snap, cur).passes) return;
+    }
     switch (a.kind) {
       case "push": {
         const r = await publisher.push(run);
@@ -1046,6 +1084,13 @@ export function createEngine(deps: EngineDeps): Engine {
     const pushed = store.runPush(run.id);
     const flightPowers = flightPowersOf(config, run.repoId);
     if (
+      input.flightClearedSha &&
+      pushed &&
+      input.flightClearedSha !== pushed.sha &&
+      !(input.carry?.from === input.flightClearedSha && input.carry.to === pushed.sha)
+    )
+      input.flightClearedSha = null;
+    if (
       run.endedAt === null &&
       pushed !== null &&
       (input.touches?.sha !== pushed.sha || input.touches.flightPowers !== flightPowers)
@@ -1084,6 +1129,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (g.ok) input.gate = { sha: pushed.sha, ...g.facts };
       else log(`${runId}: could not read the merge gate: ${g.text}`);
     }
+    if (flightPowers === "superuser" && pushed?.sha === input.reviewWaivedSha)
+      await syncReviewStatus(runId);
     const snap = snapshot(run, input, at, mergeAllowed);
     if (snap === null) {
       // a run the loop cannot read is never woken: a stale flag must not hold up a younger rework
@@ -1548,6 +1595,50 @@ export function createEngine(deps: EngineDeps): Engine {
         ) {
           return;
         }
+        if (by === "FLIGHT" && flightHeld(run)) return;
+        if (opts?.action !== undefined) {
+          if (by !== "FLIGHT" || flightPowersOf(config, run.repoId) !== "superuser") return;
+          const pushed = store.runPush(run.id);
+          const pr = findPr(run, loop);
+          if (
+            !pushed ||
+            (opts.action !== "lift" && (pr?.state !== "open" || pr.headSha !== pushed.sha))
+          )
+            return;
+          if (opts.action === "lift") {
+            const head = store.newestRunCommit(run.id)?.sha;
+            if (!head || !(await publisher.isDescendant(run, pushed.sha, head))) return;
+          } else if (!["review", "review-ruling", "ruling", "review-failed"].includes(kind ?? ""))
+            return;
+          if (opts.action === "accept") {
+            if (pr?.state !== "open" || pr.headSha !== pushed.sha) return;
+            const blocked = store
+              .reviewsOfRun(run.id)
+              .some(
+                (r) =>
+                  (r.sha === pushed.sha ||
+                    (loop.carry?.to === pushed.sha && r.sha === loop.carry.from)) &&
+                  r.blocking > 0,
+              );
+            if (blocked) {
+              const paths = await publisher.hardRuleTouches(run, pushed.sha, [
+                "apps/server/src/guard/**",
+                "apps/server/src/flight/**",
+                "apps/server/src/mcp/**",
+                "apps/server/src/engine/**",
+                "apps/server/src/runtime/**",
+                "apps/server/src/update.ts",
+                "apps/server/src/config.ts",
+                "apps/server/src/crew-apply.ts",
+                ...["guard", "flight", "runtime", "loop", "repo-rules"].map(
+                  (p) => `packages/core/src/${p}.ts`,
+                ),
+              ]);
+              if (paths.length > 0) return;
+            }
+          }
+          if (flightHeld(store.run(run.id) ?? run)) return;
+        }
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);
@@ -1578,6 +1669,42 @@ export function createEngine(deps: EngineDeps): Engine {
         } else {
           next.phase = "working";
         }
+        if (opts?.action === "accept") {
+          next.reviewWaivedSha = pushed?.sha ?? null;
+          next.flightClearedSha = pushed?.sha ?? null;
+          next.phase = "review";
+        } else if (opts?.action === "rereview" || opts?.action === "rework") {
+          next.reviewWaivedSha = null;
+          next.flightClearedSha = null;
+          next.phase = opts.action === "rereview" ? "review" : "working";
+          if (opts.action === "rework") {
+            if (next.aside) {
+              try {
+                await supervisor.wakeRun(run.id);
+              } catch {
+                return;
+              }
+              next.aside = null;
+            }
+            const review = store
+              .reviewsOfRun(run.id)
+              .filter((r) => r.state === "reported")
+              .at(-1);
+            const message = review
+              ? fixText({
+                  retro: seatCallSign(review.seatId),
+                  sha: review.sha,
+                  findings: store.findingsOf(review.id),
+                })
+              : `FLIGHT requests rework: ${loop.parked.reason}`;
+            const sent = await supervisor.send(
+              run.id,
+              `${run.id}:flight-rework:${next.epoch}`,
+              message,
+            );
+            if (sent !== "sent" && sent !== "dup") return;
+          }
+        }
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
@@ -1585,6 +1712,67 @@ export function createEngine(deps: EngineDeps): Engine {
         lifted = true;
         await pass(run.id);
       }).then(() => lifted);
+    },
+
+    clearFlight(runId, expectedSha) {
+      return onChainResult(runId, false, async () => {
+        if (!live()) return false;
+        await pass(runId);
+        const run = store.run(runId);
+        if (
+          !run?.loop ||
+          run.endedAt !== null ||
+          flightPowersOf(config, run.repoId) !== "superuser" ||
+          flightHeld(run)
+        )
+          return false;
+        const sha = run.loop.awaitingFlight;
+        if (
+          !sha ||
+          (expectedSha !== undefined && sha !== expectedSha) ||
+          sha !== store.runPush(runId)?.sha
+        )
+          return false;
+        store.setRunLoop(runId, { ...run.loop, flightClearedSha: sha, awaitingFlight: null });
+        await pass(runId);
+        return true;
+      });
+    },
+
+    rerunCi(runId) {
+      const no = (text: string) => ({ ok: false, text });
+      return onChainResult(runId, no("The engine is off."), async () => {
+        const run = store.run(runId);
+        if (
+          !live() ||
+          !run?.loop ||
+          run.endedAt !== null ||
+          flightPowersOf(config, run.repoId) !== "superuser" ||
+          flightHeld(run)
+        )
+          return no("Run is held or unavailable.");
+        const pr = findPr(run, run.loop);
+        const sha = pr?.headSha;
+        if (
+          pr?.state !== "open" ||
+          !sha ||
+          store.runPush(runId)?.sha !== sha ||
+          pr.ci !== "failing"
+        )
+          return no("No failed CI on this run's current head.");
+        const count = run.loop.flightReruns?.[sha] ?? 0;
+        if (count >= 2) return no("Already re-run twice on this head.");
+        // Reserve before the write; a partial GitHub failure must not grant extra attempts.
+        store.setRunLoop(runId, {
+          ...run.loop,
+          flightReruns: { ...run.loop.flightReruns, [sha]: count + 1 },
+        });
+        const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
+        const result = await publisher.rerunRuling(github, sha);
+        return result.ok
+          ? { ok: true, text: `Re-ran failed CI on ${sha.slice(0, 7)}.` }
+          : no(result.text);
+      });
     },
 
     acceptRuling(runId, opts) {

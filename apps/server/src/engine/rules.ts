@@ -70,7 +70,7 @@ const schema = z.strictObject({
  * Not handled: an HTML comment does not hide a heading or a fence; a `# ` H1 does not end the
  * section (only a `## ` heading does); a setext heading (text over `---`) is not a heading.
  */
-function mcBlock(markdown: string): string | null {
+export function mcBlock(markdown: string): string | null {
   const lines = markdown.replace(/^﻿/, "").split(/\r?\n/);
   let fence: { mark: string; yaml: boolean } | null = null;
   let seen = false;
@@ -195,4 +195,12 @@ export async function readRepoRules(
       `${repo}: cannot read CLAUDE.md at origin/HEAD: ${(e as Error).message}`,
     );
   }
+}
+
+/** Elevation is user config only; a repo cannot appoint FLIGHT itself. */
+export function hardRulesBy(
+  rules: RepoRules,
+  powers: "standard" | "superuser",
+): RepoRules["hardRulesBy"] {
+  return powers === "superuser" ? "flight" : rules.hardRulesBy;
 }

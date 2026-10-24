@@ -275,6 +275,8 @@ describe("FLIGHT's PR list", () => {
       {
         ref: "mc#7",
         pr: 7,
+        untrustedAuthor: true,
+        awaitingFlight: null,
         seat: "",
         runId: "",
         ready: false,
@@ -1321,6 +1323,14 @@ describe("wakeSummary", () => {
       laneLabel: null,
       assignees: [],
     };
+    it("an awaiting-flight head is a wake fact and remains pending", () => {
+      const before = state({ prs: [pr] });
+      const held = state({ prs: [{ ...pr, awaitingFlight: "head" }] });
+      expect(wakeFacts(held)).not.toBe(wakeFacts(before));
+      expect(pending(held)).toBe(true);
+      expect(pending(before)).toBe(false);
+    });
+
     it("is true for a question, a free build seat with a ticket, or a park FLIGHT can lift", () => {
       expect(pending(state({ questions: [q] }))).toBe(true);
       expect(pending(state({ seats: [s({ free: true })], tickets: [ticket] }))).toBe(true);

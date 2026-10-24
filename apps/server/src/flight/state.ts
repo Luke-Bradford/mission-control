@@ -51,6 +51,7 @@ import { attentionItems, crew, NO_LOCK } from "../hud.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
+import { trustedAuthor } from "./collaborators.ts";
 import { cut, seatFree } from "./tools.ts";
 
 interface TeamsDigestState {
@@ -398,6 +399,7 @@ export function flightState(i: {
     };
   }
   const { session } = found;
+  const repo = config.repos.find((r) => r.id === session.repoId);
   const board = store.board(session.repoId);
   const crewRows = crew(config, store, now, NO_LOCK, () => null).rows;
   const stalled = stalledSeats(config, store, now, crewRows);
@@ -482,6 +484,7 @@ export function flightState(i: {
           arrivedAt: b.createdAt,
         },
         title: b.title,
+        untrustedAuthor: !trustedAuthor(store, repo?.github ?? "", b.author, now),
         column,
         priority: b.priority,
         labels: b.labels,
@@ -518,9 +521,11 @@ export function flightState(i: {
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
+        untrustedAuthor: !trustedAuthor(store, repo?.github ?? "", p.author, now),
         seat: holder?.agentId ?? "",
         runId: holder?.id ?? "",
         ready: holder !== undefined && ready.has(holder.id),
+        awaitingFlight: holder?.loop?.awaitingFlight ?? null,
         state: p.state,
         headSha: p.headSha,
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
@@ -709,7 +714,9 @@ export function wakeFacts(
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
-    prs: s.prs.map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}`).sort(),
+    prs: s.prs
+      .map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}`)
+      .sort(),
     items: s.items.map((x) => x.key).sort(),
     release: releasable(s),
   });
@@ -741,6 +748,7 @@ export function pending(
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
     (s.discussions?.length ?? 0) > 0 ||
     (s.teamsDigest?.matches.length ?? 0) > 0 ||
+    s.prs.some((p) => p.awaitingFlight != null) ||
     s.questions.length > 0 ||
     s.items.length > 0 ||
     releasable(s).length > 0 ||

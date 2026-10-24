@@ -37,6 +37,7 @@ import {
 
 export interface FlightWatchDeps {
   config: CcConfig;
+  refreshAuthors?: (repoId: string) => Promise<void>;
   store: Store;
   bus: ChangeBus;
   supervisor: Pick<
@@ -91,6 +92,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (found === null) return;
     const id = found.seat.id;
     const t = now();
+    await deps.refreshAuthors?.(found.session.repoId);
 
     const own = flightOwnSeatIds(config);
     let added = false;

@@ -155,14 +155,15 @@ export async function readStatusField(
   gql: Gql,
   owner: string,
   project: number,
+  fieldName: string = STATUS_FIELD,
 ): Promise<{ projectId: string; fieldId: string; options: { id: string; name: string }[] }> {
   const { projectId, fields } = await read(gql, owner, project);
-  const status = fields.get(STATUS_FIELD);
+  const status = fields.get(fieldName);
   const options = (status?.options ?? []).flatMap((o) =>
     o.id === null ? [] : [{ id: o.id, name: o.name }],
   );
   if (status === undefined || status.id === null || options.length !== status.options.length) {
-    throw new Error(`github: project ${project} has no ${STATUS_FIELD} field with option ids`);
+    throw new Error(`github: project ${project} has no ${fieldName} field with option ids`);
   }
   return { projectId, fieldId: status.id, options };
 }

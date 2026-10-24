@@ -1,6 +1,7 @@
 /** The first loop's texts: what a seat is told when `mc report_evidence` is taken or refused. */
 import { clockHm } from "./hud.ts";
 import { COMMIT_PATHS_NAMED, REFERENCE_ADVICE } from "./mcp.ts";
+import { FLIGHT_FLOOR_PATHS } from "./repo-rules.ts";
 import type { MoveColumn } from "./repos.ts";
 import {
   carriedFrom,
@@ -26,6 +27,7 @@ import {
   reviewRulingParkText,
 } from "./review.ts";
 import type { SeatState } from "./runtime.ts";
+import { globMatches } from "./runtime.ts";
 import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
 
 /** What a PR head's checks say about CI, with the names behind it. */
@@ -242,6 +244,7 @@ export const loopText = (ref: string | null, loop: RunLoop): string => {
 
 /** A run's loop before anything has happened. */
 export const NEW_LOOP: RunLoop = {
+  awaitingFlight: null,
   phase: "working",
   reportedEvidenceId: 0,
   prNumber: null,
@@ -330,6 +333,8 @@ export interface LoopSnapshot {
    * at "ready for a human". Absent: false.
    */
   hardRulesSet?: boolean;
+  flightPowers?: "standard" | "superuser";
+  flightHeld?: boolean;
   /** The run's profile limits: CI tries and review rounds. Absent: `CI_TRIES` and `REVIEW_ROUNDS`. */
   limits?: { tries: number; rounds: number };
   /** The card's column from the poll. */
@@ -455,12 +460,23 @@ function reviewView(s: LoopSnapshot, loop: RunLoop) {
   return { R, P, from, cur, waived, on, blocked };
 }
 
+/** Floors 2 and 7, with unreadable rules held for the operator. */
+export function flightFloorBlocked(loop: Pick<RunLoop, "touches" | "gate">): boolean {
+  return (
+    loop.touches?.paths.some(
+      (p) =>
+        FLIGHT_FLOOR_PATHS.some((g) => globMatches(g, p, true)) &&
+        !(p.toLowerCase() === "claude.md" && loop.gate?.missionControlChanged === false),
+    ) ?? true
+  );
+}
+
 /**
  * The merge gate's facts for the pushed sha in a `merge` workspace. `on`: the review, CI and head
  * facts hold, so the engine's reads (`gate`, `touches`) decide; each is null when missing or for
  * another sha.
  */
-function gateView(s: LoopSnapshot, loop: RunLoop) {
+export function gateView(s: LoopSnapshot, loop: RunLoop) {
   const rv = reviewView(s, loop);
   const P = rv.P;
   const on =
@@ -472,24 +488,36 @@ function gateView(s: LoopSnapshot, loop: RunLoop) {
     s.pr?.state === "open" &&
     s.pr.headSha === P &&
     s.headCommit === P &&
-    s.pr.ci === "passing" &&
+    (s.pr.ci === "passing" ||
+      (s.flightPowers === "superuser" && rv.waived && loop.ciFailedSha === P)) &&
     s.pr.reviewStatus === "passing" &&
-    loop.ciFailedSha !== P &&
-    !rv.waived &&
-    rv.cur !== null &&
-    rv.cur.state === "reported" &&
-    rv.cur.blocking === 0;
+    ((s.flightPowers === "superuser" && rv.waived) ||
+      (loop.ciFailedSha !== P &&
+        !rv.waived &&
+        rv.cur !== null &&
+        rv.cur.state === "reported" &&
+        rv.cur.blocking === 0));
   const touches = P !== null && loop.touches?.sha === P ? loop.touches : null;
   const gate = P !== null && loop.gate?.sha === P ? loop.gate : null;
-  const clear = touches !== null && touches.paths.length === 0;
-  const passes =
+  const elevated = s.flightPowers === "superuser";
+  const floor = elevated && flightFloorBlocked({ touches, gate });
+  const cleared =
+    elevated &&
+    P !== null &&
+    (loop.flightClearedSha === P ||
+      (loop.carry?.to === P && loop.carry.from === loop.flightClearedSha));
+  const clear = touches !== null && !floor && (touches.paths.length === 0 || cleared);
+  const otherGates =
     on &&
     s.pr?.mergeable !== "CONFLICTING" &&
     s.hardRulesSet === true &&
-    clear &&
     gate?.hubOnly === true &&
-    gate.strays.length === 0;
-  return { on, P, touches, gate, clear, passes };
+    gate.strays.every((p) => touches?.paths.includes(p)) &&
+    (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || loop.aside != null)));
+  const awaiting =
+    elevated && otherGates && touches !== null && touches.paths.length > 0 && !floor && !cleared;
+  const passes = otherGates && clear;
+  return { on, P, touches, gate, clear, passes, awaiting };
 }
 
 /** The move of a merged run's card to Done, once per epoch: a later move by hand is left alone. */
@@ -829,7 +857,9 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
             if (hardOnly && gv.touches !== null) {
               notes.set(readyNoteKey(runId, rv.P), {
                 noteKind: "ready",
-                text: readyHardRuleText(ticket.ref, n, gv.touches.paths),
+                text: gv.awaiting
+                  ? `${ticket.ref}: PR #${n} awaiting-flight on ${rv.P}`
+                  : readyHardRuleText(ticket.ref, n, gv.touches.paths),
               });
             } else if (s.hardRulesSet !== true && s.pr?.mergeable !== "CONFLICTING") {
               notes.set(readyNoteKey(runId, rv.P), {
@@ -1112,6 +1142,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     }
   }
   const gv = gateView(s, loop);
+  loop.awaitingFlight = gv.awaiting ? gv.P : null;
   if (gv.passes && gv.P !== null) {
     const done = loop.merging?.done ?? [];
     const readyDone = loop.merging?.sha === gv.P && done.includes("ready");

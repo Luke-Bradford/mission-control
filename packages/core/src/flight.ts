@@ -36,6 +36,11 @@ export const FLIGHT_DECISION_KINDS = [
   "rerun",
   "ruling",
   "sync",
+  "merge",
+  "settle",
+  "card",
+  "dismiss",
+  "restart",
   "brief",
 ] as const;
 export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
@@ -543,6 +548,7 @@ export interface FlightState {
   questions: { id: number; seat: string; ticket: string | null; text: string; ageMin: number }[];
   tickets: {
     ref: string;
+    untrustedAuthor?: boolean;
     title: string;
     column: HudColumn;
     arrival?: FlightArrivalIdentity;
@@ -560,11 +566,13 @@ export interface FlightState {
    */
   prs: {
     ref: string;
+    untrustedAuthor?: boolean;
     pr: number;
     seat: string;
     /** The run holding the PR; "" when none does. */
     runId: string;
     ready: boolean;
+    awaitingFlight?: string | null;
     state: "open" | "merged" | "closed";
     headSha: string | null;
     readAt: string;

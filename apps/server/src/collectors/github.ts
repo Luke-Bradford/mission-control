@@ -70,6 +70,7 @@ const ITEM_FIELDS = `
 
 /** What the board reads from an issue. */
 const ISSUE_FIELDS = `
+              author { login }
               number title url state updatedAt createdAt labels(first: 20) { nodes { name } }
               assignees(first: 10) { nodes { login } }
               repository { name owner { login } }
@@ -126,6 +127,7 @@ const ISSUE_QUERY = `query Ticket($owner: String!, $name: String!, $number: Int!
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       number title url state body
+      author { login }
       labels(first: 20) { nodes { name } }
       milestone { title }
       subIssues(first: 50) { nodes { number title state repository { name owner { login } } } }
@@ -564,6 +566,9 @@ function boardItem(
   return {
     repoId: repo.id,
     issueNumber: c.number as number,
+    ...(typeof path(c, "author", "login") === "string"
+      ? { author: str(path(c, "author", "login"), "") }
+      : {}),
     title: str(c.title, ""),
     status: status ?? "",
     state: state ?? "planned",
@@ -638,6 +643,9 @@ export async function fetchTicket(
   const chars = Array.from(str(issue.body, ""));
   return {
     number: issue.number,
+    ...(typeof path(issue, "author", "login") === "string"
+      ? { author: str(path(issue, "author", "login"), "") }
+      : {}),
     title: str(issue.title, ""),
     url: str(issue.url, ""),
     state: openClosed(issue.state),

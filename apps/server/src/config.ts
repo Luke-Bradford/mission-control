@@ -175,7 +175,7 @@ export type TeamsConfig = z.infer<typeof TeamsConfig>;
 
 export interface CcConfig {
   sources?: { teams?: TeamsConfig };
-  operator: { id: string; timezone: string };
+  operator: { id: string; timezone: string; githubLogins?: string[] };
   accounts: { id: AccountId; vendor: "claude" | "codex"; alertAt: number; stopAt: number }[];
   repos: {
     id: RepoId;
@@ -416,6 +416,10 @@ const fileSchema = z
           : v,
       z.strictObject({
         id: nonEmpty.default(DEFAULT_OPERATOR_ID),
+        github_logins: z
+          .array(z.string().regex(/^[A-Za-z0-9-]{1,39}$/))
+          .max(20)
+          .default([]),
         timezone: nonEmpty,
       }),
     ),
@@ -513,6 +517,9 @@ const fileSchema = z
       ...(f.sources === undefined ? {} : { sources: f.sources }),
       operator: {
         id: f.operator.id,
+        ...(f.operator.github_logins.length === 0
+          ? {}
+          : { githubLogins: f.operator.github_logins }),
         timezone: f.operator.timezone,
       },
       accounts: f.accounts.map((a) => ({

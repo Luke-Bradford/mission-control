@@ -44,7 +44,7 @@ export interface RepoRules {
   /** Whether the repo's block set `hard_rules` itself (`[]` counts); false on the defaults. */
   hardRulesSet: boolean;
   /** Who merges a PR that touches hard-rule files: the operator by hand, or the controller. */
-  hardRulesBy: HardRulesBy;
+  hardRulesBy: HardRulesBy | "flight";
   alwaysAsk: string[];
 }
 
@@ -95,8 +95,8 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
 
 /**
  * Paths whose change FLIGHT never clears on a `superuser` repo, whatever its `hard_rules_by`: the
- * operator or the delegate does (floor 7). CLAUDE.md is held whole, a superset of its
- * `## Mission Control` block.
+ * operator or the delegate does (floor 7). CLAUDE.md is held unless the engine verifies
+ * that its `## Mission Control` block is unchanged.
  */
 export const FLIGHT_FLOOR_PATHS: readonly string[] = Object.freeze([
   "CLAUDE.md",
