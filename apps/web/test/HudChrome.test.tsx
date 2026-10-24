@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { WorkInFlight } from "../src/flight/WorkInFlight.tsx";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
+import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
 import { Agent } from "../src/pages/Agent.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
@@ -312,6 +313,7 @@ describe("HUD chrome", () => {
     stub({ "/api/attention": () => ({ status: 200, body: attention }) });
     const { container } = render(
       <>
+        <NeedsBanner />
         <Overview />
         <BoardPage repoId={null} ticket={null} />
       </>,

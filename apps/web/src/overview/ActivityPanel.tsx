@@ -337,9 +337,12 @@ export function ActivityPanel() {
               <div key={key} className="arow k-comms">
                 <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
                 <span className="g">{GLYPH.comms}</span>
+                <span className="log-who ellip">
+                  <CommsEnd id={e.who} />
+                </span>
                 <Expandable lines={2}>
                   <span className="txt">
-                    <CommsEnd id={e.who} /> <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
+                    <span className="muted">→</span> <CommsEnd id={e.to} />{" "}
                     <MentionText text={e.text} />
                   </span>
                 </Expandable>
@@ -363,13 +366,15 @@ export function ActivityPanel() {
             <div key={key} className={`arow ${KIND_CLASS[e.kind] ?? FALLBACK_CLASS}`}>
               <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
               <span className={red ? "g crit-t" : "g"}>{GLYPH[e.kind] ?? FALLBACK_GLYPH}</span>
+              <span className="log-who ellip" title={e.who}>
+                {agent ? (
+                  <AgentTag id={agent.id} index={agent.index} sm />
+                ) : (
+                  <span className="muted">{e.who}</span>
+                )}
+              </span>
               <Expandable lines={2}>
                 <span className="txt">
-                  {agent ? (
-                    <AgentTag id={agent.id} index={agent.index} sm />
-                  ) : (
-                    <span className="muted">{e.who}</span>
-                  )}{" "}
                   <ActivityText
                     event={e}
                     prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}

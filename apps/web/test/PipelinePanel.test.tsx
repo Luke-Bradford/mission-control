@@ -47,6 +47,8 @@ describe("Pipeline", () => {
       expect(card.textContent).toContain(`PR #${i + 20}`);
       expect(card.title).toContain(i ? "seat-1" : "waiting on you");
       expect(card.title).toContain("2m");
+      expect(within(card).getByText("2m")).toBeTruthy();
+      expect(within(card).getByText(i ? "seat-1" : "—")).toBeTruthy();
       for (const state of ["pass", "fail", "pending"]) {
         expect(within(card).getByRole("img", { name: `CI ${state}` }).className).toContain(state);
       }
@@ -82,7 +84,10 @@ describe("Pipeline", () => {
         within(stage)
           .getAllByRole("link")
           .map((link) => link.textContent),
-      ).toEqual(cards.map((card) => expect.stringContaining(`PR #${card.pr}`)));
+      ).toEqual([
+        ...cards.slice(0, 2).map((card) => expect.stringContaining(`PR #${card.pr}`)),
+        "+1 more",
+      ]);
       data = summary([{ ...merged, count: 2, cards: cards.filter((_, i) => i !== 1).reverse() }]);
       await act(async () => {
         hub.refetchTopic("boards");
@@ -100,7 +105,7 @@ describe("Pipeline", () => {
     }
   });
 
-  it("caps cards at three using the total count for the stage Board link", async () => {
+  it("caps cards at two using the total count for the stage Board link", async () => {
     const ready = pipeline[0] as PipelineStage;
     const card = ready.cards[0];
     if (!card) throw new Error("missing card");
@@ -119,11 +124,11 @@ describe("Pipeline", () => {
     });
     render(<PipelinePanel />);
     const stage = await screen.findByRole("region", { name: "Ready" });
-    expect(within(stage).getAllByRole("link")).toHaveLength(4);
-    expect(within(stage).getByRole("link", { name: "+6 more" }).getAttribute("href")).toBe(
+    expect(within(stage).getAllByRole("link")).toHaveLength(3);
+    expect(within(stage).getByRole("link", { name: "+7 more" }).getAttribute("href")).toBe(
       "/board?stage=ready",
     );
-    expect(within(stage).queryByText(/Ticket 4/)).toBeNull();
+    expect(within(stage).queryByText(/Ticket 3/)).toBeNull();
   });
 
   it("keeps empty stages and refetches the selected session on SSE invalidation", async () => {

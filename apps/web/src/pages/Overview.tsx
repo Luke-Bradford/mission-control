@@ -11,16 +11,16 @@ import { TimelinePanel } from "../overview/TimelinePanel.tsx";
 export function Overview() {
   return (
     <section id="page-overview">
-      <NeedsBanner />
+      <NeedsBanner awayOnly />
       <div className="overview-grid">
         <div className="overview-metrics">
           <KpiStrip />
         </div>
-        <AgentsPanel />
         <div className="overview-work">
+          <AgentsPanel />
           <TimelinePanel />
-          <PipelinePanel />
         </div>
+        <PipelinePanel />
         <div className="ov">
           <ActivityPanel />
           <div className="col">

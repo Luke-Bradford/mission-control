@@ -49,7 +49,12 @@ describe("KpiStrip", () => {
   });
 
   it("formats eight linked metrics and labels the available histories honestly", async () => {
-    stubFetch({ "/api/overview": { kpis } });
+    stubFetch({
+      "/api/overview": {
+        at: OVERVIEW.at,
+        kpis: { ...kpis, inFlight: { count: 4, oldestAt: OVERVIEW.at - 120_000 } },
+      },
+    });
     render(<KpiStrip />);
     await screen.findByText("41.2k");
     const labels = [
@@ -77,10 +82,26 @@ describe("KpiStrip", () => {
         paths[i],
       );
     });
-    for (const text of ["$24.31", "1h 12m", "92%", "1 red now", "of 5 agents", "1 over an hour"])
+    for (const text of [
+      "$24.31",
+      "1h 12m",
+      "92%",
+      "10 runs · 1 red now",
+      "of 5 agents",
+      "1 over 1 h",
+    ])
       expect(screen.getByText(text)).toBeTruthy();
     expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(2);
     expect(screen.getAllByRole("img", { name: /hourly today/ })).toHaveLength(2);
+    expect(screen.getByText("n=8 · 1h 30m avg (14d)")).toBeTruthy();
+    for (const label of ["In flight", "CI pass rate", "Cycle time", "Needs you"]) {
+      const tile = screen.getByRole("link", { name: new RegExp(label) });
+      expect(within(tile).queryByRole("img")).toBeNull();
+      expect(tile.querySelector(".kpi-secondary")?.textContent).not.toBe("—");
+    }
+    for (const graph of screen.getAllByRole("img")) {
+      expect(graph.getAttribute("preserveAspectRatio")).toBe("none");
+    }
   });
 
   it("shows dashes for unavailable values, preserves zero and follows session and SSE changes", async () => {
@@ -95,7 +116,7 @@ describe("KpiStrip", () => {
     stubFetch({ "/api/overview?session=s1": () => ({ status: 200, body: data }) });
     setSession("s1");
     render(<KpiStrip />);
-    await screen.findByText("0 red now");
+    await screen.findByText("0 runs · 0 red now");
     expect(
       within(screen.getByRole("link", { name: /CI pass rate/ })).getAllByText("—").length,
     ).toBeGreaterThan(0);
