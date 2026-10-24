@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BRIEF_LINES, BriefOptions, ItemBrief } from "../src/comms/ItemBrief.tsx";
@@ -46,12 +48,11 @@ describe("decision brief evidence", () => {
     expect(screen.queryByRole("heading", { name: "What FLIGHT did" })).toBeNull();
   });
 
-  it("uses source text, context and recommendation for legacy briefs", () => {
+  it("uses source text and context for legacy briefs", () => {
     render(<ItemBrief original="Source question" brief={brief()} />);
     for (const text of [
       "Source question",
       "The dev seat asks which port to preview on.",
-      "Use 5174.",
       "checked: read config",
     ])
       expect(screen.getByText(text)).toBeTruthy();
@@ -76,9 +77,12 @@ describe("decision brief evidence", () => {
       return style;
     });
     const { container } = render(
-      <ItemBrief original="Question stays above" brief={brief({ assessment })} />,
+      <div className="item-body">
+        <ItemBrief original="Question stays above" brief={brief({ assessment })} />
+      </div>,
     );
-    const question = screen.getByRole("heading", { name: "The question" }).parentElement;
+    const body = container.querySelector(".item-body") as HTMLElement;
+    body.scrollTop = 80;
     const content = screen
       .getByText(/Assessment line 30/)
       .closest(".expandable-content") as HTMLElement;
@@ -86,10 +90,10 @@ describe("decision brief evidence", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show more, FLIGHT's view" }));
     expect(content.style.webkitLineClamp).toBe("unset");
     expect(content.textContent).toContain(assessment);
-    expect(container.querySelector(".brief-section")).toBe(question);
+    expect(body.scrollTop).toBe(80);
     fireEvent.click(screen.getByRole("button", { name: "Show less, FLIGHT's view" }));
     expect(content.style.webkitLineClamp).toBe(String(BRIEF_LINES));
-    expect(container.querySelector(".brief-section")).toBe(question);
+    expect(body.scrollTop).toBe(80);
   });
 
   it("shows all 10 lines without a disclosure", () => {
@@ -181,11 +185,11 @@ it("retains catch-up and checked findings in the new sections", () => {
 });
 
 it.each([undefined, "", "   "])(
-  "falls back from an empty ask (%s) to the recommendation",
+  "omits an empty ask (%s) instead of repeating the recommendation",
   (ask) => {
     render(<ItemBrief brief={brief({ ask, recommendation: "Use the fallback" })} />);
-    expect(screen.getByText("Use the fallback")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "What FLIGHT needs from you" })).toBeTruthy();
+    expect(screen.queryByText("Use the fallback")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "What FLIGHT needs from you" })).toBeNull();
   },
 );
 
@@ -207,4 +211,131 @@ it("omits an empty ask and does not repeat the recommended option's text", () =>
   expect(screen.queryByRole("heading", { name: "What FLIGHT needs from you" })).toBeNull();
   expect(screen.getAllByText("Use this answer")).toHaveLength(1);
   expect(screen.getByText("FLIGHT recommends")).toBeTruthy();
+});
+
+it("applies phone wrap and fold rules to long question, recommendation and option content", () => {
+  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const declarations = (selector: string) =>
+    rules
+      .filter((rule) => rule[1]?.split(",").some((part) => part.trim() === selector))
+      .map((rule) => rule[2])
+      .join("\n");
+  const long = "unbroken".repeat(100);
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(600);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(160);
+  const pick = vi.fn();
+  const { container } = render(
+    <div id="discuss" className="flyout" style={{ width: 375 }}>
+      <div className="panel">
+        <div className="item-body">
+          <ItemBrief brief={brief({ original: long, assessment: long, ask: long })} />
+          <div id="dsOpts">
+            <BriefOptions
+              options={[{ label: "Proceed", answer: long }]}
+              recommendation={long}
+              live
+              disabled={false}
+              variant="panel"
+              onPick={pick}
+            />
+            <BriefOptions
+              options={[{ label: long, answer: long }]}
+              live
+              disabled={false}
+              variant="row"
+              primaryFirst
+              onPick={pick}
+            />
+          </div>
+        </div>
+      </div>
+    </div>,
+  );
+  expect(declarations(".flyout")).toContain("width: min(540px, 100%)");
+  expect(declarations("#discuss .panel")).toContain("overflow: hidden");
+  expect(declarations("#discuss .ph")).toContain("flex: none");
+  expect(declarations("#discuss .item-body")).toContain("overflow: auto");
+  expect(declarations("#discuss .item-body")).toContain("overflow-anchor: none");
+  for (const selector of ["#discuss .brief", "#discuss .opt", ".expandable-text"]) {
+    expect(container.querySelector(selector)).toBeTruthy();
+    expect(declarations(selector)).toContain("overflow-wrap: anywhere");
+  }
+  for (const content of container.querySelectorAll<HTMLElement>(".expandable-content")) {
+    expect(content.style.webkitLineClamp).toBe(String(BRIEF_LINES));
+    expect(content.matches(".expandable-text")).toBe(true);
+  }
+  expect(declarations(".expandable-text")).toContain("overflow: hidden");
+  expect(declarations(".expandable-text")).toContain("-webkit-box-orient: vertical");
+  expect(declarations("#dsOpts .optlist")).toContain("min-width: 0");
+  expect(container.querySelector("#dsOpts .nopts button")?.textContent).toBe(long);
+  expect(declarations("#dsOpts .nopts button")).toContain("white-space: normal");
+  expect(declarations("#dsOpts .nopts button")).toContain("overflow-wrap: anywhere");
+  expect(declarations("#dsOpts .nopts")).toContain("max-width: 100%");
+  expect(declarations("#dsForm")).toContain("flex-wrap: wrap");
+  expect(declarations("#dsForm input")).toContain("min-width: 0");
+  const button = screen.getByRole("button", { name: "Proceed" });
+  expect(button.matches(".option-pick")).toBe(true);
+  expect(declarations(".opt")).toContain("position: relative");
+  expect(declarations(".option-pick::after")).toContain('content: ""');
+  expect(declarations(".option-pick::after")).toContain("position: absolute");
+  expect(declarations(".option-pick::after")).toContain("inset: 0");
+  for (const selector of [".opt .expandable > .sm", ".opt a"]) {
+    expect(declarations(selector)).toContain("position: relative");
+    expect(declarations(selector)).toContain("z-index: 1");
+  }
+  expect(declarations(".option-pick")).toContain("width: 100%");
+  expect(declarations(".option-pick")).toContain("white-space: normal");
+  fireEvent.click(button);
+  expect(pick).toHaveBeenCalledTimes(1);
+  const fold = screen.getByRole("button", { name: "Show more, Proceed, option 1" });
+  expect(button.contains(fold)).toBe(false);
+  fireEvent.click(fold);
+  expect(pick).toHaveBeenCalledTimes(1);
+  const expanded = container.querySelector<HTMLElement>(
+    "#discuss .expandable.open .expandable-content",
+  );
+  expect(expanded?.style.webkitLineClamp).toBe("unset");
+  expect(declarations("#discuss .expandable.open .expandable-content")).toContain(
+    "max-height: none",
+  );
+  expect(declarations("#discuss .expandable.open .expandable-content")).toContain(
+    "overflow: visible",
+  );
+  expect(screen.getByRole("button", { name: "Show more, Recommendation" })).toBeTruthy();
+});
+
+it("shows the approval recommendation above a labelled call group and all option descriptions", () => {
+  render(
+    <BriefOptions
+      options={[
+        {
+          id: "approve",
+          label: "Approve",
+          answer: "Send it",
+          description: "Send the reviewed draft",
+        },
+        { id: "skip", label: "Skip", answer: "Leave the draft unsent" },
+      ]}
+      recommendedOptionId="approve"
+      recommendation="The draft is ready to send"
+      live
+      disabled={false}
+      variant="row"
+      rowLabel="Your call:"
+      primaryFirst
+      onPick={() => {}}
+    />,
+  );
+  const recommendation = screen.getByText("The draft is ready to send");
+  const group = screen.getByRole("group", { name: "Your call:" });
+  expect(recommendation.closest(".recommendation")?.textContent).toContain("FLIGHT recommends");
+  expect(
+    recommendation.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(document.querySelector(".opt.rec")?.textContent).toContain("Approve");
+  expect(document.querySelector(".opt.rec")?.textContent).toContain("FLIGHT recommends");
+  for (const description of ["Send the reviewed draft", "Leave the draft unsent"])
+    expect(screen.getByText(description).closest(".opt")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Approve" }).title).toBe("");
 });

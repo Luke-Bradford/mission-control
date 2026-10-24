@@ -2800,6 +2800,7 @@ td.wrap {
   margin-top: 4px;
 }
 .opt {
+  position: relative;
   display: grid;
   gap: 2px;
   text-align: left;
@@ -2834,6 +2835,15 @@ div.opt {
 }
 #dsOpts {
   flex-wrap: wrap;
+}
+#dsOpts .nopts {
+  min-width: 0;
+  max-width: 100%;
+}
+#dsOpts .nopts button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 #dsOpts .optlist {
   width: 100%;
@@ -3623,9 +3633,11 @@ button.nrow.thread.tagged {
   min-height: 6em;
 }
 
+#dsForm,
 #dsDiscussionForm {
   flex-wrap: wrap;
 }
+#dsForm input,
 #dsDiscussionForm input {
   min-width: 0;
   flex: 1 1 160px;
@@ -3676,8 +3688,27 @@ button.nrow.thread.tagged {
   margin: 10px 14px;
 }
 .option-pick {
+  width: 100%;
   text-align: left;
   white-space: normal;
+}
+.option-pick::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+/* The whole card is the target, so the whole card shows keyboard focus. */
+.option-pick:focus-visible {
+  outline: none;
+}
+.opt:has(.option-pick:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.opt .expandable > .sm,
+.opt a {
+  position: relative;
+  z-index: 1;
 }
 #discuss .opt .pill {
   justify-self: start;

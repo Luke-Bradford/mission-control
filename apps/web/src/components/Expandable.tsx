@@ -69,18 +69,22 @@ function MeasuredExpandable({
   const box = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Remeasure after refreshed children change the rendered height.
+  const threshold = useRef(foldAfter);
+  threshold.current = foldAfter;
+  const remeasure = useRef<() => void>(() => {});
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
     const measure = () => {
       const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
-      const clampedHeight = Number.isFinite(lineHeight) ? foldAfter * lineHeight : el.clientHeight;
+      const clampedHeight = Number.isFinite(lineHeight)
+        ? threshold.current * lineHeight
+        : el.clientHeight;
       const overflowing = el.scrollHeight > clampedHeight;
       setOverflows(overflowing);
       if (!overflowing) setOpen(false);
     };
-    measure();
+    remeasure.current = measure;
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(el);
     const mutations = new MutationObserver(measure);
@@ -95,7 +99,26 @@ function MeasuredExpandable({
       window.removeEventListener("resize", measure);
       details?.removeEventListener("toggle", measure);
     };
-  }, [children, foldAfter]);
+  }, []);
+  useLayoutEffect(() => remeasure.current());
+  const tabIndexes = useRef(new Map<HTMLElement, string | null>());
+  useLayoutEffect(() => {
+    const saved = tabIndexes.current;
+    if (overflows && !open) {
+      for (const el of box.current?.querySelectorAll<HTMLElement>(
+        "a, button, input, select, textarea, [contenteditable], [tabindex]",
+      ) ?? []) {
+        if (!saved.has(el)) saved.set(el, el.getAttribute("tabindex"));
+        el.setAttribute("tabindex", "-1");
+      }
+    } else {
+      for (const [el, value] of saved) {
+        if (value === null) el.removeAttribute("tabindex");
+        else el.setAttribute("tabindex", value);
+      }
+      saved.clear();
+    }
+  });
   return (
     <div className={`expandable${open ? " open" : ""}`}>
       <div

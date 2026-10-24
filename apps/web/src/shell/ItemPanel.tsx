@@ -34,6 +34,7 @@ import {
   markHandled,
   type NotificationsView,
   type PersonThreadView,
+  sourceOf,
   whereOf,
   whoOf,
 } from "../notifications.ts";
@@ -111,26 +112,27 @@ export function ItemPanel() {
   const about = esc?.title ?? item?.text ?? "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
   const replyOk = target?.to === "seat" || (target?.to === "flight" && live);
-  const act = async (run: () => Promise<string | null>, done?: () => void) => {
+  const act = async (run: () => Promise<string | null>) => {
     setBusy(true);
     setErr(null);
     const failed = await run();
     if (activeKey.current !== key) return;
     setBusy(false);
-    if (failed === null) done?.();
-    else setErr(failed);
+    setErr(failed);
   };
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
     const body = text.trim();
     if (!item || !target || !body || !replyOk || busy) return;
-    void act(
-      () => sendAnswer(target, seat, item, about, body),
-      () => setText(""),
-    );
+    void act(async () => {
+      const failed = await sendAnswer(target, seat, item, about, body);
+      if (failed === null && activeKey.current === item.key)
+        setText((current) => (current === text ? "" : current));
+      return failed;
+    });
   };
   const pick = (o: BriefOption) => {
-    if (!item || !target) return;
+    if (!item || !target || !replyOk || busy || chosen[item.key]) return;
     if (item.kind === "person") {
       void act(() => sendAnswer(target, seat, item, about, o.answer));
       return;
@@ -149,44 +151,46 @@ export function ItemPanel() {
       hub.refetch(resource.path);
       if (discussion) hub.refetch(RESOURCES.discussion(item.key, discussion.id).path);
     };
-    void act(
-      async () => {
-        if (target.to !== "flight") return sendAnswer(target, seat, item, about, o.answer);
+    void act(async () => {
+      if (target.to !== "flight") {
+        const failed = await sendAnswer(target, seat, item, about, o.answer);
+        if (failed !== null) return failed;
+      } else {
         if (!discussion)
           return "The discussion couldn't be loaded. Refresh discussion and try again.";
         try {
           await askFlight(item.key, discussion.version, id, o.answer);
           refresh();
-          return null;
         } catch (e) {
           return e instanceof Error ? e.message : "server unreachable";
         }
-      },
-      () => {
-        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-        if (target.to === "flight") {
-          receipt("FLIGHT hasn't replied yet.");
-        } else if (discussion && live) {
-          receipt("FLIGHT hasn't replied yet.");
-          void askFlight(item.key, discussion.version, id, `You chose: ${o.label}`)
-            .catch(() => receipt("Answer sent. FLIGHT hasn't replied yet."))
-            .finally(refresh);
-        } else {
-          receipt(
-            discussion
-              ? "FLIGHT hasn't replied yet."
-              : "Answer sent. The discussion couldn't be loaded.",
-          );
-        }
-      },
-    );
+      }
+      // These results belong to the captured item even if another item is now open.
+      setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+      if (target.to === "flight") {
+        receipt("FLIGHT hasn't replied yet.");
+      } else if (discussion && live) {
+        receipt("FLIGHT hasn't replied yet.");
+        void askFlight(item.key, discussion.version, id, `You chose: ${o.label}`)
+          .catch(() => receipt("Answer sent. FLIGHT hasn't replied yet."))
+          .finally(refresh);
+      } else {
+        receipt(
+          discussion
+            ? "FLIGHT hasn't replied yet."
+            : "Answer sent. The discussion couldn't be loaded.",
+        );
+      }
+      return null;
+    });
   };
   const dismiss = () => {
     if (!item) return;
-    void act(
-      () => dismissItem(item.key),
-      () => closeItem(),
-    );
+    void act(async () => {
+      const failed = await dismissItem(item.key);
+      if (failed === null && activeKey.current === item.key) closeItem();
+      return failed;
+    });
   };
   const thread = currentThread ?? savedPerson?.thread;
   const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
@@ -252,8 +256,9 @@ export function ItemPanel() {
               <ItemBrief
                 key={item.key}
                 brief={item.brief}
+                approval={item.kind === "approval"}
                 original={
-                  esc || thread || !item.brief?.original ? (
+                  item.escalationId || thread || !item.brief?.original ? (
                     <OriginalItem item={item} esc={esc} thread={thread} tz={tz} now={now} />
                   ) : undefined
                 }
@@ -333,8 +338,16 @@ export function ItemPanel() {
                     recommendation={item.brief?.recommendation}
                     live={target?.to !== "github"}
                     disabled={busy || !replyOk || Boolean(chosen[key])}
-                    title={target?.to === "flight" ? flightTitle : undefined}
-                    variant="panel"
+                    title={
+                      target?.to === "github"
+                        ? "Reply on GitHub to answer this item."
+                        : target?.to === "flight"
+                          ? flightTitle
+                          : undefined
+                    }
+                    variant={item.kind === "approval" ? "row" : "panel"}
+                    rowLabel={item.kind === "approval" ? "Your call:" : undefined}
+                    primaryFirst={item.kind === "approval"}
                     onPick={pick}
                   />
                 </>
@@ -361,10 +374,12 @@ export function ItemPanel() {
                   className="primary"
                   disabled={busy}
                   onClick={() =>
-                    void act(
-                      () => markHandled(item.key),
-                      () => setJustHandled((prev) => ({ ...prev, [item.key]: "marked handled" })),
-                    )
+                    void act(async () => {
+                      const failed = await markHandled(item.key);
+                      if (failed === null)
+                        setJustHandled((prev) => ({ ...prev, [item.key]: "marked handled" }));
+                      return failed;
+                    })
                   }
                 >
                   Mark handled
@@ -377,12 +392,12 @@ export function ItemPanel() {
               <input
                 id="dsInput"
                 autoComplete="off"
-                aria-label="Reply, or ask FLIGHT about this"
+                aria-label="Your answer"
                 placeholder="Type your answer…"
                 title={!replyOk ? flightTitle : undefined}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                disabled={!replyOk || busy}
+                disabled={!replyOk}
               />
               <button
                 type="submit"
@@ -502,8 +517,15 @@ function OriginalLinks({ item, thread }: { item: AttentionItem; thread?: PersonT
       )}
       {thread
         ? !item.brief?.person && (
-            <ExternalLink url={thread.message?.url ?? thread.url}>
-              Open in {item.brief?.person?.source.kind === "teams" ? "Teams" : "GitHub"} ↗
+            <ExternalLink
+              url={thread.message?.url ?? thread.url}
+              allowedOrigin={
+                thread.message?.source.kind === "teams"
+                  ? "https://teams.microsoft.com"
+                  : "https://github.com"
+              }
+            >
+              Open in {sourceOf(thread)} ↗
             </ExternalLink>
           )
         : item.url && <ExternalLink url={item.url}>Open on GitHub ↗</ExternalLink>}
