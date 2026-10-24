@@ -67,8 +67,11 @@ export function PipelinePanel() {
                         </span>
                         <span className="num xs muted">{age(card.since, now)}</span>
                       </span>
-                      <span className={`xs ${card.who === null ? "warn-t" : "mono fg2"}`}>
-                        {card.who ?? "waiting on you"}
+                      {/* A merged PR with no seat isn't waiting on anyone. */}
+                      <span
+                        className={`xs ${card.who === null && key !== "merged" ? "warn-t" : "mono fg2"}`}
+                      >
+                        {card.who ?? (key === "merged" ? "merged" : "waiting on you")}
                       </span>
                     </a>
                   );
