@@ -1451,6 +1451,40 @@ export class Store {
     }));
   }
 
+  /** Timeline sources include work already in progress at the window's left edge. */
+  timelineSources(from: number, to: number) {
+    const events = this.db
+      .prepare(`SELECT agent_id, at, from_state, to_state FROM agent_events e WHERE at <= ?
+      AND (at >= ? OR at = (SELECT MAX(at) FROM agent_events
+        WHERE agent_id = e.agent_id AND at < ?)) ORDER BY at, agent_id`)
+      .all(to, from, from) as Row[];
+    const runs = this.db
+      .prepare(`SELECT * FROM runs WHERE started_at <= ?
+      AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at, seq`)
+      .all(to, from) as Row[];
+    const holds = this.db
+      .prepare(`SELECT seat_id, started_at, ended_at FROM test_lock_runs
+      WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)`)
+      .all(to, from) as { seat_id: string; started_at: number; ended_at: number | null }[];
+    const reviews = this.db
+      .prepare(`SELECT * FROM reviews WHERE started_at <= ?
+      AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at, id`)
+      .all(to, from) as Row[];
+    return {
+      events: events.map(
+        (r): Omit<AgentEvent, "text"> => ({
+          agentId: r.agent_id as string,
+          at: r.at as number,
+          from: r.from_state as HudState,
+          to: r.to_state as HudState,
+        }),
+      ),
+      runs: runs.map(toRun),
+      holds: holds.map((r) => ({ agentId: r.seat_id, from: r.started_at, to: r.ended_at })),
+      reviews: reviews.map(toReview),
+    };
+  }
+
   /** Records a card move; returns its id. */
   addBoardMove(m: Omit<BoardMove, "id">): number {
     const r = this.db

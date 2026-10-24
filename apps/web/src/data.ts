@@ -45,6 +45,7 @@ export const RESOURCES = {
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
   // The HUD's views (Plan 3).
+  overviewTimeline: { path: "/api/overview/timeline", topic: "agents" },
   crew: { path: "/api/crew", topic: "agents" },
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
   crewSessions: { path: "/api/crew/sessions", topic: null },
@@ -348,6 +349,7 @@ class Hub {
     for (const e of this.entries.values()) {
       // The server filters watch rows using both the lock and crew state. Refetch
       // the brief when either changes, including rows omitted from its last response.
+      const timelineChanged = e.path === RESOURCES.overviewTimeline.path && topic === "guard";
       const briefChanged =
         e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
       const notificationSettingsChanged =
@@ -356,7 +358,11 @@ class Hub {
         e.path === RESOURCES.flightSummary.path &&
         (topic === "agents" || topic === "boards" || topic === "attention" || topic === "guard");
       if (
-        (e.topic === topic || briefChanged || notificationSettingsChanged || summaryChanged) &&
+        (e.topic === topic ||
+          timelineChanged ||
+          briefChanged ||
+          notificationSettingsChanged ||
+          summaryChanged) &&
         e.listeners.size > 0
       )
         void this.fetch(e);
