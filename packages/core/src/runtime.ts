@@ -688,6 +688,12 @@ export const CREW_CLI_ENV = {
   DISABLE_AUTOUPDATER: "1",
 } as const;
 
+/** Keep pnpm on its installed version when a sandbox cannot fetch the project's pin. */
+export const CODEX_CLI_ENV = {
+  pnpm_config_pm_on_fail: "ignore",
+  npm_config_update_notifier: "false",
+} as const;
+
 /** The folder pnpm makes for a project-local store; the commit tool never stages one. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
 /**

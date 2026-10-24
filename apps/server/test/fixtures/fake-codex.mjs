@@ -189,8 +189,17 @@ rl.on("line", (line) => {
       later(replay, 10);
     } else if (scenario.command || scenario.changes || scenario.method) {
       const itemId = `item-${turn}`;
-      const type = scenario.changes ? "fileChange" : "commandExecution";
-      const item = { id: itemId, type, ...(scenario.changes ? { changes: scenario.changes } : {}) };
+      const type = scenario.mcp
+        ? "mcpToolCall"
+        : scenario.changes
+          ? "fileChange"
+          : "commandExecution";
+      const item = {
+        id: itemId,
+        type,
+        ...(scenario.changes ? { changes: scenario.changes } : {}),
+        ...scenario.mcp,
+      };
       if (!scenario.missingPaths) notify("item/started", { threadId, turnId, item });
       const method =
         scenario.method ??
