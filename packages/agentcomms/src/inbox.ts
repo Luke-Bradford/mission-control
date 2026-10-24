@@ -17,8 +17,10 @@ export interface Inbox {
   list(room: string, sinceSeq?: number, limit?: number): InboxEntry[];
   lastSeq(room: string): number;
   advance(room: string, seq: number): void;
+  relayReset(room: string): number | undefined;
+  markRelayReset(room: string, relaySeq: number): void;
   threads(room: string): Thread[];
-  close(thread: string): void;
+  close(room: string, thread: string): void;
   dispose(): void;
 }
 
@@ -28,6 +30,7 @@ export function openInbox(path: string): Inbox {
   db.exec(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS cursors (room TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS relay_resets (room TEXT PRIMARY KEY, relay_seq INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS messages (
       room TEXT NOT NULL, seq INTEGER NOT NULL, msg TEXT NOT NULL, sender TEXT NOT NULL,
       PRIMARY KEY (room, seq)
@@ -62,6 +65,16 @@ export function openInbox(path: string): Inbox {
   };
   return {
     advance,
+    relayReset(room) {
+      const row = db.prepare("SELECT relay_seq FROM relay_resets WHERE room = ?").get(room);
+      return row ? Number(row.relay_seq) : undefined;
+    },
+    markRelayReset(room, relaySeq) {
+      db.prepare("INSERT OR IGNORE INTO relay_resets (room, relay_seq) VALUES (?, ?)").run(
+        room,
+        relaySeq,
+      );
+    },
     quarantine(seq, room, sealed, reason) {
       db.exec("BEGIN IMMEDIATE");
       try {
@@ -147,8 +160,8 @@ export function openInbox(path: string): Inbox {
           ...(row.question ? { question: JSON.parse(String(row.question)) as Message } : {}),
         }));
     },
-    close(thread) {
-      db.prepare("UPDATE threads SET closed = 1 WHERE thread = ?").run(thread);
+    close(room, thread) {
+      db.prepare("UPDATE threads SET closed = 1 WHERE room = ? AND thread = ?").run(room, thread);
     },
     dispose() {
       db.close();

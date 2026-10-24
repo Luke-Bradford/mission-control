@@ -1,4 +1,5 @@
 import { beforeEach, expect, it } from "vitest";
+import { AUTH_CLOCK_SKEW_MS, PRESENCE_INTERVAL_MS, TOKEN_TTL_MS } from "../src/limits.ts";
 import {
   createRoomCore,
   type RoomCore,
@@ -152,7 +153,7 @@ it("orders by relay sequence despite skewed clocks and resumes after restart", a
   expect(rebuilt.post(await f.post(8))).toEqual({ seq: 8 });
   expect(rebuilt.since(f.a.identity.id, 5).map((m) => m.seq)).toEqual([6, 7, 8]);
 });
-it("persists pending members, tokens, grants and presence", async () => {
+it("persists pending members, tokens and grants but resets presence", async () => {
   const token = core.issueToken(f.a.identity.id);
   core.requestJoin(token, f.b.member);
   core.setPresence(f.a.agent.id, "busy");
@@ -165,7 +166,8 @@ it("persists pending members, tokens, grants and presence", async () => {
   });
   expect(rebuilt.pending()).toEqual([f.b.member]);
   expect(rebuilt.requestJoin(token, f.b.member)).toBe("used");
-  expect(rebuilt.presence()[f.a.agent.id]).toEqual({ status: "busy", seenAt: now });
+  expect(rebuilt.presence()).toEqual({});
+  rebuilt.setPresence(f.a.agent.id, "busy");
   now += 91_000;
   expect(rebuilt.presence()[f.a.agent.id]?.status).toBe("gone");
 });
@@ -193,4 +195,46 @@ it("does not let callers mutate membership or stored envelopes", async () => {
   const log = core.since(f.a.identity.id, 0);
   log[0].sealed.ciphertext = "changed";
   expect(core.since(f.a.identity.id, 0)[0]?.sealed.ciphertext).not.toBe("changed");
+});
+
+it("expires and prunes unused and consumed invite tokens", async () => {
+  const unused = core.issueToken(f.a.identity.id);
+  const used = await approve();
+  now += TOKEN_TTL_MS;
+  expect(core.requestJoin(unused, f.b.member)).toBe("unknown");
+  expect(core.requestJoin(used, f.b.member)).toBe("unknown");
+  expect(saved?.tokens).toEqual({});
+  const fresh = core.issueToken(f.a.identity.id);
+  expect(saved?.tokens[fresh].expiresAt).toBe(now + TOKEN_TTL_MS);
+});
+it("rate limits presence without writing storage", () => {
+  const snapshot = structuredClone(saved);
+  expect(core.setPresence(f.a.agent.id, "online")).toBe(true);
+  expect(core.setPresence(f.a.agent.id, "busy")).toBe(false);
+  expect(saved).toEqual(snapshot);
+  now += PRESENCE_INTERVAL_MS;
+  expect(core.setPresence(f.a.agent.id, "busy")).toBe(true);
+});
+
+it("persists request timestamps, rejects replays after reload, and prunes expired nonces", () => {
+  expect(core.useRequest("first", now)).toBe(true);
+  expect(saved?.usedRequests).toEqual([{ nonce: "first", at: now }]);
+  const restored = createRoomCore({
+    room: "test-room",
+    owner: f.a.member,
+    now: () => now,
+    storage: {
+      load: () => saved,
+      save: (state) => {
+        saved = state;
+      },
+    },
+  });
+  expect(restored.useRequest("first", now)).toBe(false);
+  now += 2 * AUTH_CLOCK_SKEW_MS;
+  expect(restored.useRequest("boundary", now)).toBe(true);
+  expect(saved?.usedRequests).toHaveLength(2);
+  now++;
+  expect(restored.useRequest("new", now)).toBe(true);
+  expect(saved?.usedRequests?.map((r) => r.nonce)).toEqual(["boundary", "new"]);
 });

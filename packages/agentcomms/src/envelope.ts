@@ -25,6 +25,7 @@ export type Message = {
   needsHuman?: boolean;
   auto: boolean;
   reason?: string;
+  // Claimed attribution by the sender, not verified human authorization.
   requestedBy?: { kind: "human" | "agent"; name: string };
   sentAt: string;
 };
@@ -41,7 +42,7 @@ export type Sealed = {
 export class BodyTooLarge extends Error {
   override name = "BodyTooLarge";
   constructor() {
-    super("Message body exceeds 32000 UTF-8 bytes");
+    super(`Message body exceeds ${BODY_MAX} UTF-8 bytes`);
   }
 }
 export class BadSignature extends Error {

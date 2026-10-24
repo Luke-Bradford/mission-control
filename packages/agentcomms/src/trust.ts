@@ -28,26 +28,47 @@ export function checkedDirectory(
   }
   return d;
 }
+async function storedVersions(home: string, room: string): Promise<string[]> {
+  try {
+    return (await readdir(path(home, room)))
+      .filter((file) => /^\d+\.json$/.test(file))
+      .sort((a, b) => Number(b.slice(0, -5)) - Number(a.slice(0, -5)));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+async function storedDirectory(
+  home: string,
+  invite: Pick<Invite, "room" | "ownerId">,
+  file: string,
+): Promise<Directory> {
+  const raw = await readOptional(join(path(home, invite.room), file));
+  const directory = checkedDirectory(JSON.parse(raw as string), invite);
+  if (`${directory.version}.json` !== file) throw new Error("Invalid stored directory version");
+  return directory;
+}
 export async function readTrust(
   home: string,
   invite: Pick<Invite, "room" | "ownerId">,
 ): Promise<Directory | undefined> {
-  let files: string[];
-  try {
-    files = await readdir(path(home, invite.room));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
+  const [latest] = await storedVersions(home, invite.room);
+  return latest ? storedDirectory(home, invite, latest) : undefined;
+}
+export async function readMembershipTrust(
+  home: string,
+  invite: Pick<Invite, "room" | "ownerId">,
+  memberId: string,
+): Promise<{ directory: Directory | undefined; removed: boolean }> {
+  const [latest, ...history] = await storedVersions(home, invite.room);
+  const directory = latest ? await storedDirectory(home, invite, latest) : undefined;
+  if (directory && !directory.activeMemberIds.includes(memberId)) {
+    for (const file of history) {
+      const previous = await storedDirectory(home, invite, file);
+      if (previous.activeMemberIds.includes(memberId)) return { directory, removed: true };
+    }
   }
-  const versions = files
-    .filter((file) => /^\d+\.json$/.test(file))
-    .sort((a, b) => Number(b.slice(0, -5)) - Number(a.slice(0, -5)));
-  if (!versions.length) return undefined;
-  const raw = await readOptional(join(path(home, invite.room), versions[0]));
-  const directory = checkedDirectory(JSON.parse(raw as string), invite);
-  if (`${directory.version}.json` !== versions[0])
-    throw new Error("Invalid stored directory version");
-  return directory;
+  return { directory, removed: false };
 }
 export async function acceptDirectory(
   home: string,

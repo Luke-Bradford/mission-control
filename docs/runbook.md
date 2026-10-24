@@ -908,8 +908,31 @@ copy of your own database (`MC_PORT=<port>`, `MC_DB=<copy>`, `MC_NO_LOOP_WRITES=
 
 The relay stores signed ciphertext, public membership records and wrapped key grants. It never
 receives the room key or a plaintext message body. History keeps the last 5000 messages per room;
-clients resume by relay sequence, not sender time. Back up the Node relay's data directory if you
-need to preserve rooms across machines.
+clients resume by relay sequence, not sender time. If retention has passed a client's cursor,
+the relay sends a `gap` range before the retained messages; `comms_rooms` reports the missing
+sequence range in its `gaps` field, separately from connection errors. Overlapping or adjacent
+ranges are merged; at most the 20 highest ranges are kept. The relay cannot recover messages
+already trimmed. Back up the Node relay's data directory if you need to preserve rooms across machines.
+
+A cursor ahead of the relay (for example after restoring an older backup) produces
+`{t:"reset",relaySeq}` and closes the connection. The daemon reports `relay-reset` in `rooms()` /
+`comms_rooms` with the relay sequence, local cursor and recovery instructions. It pauses sending,
+answering and reconnecting for that room, preserving the inbox and cursor. The pause persists
+across daemon restarts. New messages can reuse sequence numbers already in the inbox: these are
+new messages, not duplicates, so merely waiting for the relay counter to catch up loses messages.
+The daemon never rewinds automatically.
+
+For **relay-reset recovery**, stop the daemon and back up its entire agentcomms home, including
+`inbox.sqlite` and any SQLite sidecars. Have the owner create a replacement room with a new room
+name, invite the members and approve them again. Remove the affected room's entry from the local
+`config.json` rooms list, then restart the daemon with the replacement room configured. Keep the
+old inbox, trust records and keys as an archive; do not clear its cursor or delete old rows to
+resume the old room. Other members must migrate too. Messages lost in the relay restore need to
+be recovered from members' local archives or resent into the replacement room.
+
+Redeploy the relay before updating clients, then update clients promptly after the relay;
+clients more than one page behind get no live delivery until updated because old clients reject
+`more`.
 
 Deploy the Cloudflare relay from your own account, by hand:
 
@@ -925,7 +948,12 @@ npx wrangler@4 deploy
 Wrangler binds `ROOMS` to the SQLite-backed `RoomDO` Durable Object, one object per room. The build
 extracts WASM from the already installed libsodium package into ignored `dist/` files for
 static loading on Workers. No credentials are ever committed to the repo or CI. Wrangler is an
-operator tool, not a project dependency.
+operator tool, not a project dependency. The Durable Object stores each ciphertext entry in its
+own SQL row, reads replay in pages of 100, and stores membership, grants and tokens in separate
+rows. Existing chunked snapshots migrate transactionally on first use; failures are logged and
+initialization retries on the next event. Presence does not write room rows. Heartbeats run every
+30 seconds with a 24-second throttle to allow jitter. Presence status and timestamps, socket
+authentication and replay cursors survive hibernation through WebSocket attachments.
 
 For a LAN relay, with Node 25 and `packages/agentcomms/bin` on `PATH`:
 
@@ -952,8 +980,13 @@ The transport bootstrap API supplies the CLI's room and invite operations:
   `agentcomms/create/v1|` domain. The directory and each epoch-0 grant are separately signed.
   An existing room returns 409 and is never overwritten.
 - `POST /rooms/:room/tokens` takes `{memberId, nonce, at, sig}`, owner-signed in the
-  `agentcomms/token/v1|` domain. Requests expire after 120 seconds and nonces cannot be reused.
-  Returned join tokens contain 32 random bytes in base64url and can be used once.
+  `agentcomms/token/v1|` domain. Requests expire after 120 seconds. Nonces are stored with the signed request timestamp and
+  pruned once older than twice the clock-skew window, preventing replay while requests are valid.
+  Returned join tokens contain 32 random bytes in base64url, can be used once, and expire after
+  24 hours. Used and unused expired tokens are pruned on issuance, joining and room load.
+  Legacy tokens without an expiry must be reissued. A signed token request outside the time
+  window reports clock skew; synchronize the client clock and retry. WebSocket authentication
+  uses a challenge, not the client clock; its timeout means no valid hello arrived in time.
 - Every socket receives a random `{t:"challenge", challenge}`. A member or agent signs
   `agentcomms/hello/v1|room|id|challenge` and sends `{t:"hello", room, memberId, challenge, sig}`.
   Challenges are single-use and socket-specific. Sockets without hello close after 10 seconds.
@@ -970,8 +1003,23 @@ The transport bootstrap API supplies the CLI's room and invite operations:
 - The owner's `approve` and `remove` payloads are signed, including their grants and next
   directory version. Removal increments the epoch and wraps a new key to remaining members
   and agents. Receivers quarantine messages from removed senders and earlier epochs once
-  they verify the rotation.
-- Clients send `{t:"since",seq:lastStoredSequence}` before live delivery. Signed messages that
+  they verify the rotation. The relay sends the signed directory before refusing a removed
+  peer, including on reconnect. A communicator stops a room iff some owner-verified directory
+  stored on disk listed its member id in `activeMemberIds` and the newest stored directory omits
+  it. It checks this history at startup and whenever it accepts a directory, so removal survives
+  restart. Without that evidence, `refused: removed` is temporary and triggers normal reconnect
+  backoff, including for first connections and pending members receiving pre-approval directories.
+- Posts include a message `id`; refusals echo it so an unrelated refusal cannot reject the
+  pending send or alter room status. While a post is pending, an id-less `invalid-message`
+  refusal from an older relay also fails that post. The client checks the complete sealed frame against `FRAME_MAX` (256000 bytes)
+  before sending; a body within 32000 bytes can still exceed the frame limit after JSON escaping,
+  metadata and encryption. The relay also checks the outgoing `msg` frame using the largest
+  safe sequence number and refuses oversized posts with `too-large` and the post id. Daemon
+  receive limits reserve an extra 1024 bytes of headroom.
+- Clients send `{t:"since",seq:lastStoredSequence}` before live delivery. Each request returns
+  at most 100 messages. If history remains, `{t:"more",seq:lastPageSequence}` follows the page;
+  clients store the page and send another `since` with their last stored sequence until no
+  `more` remains. Live delivery starts only after the replay cursor catches up. Signed messages that
   cannot be delivered become quarantined rows with a reason and advance the cursor. Inbox
   uniqueness is `(room, msg_id)`; replaying a message at another sequence cannot run the hook
   twice. A quarantined row has `msg: null` and must never be treated as an agent instruction.
@@ -1043,6 +1091,8 @@ pending. Confirm that id with the work operator and approve it from the home ter
 agentcomms approve home-work WORK_MEMBER_ID
 ```
 
+Approval does not rotate the room key: a newly approved member can read retained history from
+the current epoch, including messages sent before approval. It does not receive earlier epochs.
 Approval wraps the room key to the work member's X25519 key **and each approved agent's**
 X25519 key. Each daemon authenticates as its own agent, gets the public directory, unwraps its
 own grants and follows key rotations without loading a member key. Only the human-run setup
@@ -1060,9 +1110,20 @@ one daemon per home:
 | `member-<member-id>.json` | Owner’s locally pinned self-signed approval record, mode `0600`. |
 | `keys/<identity-id>.json` | Private signing and box keys for a member or agent, mode `0600`. |
 | `keys/room-<sha256-of-room-name>-<epoch>.json` | Immutable cached room keys by epoch, mode `0600`. |
-| `inbox.sqlite` (and SQLite sidecars) | Local decrypted messages, quarantined ciphertext/reasons, thread state and resume cursors. |
+| `inbox.sqlite` (and SQLite sidecars) | Local decrypted messages, quarantined ciphertext/reasons, thread state, resume cursors and persistent relay-reset pauses. |
 | `api-url`, `api-token` | Daemon's loopback URL and bearer token, mode `0600`; rewritten when it starts. |
 | `relay/` | Default Node relay data directory; `relay --data <dir>` overrides it. |
+
+The member private key is a **plaintext `0600` file**, readable by the user's own processes,
+including agent shells running as that user. It is not passphrase-wrapped or stored in the OS
+keychain. The operator accepted this risk for MVP; separate CLI and daemon signing paths do not
+prevent same-user shell access to the key.
+
+On Windows, POSIX mode `0600` does not enforce a private ACL. Restrict the entire
+`AGENTCOMMS_HOME` directory and its inherited child ACLs to the setup/service account (plus
+SYSTEM and administrators as required by local policy), remove broad Users/Everyone access,
+and verify the effective permissions with `icacls`. Do this before creating keys. The scheduled
+daemon must run as that same account; other processes under it can still read the plaintext key.
 
 Private keys stay in `keys/`, outside the repo and config. The API listens on `127.0.0.1` at a
 random port; there is no daemon `--port` setting. MCP reads `api-url` and `api-token`, so do not
@@ -1191,7 +1252,8 @@ From the work Claude session, make this first exchange:
    show both agent ids online.
 2. Call `comms_send {"room":"home-work","kind":"request","body":"FLIGHT-comms, take #506"}`.
    It must return the tool error `a request needs a reason`, with no message sent. Requests
-   need a non-blank `reason`; `requestedBy` can identify the human or agent asking.
+   need a non-blank `reason`; `requestedBy` is attribution claimed by the sender, not verified
+   identity or human approval.
 3. Call `comms_send {"room":"home-work","kind":"question","body":"FLIGHT-comms, is #506 yours?","thread":"first-test"}`.
 4. Call `comms_read {"room":"home-work","since":0}` until the question and one answer appear.
    Check the answer body, `knowledge.kind: "cannot-confirm"`, `auto: true`, matching thread
@@ -1207,6 +1269,11 @@ reads, pass the last seen sequence as `since`. The daemon resumes from its persi
 reconnect. To remove work access, the home owner runs `agentcomms remove home-work WORK_MEMBER_ID`;
 this rotates the key and distributes grants to all remaining members and agents, including
 those that reconnect later. Removed members retain earlier history but cannot read new messages.
+A removed member's communicator stops sending, answering and reconnecting for that room;
+`comms_rooms` reports `removed` with an explanation. Other configured rooms keep running.
+If the owner later approves the same member again, the removed daemon stays halted (it never
+connects, so it never sees the newer directory): re-run `agentcomms join <code>` with a fresh invite
+on that machine, then restart the daemon.
 
 Run the automated local equivalent from the repo root on a machine that permits sockets:
 
