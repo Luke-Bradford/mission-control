@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseArgs } from "node:util";
+import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
 import { z } from "zod";
 import { startApi } from "./api.ts";
 import { controlPayload, sign, signDirectory, signGrant, signMember, verifyGrant } from "./auth.ts";
@@ -53,25 +53,46 @@ async function waitForSignal(stop: () => Promise<void>): Promise<void> {
   await stop();
 }
 
+// Every option is long (`--name`), so an argument with one leading dash is never an option. Member and agent
+// ids are 43-character base64url keys and can start with "-" (about one in 64) or "--" (one in 4096);
+// parseArgs would refuse them, so both shapes are masked as positionals before parsing.
+const SINGLE_DASH = /^-[^-]/;
+const KEY_ID = /^[A-Za-z0-9_-]{43}$/;
+
+/** parseArgs over long options only; does not support `multiple` options. */
+export function parseCliArgs<const O extends ParseArgsOptionsConfig>(args: string[], options: O) {
+  const masks = new Map<string, string>();
+  const masked = args.map((arg, i) => {
+    if (!SINGLE_DASH.test(arg) && !(arg.startsWith("--") && KEY_ID.test(arg))) return arg;
+    const token = `\u0000${i}`;
+    masks.set(token, arg);
+    return token;
+  });
+  const restore = (arg: string): string => masks.get(arg) ?? arg;
+  const { values, positionals } = parseArgs({ args: masked, allowPositionals: true, options });
+  return {
+    values: Object.fromEntries(
+      Object.entries(values).map(([k, v]) => [k, typeof v === "string" ? restore(v) : v]),
+    ) as typeof values,
+    positionals: positionals.map(restore),
+  };
+}
+
 export async function runCli(
   args: string[],
   home = defaultHome(),
   print: (text: string) => void = console.log,
 ): Promise<void> {
-  const { values, positionals } = parseArgs({
-    args,
-    allowPositionals: true,
-    options: {
-      member: { type: "string" },
-      github: { type: "string" },
-      subscription: { type: "string" },
-      answer: { type: "string" },
-      agent: { type: "string" },
-      port: { type: "string" },
-      data: { type: "string" },
-      help: { type: "boolean" },
-      "create-secret": { type: "string" },
-    },
+  const { values, positionals } = parseCliArgs(args, {
+    member: { type: "string" },
+    github: { type: "string" },
+    subscription: { type: "string" },
+    answer: { type: "string" },
+    agent: { type: "string" },
+    port: { type: "string" },
+    data: { type: "string" },
+    help: { type: "boolean" },
+    "create-secret": { type: "string" },
   });
   const [command, ...rest] = positionals;
   const required = (value: string | undefined, name: string): string => {
