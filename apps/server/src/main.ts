@@ -265,6 +265,7 @@ async function main(): Promise<void> {
     hubStartedAt,
     log: (line) => log(`engine: ${line}`),
   });
+  mcDeps.syncMain = (runId) => engine.writerSyncMain(runId);
   scheduler.setEngine(engine);
 
   // FLIGHT's mc tools: after the engine, which later tools wake.

@@ -57,8 +57,10 @@ import {
 } from "../src/flight/state.ts";
 import { createFlightWatch, type FlightWatch } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
+import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
+import { foldTranscript } from "../src/streamjson.ts";
 
 const T0 = Date.parse("2026-10-22T12:00:00Z");
 const MIN = 60_000;
@@ -2541,6 +2543,61 @@ describe("ops review regressions", () => {
         .sort(),
     ).toEqual(["report:engine-ended", "report:silent"]);
   });
+
+  it.each(["failed", "superseded"] as const)(
+    "uses only structured diagnostics for a %s review",
+    (state) => {
+      const reviewId = store.requestReview({
+        authorRunId: "author",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: "head",
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: T0,
+      }) as number;
+      store.setReviewState(reviewId, ["queued"], state, { at: T0 });
+      const r = run("failed-review", "retro-1", { reviewId, endedAt: T0, status: "failed" });
+      store.upsertRun(r);
+      recordNoReport(
+        store,
+        r,
+        "review",
+        { code: 1, signal: null, lastStderr: "private stderr" },
+        foldTranscript(
+          null,
+          [
+            JSON.stringify({
+              type: "result",
+              subtype: "error_during_execution",
+              is_error: true,
+              stop_reason: "model_context_window_exceeded",
+              terminal_reason: "aborted_streaming",
+              errors: ["private error text"],
+            }),
+          ],
+          T0,
+        ),
+        T0,
+      );
+      const signals = signalState().signals;
+      if (state === "superseded") {
+        expect(signals).toEqual([]);
+        return;
+      }
+      expect(JSON.stringify(signals)).not.toContain("private");
+      expect(JSON.stringify(signals)).toContain("aborted_streaming");
+      expect(signals).toContainEqual(
+        expect.objectContaining({
+          key: `report:${r.id}`,
+          kind: "hub_error",
+          evidence: expect.stringContaining("stop reason model_context_window_exceeded"),
+        }),
+      );
+    },
+  );
 
   it.each(["queued", "starting", "running", "reported", "superseded", "failed"] as const)(
     "only treats pending reviews as missing reports: %s",

@@ -187,7 +187,12 @@ describe("the allowlist in phase 2b", () => {
   it("a writer commits and reports through the mc tools, never git, and has no push or draft PR tool", () => {
     expect(WRITER_TOOLS).not.toContain("Bash(git add:*)");
     expect(WRITER_TOOLS).not.toContain("Bash(git commit:*)");
-    for (const t of [MC_TOOLS.commit, MC_TOOLS.askOperator, MC_TOOLS.reportEvidence]) {
+    for (const t of [
+      MC_TOOLS.commit,
+      MC_TOOLS.syncMain,
+      MC_TOOLS.askOperator,
+      MC_TOOLS.reportEvidence,
+    ]) {
       expect(WRITER_TOOLS).toContain(t);
     }
     // Mission Control pushes and opens the PR (the engine); a seat has neither tool
@@ -263,7 +268,7 @@ describe("the allowlist in phase 2b", () => {
       listTickets: "mcp__mc__list_tickets",
       updateBrief: "mcp__mc__update_brief",
     });
-    expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit]);
+    expect(MC_WRITER_TOOLS).toEqual([MC_TOOLS.commit, MC_TOOLS.syncMain]);
   });
 
   it("protects .gitattributes, at the top and below it", () => {

@@ -8,6 +8,7 @@ export const TOOL_USE_ID_META = "claudecode/toolUseId";
 /** The mc tools as the hub's `/mcp` endpoint serves them; the CLI prefixes each (`MC_TOOLS`). */
 export const MC_TOOL_NAMES = {
   commit: "commit",
+  syncMain: "sync_main",
   push: "push",
   draftPr: "draft_pr",
   askOperator: "ask_operator",
@@ -29,7 +30,6 @@ export const MC_TOOL_NAMES = {
   editCard: "edit_card",
   dismissItem: "dismiss_item",
 
-  syncMain: "sync_main",
   createTicket: "create_ticket",
   commentTicket: "comment_ticket",
   briefItem: "brief_item",
@@ -55,6 +55,7 @@ export const mcTool = <T extends McToolName>(name: T) => `mcp__${MC_MCP_SERVER}_
 /** The mc tools as the model, the allowlist and the guard name them: `mcp__mc__<tool>`. */
 export const MC_TOOLS = {
   commit: mcTool(MC_TOOL_NAMES.commit),
+  syncMain: mcTool(MC_TOOL_NAMES.syncMain),
   push: mcTool(MC_TOOL_NAMES.push),
   draftPr: mcTool(MC_TOOL_NAMES.draftPr),
   askOperator: mcTool(MC_TOOL_NAMES.askOperator),
@@ -76,7 +77,6 @@ export const MC_TOOLS = {
   editCard: mcTool(MC_TOOL_NAMES.editCard),
   dismissItem: mcTool(MC_TOOL_NAMES.dismissItem),
 
-  syncMain: mcTool(MC_TOOL_NAMES.syncMain),
   createTicket: mcTool(MC_TOOL_NAMES.createTicket),
   commentTicket: mcTool(MC_TOOL_NAMES.commentTicket),
   briefItem: mcTool(MC_TOOL_NAMES.briefItem),
@@ -102,6 +102,24 @@ export const MC_EVIDENCE_MAX = 4000;
 export const MC_BAD_ARGS = "Invalid arguments: ";
 /** A call from a run that is no longer the seat's live one (it ended, or the seat moved on). */
 export const MC_RUN_ENDED = "This run has ended.";
+
+export const SYNC_MAIN_GAP_MIN = 10;
+export const SYNC_MAIN_GAP_MS = SYNC_MAIN_GAP_MIN * 60_000;
+export const MC_SYNC_UP_TO_DATE = "Already up to date: your branch contains main.";
+export const syncMergedText = (mainSha: string, sha: string): string =>
+  `Merged main ${mainSha.slice(0, 7)} into your branch as ${sha.slice(0, 7)}.`;
+export const writerSyncConflictText = (files: readonly string[]): string =>
+  `Conflicts in: ${files.join(", ")}. Resolve the conflict markers in those files, keeping what both sides meant, then call mc commit.`;
+export const MC_SYNC_DIRTY =
+  "Not merged: your worktree has uncommitted changes. Commit them with mc commit, then call mc sync_main again.";
+export const MC_SYNC_NOT_WORKING =
+  "Not merged: your run is waiting for CI or review, and Mission Control brings main into the branch itself then.";
+export const MC_SYNC_OFF =
+  "Not merged: Mission Control's engine is off, so main cannot be brought into your branch now. Ask the operator.";
+export const syncTooSoonText = (minutes: number): string =>
+  `Not merged: main was brought into your branch less than ${SYNC_MAIN_GAP_MIN} minutes ago. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+export const syncFailedText = (why: string): string =>
+  `Not merged: ${why}. Ask the operator if it keeps happening.`;
 
 export const NOTHING_TO_COMMIT = "Nothing to commit.";
 /** The last line of every refused commit that names paths. */

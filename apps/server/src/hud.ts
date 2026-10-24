@@ -34,6 +34,7 @@ import {
   isCleanupNoteKey,
   isFlakeNoteKey,
   isHardRulesFlagKey,
+  isNoReportNoteKey,
   LOCK_WAITING_TEXT,
   type LoopWait,
   laneOwner,
@@ -74,7 +75,14 @@ import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from 
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
+import {
+  type PrCache,
+  parseTicket,
+  runPrs,
+  runSummary,
+  runTicket,
+  runTicketTitle,
+} from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
@@ -177,7 +185,7 @@ function loopViews(
                 ? "waiting-agent"
                 : "idle",
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
-        currentRun: latest ?? null,
+        currentRun: latest ? runSummary(latest) : null,
         paused: false,
         sourceError: hud === "error" ? (reason ?? "seat error") : null,
         // The seat's reason is its doing line, unless it is already the error text.
@@ -207,7 +215,7 @@ function loopViews(
       accountId: loop.accountId,
       state,
       stateSince: since,
-      currentRun: latest ?? null,
+      currentRun: latest ? runSummary(latest) : null,
       paused,
       sourceError,
       note,
@@ -840,7 +848,8 @@ function noteOwner(
     const loop = n.runId === null ? null : store.run(n.runId)?.loop;
     return loop && !flightFloorBlocked(loop) ? OWNER_FLIGHT : OWNER_OPERATOR;
   }
-  if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key)) return OWNER_CONTROLLER;
+  if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key) || isNoReportNoteKey(n.key))
+    return OWNER_CONTROLLER;
   if (
     isHardRulesFlagKey(n.key) &&
     n.repoId !== null &&

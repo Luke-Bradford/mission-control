@@ -5,8 +5,11 @@ import {
   type LiveTask,
   leadSentence,
   MC_MCP_SERVER,
+  NO_REPORT_REASON_MAX,
+  NO_REPORT_TEXT_MAX,
   type Run,
   type RunDigest,
+  STDERR_TEXT_MAX,
   type SubagentInfo,
   type TokenUsage,
   workSummary,
@@ -23,6 +26,15 @@ export interface TranscriptFacts {
   tokens: TokenUsage;
   resultCount: number;
   isError: boolean;
+  stopReason: string | null;
+  resultSubtype: string | null;
+  terminalReason: string | null;
+  apiErrorStatus: number | null;
+  numTurns: number | null;
+  /** Whether the current turn has a result frame. */
+  hasResult: boolean;
+  error: string | null;
+  lastAssistantText: string | null;
   rateLimits: { window: "5h" | "7d"; utilization: number; resetsAt: number; at: number }[];
   digest: RunDigest;
   /** GitHub PRs from `code_change_published`, each once, in first-seen order. */
@@ -173,6 +185,10 @@ const numOrNull = (v: unknown): number | null =>
 const cleanStr = (v: unknown): string | null => {
   const s = str(v);
   return s === null ? null : str(cleanText(s));
+};
+const reasonStr = (v: unknown): string | null => {
+  const s = str(v);
+  return s === null ? null : str(cleanText(s, NO_REPORT_REASON_MAX));
 };
 /** A positive integer, from a number or a string of digits (`identifier` is a string). */
 const prNumber = (v: unknown): number | null => {
@@ -573,6 +589,14 @@ export function foldTranscript(
         tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 },
         resultCount: 0,
         isError: false,
+        stopReason: null,
+        resultSubtype: null,
+        terminalReason: null,
+        apiErrorStatus: null,
+        numTurns: null,
+        hasResult: false,
+        error: null,
+        lastAssistantText: null,
         rateLimits: [],
         digest: buildDigest(emptyDigestState(), null),
         prs: [],
@@ -595,6 +619,19 @@ export function foldTranscript(
       continue;
     }
     if (!isObj(ev)) continue;
+
+    if (isTopLevel(ev) && (ev.type === "assistant" || ev.type === "user")) {
+      if (facts.hasResult) {
+        facts.stopReason = null;
+        facts.resultSubtype = null;
+        facts.apiErrorStatus = null;
+        facts.numTurns = null;
+        facts.error = null;
+        facts.isError = false;
+      }
+      facts.hasResult = false;
+      facts.terminalReason = "mid-turn (no result)";
+    }
 
     if (ev.type === "system") {
       if (ev.subtype === "init") {
@@ -640,6 +677,20 @@ export function foldTranscript(
     } else if (ev.type === "assistant") {
       digestFrame(d, ev);
       const msg = ev.message;
+      if (isTopLevel(ev) && isObj(msg)) {
+        facts.stopReason = reasonStr(msg.stop_reason) ?? facts.stopReason;
+        if (Array.isArray(msg.content)) {
+          const text = msg.content
+            .filter((b) => isObj(b) && b.type === "text" && typeof b.text === "string")
+            .map((b) => b.text)
+            .join("\n");
+          if (text.trim() !== "") facts.lastAssistantText = cleanText(text, NO_REPORT_TEXT_MAX);
+        }
+        if (typeof ev.error === "string") {
+          facts.isError = true;
+          facts.error = facts.error ?? cleanText(ev.error, STDERR_TEXT_MAX);
+        }
+      }
       if (!isObj(msg) || !isObj(msg.usage)) continue;
       const u = msg.usage;
       const id = str(msg.id) ?? `anon-${anon++}`;
@@ -657,7 +708,22 @@ export function foldTranscript(
         d.costTokens = t.input + t.output + t.cacheRead + t.cacheCreate;
       }
       d.asked = null;
-      facts.isError = ev.is_error === true;
+      facts.hasResult = true;
+      facts.isError = ev.is_error === true || facts.isError;
+      facts.terminalReason = reasonStr(ev.terminal_reason);
+      facts.apiErrorStatus = numOrNull(ev.api_error_status);
+      facts.numTurns = numOrNull(ev.num_turns);
+      facts.stopReason = reasonStr(ev.stop_reason) ?? facts.stopReason;
+      facts.resultSubtype = reasonStr(ev.subtype);
+      const errors = Array.isArray(ev.errors)
+        ? cleanText(
+            ev.errors
+              .filter((e) => typeof e === "string" && !e.startsWith("[ede_diagnostic]"))
+              .join("; "),
+            STDERR_TEXT_MAX,
+          ) || null
+        : null;
+      facts.error = errors ?? facts.error;
       if (typeof ev.result === "string") facts.summary = workSummary(cleanText(ev.result));
       // The turn is over: a call still without a result is not live any more. It stays pending,
       // so a late result still records its duration.
