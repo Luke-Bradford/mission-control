@@ -84,6 +84,7 @@ export function awayDigest(
     .sort((a, b) => a.createdAt - b.createdAt || a.number - b.number);
   return {
     active,
+    ...(Number.isFinite(started) && started > 0 ? { startedAt: started } : {}),
     groups: [
       {
         kind: "needYouNow",
