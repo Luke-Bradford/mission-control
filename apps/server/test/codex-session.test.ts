@@ -1,11 +1,24 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CANNOT_START, codexCommand, type SessionEvent } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type CodexSessionInput, startCodexSession } from "../src/runtime/codex-session.ts";
-import type { CrewSession } from "../src/runtime/session.ts";
+import {
+  attachCodexSession,
+  CODEX_OUTBOX_FILE,
+  type CodexAttachInput,
+  type CodexSessionInput,
+  startCodexSession,
+} from "../src/runtime/codex-session.ts";
+import { attachSession, type CrewSession } from "../src/runtime/session.ts";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
 const KEEPER = fileURLToPath(new URL("../src/runtime/keeper-cli.ts", import.meta.url));
@@ -44,6 +57,7 @@ function start(scenario: Record<string, unknown> = {}, over: Partial<CodexSessio
     effort: "high",
     developerInstructions: "Hub instructions",
     resumeThreadId: null,
+    outboxPath: join(dir, CODEX_OUTBOX_FILE),
     approve,
     stopGraceMs: 100,
     controlTimeoutMs: 1000,
@@ -52,6 +66,36 @@ function start(scenario: Record<string, unknown> = {}, over: Partial<CodexSessio
   sessions.push(session);
   session.on((e) => events.push(e));
   return { session, events, approve };
+}
+
+async function reattach(over: Partial<CodexAttachInput> = {}) {
+  const found = await attachSession({
+    dir: join(dir, "k"),
+    from: () => 0,
+    raw: true,
+    stopGraceMs: 100,
+  });
+  if (found.kind !== "attached") throw new Error("keeper did not survive detach");
+  const session = attachCodexSession(
+    {
+      from: 0,
+      threadId: "codex-thread-1",
+      cwd: dir,
+      developerInstructions: "Hub instructions",
+      model: "gpt-5.4",
+      effort: "high",
+      approve: async () => "decline",
+      outboxPath: join(dir, CODEX_OUTBOX_FILE),
+      controlTimeoutMs: 1000,
+      ...over,
+    },
+    found.session,
+  );
+  const events: SessionEvent[] = [];
+  session.on((e) => events.push(e));
+  sessions.push(session);
+  await session.ready;
+  return { session, events };
 }
 
 describe("Codex session", () => {
@@ -85,6 +129,12 @@ describe("Codex session", () => {
       config: { project_doc_max_bytes: 0 },
       ephemeral: false,
     });
+    const usage = readFileSync(join(dir, "transcript"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .find((m) => m.method === "thread/tokenUsage/updated");
+    expect(Number.isFinite(Date.parse(usage.timestamp))).toBe(true);
     expect(messages[3].params).toMatchObject({ threadId: "codex-thread-1", effort: "high" });
     expect(events.filter((e) => ["init", "turn-start", "result"].includes(e.kind))).toEqual([
       { kind: "init", sessionId: "codex-thread-1", model: "gpt-5.4" },
@@ -175,25 +225,24 @@ describe("Codex session", () => {
   });
 
   it("remembers every file and rename target, failing closed on unknown paths", async () => {
-    const { session, approve } = start();
+    const { session, events, approve } = start();
     session.send(
       JSON.stringify({
         changes: [{ path: "apps/a.ts", kind: { type: "update", move_path: "outside.ts" } }],
-        holdItem: true,
       }),
     );
     await until(() => expect(approve).toHaveBeenCalledTimes(1));
     expect(approve.mock.calls[0]?.[1]).toEqual(["apps/a.ts", "outside.ts"]);
-    session.send(
-      JSON.stringify({ changes: [{ path: "apps/b.ts" }], missingPaths: true, holdItem: true }),
-    );
+    // A send during the current turn steers it; each path case needs a fresh turn.
+    await until(() => expect(events.filter((e) => e.kind === "result")).toHaveLength(1));
+    session.send(JSON.stringify({ changes: [{ path: "apps/b.ts" }], missingPaths: true }));
     await until(() => expect(approve).toHaveBeenCalledTimes(2));
     expect(approve.mock.calls[1]?.[1]).toBeUndefined();
-    session.send(
-      JSON.stringify({ changes: [{ path: "apps/a.ts" }, { kind: "add" }], holdItem: true }),
-    );
+    await until(() => expect(events.filter((e) => e.kind === "result")).toHaveLength(2));
+    session.send(JSON.stringify({ changes: [{ path: "apps/a.ts" }, { kind: "add" }] }));
     await until(() => expect(approve).toHaveBeenCalledTimes(3));
     expect(approve.mock.calls[2]?.[1]).toBeUndefined();
+    await until(() => expect(events.filter((e) => e.kind === "result")).toHaveLength(3));
   });
 
   it("reports command completion for both the item and its approval key", async () => {
@@ -330,6 +379,7 @@ describe("Codex session", () => {
               resumeThreadId,
               dir: join(dir, `k${n}`),
               transcriptPath: join(dir, `transcript${n}`),
+              outboxPath: join(dir, `${n}-${CODEX_OUTBOX_FILE}`),
               env: {
                 FAKE_CODEX_RECORD: join(dir, `record${n}`),
                 FAKE_CODEX_SCENARIO: JSON.stringify({ badField, badShape }),
@@ -468,4 +518,182 @@ describe("Codex session", () => {
       expect(codexCommand(params.command, params.proposedExecpolicyAmendment)).toBe(command);
     },
   );
+});
+
+it("reattaches to the running Codex turn and steers without a second handshake", async () => {
+  const { session, events } = start({ holdTurn: true });
+  session.send("hello");
+  await until(() => expect(events.some((e) => e.kind === "turn-start")).toBe(true));
+  session.detach();
+  const found = await attachSession({
+    dir: join(dir, "k"),
+    from: () => 0,
+    raw: true,
+    stopGraceMs: 100,
+  });
+  if (found.kind !== "attached") throw new Error("keeper did not survive detach");
+  const attached = attachCodexSession(
+    {
+      from: 0,
+      threadId: "codex-thread-1",
+      outboxPath: join(dir, CODEX_OUTBOX_FILE),
+      cwd: dir,
+      developerInstructions: "Hub instructions",
+      model: "gpt-5.4",
+      effort: "high",
+      approve: async () => "decline",
+    },
+    found.session,
+  );
+  sessions.push(attached);
+  await attached.ready;
+  attached.send("steer");
+  await until(() => expect(recorded().some((m) => m.method === "turn/steer")).toBe(true));
+  expect(recorded().filter((m) => m.method === "initialize")).toHaveLength(1);
+  await attached.close();
+});
+
+it.each([
+  { badReattach: "approvalPolicy" },
+  { badReattach: "approvalsReviewer" },
+  { badReattach: "activePermissionProfile" },
+  { badReattach: "networkAccess" },
+  { badReattach: "instructionSources" },
+  { badReattachField: "activePermissionProfile", badReattachShape: "absent" },
+  { badReattachField: "instructionSources", badReattachShape: "null" },
+])("refuses reattachment when the live floor is invalid: %j", async (scenario) => {
+  const { session, events } = start({ ...scenario, holdTurn: true });
+  session.send("first turn");
+  await until(() => expect(events).toContainEqual({ kind: "turn-start" }));
+  session.detach();
+  const found = await attachSession({
+    dir: join(dir, "k"),
+    from: () => 0,
+    raw: true,
+    stopGraceMs: 100,
+  });
+  if (found.kind !== "attached") throw new Error("keeper did not survive detach");
+  const attached = attachCodexSession(
+    {
+      from: 0,
+      threadId: "codex-thread-1",
+      outboxPath: join(dir, CODEX_OUTBOX_FILE),
+      cwd: dir,
+      developerInstructions: "Hub instructions",
+      model: "gpt-5.4",
+      effort: "high",
+      approve: async () => "decline",
+      controlTimeoutMs: 1000,
+    },
+    found.session,
+  );
+  sessions.push(attached);
+  const attachedEvents: SessionEvent[] = [];
+  attached.on((e) => attachedEvents.push(e));
+  attached.send("must not run");
+  await attached.ready;
+  await until(() =>
+    expect(attachedEvents).toContainEqual(
+      expect.objectContaining({ kind: "exit", reason: CANNOT_START }),
+    ),
+  );
+  expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+  expect(recorded().some((m) => m.method === "turn/steer")).toBe(false);
+  expect(attachedEvents.some((e) => e.kind === "attached")).toBe(false);
+});
+
+it("queues rapid sends until a delayed start notification establishes the turn", async () => {
+  const { session } = start({ holdTurn: true, startDelayMs: 150 });
+  session.send("first");
+  session.send("second");
+  await until(() => expect(recorded().some((m) => m.method === "turn/steer")).toBe(true));
+  expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+  expect(recorded().find((m) => m.method === "turn/steer")?.params).toMatchObject({
+    expectedTurnId: "turn-1",
+    input: [{ type: "text", text: "second" }],
+  });
+});
+
+it("does not start a replacement when interruption is acknowledged but not completed", async () => {
+  const signal = join(dir, "complete-interrupt");
+  const { session, events } = start({ holdTurn: true, interruptCompleteSignal: signal });
+  session.send("first");
+  await until(() => expect(events).toContainEqual({ kind: "turn-start" }));
+  const acknowledged = vi.fn();
+  const replacement = session
+    .control("interrupt", { onSuccess: acknowledged })
+    .then(() => session.send("replacement"));
+  await until(() => expect(acknowledged).toHaveBeenCalledTimes(1));
+  expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+  expect(events.some((e) => e.kind === "result")).toBe(false);
+  writeFileSync(signal, "complete");
+  await replacement;
+  await until(() => expect(events.filter((e) => e.kind === "turn-start")).toHaveLength(2));
+  expect(
+    recorded()
+      .filter((m) => m.method?.startsWith("turn/"))
+      .map((m) => m.method),
+  ).toEqual(["turn/start", "turn/interrupt", "turn/start"]);
+  expect(events.filter((e) => e.kind === "result")).toHaveLength(1);
+});
+
+it("recovers a rapid send detached before the first turn's start notification", async () => {
+  const signal = join(dir, "start-turn");
+  const first = start({ holdTurn: true, startSignal: signal });
+  first.session.send("first");
+  first.session.send("second");
+  await until(() => expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1));
+  first.session.detach();
+  const next = await reattach();
+  expect(next.events).toContainEqual({ kind: "attached", awaiting: true });
+  expect(next.events).not.toContainEqual({ kind: "turn-start" });
+  next.session.send("third");
+  writeFileSync(signal, "go");
+  await until(() => expect(recorded().filter((m) => m.method === "turn/steer")).toHaveLength(2));
+  expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+  expect(
+    recorded()
+      .filter((m) => m.method === "turn/steer")
+      .map((m) => m.params),
+  ).toEqual([
+    {
+      threadId: "codex-thread-1",
+      expectedTurnId: "turn-1",
+      input: [{ type: "text", text: "second" }],
+    },
+    {
+      threadId: "codex-thread-1",
+      expectedTurnId: "turn-1",
+      input: [{ type: "text", text: "third" }],
+    },
+  ]);
+  next.session.detach();
+  const again = await reattach();
+  expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+  expect(recorded().filter((m) => m.method === "turn/steer")).toHaveLength(2);
+  await again.session.close();
+});
+
+it("waits for the pending turn's identity on reattach before interrupting and replacing it", async () => {
+  const signal = join(dir, "start-turn");
+  const first = start({ holdTurn: true, startSignal: signal });
+  first.session.send("first");
+  await until(() => expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1));
+  first.session.detach();
+  const next = await reattach();
+  const acknowledged = vi.fn();
+  const replacement = next.session.control("interrupt", { onSuccess: acknowledged }).then(() => {
+    next.session.send("replacement");
+  });
+  expect(acknowledged).not.toHaveBeenCalled();
+  writeFileSync(signal, "go");
+  await replacement;
+  await until(() => expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(2));
+  expect(
+    recorded()
+      .filter((m) => m.method?.startsWith("turn/"))
+      .map((m) => m.method),
+  ).toEqual(["turn/start", "turn/interrupt", "turn/start"]);
+  expect(recorded().find((m) => m.method === "turn/interrupt")?.params.turnId).toBe("turn-1");
+  expect(acknowledged).toHaveBeenCalledOnce();
 });

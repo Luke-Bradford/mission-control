@@ -2303,3 +2303,78 @@ it.each([
     db.close();
   }
 });
+
+describe("Codex lifecycle storage", () => {
+  it("defaults old callers to Claude and persists Codex vendor, thread and latest plan", () => {
+    store.upsertRun(run());
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    expect(db.prepare("SELECT vendor FROM runs WHERE id = 'r1'").get()?.vendor).toBe("claude");
+    store.upsertRun(
+      run({
+        id: "codex",
+        vendor: "codex",
+        sessionId: "thread",
+        latestPlan: "first",
+        plan: { skipped: "Size S" },
+      }),
+    );
+    store.upsertRun(
+      run({ id: "codex", vendor: "codex", sessionId: "thread", latestPlan: "second" }),
+    );
+    expect(store.run("codex")).toMatchObject({
+      vendor: "codex",
+      sessionId: "thread",
+      latestPlan: "second",
+      plan: { skipped: "Size S" },
+    });
+    store.setSeatSession({
+      seatId: "a1",
+      runId: "codex",
+      vendor: "codex",
+      cliSessionId: "thread",
+      state: "idle",
+      reason: null,
+      worktree: "/work",
+      updatedAt: 1000,
+    });
+    expect(store.seatSession("a1")).toMatchObject({ vendor: "codex", cliSessionId: "thread" });
+    store.setSeatSession({
+      seatId: "legacy",
+      runId: null,
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: 1000,
+    });
+    expect(
+      db.prepare("SELECT vendor FROM seat_sessions WHERE seat_id = 'legacy'").get()?.vendor,
+    ).toBe("claude");
+    db.close();
+  });
+});
+
+it("migrates existing run and seat rows to the Claude vendor", () => {
+  store.upsertRun(run());
+  store.setSeatSession({
+    seatId: "a1",
+    runId: "r1",
+    cliSessionId: "claude-id",
+    state: "idle",
+    reason: null,
+    worktree: "/work",
+    updatedAt: 1000,
+  });
+  store.close();
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  db.exec(
+    "ALTER TABLE runs DROP COLUMN vendor; ALTER TABLE runs DROP COLUMN latest_plan; ALTER TABLE seat_sessions DROP COLUMN vendor",
+  );
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(db.prepare("SELECT vendor FROM runs WHERE id = 'r1'").get()?.vendor).toBe("claude");
+  expect(db.prepare("SELECT vendor FROM seat_sessions WHERE seat_id = 'a1'").get()?.vendor).toBe(
+    "claude",
+  );
+  expect(store.seatSession("a1")?.cliSessionId).toBe("claude-id");
+  db.close();
+});

@@ -18,7 +18,8 @@
  * it), `{t:"out",n,line}`, `{t:"err",text}`, `{t:"exit",code,signal}`. Hub to keeper:
  * `{t:"hello",version,from,secret}` (the first line wanted, and the secret from `spec.json`; a
  * connection whose first line is anything else is closed, and so is one silent for 5 s),
- * `{t:"in",line,user}` (a line for the CLI's stdin; `user`: it starts a turn) and
+ * `{t:"in",line,user,deliveryId?}` (a line for the CLI's stdin; `user`: it starts a turn;
+ * Codex's optional delivery id is deduplicated and receipted in the transcript) and
  * `{t:"close",graceMs}` (end stdin). One hub at a time: the newest to authenticate replaces the old.
  * A hub that was away gets every line from the one it asks for, replayed 500 at a time, then the
  * live ones, in order, with `exit` after the last. The CLI runs in its own process group, which the
@@ -56,6 +57,8 @@ export const CLI_PID_FILE = "cli.pid";
 export const KEEPER_EXIT_FILE = "exit.json";
 export const KEEPER_LOG_FILE = "keeper.log";
 export const KEEPER_SPEC_FILE = "spec.json";
+/** A replayable receipt for a hub message handed to the Codex process. */
+export const CODEX_DELIVERY = "mc_codex_delivery";
 
 /** Lines replayed to a client per turn of the event loop. */
 const REPLAY_BATCH = 500;
@@ -469,6 +472,7 @@ export function runKeeper(
   let transcriptFailed = false;
   let awaiting = false;
   let awaitingId: number | string | null = null;
+  const deliveries = new Set<string>();
 
   const send = (c: Client, obj: Json) => {
     if (!c.sock.destroyed) c.sock.write(`${JSON.stringify(obj)}\n`);
@@ -554,6 +558,17 @@ export function runKeeper(
     step();
   };
   const addLine = (line: string) => {
+    if (spec.turnEnd === "codex") {
+      try {
+        const m = JSON.parse(line) as Json | null;
+        // Codex usage has no timestamp. Persist arrival time so replay keeps its minute bucket.
+        if (m?.method === "thread/tokenUsage/updated") {
+          line = JSON.stringify({ ...m, timestamp: new Date().toISOString() });
+        }
+      } catch {
+        // Preserve non-JSON output too.
+      }
+    }
     const n = lineCount;
     const ok = record(line);
     if (ok) {
@@ -686,6 +701,9 @@ export function runKeeper(
       return; // a line before the hello does not count
     } else if (msg.t === "in" && typeof msg.line === "string") {
       if (stdinEnded || !alive) return;
+      const deliveryId =
+        spec.turnEnd === "codex" && typeof msg.deliveryId === "string" ? msg.deliveryId : null;
+      if (deliveryId !== null && deliveries.has(deliveryId)) return;
       if (msg.user === true) {
         if (spec.turnEnd === "codex") {
           try {
@@ -703,6 +721,10 @@ export function runKeeper(
         } else awaiting = true;
       }
       stdin.write(`${msg.line}\n`);
+      if (deliveryId !== null) {
+        deliveries.add(deliveryId);
+        addLine(JSON.stringify({ type: CODEX_DELIVERY, id: deliveryId }));
+      }
     } else if (msg.t === "close") {
       const g = typeof msg.graceMs === "number" && msg.graceMs >= 0 ? msg.graceMs : 0;
       closeStdin(g);

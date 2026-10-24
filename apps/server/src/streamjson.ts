@@ -20,6 +20,7 @@ import { cleanText } from "./clean.ts";
 import { str } from "./util.ts";
 
 export interface TranscriptFacts {
+  latestPlan?: string;
   sessionId: string | null;
   model: string | null;
   permissionMode: string | null;
@@ -92,6 +93,8 @@ interface DigestState {
   appliedTasks: Set<string>;
   lastEventAt: number | null;
   contextTokens: number | null;
+  /** Codex reports its context limit independently of a model name. */
+  contextWindow: number | null;
   /** contextWindow per model from the latest `result` line. */
   windows: Record<string, number> | null;
   toolStarts: Map<string, number>;
@@ -147,6 +150,7 @@ const emptyDigestState = (): DigestState => ({
   appliedTasks: new Set(),
   lastEventAt: null,
   contextTokens: null,
+  contextWindow: null,
   windows: null,
   toolStarts: new Map(),
   toolCalls: 0,
@@ -550,7 +554,7 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
     lastEventAt: d.lastEventAt,
     model,
     contextTokens: d.contextTokens,
-    contextWindow: window ?? null,
+    contextWindow: d.contextWindow ?? window ?? null,
     liveTool,
     lastText: d.lastText,
     tools,
@@ -586,6 +590,72 @@ function replySpeed(d: DigestState): NonNullable<RunDigest["speed"]> {
     tokensPerSec: n > 0 && ms > 0 ? output / (ms / 1000) : null,
     turnMs: n > 0 ? ms / n : null,
   };
+}
+
+function foldCodex(
+  facts: TranscriptFacts,
+  seen: Map<string, TokenUsage>,
+  d: DigestState,
+  ev: Json,
+  fileMtime: number,
+): void {
+  const p = isObj(ev.params) ? ev.params : {};
+  const at = timeOf(ev.timestamp) ?? fileMtime;
+  d.lastEventAt = Math.max(d.lastEventAt ?? at, at);
+  if (ev.method === "thread/started" && isObj(p.thread)) {
+    facts.sessionId = str(p.thread.id) ?? facts.sessionId;
+  } else if (ev.method === "thread/tokenUsage/updated" && isObj(p.tokenUsage)) {
+    const u = p.tokenUsage;
+    if (!isObj(u.total) || typeof p.threadId !== "string") return;
+    const valid = (n: unknown): n is number =>
+      typeof n === "number" && Number.isFinite(n) && n >= 0;
+    if (![u.total.inputTokens, u.total.cachedInputTokens, u.total.outputTokens].every(valid))
+      return;
+    const input = u.total.inputTokens as number;
+    const cacheRead = u.total.cachedInputTokens as number;
+    if (cacheRead > input) return;
+    const usage = {
+      input: input - cacheRead,
+      cacheRead,
+      output: u.total.outputTokens as number,
+      cacheCreate: 0,
+    };
+    const key = `codex:${p.threadId}`;
+    const prev = seen.get(key);
+    // Thread totals are cumulative, including across resume. Repeated notifications add nothing.
+    if (
+      prev &&
+      (usage.input + usage.cacheRead < prev.input + prev.cacheRead || usage.output < prev.output)
+    )
+      return;
+    const delta = usage.input + usage.output - (prev ? prev.input + prev.output : 0);
+    seen.set(key, usage);
+    const minute = at - (at % MINUTE_MS);
+    if (delta > 0) d.minutes.set(minute, (d.minutes.get(minute) ?? 0) + delta);
+    d.contextTokens = isObj(u.last) ? numOrNull(u.last.totalTokens) : null;
+    const window = numOrNull(u.modelContextWindow);
+    if (window !== null && window > 0) d.contextWindow = window;
+    facts.costUsd = null;
+  } else if (ev.method === "turn/plan/updated" && Array.isArray(p.plan)) {
+    const steps = p.plan.filter(
+      (step) => isObj(step) && typeof step.step === "string" && typeof step.status === "string",
+    );
+    if (steps.length !== p.plan.length) return;
+    facts.latestPlan = cleanText(
+      [
+        ...(typeof p.explanation === "string" && p.explanation !== "" ? [p.explanation] : []),
+        ...steps.map((step) => `[${step.status}] ${step.step}`),
+      ].join("\n"),
+    );
+  } else if (ev.method === "turn/started") {
+    facts.hasResult = false;
+  } else if (ev.method === "turn/completed" && isObj(p.turn)) {
+    facts.resultCount++;
+    facts.hasResult = true;
+    facts.stopReason = str(p.turn.status);
+    facts.isError = p.turn.status === "failed";
+    facts.error = isObj(p.turn.error) ? str(p.turn.error.message) : null;
+  }
 }
 
 /**
@@ -647,6 +717,10 @@ export function foldTranscript(
       continue;
     }
     if (!isObj(ev)) continue;
+    if (typeof ev.method === "string") {
+      foldCodex(facts, seen, d, ev, fileMtime);
+      continue;
+    }
 
     if (isTopLevel(ev) && (ev.type === "assistant" || ev.type === "user")) {
       if (facts.hasResult) {

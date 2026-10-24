@@ -4,7 +4,7 @@ import "./supervisor-harness.ts";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_REPO_RULES, freezeRules, otherLaneText } from "@mc/core";
+import { CANNOT_START, DEFAULT_REPO_RULES, freezeRules, otherLaneText } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
@@ -22,7 +22,14 @@ import {
 } from "../src/runtime/keeper.ts";
 import { restoreRuns } from "../src/runtime/restore.ts";
 import { CREW_LOCK_FILE, type SupervisorEvent } from "../src/runtime/supervisor.ts";
-import { crewKeeperDir, crewMcpPath, crewPromptPath, crewTokenPath } from "../src/store.ts";
+import {
+  crewCodexDir,
+  crewKeeperDir,
+  crewMcpPath,
+  crewPromptPath,
+  crewTokenPath,
+} from "../src/store.ts";
+import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import {
   boardCard,
   clone,
@@ -1295,3 +1302,265 @@ describe("a seat keeps running through a restart", () => {
     expect(seen.some((e) => e.kind === "run-ended" && e.runId === runId)).toBe(false);
   });
 });
+
+describe("Codex restart", () => {
+  it("keeps the process across stopAll and rechecks only unresolved replayed approvals", async () => {
+    const signal = join(dir, "replay");
+    const first = codexSupervisor({ replayApprovals: true, replaySignal: signal, holdTurn: true });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const pid = readPidFile(crewKeeperDir(dbPath, runId), CLI_PID_FILE);
+    await first.sup.stopAll();
+    expect(pid !== null && pidAlive(pid)).toBe(true);
+    writeFileSync(signal, "go");
+    await until(() =>
+      expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain('"id":"open"'),
+    );
+    const next = codexSupervisor();
+    next.sup.start();
+    await until(() =>
+      expect(recorded().filter((m) => m.result?.decision)).toEqual([
+        { id: "open", result: { decision: "accept" } },
+      ]),
+    );
+    expect(next.lock.state().holder?.runId).toBe(runId);
+    expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(1);
+    expect(recorded().filter((m) => m.method === "thread/resume")).toEqual([
+      expect.objectContaining({
+        params: expect.objectContaining({
+          threadId: "codex-thread-1",
+          config: { project_doc_max_bytes: 0 },
+        }),
+      }),
+    ]);
+    await next.sup.interrupt("guido-1");
+    await until(() => expect(next.lock.state().holder).toBeNull());
+    await next.sup.endRunByEngine(runId);
+  });
+
+  it("resumes the saved thread with the floor overrides when no keeper survives", async () => {
+    const first = codexSupervisor();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    await noKeepers();
+    expect(
+      existsSync(
+        join(crewCodexDir(dbPath, runId), "codex-home", "sessions", "codex-thread-1.json"),
+      ),
+    ).toBe(true);
+    const next = codexSupervisor();
+    // The persisted vendor chooses the driver even if the account has since changed.
+    const account = next.cfg.accounts[0];
+    if (account) account.vendor = "claude";
+    const seat = next.cfg.crew?.sessions[0]?.seats[0];
+    if (seat) seat.model = "sonnet";
+    next.sup.start();
+    await until(() =>
+      expect(recorded().find((m) => m.method === "thread/resume")?.params).toMatchObject({
+        threadId: "codex-thread-1",
+        model: "gpt-5.4",
+        approvalPolicy: "untrusted",
+        approvalsReviewer: "user",
+        config: { project_doc_max_bytes: 0 },
+      }),
+    );
+    await until(() => expect(next.sup.seatFacts("guido-1")).not.toBeNull());
+    expect(store.seatSession("guido-1")).toMatchObject({
+      vendor: "codex",
+      cliSessionId: "codex-thread-1",
+    });
+    await next.sup.endRunByEngine(runId);
+  });
+
+  it.each([
+    "approvalPolicy",
+    "approvalsReviewer",
+    "activePermissionProfile",
+    "networkAccess",
+    "instructionSources",
+  ])("refuses a no-keeper resume with bad %s", async (bad) => {
+    const first = codexSupervisor();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    await noKeepers();
+    const turns = recorded().filter((m) => m.method === "turn/start").length;
+    const next = codexSupervisor({ bad });
+    next.sup.start();
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    expect(store.seatSession("guido-1")?.reason).toBeTruthy();
+    expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(turns);
+    expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
+  });
+});
+
+it("folds Codex usage exactly once across reattachment and subsequent cumulative updates", async () => {
+  const usage = (inputTokens: number, cachedInputTokens: number, outputTokens: number) => ({
+    total: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+    },
+    last: { totalTokens: 100 },
+    modelContextWindow: 10000,
+  });
+  const first = codexSupervisor({ usage: usage(100, 20, 10) });
+  first.sup.start();
+  const { runId } = await first.sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  await first.sup.stopAll();
+  const tokens = store.run(runId)?.tokens;
+  const buckets = store.digest(runId)?.minuteTokens;
+  expect(store.digest(runId)?.contextWindow).toBe(10000);
+  expect(tokens).toEqual({ input: 80, output: 10, cacheRead: 20, cacheCreate: 0 });
+  expect(buckets).toHaveLength(1);
+  const cursor = store.keeperCursor(runId);
+  if (!cursor) throw new Error("missing cursor");
+  store.setKeeperCursor({ ...cursor, line: 0 });
+  const next = codexSupervisor();
+  next.sup.start();
+  await until(async () => expect(await next.sup.contextUsage("guido-1")).not.toBeNull());
+  expect(store.run(runId)?.tokens).toEqual(tokens);
+  expect(store.run(runId)?.costUsd).toBeNull();
+  expect(store.digest(runId)?.minuteTokens).toEqual(buckets);
+  expect(store.digest(runId)?.contextWindow).toBe(10000);
+  expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(1);
+
+  await next.sup.message("guido-1", JSON.stringify({ usage: usage(160, 30, 30) }), {
+    interrupt: false,
+  });
+  await until(() =>
+    expect(store.run(runId)?.tokens).toEqual({
+      input: 130,
+      output: 30,
+      cacheRead: 30,
+      cacheCreate: 0,
+    }),
+  );
+  const updates = readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((m) => m.method === "thread/tokenUsage/updated");
+  expect(updates).toHaveLength(2);
+  const at = Date.parse(updates[1].timestamp);
+  const minute = at - (at % 60000);
+  const expected = new Map(buckets);
+  expected.set(minute, (expected.get(minute) ?? 0) + 70);
+  expect(store.digest(runId)?.minuteTokens).toEqual([...expected].sort(([a], [b]) => a - b));
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  await next.sup.message("guido-1", JSON.stringify({ usage: usage(160, 30, 30) }), {
+    interrupt: false,
+  });
+  await next.sup.stopAll();
+  // The repeated total adds nothing, whether it arrived before or after detach.
+  const third = codexSupervisor();
+  third.sup.start();
+  await until(async () => expect(await third.sup.contextUsage("guido-1")).not.toBeNull());
+  expect(store.run(runId)?.tokens).toEqual({
+    input: 130,
+    output: 30,
+    cacheRead: 30,
+    cacheCreate: 0,
+  });
+  expect(store.digest(runId)?.minuteTokens).toEqual([...expected].sort(([a], [b]) => a - b));
+  expect(store.run(runId)?.costUsd).toBeNull();
+  await until(() =>
+    expect(
+      readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((m) => m.method === "thread/tokenUsage/updated"),
+    ).toHaveLength(3),
+  );
+  await third.sup.endRunByEngine(runId);
+});
+
+it("ends a reattached Codex run whose live floor changed before answering pending approvals", async () => {
+  const signal = join(dir, "replay");
+  const first = codexSupervisor({
+    badReattach: "networkAccess",
+    replayApprovals: true,
+    replaySignal: signal,
+    holdTurn: true,
+  });
+  first.sup.start();
+  const { runId } = await first.sup.startRun("guido-1", 42);
+  await until(() => expect(seatState("guido-1")).toBe("running"));
+  await first.sup.stopAll();
+  writeFileSync(signal, "go");
+  await until(() =>
+    expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain('"id":"open"'),
+  );
+  const next = codexSupervisor();
+  next.sup.start();
+  await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+  expect(store.seatSession("guido-1")?.reason).toBe(CANNOT_START);
+  expect(recorded().some((m) => m.result?.decision === "accept")).toBe(false);
+  expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+  expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
+});
+
+it("recovers an acknowledged Codex message queued behind a pending start across stopAll", async () => {
+  const signal = join(dir, "start-codex-turn");
+  const first = codexSupervisor({ holdTurn: true, startSignal: signal });
+  first.sup.start();
+  const { runId } = await first.sup.startRun("guido-1", 42);
+  await until(() => expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1));
+  await first.sup.message("guido-1", "keep this queued message", { interrupt: false });
+  await first.sup.stopAll();
+  const cursor = store.keeperCursor(runId);
+  if (!cursor) throw new Error("missing keeper cursor");
+  const next = codexSupervisor();
+  next.sup.start();
+  // No usage has been reported. The cursor advances once replay and the floor check finish.
+  await until(() => expect(store.keeperCursor(runId)?.line).toBeGreaterThan(cursor.line));
+  expect(next.sup.seatFacts("guido-1")?.inTurn).toBe(true);
+  writeFileSync(signal, "go");
+  await until(() => expect(recorded().filter((m) => m.method === "turn/steer")).toHaveLength(1));
+  expect(recorded().find((m) => m.method === "turn/steer")?.params).toMatchObject({
+    expectedTurnId: "turn-1",
+    input: [{ type: "text", text: "keep this queued message" }],
+  });
+  expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+  expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(1);
+  await next.sup.endRunByEngine(runId);
+});
+
+it.each([true, false])(
+  "refuses a Codex resume without its saved model (keeper survives: %s)",
+  async (keeper) => {
+    const first = codexSupervisor();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    if (!keeper) await noKeepers();
+    const run = store.run(runId);
+    if (!run) throw new Error("missing run");
+    store.upsertRun({ ...run, model: null });
+    const next = codexSupervisor();
+    const account = next.cfg.accounts[0];
+    if (account) account.vendor = "claude";
+    const seat = next.cfg.crew?.sessions[0]?.seats[0];
+    if (seat) seat.model = "sonnet";
+    next.sup.start();
+    await until(() => expect(store.run(runId)?.endedAt).not.toBeNull());
+    if (keeper) {
+      expect(store.seatSession("guido-1")?.reason).toContain("saved model missing");
+    } else {
+      expect(store.seatSession("guido-1")?.reason).toBe(
+        `could not resume the session: ${CANNOT_START}`,
+      );
+      expect(next.log).toHaveBeenCalledWith(expect.stringContaining("saved model missing"));
+    }
+    expect(recorded().some((m) => m.method === "thread/resume")).toBe(false);
+    expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(1);
+  },
+);

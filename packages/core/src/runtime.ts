@@ -1104,3 +1104,6 @@ export type SessionCheckoutOutcome =
   | "retained-unpushed"
   | "retained-unproven"
   | "removal-failed-partway";
+
+/** The process protocol recorded with a crew run. */
+export type CrewVendor = "claude" | "codex";

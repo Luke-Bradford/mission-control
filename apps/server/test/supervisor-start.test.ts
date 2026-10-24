@@ -78,6 +78,7 @@ import {
   seatDenyRead,
 } from "../src/runtime/supervisor.ts";
 import {
+  crewCodexDir,
   crewKeeperDir,
   crewMcpPath,
   crewPrBodyPath,
@@ -2026,7 +2027,7 @@ import(${JSON.stringify(fixture)});
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     const spawn = recorded().find((m) => m.type === "spawn");
     expect(spawn.args).toEqual(["app-server", "-c", `mc_run="${runId}"`]);
-    const folder = crewKeeperDir(dbPath, runId);
+    const folder = crewCodexDir(dbPath, runId);
     const home = join(folder, "codex-home");
     expect(spawn.env.CODEX_HOME).toBe(home);
     expect(spawn.env.SHELL).toBe(CODEX_SHELL);
@@ -2066,10 +2067,19 @@ import(${JSON.stringify(fixture)});
     const { sup } = codex({ holdTurn: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
-    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await vi.waitFor(() => expect(seatState("guido-1")).toBe("running"), { timeout: 5_000 });
     await sup.message("guido-1", JSON.stringify({ failed: true }), { interrupt: true });
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
-    expect(store.seatSession("guido-1")?.reason).toBe("last turn ended in an error");
+    // Sending the replacement must clear the interrupted turn's idle state immediately.
+    expect(seatState("guido-1")).toBe("running");
+    await vi.waitFor(
+      () => {
+        expect(store.seatSession("guido-1")).toMatchObject({
+          state: "idle",
+          reason: "last turn ended in an error",
+        });
+      },
+      { timeout: 5_000 },
+    );
     await sup.endRunByEngine(runId);
   });
 
@@ -2150,7 +2160,7 @@ import(${JSON.stringify(fixture)});
     expect(store.run(runId)?.endedAt).not.toBeNull();
   });
 
-  it("retains an accepted test lock when a later turn/start is rejected", async () => {
+  it("retains an accepted test lock when a steer is rejected", async () => {
     const { sup, lock, log } = codex({ command: "pnpm -s test", holdItem: true, ackDelayMs: 100 });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);

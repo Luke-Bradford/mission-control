@@ -115,6 +115,7 @@ export function applyFacts(r: Run, facts: TranscriptFacts): void {
   r.tokens = facts.tokens;
   r.prs = facts.prs.map((p) => ({ ...p }));
   r.summary = facts.summary;
+  if (facts.latestPlan !== undefined) r.latestPlan = facts.latestPlan;
 }
 
 /** The ticket `r.branch` names, else the ticket `r` already has (a known ticket is never nulled). */

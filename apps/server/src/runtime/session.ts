@@ -122,7 +122,7 @@ type Json = Record<string, unknown>;
 
 /** The keeper transport, shared by the Claude stream and Codex RPC drivers. */
 export interface KeeperSession extends CrewSession {
-  write(message: Json, user?: boolean): void;
+  write(message: Json, user?: boolean, deliveryId?: string): void;
   onLine(listener: (line: string) => void): () => void;
 }
 
@@ -419,9 +419,9 @@ function createDriver(i: {
   const writable = () => alive && !stdinEnded && !finished;
 
   const session: KeeperSession = {
-    write(message, user = false) {
+    write(message, user = false, deliveryId) {
       if (!writable()) throw new SessionControlError("ended", "session ended");
-      transmit({ t: "in", line: JSON.stringify(message), user });
+      transmit({ t: "in", line: JSON.stringify(message), user, deliveryId });
     },
     onLine(listener) {
       lineListeners.add(listener);
@@ -640,7 +640,7 @@ export function startKeeperSession(i: KeeperSessionInput): KeeperSession {
 
 /** What `attachSession` found. */
 export type Attached =
-  | { kind: "attached"; session: CrewSession; hello: KeeperHello }
+  | { kind: "attached"; session: KeeperSession; hello: KeeperHello }
   /** The CLI exited while no hub was attached. */
   | { kind: "exited"; exit: KeeperExit }
   /** No keeper to attach to (null), or one that speaks another version (its number). */
@@ -653,6 +653,7 @@ export type Attached =
 export async function attachSession(i: {
   dir: string;
   from: (h: KeeperHello) => number;
+  raw?: boolean;
   controlTimeoutMs?: number;
   stopGraceMs?: number;
   log?: (msg: string) => void;
@@ -714,6 +715,7 @@ export async function attachSession(i: {
       controlTimeoutMs: i.controlTimeoutMs ?? CONTROL_TIMEOUT_MS,
       stopGraceMs: i.stopGraceMs ?? STOP_GRACE_MS,
       announce: true,
+      raw: i.raw,
       // an older keeper's spec has no secret, and that keeper asks for none
       secret: readKeeperSecret(i.dir),
       log: i.log,

@@ -1,6 +1,8 @@
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { clockHm, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
@@ -8,13 +10,16 @@ import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { CLI_PID_FILE, KEEPER_PID_FILE, pidAlive, readPidFile } from "../src/runtime/keeper.ts";
 import * as sessionDriver from "../src/runtime/session.ts";
 import type { Supervisor, SupervisorEvent } from "../src/runtime/supervisor.ts";
-import type { Store } from "../src/store.ts";
+import { crewCodexDir, crewKeeperDir, type Store } from "../src/store.ts";
+import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import {
   BRANCH,
   bus,
   clone,
+  dbPath,
   dir,
   git,
   make,
@@ -1155,5 +1160,157 @@ describe("supervisor events (Plan 7a)", () => {
       expect(seatState("guido-1")).toBe("idle");
       expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
     });
+  });
+});
+
+describe("Codex lifecycle events", () => {
+  it("steers mid-turn and interrupts before starting the replacement turn", async () => {
+    const { sup } = codexSupervisor({ holdTurn: true });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await sup.message("guido-1", "follow this lead", { interrupt: false });
+    await until(() => expect(recorded().some((m) => m.method === "turn/steer")).toBe(true));
+    await sup.message("guido-1", "replace the turn", { interrupt: true });
+    await until(() =>
+      expect(
+        recorded()
+          .filter((m) => m.method?.startsWith("turn/"))
+          .map((m) => m.method),
+      ).toEqual(["turn/start", "turn/steer", "turn/interrupt", "turn/start"]),
+    );
+    await sup.endRunByEngine(runId);
+  });
+
+  it("keeps the thread and its private storage through set aside, hub restart and wake", async () => {
+    const first = codexSupervisor();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const aside = await first.sup.setAside(runId);
+    expect(aside).not.toBeNull();
+    store.setRunLoop(runId, {
+      ...NEW_LOOP,
+      aside: { worktree: aside?.worktree ?? "", wake: true },
+    });
+    expect(store.run(runId)?.sessionId).toBe("codex-thread-1");
+    await first.sup.stopAll();
+    const next = codexSupervisor();
+    next.sup.start();
+    await next.sup.wakeRun(runId);
+    await until(() =>
+      expect(recorded().find((m) => m.method === "thread/resume")?.params.threadId).toBe(
+        "codex-thread-1",
+      ),
+    );
+    expect(store.seatSession("guido-1")?.cliSessionId).toBe("codex-thread-1");
+    await next.sup.endRunByEngine(runId);
+    expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
+  });
+
+  it("folds cumulative tokens, unknown cost and the latest plan into the stored run", async () => {
+    const { sup } = codexSupervisor({
+      usage: {
+        total: { inputTokens: 100, cachedInputTokens: 20, outputTokens: 10, totalTokens: 110 },
+        last: { totalTokens: 110 },
+        modelContextWindow: 10000,
+      },
+      plan: { explanation: "Next", plan: [{ step: "Check the fix", status: "in_progress" }] },
+    });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(store.run(runId)).toMatchObject({
+      costUsd: null,
+      tokens: { input: 80, cacheRead: 20, output: 10, cacheCreate: 0 },
+      latestPlan: "Next\n[in_progress] Check the fix",
+    });
+    expect(store.digest(runId)?.minuteTokens.reduce((sum, [, n]) => sum + n, 0)).toBe(90);
+    await sup.endRunByEngine(runId);
+  });
+});
+
+describe("Codex interrupt failures", () => {
+  it.each([
+    { scenario: { interruptRefused: true }, status: 409 },
+    { scenario: { noInterruptAck: true }, status: 504 },
+    { scenario: { noInterruptCompletion: true }, status: 504 },
+  ])(
+    "returns $status without steering or starting a replacement for $scenario",
+    async ({ scenario, status }) => {
+      const { sup } = codexSupervisor({ ...scenario, holdTurn: true });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("running"));
+      const error = await refusal(sup.message("guido-1", "replacement", { interrupt: true }));
+      expect(error.status).toBe(status);
+      expect(
+        recorded()
+          .filter((m) => m.method?.startsWith("turn/"))
+          .map((m) => m.method),
+      ).toEqual(["turn/start", "turn/interrupt"]);
+      expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
+      await sup.endRunByEngine(runId);
+    },
+  );
+
+  it("keeps the seat running until delayed interruption completes, then runs the replacement", async () => {
+    const signal = join(dir, "interrupt-complete");
+    const { sup } = codexSupervisor({ holdTurn: true, interruptCompleteSignal: signal });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    let sent = false;
+    const replacement = sup.message("guido-1", "replacement", { interrupt: true }).then(() => {
+      sent = true;
+    });
+    await until(() => expect(recorded().some((m) => m.method === "turn/interrupt")).toBe(true));
+    expect(sent).toBe(false);
+    expect(seatState("guido-1")).toBe("running");
+    expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(1);
+    writeFileSync(signal, "complete");
+    await replacement;
+    await until(() => expect(recorded().filter((m) => m.method === "turn/start")).toHaveLength(2));
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    expect(sup.seatFacts("guido-1")?.inTurn).toBe(true);
+    await sup.endRunByEngine(runId);
+  });
+
+  it("Stop terminates a Codex process after interrupt timeout without touching an unrelated process", async () => {
+    const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    const exited = once(unrelated, "exit");
+    await once(unrelated, "spawn");
+    try {
+      const { sup } = codexSupervisor({
+        holdTurn: true,
+        noInterruptCompletion: true,
+        closeDelayMs: 10000,
+        ignoreTerm: true,
+      });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("running"));
+      const keeperDir = crewKeeperDir(dbPath, runId);
+      const cliPid = readPidFile(keeperDir, CLI_PID_FILE);
+      const keeperPid = readPidFile(keeperDir, KEEPER_PID_FILE);
+      expect(cliPid).not.toBeNull();
+      expect(keeperPid).not.toBeNull();
+      const began = Date.now();
+      await sup.endRun("guido-1");
+      await until(() => {
+        expect(pidAlive(cliPid as number)).toBe(false);
+        expect(pidAlive(keeperPid as number)).toBe(false);
+      });
+      expect(Date.now() - began).toBeLessThan(5000);
+      expect(recorded().filter((m) => m.method === "turn/interrupt")).toHaveLength(1);
+      expect(store.run(runId)).toMatchObject({ endedBy: "operator", status: "ok" });
+      expect(existsSync(crewCodexDir(dbPath, runId))).toBe(false);
+      expect(pidAlive(unrelated.pid as number)).toBe(true);
+    } finally {
+      unrelated.kill("SIGTERM");
+      await exited;
+    }
   });
 });
