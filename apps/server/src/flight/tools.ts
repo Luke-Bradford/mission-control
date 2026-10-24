@@ -81,6 +81,8 @@ import {
   FLIGHT_DECISION_MAX,
   FLIGHT_ENDS_PER_HOUR,
   FLIGHT_FIELD_MAX,
+  FLIGHT_GH_API_READS_PER_HOUR,
+  FLIGHT_GH_PATH_MAX,
   FLIGHT_GH_READS_PER_HOUR,
   FLIGHT_HEADLINE,
   FLIGHT_HEADLINE_MAX,
@@ -130,6 +132,10 @@ import {
   type FlightPrRead,
   FORGET_DESCRIPTION,
   flightFloorBlocked,
+  GH_READ_BAD_PATH,
+  GH_READ_DESCRIPTION,
+  GH_READ_NOT_FOUND,
+  GH_READ_UNTRUSTED,
   GITHUB_WRITES_OFF,
   GUARD_ACK_PREFIX,
   globMatches,
@@ -283,6 +289,7 @@ import { RepoRulesError } from "../engine/rules.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { attentionItems, crew, NO_LOCK, NOTE_KEY } from "../hud.ts";
 import type { GhRunner } from "../mcp/gh.ts";
+import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext } from "../mcp/server.ts";
 import {
   badArgs,
@@ -597,6 +604,7 @@ const CommentTicketArgs = z.strictObject({
   text: text(MC_TEXT_MAX),
   basis: basisArg,
 });
+const GhReadArgs = z.strictObject({ path: z.string().min(1).max(FLIGHT_GH_PATH_MAX) });
 const ReadPrArgs = z.strictObject({ pr: issueNumber });
 const ReadCiLogArgs = z.strictObject({
   pr: issueNumber,
@@ -1792,14 +1800,41 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (!c.ok) return c;
     const repo = repoOf();
     if (repo === undefined) return { ok: false, result: fail(READ_NO_REPO) };
-    const at = now();
-    const recent = (ghReads.get(ctx.seatId) ?? []).filter((t) => t > at - FLIGHT_HOUR_MS);
-    if (recent.length >= FLIGHT_GH_READS_PER_HOUR) {
-      ghReads.set(ctx.seatId, recent);
-      return { ok: false, result: fail(capText("read GitHub", recent.length)) };
-    }
-    ghReads.set(ctx.seatId, [...recent, at]);
+    const capped = ghReadCap(ctx.seatId, ghReads, FLIGHT_GH_READS_PER_HOUR);
+    if (capped) return { ok: false, result: capped };
     return { ok: true, args: c.args, repo };
+  }
+
+  const ghApiReads = new Map<string, number[]>();
+  const ghApiQueue = new Map<string, Promise<unknown>>();
+
+  function ghReadCap(seatId: string, calls: Map<string, number[]>, limit: number): Result | null {
+    const at = now();
+    const recent = (calls.get(seatId) ?? []).filter((t) => t > at - FLIGHT_HOUR_MS);
+    if (recent.length >= limit) {
+      calls.set(seatId, recent);
+      return fail(capText("read GitHub", recent.length));
+    }
+    calls.set(seatId, [...recent, at]);
+    return null;
+  }
+
+  async function readGithub(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, GhReadArgs, args);
+    if (!c.ok) return c.result;
+    const repoId = seatPlace(config, ctx.seatId)?.session.repoId;
+    const repo = config.repos.find((r) => r.id === repoId);
+    if (!repo) return fail(READ_NO_REPO);
+    const denied = requirePowers(config, repo.id, "superuser");
+    if (denied) return denied;
+    const path = githubReadPath(c.args.path, repo.github);
+    if (path === null) return fail(GH_READ_BAD_PATH);
+    const capped = ghReadCap(ctx.seatId, ghApiReads, FLIGHT_GH_API_READS_PER_HOUR);
+    if (capped) return capped;
+    const known = await readKnown(deps, MC_TOOL_NAMES.ghRead);
+    const output = await isolatedGithubRead(deps.gh, path, known, repo.github, deps.log);
+    if (!output.ok) return fail(output.notFound ? GH_READ_NOT_FOUND : READ_NO_GITHUB);
+    return { text: `${GH_READ_UNTRUSTED}${output.text}` };
   }
 
   /** gh, in the crew dir; a failure is logged without its stderr, which may hold anything. */
@@ -2765,6 +2800,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: readCiLog,
+    },
+    {
+      name: MC_TOOL_NAMES.ghRead,
+      description: GH_READ_DESCRIPTION,
+      inputSchema: z.toJSONSchema(GhReadArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: (ctx, args) => queued(ghApiQueue, ctx.seatId, () => readGithub(ctx, args)),
     },
     {
       name: MC_TOOL_NAMES.listTickets,
