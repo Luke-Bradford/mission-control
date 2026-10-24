@@ -2,7 +2,7 @@
  * What a run was about, as the API serves it: the PRs the run published joined to the stored PR
  * rows, and the run's ticket resolved through them (#26 A3).
  */
-import type { PullRequestView, RepoId, Run, RunPr, RunSummary, RunView } from "@mc/core";
+import type { PullRequestView, RepoId, Run, RunPr, RunSummary, RunUsage, RunView } from "@mc/core";
 import type { CcConfig } from "./config.ts";
 import type { Store } from "./store.ts";
 
@@ -101,8 +101,24 @@ export function runView(
   }
   return {
     ...runSummary(run),
+    usage: runUsage(store, run),
     prs,
     ticket,
     ticketTitle: runTicketTitle(run, ticket, boardTitle),
+  };
+}
+
+/** Full run measurements, independent of a template's illustrative budget. */
+export function runUsage(store: Store, run: Run, now = Date.now()): RunUsage {
+  const digest = store.digest(run.id);
+  return {
+    input: run.tokens?.input ?? null,
+    output: run.tokens?.output ?? null,
+    cacheRead: run.tokens?.cacheRead ?? null,
+    cacheCreate: run.tokens?.cacheCreate ?? null,
+    costUsd: run.costUsd,
+    model: run.model ?? digest?.model ?? null,
+    turns: digest?.turns ?? null,
+    durationMs: Math.max(0, (run.endedAt ?? now) - run.startedAt),
   };
 }

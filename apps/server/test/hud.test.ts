@@ -1299,7 +1299,7 @@ describe("crew seats in the rows", () => {
         text: "CI on abcdef1",
         prNumber: null,
         parked: null,
-        tries: { n: 1, max: 3 },
+        tries: { n: 1, max: 3, failures: 0, runs: 0 },
         wait: "ci",
       });
       store.setRunLoop("c1", loopOf({ phase: "review", prNumber: 208 }));
@@ -1516,7 +1516,7 @@ describe("crew seats in the rows", () => {
         store.upsertRun(crewRun());
         store.setSeatSession(seat({}));
         store.setRunLoop("c1", loopOf({ phase: "ci", ciFails: 1 }));
-        expect(triesOf(withCrew())).toEqual({ n: 2, max: 3 });
+        expect(triesOf(withCrew())).toEqual({ n: 2, max: 3, failures: 1, runs: 0 });
       });
       it("review: the round, from the fix lines claimed this epoch", () => {
         store.upsertRun(crewRun());

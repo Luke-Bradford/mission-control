@@ -1,4 +1,4 @@
-import type { ProfileStepPhase, ReviewDepth } from "./profiles.ts";
+import type { ProfileStep, ReviewDepth } from "./profiles.ts";
 import type { ConfigSeatMode, CrewEffort, CrewMode, CrewRole, LoopKind } from "./runtime.ts";
 import type {
   AccountId,
@@ -17,7 +17,11 @@ import type {
 export interface ConfigProfile {
   name: string;
   labels: string[];
-  steps: { name: string; phase: ProfileStepPhase | null }[];
+  steps: (ProfileStep & { agents?: string[] })[];
+  nodes?: ProfileStep[];
+  trigger?: string;
+  budget?: number | null;
+  orchestrationOnly?: boolean;
   planRequired: boolean;
   reviewer: { role: string; depth: ReviewDepth };
   tries: number;
@@ -198,6 +202,7 @@ export interface ConfigView {
   profiles?: {
     /** The profiles file, or BUILTIN_PROFILES_SOURCE when none exists. */
     source: string;
+    version?: string;
     /** Why the file cannot be loaded; null when it can. `list` is then empty. */
     error: string | null;
     list: ConfigProfile[];

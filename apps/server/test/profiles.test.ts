@@ -132,3 +132,197 @@ describe("chooseRunProfile", () => {
     });
   });
 });
+
+describe("template descriptions", () => {
+  it("exposes seven templates without routing orchestration into a build", () => {
+    expect(DEFAULT_PROFILES).toHaveLength(7);
+    expect(DEFAULT_PROFILES.find((p) => p.name === "watch")).toMatchObject({
+      orchestrationOnly: true,
+      rounds: 0,
+      budget: null,
+    });
+    expect(
+      chooseRunProfile(DEFAULT_PROFILES, [], "M", {
+        profile: "watch",
+        reason: "monitor",
+        by: "FLIGHT",
+      }),
+    ).toHaveProperty("refusal");
+    const feature = DEFAULT_PROFILES[0] as Profile;
+    expect(feature.steps.map((s) => s.name)).toEqual([
+      "implement",
+      "draft PR",
+      "verify",
+      "review",
+      "merge",
+    ]);
+    expect(feature.steps.find((s) => s.name === "verify")).toMatchObject({
+      max: 3,
+      role: "Mission Control runs it",
+      checks: expect.any(Array),
+    });
+  });
+
+  it("loads typed metadata, hashes it, and rejects unknown check kinds and fields", () => {
+    const metadata = "\n    budget: 120000\n    trigger: label custom";
+    const text = two.replace(
+      "steps: [{ name: do, phase: working }]",
+      "steps: [{ name: do, phase: working, gate: true, max: 2, retry: again, role: GUIDO, checks: [{kind: gate, text: approval}] }]",
+    );
+    const ps = loadProfiles(file(text + metadata));
+    expect(ps).not.toBeInstanceOf(ProfilesError);
+    const p = (ps as Profile[])[0] as Profile;
+    expect(p.steps[0]).toMatchObject({
+      gate: true,
+      max: 2,
+      checks: [{ kind: "gate", text: "approval" }],
+    });
+    expect(profileHash(p)).not.toBe(
+      profileHash({ ...p, steps: [{ name: "do", phase: "working" }] }),
+    );
+    expect(loadProfiles(file(text.replace("kind: gate", "kind: shell")))).toBeInstanceOf(
+      ProfilesError,
+    );
+    expect(loadProfiles(file(text.replace("retry: again", "unknown: again")))).toBeInstanceOf(
+      ProfilesError,
+    );
+  });
+});
+
+describe("profile creation", () => {
+  const input = {
+    name: "custom",
+    labels: ["type:custom"],
+    steps: [
+      {
+        name: "implement",
+        phase: "working",
+        checks: [
+          { kind: "cmd", text: "Scoped tests pass" },
+          { kind: "rule", text: "Area checked" },
+          { kind: "review", text: "Fresh reviewer" },
+          { kind: "gate", text: "Approval" },
+          { kind: "agent", text: "Evidence" },
+        ],
+        gate: true,
+        max: 2,
+      },
+    ],
+    plan_required: false,
+    reviewer: { role: "RETRO", depth: "light" },
+    tries: 2,
+    rounds: 2,
+    budget: 100000,
+  };
+  it("creates and reloads, preserving fallbacks and a started snapshot", async () => {
+    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    const path = join(dir, `new-${n++}.yaml`);
+    const snapshot = structuredClone(DEFAULT_PROFILES[0] as Profile);
+    const hash = profileHash(snapshot);
+    await createProfile(path, input, profilesVersion(loadProfiles(path) as Profile[]), 1);
+    const ps = loadProfiles(path) as Profile[];
+    expect(ps.map((p) => p.name)).toContain("custom");
+    expect(ps.slice(0, 7)).toEqual(DEFAULT_PROFILES);
+    expect(ps[7]?.steps[0]?.checks).toHaveLength(5);
+    expect(profileHash(snapshot)).toBe(hash);
+    expect(snapshot).toEqual(DEFAULT_PROFILES[0]);
+  });
+  it("refuses duplicate, invalid graph, unknown execution and stale writes without changing the file", async () => {
+    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    const path = file(two);
+    const { readFileSync } = await import("node:fs");
+    const before = readFileSync(path, "utf8");
+    const base = profilesVersion(loadProfiles(path) as Profile[]);
+    for (const profile of [
+      { ...input, name: "feature" },
+      { ...input, steps: [{ name: "work", phase: "shell" }] },
+      { ...input, steps: [{ name: "split", phase: null }] },
+      {
+        ...input,
+        steps: [
+          { name: "a", phase: "review" },
+          { name: "b", phase: "working" },
+        ],
+      },
+      { ...input, rounds: 0 },
+      { ...input, orchestration_only: true },
+    ]) {
+      await expect(createProfile(path, profile, base, 1)).rejects.toThrow();
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
+    await expect(createProfile(path, input, "stale", 1)).rejects.toThrow(/changed/);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    const outcomes = await Promise.allSettled([
+      createProfile(path, input, base, 1),
+      createProfile(path, { ...input, name: "other" }, base, 1),
+    ]);
+    expect(outcomes.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect((loadProfiles(path) as Profile[]).map((p) => p.name)).toEqual([
+      "small-change",
+      "feature",
+      "custom",
+    ]);
+  });
+});
+
+it("exposes multiple current occupants of the same step", async () => {
+  const { profilesView } = await import("../src/profiles.ts");
+  const view = profilesView(join(dir, "absent.yaml"), [
+    { id: "guido-1", loop: { profile: "feature", step: "verify" } },
+    { id: "guido-2", loop: { profile: "feature", step: "verify" } },
+    { id: "guido-3", loop: { profile: "bugfix", step: "verify" } },
+  ]);
+  expect(view.list[0]?.steps.find((s) => s.name === "verify")?.agents).toEqual([
+    "guido-1",
+    "guido-2",
+  ]);
+});
+
+it("matches the catalogue descriptions, with the folded developer path corrections", async () => {
+  const { default: golden } = await import("./template-catalogue.json");
+  for (const p of DEFAULT_PROFILES) {
+    const t = golden[p.name as keyof typeof golden];
+    expect(p.trigger).toBe(t.trigger);
+    expect(p.rounds).toBe(t.rounds);
+    expect(p.budget).toBe(t.budget === "—" ? null : Number.parseInt(t.budget, 10) * 1000);
+    for (const node of t.nodes) {
+      if (p.name === "feature" && ["plan", "go/no-go"].includes(node.id)) continue;
+      expect(p.nodes?.find((s) => s.name === node.id)).toMatchObject({
+        name: node.id,
+        role: node.role,
+        checks: node.checks.map(([kind, text]) => ({ kind, text })),
+        ...("gate" in node ? { gate: node.gate } : {}),
+        ...("max" in node ? { max: node.max } : {}),
+        ...(node.id in t.rules ? { retry: (t.rules as Record<string, string>)[node.id] } : {}),
+      });
+    }
+  }
+});
+
+it("keeps the original profiles when atomic replacement fails and refuses symbolic links", async () => {
+  const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+  const { mkdirSync, readFileSync, symlinkSync } = await import("node:fs");
+  const path = file(two);
+  const before = readFileSync(path, "utf8");
+  const input = {
+    name: "custom",
+    steps: [{ name: "implement", phase: "working" }],
+    plan_required: false,
+    reviewer: { role: "RETRO", depth: "light" },
+    tries: 2,
+    rounds: 2,
+  };
+  const temp = `${path}.tmp-${process.pid}`;
+  mkdirSync(temp);
+  writeFileSync(join(temp, "occupied"), "fixture");
+  await expect(
+    createProfile(path, input, profilesVersion(loadProfiles(path) as Profile[]), 1),
+  ).rejects.toThrow();
+  expect(readFileSync(path, "utf8")).toBe(before);
+  const link = join(dir, `link-${n++}.yaml`);
+  symlinkSync(path, link);
+  await expect(
+    createProfile(link, input, profilesVersion(loadProfiles(path) as Profile[]), 1),
+  ).rejects.toThrow(/symbolic link/);
+  expect(readFileSync(path, "utf8")).toBe(before);
+});

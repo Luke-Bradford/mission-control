@@ -486,6 +486,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
+  ["POST", "/api/profiles"],
   ["GET", "/api/accounts/status"],
   ["GET", "/api/sources/teams"],
   ["POST", "/api/sources/teams/selection", { selected: [] }],
@@ -1005,6 +1006,7 @@ describe("local access", () => {
         continue;
       }
       if (
+        url === "/api/profiles" ||
         url === "/api/sources/teams/selection" ||
         (method === "POST" && (url === "/api/crew/sessions" || url.endsWith("/close")))
       ) {
@@ -3106,7 +3108,11 @@ describe("config", () => {
     expect(builtIn.list[0]).toEqual({
       name: "feature",
       labels: ["type:feature"],
-      steps: feature?.steps,
+      steps: feature?.steps.map((step) => ({ ...step, agents: [] })),
+      nodes: feature?.nodes,
+      trigger: feature?.trigger,
+      budget: feature?.budget,
+      orchestrationOnly: false,
       planRequired: true,
       reviewer: { role: "RETRO", depth: "full" },
       tries: 3,
@@ -4726,12 +4732,12 @@ describe("the first loop's engine", () => {
       loop,
       events: [{ key: "k1", runId: "looped", text: "reported; pushing", at: NOW }],
       round: 1,
-      budget: 100_000,
+      budget: null,
       review: null,
     });
     expect(body.tries.map((t: { step: string }) => t.step)).toEqual(["working", "ci"]);
     store.setRunLoop("looped", { ...loop, budgetExtra: 5000 });
-    expect((await get("/api/runs/looped/loop")).json().budget).toBe(105_000);
+    expect((await get("/api/runs/looped/loop")).json().budget).toBeNull();
     const claim = (n: number) =>
       store.claimLine(`fix:looped:${loop.epoch}:${n}`, {
         runId: "looped",
@@ -4747,6 +4753,16 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/looped/loop")).json().round).toBe(3);
     expect((await get("/api/runs/plain/loop")).json()).toEqual({
       runId: "plain",
+      usage: {
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheCreate: null,
+        costUsd: null,
+        model: null,
+        turns: null,
+        durationMs: 3600000,
+      },
       noReport: null,
       loop: null,
       events: [{ key: "k2", runId: "plain", text: "other", at: NOW }],

@@ -102,7 +102,16 @@ interface DigestState {
   /** Top-level message id → usage, in first-seen order. */
   turns: Map<string, { input: number; output: number; cacheRead: number }>;
   /** Every frame's message id → its minute bucket and tokens (input + output). */
-  usage: Map<string, { minute: number | null; at: number | null; tokens: number }>;
+  usage: Map<
+    string,
+    {
+      minute: number | null;
+      at: number | null;
+      tokens: number;
+      usage: TokenUsage;
+      model: string | null;
+    }
+  >;
   minutes: Map<number, number>;
   subagents: Map<string, SubagentInfo>;
   /** Subagents whose task_notification (final numbers) has arrived. */
@@ -401,7 +410,13 @@ function digestFrame(d: DigestState, ev: Json): void {
       if (minute !== null) {
         d.minutes.set(minute, (d.minutes.get(minute) ?? 0) - (prev?.tokens ?? 0) + tokens);
       }
-      d.usage.set(id, { minute, at: prev?.at ?? at, tokens });
+      d.usage.set(id, {
+        minute,
+        at: prev?.at ?? at,
+        tokens,
+        usage: { input, output, cacheRead, cacheCreate: num(u.cache_creation_input_tokens) },
+        model: str(msg.model),
+      });
       if (top) d.turns.set(id, { input, output, cacheRead });
     }
     if (top) d.contextTokens = input + cacheRead + num(u.cache_creation_input_tokens);
@@ -516,7 +531,13 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
   const window = model !== null && d.windows ? d.windows[model] : undefined;
   return {
     tasks: [...d.tasks.values()].map((task) => ({ ...task })),
-    attemptUsage: [...d.usage].map(([id, u]) => ({ id, at: u.at, tokens: u.tokens })),
+    attemptUsage: [...d.usage].map(([id, u]) => ({
+      id,
+      at: u.at,
+      tokens: u.tokens,
+      usage: { ...u.usage },
+      model: u.model,
+    })),
     toolCalls: d.toolCalls,
     turns: d.turns.size,
     lastEventAt: d.lastEventAt,
