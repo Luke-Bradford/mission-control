@@ -4,7 +4,10 @@ import { expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
 it("sizes Agents to its rows and gives Activity the remaining height", () => {
-  expect(css).toMatch(/#page-overview > #agentsP \{\s*flex: none/);
+  expect(css).toMatch(/\.overview-crew \{\s*flex: none/);
+  expect(css).toMatch(/\.overview-crew \{[^}]*display: flex;[^}]*flex-wrap: wrap/);
+  expect(css).toMatch(/\.overview-crew > #agentsP \{\s*flex: 999 1 820px/);
+  expect(css).toMatch(/\.overview-crew > #timelineP \{\s*flex: 1 1 420px/);
   expect(css).toMatch(/#agentsList \{\s*overflow: visible/);
   expect(css).toMatch(/\.ov > \.col \{\s*overflow: visible/);
   expect(css).toMatch(/\.ov > #actP \{\s*min-height: 240px;\s*align-self: stretch/);

@@ -410,3 +410,12 @@ it("reads only open or recently merged PRs", () => {
   );
   expect(store.overviewPullRequests("repo", NOW - HOUR).map((p) => p.number)).toEqual([104, 101]);
 });
+
+it("includes an attempt at now in the current hour", () => {
+  store.upsertRun(run(1, { startedAt: NOW, costUsd: 2 }));
+  store.setDigest("run-1", {
+    ...digest([]),
+    attemptUsage: [{ id: "now", at: NOW, tokens: 10 }],
+  });
+  expect(summary().kpis.spendToday).toEqual({ usd: 2, perHour: [...Array(13).fill(0), 2] });
+});
