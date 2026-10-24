@@ -26,6 +26,7 @@ import {
   briefSavedDecision,
   briefSavedText,
   briefTooLongText,
+  CATCH_UP_KINDS,
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
   COMMENTED_DECISION,
@@ -324,7 +325,7 @@ const BriefOptionArgs = z.strictObject({
 const StructuredBriefArgs = z.strictObject({
   catchUp: z
     .strictObject({
-      kind: z.enum(["new", "follow-up", "old"]),
+      kind: z.enum(CATCH_UP_KINDS),
       line: text(MC_TEXT_MAX),
       story: z.array(text(MC_TEXT_MAX)).max(20),
       aware: z.array(text(MC_TEXT_MAX)).max(20),
@@ -375,7 +376,7 @@ const WatchEntryArgs = z.strictObject({
   state: z.enum(["warn", "info", "ok"]),
   title: text(BRIEF_LABEL_MAX),
   detail: text(MC_TEXT_MAX),
-  catchUp: z.strictObject({ kind: z.enum(["new", "follow-up", "old"]), line: text(MC_TEXT_MAX) }),
+  catchUp: z.strictObject({ kind: z.enum(CATCH_UP_KINDS), line: text(MC_TEXT_MAX) }),
   next: text(MC_TEXT_MAX),
   action: z
     .discriminatedUnion("kind", [

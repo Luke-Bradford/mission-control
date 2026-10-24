@@ -44,13 +44,13 @@ const record = (line) => {
 };
 const bootDelay = Number(flag("--boot-delay") ?? 0);
 if (bootDelay > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, bootDelay);
-record(JSON.stringify({ argv, cwd: process.cwd(), env: process.env }));
 // `--record-exit`: a SIGTERM ends it with exit 143 (not by the signal), and every exit leaves
 // `{"exited":<pid>}` in the record, so a test can order it against the starts around it.
 if (argv.includes("--record-exit")) {
   process.on("SIGTERM", () => process.exit(143));
   process.on("exit", () => record(JSON.stringify({ exited: process.pid })));
 }
+record(JSON.stringify({ argv, cwd: process.cwd(), env: process.env }));
 if (argv.includes("--fail-resume") && argv.includes("--resume")) {
   process.stderr.write("No conversation found with session ID\n");
   process.exit(1);

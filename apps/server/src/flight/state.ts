@@ -36,7 +36,7 @@ import {
   inLane,
   LANE_LABEL_PREFIX,
   OWNER_OPERATOR,
-  PRIORITIES,
+  priorityRank,
   READY_LABEL,
   RULING_PARK,
   type Run,
@@ -302,11 +302,6 @@ export function flightArrivalSource(
   }
   return { text: n.title, arrivedAt: n.updatedAt };
 }
-
-const priorityRank = (p: string | null): number => {
-  const i = (PRIORITIES as readonly (string | null)[]).indexOf(p);
-  return i === -1 ? PRIORITIES.length : i;
-};
 
 /** Per store, the PRs already listed as merged or closed (`repo#number:state`): each is listed once. */
 const shownByStore = new WeakMap<Store, Set<string>>();

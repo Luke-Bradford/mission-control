@@ -4,6 +4,10 @@ import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
 import type { LoopPhase } from "./types.ts";
 
+/** How a notification relates to what the person already knows. */
+export const CATCH_UP_KINDS = ["new", "follow-up", "old"] as const;
+export type CatchUpKind = (typeof CATCH_UP_KINDS)[number];
+
 // The FLIGHT seat: the head agent that runs the crew. It is the one `watch` seat, started with no
 // ticket, and it keeps a log of what it decided (`flight_decisions`).
 
@@ -704,7 +708,7 @@ export interface FlightWatchEntry {
   state: "warn" | "info" | "ok";
   title: string;
   detail: string;
-  catchUp: { kind: "new" | "follow-up" | "old"; line: string };
+  catchUp: { kind: CatchUpKind; line: string };
   next: string;
   action?: FlightWatchAction;
   updatedAt?: number;

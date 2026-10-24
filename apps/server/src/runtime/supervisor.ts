@@ -49,6 +49,7 @@ import {
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   eligibleToStart,
+  errorText as errText,
   GUARD_CHECK_PATH,
   GUARD_HOOK_TIMEOUT_S,
   guardHookCommand,
@@ -510,8 +511,6 @@ interface Live {
   /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
   awaitingAtAttach: boolean;
 }
-
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** `get_context_usage`'s answer, or null when it is not the shape the CLI sends (spike). */
 function toContextUsage(v: unknown): ContextUsage | null {
