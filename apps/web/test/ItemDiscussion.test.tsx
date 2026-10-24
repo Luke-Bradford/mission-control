@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ItemDiscussion as Discussion } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ItemDiscussion } from "../src/comms/ItemDiscussion.tsx";
 import { hub } from "../src/data.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
@@ -120,4 +120,78 @@ it("keeps the fly-out and composer within a narrow screen", () => {
   expect(css.match(/#discuss \.expandable.open \.expandable-content \{([^}]*)\}/)?.[1]).toContain(
     "max-height: none",
   );
+});
+
+it("focuses and scrolls once per item, preserving focus and folds through refresh and reconnect", async () => {
+  stubFetch({ [path("a")]: thread("a"), [path("b")]: thread("b") });
+  const scroll = vi.fn();
+  const original = HTMLElement.prototype.scrollIntoView;
+  HTMLElement.prototype.scrollIntoView = scroll;
+  try {
+    const view = render(<ItemDiscussion itemKey="a" live focus />);
+    const input = screen.getByLabelText("Ask FLIGHT about this");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: "nearest" });
+    view.rerender(<ItemDiscussion itemKey="a" live collapsed />);
+    const details = screen.getByText("Conversation with FLIGHT").closest("details");
+    expect(details?.open).toBe(true);
+    expect(document.activeElement).toBe(input);
+    fireEvent.click(screen.getByText("Conversation with FLIGHT"));
+    expect(details?.open).toBe(false);
+    const summary = screen.getByText("Conversation with FLIGHT");
+    summary.focus();
+    view.rerender(<ItemDiscussion itemKey="a" live={false} focus />);
+    view.rerender(<ItemDiscussion itemKey="a" live focus />);
+    await act(async () => {});
+    expect(document.activeElement).toBe(summary);
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(details?.open).toBe(false);
+    view.rerender(<ItemDiscussion itemKey="b" live focus />);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this")),
+    );
+    expect(screen.getByText("Conversation with FLIGHT").closest("details")?.open).toBe(true);
+    expect(scroll).toHaveBeenCalledTimes(2);
+  } finally {
+    HTMLElement.prototype.scrollIntoView = original;
+  }
+});
+
+it("labels message and receipt folds", async () => {
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(500);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(40);
+  const discussion = thread("a");
+  discussion.messages.push({
+    id: "m",
+    itemKey: "a",
+    correlationId: discussion.id,
+    role: "flight",
+    text: "Long reply",
+    at: 1,
+  });
+  discussion.messages.push({
+    id: "m2",
+    itemKey: "a",
+    correlationId: discussion.id,
+    role: "flight",
+    text: "Another reply",
+    at: 2,
+  });
+  stubFetch({ [path("a")]: discussion });
+  render(<ItemDiscussion itemKey="a" live receipt={{ id: "receipt", text: "Long answer" }} />);
+  expect(await screen.findByRole("button", { name: "Show more, FLIGHT’s message 1" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Show more, FLIGHT’s message 2" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Show more, Your answer" })).toBeTruthy();
+  vi.restoreAllMocks();
+});
+
+it("does not take focus when FLIGHT comes online after mounting offline", async () => {
+  stubFetch({ [path("a")]: thread("a") });
+  const view = render(<ItemDiscussion itemKey="a" live={false} focus />);
+  await screen.findByText("No messages yet.");
+  const elsewhere = screen.getByRole("button", { name: "Refresh discussion" });
+  elsewhere.focus();
+  view.rerender(<ItemDiscussion itemKey="a" live focus />);
+  await act(async () => {});
+  expect(document.activeElement).toBe(elsewhere);
 });

@@ -1,5 +1,5 @@
 import type { AttentionBrief, AttentionItem, BriefOption } from "@mc/core";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Expandable } from "../components/Expandable.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { hub, RESOURCES } from "../data.ts";
@@ -39,6 +39,7 @@ export function ItemBrief({
   afterOriginal,
   catchUp,
   viewLinks,
+  approval = false,
 }: {
   brief?: AttentionBrief;
   original?: ReactNode;
@@ -46,8 +47,9 @@ export function ItemBrief({
   afterOriginal?: ReactNode;
   catchUp?: ReactNode;
   viewLinks?: ReactNode;
+  approval?: boolean;
 }) {
-  const ask = brief?.ask?.trim() || brief?.recommendation;
+  const ask = brief?.ask?.trim();
   return (
     <div className="brief">
       {brief?.catchUp ? (
@@ -92,7 +94,7 @@ export function ItemBrief({
       {brief && (
         <>
           <BriefSection
-            title="FLIGHT's view"
+            title={approval ? "If you approve" : "FLIGHT's view"}
             after={
               <>
                 {brief.basis && <p className="note">checked: {brief.basis}</p>}
@@ -171,7 +173,7 @@ function TextList({ title, lines }: { title: string; lines?: string[] }) {
 
 /**
  * One button per option. In the panel each is a card with its answer under the label (a plain card
- * when `live` is false); in a row it is a small button with the answer as its title.
+ * when `live` is false); a row puts its buttons above the visible option descriptions.
  */
 export function BriefOptions(p: {
   options: BriefOption[];
@@ -182,27 +184,54 @@ export function BriefOptions(p: {
   disabled: boolean;
   title?: string;
   variant: "panel" | "row";
+  rowLabel?: string;
   onPick: (o: BriefOption) => void;
 }) {
+  const labelId = useId();
   if (p.options.length === 0) return null;
   if (p.variant === "row") {
     return (
-      <div className="nopts">
-        {p.options.map((o, i) => (
-          <button
-            type="button"
-            className={p.primaryFirst && i === 0 ? "sm primary" : "sm"}
-            // Labels can repeat, so the text is no key; the list never reorders.
-            // biome-ignore lint/suspicious/noArrayIndexKey: position is the only id, see above
-            key={i}
-            title={p.title ?? o.answer}
-            disabled={p.disabled}
-            onClick={() => p.onPick(o)}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      <>
+        {p.recommendation && <Recommendation text={p.recommendation} />}
+        {/* biome-ignore lint/a11y/useSemanticElements: group labels action buttons, not form fields */}
+        <div role="group" aria-labelledby={p.rowLabel ? labelId : undefined}>
+          {p.rowLabel && (
+            <span className="bsec" id={labelId}>
+              {p.rowLabel}
+            </span>
+          )}
+          <div className="nopts">
+            {p.options.map((o, i) => (
+              <button
+                type="button"
+                className={p.primaryFirst && i === 0 ? "sm primary" : "sm"}
+                // Labels can repeat, so the text is no key; the list never reorders.
+                // biome-ignore lint/suspicious/noArrayIndexKey: position is the only id, see above
+                key={i}
+                title={p.title}
+                disabled={p.disabled || !p.live}
+                onClick={() => p.onPick(o)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="optlist">
+            {p.options.map((o, i) => (
+              <OptionCard
+                {...p}
+                key={o.id ?? i}
+                option={o}
+                of={`${o.label}, option ${i + 1}`}
+                recommended={o.id !== undefined && o.id === p.recommendedOptionId}
+                recommendation={undefined}
+                live={false}
+              />
+            ))}
+          </div>
+          {(p.disabled || !p.live) && p.title && <p className="note">{p.title}</p>}
+        </div>
+      </>
     );
   }
   return (
@@ -216,16 +245,19 @@ export function BriefOptions(p: {
         <OptionCard
           key={o.id ?? i}
           option={o}
+          of={`${o.label}, option ${i + 1}`}
           recommended={o.id !== undefined && o.id === p.recommendedOptionId}
           {...p}
         />
       ))}
+      {(p.disabled || !p.live) && p.title && <p className="note">{p.title}</p>}
     </div>
   );
 }
 
 function OptionCard(p: {
   option: BriefOption;
+  of: string;
   recommended: boolean;
   recommendation?: string;
   live: boolean;
@@ -250,13 +282,13 @@ function OptionCard(p: {
       ) : (
         label
       )}
-      <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+      <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={p.of}>
         <span className="xs fg2">{p.option.description ?? p.option.answer}</span>
       </Expandable>
       {p.recommended &&
         (p.recommendation?.trim() &&
         p.recommendation.trim() !== (p.option.description ?? p.option.answer).trim() ? (
-          <Recommendation text={p.recommendation} />
+          <Recommendation text={p.recommendation} of={`Recommendation, ${p.of}`} />
         ) : (
           <span className="pill plain">FLIGHT recommends</span>
         ))}
@@ -264,12 +296,12 @@ function OptionCard(p: {
   );
 }
 
-export function Recommendation({ text }: { text: string }) {
+export function Recommendation({ text, of = "Recommendation" }: { text: string; of?: string }) {
   if (!text.trim()) return null;
   return (
     <div className="recommendation">
       <span className="pill plain">FLIGHT recommends</span>
-      <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+      <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={of}>
         <Markdown text={text} />
       </Expandable>
     </div>

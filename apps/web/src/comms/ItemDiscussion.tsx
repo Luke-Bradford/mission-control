@@ -7,22 +7,30 @@ import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
 
 type Receipt = { id: string; text: string; note?: string };
 
-export function ItemDiscussion(p: {
+type ItemDiscussionProps = {
   itemKey: string;
   live: boolean;
   title?: string;
   receipt?: Receipt;
   focus?: boolean;
   collapsed?: boolean;
-}) {
+};
+
+export function ItemDiscussion(p: ItemDiscussionProps) {
+  return <Conversation key={p.itemKey} {...p} />;
+}
+
+function Conversation(p: ItemDiscussionProps) {
+  const initialOpen = useRef(!p.collapsed || Boolean(p.receipt));
+  const initialFocus = useRef(p.focus);
+  const details = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    if (p.receipt && details.current) details.current.open = true;
+  }, [p.receipt]);
   return (
-    <details
-      className="item-conversation"
-      key={p.itemKey}
-      open={!p.collapsed || Boolean(p.receipt)}
-    >
+    <details ref={details} className="item-conversation" open={initialOpen.current}>
       <summary>Conversation with FLIGHT</summary>
-      <DiscussionBody {...p} />
+      <DiscussionBody {...p} focus={initialFocus.current} />
     </details>
   );
 }
@@ -41,17 +49,21 @@ function DiscussionBody({
   focus?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const initialFocus = useRef(focus && live);
   useEffect(() => {
     let active = true;
     // Let the panel remember its opener before moving focus into the conversation.
-    if (focus && live)
+    if (initialFocus.current)
       queueMicrotask(() => {
-        if (active) input.current?.focus({ preventScroll: true });
+        if (active && input.current) {
+          input.current.focus({ preventScroll: true });
+          input.current.scrollIntoView?.({ block: "nearest" });
+        }
       });
     return () => {
       active = false;
     };
-  }, [focus, live]);
+  }, []);
   const current = useResource<Discussion>(RESOURCES.discussion(itemKey));
   const resource = current.data ? RESOURCES.discussion(itemKey, current.data.id) : null;
   const history = useResource<Discussion>(resource);
@@ -99,11 +111,15 @@ function DiscussionBody({
         {discussion?.messages.length === 0 && !receipt && <p className="note">No messages yet.</p>}
         {discussion?.messages
           .filter((m) => m.itemKey === itemKey && m.correlationId === discussion?.id)
-          .map((m) => (
+          .map((m, i) => (
             <div className={`dmsg ${m.role === "operator" ? "you" : "flight"}`} key={m.id}>
               <span className="who">{m.role === "operator" ? "You" : "FLIGHT"}</span>
               <div className="txt">
-                <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+                <Expandable
+                  lines={BRIEF_LINES}
+                  foldAfter={BRIEF_FOLD_AFTER}
+                  of={`${m.role === "operator" ? "Your" : "FLIGHT’s"} message ${i + 1}`}
+                >
                   {m.text}
                 </Expandable>
               </div>
@@ -117,7 +133,7 @@ function DiscussionBody({
             <div className="dmsg you">
               <span className="who">You</span>
               <div className="txt">
-                <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+                <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of="Your answer">
                   {receipt.text}
                 </Expandable>
               </div>
