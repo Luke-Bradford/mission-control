@@ -3,9 +3,12 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -69,6 +72,37 @@ describe("toolchain read grants", () => {
     expect(() => crewToolchainPaths(process.execPath, entry)).toThrow(/contains pnpm store/);
   });
 
+  it("caches store discovery across binary aliases and refreshes after an upgrade", () => {
+    const install = join(dir, "package");
+    const entry = pnpmPackage(install, join(dir, "store"));
+    const calls = join(dir, "calls");
+    writeFileSync(entry, `${readFileSync(entry, "utf8")}printf x >> '${calls}'\n`);
+    const link = join(dir, "pnpm");
+    symlinkSync(entry, link);
+    crewToolchainPaths(process.execPath, link);
+    crewToolchainPaths(process.execPath, entry);
+    expect(readFileSync(calls, "utf8")).toBe("x");
+
+    const modified = statSync(entry).mtimeMs / 1000 + 10;
+    pnpmPackage(install, join(install, "store"));
+    utimesSync(entry, modified, modified);
+    expect(() => crewToolchainPaths(process.execPath, link)).toThrow(/contains pnpm store/);
+  });
+
+  it("refreshes store discovery when a pnpm link changes target with the same mtime", () => {
+    const entry = pnpmPackage(join(dir, "first"), join(dir, "store"));
+    const other = pnpmPackage(join(dir, "second"), join(dir, "second/store"));
+    const modified = new Date("2026-01-01T00:00:00Z");
+    utimesSync(entry, modified, modified);
+    utimesSync(other, modified, modified);
+    const link = join(dir, "pnpm");
+    symlinkSync(entry, link);
+    crewToolchainPaths(process.execPath, link);
+    rmSync(link);
+    symlinkSync(other, link);
+    expect(() => crewToolchainPaths(process.execPath, link)).toThrow(/contains pnpm store/);
+  });
+
   it.each([".", "nested-home"])("refuses a package at or above home (%s)", (home) => {
     const entry = pnpmPackage(dir, join(dir, "store"));
     vi.stubEnv("HOME", join(dir, home));
@@ -94,6 +128,67 @@ describe("toolchain read grants", () => {
 });
 
 describe("global git config read grants", () => {
+  it("grants configured ignore and attributes files through includes, tilde paths and symlinks", async () => {
+    const home = join(dir, "home");
+    const repo = join(dir, "repo");
+    mkdirSync(home);
+    vi.stubEnv("HOME", home);
+    execFileSync("git", ["init", "-q", repo]);
+    const ignores = file(join(dir, "files/ignores"), "ignored\n");
+    const attributes = file(join(dir, "files/attributes"), "* text=auto\n");
+    symlinkSync(ignores, join(home, "ignores"));
+    symlinkSync(attributes, join(home, "attributes"));
+    file(join(home, ".gitconfig"), "[include]\npath = settings/git\n");
+    file(
+      join(home, "settings/git"),
+      `[core]\nexcludesFile = ~/ignores\nattributesFile = ${home}/attributes\n`,
+    );
+    const { allowRead } = await crewGitConfigPaths(repo, join(repo, ".git"));
+    expect(allowRead).toContain(ignores);
+    expect(allowRead).toContain(attributes);
+    expect(allowRead).not.toContain(join(dir, "files"));
+    expect(allowRead).not.toContain(home);
+  });
+
+  it("resolves relative core file paths against the checkout and uses the last configured value", async () => {
+    vi.stubEnv("HOME", dir);
+    const repo = join(dir, "repo");
+    execFileSync("git", ["init", "-q", repo]);
+    file(
+      join(dir, ".gitconfig"),
+      "[core]\nexcludesFile = old\nexcludesFile = ignores\nattributesFile = attributes\n",
+    );
+    const { allowRead } = await crewGitConfigPaths(repo, join(repo, ".git"));
+    expect(allowRead).toContain(join(repo, "ignores"));
+    expect(allowRead).toContain(join(repo, "attributes"));
+    expect(allowRead).not.toContain(join(repo, "old"));
+    expect(allowRead).not.toContain(join(dir, "ignores"));
+  });
+
+  it("discovers the seat's default XDG config, includes and core files despite the hub's override", async () => {
+    vi.stubEnv("HOME", dir);
+    const repo = join(dir, "repo");
+    execFileSync("git", ["init", "-q", repo]);
+    const override = join(dir, "override");
+    vi.stubEnv("XDG_CONFIG_HOME", override);
+    for (const [config, prefix] of [
+      [join(dir, ".config/git/config"), "seat"],
+      [join(override, "git/config"), "hub"],
+    ]) {
+      file(config, `[include]\npath = ~/${prefix}-include\n`);
+      file(
+        join(dir, `${prefix}-include`),
+        `[core]\nexcludesFile = ~/${prefix}-ignores\nattributesFile = ~/${prefix}-attributes\n`,
+      );
+    }
+    const { allowRead } = await crewGitConfigPaths(repo, join(repo, ".git"));
+    for (const suffix of ["include", "ignores", "attributes"]) {
+      expect(allowRead).toContain(join(dir, `seat-${suffix}`));
+      expect(allowRead).not.toContain(join(dir, `hub-${suffix}`));
+    }
+    expect(process.env.XDG_CONFIG_HOME).toBe(override);
+  });
+
   it("resolves config symlinks, relative and tilde includes, conditional and nested includes", async () => {
     const home = join(dir, "home");
     const repo = join(dir, "repo");

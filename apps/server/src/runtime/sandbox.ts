@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { realish } from "../config.ts";
 import { crewGit } from "./git.ts";
 
-/** Global config and include targets, resolved before constructing the sandbox's read grants. */
+/** Global config, includes and configured files, resolved before constructing read grants. */
 export async function crewGitConfigPaths(
   cwd: string,
   commonDir: string,
@@ -14,6 +14,8 @@ export async function crewGitConfigPaths(
   for (const [option, key] of [
     ["--get-all", "include.path"],
     ["--get-regexp", "^includeif\\..*\\.path$"],
+    ["--get", "core.excludesFile"],
+    ["--get", "core.attributesFile"],
   ] as const) {
     let out: string;
     try {
@@ -21,6 +23,8 @@ export async function crewGitConfigPaths(
         cwd,
         ["config", "--global", "--includes", "--null", "--show-origin", "--path", option, key],
         commonDir,
+        // Seats do not inherit XDG_CONFIG_HOME; discover the same ~/.config/git files they read.
+        { env: { XDG_CONFIG_HOME: undefined } },
       );
     } catch (e) {
       // git config exits 1 when there are no matching keys. Other errors must not hide config.
@@ -35,7 +39,9 @@ export async function crewGitConfigPaths(
       const value = option === "--get-regexp" ? entry.slice(entry.indexOf("\n") + 1) : entry;
       if (value === "") continue;
       const source = origin.slice(5);
-      allowRead.push(realish(resolve(dirname(resolve(cwd, source)), value)));
+      // Includes are relative to their config file; core file paths are relative to git's cwd.
+      const base = option === "--get" ? cwd : dirname(resolve(cwd, source));
+      allowRead.push(realish(resolve(base, value)));
     }
   }
   return {

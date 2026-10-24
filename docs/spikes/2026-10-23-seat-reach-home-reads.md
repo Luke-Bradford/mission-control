@@ -57,7 +57,7 @@ The review probed the real CLI sandbox on **Claude Code 2.1.302**:
 | Rule arrangement | Observed result |
 |---|---|
 | A deny nested inside an allowed parent | The nested path is denied. |
-| A grant equal to or inside a denied path | The grant reopens that path. |
+| A grant equal to or inside a denied path | The grant reopens that path only when the deny is not itself inside an allowed parent. A grant inside a deny nested under an allowed parent stays denied. |
 | A symlink to a denied file | Reading through the symlink is denied. |
 
 Consequently, extra and computed read grants must never equal or lie inside credential,

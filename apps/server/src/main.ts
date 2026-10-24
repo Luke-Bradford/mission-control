@@ -27,6 +27,7 @@ import { fetchCardNow, fetchTicket, githubToken, makeGql } from "./collectors/gi
 import {
   ConfigError,
   crewAllowed,
+  DEFAULT_DB_PATH,
   findHubRoot,
   isPreview,
   loadConfig,
@@ -70,9 +71,7 @@ async function main(): Promise<void> {
   const configPath =
     process.env.MC_CONFIG ?? join(homedir(), ".config", "mission-control", "config.yaml");
   // absolute: the crew's prompt and transcript paths derive from it, and a seat runs elsewhere
-  const dbPath = resolve(
-    process.env.MC_DB ?? join(homedir(), ".local", "share", "mission-control", "mc.sqlite"),
-  );
+  const dbPath = resolve(process.env.MC_DB ?? join(homedir(), DEFAULT_DB_PATH));
 
   let config: ReturnType<typeof loadConfig>;
   let port: number;

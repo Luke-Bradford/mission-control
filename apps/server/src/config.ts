@@ -57,6 +57,9 @@ import { SAFE_CONFIG } from "./runtime/git.ts";
 export const REPO_AUTONOMIES = ["draft", "merge"] as const;
 export type RepoAutonomy = (typeof REPO_AUTONOMIES)[number];
 
+/** Relative to the operator's home directory. */
+export const DEFAULT_DB_PATH = ".local/share/mission-control/mc.sqlite";
+
 export interface AdoptedLoop {
   id: AgentId;
   repoId: RepoId;
@@ -704,12 +707,12 @@ export function crewOwnFolders(crew: CrewConfig): string[] {
  * followed by `<repo>` itself, the repo's main working tree (`~/code/shop-app`), unless that folder is
  * or holds one the seat needs (`crewOwnFolders`). Each by its real path (a folder that doesn't
  * exist yet by its deepest existing ancestor's), since the sandbox matches real paths. `extra`
- * (a review seat's session-mates' worktrees) comes last.
+ * (a review seat's session-mates' worktrees) comes last. A null sessionId includes every session.
  */
 export function seatDenyRead(
   config: CcConfig,
   hubRoot: string,
-  sessionId: string,
+  sessionId: string | null,
   extra: readonly string[] = [],
 ): string[] {
   const own = config.crew ? crewOwnFolders(config.crew) : [];
@@ -1020,10 +1023,14 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null, dbPath: string): v
   const lower = (p: string) => realish(p).toLowerCase();
   const ownFolders = crewOwnFolders(crew).map(lower);
   const crewDirs = [crew.worktrees, ...crew.sessions.map((s) => s.checkout)].map(lower);
+  // With multiple sessions, each is denied by another. Discover the shared git paths only once.
+  const sessionDenied = crew.sessions.length
+    ? seatDenyRead(cfg, hubRootPath, crew.sessions.length === 1 ? crew.sessions[0].id : null)
+    : [];
   const denied = [
     ...SANDBOX_DENY_READ_HOME.map((p) => join(homedir(), p)),
     dirname(resolve(dbPath)),
-    ...crew.sessions.flatMap((session) => seatDenyRead(cfg, hubRootPath, session.id)),
+    ...sessionDenied,
   ].map(lower);
   for (const p of crew.allowRead ?? []) {
     if (!isAbsolute(p)) throw new ConfigError("crew.allow_read", `${p} is not an absolute path`);
@@ -1241,10 +1248,13 @@ export function parseConfig(
   checkCrew(
     cfg,
     guard ? guard.hubRoot : findHubRoot(),
-    guard?.dbPath ?? process.env.MC_DB ?? join(homedir(), ".local/share/mission-control/mc.sqlite"),
+    guard?.dbPath ?? process.env.MC_DB ?? join(homedir(), DEFAULT_DB_PATH),
   );
   return cfg;
 }
+
+/** Store discovery is synchronous; reuse it until the resolved pnpm binary changes. */
+const pnpmStores = new Map<string, { mtimeMs: number; path: string }>();
 
 /** Resolved executable files, plus only a verified pnpm package's supporting libraries. */
 export function crewToolchainPaths(node: string | null, pnpm: string | null): string[] {
@@ -1252,7 +1262,8 @@ export function crewToolchainPaths(node: string | null, pnpm: string | null): st
     .filter((p): p is string => p !== null)
     .map((p) => realpathSync(p));
   if (pnpm !== null) {
-    const bin = dirname(realpathSync(pnpm));
+    const executable = realpathSync(pnpm);
+    const bin = dirname(executable);
     if (basename(bin) === "bin") {
       const install = dirname(bin);
       let name: unknown;
@@ -1265,19 +1276,25 @@ export function crewToolchainPaths(node: string | null, pnpm: string | null): st
         if (isInside(realish(homedir()).toLowerCase(), install.toLowerCase())) {
           throw new Error(`pnpm package grant ${install} is home or holds home`);
         }
-        const storePath = execFileSync(pnpm, ["store", "path"], {
-          // Inspect the resolved executable without downloading a project-pinned pnpm.
-          env: {
-            ...process.env,
-            npm_config_manage_package_manager_versions: "false",
-            pnpm_config_pm_on_fail: "ignore",
-          },
-          encoding: "utf8",
-          timeout: GIT_TIMEOUT_MS,
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        if (!isAbsolute(storePath))
-          throw new Error("pnpm store path did not report an absolute path");
+        const mtimeMs = statSync(executable).mtimeMs;
+        const cached = pnpmStores.get(executable);
+        let storePath = cached?.mtimeMs === mtimeMs ? cached.path : undefined;
+        if (storePath === undefined) {
+          storePath = execFileSync(executable, ["store", "path"], {
+            // Inspect the resolved executable without downloading a project-pinned pnpm.
+            env: {
+              ...process.env,
+              npm_config_manage_package_manager_versions: "false",
+              pnpm_config_pm_on_fail: "ignore",
+            },
+            encoding: "utf8",
+            timeout: GIT_TIMEOUT_MS,
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim();
+          if (!isAbsolute(storePath))
+            throw new Error("pnpm store path did not report an absolute path");
+          pnpmStores.set(executable, { mtimeMs, path: storePath });
+        }
         const store = realish(storePath);
         if (isInside(store.toLowerCase(), install.toLowerCase())) {
           throw new Error(`pnpm package grant ${install} contains pnpm store ${store}`);
