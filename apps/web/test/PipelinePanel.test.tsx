@@ -45,8 +45,8 @@ describe("Pipeline", () => {
       const card = within(stage).getByRole("link");
       expect(card.getAttribute("href")).toBe(`/board/sample-app/${i + 1}`);
       expect(card.textContent).toContain(`PR #${i + 20}`);
-      expect(card.textContent).toContain(i ? "seat-1" : "waiting on you");
-      expect(within(card).getByText("2m")).toBeTruthy();
+      expect(card.title).toContain(i ? "seat-1" : "waiting on you");
+      expect(card.title).toContain("2m");
       for (const state of ["pass", "fail", "pending"]) {
         expect(within(card).getByRole("img", { name: `CI ${state}` }).className).toContain(state);
       }
@@ -63,8 +63,8 @@ describe("Pipeline", () => {
     render(<PipelinePanel />);
     const stage = await screen.findByRole("region", { name: "Merged today" });
     const link = within(stage).getByRole("link");
-    expect(link.textContent).toContain("merged");
-    expect(link.textContent).not.toContain("waiting on you");
+    expect(link.title).toContain("merged");
+    expect(link.title).not.toContain("waiting on you");
   });
 
   it("keeps multiple merged PRs for one ticket distinct across live updates", async () => {
@@ -100,7 +100,7 @@ describe("Pipeline", () => {
     }
   });
 
-  it("caps cards at six using the total count for the stage Board link", async () => {
+  it("caps cards at three using the total count for the stage Board link", async () => {
     const ready = pipeline[0] as PipelineStage;
     const card = ready.cards[0];
     if (!card) throw new Error("missing card");
@@ -119,11 +119,11 @@ describe("Pipeline", () => {
     });
     render(<PipelinePanel />);
     const stage = await screen.findByRole("region", { name: "Ready" });
-    expect(within(stage).getAllByRole("link")).toHaveLength(7);
-    expect(within(stage).getByRole("link", { name: "+3 more" }).getAttribute("href")).toBe(
+    expect(within(stage).getAllByRole("link")).toHaveLength(4);
+    expect(within(stage).getByRole("link", { name: "+6 more" }).getAttribute("href")).toBe(
       "/board?stage=ready",
     );
-    expect(within(stage).queryByText("Ticket 7")).toBeNull();
+    expect(within(stage).queryByText(/Ticket 4/)).toBeNull();
   });
 
   it("keeps empty stages and refetches the selected session on SSE invalidation", async () => {
@@ -137,6 +137,6 @@ describe("Pipeline", () => {
     await act(async () => {
       hub.refetchTopic("boards");
     });
-    expect(await screen.findByText("Ticket 1")).toBeTruthy();
+    expect(await screen.findByText(/Ticket 1/)).toBeTruthy();
   });
 });

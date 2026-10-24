@@ -61,7 +61,7 @@ export function TimelinePanel() {
   });
   return (
     <Panel id="timelineP" title="Timeline" sub="last 60 minutes">
-      <div className="pb">
+      <div className="pb scroll">
         <div className="overview-axis num muted">
           {["-60m", "-45m", "-30m", "-15m", "now"].map((label) => (
             <span key={label}>{label}</span>

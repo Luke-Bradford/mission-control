@@ -2,13 +2,19 @@ import { useSecond } from "../clock.ts";
 import { streamStatus } from "../data.ts";
 import { useStore } from "./store.ts";
 
-/** Freshness of observable SSE messages; server heartbeat comments are invisible to EventSource. */
+/** Connection state and observable message age; quiet open streams remain connected. */
 export function LiveIndicator() {
-  const { connected, lastMessageAt } = useStore(streamStatus);
+  const { connected, reconnecting, lastMessageAt } = useStore(streamStatus);
   const now = useSecond();
   const age = lastMessageAt === null ? null : Math.max(0, now - lastMessageAt);
-  const state = !connected ? "down" : age === null || age > 15_000 ? "stale" : "fresh";
-  const text = !connected ? "reconnecting" : age === null ? "—" : `${Math.floor(age / 1000)}s`;
+  const state = connected ? "fresh" : reconnecting ? "down" : "connecting";
+  const text = connected
+    ? age === null
+      ? "—"
+      : `${Math.floor(age / 1000)}s`
+    : reconnecting
+      ? "reconnecting"
+      : "connecting";
   return (
     <span className={`live-indicator num ${state}`} title="Age of the last SSE message">
       <i aria-hidden="true" />

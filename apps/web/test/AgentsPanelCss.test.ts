@@ -3,17 +3,25 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 
 const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
-it("sizes Agents to its rows and gives Activity the remaining height", () => {
-  expect(css).toMatch(/\.overview-crew \{\s*flex: none/);
-  expect(css).toMatch(/\.overview-crew \{[^}]*display: flex;[^}]*flex-wrap: wrap/);
-  expect(css).toMatch(/\.overview-crew > #agentsP \{\s*flex: 999 1 820px/);
-  expect(css).toMatch(/\.overview-crew > #timelineP \{\s*flex: 1 1 420px/);
-  expect(css).toMatch(/#agentsList \{\s*overflow: visible/);
-  expect(css).toMatch(/\.ov > \.col \{\s*overflow: visible/);
-  expect(css).toMatch(/\.ov > #actP \{\s*min-height: 240px;\s*align-self: stretch/);
-  expect(css).toMatch(/grid-template-columns: minmax\(0, 1fr\) 300px/);
-  expect(css).not.toContain("min-height: calc(100dvh - 130px)");
-  expect(css).not.toContain("#agentsP .scroll");
+it("caps Agents by its rows and gives the remaining grid rows to the scrolling panels", () => {
+  expect(css).toMatch(/\.overview-grid \{[^}]*min-height: 0;[^}]*display: grid/);
+  expect(css).toMatch(
+    /\.overview-grid \{[^}]*grid-template-rows: auto fit-content\(38%\) minmax\(0, 1fr\) minmax\(0, 1fr\)/,
+  );
+  expect(css).toMatch(
+    /\.overview-kpis \{[^}]*grid-template-columns: repeat\(8, minmax\(0, 1fr\)\)/,
+  );
+  expect(css).toMatch(
+    /\.overview-work \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/,
+  );
+  expect(css).toMatch(/\.ov \{[^}]*grid-template-columns: minmax\(0, 1fr\) 320px/);
+  expect(css).toMatch(/#agentsList \{\s*min-height: 0;\s*overflow: auto/);
+  expect(css).toMatch(
+    /\.ov > \.col \{[^}]*grid-template-rows: minmax\(0, 1fr\) minmax\(0, 1fr\);[^}]*overflow: hidden/,
+  );
+  expect(css).toMatch(/\.overview-grid > \*,[\s\S]*?\.ov > \.panel \{[\s\S]*?overflow: hidden/);
+  expect(css).toMatch(/\.ov > \.col > \.panel > \.pb \{\s*min-height: 0;\s*overflow: auto/);
+  expect(css).toMatch(/\.panel > \.pb\.scroll \{\s*flex: 1 1 auto/);
 });
 
 it("keeps all metrics on one padded line and only needs on line two", () => {

@@ -140,7 +140,8 @@ describe("doing lines and run rows (hud.css)", () => {
   });
 
   it("lets the desktop table shrink without a fixed minimum width", () => {
-    expect(rule("#agentsList")).toContain("overflow: visible");
+    expect(rule("#agentsList")).toContain("min-height: 0");
+    expect(rule("#agentsList")).toContain("overflow: auto");
     expect(rule(String.raw`#agentsList \.trow`)).toContain("min-width: 0");
     expect(templateOf(rule(String.raw`#agentsList \.trow`))).toHaveLength(9);
     expect(templateOf(rule(String.raw`#agentsList\.no-steps \.trow`))).toHaveLength(8);

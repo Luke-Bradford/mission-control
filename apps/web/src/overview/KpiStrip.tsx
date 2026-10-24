@@ -21,6 +21,7 @@ const change = (series: number[] | undefined): string => {
 export function KpiStrip() {
   const [session] = useSession();
   const { data: summary, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
+  const pending = !summary && !error;
   const k = summary?.kpis;
   const tiles = [
     {
@@ -103,7 +104,7 @@ export function KpiStrip() {
             : "Could not load overview metrics."}
         </div>
       )}
-      <section className="overview-kpis" aria-label="Overview metrics">
+      <section className="overview-kpis" aria-label="Overview metrics" aria-busy={pending}>
         {tiles.map((tile) => {
           const path = PAGE_PATHS[tile.page];
           const series = "series" in tile ? tile.series : undefined;
@@ -114,9 +115,15 @@ export function KpiStrip() {
               href={path}
               onClick={(e) => followLink(e, path)}
             >
-              <span className="lbl">{tile.label}</span>
-              <span className="v num">{tile.value}</span>
-              <span className="d num">{tile.delta}</span>
+              <span className="lbl" title={tile.label}>
+                {tile.label}
+              </span>
+              <span className="v num">
+                {pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
+              </span>
+              <span className="d num" title={pending ? undefined : tile.delta}>
+                {pending ? null : tile.delta}
+              </span>
               {series && series.length >= 2 ? (
                 <Sparkline
                   values={series}
@@ -125,7 +132,7 @@ export function KpiStrip() {
                 />
               ) : (
                 <span className="kpi-no-trend" title="History unavailable">
-                  —
+                  {pending ? null : "—"}
                 </span>
               )}
             </a>

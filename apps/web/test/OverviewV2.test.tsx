@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
-import { hub } from "../src/data.ts";
+import { hub, RESOURCES } from "../src/data.ts";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
@@ -13,6 +13,60 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
 });
+it.each([false, true])(
+  "renders the first full activity load and deltas, including an empty list: %s",
+  async (empty) => {
+    const at = Date.now();
+    const row = (text: string, time: number) => ({
+      at: time,
+      who: "seat",
+      kind: "run-start",
+      text,
+      ref: null,
+      url: null,
+      prs: [],
+      status: null,
+      summary: null,
+    });
+    const since = empty ? 0 : at - 1;
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = stubFetch({
+      "/api/activity": empty ? [] : [row("First activity", at)],
+      [`/api/activity?since=${since}`]: empty
+        ? []
+        : [row("First activity", at), row("Delta activity", at + 1)],
+      "/api/crew": { rows: [] },
+      "/api/config": CONFIG,
+      "/api/attention": [],
+    });
+    const answer = fetch.getMockImplementation();
+    if (!answer) throw new Error("Missing fetch stub");
+    fetch.mockImplementation(async (...args) => {
+      if (args[0].startsWith("/api/activity?")) await pending;
+      return answer(...args);
+    });
+    render(<ActivityPanel />);
+    expect(screen.getByText("Loading activity…")).toBeTruthy();
+    const visible = empty ? "No events yet." : "First activity";
+    expect(await screen.findByText(visible)).toBeTruthy();
+    expect(
+      fetch.mock.calls
+        .filter(([path]) => path.startsWith(RESOURCES.activity.path))
+        .map(([path]) => path),
+    ).toEqual([RESOURCES.activity.path]);
+    act(() => hub.refetchTopic("agents"));
+    expect(screen.getByText(visible)).toBeTruthy();
+    expect(screen.queryByText("Loading activity…")).toBeNull();
+    await act(async () => release());
+    expect(await screen.findByText(empty ? "No events yet." : "Delta activity")).toBeTruthy();
+    expect(screen.queryByText("Loading activity…")).toBeNull();
+    expect(fetch).toHaveBeenCalledWith(`/api/activity?since=${since}`, expect.anything());
+  },
+);
+
 it("filters each live log chip and remembers the selection", async () => {
   const kinds = ["run-start", "pr-opened", "pr-merged", "loop", "guard"];
   stubFetch({

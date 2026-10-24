@@ -394,7 +394,7 @@ export function ActivityPanel() {
             </div>
           );
         })}
-        {rows.length === 0 && resources.every((r) => r.data && !r.error && !r.loading) && (
+        {rows.length === 0 && resources.every((r) => r.data !== undefined && !r.error) && (
           <div className="pb muted">No events yet.</div>
         )}
         {resources.map((r) =>
@@ -404,7 +404,7 @@ export function ActivityPanel() {
                 ? `Could not refresh ${r.name}. Showing last known items.`
                 : `Could not load ${r.name}.`}
             </div>
-          ) : r.loading ? (
+          ) : r.data === undefined ? (
             <div key={r.name} className="pb muted">{`Loading ${r.name}…`}</div>
           ) : null,
         )}

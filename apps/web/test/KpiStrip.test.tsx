@@ -9,6 +9,45 @@ import { OVERVIEW } from "./fixtures.ts";
 const kpis = OVERVIEW.kpis;
 
 describe("KpiStrip", () => {
+  it("shows neutral skeletons until the first response, then renders zeros and flat sparklines", async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = stubFetch({
+      "/api/overview": {
+        ...OVERVIEW,
+        kpis: {
+          ...kpis,
+          working: { now: 0, of: 5, series: [0, 0, 0] },
+          spendToday: { usd: 0, perHour: [0, 0, 0] },
+        },
+      },
+    });
+    const answer = fetch.getMockImplementation();
+    if (!answer) throw new Error("Missing fetch stub");
+    fetch.mockImplementation(async (...args) => {
+      await ready;
+      return answer(...args);
+    });
+    const { container } = render(<KpiStrip />);
+    expect(screen.getByRole("region", { name: "Overview metrics" }).getAttribute("aria-busy")).toBe(
+      "true",
+    );
+    expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(8);
+    expect(screen.queryByText("—")).toBeNull();
+    await act(async () => release());
+    expect(await screen.findByText("$0.00")).toBeTruthy();
+    expect(
+      within(screen.getByRole("link", { name: /Agents working/ })).getByText("0"),
+    ).toBeTruthy();
+    expect(container.querySelectorAll(".kpi-skeleton")).toHaveLength(0);
+    const line = screen
+      .getByRole("img", { name: /Agents working/ })
+      .querySelector('path[fill="none"]');
+    expect(line?.getAttribute("d")).toBe("M0.0,16.0L26.0,16.0L52.0,16.0");
+  });
+
   it("formats eight linked metrics and labels the available histories honestly", async () => {
     stubFetch({ "/api/overview": { kpis } });
     render(<KpiStrip />);

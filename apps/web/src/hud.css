@@ -1029,8 +1029,34 @@ main > section {
   flex-direction: column;
   gap: 10px;
 }
-#page-overview > * {
+#page-overview > .nbanner {
   flex-shrink: 0;
+}
+.overview-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto fit-content(38%) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.overview-grid > *,
+.overview-work > .panel,
+.ov > .panel {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.overview-metrics {
+  overflow: auto;
+}
+.overview-grid .ph {
+  flex-shrink: 0;
+}
+.overview-work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 10px;
 }
 .nbanner {
   display: flex;
@@ -1081,31 +1107,23 @@ main > section {
   margin-top: 6px;
 }
 .ov {
-  flex: 1 0 0;
-  min-height: 420px;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   grid-template-rows: minmax(0, 1fr);
-  align-items: start;
-  gap: 12px;
+  gap: 10px;
 }
 .ov > .col {
-  overflow: visible;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  overflow: hidden;
 }
-.overview-crew {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: start;
+.ov > .col > .panel {
+  overflow: hidden;
 }
-.overview-crew > #agentsP {
-  flex: 999 1 820px;
-  min-width: 0;
-}
-.overview-crew > #timelineP {
-  flex: 1 1 420px;
-  min-width: 0;
+.ov > .col > .panel > .pb {
+  min-height: 0;
+  overflow: auto;
 }
 .overview-axis {
   margin-left: 100px;
@@ -1122,7 +1140,7 @@ main > section {
   grid-template-columns: 92px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  min-height: 30px;
+  height: 14px;
   color: var(--fg-2);
   text-decoration: none;
   font-size: 11px;
@@ -1132,21 +1150,21 @@ main > section {
 }
 .overview-track {
   position: relative;
-  height: 24px;
+  height: 14px;
   overflow: hidden;
   background: repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 25%);
 }
 .overview-span {
   position: absolute;
-  top: 7px;
+  top: 2px;
   height: 10px;
   border-radius: 2px;
 }
 .overview-tick {
   position: absolute;
-  top: 3px;
+  top: 1px;
   width: 1px;
-  height: 18px;
+  height: 12px;
   background: var(--fg-2);
 }
 .overview-legend {
@@ -1172,13 +1190,9 @@ main > section {
   background: var(--fg-2);
 }
 #agentsList {
-  overflow: visible;
+  min-height: 0;
+  overflow: auto;
   container: agents / inline-size;
-}
-.ov > #actP {
-  min-height: 240px;
-  align-self: stretch;
-  overflow: hidden;
 }
 #page-overview {
   container: overview / inline-size;
@@ -1192,18 +1206,10 @@ main > section {
 .crew-off {
   white-space: nowrap;
 }
-@container overview (width < 900px) {
-  .ov {
+@container overview (width < 1100px) {
+  .overview-work {
     grid-template-columns: minmax(0, 1fr);
-    flex: none;
-  }
-  .ov > #actP {
-    max-height: 360px;
-  }
-  .ov > .col {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-    align-items: start;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 .trow {
@@ -4388,8 +4394,9 @@ button.nrow.thread.tagged {
 }
 .pipeline-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  align-content: start;
+  gap: 8px;
 }
 .pipeline-stage {
   min-width: 0;
@@ -4412,44 +4419,42 @@ button.nrow.thread.tagged {
 }
 .pipeline-stage h3 {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
   margin: 0;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--stage-colour);
   font-size: var(--fs);
 }
 .pipeline-oldest {
-  margin: 5px 0 8px;
+  margin-left: auto;
 }
 .pipeline-card {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 6px;
-  padding: 9px;
-  margin-bottom: 6px;
+  padding: 3px 6px;
+  margin-top: 3px;
   border: 1px solid var(--line);
   border-radius: var(--r-s);
   background: var(--surface-2);
   color: var(--fg);
   text-decoration: none;
-  overflow-wrap: anywhere;
 }
 .pipeline-card:hover {
   border-color: var(--stage-colour);
 }
 .pipeline-title {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
-}
-.pipeline-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  text-overflow: ellipsis;
 }
 .pipeline-ci {
   display: flex;
+  flex-shrink: 0;
   gap: 4px;
 }
 .pipeline-dot {
@@ -4473,14 +4478,17 @@ button.nrow.thread.tagged {
 /* Overview v2 metrics and stream freshness. */
 .overview-kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 8px;
 }
 .overview-kpi {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px 8px;
-  padding: 12px;
+  min-width: 0;
+  height: 64px;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  grid-template-rows: auto auto auto;
+  gap: 0 4px;
+  padding: 5px 8px;
   border: 1px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
@@ -4493,10 +4501,16 @@ button.nrow.thread.tagged {
 }
 .overview-kpi .lbl,
 .overview-kpi .d {
-  grid-column: 1 / -1;
+  line-height: 12px;
+  grid-column: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .overview-kpi .v {
-  font-size: 26px;
+  grid-column: 1;
+  grid-row: 2;
+  font-size: 22px;
   line-height: 1.2;
 }
 .overview-kpi .d,
@@ -4507,8 +4521,22 @@ button.nrow.thread.tagged {
 .overview-kpi .spark,
 .kpi-no-trend {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1 / -1;
+  width: 40px;
   align-self: center;
+}
+.kpi-skeleton {
+  display: block;
+  width: 70%;
+  height: 16px;
+  margin: 5px 0;
+  border-radius: 3px;
+  background: var(--line);
+}
+@container overview (width < 1100px) {
+  .overview-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 .live-indicator {
   display: inline-flex;
@@ -4518,7 +4546,7 @@ button.nrow.thread.tagged {
   font-size: var(--fs-xs);
   color: var(--ok);
 }
-.live-indicator.stale {
+.live-indicator.connecting {
   color: var(--warn);
 }
 .live-indicator.down {
