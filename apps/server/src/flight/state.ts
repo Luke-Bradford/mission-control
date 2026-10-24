@@ -107,6 +107,50 @@ export function operatorItems(
   ).filter((i) => i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT);
 }
 
+/** All items awaiting FLIGHT triage, before the digest's display cap. */
+export function flightTriageItems(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  hubLogin: string | null,
+  rows?: ReturnType<typeof crew>["rows"],
+  lock: TestLockState = NO_LOCK,
+): AttentionItem[] {
+  const flightId = flightSeat(config)?.seat.id ?? null;
+  if (flightId === null) return [];
+  const questionKeys = new Set(
+    store
+      .openQuestions()
+      .filter(
+        (q) => q.agentId !== flightId && q.passedAt === null && store.run(q.runId)?.endedAt == null,
+      )
+      .map((q) => `ask:${q.id}`),
+  );
+  return operatorItems(config, store, now, hubLogin, rows, lock)
+    .filter(
+      (x) =>
+        !x.brief &&
+        !ownReply(x, flightId) &&
+        (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
+    )
+    .filter((item) => item.kind !== "message" || flightQuestion(item.text));
+}
+
+export function flightHeadline(
+  store: Store,
+  session: string | null,
+  now: number,
+): Pick<FlightState, "headline" | "headlineAgeMin"> {
+  const row =
+    session === null
+      ? undefined
+      : store.flightBrief(session).find((r) => r.section === FLIGHT_HEADLINE);
+  return {
+    headline: row?.text ?? "",
+    headlineAgeMin: !row?.text ? null : Math.floor((now - row.updatedAt) / 60_000),
+  };
+}
+
 /**
  * The tickets FLIGHT may start in an hour: FLIGHT_STARTS_PER_HOUR per developer (build) seat in its
  * session, and never fewer. The cap guards against a runaway FLIGHT, so it grows with the seats.
@@ -244,10 +288,10 @@ export function flightBriefView(
   store: Store,
   lock: TestLockState = NO_LOCK,
   now = Date.now(),
+  rows = crew(config, store, now, lock, () => null).rows,
 ): FlightBriefView {
   const session = flightSeat(config)?.session.id ?? null;
   const drafts = store.drafts(true);
-  const rows = crew(config, store, now, lock, () => null).rows;
   const watch = (session === null ? [] : store.flightWatch(session)).filter((entry) => {
     const action = entry.action;
     if (!action) return true;
@@ -408,11 +452,7 @@ export function flightState(i: {
       about: cut(d.about, FLIGHT_STATE_TEXT_MAX),
       decision: cut(d.decision, FLIGHT_STATE_DECISION_MAX),
     }));
-  const headline =
-    found === null
-      ? ""
-      : (store.flightBrief(found.session.id).find((r) => r.section === FLIGHT_HEADLINE)?.text ??
-        "");
+  const headline = flightHeadline(store, found?.session.id ?? null, now);
   const openLedger = orderLedger(found === null ? [] : store.flightLedger(found.session.id)).filter(
     (e) => FLIGHT_LEDGER_OPEN.includes(e.status),
   );
@@ -447,7 +487,7 @@ export function flightState(i: {
       recent,
       limits,
       brief,
-      headline,
+      ...headline,
       ledger,
       ledgerMore: openLedger.length - ledger.length,
     };
@@ -689,22 +729,7 @@ export function flightState(i: {
     ];
   });
 
-  const flightId = found.seat.id;
-  const questionKeys = new Set(
-    open
-      .filter(
-        (q) => q.agentId !== flightId && q.passedAt === null && store.run(q.runId)?.endedAt == null,
-      )
-      .map((q) => `ask:${q.id}`),
-  );
-  const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock)
-    .filter(
-      (x) =>
-        !x.brief &&
-        !ownReply(x, flightId) &&
-        (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
-    )
-    .filter((item) => item.kind !== "message" || flightQuestion(item.text))
+  const items = flightTriageItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock)
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -748,7 +773,7 @@ export function flightState(i: {
     recent,
     limits,
     brief,
-    headline,
+    ...headline,
     ledger,
     ledgerMore: openLedger.length - ledger.length,
   };

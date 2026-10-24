@@ -35,7 +35,7 @@ const stubFetch = (routes: Parameters<typeof fetchStub>[0]) =>
     "/api/flight/incoming": { entries: [] },
     "/api/flight/brief": { session: null, sections: [] },
     "/api/flight/summary": flightSummary({ session: null }),
-    "/api/flight/ledger": { session: null, entries: [] },
+    "/api/flight/ledger?status=all": { session: null, entries: [] },
     "/api/flight/schedule": { session: null, entries: [] },
     ...routes,
   });

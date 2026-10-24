@@ -36,9 +36,12 @@ export const summaryItem = (entry: FlightLedgerEntry): FlightSummaryItem => ({
 export const flightLedger = (entries: FlightLedgerEntry[] = []): FlightLedgerView => ({
   session: "s1",
   entries,
+  more: false,
+  nextOffset: null,
 });
 export const flightSummary = (over: Partial<FlightSummaryView> = {}): FlightSummaryView => ({
   session: "s1",
+  headlineAgeMin: 1,
   headline: "The crew is shipping; one review needs attention.",
   now: [],
   watching: { counts: { active: 3, blocked: 1, waiting: 2, done: 4, dropped: 1 }, top: [] },
