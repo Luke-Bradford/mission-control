@@ -417,9 +417,15 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  function saveLoop(runId: string, loop: RunLoop, stored: RunLoop | null | undefined): void {
+  function saveLoop(
+    runId: string,
+    loop: RunLoop,
+    stored: RunLoop | null | undefined,
+    at: number,
+  ): void {
     if (JSON.stringify(loop) === JSON.stringify(stored)) return;
-    store.setRunLoop(runId, loop);
+    store.setRunLoop(runId, loop, at);
+    if (loop.phase === "done") bus.emit("attention");
     bus.emit("agents");
   }
 
@@ -1223,7 +1229,7 @@ export function createEngine(deps: EngineDeps): Engine {
       input.merging = null;
       if (input.lastRefusal === READY_UNDO_FAILED) input.lastRefusal = null;
       input.awayBugDecision = null;
-      saveLoop(runId, input, stored);
+      saveLoop(runId, input, stored, at);
       deps.pollGithub?.();
       return;
     }
@@ -1282,7 +1288,7 @@ export function createEngine(deps: EngineDeps): Engine {
       // a run the loop cannot read is never woken: a stale flag must not hold up a younger rework
       if (input.aside?.wake) {
         input.aside = { ...input.aside, wake: false };
-        saveLoop(runId, input, stored);
+        saveLoop(runId, input, stored, at);
       }
       return;
     }
@@ -1311,7 +1317,7 @@ export function createEngine(deps: EngineDeps): Engine {
       // (in ci, a new report is in flight: the line about the old failure is moot)
       if (run.endedAt !== null || cur.phase === "ci" || !current) excerpts.delete(key);
     }
-    saveLoop(runId, cur, stored);
+    saveLoop(runId, cur, stored, at);
     // The run's card is not the ended run's to move once another run has the ticket.
     const newer = run.endedAt !== null && store.hasNewerRunOnTicket(run);
     const out: Outcome = { again: false, parked: false };
@@ -1333,7 +1339,7 @@ export function createEngine(deps: EngineDeps): Engine {
         log(`${runId}: ${a.kind} failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
-    saveLoop(runId, cur, store.run(runId)?.loop);
+    saveLoop(runId, cur, store.run(runId)?.loop, at);
     await syncReviewStatus(runId);
     if (out.again && round + 1 < MAX_ROUNDS) await pass(runId, round + 1);
   }

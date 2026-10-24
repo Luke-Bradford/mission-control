@@ -5,6 +5,7 @@ import {
   type BoardItem,
   type Escalation,
   hardRulesBySettingKey,
+  noReportNoteKey,
   type PullRequestView,
   type Run,
 } from "@mc/core";
@@ -194,6 +195,11 @@ describe("Needs-you owners", () => {
     expect(o["note:review:r1:abc"]).toBe("operator");
     expect(o["note:cleanup-branch:r1"]).toBe("controller");
     expect(o["note:cleanup:r2"]).toBe("controller");
+  });
+
+  it("a missing-report note is the controller's", () => {
+    note(noReportNoteKey("r1"), "flag");
+    expect(owners()[`note:${noReportNoteKey("r1")}`]).toBe("controller");
   });
 
   it("a flake note is the controller's", () => {

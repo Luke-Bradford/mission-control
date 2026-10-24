@@ -1694,6 +1694,43 @@ describe("a run that ends", () => {
 });
 
 describe("merged", () => {
+  it("clears missing-report notes at the hub time before notifying attention", async () => {
+    const key = `no_report:${RUN}`;
+    store.raiseNote({
+      key,
+      kind: "flag",
+      runId: RUN,
+      seatId: SEAT,
+      repoId: REPO,
+      text: "Missing report",
+      at: clock - 1000,
+    });
+    setPr({ state: "merged", mergedAt: clock });
+    setLoop({
+      prNumber: 12,
+      phase: "parked",
+      parked: { kind: "silent", reason: "no report", ended: true },
+    });
+    const cleared: unknown[] = [];
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    const emit = vi.spyOn(ChangeBus.prototype, "emit").mockImplementation((topic) => {
+      if (topic === "attention")
+        cleared.push(
+          db.prepare("SELECT cleared_at FROM attention_notes WHERE key = ?").get(key)?.cleared_at,
+        );
+    });
+    try {
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().phase).toBe("done");
+      expect(cleared.length).toBeGreaterThan(0);
+      expect(cleared.every((at) => at === clock)).toBe(true);
+      expect(noteKeys()).not.toContain(key);
+    } finally {
+      emit.mockRestore();
+      db.close();
+    }
+  });
+
   it("ends the run once and starts the next ticket once", async () => {
     report();
     await h.engine.reconcileRun(RUN);

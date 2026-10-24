@@ -688,6 +688,9 @@ const toRun = (r: Row): Run => ({
   ...(r.ended_by === null || r.ended_by === undefined
     ? {}
     : { endedBy: r.ended_by as NonNullable<Run["endedBy"]> }),
+  ...(r.no_report == null
+    ? {}
+    : { noReport: JSON.parse(r.no_report as string) as Run["noReport"] }),
   id: r.id as string,
   agentId: r.agent_id as string,
   repoId: r.repo_id as string,
@@ -924,6 +927,7 @@ export class Store {
       // The first loop's state (JSON) and who ended the run; `upsertRun` never writes them.
       ["loop", "TEXT"],
       ["ended_by", "TEXT"],
+      ["no_report", "TEXT"],
       // The ticket's title as the run started with it; null on rows from before it was stored.
       ["ticket_title", "TEXT"],
       // The review a run performs (7b-1); `upsertRun` never rewrites it.
@@ -2189,10 +2193,11 @@ export class Store {
   }
 
   /** Sets the run's loop state (null clears it). */
-  setRunLoop(runId: string, loop: RunLoop | null): void {
+  setRunLoop(runId: string, loop: RunLoop | null, at = Date.now()): void {
     this.db
       .prepare("UPDATE runs SET loop = ? WHERE id = ?")
       .run(loop === null ? null : JSON.stringify(loop), runId);
+    if (loop?.phase === "done") this.clearNoReportNotes(runId, at, true);
   }
 
   /** Ends the run: when, with what status, and who ended it. */
@@ -2207,11 +2212,38 @@ export class Store {
       .run(at, status, endedBy, runId);
   }
 
+  /** Exit diagnostics are controller-owned; transcript upserts never overwrite them. */
+  recordNoReport(runId: string, record: NonNullable<Run["noReport"]>, note: NoteInput): void {
+    this.transaction(() => {
+      this.db
+        .prepare("UPDATE runs SET no_report = ? WHERE id = ?")
+        .run(JSON.stringify(record), runId);
+      this.raiseNote(note);
+    });
+  }
+
+  /** A report resolves earlier failures on this ticket; done resolves the whole ticket. */
+  private clearNoReportNotes(runId: string, at: number, done = false): void {
+    this.db
+      .prepare(`
+      UPDATE attention_notes SET cleared_at = ?
+      WHERE cleared_at IS NULL AND key IN (
+        SELECT 'no_report:' || old.id FROM runs old JOIN runs fresh ON fresh.id = ?
+        WHERE old.id = fresh.id OR (
+          old.repo_id = fresh.repo_id AND old.ticket = fresh.ticket
+          AND (? OR old.started_at <= fresh.started_at)
+        )
+      )
+    `)
+      .run(at, runId, done ? 1 : 0);
+  }
+
   /** Appends a note the run's seat reported; returns its id. */
   addEvidence(runId: string, note: string, at: number): number {
     const r = this.db
       .prepare("INSERT INTO run_evidence (run_id, note, at) VALUES (?, ?, ?)")
       .run(runId, note, at);
+    this.clearNoReportNotes(runId, at);
     return Number(r.lastInsertRowid);
   }
 
@@ -2384,6 +2416,7 @@ export class Store {
           isBlocking(f) ? "open" : "logged",
         );
       });
+      this.clearNoReportNotes(runId, r.at);
       recorded = true;
     }, true);
     return recorded;
@@ -2478,6 +2511,7 @@ export class Store {
     const r = this.db
       .prepare("INSERT OR IGNORE INTO loop_events (key, run_id, text, at) VALUES (?, ?, ?, ?)")
       .run(key, runId, text, at);
+    if (r.changes === 1 && key === `${runId}:plan`) this.clearNoReportNotes(runId, at);
     return r.changes === 1;
   }
 

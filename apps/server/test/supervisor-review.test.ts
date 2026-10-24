@@ -623,6 +623,18 @@ describe("startReview", () => {
     expect(await reviewModel("light")).toBe("haiku");
   });
 
+  it("a superseded review ends without missing-report diagnostics", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({ scratchRetro: true });
+    sup.start();
+    const { runId } = await sup.startReview("retro", r.reviewId);
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    store.setReviewState(r.reviewId, ["running"], "superseded", { at: Date.now() });
+    await sup.endRunByEngine(runId);
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  });
+
   it("startReview launches a scratch run", async () => {
     const r = reviewOfPush();
     const { sup, cfg } = make({ scratchRetro: true });
@@ -814,6 +826,8 @@ describe("startReview", () => {
       }),
     );
     expect(store.run(runId)?.status).toBe("failed");
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     await until(() => expect(existsSync(scratch(reviewId))).toBe(false));
     expect(recorded().filter((l) => Array.isArray(l.argv))).toHaveLength(1);
   });
