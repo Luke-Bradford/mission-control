@@ -27,6 +27,7 @@ import { WINDOWS } from "./collectors/usage-common.ts";
 import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "./config.ts";
 import { crew } from "./hud.ts";
 import { type PrCache, runPrs, runTicket } from "./runview.ts";
+import { runSpend } from "./spend.ts";
 import type { Store } from "./store.ts";
 import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./views.ts";
 
@@ -192,7 +193,11 @@ export function telemetry(
     cacheRead += (r.tokens?.cacheRead ?? 0) * f;
     toolCalls += (d?.toolCalls ?? 0) * f;
     turns += (d?.turns ?? 0) * f;
-    costUsd = addCost(costUsd, r.costUsd, f);
+  }
+  for (const r of runs) {
+    if (!matches(r) || r.costUsd === null) continue;
+    if (share(r, dayStart, now) <= 0 && !digests.get(r.id)?.attemptUsage?.length) continue;
+    costUsd = (costUsd ?? 0) + (runSpend(r, digests.get(r.id), dayStart, now)[0] ?? 0);
   }
   const merged = prs.flatMap((p) => (p.mergedAt === null ? [] : [p.mergedAt]));
   const today: Telemetry["today"] = {
