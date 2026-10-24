@@ -405,6 +405,17 @@ describe("supervisor events (Plan 7a)", () => {
   });
 
   describe("endRunByEngine", () => {
+    it("emits seat-free after an engine-ended process releases the seat", async () => {
+      const { sup, seen, runId } = await idleRun();
+      const free: boolean[] = [];
+      sup.on((e) => {
+        if (e.kind === "seat-free") free.push(sup.seatBusy(e.seatId));
+      });
+      await sup.endRunByEngine(runId);
+      expect(seen).toContainEqual({ kind: "seat-free", seatId: "guido-1", runId });
+      expect(free).toEqual([false]);
+    });
+
     it("does not record a missing report when a PR was merged by hand", async () => {
       const { sup, runId } = await idleRun();
       store.setRunLoop(runId, { ...NEW_LOOP, phase: "done", prNumber: 7 });

@@ -341,10 +341,11 @@ export type EndedBy = NonNullable<Run["endedBy"]>;
 /**
  * What the supervisor tells its listeners. `idle`: a seat with an active run left a turn, or was
  * resumed. `run-ended`: after the store has the end, from every end path. `evidence`: the seat
- * reported through `mc report_evidence`.
+ * reported through `mc report_evidence`. `seat-free`: after exit cleanup releases the process.
  */
 export type SupervisorEvent =
   | { kind: "idle"; seatId: string; runId: string; resumed: boolean }
+  | { kind: "seat-free"; seatId: string; runId: string }
   | { kind: "run-ended"; seatId: string; runId: string; endedBy: EndedBy }
   | { kind: "evidence"; seatId: string; runId: string }
   | { kind: "findings"; seatId: string; runId: string };
@@ -771,7 +772,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       );
     transcripts.delete(l.run.transcriptPath);
     digests.delete(l.run.id);
-    if (byEngine) return;
+    if (byEngine) {
+      emit({ kind: "seat-free", seatId, runId: l.run.id });
+      return;
+    }
     store.setRunEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
     closeRunItems(l.info);
     // read before the seat row changes
@@ -795,6 +799,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       setSeat(seatId, { state: "error", reason: `${why}${said}` });
     }
     emit({ kind: "run-ended", seatId, runId: l.run.id, endedBy: l.endedBy ?? "exit" });
+    emit({ kind: "seat-free", seatId, runId: l.run.id });
   }
 
   function onEvent(l: Live, e: SessionEvent): void {
