@@ -1,4 +1,4 @@
-import type { AgentState, RepoId, Run, TokenUsage } from "./types.ts";
+import type { AgentState, NoReport, RepoId, Run, TokenUsage } from "./types.ts";
 
 /** Total tokens of a run: all four kinds (a run without counts is 0). */
 export const tokenTotal = (t: TokenUsage | null): number =>
@@ -52,4 +52,44 @@ export function agentState(input: {
     return { state: "waiting-you", since: latestSince };
   }
   return { state: "idle", since: latestSince };
+}
+
+/** The missing-report note belongs to the controller, including on standard repos. */
+const NO_REPORT_PREFIX = "no_report:";
+export const noReportNoteKey = (runId: string): string => `${NO_REPORT_PREFIX}${runId}`;
+export const isNoReportNoteKey = (key: string): boolean => key.startsWith(NO_REPORT_PREFIX);
+/** Maximum retained assistant text in a missing-report record. */
+export const NO_REPORT_TEXT_MAX = 4000;
+
+/** Maximum retained length of structured CLI reason fields. */
+export const NO_REPORT_REASON_MAX = 64;
+
+/** Only structured exit facts belong in FLIGHT evidence. */
+export function noReportExitReason(record: NoReport): string {
+  const reasons: string[] = [];
+  if (record.terminalReason != null) reasons.push(record.terminalReason);
+  reasons.push(`exit code ${record.code ?? "unknown"}`);
+  if (record.signal !== null) reasons.push(`signal ${record.signal}`);
+  reasons.push(`stop reason ${record.stopReason ?? "unknown"}`);
+  if (record.resultSubtype !== null) reasons.push(record.resultSubtype);
+  return reasons.join("; ");
+}
+
+/** Human-readable exit diagnostics for the controller note. */
+export function noReportReason(record: NoReport): string {
+  const reasons = [noReportExitReason(record)];
+  if (
+    record.isError &&
+    !/error|abort/i.test(`${record.terminalReason ?? ""} ${record.resultSubtype ?? ""}`)
+  )
+    reasons.push("stream error");
+  if (record.apiErrorStatus != null) reasons.push(`API status ${record.apiErrorStatus}`);
+  for (const text of [record.error, record.lastStderr]) {
+    const useful = text
+      ?.split(/; |\n/)
+      .filter((entry) => !entry.trimStart().startsWith("[ede_diagnostic]"))
+      .join("; ");
+    if (useful) reasons.push(useful);
+  }
+  return reasons.join("; ");
 }

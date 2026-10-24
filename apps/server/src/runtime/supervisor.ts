@@ -147,6 +147,7 @@ import {
   writeReviewInputs,
 } from "./checkouts.ts";
 import { endKeeper, KEEPER_ENTRY, type KeeperHello, keeperAlive, pidAlive } from "./keeper.ts";
+import { recordNoReport } from "./no-report.ts";
 import { attachSession, type CrewSession, type SessionEvent, startSession } from "./session.ts";
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
@@ -708,6 +709,38 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     l.foldTimer.unref();
   }
 
+  function noteMissingReport(
+    info: SeatInfo,
+    run: Run,
+    exit: Pick<NonNullable<Run["noReport"]>, "code" | "signal" | "lastStderr"> & {
+      error?: string;
+    },
+    facts: ReturnType<typeof foldPath>,
+    at: number,
+  ): void {
+    try {
+      if (
+        recordNoReport(
+          store,
+          run,
+          seatDef(info.seat).loop,
+          {
+            code: exit.code,
+            signal: exit.signal,
+            error: exit.error === undefined ? undefined : cleanText(exit.error, STDERR_TEXT_MAX),
+            lastStderr:
+              exit.lastStderr === null ? null : cleanText(exit.lastStderr, STDERR_TEXT_MAX),
+          },
+          facts,
+          at,
+        )
+      )
+        bus.emit("attention");
+    } catch (e) {
+      log(`${run.agentId}: could not record missing report for ${run.id}: ${errText(e)}`);
+    }
+  }
+
   function onExit(l: Live, e: { code: number | null; signal: string | null }): void {
     const seatId = l.info.seat.id;
     if (live.get(seatId) === l) live.delete(seatId);
@@ -724,6 +757,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       status: l.ending !== null ? "ok" : "failed",
     };
     fold(l, true);
+    const fresh = store.run(l.run.id);
+    const parked = fresh?.loop?.parked?.kind;
+    const failedReview =
+      fresh?.reviewId != null && store.review(fresh.reviewId)?.state === "failed";
+    if (l.endedBy === null || parked === "silent" || parked === "budget" || failedReview)
+      noteMissingReport(
+        l.info,
+        l.run,
+        { ...e, lastStderr: l.lastStderr },
+        transcripts.get(l.run.transcriptPath)?.facts ?? null,
+        l.run.endedAt as number,
+      );
     transcripts.delete(l.run.transcriptPath);
     digests.delete(l.run.id);
     if (byEngine) return;
@@ -1189,13 +1234,29 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /** Ends a run that cannot be resumed: the run failed, the seat in error with `reason`. */
-  function failResume(row: SeatSessionRow, reason: string): void {
+  function failResume(
+    row: SeatSessionRow,
+    reason: string,
+    opts: {
+      record?: boolean;
+      exit?: Pick<NonNullable<Run["noReport"]>, "code" | "signal" | "lastStderr"> & { at: number };
+    } = {},
+  ): void {
     const run = row.runId === null ? null : store.run(row.runId);
     const open = run !== null && run.endedAt === null;
     if (open) {
       const at = now();
-      store.upsertRun({ ...run, endedAt: at, status: "failed" });
+      const facts = foldOpenRun(run);
       store.setRunEnded(run.id, at, "failed", "exit");
+      const info = findSeat(row.seatId);
+      if (info && opts.record !== false)
+        noteMissingReport(
+          info,
+          run,
+          opts.exit ?? { code: null, signal: null, lastStderr: null, error: reason },
+          facts,
+          opts.exit?.at ?? at,
+        );
     }
     setSeat(row.seatId, { state: "error", reason });
     if (row.runId !== null) {
@@ -1331,7 +1392,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * the end that follows keeps what the seat did while no hub was watching. Never throws a fold's
    * failure: the next read of the transcript (the backfill) has it.
    */
-  function foldOpenRun(run: Run): void {
+  function foldOpenRun(run: Run): ReturnType<typeof foldPath> {
     const r: Run = { ...run };
     let facts: ReturnType<typeof foldPath> = null;
     try {
@@ -1342,6 +1403,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       log(`${run.agentId}: could not fold run ${run.id}: ${errText(e)}`);
     }
+    return facts;
   }
 
   /** Held unended runs are recovered even after an error; stopped seats stay stopped. */
@@ -1453,8 +1515,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (found.kind === "exited") {
       // The CLI exited while no hub was attached: the end is recorded as the exit path would.
       dropGrant(row.seatId, runId);
-      const run = store.run(runId);
-      if (run !== null && run.endedAt === null) foldOpenRun(run);
       const how = found.exit.code ?? found.exit.signal;
       const said =
         found.exit.lastStderr === null
@@ -1463,6 +1523,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return failResume(
         row,
         how === null ? CANNOT_START : `process exited ${how}${said === "" ? "" : `: ${said}`}`,
+        { exit: found.exit },
       );
     }
     // No keeper to attach to: a reboot took it, or it speaks a version this hub does not.
@@ -1510,7 +1571,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (refusal !== null || info === undefined || run === null) {
       dropGrant(row.seatId, runId);
       await session.close();
-      return failResume(row, refusal ?? RESUME_FAILED);
+      return failResume(row, refusal ?? RESUME_FAILED, { record: refusal !== RESUME_MODE_CHANGED });
     }
     // restoreRuns has put the token back; this makes sure of it for a hub that did not run it
     try {
@@ -1589,7 +1650,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return failResume(row, RESUME_FAILED); // an ended run is left as it ended
     }
     if ((modeOfSeat(info.seat) === "scratch") !== (run.reviewId != null)) {
-      return failResume(row, RESUME_MODE_CHANGED); // a scratch seat resumes only review runs
+      return failResume(row, RESUME_MODE_CHANGED, { record: false }); // a scratch seat resumes only review runs
     }
     let checkout: { path: string; branch: string; gitDir: string } | null = null;
     try {

@@ -3,7 +3,7 @@ import "./supervisor-harness.ts";
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { clockHm, type Run, type RunLoop } from "@mc/core";
+import { clockHm, NEW_LOOP, type Run, type RunLoop } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
@@ -130,11 +130,35 @@ describe("seat states", () => {
     expect(store.seatSession("guido-1")?.reason).toBe("process exited 3");
     const run = store.run(runId);
     expect(run?.status).toBe("failed");
+    expect(run?.noReport).toMatchObject({
+      code: 3,
+      signal: null,
+      stopReason: "half",
+      isError: true,
+    });
+    expect(store.notes()).toContainEqual(
+      expect.objectContaining({
+        runId,
+        text: expect.stringContaining("stop reason half"),
+      }),
+    );
     expect(run?.endedAt).not.toBeNull();
     const lines = readFileSync(run?.transcriptPath ?? "", "utf8").split("\n");
     expect(lines).toContain('{"type":"result","is_error":true,"stop_reason":"half"}');
     const e = await refusal(sup.message("guido-1", "again", { interrupt: false }));
     expect(e.message).toBe("GUIDO-1 has no live session; start it on a ticket");
+  });
+
+  it("does not record missing-report diagnostics when evidence was reported before exit", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    store.addEvidence(runId, "done", Date.now());
+    await sup.message("guido-1", "DIE", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("error"));
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.runId === runId)).toEqual([]);
   });
 
   it("logs each stderr line, and a crash keeps the last one in the seat's reason", async () => {
@@ -315,6 +339,8 @@ describe("supervisor events (Plan 7a)", () => {
         { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
       ]);
       expect(atEvent).toMatchObject({ status: "ok", endedBy: "operator" });
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
       expect(seatState("guido-1")).toBe("idle");
     });
 
@@ -347,6 +373,12 @@ describe("supervisor events (Plan 7a)", () => {
       });
       expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
       expect(seatState("guido-1")).toBe("error");
+      expect(store.run(runId)?.noReport).toMatchObject({
+        code: null,
+        signal: null,
+        lastStderr: null,
+        error: "could not resume: checkout missing",
+      });
     });
 
     it("is operator for a Stop with no live process", async () => {
@@ -364,13 +396,47 @@ describe("supervisor events (Plan 7a)", () => {
     });
 
     it("does not fire when the hub shuts down (the run stays active)", async () => {
-      const { sup, seen } = await idleRun();
+      const { sup, seen, runId } = await idleRun();
       await sup.stopAll();
       expect(ended(seen)).toEqual([]);
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
     });
   });
 
   describe("endRunByEngine", () => {
+    it("does not record a missing report when a PR was merged by hand", async () => {
+      const { sup, runId } = await idleRun();
+      store.setRunLoop(runId, { ...NEW_LOOP, phase: "done", prNumber: 7 });
+      await sup.endRunByEngine(runId);
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
+    });
+
+    it("does not record a missing report when a silent parked run's PR was merged", async () => {
+      const { sup, runId } = await idleRun();
+      store.setRunLoop(runId, {
+        ...NEW_LOOP,
+        phase: "done",
+        prNumber: 7,
+        parked: { kind: "silent", reason: "no report", ended: true },
+      });
+      await sup.endRunByEngine(runId);
+      expect(store.run(runId)?.noReport).toBeUndefined();
+      expect(store.notes()).toEqual([]);
+    });
+
+    it.each(["silent", "budget"])("records an engine end after a %s failure", async (kind) => {
+      const { sup, runId } = await idleRun();
+      store.setRunLoop(runId, {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind, reason: "no report", ended: true },
+      });
+      await sup.endRunByEngine(runId);
+      expect(store.run(runId)?.noReport).toBeDefined();
+    });
+
     it("ends the run ok, endedBy engine, leaves the seat idle and removes the worktree", async () => {
       const { sup, seen, runId } = await idleRun();
       const wt = join(root, "mc-crew", "guido-1-42");

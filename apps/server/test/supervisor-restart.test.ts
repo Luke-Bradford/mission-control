@@ -199,6 +199,8 @@ describe("stopAll", () => {
     expect(existsSync(crewMcpPath(dbPath, runId))).toBe(true);
     expect(tokens.resolve(token)).not.toBeNull();
     expect(sup.seatFacts("guido-1")).toBeNull();
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     expect(store.keeperCursor(runId)).toMatchObject({ runId });
     expect(existsSync(join(root, CREW_LOCK_FILE))).toBe(false);
   });
@@ -261,6 +263,8 @@ describe("reattach after a restart", () => {
     );
     expect(store.run(runId)?.status).toBe("failed");
     expect(store.run(runId)?.endedAt).not.toBeNull();
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     await new Promise((r) => setTimeout(r, 200));
     expect(starts()).toHaveLength(1);
   });
@@ -671,6 +675,8 @@ describe("a seat keeps running through a restart", () => {
     expect(starts()).toHaveLength(1);
     expect(userLines()).toEqual([expect.stringContaining("You are GUIDO-1"), "SLOW"]);
     expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain("echo: SLOW");
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
   });
 
@@ -841,6 +847,18 @@ describe("a seat keeps running through a restart", () => {
       }),
     );
     expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
+    expect(store.run(runId)?.noReport).toMatchObject({
+      code: null,
+      signal: "SIGTERM",
+      stopReason: "end_turn",
+      isError: false,
+    });
+    expect(store.notes()).toContainEqual(
+      expect.objectContaining({
+        runId,
+        text: expect.stringContaining("signal SIGTERM"),
+      }),
+    );
     expect(store.run(runId)?.endedAt).not.toBeNull();
     expect(seen).toEqual([{ kind: "run-ended", seatId: "guido-1", runId, endedBy: "exit" }]);
     expect(starts()).toHaveLength(1);
