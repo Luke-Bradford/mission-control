@@ -183,7 +183,7 @@ describe("Setup tabs", () => {
     expect(window.location.pathname).toBe("/agent/shop-app-ta");
     const other = screen.getByRole("region", { name: "site-builder · observed loops" });
     expect(other.textContent).toContain("octo-org/site-builder · —");
-    expect(document.getElementById("page-setup")?.textContent).not.toContain("Add session");
+    expect(screen.getByRole("button", { name: "Add session" })).toBeTruthy();
   });
 
   it("Sessions and Loops hide what is outside the selected session", async () => {
@@ -355,7 +355,7 @@ describe("Setup tabs", () => {
     expect(within(docsSeen).getByText("docs/")).toBeTruthy();
     expect(p.textContent).toContain("Tiles show who owns each folder; areas can't overlap.");
     expect(within(p).getAllByRole("button", { name: "Add agent" })).toHaveLength(1);
-    expect(document.getElementById("page-setup")?.textContent).not.toContain("Add session");
+    expect(screen.getByRole("button", { name: "Add session" })).toBeTruthy();
     // the repo's panel is its observed loops only: the seats are in the crew session's panel
     const loops = screen.getByRole("region", { name: "shop-app · observed loops" });
     expect(within(loops).getByRole("button", { name: /shop-app-ta/ })).toBeTruthy();

@@ -200,6 +200,8 @@ export const ACTIONS = {
   /** Body `{}`: ends a run set aside in review, without waking it; a 409 if it is not aside. */
   runEnd: (runId: string) => `/api/runs/${enc(runId)}/end`,
   /** Body `{ base, seats }`; answers `{ backup, changes }` after writing config.yaml. */
+  addSession: "/api/crew/sessions",
+  closeSession: (sessionId: string) => `/api/crew/sessions/${enc(sessionId)}/close`,
   crewSeats: (sessionId: string) => `/api/crew/sessions/${enc(sessionId)}/seats`,
   /** Body `{}`; answers a ReloadResult. */
   reloadConfig: "/api/config/reload",
