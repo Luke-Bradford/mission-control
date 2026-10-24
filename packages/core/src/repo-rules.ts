@@ -3,6 +3,7 @@
  * statuses a seat may pick from, which area labels match a seat, and which paths are hard-rule
  * files. The parser is the server's; this is the shape, the defaults and the label match.
  */
+import { AWAY_START_REFUSED, awayTicketType } from "./away.ts";
 import {
   claimedText,
   hasDoneWhenSection,
@@ -31,6 +32,8 @@ export const HARD_RULES_BY = ["operator", "controller"] as const;
 export type HardRulesBy = (typeof HARD_RULES_BY)[number];
 
 export interface RepoRules {
+  /** Label to template mapping from the repo's Mission Control block. */
+  templates?: Record<string, string>;
   /** Board statuses a seat may pick a ticket from. */
   pickFrom: string[];
   /** Whether the hub may promote Backlog tickets to a pickable status. */
@@ -55,6 +58,7 @@ export interface RepoRules {
 export function freezeRules(rules: RepoRules): RepoRules {
   for (const globs of Object.values(rules.areas)) Object.freeze(globs);
   Object.freeze(rules.areas);
+  if (rules.templates) Object.freeze(rules.templates);
   Object.freeze(rules.pickFrom);
   Object.freeze(rules.needs);
   Object.freeze(rules.hardRules);
@@ -73,11 +77,13 @@ export const hardRulesUnsetText = (repo: string): string =>
 
 /** Code that enforces FLIGHT's floors requires independent RETRO review. */
 export const FLIGHT_FLOOR_ENFORCING_PATHS: readonly string[] = Object.freeze([
+  "apps/server/src/away.ts",
   "apps/server/src/guard/**",
   "apps/server/src/mcp/**",
   "apps/server/src/runtime/**",
   "apps/server/src/engine/**",
   "apps/server/src/flight/**",
+  "packages/core/src/away.ts",
   "packages/core/src/guard.ts",
   "packages/core/src/flight.ts",
   "packages/core/src/loop.ts",
@@ -194,13 +200,15 @@ export function inLane(
 }
 
 export interface StartCheck {
+  /** Present only while away; FLIGHT may explicitly start work that must stay draft. */
+  away?: { pickUp: boolean; flight: boolean };
   repoId: string;
   issue: number;
   card: Pick<
     BoardItem,
     "labels" | "assignees" | "blockedBy" | "size" | "status" | "state" | "closed"
   >;
-  rules: Pick<RepoRules, "areas" | "needs">;
+  rules: Pick<RepoRules, "areas" | "needs" | "templates">;
   seat: { call: string; area: string[]; loop: LoopKind };
   login: string | null;
   hasRun: boolean;
@@ -247,6 +255,13 @@ export function eligibleToStart(c: StartCheck): string | null {
   if (waits.size > 0) return waitsOnText(ref, [...waits]);
   const build = seat.loop === "build";
   if (build && card.labels.some((l) => RESEARCH_LABELS.includes(l))) return researchText(ref);
+  if (
+    c.away &&
+    !c.away.flight &&
+    (!c.away.pickUp || awayTicketType(card, rules.templates) === null)
+  ) {
+    return AWAY_START_REFUSED;
+  }
   if (body === null) return null;
   if (build || seat.loop === "plan") {
     const missing = rules.needs.filter((n) =>

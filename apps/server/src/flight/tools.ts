@@ -7,11 +7,16 @@ import {
   ANSWER_ONE_OF,
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
+  AWAY_BUG_VERIFIED,
+  AWAY_PLANNER_REFUSED,
+  AWAY_QUOTA_REFUSED,
+  AWAY_WRITES_REFUSED,
   accountStoppedText,
   answeredText,
   answerMessageText,
   areaLabelsOf,
   askerRunEndedText,
+  awayBugDecisionAbout,
   BRIEF_CLEARED_DECISION,
   BRIEF_INPUT_MAX,
   BRIEF_ITEM_DESCRIPTION,
@@ -277,6 +282,7 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
+import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
@@ -285,7 +291,7 @@ import { threadMessages } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
-import { accountAtStop } from "../engine/queue.ts";
+import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { attentionItems, crew, NO_LOCK, NOTE_KEY } from "../hud.ts";
@@ -997,6 +1003,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
     const planner = loopKind === "plan";
+    if (planner && activeAway(store, at, config.operator.timezone))
+      return fail(AWAY_PLANNER_REFUSED);
+    if (
+      awayQuotaUnknown(config, store, cfg.accountId, at) ||
+      awayQuotaReserve(config, store, cfg.accountId, at)
+    )
+      return fail(AWAY_QUOTA_REFUSED);
     if (store.seatSession(seat)?.state === "stopped")
       return fail(`${call} is stopped by the operator.`);
     if (!seatFree(store, deps.supervisor.busy(), seat)) return fail(seatHasRunText(call));
@@ -1042,7 +1055,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     );
     if ("refusal" in chosen) return fail(chosen.refusal);
     const board = store.board(repo.id);
+    const away = activeAway(store, now(), config.operator.timezone);
     const refusal = eligibleToStart({
+      ...(away ? { away: { pickUp: away.may.pickUp, flight: true } } : {}),
       planRequired: chosen.profile.planRequired,
       repoId: repo.id,
       issue,
@@ -1074,14 +1089,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     try {
       // a planner starts with no loop: the engine never reconciles it or moves its card
       if (planner) {
-        if (override) await deps.supervisor.startRun(seat, issue, { override });
+        if (override || away)
+          await deps.supervisor.startRun(seat, issue, {
+            ...(override ? { override } : {}),
+            ...(away ? { flight: true } : {}),
+          });
         else await deps.supervisor.startRun(seat, issue);
       } else {
         const loop = deps.engine?.status().on === true ? { loop: NEW_LOOP } : {};
         await deps.supervisor.startRun(
           seat,
           issue,
-          override || loop.loop ? { ...loop, ...(override ? { override } : {}) } : undefined,
+          override || loop.loop || away
+            ? { ...loop, ...(override ? { override } : {}), ...(away ? { flight: true } : {}) }
+            : undefined,
         );
       }
     } catch (e) {
@@ -1416,6 +1437,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       }
       if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits]));
     }
+    if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
     const result = await deps.board.move({
       runId: ctx.runId,
       repoId: repo.id,
@@ -1543,6 +1565,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const same = openIssues(listed.stdout)?.find((i) => i.title === title);
       if (same !== undefined) return fail(duplicateTitleText(same.number));
 
+      if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const created = await deps.gh(
         [
           "issue",
@@ -1572,6 +1595,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       });
       bus.emit("flight");
       const [owner = ""] = repo.github.split("/");
+      if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const added = await deps.gh(
         ["project", "item-add", String(repo.project), `--owner=${owner}`, `--url=${url}`],
         { cwd },
@@ -1582,6 +1606,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       }
       // a draft repo's board is never written: moveCard would answer ok and change nothing
       if (repo.autonomy !== "merge") return { text: createdDraftText(ref, repo.id) };
+      if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const moved = await deps.board.move({
         runId: ctx.runId,
         repoId: repo.id,
@@ -1613,6 +1638,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const at = now();
       const posted = lastHour(["comment"], at);
       if (posted >= FLIGHT_COMMENTS_PER_HOUR) return fail(capText("posted comments", posted));
+      if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
       const r = await deps.gh(
         ["issue", "comment", String(issue), `--repo=${repo.github}`, `--body=${comment}`],
         { cwd: crewDir(deps.dbPath) },
@@ -2328,6 +2354,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           const denied = requirePowers(config, repo.id, "superuser");
           if (denied) return denied;
           if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
+          if (activeAway(store, now(), config.operator.timezone) && !awayLocalTools.has(name))
+            return fail(AWAY_WRITES_REFUSED);
           const result = await act(c.args, repo, ctx);
           if (kind !== "rerun" || !result.isError)
             record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
@@ -2432,8 +2460,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (problem) return fail(problem);
         if (requirePowers(config, repo.id, "superuser") || held(store.run(run.id) ?? run))
           return fail("Run is held.");
+        if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         if (!(await deps.engine.clearFlight(run.id, sha)))
           return fail("The merge gates changed; refresh the PR.");
+        if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         const posted = await deps.gh(
           [
             "pr",
@@ -2540,6 +2570,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         ];
         if (a.size !== undefined || a.priority !== undefined) {
           if (!deps.board.edit) return fail("Board edits unavailable.");
+          if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
           const result = await deps.board.edit(repo.id, a.issue, {
             ...(a.size === undefined ? {} : { size: a.size }),
             ...(a.priority === undefined ? {} : { priority: a.priority }),
@@ -2547,6 +2578,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           if (!result.ok) return fail(result.reason);
         }
         if (a.labels !== undefined || a.lane !== undefined || a.assignees !== undefined) {
+          if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
           const result = await deps.gh(
             ["api", "--method=PATCH", `repos/${repo.github}/issues/${a.issue}`, "--input=-"],
             {
@@ -2612,11 +2644,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
   ];
 
-  return [
+  const flightTools: McTool[] = [
     {
       name: MC_TOOL_NAMES.logDecision,
-      description:
-        "Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.",
+      description: `For away-mode bugs, record about "${awayBugDecisionAbout("<repo>#<issue>", "<base-sha>", "<head-sha>")}", decision "${AWAY_BUG_VERIFIED}", and basis naming a test file added by the diff, plus its results on both commits. A new reproducing test is required; fixture files do not count. flight_state supplies awayBugDecision.about and testPaths for waiting PRs. Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -2964,4 +2995,36 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: recall,
     },
   ];
+  // An allowlist keeps future posting or config tools held until their away behaviour is explicit.
+  const awayLocalTools: ReadonlySet<string> = new Set([
+    MC_TOOL_NAMES.logDecision,
+    MC_TOOL_NAMES.readTicket,
+    MC_TOOL_NAMES.answerQuestion,
+    MC_TOOL_NAMES.startSeat,
+    MC_TOOL_NAMES.messageSeat,
+    MC_TOOL_NAMES.flightState,
+    MC_TOOL_NAMES.endRun,
+    MC_TOOL_NAMES.dismissItem,
+    MC_TOOL_NAMES.briefItem,
+    MC_TOOL_NAMES.readPr,
+    MC_TOOL_NAMES.readCiLog,
+    MC_TOOL_NAMES.ghRead,
+    MC_TOOL_NAMES.listTickets,
+    MC_TOOL_NAMES.updateBrief,
+    MC_TOOL_NAMES.draftReply,
+    MC_TOOL_NAMES.track,
+    MC_TOOL_NAMES.untrack,
+    MC_TOOL_NAMES.ledger,
+    MC_TOOL_NAMES.remember,
+    MC_TOOL_NAMES.forget,
+    MC_TOOL_NAMES.recall,
+  ]);
+  return flightTools.map((tool) => ({
+    ...tool,
+    call: (ctx, args) => {
+      if (activeAway(store, now(), config.operator.timezone) && !awayLocalTools.has(tool.name))
+        return Promise.resolve(fail(AWAY_WRITES_REFUSED));
+      return tool.call(ctx, args);
+    },
+  }));
 }

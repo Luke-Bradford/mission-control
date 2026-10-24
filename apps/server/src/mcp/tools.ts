@@ -12,6 +12,7 @@ import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ASKED_OPERATOR,
+  AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
@@ -150,6 +151,7 @@ import {
   VERDICTS,
 } from "@mc/core";
 import { z } from "zod";
+import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
@@ -1666,6 +1668,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportPlan(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = PlanArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
+    if (activeAway(store, now(), config.operator.timezone))
+      return { text: AWAY_PLAN_REFUSED, isError: true };
     const plan = parsed.data.plan;
     const live = liveRun(ctx);
     if (live === null) return ENDED;
@@ -1774,6 +1778,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const file = crewPrBodyPath(deps.dbPath);
       try {
         await writeFile(file, next, { mode: 0o600, flag: "wx" });
+        if (activeAway(store, now(), config.operator.timezone))
+          return { text: AWAY_PLAN_REFUSED, isError: true };
         const edited = await deps.gh(
           ["issue", "edit", String(issue), `--repo=${repo}`, `--body-file=${file}`],
           { cwd },

@@ -58,7 +58,7 @@ export function mcSection(markdown: string): string | null {
 }
 
 /** Keys accepted but not used here (other parts of the board automation own them). */
-const IGNORED_KEYS = ["templates", "ci"];
+const IGNORED_KEYS = ["ci"];
 
 /**
  * A label glob: repo-relative, and `**` only as a trailing `/**`, else it would match wrongly
@@ -74,6 +74,8 @@ const nonEmpty = z.string().min(1);
 // `pick_from: []` is refused on purpose: pausing a repo is not this key's job. Status names are
 // not checked against the board here; the engine reports a status it cannot find.
 const schema = z.strictObject({
+  // Historically ignored; tolerate legacy shapes without weakening the away label gate.
+  templates: z.unknown().optional(),
   pick_from: z.array(nonEmpty).min(1).optional(),
   promote_backlog: z.boolean().optional(),
   needs: z.array(z.enum(REPO_NEEDS)).optional(),
@@ -162,6 +164,13 @@ export function parseRepoRules(markdown: string | null): RepoRules {
   }
   const r = parsed.data;
   return freezeRules({
+    ...(r.templates === undefined
+      ? {}
+      : {
+          templates: z.record(nonEmpty, nonEmpty).safeParse(r.templates).success
+            ? (r.templates as Record<string, string>)
+            : {},
+        }),
     pickFrom: r.pick_from ?? DEFAULT_REPO_RULES.pickFrom,
     promoteBacklog: r.promote_backlog ?? DEFAULT_REPO_RULES.promoteBacklog,
     needs: r.needs ?? DEFAULT_REPO_RULES.needs,

@@ -22,6 +22,7 @@ import {
   type ActivityEvent,
   type AgentStream,
   type AttentionItem,
+  type AwayDigest,
   type AwaySettings,
   type BoardItem,
   type ChangedFiles,
@@ -50,6 +51,7 @@ import {
   OPERATOR_TOKEN_REQUIRED,
   otherLaneText,
   type PrCheck,
+  type PullRequestView,
   projectAtReset,
   READONLY_FILES_NOTE,
   type ReloadResult,
@@ -539,6 +541,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/notifications/events"],
   ["POST", "/api/notifications/test", {}],
   ["GET", "/api/settings/away"],
+  ["GET", "/api/away/digest"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
   [
     "POST",
@@ -2131,6 +2134,96 @@ describe("away settings", () => {
     may: { pickUp: true, research: false, check: true, status: false, safePr: true },
   };
 
+  it("GET /api/away/digest assembles one item per group without saving a digest", async () => {
+    store.replaceEscalations("shop-app", [escalation({})]);
+    const pr: PullRequestView = {
+      repoId: "shop-app",
+      number: 41,
+      title: "Safe docs",
+      url: "https://github.com/o/shop-app/pull/41",
+      branch: "docs/guide",
+      ticket: "shop-app#7",
+      state: "open",
+      isDraft: false,
+      review: null,
+      ci: "passing",
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha: "safe-sha",
+      mergeable: null,
+    };
+    store.upsertRun(
+      run({
+        id: "safe",
+        repoId: "shop-app",
+        loop: { ...NEW_LOOP, prNumber: 41, merging: { sha: "safe-sha", done: ["ready"] } },
+      }),
+    );
+    store.upsertPullRequests(
+      "shop-app",
+      [pr, { ...pr, number: 42, isDraft: true, ticket: "shop-app#8" }],
+      NOW,
+    );
+    store.upsertRun(
+      run({
+        id: "failed",
+        ticket: "shop-app#8",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "stuck", reason: "Verify stopped producing output", ended: false },
+        },
+      }),
+    );
+    store.addFlightDecision({
+      at: NOW,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "shop-app#7",
+      decision: "Ready for review",
+      basis: "CI and RETRO passed",
+    });
+    store.addDraft("shop-app#7", "issue", "Review is ready", NOW);
+    const result = await get("/api/away/digest");
+    expect(result.statusCode).toBe(200);
+    const digest = result.json() as AwayDigest;
+    expect(digest.active).toBe(false);
+    expect(digest.groups.map((g) => [g.kind, g.items.length])).toEqual([
+      ["needYouNow", 1],
+      ["safePrsReady", 1],
+      ["draftsToWalkThrough", 1],
+      ["failures", 1],
+      ["flightDecisions", 1],
+      ["messagesDrafted", 1],
+    ]);
+    expect(digest.groups[3].items[0]?.reason).toBe("Verify stopped producing output");
+    expect((await get("/api/away/digest")).json()).toEqual(digest);
+  });
+
+  it("digest accepts a since timestamp and stores away start only on activation", async () => {
+    await postBody("/api/settings/away", { ...away, until: "" });
+    expect(store.getSetting("awayStartedAt")).toBe(String(NOW));
+    store.addFlightDecision({
+      at: NOW - 1,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "old",
+      decision: "checked",
+      basis: "test",
+    });
+    expect((await get("/api/away/digest")).json().groups[4].items).toEqual([]);
+    expect((await get(`/api/away/digest?since=${NOW - 1}`)).json().groups[4].items).toHaveLength(1);
+    expect((await get("/api/away/digest?since=nope")).statusCode).toBe(400);
+    expect((await get("/api/away/digest?since=-1")).statusCode).toBe(400);
+  });
+
   it("GET answers the defaults when nothing is stored", async () => {
     const r = await get("/api/settings/away");
     expect(r.statusCode).toBe(200);
@@ -2175,11 +2268,19 @@ describe("away settings", () => {
     ).toBe(200);
   });
 
-  it("GET falls back to the defaults when the stored value is unreadable", async () => {
+  it("GET fails closed when the stored value is unreadable", async () => {
     store.setSetting("away", "{not json");
-    expect((await get("/api/settings/away")).json()).toEqual(DEFAULT_AWAY);
+    expect((await get("/api/settings/away")).json()).toEqual({
+      on: true,
+      until: "",
+      may: { pickUp: false, research: false, check: false, status: false, safePr: false },
+    });
     store.setSetting("away", JSON.stringify({ on: "x" }));
-    expect((await get("/api/settings/away")).json()).toEqual(DEFAULT_AWAY);
+    expect((await get("/api/settings/away")).json()).toEqual({
+      on: true,
+      until: "",
+      may: { pickUp: false, research: false, check: false, status: false, safePr: false },
+    });
   });
 });
 
@@ -3327,13 +3428,19 @@ describe("crew routes", () => {
   const post5 = (action: string, body: unknown = {}) =>
     postBody(`/api/seats/guido-1/${action}`, body);
 
+  it("identifies an operator start while away", async () => {
+    store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
+
   it("start answers { runId, branch } and emits agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
     const r = await post5("start", { issue: 5 });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ runId: "r-1", branch: "feature/5-x" });
-    expect(supervisorCalls).toEqual([["start", "guido-1", 5]]);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
     expect(seen).toContain("agents");
   });
 
@@ -3375,7 +3482,9 @@ describe("crew routes", () => {
     it("starts a writer seat's run looped when the engine is on, in a draft repo too", async () => {
       expect(config.repos[0]?.autonomy).toBe("draft");
       expect((await startVia(true, "guido-1")).statusCode).toBe(200);
-      expect(supervisorCalls).toEqual([["start", "guido-1", 5, { loop: NEW_LOOP }]]);
+      expect(supervisorCalls).toEqual([
+        ["start", "guido-1", 5, { loop: NEW_LOOP, operator: true }],
+      ]);
     });
 
     it("starts a writer seat's run looped in a merge repo too", async () => {
@@ -3383,22 +3492,24 @@ describe("crew routes", () => {
       if (repo === undefined) throw new Error("no repo");
       repo.autonomy = "merge";
       expect((await startVia(true, "guido-1")).statusCode).toBe(200);
-      expect(supervisorCalls).toEqual([["start", "guido-1", 5, { loop: NEW_LOOP }]]);
+      expect(supervisorCalls).toEqual([
+        ["start", "guido-1", 5, { loop: NEW_LOOP, operator: true }],
+      ]);
     });
 
     it("starts it with no loop when the engine is off or absent", async () => {
       await startVia(false, "guido-1");
       await startVia(null, "guido-1");
       expect(supervisorCalls).toEqual([
-        ["start", "guido-1", 5],
-        ["start", "guido-1", 5],
+        ["start", "guido-1", 5, { operator: true }],
+        ["start", "guido-1", 5, { operator: true }],
       ]);
     });
 
     it("never loops a read-only seat's run", async () => {
       withReader();
       await startVia(true, "retro");
-      expect(supervisorCalls).toEqual([["start", "retro", 5]]);
+      expect(supervisorCalls).toEqual([["start", "retro", 5, { operator: true }]]);
     });
   });
 

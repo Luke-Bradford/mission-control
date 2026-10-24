@@ -46,6 +46,7 @@ const EXAMPLE = `mc:
 describe("parseRepoRules", () => {
   it("parses the example block", () => {
     const r = parseRepoRules(block(EXAMPLE));
+    expect(r.templates).toEqual({ "type:feature": "feature", bug: "bugfix" });
     expect(r.pickFrom).toEqual(["Ready"]);
     expect(r.promoteBacklog).toBe(true);
     expect(r.areas).toEqual({
@@ -406,3 +407,10 @@ describe("this repo's own rules", () => {
     expect(DEFAULT_HARD_RULES.filter((p) => !own.includes(p))).toEqual([]);
   });
 });
+
+it.each(["[]", "null", "old-format", "{ bug: { profile: bugfix } }"])(
+  "tolerates legacy templates: %s",
+  (templates) => {
+    expect(parseRepoRules(block(`mc:\n  templates: ${templates}\n`)).templates).toEqual({});
+  },
+);

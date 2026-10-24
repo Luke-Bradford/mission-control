@@ -14,8 +14,12 @@
  * raises one note of its own, which clears when a take succeeds. A note holds no raw error text.
  */
 import {
+  AWAY_QUOTA_REFUSED,
+  AWAY_START_REFUSED,
+  AWAY_WEEKLY_STOP_PCT,
   areaLabelsFor,
   areaLabelsOf,
+  awayTicketType,
   type BoardItem,
   claimedByOther,
   DEFAULT_PROFILES,
@@ -33,6 +37,7 @@ import {
   seatDef,
   type TicketView,
 } from "@mc/core";
+import { activeAway } from "../away.ts";
 import type { CardNow } from "../collectors/github.ts";
 import {
   type CcConfig,
@@ -264,10 +269,12 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       );
       if ("refusal" in chosen) continue;
       // the one start check every start applies
-      const startable = (body: string | null): boolean =>
-        group.some(
+      const startable = (body: string | null): boolean => {
+        const away = activeAway(store, now(), config.operator.timezone);
+        return group.some(
           ({ seat }) =>
             eligibleToStart({
+              ...(away ? { away: { pickUp: away.may.pickUp, flight: false } } : {}),
               planRequired: chosen.profile.planRequired,
               repoId,
               issue: card.issueNumber,
@@ -282,6 +289,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
               closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
             }) === null,
         );
+      };
       // the board alone first: only a card that passes it has its body read
       if (!startable(null)) continue;
       // fails closed: a body that cannot be read, or a ticket GitHub no longer has, is not dealt
@@ -450,7 +458,12 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const found = writerSeats(config).find((s) => s.seat.id === seatId);
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
   if (!seatMayTake(store, seatId, maxOpenRunsOf(config))) return;
-  if (atQuotaStop(deps, found.seat.accountId)) return;
+  if (
+    atQuotaStop(deps, found.seat.accountId) ||
+    awayQuotaUnknown(config, store, found.seat.accountId, deps.now()) ||
+    awayQuotaReserve(config, store, found.seat.accountId, deps.now())
+  )
+    return;
   await claimBestReady(deps, found.session.repoId, found.seat);
 
   const taken = store.takeQueued(seatId, deps.now());
@@ -462,6 +475,18 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (card === undefined || hudColumnOf(card) !== "Ready" || store.activeTickets().has(ref)) {
     store.dropQueued(seatId, repoId, issue);
     return;
+  }
+  const away = activeAway(store, deps.now(), config.operator.timezone);
+  if (away) {
+    const rules = await deps.rules(repoId);
+    if (
+      rules instanceof RepoRulesError ||
+      !away.may.pickUp ||
+      awayTicketType(card, rules.templates) === null
+    ) {
+      store.untake(seatId, repoId, issue);
+      return;
+    }
   }
   // The poll is up to a minute old and another hub may have claimed the card since: read it fresh.
   // The row goes back; the next refill, from a newer poll, decides whether it is dealt again.
@@ -522,6 +547,13 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
       deps.onNotes?.();
     }
   } catch (e) {
+    if (
+      e instanceof SupervisorError &&
+      (e.message === AWAY_START_REFUSED || e.message === AWAY_QUOTA_REFUSED)
+    ) {
+      store.untake(seatId, repoId, issue);
+      return;
+    }
     const reason = takeReason(e);
     const logText =
       e instanceof CheckoutError
@@ -587,8 +619,35 @@ export function accountAtStop(
   if (account === undefined) return false;
   return (["5h", "7d"] as const).some((window) => {
     const latest = store.latestUsage(accountId, window);
-    return latest !== null && latest.resetAt > at && latest.pct >= account.stopAt;
+    const stop = account.stopAt;
+    return latest !== null && latest.resetAt > at && latest.pct >= stop;
   });
+}
+
+/** Only new away starts need fresh readings for both windows. Resumes/reviews/watch are unaffected. */
+export function awayQuotaUnknown(
+  config: CcConfig,
+  store: Store,
+  accountId: string,
+  at: number,
+): boolean {
+  if (!activeAway(store, at, config.operator.timezone)) return false;
+  if (!config.accounts.some((a) => a.id === accountId)) return true;
+  return (["5h", "7d"] as const).some((window) => {
+    const reading = store.latestUsage(accountId, window);
+    return reading === null || reading.resetAt <= at;
+  });
+}
+
+export function awayQuotaReserve(
+  config: CcConfig,
+  store: Store,
+  accountId: string,
+  at: number,
+): boolean {
+  if (!activeAway(store, at, config.operator.timezone)) return false;
+  const reading = store.latestUsage(accountId, "7d");
+  return reading !== null && reading.resetAt > at && reading.pct >= AWAY_WEEKLY_STOP_PCT;
 }
 
 const atQuotaStop = (deps: TakeDeps, accountId: string): boolean =>

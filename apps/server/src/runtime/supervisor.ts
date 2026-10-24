@@ -36,6 +36,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
+  AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
   type ContextUsage,
   CREW_CLI_ENV,
@@ -89,6 +90,7 @@ import {
   watchCheckoutName,
   watchStartRefusedText,
 } from "@mc/core";
+import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli-update.ts";
@@ -104,6 +106,7 @@ import {
   realish,
 } from "../config.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
+import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
@@ -410,11 +413,13 @@ export interface Supervisor {
   /**
    * `opts.loop`: the run row is created with this loop state. `opts.override`: the template
    * profile to use instead of the routed one; it is stored for the ticket before the run starts.
+   * `opts.flight`: FLIGHT explicitly cleared this start while away; its PR still goes through the away gate.
+   * `opts.operator`: a manual HUD start, exempt from away-only start restrictions.
    */
   startRun(
     seatId: string,
     issue: number,
-    opts?: { loop?: RunLoop; override?: ProfileOverride },
+    opts?: { loop?: RunLoop; override?: ProfileOverride; flight?: boolean; operator?: boolean },
   ): Promise<{ runId: string; branch: string }>;
   /**
    * Starts the watch seat (FLIGHT): no ticket and no branch, a detached worktree of the default
@@ -1621,7 +1626,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   async function startRun(
     seatId: string,
     issue: number,
-    opts?: { loop?: RunLoop; override?: ProfileOverride },
+    opts?: { loop?: RunLoop; override?: ProfileOverride; flight?: boolean; operator?: boolean },
   ) {
     const info = need(seatId);
     refuseWhileHeld();
@@ -1675,7 +1680,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if ("refusal" in chosen) {
         throw new SupervisorError(profiles instanceof Error ? 502 : 422, chosen.refusal);
       }
+      const away = activeAway(store, now(), config.operator.timezone);
+      if (
+        away &&
+        !opts?.operator &&
+        (accountAtStop(config, store, info.seat.accountId, now()) ||
+          awayQuotaUnknown(config, store, info.seat.accountId, now()) ||
+          awayQuotaReserve(config, store, info.seat.accountId, now()))
+      ) {
+        throw new SupervisorError(422, AWAY_QUOTA_REFUSED);
+      }
       const refusal = eligibleToStart({
+        ...(away && !opts?.operator
+          ? { away: { pickUp: away.may.pickUp, flight: opts?.flight === true } }
+          : {}),
         planRequired: chosen.profile.planRequired,
         repoId: info.repo.id,
         issue,

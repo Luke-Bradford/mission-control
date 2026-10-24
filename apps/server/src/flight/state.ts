@@ -64,6 +64,7 @@ import {
   type TestLockState,
   wakeKeyPrefix,
 } from "@mc/core";
+import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -623,6 +624,11 @@ export function flightState(i: {
         runId: holder?.id ?? "",
         ready: holder !== undefined && ready.has(holder.id),
         awaitingFlight: holder?.loop?.awaitingFlight ?? null,
+        ...(activeAway(store, now, tz) &&
+        holder?.loop?.awayBugDecision?.headSha === p.headSha &&
+        holder?.loop?.awayBugDecision
+          ? { awayBugDecision: holder.loop.awayBugDecision }
+          : {}),
         state: p.state,
         headSha: p.headSha,
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
@@ -982,7 +988,10 @@ export function wakeFacts(
     ].sort(),
     stopped: stoppedSeats(s),
     prs: s.prs
-      .map((p) => `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}`)
+      .map(
+        (p) =>
+          `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
+      )
       .sort(),
     items: s.items
       .map((x) =>
@@ -1024,7 +1033,7 @@ export function pending(
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
     (s.discussions?.length ?? 0) > 0 ||
     (s.teamsDigest?.matches.length ?? 0) > 0 ||
-    s.prs.some((p) => p.awaitingFlight != null) ||
+    s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
     s.questions.length > 0 ||
     s.items.length > 0 ||
     releasable(s).length > 0 ||

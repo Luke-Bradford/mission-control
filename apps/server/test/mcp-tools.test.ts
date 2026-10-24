@@ -16,9 +16,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AWAY_PLAN_REFUSED,
+  AWAY_SETTING,
   CREW_MODES,
   commitMarkersText,
   commitUnresolvedText,
+  DEFAULT_AWAY,
   DEFAULT_PROFILES,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
@@ -3099,6 +3102,40 @@ describe("report_plan", () => {
   it("is offered to read-only seats whose role is granted it", () => {
     expect(tool("report_plan", pt).modes).toEqual([]);
     expect(tool("report_plan", pt).grantable).toEqual(["read-only"]);
+  });
+
+  it("refuses report_plan while away without editing GitHub", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await plan()).toEqual(refused(AWAY_PLAN_REFUSED));
+    expect(ghCalls()).toEqual([]);
+    expect(told).toEqual([]);
+  });
+
+  it("rechecks away after reading the issue and before editing it", async () => {
+    const calls: string[][] = [];
+    const cfg = config();
+    cfg.crew?.sessions[0]?.seats.push({
+      id: "fao-1",
+      role: "FAO",
+      accountId: "claude-main",
+      model: "haiku",
+      area: [],
+    });
+    const tools = createMcTools(
+      deps({
+        config: cfg,
+        gh: async (args) => {
+          calls.push([...args]);
+          store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+          return { code: 0, stdout: JSON.stringify({ body: "Do X.", state: "OPEN" }), stderr: "" };
+        },
+      }),
+    );
+    expect(await tool("report_plan", tools).call(FAO_CTX, { plan: PLAN })).toEqual(
+      refused(AWAY_PLAN_REFUSED),
+    );
+    expect(calls.some((a) => a[1] === "edit")).toBe(false);
+    expect(told).toEqual([]);
   });
 
   it("appends the plan", async () => {
