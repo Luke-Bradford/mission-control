@@ -733,6 +733,32 @@ describe("startRun", () => {
     ]);
   });
 
+  it("denies a bare loop repo and its worktree, without denying the repo's parent", () => {
+    const cfg = config();
+    const parent = join(dir, "bare");
+    const bare = join(parent, "shop-app.git");
+    const worktree = join(dir, "shop-app-loop");
+    mkdirSync(parent);
+    git(dir, "init", "-q", "--bare", "-b", "main", bare);
+    git(clone, "push", "-q", bare, "HEAD:main");
+    git(bare, "worktree", "add", "-q", "-b", "loop", worktree);
+    cfg.loops = [
+      {
+        id: "ta",
+        repoId: "mc",
+        kind: "ta-loop",
+        accountId: "claude-main",
+        stateDir: join(worktree, "var"),
+        worktree,
+        launchdLabel: "com.example.ta",
+      },
+    ];
+    const denied = seatDenyRead(cfg, join(dir, "hub"), "mc-crew");
+    expect(denied).toContain(realpathSync(worktree));
+    expect(denied).toContain(realpathSync(bare));
+    expect(denied).not.toContain(realpathSync(parent));
+  });
+
   it("denies a loop repo's main working tree (`<repo>/.git` common dir), never the seat's own folders", () => {
     const cfg = config();
     const main = join(dir, "shop-app");
