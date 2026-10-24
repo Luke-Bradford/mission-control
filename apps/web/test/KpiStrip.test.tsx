@@ -1,21 +1,12 @@
-import type { OverviewSummary } from "@mc/core";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
+import { OVERVIEW } from "./fixtures.ts";
 
-const kpis: OverviewSummary["kpis"] = {
-  working: { now: 3, of: 5, series: [1, 2, 3] },
-  tokensPerMin: { now: 41200, series: [100, 200, 300] },
-  spendToday: { usd: 24.31, perHour: [1, 2] },
-  inFlight: { count: 4, oldestAt: null },
-  mergedToday: { count: 6, perHour: [1, 2] },
-  ciPassRate24h: { pct: 92, runs: 10, redNow: 1 },
-  cycleTime: { medianMs: 4320000, n: 8, avg14dMs: 5400000 },
-  needsYou: { count: 2, overHour: 1 },
-};
+const kpis = OVERVIEW.kpis;
 
 describe("KpiStrip", () => {
   it("formats eight linked metrics and labels the available histories honestly", async () => {

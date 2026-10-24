@@ -648,3 +648,21 @@ it("coalesces overview topics within one macrotask and omits the All session fil
   expect(fetchMock).toHaveBeenCalledTimes(1);
   off();
 });
+
+it("refetches the live log on guard, health and board changes", async () => {
+  const fetchMock = vi.fn(async () => Response.json([]));
+  vi.stubGlobal("fetch", fetchMock);
+  const ref = RESOURCES.activity;
+  const off = hub.subscribe(ref.path, ref.topic, () => {});
+  try {
+    await settle();
+    for (const topic of ["guard", "health", "boards"] as const) {
+      fetchMock.mockClear();
+      hub.refetchTopic(topic);
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  } finally {
+    off();
+  }
+});

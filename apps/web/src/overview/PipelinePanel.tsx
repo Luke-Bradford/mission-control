@@ -26,8 +26,8 @@ export function PipelinePanel() {
       {data && (
         <div className="pipeline-grid pb">
           {Object.entries(PIPELINE_STAGES).map(([key, label]) => {
-            const stage = data.pipeline.find((s) => s.stage === key);
-            const cards = stage?.cards.slice(0, 6) ?? [];
+            const stage = data.pipeline?.find((s) => s.stage === key);
+            const cards = stage?.cards?.slice(0, 6) ?? [];
             const more = (stage?.count ?? 0) - cards.length;
             const href = `/board?stage=${key}`;
             return (
@@ -55,7 +55,7 @@ export function PipelinePanel() {
                       <span className="pipeline-title">{card.title}</span>
                       <span className="pipeline-meta">
                         <span className="pipeline-ci">
-                          {card.ci.map((state, i) => (
+                          {card.ci?.map((state, i) => (
                             <span
                               // biome-ignore lint/suspicious/noArrayIndexKey: CI states have no check ids; each position is a dot.
                               key={`${i}-${state}`}

@@ -26,38 +26,38 @@ export function KpiStrip() {
     {
       label: "Agents working",
       page: "agent",
-      value: value(k?.working.now),
-      delta: k ? `of ${k.working.of} agents` : "—",
-      series: k?.working.series,
+      value: value(k?.working?.now),
+      delta: k?.working?.of != null ? `of ${k.working.of} agents` : "—",
+      series: k?.working?.series,
       color: "var(--ok)",
       history: "last 30 minutes",
     },
     {
       label: "Tokens/min",
       page: "telemetry",
-      value: k ? kTokens(k.tokensPerMin.now) : "—",
-      delta: change(k?.tokensPerMin.series),
-      series: k?.tokensPerMin.series,
+      value: k?.tokensPerMin?.now != null ? kTokens(k.tokensPerMin.now) : "—",
+      delta: change(k?.tokensPerMin?.series),
+      series: k?.tokensPerMin?.series,
       color: "var(--accent)",
       history: "last 30 minutes",
     },
     {
       label: "Spend today",
       page: "telemetry",
-      value: k ? `$${k.spendToday.usd.toFixed(2)}` : "—",
-      delta: k?.spendToday.perHour.length
+      value: k?.spendToday?.usd != null ? `$${k.spendToday.usd.toFixed(2)}` : "—",
+      delta: k?.spendToday?.perHour?.length
         ? `$${(k.spendToday.perHour.at(-1) ?? 0).toFixed(2)} this hour`
         : "—",
-      series: k?.spendToday.perHour,
+      series: k?.spendToday?.perHour,
       color: "var(--think)",
       history: "hourly today",
     },
     {
       label: "In flight",
       page: "board",
-      value: value(k?.inFlight.count),
+      value: value(k?.inFlight?.count),
       delta:
-        k?.inFlight.oldestAt == null
+        k?.inFlight?.oldestAt == null
           ? "—"
           : `${duration((summary?.at ?? Date.now()) - k.inFlight.oldestAt)} oldest`,
       color: "var(--accent)",
@@ -65,32 +65,32 @@ export function KpiStrip() {
     {
       label: "Merged today",
       page: "board",
-      value: value(k?.mergedToday.count),
-      delta: k?.mergedToday.perHour.length ? `${k.mergedToday.perHour.at(-1)} this hour` : "—",
-      series: k?.mergedToday.perHour,
+      value: value(k?.mergedToday?.count),
+      delta: k?.mergedToday?.perHour?.length ? `${k.mergedToday.perHour.at(-1)} this hour` : "—",
+      series: k?.mergedToday?.perHour,
       color: "var(--ok)",
       history: "hourly today",
     },
     {
       label: "CI pass rate",
       page: "board",
-      value: k?.ciPassRate24h.pct == null ? "—" : `${Math.round(k.ciPassRate24h.pct)}%`,
-      delta: k ? `${k.ciPassRate24h.redNow} red now` : "—",
+      value: k?.ciPassRate24h?.pct == null ? "—" : `${Math.round(k.ciPassRate24h.pct)}%`,
+      delta: k?.ciPassRate24h?.redNow != null ? `${k.ciPassRate24h.redNow} red now` : "—",
       color: "var(--crit)",
     },
     {
       label: "Cycle time",
       page: "board",
-      value: duration(k?.cycleTime.medianMs),
+      value: duration(k?.cycleTime?.medianMs),
       delta:
-        k?.cycleTime.avg14dMs == null ? "—" : `${duration(k.cycleTime.avg14dMs)} · 14d average`,
+        k?.cycleTime?.avg14dMs == null ? "—" : `${duration(k.cycleTime.avg14dMs)} · 14d average`,
       color: "var(--think)",
     },
     {
       label: "Needs you",
       page: "comms",
-      value: value(k?.needsYou.count),
-      delta: k ? `${k.needsYou.overHour} over an hour` : "—",
+      value: value(k?.needsYou?.count),
+      delta: k?.needsYou?.overHour != null ? `${k.needsYou.overHour} over an hour` : "—",
       color: "var(--warn)",
     },
   ] as const;

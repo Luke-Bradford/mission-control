@@ -4365,6 +4365,17 @@ button.nrow.thread.tagged {
   max-width: 100%;
 }
 
+.meter .track {
+  position: relative;
+}
+.projection-tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--fg-2);
+  z-index: 1;
+}
 .pipeline-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

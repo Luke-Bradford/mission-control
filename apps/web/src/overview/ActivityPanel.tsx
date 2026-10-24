@@ -1,6 +1,7 @@
 import {
   type ActivityEvent,
   type ActivityRow,
+  type AttentionItem,
   type ConfigView,
   type Crew,
   HUD_STATE_LABEL,
@@ -8,6 +9,7 @@ import {
   SEAT_TURN_START_TEXT,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
+import { operatorItems } from "../attention.ts";
 import { useTz } from "../clock.ts";
 import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
 import { Expandable } from "../components/Expandable.tsx";
@@ -19,20 +21,40 @@ import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
+import { itemPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 
-type Filter = "steps" | "comms" | "all";
+type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
+
+type Filter = "steps" | "comms" | "all" | "reviews" | "merges" | "guard" | "needs";
 const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
   { value: "steps", label: "Steps" },
+  { value: "reviews", label: "Reviews" },
+  { value: "merges", label: "Merges" },
+  { value: "guard", label: "Guard" },
+  { value: "needs", label: "Needs you" },
   { value: "comms", label: "Messages" },
-  { value: "all", label: "Everything" },
 ];
 const SUB: Record<Filter, string> = {
+  reviews: "reviews and pull requests",
+  merges: "merge activity",
+  guard: "guard activity",
+  needs: "open items needing you",
   steps: "high-level steps from every agent",
   comms: "what agents said to each other",
   all: "every event",
 };
 const SHOWN = 120;
+const FILTER_KEY = "overview.live-log.filter";
+function rememberedFilter(): Filter {
+  try {
+    const value = localStorage.getItem(FILTER_KEY);
+    return FILTERS.find((f) => f.value === value)?.value ?? "steps";
+  } catch {
+    return "steps";
+  }
+}
 
 const FALLBACK_GLYPH = "◆";
 const FALLBACK_CLASS = "k-step";
@@ -128,11 +150,13 @@ function ActivityText({
   prRepoId,
   split,
   red,
+  attentionKey,
 }: {
   event: ActivityEvent;
   prRepoId: string | null;
   split: [string, string] | null;
   red: boolean;
+  attentionKey?: string;
 }) {
   const pr = e.kind === "pr-opened" || e.kind === "pr-merged" ? PR_EVENT.exec(e.text) : null;
   return (
@@ -148,6 +172,14 @@ function ActivityText({
           <TicketRef ticket={e.ref} url={e.kind === "escalation" ? e.url : null} />
           {split[1]}
         </>
+      ) : attentionKey && !e.ref ? (
+        <a
+          href={e.url ?? itemPath(attentionKey)}
+          target={e.url ? "_blank" : undefined}
+          rel={e.url ? "noreferrer" : undefined}
+        >
+          {e.text}
+        </a>
       ) : (
         <MarkdownInline text={e.text} />
       )}
@@ -160,10 +192,11 @@ export function ActivityPanel() {
   const events = useResource<ActivityRow[]>(RESOURCES.activity);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention);
   const tz = useTz();
   const { inView, inRepo } = useSessionScope();
-  const [filter, setFilter] = useState<Filter>("steps");
-  const [frozen, setFrozen] = useState<ActivityRow[] | null>(null);
+  const [filter, setFilter] = useState<Filter>(rememberedFilter);
+  const [frozen, setFrozen] = useState<LogRow[] | null>(null);
   const list = useRef<HTMLDivElement>(null);
 
   const agents = new Map(crew?.rows.map((r) => [r.id, r]));
@@ -175,10 +208,62 @@ export function ActivityPanel() {
   const repoOf = (who: string): string | null =>
     agents.get(who)?.repoId ?? [who, ...who.split(":")].find((p) => repoIds.has(p)) ?? null;
 
-  const source = frozen ?? events.data ?? [];
+  const needs: LogRow[] = [
+    ...new Map(
+      operatorItems(attention.data ?? []).map((i) => [
+        i.escalationId && i.ticket ? `escalation:${i.ticket}` : `attention:${i.key}`,
+        i,
+      ]),
+    ).values(),
+  ].map((i) => ({
+    attentionKey: i.key,
+    escalationRef: i.escalationId ? i.ticket : null,
+    at: i.messageAt ?? i.at,
+    who: i.agentId ?? i.repoId ?? "Needs you",
+    kind: "escalation",
+    text: i.text,
+    ref: i.ticket,
+    url: i.url,
+    status: null,
+    prs: [],
+    summary: null,
+  }));
+  const escalationRefs = new Set(
+    (events.data ?? []).filter((e) => e.kind === "escalation").map((e) => e.ref),
+  );
+  const usesAttention = filter === "needs" || filter === "all";
+  const resources = [
+    ...(filter === "needs" ? [] : [{ name: "activity", ...events }]),
+    ...(usesAttention ? [{ name: "attention", ...attention }] : []),
+  ];
+  const source: LogRow[] =
+    frozen ??
+    (filter === "needs"
+      ? needs
+      : filter === "all"
+        ? [
+            ...(events.data ?? []),
+            ...needs.filter((i) => !i.escalationRef || !escalationRefs.has(i.escalationRef)),
+          ]
+        : (events.data ?? []));
   const rows = source
     .filter((e) => {
-      if (filter === "all") return true;
+      if (filter === "all" || filter === "needs") return true;
+      if (filter === "guard") return e.kind === "guard";
+      if (filter === "reviews")
+        return (
+          e.kind === "pr-opened" ||
+          e.kind === "pr-merged" ||
+          (e.kind === "loop" && /review/i.test(e.text))
+        );
+      if (filter === "merges")
+        return (
+          e.kind === "pr-merged" ||
+          (e.kind === "loop" &&
+            /^(?:merged?\b|marked (?:PR #\d+|the PR) ready|closed #\d+|deleted origin's |deleted the local branch |could not delete the local branch |(?:mark ready|close the issue|delete the remote branch) failed:)/i.test(
+              e.text,
+            ))
+        );
       if (filter === "comms") return isComms(e);
       return (
         !isComms(e) &&
@@ -195,6 +280,7 @@ export function ActivityPanel() {
       const repo = repoOf(e.who);
       return repo === null || inRepo(repo);
     })
+    .sort((a, b) => b.at - a.at)
     .slice(0, SHOWN)
     .reverse();
   // Events have no id: key by content, and number repeats so twins never share a key.
@@ -216,15 +302,28 @@ export function ActivityPanel() {
   return (
     <Panel
       id="actP"
-      title="Activity"
+      title="Live log"
       sub={SUB[filter]}
       actions={
         <>
-          <Seg label="Activity filter" options={FILTERS} value={filter} onChange={setFilter} />
+          <Seg
+            label="Activity filter"
+            options={FILTERS}
+            value={filter}
+            onChange={(value) => {
+              setFilter(value);
+              setFrozen(null);
+              try {
+                localStorage.setItem(FILTER_KEY, value);
+              } catch {
+                /* Storage can be unavailable. */
+              }
+            }}
+          />
           <button
             type="button"
             className="sm ghost"
-            onClick={() => setFrozen(frozen ? null : (events.data ?? []))}
+            onClick={() => setFrozen(frozen ? null : source)}
           >
             {frozen ? "Resume" : "Pause"}
           </button>
@@ -276,6 +375,7 @@ export function ActivityPanel() {
                     prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
                     split={split}
                     red={red}
+                    attentionKey={e.attentionKey}
                   />
                 </span>
               </Expandable>
@@ -294,10 +394,20 @@ export function ActivityPanel() {
             </div>
           );
         })}
-        {rows.length === 0 && !events.error && events.data && (
+        {rows.length === 0 && resources.every((r) => r.data && !r.error && !r.loading) && (
           <div className="pb muted">No events yet.</div>
         )}
-        {events.error && !events.data && <div className="pb crit-t">Could not load activity.</div>}
+        {resources.map((r) =>
+          r.error ? (
+            <div key={r.name} className="pb crit-t">
+              {r.data
+                ? `Could not refresh ${r.name}. Showing last known items.`
+                : `Could not load ${r.name}.`}
+            </div>
+          ) : r.loading ? (
+            <div key={r.name} className="pb muted">{`Loading ${r.name}…`}</div>
+          ) : null,
+        )}
       </div>
     </Panel>
   );

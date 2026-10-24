@@ -40,6 +40,7 @@ import {
   limit7d,
   MIN,
   NOW,
+  OVERVIEW,
   prView,
   SESSION_CONFIG,
   seatRow,
@@ -87,7 +88,7 @@ interface Data {
 function stub(d: Data = {}) {
   return stubFetch({
     ...d.extra,
-    "/api/overview": { pipeline: [] },
+    "/api/overview": OVERVIEW,
     "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
     "/api/crew": { rows: d.rows ?? [], firstRunToday: null },
     "/api/attention": d.items ?? [],
@@ -113,6 +114,7 @@ function Probe() {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  localStorage.clear();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -1143,6 +1145,7 @@ describe("Agents panel", () => {
     vi.useRealTimers();
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(NOW);
+    localStorage.clear();
     stub({
       rows: [crewRow({ hudState: "stalled", lastOutputAt: NOW - 11 * MIN })],
       items: [
@@ -1840,7 +1843,7 @@ describe("Activity panel", () => {
     expect(within(act_).queryByText(SEAT_TURN_END_TEXT)).toBeNull();
     expect(act_.querySelectorAll(".arow")).toHaveLength(2);
 
-    fireEvent.click(within(act_).getByRole("button", { name: "Everything" }));
+    fireEvent.click(within(act_).getByRole("button", { name: "All" }));
     for (const { text } of activity) expect(within(act_).getByText(text)).toBeTruthy();
     expect(act_.querySelectorAll(".arow")).toHaveLength(4);
   });
@@ -2163,7 +2166,7 @@ describe("Activity panel", () => {
     expect(you.querySelector(".mention")?.textContent).toBe(TAG);
     expect(act_.textContent).toContain("what agents said to each other");
     expect(act_.textContent).not.toContain("Arrives with the engine (phase 2).");
-    fireEvent.click(within(act_).getByRole("button", { name: "Everything" }));
+    fireEvent.click(within(act_).getByRole("button", { name: "All" }));
     expect(act_.textContent).toContain("every event");
     expect(act_.querySelectorAll(".arow").length).toBe(6);
     expect(f).toHaveBeenCalled();
