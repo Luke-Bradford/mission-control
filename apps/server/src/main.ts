@@ -128,7 +128,10 @@ async function main(): Promise<void> {
     if (repo === undefined || session === undefined) {
       return new RepoRulesError(`${repoId}: no crew session reads this repo's rules`);
     }
-    return readRepoRules(repo.github, session.checkout);
+    const notes: string[] = [];
+    const rules = await readRepoRules(repo.github, session.checkout, repo.rules, notes);
+    for (const note of notes) log(`engine: ${note}`);
+    return rules;
   };
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
   // crew config, and only where the guard hook can be found.

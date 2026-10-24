@@ -2140,6 +2140,25 @@ describe("merge workspace", () => {
     expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
   });
 
+  it("holds Mission Control block changes on a standard repo with no hard-rule touches", () => {
+    const unchanged = merge(
+      { flightPowers: "standard" },
+      { gate: gateOf({ missionControlChanged: false }) },
+    );
+    expect(kindsOf(reconcile(unchanged).actions)).toContain("merge");
+    const changed = merge(
+      { flightPowers: "standard" },
+      { gate: gateOf({ missionControlChanged: true }) },
+    );
+    expect(kindsOf(reconcile(changed).actions)).not.toContain("merge");
+    expect(reconcile(changed).actions).toContainEqual({
+      kind: "note",
+      key: readyKey,
+      noteKind: "ready",
+      text: readyHardRuleText(REF, 12, ["CLAUDE.md"]),
+    });
+  });
+
   it("CLAUDE prose outside the Mission Control block can be cleared", () => {
     const s = merge(
       { flightPowers: "superuser" },

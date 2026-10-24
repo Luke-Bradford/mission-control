@@ -99,7 +99,8 @@ import {
   READY_UNDO_FAILED,
 } from "../src/engine/publish.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
-import { RepoRulesError } from "../src/engine/rules.ts";
+import { resolveRepoRules } from "../src/engine/rule-config.ts";
+import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
 import {
@@ -2905,15 +2906,17 @@ describe("the engine runs reviews", () => {
     });
 
     it("does not merge while the rules leave hard_rules unset, and says which key to add", async () => {
-      h.rules = async () => DEFAULT_REPO_RULES;
+      h.rules = async () => parseRepoRules(null);
       await gateOpen();
       await vi.waitFor(() => expect(noteKeys()).toContain(hardRulesUnsetNoteKey(REPO)));
       await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
       expect(h.steps).toEqual([]);
       const unset = store.notes().filter((n) => n.key === hardRulesUnsetNoteKey(REPO));
       expect(unset.map((n) => n.text)).toEqual([hardRulesUnsetText(REPO)]);
-      // once the rules set the key the run merges and the note clears
-      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true });
+      expect(unset[0]?.text).toContain("~/.config/mission-control/config.yaml");
+      expect(unset[0]?.text).toContain("repos[].rules.hard_rules");
+      // user config alone enables the merge and clears the note
+      h.rules = async () => parseRepoRules(null, resolveRepoRules({ hard_rules: [] }));
       await h.engine.tick();
       await h.engine.reconcileRun(RUN);
       await vi.waitFor(() => expect(h.steps).toEqual(ALL));

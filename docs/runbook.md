@@ -777,22 +777,58 @@ repo it makes no call at all. The engine moves only a looped run's own card. Eve
 Activity (`{repo}#{issue} → {column}`, or `… failed: {reason}`); a card already in place makes no
 write and no row.
 
-**Per-repo board rules.** Each repo can state how the build loop treats its board in a
-`## Mission Control` section of its `CLAUDE.md`: prose for people and seats, plus the first fenced
-`yaml` block under that heading, key `mc:`. The hub reads it at the repo's `origin/HEAD` (not a
-seat's worktree), once per commit, so a change takes effect once it is merged and the crew clone
-has fetched. Keys:
-`pick_from` (statuses seats take tickets from; default `[Ready]`), `promote_backlog` (default
-`false`), `areas` (area label → the globs it covers; a seat's focus is the labels inside its area),
-`hard_rules` (paths that never auto-merge or auto-Update; absent or `null` means the built-in list,
-`[]` means none) and `always_ask`; `needs`, `templates` and `ci` are accepted unchecked, for later
-parts. An unknown key, or a wrong type in one of the keys above, is refused with the key named. A
-repo with no `## Mission Control` heading gets the defaults; a heading with no yaml block (none
-before the next `## ` heading, an unclosed or empty fence, or no `mc:` mapping) is refused, not
-defaulted. `pick_from: []` and an area with no globs are refused, and an area glob must be
-repo-relative with `**` only as a trailing `/**`. Nothing uses the rules yet (the build loop will,
-and a refused block stops new tickets for that repo). This repo's own block is at the end of its
-`CLAUDE.md`. `crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
+**Per-repo board rules.** Set `repos[].rules` on the matching repo in
+`~/.config/mission-control/config.yaml` (or the file selected by `MC_CONFIG`). The target repo
+needs no Mission Control file, heading or block. `config.example.yaml` shows the shape. Keys:
+
+- `pick_from`: statuses seats take tickets from; default `[Ready]`.
+- `promote_backlog`: default `false`.
+- `needs`: promotion/start requirements; default `[done_when, size]`.
+- `templates`: label → template profile name (profiles live beside the config).
+- `areas`: area label → globs; a seat's focus is the labels inside its area.
+- `hard_rules`: paths held from ordinary auto-merge and auto-Update. Omitted or `null` inherits
+  the built-in list; `[]` explicitly sets no hard-rule paths. On a standard repo it removes
+  hard-rule path holds, but area strays and `PROTECTED_FILES` remain enforced, and Mission Control
+  block changes hold auto-merge for the operator to merge by hand (Needs you). It does not bypass review, CI or other merge gates.
+  Superuser floors still apply.
+- `hard_rules_by`: `operator` (default) or `controller`; superuser FLIGHT powers remain a separate
+  user-config setting.
+- `always_ask`: labels that require the operator.
+
+Commands and protected files already live alongside `rules`, at `repos[].commands` (`writer` and
+`review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
+from a repo block. Changes to these repo settings, including `rules`, require a hub restart.
+
+A repo block optionally tightens the rules in the first fenced `yaml` block under
+`## Mission Control` in its `CLAUDE.md`, key `mc:`. The hub reads it at `origin/HEAD`, not a seat's
+worktree; a change takes effect once merged and fetched. `hard_rules` is unioned with an explicit
+user-config list (even `[]`); it replaces the defaults only when user config supplies no list.
+`always_ask` is unioned, and `hard_rules_by` is `operator` if either source says `operator`.
+The default counts as `operator`, so a block cannot set `controller` unless user config sets it.
+User-config `templates`, `promote_backlog` and `needs` win whenever supplied, including empty maps,
+empty lists and `false`; the block may fill omitted keys. The block may replace `pick_from` and
+`areas`. Omitted fields inherit user config, then built-in defaults; `hard_rules: null` also
+inherits. An explicit hard-rule list in either source,
+including `[]`, sets `hardRulesSet`. Without a list in either source the hub never auto-merges and
+posts a Needs you note pointing to `repos[].rules.hard_rules` in user config.
+
+An unknown key or invalid value is refused with the key named. `pick_from: []` and an area with no
+globs are refused, and area globs must be repo-relative with `**` only as a trailing `/**`. No
+`CLAUDE.md` or no Mission Control heading is fine. A heading with a missing, unclosed or empty yaml
+block, or no `mc:` mapping, is still refused and stops new tickets and merges for that repo.
+Hard-rule globs use the same validation as protected globs: repo-relative, with no leading `/` or
+`./`, trailing `/`, empty or dot segments. A malformed legacy block `templates` value is logged
+and ignored when user templates exist; otherwise it retains the legacy empty map.
+The legacy repo-only `ci` key remains ignored; configure CI through `repos[].required_checks`.
+
+**Migrating this repo (operator step).** In your home config's `mission-control` repo entry, copy
+the mapping beneath this repo's `CLAUDE.md` `mc:` key into `rules:`. Keep its template map, areas,
+full hard-rule list, pick/promote/needs settings and `always_ask`; omit the unused `ci` key. Apply
+the config through the normal operator update/restart process. The repo block may remain as an
+optional override that tightens the rules; removing it is a separate operator change after the home config is in place.
+This code change does not edit `CLAUDE.md` or your home config.
+
+`crew.run_token_budget` (default `400000`) is the input + output tokens one build-loop
 run may use; the engine parks a run that goes over. A writer run leaves its seat (is set aside) once
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
 the seat does not idle through CI. A CI failure brings the run back first, ahead of any new ticket.

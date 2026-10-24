@@ -510,7 +510,11 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     P !== null &&
     (loop.flightClearedSha === P ||
       (loop.carry?.to === P && loop.carry.from === loop.flightClearedSha));
-  const clear = touches !== null && !floor && (touches.paths.length === 0 || cleared);
+  const clear =
+    touches !== null &&
+    !floor &&
+    gate?.missionControlChanged !== true &&
+    (touches.paths.length === 0 || cleared);
   const otherGates =
     on &&
     s.pr?.mergeable !== "CONFLICTING" &&
@@ -855,19 +859,25 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
               });
             }
           } else {
-            // only hard-rule files hold it: the operator merges
+            // Hard-rule files and Mission Control block changes hold it for the operator.
+            const hardPaths = [
+              ...new Set([
+                ...(gv.touches?.paths ?? []),
+                ...(gv.gate?.missionControlChanged === true ? ["CLAUDE.md"] : []),
+              ]),
+            ];
             const hardOnly =
               s.pr?.mergeable !== "CONFLICTING" &&
               gv.touches !== null &&
-              gv.touches.paths.length > 0 &&
+              hardPaths.length > 0 &&
               gv.gate?.hubOnly === true &&
-              gv.gate.strays.every((p) => gv.touches?.paths.includes(p));
+              gv.gate.strays.every((p) => hardPaths.includes(p));
             if (hardOnly && gv.touches !== null) {
               notes.set(readyNoteKey(runId, rv.P), {
                 noteKind: "ready",
                 text: gv.awaiting
                   ? `${ticket.ref}: PR #${n} awaiting-flight on ${rv.P}`
-                  : readyHardRuleText(ticket.ref, n, gv.touches.paths),
+                  : readyHardRuleText(ticket.ref, n, hardPaths),
               });
             } else if (s.hardRulesSet !== true && s.pr?.mergeable !== "CONFLICTING") {
               notes.set(readyNoteKey(runId, rv.P), {
@@ -876,7 +886,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
               });
             }
           }
-          // otherwise the gate passes or its reads are due: the operator has nothing to do
+          // Other gate failures or pending reads do not produce a ready note.
         }
       }
     }
