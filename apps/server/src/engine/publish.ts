@@ -48,7 +48,13 @@ import {
   readKnown,
   seatPlace,
 } from "../mcp/tools.ts";
-import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
+import {
+  adminDirOf,
+  CREW_GIT_SLOW_MS,
+  installAfterSync,
+  MC_MERGE_AUTHOR,
+  mainMergeArgs,
+} from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { crewDir } from "../store.ts";
 import { mcSection } from "./rules.ts";
@@ -89,8 +95,7 @@ export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the s
 export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
 export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
-/** The author and committer of the merge commit the engine makes. */
-export const MC_MERGE_AUTHOR = "Mission Control";
+export { MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
@@ -120,7 +125,7 @@ export type GateResult =
  * changes, so nothing was merged).
  */
 export type UpdateBranchResult =
-  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean }
+  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean; installNote?: string }
   | { ok: true; kind: "conflict"; files: string[] }
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
@@ -147,6 +152,11 @@ export function prDiffKey(diff: string): string {
 }
 
 export interface Publisher {
+  /** The pending merge in the registered worktree, or null when absent or unreadable. */
+  mergeHead(run: Run, worktree: string): Promise<string | null>;
+  mainTip(
+    run: Run,
+  ): Promise<{ ok: true; sha: string } | { ok: false; text: string; transient: boolean }>;
   awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
@@ -873,6 +883,30 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       });
     },
 
+    async mergeHead(run, worktree) {
+      const place = seatPlace(deps.config, run.agentId);
+      if (place === null) return null;
+      try {
+        const common = await realpath(join(place.session.checkout, ".git"));
+        const gitDir = await adminDirOf(common, worktree);
+        if (gitDir === null) return null;
+        return (
+          await (deps.git ?? crewGit)(
+            worktree,
+            ["rev-parse", "-q", "--verify", "MERGE_HEAD"],
+            common,
+            { gitDir },
+          )
+        ).trim();
+      } catch {
+        return null;
+      }
+    },
+
+    mainTip(run) {
+      return inGit(run, async (g) => ({ ok: true, sha: (await originNow(g, null)).mainSha }));
+    },
+
     async updateBranch(run, mainSha, worktree) {
       const branch = ownBranch(run);
       if (branch === null) return final(MERGE_NOT_RUN_BRANCH);
@@ -927,27 +961,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           const { defaultBranch } = await originNow(g, null);
           await fetchMain(g, defaultBranch, mainSha);
           const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
-          // the work is on main already: the PR is merged, and the next pass sees it
+          // No branch-only commits remain: there is nothing to merge main into.
           if (await yes(g, ["merge-base", "--is-ancestor", before, mainSha])) {
             return transient(UPDATE_UP_TO_DATE);
           }
           try {
-            await w(
-              [
-                "-c",
-                "commit.gpgsign=false",
-                "-c",
-                "rerere.enabled=false",
-                "merge",
-                "--no-ff",
-                "--no-edit",
-                "--no-verify",
-                "-m",
-                `Merge main into ${branch}`,
-                mainSha,
-              ],
-              { GIT_AUTHOR_NAME: MC_MERGE_AUTHOR, GIT_COMMITTER_NAME: MC_MERGE_AUTHOR },
-            );
+            await w(mainMergeArgs(branch, mainSha), {
+              GIT_AUTHOR_NAME: MC_MERGE_AUTHOR,
+              GIT_COMMITTER_NAME: MC_MERGE_AUTHOR,
+            });
           } catch (e) {
             if ((e as { code?: unknown } | null)?.code === 1) {
               const files = await unmerged();
@@ -988,7 +1010,24 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           } catch {
             prSame = false;
           }
-          return { ok: true, kind: "merged", sha, parent: before, prSame };
+          const installNote = await installAfterSync(
+            checkout,
+            {
+              path: worktree,
+              gitDir,
+              branch,
+              baseSha: mainSha,
+            },
+            before,
+          );
+          return {
+            ok: true,
+            kind: "merged",
+            sha,
+            parent: before,
+            prSame,
+            ...(installNote ? { installNote } : {}),
+          };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);

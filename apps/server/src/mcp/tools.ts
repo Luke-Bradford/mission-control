@@ -87,6 +87,7 @@ import {
   MC_REMOVE_PATH_MAX,
   MC_REMOVE_REFUSED,
   MC_RUN_ENDED,
+  MC_SYNC_OFF,
   MC_TEXT_MAX,
   MC_TOOL_NAMES,
   mcToolHitText,
@@ -98,7 +99,6 @@ import {
   otherAreaText,
   outsideAreaText,
   PLAN_HEADING,
-  PNPM_STORE_DIR_NAME,
   PROFILE_NAME,
   PROFILE_PAIR_TEXT,
   PROFILE_REASON_MAX,
@@ -142,6 +142,7 @@ import {
   removeNotFileText,
   reviewedEventText,
   type StrayKind,
+  SYNC_MAIN_GAP_MIN,
   scanSecrets,
   scanText,
   seatCallSign,
@@ -156,7 +157,7 @@ import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import type { ProfilesError } from "../profiles.ts";
-import { adminDirOf, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
+import { adminDirOf, COMMIT_ADD_PATHSPEC, CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
 import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
@@ -185,6 +186,8 @@ export interface McToolsDeps {
   knownSecretsTimeoutMs?: number;
   /** A line for the server log (a push or gh failure); default: none. */
   log?: (line: string) => void;
+  /** Writer sync callback, bound to Engine.writerSyncMain; absent when the engine is unavailable. */
+  syncMain?: (runId: string) => Promise<{ text: string; isError?: boolean }>;
   /** Called after `report_evidence` records a note (the supervisor tells its listeners). */
   onEvidence?: (seatId: string, runId: string) => void;
   /** Called after `report_findings` records a review (the supervisor tells its listeners). */
@@ -304,16 +307,7 @@ export function stagedEntries(out: string): StagedEntry[] {
   return entries;
 }
 
-/**
- * What the commit tool's `add -A` stages: the whole worktree but any `.pnpm-store/`, at the top or
- * nested. A sandboxed pnpm that cannot write its global store makes one inside the worktree; the
- * seat's env points the store elsewhere (`crewPnpmStoreDir`), and this is the backstop.
- */
-export const COMMIT_ADD_PATHSPEC = [
-  "--",
-  ":(top)",
-  `:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`,
-] as const;
+export { COMMIT_ADD_PATHSPEC } from "../runtime/checkouts.ts";
 
 /** Paths named on one git command line, so a large commit stays inside the argument limit. */
 const PATHSPEC_CHUNK = 200;
@@ -1088,6 +1082,16 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { run, worktree: row.worktree };
   }
 
+  async function syncMain(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = z.strictObject({}).safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const place = writerPlace(deps, ctx.runId, MC_TOOL_NAMES.syncMain);
+    if ("text" in place) return place;
+    if (liveRun(ctx) === null) return ENDED;
+    if (deps.syncMain === undefined) return { text: MC_SYNC_OFF, isError: true };
+    return deps.syncMain(ctx.runId);
+  }
+
   async function commit(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = CommitArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -1835,6 +1839,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       },
       modes: ["writer"],
       call: commit,
+    },
+    {
+      name: MC_TOOL_NAMES.syncMain,
+      description: `Bring main into your branch when your ticket needs a change that has merged since your branch was cut. Mission Control merges origin's main into your branch in your worktree and records the merge commit. Commit your changes first. The answer is Merged, Already up to date, or Conflicts in: the files to resolve; resolve those files' markers, then call mc commit. At most once every ${SYNC_MAIN_GAP_MIN} minutes.`,
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      modes: ["writer"],
+      call: syncMain,
     },
     {
       name: MC_TOOL_NAMES.askOperator,

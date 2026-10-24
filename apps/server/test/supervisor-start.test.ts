@@ -22,6 +22,8 @@ import {
   type BoardItem,
   CREW_DISABLED,
   claimedText,
+  conflictKey,
+  conflictText,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
@@ -30,6 +32,8 @@ import {
   GUARD_UNREACHABLE_TEXT,
   guardDenyOutput,
   HOOK_RETRY_ENV,
+  mergedMainText,
+  NEW_LOOP,
   notOnBoardText,
   otherLaneText,
   PNPM_STORE_ENV,
@@ -56,9 +60,10 @@ import { RepoRulesError } from "../src/engine/rules.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
+import { createMcTools } from "../src/mcp/tools.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
-import { CheckoutError } from "../src/runtime/checkouts.ts";
+import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -1095,6 +1100,159 @@ describe("message", () => {
     const e = await refusal(sup.message("guido-1", "hello", { interrupt: false }));
     expect(e.status).toBe(409);
     expect(e.message).toBe("GUIDO-1 has no live session; start it on a ticket");
+  });
+});
+
+describe("reused worktrees", () => {
+  const checkout = () =>
+    prepareCheckout({
+      checkout: clone,
+      worktreesRoot: root,
+      sessionId: "mc-crew",
+      seatId: "guido-1",
+      issue: 42,
+      title: TICKET.title,
+    });
+
+  it.each([false, true])(
+    "records a start conflict, briefs the seat and permits mc commit (orphan: %s)",
+    async (orphan) => {
+      const first = await checkout();
+      mkdirSync(join(first.path, "apps"));
+      writeFileSync(join(first.path, "apps/conflict.ts"), "branch\n");
+      git(first.path, "add", "-A");
+      git(first.path, "commit", "-qm", "branch change");
+      const seed = join(dir, "seed");
+      mkdirSync(join(seed, "apps"));
+      writeFileSync(join(seed, "apps/conflict.ts"), "main\n");
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "main change");
+      git(seed, "push", "-q", "origin", "main");
+      const mainSha = git(seed, "rev-parse", "HEAD");
+      if (orphan) {
+        expect(await syncReusedWorktree(clone, await checkout(), { syncMain: true })).toMatchObject(
+          { kind: "conflict" },
+        );
+        writeFileSync(join(seed, "later.txt"), "later main\n");
+        git(seed, "add", "-A");
+        git(seed, "commit", "-qm", "later main");
+        git(seed, "push", "-q", "origin", "main");
+      }
+      const { sup, cfg } = make();
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+      const files = ["apps/conflict.ts"];
+      expect(store.run(runId)?.loop?.mainMerge).toEqual({ mainSha, files });
+      expect(store.claimedKeys(runId)[conflictKey(runId, mainSha)]).toBeDefined();
+      await until(() => expect(userLines().at(-1)?.endsWith(conflictText(files))).toBe(true));
+      writeFileSync(join(first.path, files[0] as string), "resolved branch and main\n");
+      const commit = createMcTools({
+        config: cfg,
+        store,
+        bus,
+        dbPath,
+        inClone: sup.inClone,
+        knownSecrets: async () => [],
+        gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+      }).find((t) => t.name === "commit");
+      expect(commit).toBeDefined();
+      const result = await commit?.call(
+        { seatId: "guido-1", runId },
+        { message: "Resolve main conflict" },
+      );
+      expect(result?.isError, result?.text).not.toBe(true);
+      expect(store.runCommits(runId)).toContain(git(first.path, "rev-parse", "HEAD"));
+    },
+  );
+
+  it.each([false, true])(
+    "keeps the sync recorded when launching the CLI fails (conflict: %s)",
+    async (conflict) => {
+      const first = await checkout();
+      writeFileSync(join(first.path, "README.md"), "branch\n");
+      git(first.path, "commit", "-qam", "branch change");
+      const seed = join(dir, "seed");
+      writeFileSync(join(seed, conflict ? "README.md" : "main.txt"), "main\n");
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "main change");
+      git(seed, "push", "-q", "origin", "main");
+      const mainSha = git(seed, "rev-parse", "HEAD");
+      const { sup } = make({ command: join(dir, "missing-cli") });
+      sup.start();
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow();
+      const run = store.runs("guido-1", 1)[0];
+      expect(run).toBeDefined();
+      if (!run) throw new Error("expected stored run");
+      if (conflict) {
+        expect(run.loop?.mainMerge).toEqual({ mainSha, files: ["README.md"] });
+        expect(store.claimedKeys(run.id)[conflictKey(run.id, mainSha)]).toBeDefined();
+      } else {
+        expect(store.runCommits(run.id)).toContain(git(first.path, "rev-parse", "HEAD"));
+      }
+    },
+  );
+
+  it("leaves the reused worktree unchanged when claiming the ticket fails", async () => {
+    const first = await checkout();
+    const seed = join(dir, "seed");
+    writeFileSync(join(seed, "main.txt"), "main\n");
+    git(seed, "add", "-A");
+    git(seed, "commit", "-qm", "main change");
+    git(seed, "push", "-q", "origin", "main");
+    const { sup } = make({
+      claim: async () => {
+        throw new Error("claim failed");
+      },
+    });
+    sup.start();
+    await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+      "could not claim",
+    );
+    expect(git(first.path, "rev-parse", "HEAD")).toBe(first.baseSha);
+    expect(store.runs("guido-1", 10)).toEqual([]);
+  });
+
+  it("reports an install refusal in the brief after recording the start merge", async () => {
+    const first = await checkout();
+    writeFileSync(join(first.path, ".npmrc"), "unsafe=true\n");
+    git(first.path, "add", "-A");
+    git(first.path, "commit", "-qm", "branch input");
+    const seed = join(dir, "seed");
+    writeFileSync(join(seed, "package.json"), '{"name":"sync-test","private":true}\n');
+    git(seed, "add", "-A");
+    git(seed, "commit", "-qm", "main dependencies");
+    git(seed, "push", "-q", "origin", "main");
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    expect(store.runCommits(runId)).toContain(git(first.path, "rev-parse", "HEAD"));
+    await until(() =>
+      expect(userLines().at(-1)).toContain("dependencies changed; install refused:"),
+    );
+    expect(userLines().at(-1)).toContain("changes .npmrc");
+  });
+
+  it("records the merge that brings main into a reused worktree", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const seed = join(dir, "seed");
+    writeFileSync(join(seed, "m.txt"), "main\n");
+    git(seed, "add", "m.txt");
+    git(seed, "commit", "-qm", "main change");
+    git(seed, "push", "-q", "origin", "main");
+    const mainSha = git(seed, "rev-parse", "HEAD");
+    const { runId } = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    expect(store.runCommits(runId)).toEqual([git(worktree, "rev-parse", "HEAD")]);
+    expect(
+      store
+        .loopEvents(0)
+        .filter((e) => e.runId === runId)
+        .map((e) => e.text),
+    ).toContain(mergedMainText(mainSha));
+    expect(readFileSync(join(worktree, "m.txt"), "utf8")).toBe("main\n");
   });
 });
 
