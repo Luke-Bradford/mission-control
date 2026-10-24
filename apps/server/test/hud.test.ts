@@ -2226,7 +2226,7 @@ describe("crew heartbeat", () => {
         at: NOW - (i + 3) * MIN,
       });
     });
-    const queries = ["runCommitsSince", "lockRuns", "comms"] as const;
+    const queries = ["runCommitsSince", "lockRuns", "commsEvidence"] as const;
     const spies = queries.map((query) => vi.spyOn(store, query));
     const rows = crew(config, store, NOW).rows;
     expect(rows).toHaveLength(config.loops.length);

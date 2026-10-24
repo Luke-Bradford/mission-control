@@ -1,4 +1,4 @@
-import type { ItemDiscussion as Discussion } from "@mc/core";
+import { DISCUSSION_TEXT_MAX, type ItemDiscussion as Discussion } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { Expandable } from "../components/Expandable.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
@@ -146,7 +146,7 @@ function DiscussionBody({
           aria-label="Ask FLIGHT about this"
           placeholder="Ask FLIGHT about this…"
           autoComplete="off"
-          maxLength={4000}
+          maxLength={DISCUSSION_TEXT_MAX}
           value={text}
           disabled={!live || pending}
           title={title}

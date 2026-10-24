@@ -21,7 +21,7 @@ import {
   ciNotFailedText,
   claimedText,
   DEFAULT_REPO_RULES,
-  FLIGHT_ABOUT_MAX,
+  FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_BRIEF_EDITS_PER_HOUR,
   FLIGHT_BRIEF_INPUT_MAX,
   FLIGHT_BRIEF_SECTION_MAX,
@@ -29,6 +29,7 @@ import {
   FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
+  FLIGHT_DECISION_MAX,
   FLIGHT_GH_READS_PER_HOUR,
   FLIGHT_HANDLING_MAX_MS,
   FLIGHT_HEADLINE,
@@ -42,6 +43,7 @@ import {
   FLIGHT_NOTES_PER_HOUR,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
+  FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   GITHUB_WRITES_OFF,
@@ -97,7 +99,7 @@ import {
 } from "../src/config.ts";
 import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
 import { flightBriefView } from "../src/flight/state.ts";
-import { createFlightTools, requirePowers, seatFree } from "../src/flight/tools.ts";
+import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
@@ -106,6 +108,11 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+
+it("cuts FLIGHT text by code points without splitting non-ASCII characters", () => {
+  expect(cut("🚀🚀🚀", 3)).toBe("🚀🚀🚀");
+  expect(cut("🚀🚀🚀🚀", 3)).toBe("🚀🚀…");
+});
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
 const SHA = "a".repeat(40);
@@ -388,7 +395,7 @@ describe("log_decision", () => {
   it("refuses bad arguments", async () => {
     for (const bad of [
       args({ about: "" }),
-      args({ about: "x".repeat(FLIGHT_ABOUT_MAX + 1) }),
+      args({ about: "x".repeat(FLIGHT_ABOUT_ARG_MAX + 1) }),
       args({ extra: 1 }),
       { about: "a", decision: "d" },
       args({ seat: "Not A Seat" }),
@@ -397,6 +404,15 @@ describe("log_decision", () => {
       expect(r.isError).toBe(true);
       expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
     }
+  });
+
+  it("keeps decision fields whole at their limits and refuses an oversized decision", async () => {
+    const about = "a".repeat(FLIGHT_ABOUT_ARG_MAX);
+    const decision = "d".repeat(FLIGHT_DECISION_MAX);
+    expect(await tool.call(ctx(), args({ about, decision }))).toEqual({ text: FLIGHT_NOTED });
+    expect(store.flightDecisions(0, 10)[0]).toMatchObject({ about, decision });
+    expect((await tool.call(ctx(), args({ decision: `${decision}x` }))).isError).toBe(true);
+    expect(store.flightDecisions(0, 10)).toHaveLength(1);
   });
 
   it("records a note and emits flight", async () => {
@@ -728,6 +744,25 @@ describe("answer_question", () => {
       },
     ]);
     expect(seen).toContain("flight");
+  });
+
+  it("keeps a hub-assembled 1500-character question and its long answer whole", async () => {
+    live("guido-1", "r-guido");
+    const question = "q".repeat(1500);
+    const answer = "a".repeat(1500);
+    const id = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: question,
+      at: NOW,
+    });
+    expect((await call("answer_question", A(id, { answer }))).isError).toBeUndefined();
+    expect(decisions()[0]).toMatchObject({ about: `GUIDO-1: ${question}`, decision: answer });
+    const state = JSON.parse((await call("flight_state", {})).text);
+    expect(state.recent[0]).toMatchObject({
+      about: cut(`GUIDO-1: ${question}`, FLIGHT_STATE_TEXT_MAX),
+      decision: cut(answer, 1000),
+    });
   });
 
   it("records the answer as FLIGHT to the asker, about its run's ticket", async () => {

@@ -14,6 +14,7 @@ import {
   type ChosenProfile,
   COMMS_CAPCOM,
   COMMS_TEXT_MAX,
+  commsCutMarker,
   type Escalation,
   type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
@@ -2455,13 +2456,13 @@ export class Store {
     }));
   }
 
-  /** Records a hand-off: whitespace runs made one space, trimmed, cut to COMMS_TEXT_MAX characters. */
+  /** Records a hand-off whole up to COMMS_TEXT_MAX, then marks the stored copy's cut. */
   addComms(row: CommsRow): void {
-    const chars = Array.from(row.text.replace(/\s+/g, " ").trim());
+    const chars = Array.from(row.text);
     const text =
       chars.length > COMMS_TEXT_MAX
-        ? `${chars.slice(0, COMMS_TEXT_MAX - 1).join("")}…`
-        : chars.join("");
+        ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
+        : row.text;
     this.db
       .prepare("INSERT INTO comms (at, from_id, to_id, ticket, text) VALUES (?, ?, ?, ?, ?)")
       .run(row.at, row.from, row.to, row.ticket, text);
@@ -2490,14 +2491,22 @@ export class Store {
   }
 
   /** Stable stored message IDs for one thread, in insertion order. */
-  threadComms(id: string): (CommsRow & { id: string })[] {
+  threadComms(id: string, after = 0): (CommsRow & { id: string })[] {
     const rows = this.db
       .prepare(`SELECT * FROM comms WHERE id IN (
-          SELECT id FROM (SELECT id FROM comms WHERE from_id = ? ORDER BY id DESC LIMIT ?)
+          SELECT id FROM (SELECT id FROM comms WHERE from_id = ? AND id > ? ORDER BY id DESC LIMIT ?)
           UNION
-          SELECT id FROM (SELECT id FROM comms WHERE to_id = ? ORDER BY id DESC LIMIT ?)
+          SELECT id FROM (SELECT id FROM comms WHERE to_id = ? AND id > ? ORDER BY id DESC LIMIT ?)
         ) ORDER BY id DESC LIMIT ?`)
-      .all(id, THREAD_COMMS_LIMIT, id, THREAD_COMMS_LIMIT, THREAD_COMMS_LIMIT) as Row[];
+      .all(
+        id,
+        after,
+        THREAD_COMMS_LIMIT,
+        id,
+        after,
+        THREAD_COMMS_LIMIT,
+        THREAD_COMMS_LIMIT,
+      ) as Row[];
     return rows.reverse().map((r) => ({
       id: `comms:${r.id}`,
       at: r.at as number,
@@ -2506,6 +2515,23 @@ export class Store {
       ticket: r.ticket as string | null,
       text: r.text as string,
     }));
+  }
+
+  /** Prompt metadata remains available even after its body has been read. */
+  threadPrompt(id: string): { id: string; at: number } | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT id, at FROM comms WHERE from_id = ? AND to_id = ? ORDER BY at DESC, id DESC LIMIT 1",
+      )
+      .get(COMMS_CAPCOM, id) as { id: number; at: number } | undefined;
+    return row && { id: `comms:${row.id}`, at: row.at };
+  }
+
+  /** Progress evidence does not need message bodies. */
+  commsEvidence(since: number): Pick<CommsRow, "at" | "from" | "ticket">[] {
+    return this.db
+      .prepare('SELECT at, from_id AS "from", ticket FROM comms WHERE at >= ? ORDER BY at, id')
+      .all(since) as Pick<CommsRow, "at" | "from" | "ticket">[];
   }
 
   threadReadCursors(id: string): Map<string, { offset: number; block: number }> {

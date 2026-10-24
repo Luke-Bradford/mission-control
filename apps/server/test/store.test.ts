@@ -16,7 +16,7 @@ import type {
   SeatSessionRow,
   UsageSample,
 } from "@mc/core";
-import { COMMS_CAPCOM, COMMS_TEXT_MAX, DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
+import { COMMS_CAPCOM, COMMS_TEXT_MAX, commsCutMarker, DEFAULT_PROFILES, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACK_ABSENT_MS,
@@ -1810,16 +1810,18 @@ describe("comms", () => {
     expect(store.comms(0)[0]?.text).toBe(text);
   });
 
-  it("cuts a longer text to that length, ending with an ellipsis", () => {
-    store.addComms(row("y".repeat(COMMS_TEXT_MAX + 50)));
-    const text = store.comms(0)[0]?.text ?? "";
-    expect(Array.from(text)).toHaveLength(COMMS_TEXT_MAX);
-    expect(text.endsWith("…")).toBe(true);
+  it("marks an oversized stored copy without throwing or splitting code points", () => {
+    const text = "🚀".repeat(COMMS_TEXT_MAX + 1);
+    store.addComms(row(text));
+    expect(store.comms(0)[0]?.text).toBe(
+      `${"🚀".repeat(COMMS_TEXT_MAX)}${commsCutMarker(COMMS_TEXT_MAX, COMMS_TEXT_MAX + 1)}`,
+    );
   });
 
-  it("makes whitespace runs one space and trims", () => {
-    store.addComms(row("  a \n\n b\t\tc  "));
-    expect(store.comms(0)[0]?.text).toBe("a b c");
+  it("preserves whitespace as typed", () => {
+    const text = "  a \n\n b\t\tc  ";
+    store.addComms(row(text));
+    expect(store.comms(0)[0]?.text).toBe(text);
   });
 
   it("returns the rows at or after since, oldest first", () => {

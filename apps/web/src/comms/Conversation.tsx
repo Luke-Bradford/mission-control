@@ -10,6 +10,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SeatComposer } from "../agent/StreamPanel.tsx";
 import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
+import { Expandable } from "../components/Expandable.tsx";
 import { callSign, seatStatus, seatTurn } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
@@ -19,6 +20,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { agentPath, followLink } from "../router.ts";
 import { FlightChat } from "../shell/Dock.tsx";
+import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
 
 /** Comms › Conversation (catalogue 2.5.3): FLIGHT's chat, or the selected agent's thread. */
@@ -134,7 +136,9 @@ export function Conversation({ row }: { row: CrewRow | null }) {
                   {tagged && <Pill tone="warn">{ATTENTION_LABEL.tag}</Pill>}
                 </div>
                 <div className="body">
-                  <MentionText text={m.text} />
+                  <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+                    <MentionText text={m.text} />
+                  </Expandable>
                 </div>
               </div>
             );

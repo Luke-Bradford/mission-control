@@ -2,10 +2,11 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Run } from "@mc/core";
+import { COMMS_TEXT_MAX, type Run } from "@mc/core";
 import { expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { threadMessages } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
@@ -468,6 +469,38 @@ it("keeps undated tags in source order before later dated tags", () => {
       })}\n${f.frame("@CAPCOM newest", 3000)}`,
     );
     expect(f.needs().find((i) => i.kind === "tag")?.text).toBe("@CAPCOM newest");
+  } finally {
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+it("attention selects only unread stored bodies and retains a read prompt's reply context", () => {
+  const f = regressionFixture();
+  try {
+    f.store.addComms({ from: "CAPCOM", to: "guido-1", text: "Prompt", at: 10, ticket: null });
+    for (let i = 0; i < 10; i++) {
+      f.store.addComms({
+        from: "guido-1",
+        to: "peer",
+        text: "x".repeat(COMMS_TEXT_MAX),
+        at: 11,
+        ticket: null,
+      });
+    }
+    const snapshot = f.store.threadComms("guido-1");
+    f.store.markThreadRead(
+      "guido-1",
+      snapshot.map((m) => m.id),
+    );
+    f.store.addComms({ from: "guido-1", to: "CAPCOM", text: "Reply", at: 12, ticket: null });
+    const query = vi.spyOn(f.store, "threadComms");
+    const messages = threadMessages(f.store, "guido-1", true, "attention");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ text: "Reply", seen: false, direct: true });
+    expect(query).toHaveBeenCalledWith("guido-1", Number(snapshot.at(-1)?.id.split(":")[1]));
+    expect(query.mock.results[0]?.value).toHaveLength(1);
+    expect(threadMessages(f.store, "guido-1", true)).toHaveLength(12);
   } finally {
     f.store.close();
     rmSync(f.dir, { recursive: true, force: true });

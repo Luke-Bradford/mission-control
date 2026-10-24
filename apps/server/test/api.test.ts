@@ -25,6 +25,8 @@ import {
   type AwaySettings,
   type BoardItem,
   type ChangedFiles,
+  COMMS_MESSAGE_BODY_LIMIT,
+  COMMS_MESSAGE_MAX,
   type ConfigView,
   type Crew,
   type CrewChanges,
@@ -3438,7 +3440,6 @@ describe("crew routes", () => {
       ["message", { text: "" }],
       ["message", { text: "   " }],
       ["message", { text: "\n\t" }],
-      ["message", { text: "x".repeat(8001) }],
       ["message", { text: "hi", extra: 1 }],
       ["message", { text: "hi", interrupt: "yes" }],
       ["interrupt", { extra: 1 }],
@@ -3554,6 +3555,24 @@ describe("crew routes", () => {
     const r = await post5("message", { text: "   " });
     expect(r.statusCode).toBe(400);
     expect(r.json<{ error: string }>().error).toBe("text: must not be blank");
+  });
+
+  it.each(["x", "\u0001"])("delivers and stores a message at the cap whole (%j)", async (char) => {
+    const text = char.repeat(COMMS_MESSAGE_MAX);
+    const r = await post5("message", { text });
+    expect(r.statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["message", "guido-1", text, { interrupt: false }]]);
+    expect(store.comms(0).map((m) => m.text)).toEqual([text]);
+  });
+
+  it.each([
+    [COMMS_MESSAGE_MAX + 1, 400],
+    [COMMS_MESSAGE_BODY_LIMIT + 1, 413],
+  ])("rejects %i characters with %i before delivery or storage", async (length, status) => {
+    const r = await post5("message", { text: "x".repeat(length) });
+    expect(r.statusCode).toBe(status);
+    expect(supervisorCalls).toEqual([]);
+    expect(store.comms(0)).toEqual([]);
   });
 
   it("passes message text on as typed, indentation included", async () => {
