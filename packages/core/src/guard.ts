@@ -1821,7 +1821,7 @@ function blankCodeSpans(md: string): string {
   type Run = { start: number; end: number; next?: Run };
   const runs: Run[] = [];
   const open = new Map<number, Run>();
-  for (const match of md.matchAll(/`+|\n[ \t]*\n/g)) {
+  for (const match of md.matchAll(/`+|\r?\n[ \t]*\r?\n/g)) {
     const marks = match[0];
     if (marks.charAt(0) !== "`") {
       open.clear();
@@ -1837,7 +1837,8 @@ function blankCodeSpans(md: string): string {
   let end = 0;
   for (const run of runs) {
     if (run.start < end || run.next === undefined) continue;
-    parts.push(md.slice(end, run.start), " ");
+    // A non-whitespace word break keeps surrounding text from forming a reference across a span.
+    parts.push(md.slice(end, run.start), "\0");
     end = run.next.end;
   }
   parts.push(md.slice(end));

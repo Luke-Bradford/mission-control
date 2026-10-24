@@ -1696,16 +1696,33 @@ describe("Task 9 fix round 1: unclosedMarkdown and namesIssue (finding 8)", () =
 });
 
 describe("closesIssue", () => {
-  it.each(["`example\nFixes #42`", "``example\nFixes #42 ` x``"])(
+  it.each([
+    "Fixes`example`#42",
+    "Fixes `example` #42",
+    "Fix`example`es #42",
+    "Fixes o/`example`mc#42",
+    "Fixes #4`example`2",
+    "Fixes`example` GH-42",
+    "Fixes`example` https://github.com/o/mc/issues/42",
+  ])("does not assemble a closing reference across a code span: %j", (md) => {
+    expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(false);
+  });
+
+  it.each(["`example\nFixes #42`", "`example\r\nFixes #42`", "``example\nFixes #42 ` x``"])(
     "blanks a code span across one line break: %j",
     (md) => {
       expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(false);
     },
   );
 
-  it.each(["\n\n", "\n \t\n"])("ends a code span's paragraph at %j", (separator) => {
-    expect(closesIssue(`\`example${separator}Fixes #42\``, { repo: "o/mc", issue: 42 })).toBe(true);
-  });
+  it.each(["\n\n", "\n \t\n", "\r\n\r\n", "\r\n \t\r\n"])(
+    "ends a code span's paragraph at %j",
+    (separator) => {
+      expect(closesIssue(`\`example${separator}Fixes #42\``, { repo: "o/mc", issue: 42 })).toBe(
+        true,
+      );
+    },
+  );
 
   it.each(["distinct runs", "one long run"])(
     "scans a 100k-character line with 10k unmatched backticks in under 50 ms (%s)",
