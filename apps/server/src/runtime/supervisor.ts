@@ -58,6 +58,7 @@ import {
   GUARD_HOOK_TIMEOUT_S,
   guardHookCommand,
   HUD_STATE_LABEL,
+  hasPlanSection,
   inferTicket,
   LOOPBACK_HOST,
   MCP_PATH,
@@ -68,6 +69,7 @@ import {
   notOnBoardText,
   notReviewSeatText,
   notWatchSeatText,
+  PLAN_SIZES,
   PNPM_STORE_ENV,
   type Profile,
   type ProfileOverride,
@@ -78,6 +80,7 @@ import {
   ROLE_PROMPT_DIR,
   type Run,
   type RunLoop,
+  type RunPlan,
   retiringText,
   reviewDepth,
   reworkFirstText,
@@ -1807,6 +1810,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
       });
       if (refusal !== null) throw new SupervisorError(422, refusal);
+      // only a build run works from the ticket's plan; planner and review runs record none
+      const plan: RunPlan | undefined =
+        def.loop !== "build"
+          ? undefined
+          : hasPlanSection(ticket.body)
+            ? (store.ticketPlan(info.repo.id, ref) ?? { by: null, at: null, ref })
+            : card.size !== null && !PLAN_SIZES.includes(card.size)
+              ? { skipped: `Size ${card.size}` }
+              : undefined;
       const title = ticket.title;
       // A planner has no branch: a detached checkout of the default branch, for reading only
       const planner = def.loop === "plan";
@@ -1871,6 +1883,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         summary: null,
         ...(opts?.loop ? { loop: opts.loop } : {}),
         profile: { ...chosen, hash: profileHash(chosen.profile) },
+        ...(plan === undefined ? {} : { plan }),
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
