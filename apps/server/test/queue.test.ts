@@ -24,6 +24,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
+  accountAtStop,
+  awayQuotaReserve,
+  awayQuotaUnknown,
   clearBodyCache,
   dealQueues,
   type QueueDeps,
@@ -1509,5 +1512,50 @@ describe("refillQueues: notes and races", () => {
       await refill();
       expect(store.notes()).toEqual([]);
     });
+  });
+});
+
+describe("away start quota", () => {
+  const accountId = "claude-main";
+  const reading = (window: "5h" | "7d", resetAt = NOW + DAY, pct = 20) =>
+    store.addUsage({ accountId, window, at: NOW, resetAt, pct, source: "test" });
+  it("holds unknown accounts, missing windows and reset readings only while away", () => {
+    expect(awayQuotaUnknown(config, store, "missing", NOW)).toBe(false);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(awayQuotaUnknown(config, store, "missing", NOW)).toBe(true);
+    expect(awayQuotaUnknown(config, store, accountId, NOW)).toBe(true);
+    reading("5h");
+    expect(awayQuotaUnknown(config, store, accountId, NOW)).toBe(true);
+    reading("7d");
+    expect(awayQuotaUnknown(config, store, accountId, NOW)).toBe(false);
+    expect(awayQuotaUnknown(config, store, accountId, NOW + DAY)).toBe(true);
+  });
+  it.each(["5h", "7d"] as const)("holds a start when %s has reset", async (window) => {
+    store.replaceBoard(REPO, [card(1, { labels: ["area:server", "docs"] })]);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    reading("5h", window === "5h" ? NOW : NOW + DAY);
+    reading("7d", window === "7d" ? NOW : NOW + DAY);
+    await refill();
+    await take();
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([1]);
+  });
+  it("holds missing quota before taking a queued ticket", async () => {
+    store.replaceBoard(REPO, [card(1, { labels: ["area:server", "docs"] })]);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    await refill();
+    await take();
+    expect(started).toEqual([]);
+    reading("5h");
+    reading("7d");
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+  it("the 70% reserve does not stop resumes, reviews or watch", () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    reading("5h");
+    reading("7d", NOW + DAY, 70);
+    expect(awayQuotaReserve(config, store, accountId, NOW)).toBe(true);
+    expect(accountAtStop(config, store, accountId, NOW)).toBe(false);
   });
 });

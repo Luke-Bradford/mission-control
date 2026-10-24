@@ -8,6 +8,8 @@ import {
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
   AWAY_BUG_VERIFIED,
+  AWAY_PLANNER_REFUSED,
+  AWAY_QUOTA_REFUSED,
   AWAY_WRITES_REFUSED,
   accountStoppedText,
   answeredText,
@@ -289,7 +291,7 @@ import { threadMessages } from "../comms.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import type { Engine } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
-import { accountAtStop } from "../engine/queue.ts";
+import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { attentionItems, crew, NO_LOCK, NOTE_KEY } from "../hud.ts";
@@ -1001,6 +1003,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
     const planner = loopKind === "plan";
+    if (planner && activeAway(store, at, config.operator.timezone))
+      return fail(AWAY_PLANNER_REFUSED);
+    if (
+      awayQuotaUnknown(config, store, cfg.accountId, at) ||
+      awayQuotaReserve(config, store, cfg.accountId, at)
+    )
+      return fail(AWAY_QUOTA_REFUSED);
     if (store.seatSession(seat)?.state === "stopped")
       return fail(`${call} is stopped by the operator.`);
     if (!seatFree(store, deps.supervisor.busy(), seat)) return fail(seatHasRunText(call));
@@ -1047,8 +1056,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if ("refusal" in chosen) return fail(chosen.refusal);
     const board = store.board(repo.id);
     const away = activeAway(store, now(), config.operator.timezone);
-    if (away && planner && !away.may.research)
-      return fail("Away mode: researching tickets is off.");
     const refusal = eligibleToStart({
       ...(away ? { away: { pickUp: away.may.pickUp, flight: true } } : {}),
       planRequired: chosen.profile.planRequired,
@@ -2640,7 +2647,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const flightTools: McTool[] = [
     {
       name: MC_TOOL_NAMES.logDecision,
-      description: `For away-mode bugs, record about "${awayBugDecisionAbout("<repo>#<issue>", "<base-sha>", "<head-sha>")}", decision "${AWAY_BUG_VERIFIED}", and basis naming the reproducing test and its results on both commits. Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.`,
+      description: `For away-mode bugs, record about "${awayBugDecisionAbout("<repo>#<issue>", "<base-sha>", "<head-sha>")}", decision "${AWAY_BUG_VERIFIED}", and basis naming a test file added by the diff, plus its results on both commits. A new reproducing test is required; fixture files do not count. flight_state supplies awayBugDecision.about and testPaths for waiting PRs. Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.`,
       inputSchema: {
         type: "object",
         properties: {

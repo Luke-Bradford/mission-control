@@ -458,7 +458,12 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const found = writerSeats(config).find((s) => s.seat.id === seatId);
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
   if (!seatMayTake(store, seatId, maxOpenRunsOf(config))) return;
-  if (atQuotaStop(deps, found.seat.accountId)) return;
+  if (
+    atQuotaStop(deps, found.seat.accountId) ||
+    awayQuotaUnknown(config, store, found.seat.accountId, deps.now()) ||
+    awayQuotaReserve(config, store, found.seat.accountId, deps.now())
+  )
+    return;
   await claimBestReady(deps, found.session.repoId, found.seat);
 
   const taken = store.takeQueued(seatId, deps.now());
@@ -614,12 +619,35 @@ export function accountAtStop(
   if (account === undefined) return false;
   return (["5h", "7d"] as const).some((window) => {
     const latest = store.latestUsage(accountId, window);
-    const stop =
-      window === "7d" && activeAway(store, at, config.operator.timezone)
-        ? Math.min(account.stopAt, AWAY_WEEKLY_STOP_PCT)
-        : account.stopAt;
+    const stop = account.stopAt;
     return latest !== null && latest.resetAt > at && latest.pct >= stop;
   });
+}
+
+/** Only new away starts need fresh readings for both windows. Resumes/reviews/watch are unaffected. */
+export function awayQuotaUnknown(
+  config: CcConfig,
+  store: Store,
+  accountId: string,
+  at: number,
+): boolean {
+  if (!activeAway(store, at, config.operator.timezone)) return false;
+  if (!config.accounts.some((a) => a.id === accountId)) return true;
+  return (["5h", "7d"] as const).some((window) => {
+    const reading = store.latestUsage(accountId, window);
+    return reading === null || reading.resetAt <= at;
+  });
+}
+
+export function awayQuotaReserve(
+  config: CcConfig,
+  store: Store,
+  accountId: string,
+  at: number,
+): boolean {
+  if (!activeAway(store, at, config.operator.timezone)) return false;
+  const reading = store.latestUsage(accountId, "7d");
+  return reading !== null && reading.resetAt > at && reading.pct >= AWAY_WEEKLY_STOP_PCT;
 }
 
 const atQuotaStop = (deps: TakeDeps, accountId: string): boolean =>

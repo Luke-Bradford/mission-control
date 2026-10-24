@@ -907,22 +907,43 @@ Automatic starts require **Pick up safe tickets**, Size XS or S, and a bug, chor
 label mapped through the repo's `mc.templates` (the built-in profile labels when absent).
 `bugfix` maps to bug; `small-change` maps to test or docs for those labels, otherwise chore.
 FLIGHT can explicitly start other work, which stays draft. Existing seat, memory and verify
-limits still apply; an account with current weekly usage at 70% or above starts nothing new.
+limits still apply. New automatic and FLIGHT ticket starts require current readings for both
+quota windows and weekly usage below 70%; missing accounts, missing readings and readings at or
+past reset hold those starts. The reserve does not stop resumes, RETRO reviews or FLIGHT's watch;
+the account's configured stop still applies to those. The operator can start a ticket manually
+from the HUD while away, including a planner. That planner cannot report its plan until away
+is off: `report_plan` refuses to edit an issue. FLIGHT cannot start planners while away.
 
-**Take a safe PR out of draft** requires the safe metadata, green CI, a clean RETRO review with
+**Take a safe PR out of draft** applies only to `autonomy: merge` repos with explicit hard rules
+(`hard_rules: []` counts). Draft repos always stay draft. Pick up must also be on; work started
+by FLIGHT with Pick up off stays draft while away. Readiness requires safe metadata, green CI, a clean RETRO review with
 no Minor findings or waiver, and an allowed diff inside the seat's area. Test tickets add only
 test files; docs tickets change only documentation. Existing tests, hard-rule files, migrations,
 settings, CI, infrastructure, dependencies, auth and API paths hold the PR in draft. Dependency
-manifests are held whole. For bugs, FLIGHT records a `log_decision` with the reproducing test's
-results on the base and branch; the tool describes the commit-specific key the gate requires.
+manifests, deployment and test configuration, install scripts, CODEOWNERS and this repo's
+GitHub-write wiring are held whole. Documentation is identified by its extension or README
+filename; a `docs/` directory alone does not qualify. For bugs, the diff must add a reproducing
+test file; fixture files do not count. FLIGHT records a `log_decision` with that test's results
+on the base and branch. `flight_state` supplies the expected `awayBugDecision.about` key and
+eligible `testPaths` for a waiting PR; the basis must name one of those added test paths. A head
+SHA alone is insufficient. The hub checks the head again after marking ready and restores draft if it moved, including
+on later passes.
 Away mode blocks merging in every repo and FLIGHT's external posting and settings changes.
 `draft_reply` remains available; comments wait for approval in the existing drafts list.
 
 Read `GET /api/away/digest` (for example, open `http://127.0.0.1:7420/api/away/digest` on the hub).
 It returns `active` and six ordered `groups`: `needYouNow`, `safePrsReady`,
 `draftsToWalkThrough`, `failures`, `flightDecisions`, and `messagesDrafted`. Each has `items`.
-This is current outstanding work and retained FLIGHT decision history, not a saved report or a
-new visit window; repeated reads acknowledge nothing and pending messages remain drafts.
+Only PRs with a recorded ready step for their current head count as safe. Ended runs and ended
+parks are omitted from failures; acknowledged attention is omitted. Decision history accepts
+`?since=<epoch milliseconds>` and defaults to the away start, or seven days when none is known,
+with at most 200 entries. `AWAY_STARTED_SETTING` (`awayStartedAt`) is stored to bound the digest.
+Repeated reads acknowledge nothing and pending messages remain drafts.
+
+`may.research` is not acted on yet; research drafting is a follow-up. `may.check` means
+"Check GitHub (and Teams) every 30 min for anything about me or my tickets" and is also a
+follow-up. The "label safe-to-merge and ask its code owner" step remains a follow-up.
+Existing verification and review behaviour continues in the meantime.
 
 When the server ticket goes Ready, file the **lane:work** web follow-up: replace the Away modal's
 "phase 4" text and show this single digest when away switches off or its end date passes.

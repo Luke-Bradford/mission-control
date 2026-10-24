@@ -830,6 +830,7 @@ export interface FlightState {
     runId: string;
     ready: boolean;
     awaitingFlight?: string | null;
+    awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
     state: "open" | "merged" | "closed";
     headSha: string | null;
     readAt: string;

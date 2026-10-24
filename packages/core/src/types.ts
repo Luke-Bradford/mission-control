@@ -74,6 +74,8 @@ export interface CiRerun {
 
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
+  /** Computed from the checked diff; FLIGHT copies this exact key and evidence path. */
+  awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
   flightReruns?: Record<string, number>;

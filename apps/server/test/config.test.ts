@@ -1490,3 +1490,9 @@ describe("repo autonomy", () => {
     }
   });
 });
+
+it("rejects an invalid operator timezone at config load", () => {
+  const path = tmpConfig((s) => s.replace("timezone: UTC", "timezone: Mars/Olympus"));
+  expect(() => loadConfig(path)).toThrow(ConfigError);
+  expect(() => loadConfig(path)).toThrow(/timezone/);
+});

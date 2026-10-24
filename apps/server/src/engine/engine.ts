@@ -11,6 +11,10 @@
  */
 import {
   AWAY_BUG_VERIFIED,
+  AWAY_DOC_PATH,
+  AWAY_FIXTURE_DIR,
+  AWAY_STATUS_ADDED,
+  AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
   asideEventText,
   asideInCiEventText,
@@ -106,6 +110,7 @@ import {
   MERGE_WAITS_ON_MAIN,
   NO_FAILED_RUN,
   type Publisher,
+  READY_UNDO_FAILED,
   type UpdateBranchResult,
 } from "./publish.ts";
 import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
@@ -588,16 +593,33 @@ export function createEngine(deps: EngineDeps): Engine {
     }
   }
 
-  async function safeAwayPr(run: Run, cur: RunLoop): Promise<boolean> {
+  async function safeAwayPr(run: Run, cur: RunLoop): Promise<string | null> {
     const away = activeAway(store, now(), config.operator.timezone);
-    if (!away?.may.safePr || flightHeld(run)) return false;
+    if (!away?.may.safePr || !away.may.pickUp || flightHeld(run)) return null;
     const rules = await rulesFor(run.repoId);
     const card = store.board(run.repoId).find((b) => b.issueNumber === issueOf(run));
     const type = card && rules ? awayTicketType(card, rules.templates) : null;
     const sha = store.runPush(run.id)?.sha;
-    if (!rules || type === null || !sha) return false;
+    if (!rules?.hardRulesSet || type === null || !sha) return null;
     const diff = await publisher.awayDiff(run, sha);
-    if (!diff || !awayDiffSafe(type, diff, rules)) return false;
+    if (!diff || !awayDiffSafe(type, diff, rules, seatConfig(run.agentId)?.area ?? [])) return null;
+    cur.awayBugDecision =
+      type === "bug"
+        ? {
+            headSha: sha,
+            about: awayBugDecisionAbout(run.ticket ?? "", diff.base, sha),
+            testPaths: diff.changes
+              .filter(
+                (c) =>
+                  c.status === AWAY_STATUS_ADDED &&
+                  AWAY_TEST_PATH.test(c.path) &&
+                  !AWAY_DOC_PATH.test(c.path) &&
+                  !AWAY_FIXTURE_DIR.test(c.path),
+              )
+              .map((c) => c.path),
+          }
+        : null;
+    if (type === "bug" && cur.awayBugDecision?.testPaths.length === 0) return null;
     if (
       type === "bug" &&
       !store
@@ -607,23 +629,25 @@ export function createEngine(deps: EngineDeps): Engine {
             d.kind === "note" &&
             d.about === awayBugDecisionAbout(run.ticket ?? "", diff.base, sha) &&
             d.decision === AWAY_BUG_VERIFIED &&
-            d.basis.trim() !== "",
+            (cur.awayBugDecision?.testPaths ?? []).some((path) => d.basis.includes(path)),
         )
     )
-      return false;
+      return null;
+    cur.awayBugDecision = null;
     const current = store.run(run.id);
-    if (!current || flightHeld(current) || store.runPush(run.id)?.sha !== sha) return false;
-    const snap = snapshot(current, cur, now(), true);
-    if (!snap || !activeAway(store, now(), config.operator.timezone)?.may.safePr) return false;
+    if (!current || flightHeld(current) || store.runPush(run.id)?.sha !== sha) return null;
+    const snap = snapshot(current, cur, now(), rules.hardRulesSet);
+    const latestAway = activeAway(store, now(), config.operator.timezone);
+    if (!snap || !latestAway?.may.safePr || !latestAway.may.pickUp) return null;
     // No waiver or Minor findings qualify as a clean RETRO review while away.
     const review = reviewFor(snap.review?.rows ?? [], cur.epoch, sha, null);
-    return (
-      review?.state === "reported" &&
+    return review?.state === "reported" &&
       review.blocking === 0 &&
       review.minor === 0 &&
       cur.reviewWaivedSha !== sha &&
       gateView({ ...snap, autoMerge: true }, cur).passes
-    );
+      ? sha
+      : null;
   }
 
   /** The actions only a `merge` workspace takes, whatever the loop planned. */
@@ -705,13 +729,9 @@ export function createEngine(deps: EngineDeps): Engine {
     const away = activeAway(store, now(), config.operator.timezone);
     if (away && a.kind === "merge") return;
     if (away && a.kind === "move-card" && !away.may.status) return;
-    if (away && a.kind === "mark-ready" && !(await safeAwayPr(live(), cur))) return;
-    if (
-      MERGE_STEP_KINDS.has(a.kind) &&
-      repo?.autonomy !== "merge" &&
-      !(away && a.kind === "mark-ready")
-    )
-      return;
+    const checkedSha = away && a.kind === "mark-ready" ? await safeAwayPr(live(), cur) : null;
+    if (away && a.kind === "mark-ready" && checkedSha === null) return;
+    if (MERGE_STEP_KINDS.has(a.kind) && repo?.autonomy !== "merge") return;
     if (
       !away &&
       (a.kind === "merge" || a.kind === "mark-ready") &&
@@ -974,9 +994,15 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "mark-ready": {
-        const sha = store.runPush(run.id)?.sha;
+        const sha = checkedSha ?? store.runPush(run.id)?.sha;
         if (sha === undefined) return;
         const r = await publisher.markReady(live(), away ? sha : undefined);
+        if (!r.ok && away && r.text === READY_UNDO_FAILED) {
+          cur.merging = { sha, done: ["ready"] };
+          cur.lastRefusal = READY_UNDO_FAILED;
+          deps.pollGithub?.();
+          return;
+        }
         if (!r.ok && away && r.text === MERGE_HEAD_MOVED) {
           deps.pollGithub?.();
           return;
@@ -1163,6 +1189,27 @@ export function createEngine(deps: EngineDeps): Engine {
     const input: RunLoop = { ...stored };
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
+    if (
+      activeAway(store, at, config.operator.timezone) &&
+      pr?.state === "open" &&
+      input.merging?.done.includes("ready") &&
+      (input.merging.sha !== pr.headSha || input.lastRefusal === READY_UNDO_FAILED)
+    ) {
+      // A failed rollback must be retried even when the cached PR still says draft.
+      if (!pr.isDraft || input.lastRefusal === READY_UNDO_FAILED) {
+        const result = await publisher.markDraft({ ...run, loop: input });
+        if (!result.ok) {
+          log(`${runId}: could not restore draft: ${result.text}`);
+          return;
+        }
+      }
+      input.merging = null;
+      if (input.lastRefusal === READY_UNDO_FAILED) input.lastRefusal = null;
+      input.awayBugDecision = null;
+      saveLoop(runId, input, stored);
+      deps.pollGithub?.();
+      return;
+    }
     const pushed = store.runPush(run.id);
     const flightPowers = flightPowersOf(config, run.repoId);
     if (
@@ -1202,8 +1249,7 @@ export function createEngine(deps: EngineDeps): Engine {
       (input.phase === "review" || conflicting) &&
       pr?.state === "open" &&
       pr.headSha === pushed.sha &&
-      (config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" ||
-        activeAway(store, now(), config.operator.timezone) !== null) &&
+      config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       (conflicting || reviewerOf(config, run.agentId, reviewRoleOf(run)) !== null)
     ) {
       // origin's tip is read every pass; the other reads only when the sha or the tip changed
@@ -1226,6 +1272,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const step = reconcile(snap);
     const cur = step.loop;
     if (
+      config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
       cur.phase === "review" &&
       pr?.state === "open" &&

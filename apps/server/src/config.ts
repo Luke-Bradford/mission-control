@@ -420,7 +420,14 @@ const fileSchema = z
           .array(z.string().regex(/^[A-Za-z0-9-]{1,39}$/))
           .max(20)
           .default([]),
-        timezone: nonEmpty,
+        timezone: nonEmpty.refine((zone) => {
+          try {
+            new Intl.DateTimeFormat("en", { timeZone: zone });
+            return true;
+          } catch {
+            return false;
+          }
+        }, "must be a valid IANA timezone"),
       }),
     ),
     accounts: z.array(

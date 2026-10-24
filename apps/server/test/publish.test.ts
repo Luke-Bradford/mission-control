@@ -42,6 +42,7 @@ import {
   MERGE_HEAD_MOVED,
   MERGE_PR_NOT_RUNS,
   NO_FAILED_RUN,
+  READY_UNDO_FAILED,
   REVIEW_STATUS_FAILED,
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
@@ -1260,9 +1261,57 @@ describe("merge steps", () => {
       ghAnswers = [
         () => ({ code: 0, stdout: JSON.stringify({ state: "OPEN", headRefOid: SHA }), stderr: "" }),
         ok,
+        () => ({ code: 0, stdout: JSON.stringify({ state: "OPEN", headRefOid: SHA }), stderr: "" }),
       ];
       expect(await publisher().markReady(R, SHA)).toEqual({ ok: true });
     });
+
+    it("undoes ready when the head moves during the write", async () => {
+      ghAnswers = [
+        () => ({ code: 0, stdout: JSON.stringify({ state: "OPEN", headRefOid: SHA }), stderr: "" }),
+        ok,
+        () => ({
+          code: 0,
+          stdout: JSON.stringify({ state: "OPEN", headRefOid: BASE }),
+          stderr: "",
+        }),
+        ok,
+      ];
+      expect(await publisher().markReady(R, SHA)).toMatchObject({
+        ok: false,
+        text: MERGE_HEAD_MOVED,
+      });
+      expect(ghCalls.at(-1)).toEqual(["pr", "ready", "12", "--repo=o/mc", "--undo"]);
+    });
+
+    it.each(["unreadable", "moved"])(
+      "reports failed rollback after a %s post-ready view",
+      async (after) => {
+        ghAnswers = [
+          () => ({
+            code: 0,
+            stdout: JSON.stringify({ state: "OPEN", headRefOid: SHA }),
+            stderr: "",
+          }),
+          ok,
+          () =>
+            after === "unreadable"
+              ? { code: 1, stdout: "", stderr: "network" }
+              : {
+                  code: 0,
+                  stdout: JSON.stringify({ state: "OPEN", headRefOid: BASE }),
+                  stderr: "",
+                },
+          () => ({ code: 1, stdout: "", stderr: "undo failed" }),
+        ];
+        expect(await publisher().markReady(R, SHA)).toEqual({
+          ok: false,
+          transient: true,
+          text: READY_UNDO_FAILED,
+        });
+        expect(ghCalls.at(-1)).toEqual(["pr", "ready", "12", "--repo=o/mc", "--undo"]);
+      },
+    );
 
     it("answers a transient refusal when gh fails, a final one with no PR", async () => {
       ghAnswers = [() => ({ code: 1, stdout: "", stderr: "boom" })];

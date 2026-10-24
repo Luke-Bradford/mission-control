@@ -33,14 +33,32 @@ export const AwayBody = z.strictObject({
   }),
 }) satisfies z.ZodType<AwaySettings>;
 
+export const AWAY_STARTED_SETTING = "awayStartedAt";
+export const AWAY_DIGEST_DECISIONS_MAX = 200;
+export const AWAY_DIGEST_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+export const AWAY_CORRUPT_LOG =
+  "Invalid away settings: holding away mode on with all permissions off.";
+export const CLOSED_AWAY: AwaySettings = {
+  on: true,
+  until: "",
+  may: { pickUp: false, research: false, check: false, status: false, safePr: false },
+};
+const warnedStores = new WeakSet<Store>();
+
 export function readAwaySettings(store: Store): AwaySettings {
   const raw = store.getSetting(AWAY_SETTING);
+  if (raw === null) return DEFAULT_AWAY;
   try {
-    const parsed = AwayBody.safeParse(JSON.parse(raw ?? "null"));
-    return parsed.success ? parsed.data : DEFAULT_AWAY;
+    const parsed = AwayBody.safeParse(JSON.parse(raw));
+    if (parsed.success) return parsed.data;
   } catch {
-    return DEFAULT_AWAY;
+    /* A corrupt row must not enable writes. */
   }
+  if (!warnedStores.has(store)) {
+    warnedStores.add(store);
+    console.warn(AWAY_CORRUPT_LOG);
+  }
+  return CLOSED_AWAY;
 }
 
 export function activeAway(store: Store, now: number, timezone: string): AwaySettings | null {
@@ -54,7 +72,12 @@ export function awayDigest(
   active: boolean,
   attention: AttentionItem[],
   repos: string[],
+  at: number = Date.now(),
+  since?: number,
 ): AwayDigest {
+  const started = Number(store.getSetting(AWAY_STARTED_SETTING));
+  const after = since ?? (started > 0 ? started : at - AWAY_DIGEST_LOOKBACK_MS);
+  const runs = store.runsForAwayDigest();
   const prs = repos
     .flatMap((repo) => store.pullRequests(repo))
     .filter((p) => p.state === "open")
@@ -62,18 +85,39 @@ export function awayDigest(
   return {
     active,
     groups: [
-      { kind: "needYouNow", items: attention.filter((i) => i.owner === OWNER_OPERATOR) },
-      { kind: "safePrsReady", items: prs.filter((p) => !p.isDraft && p.ci === "passing") },
+      {
+        kind: "needYouNow",
+        items: attention.filter(
+          (i) =>
+            !i.acked &&
+            (i.owner === undefined || i.owner === OWNER_OPERATOR || i.flightTriage !== undefined),
+        ),
+      },
+      {
+        kind: "safePrsReady",
+        items: prs.filter(
+          (p) =>
+            !p.isDraft &&
+            p.ci === "passing" &&
+            runs.some(
+              (r) =>
+                r.repoId === p.repoId &&
+                r.loop?.prNumber === p.number &&
+                r.loop.merging?.done.includes("ready") &&
+                r.loop.merging.sha === p.headSha,
+            ),
+        ),
+      },
       { kind: "draftsToWalkThrough", items: prs.filter((p) => p.isDraft) },
       {
         kind: "failures",
-        items: store
-          .runsActiveSince(0)
-          .flatMap((r) =>
-            r.loop?.parked ? [{ runId: r.id, ticket: r.ticket, reason: r.loop.parked.reason }] : [],
-          ),
+        items: runs.flatMap((r) =>
+          r.endedAt === null && r.loop?.parked && !r.loop.parked.ended
+            ? [{ runId: r.id, ticket: r.ticket, reason: r.loop.parked.reason }]
+            : [],
+        ),
       },
-      { kind: "flightDecisions", items: store.flightDecisions(0, -1) },
+      { kind: "flightDecisions", items: store.flightDecisions(after, AWAY_DIGEST_DECISIONS_MAX) },
       { kind: "messagesDrafted", items: store.drafts() },
     ],
   };

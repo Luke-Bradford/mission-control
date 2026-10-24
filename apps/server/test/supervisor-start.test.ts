@@ -17,9 +17,12 @@ import {
 } from "node:fs";
 import { basename, isAbsolute, join, relative } from "node:path";
 import {
+  AWAY_QUOTA_REFUSED,
+  AWAY_SETTING,
   type BoardItem,
   CREW_DISABLED,
   claimedText,
+  DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   freezeRules,
@@ -132,6 +135,34 @@ describe("startRun eligibility", () => {
     expect(worktrees()).toEqual([]);
     expect(claim).not.toHaveBeenCalled();
   }
+
+  it.each(["missing", "5h", "7d"])("refuses an away start with %s quota data", async (missing) => {
+    const at = Date.now();
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    if (missing !== "missing")
+      for (const window of ["5h", "7d"] as const) {
+        store.addUsage({
+          accountId: "claude-main",
+          window,
+          at,
+          resetAt: window === missing ? at - 1 : at + 86_400_000,
+          pct: 10,
+          source: "test",
+        });
+      }
+    await refused(422, AWAY_QUOTA_REFUSED);
+  });
+
+  it("allows the operator's manual start while away with pickUp off and unknown quota", async () => {
+    store.setSetting(
+      AWAY_SETTING,
+      JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, pickUp: false } }),
+    );
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    const started = await sup.startRun("guido-1", 42, { operator: true });
+    expect(started.runId).toBeTruthy();
+  });
 
   it("0: refuses a closed card", async () => {
     onBoard(boardCard(42, { closed: true }));

@@ -2150,9 +2150,16 @@ describe("away settings", () => {
       createdAt: NOW,
       updatedAt: NOW,
       mergedAt: null,
-      headSha: null,
+      headSha: "safe-sha",
       mergeable: null,
     };
+    store.upsertRun(
+      run({
+        id: "safe",
+        repoId: "shop-app",
+        loop: { ...NEW_LOOP, prNumber: 41, merging: { sha: "safe-sha", done: ["ready"] } },
+      }),
+    );
     store.upsertPullRequests(
       "shop-app",
       [pr, { ...pr, number: 42, isDraft: true, ticket: "shop-app#8" }],
@@ -2195,6 +2202,26 @@ describe("away settings", () => {
     ]);
     expect(digest.groups[3].items[0]?.reason).toBe("Verify stopped producing output");
     expect((await get("/api/away/digest")).json()).toEqual(digest);
+  });
+
+  it("digest accepts a since timestamp and stores away start only on activation", async () => {
+    await postBody("/api/settings/away", { ...away, until: "" });
+    expect(store.getSetting("awayStartedAt")).toBe(String(NOW));
+    store.addFlightDecision({
+      at: NOW - 1,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "old",
+      decision: "checked",
+      basis: "test",
+    });
+    expect((await get("/api/away/digest")).json().groups[4].items).toEqual([]);
+    expect((await get(`/api/away/digest?since=${NOW - 1}`)).json().groups[4].items).toHaveLength(1);
+    expect((await get("/api/away/digest?since=nope")).statusCode).toBe(400);
+    expect((await get("/api/away/digest?since=-1")).statusCode).toBe(400);
   });
 
   it("GET answers the defaults when nothing is stored", async () => {
@@ -2241,11 +2268,19 @@ describe("away settings", () => {
     ).toBe(200);
   });
 
-  it("GET falls back to the defaults when the stored value is unreadable", async () => {
+  it("GET fails closed when the stored value is unreadable", async () => {
     store.setSetting("away", "{not json");
-    expect((await get("/api/settings/away")).json()).toEqual(DEFAULT_AWAY);
+    expect((await get("/api/settings/away")).json()).toEqual({
+      on: true,
+      until: "",
+      may: { pickUp: false, research: false, check: false, status: false, safePr: false },
+    });
     store.setSetting("away", JSON.stringify({ on: "x" }));
-    expect((await get("/api/settings/away")).json()).toEqual(DEFAULT_AWAY);
+    expect((await get("/api/settings/away")).json()).toEqual({
+      on: true,
+      until: "",
+      may: { pickUp: false, research: false, check: false, status: false, safePr: false },
+    });
   });
 });
 
@@ -3393,13 +3428,19 @@ describe("crew routes", () => {
   const post5 = (action: string, body: unknown = {}) =>
     postBody(`/api/seats/guido-1/${action}`, body);
 
+  it("identifies an operator start while away", async () => {
+    store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
+
   it("start answers { runId, branch } and emits agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
     const r = await post5("start", { issue: 5 });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({ runId: "r-1", branch: "feature/5-x" });
-    expect(supervisorCalls).toEqual([["start", "guido-1", 5]]);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
     expect(seen).toContain("agents");
   });
 
@@ -3441,7 +3482,9 @@ describe("crew routes", () => {
     it("starts a writer seat's run looped when the engine is on, in a draft repo too", async () => {
       expect(config.repos[0]?.autonomy).toBe("draft");
       expect((await startVia(true, "guido-1")).statusCode).toBe(200);
-      expect(supervisorCalls).toEqual([["start", "guido-1", 5, { loop: NEW_LOOP }]]);
+      expect(supervisorCalls).toEqual([
+        ["start", "guido-1", 5, { loop: NEW_LOOP, operator: true }],
+      ]);
     });
 
     it("starts a writer seat's run looped in a merge repo too", async () => {
@@ -3449,22 +3492,24 @@ describe("crew routes", () => {
       if (repo === undefined) throw new Error("no repo");
       repo.autonomy = "merge";
       expect((await startVia(true, "guido-1")).statusCode).toBe(200);
-      expect(supervisorCalls).toEqual([["start", "guido-1", 5, { loop: NEW_LOOP }]]);
+      expect(supervisorCalls).toEqual([
+        ["start", "guido-1", 5, { loop: NEW_LOOP, operator: true }],
+      ]);
     });
 
     it("starts it with no loop when the engine is off or absent", async () => {
       await startVia(false, "guido-1");
       await startVia(null, "guido-1");
       expect(supervisorCalls).toEqual([
-        ["start", "guido-1", 5],
-        ["start", "guido-1", 5],
+        ["start", "guido-1", 5, { operator: true }],
+        ["start", "guido-1", 5, { operator: true }],
       ]);
     });
 
     it("never loops a read-only seat's run", async () => {
       withReader();
       await startVia(true, "retro");
-      expect(supervisorCalls).toEqual([["start", "retro", 5]]);
+      expect(supervisorCalls).toEqual([["start", "retro", 5, { operator: true }]]);
     });
   });
 

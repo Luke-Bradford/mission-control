@@ -81,7 +81,13 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
-import { AwayBody, activeAway, awayDigest, readAwaySettings } from "./away.ts";
+import {
+  AWAY_STARTED_SETTING,
+  AwayBody,
+  activeAway,
+  awayDigest,
+  readAwaySettings,
+} from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
@@ -1646,8 +1652,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
         return deps.engine?.status().on === true && loop === "build"
-          ? sup.startRun(id, b.issue, { loop: NEW_LOOP })
-          : sup.startRun(id, b.issue);
+          ? sup.startRun(id, b.issue, { loop: NEW_LOOP, operator: true })
+          : sup.startRun(id, b.issue, { operator: true });
       });
       seatAction(
         "/seats/:id/message",
@@ -2345,8 +2351,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
 
       // Reader: docs/runbook.md#away-mode (operator reads the digest; HUD follow-up is lane:work)
-      api.get("/away/digest", async () =>
-        awayDigest(
+      api.get("/away/digest", async (req, reply) => {
+        const query = z
+          .object({ since: z.coerce.number().finite().nonnegative().optional() })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
+        return awayDigest(
           store,
           activeAway(store, now(), config.operator.timezone) !== null,
           attentionItems(
@@ -2358,12 +2368,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             deps.hubLogin?.() ?? null,
           ),
           config.repos.map((r) => r.id),
-        ),
-      );
+          now(),
+          query.data.since,
+        );
+      });
 
       api.post("/settings/away", async (req, reply) => {
         const body = AwayBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.on && !activeAway(store, now(), config.operator.timezone))
+          store.setSetting(AWAY_STARTED_SETTING, String(now()));
         store.setSetting(AWAY_SETTING, JSON.stringify(body.data));
         bus.emit("settings");
         return body.data;

@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  AWAY_PLANNER_REFUSED,
+  AWAY_QUOTA_REFUSED,
   AWAY_SETTING,
   AWAY_WRITES_REFUSED,
   type BoardItem,
@@ -85,6 +87,7 @@ import {
   needsSuperuserText,
   OPERATOR_HEADER,
   PROFILE_PAIR_TEXT,
+  type PullRequestView,
   READ_NO_GITHUB,
   READ_NO_PR,
   READ_OTHER_REPO,
@@ -963,8 +966,23 @@ describe("start_seat", () => {
       AWAY_SETTING,
       JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, pickUp: false } }),
     );
+    for (const window of ["5h", "7d"] as const)
+      store.addUsage({
+        accountId: "claude-main",
+        window,
+        at: NOW,
+        resetAt: NOW + 86_400_000,
+        pct: 10,
+        source: "test",
+      });
     expect((await start()).isError).toBeUndefined();
     expect(startCalls[0]?.[2]).toMatchObject({ flight: true });
+  });
+
+  it("reaches the inner start quota check while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await start()).toEqual(refused(AWAY_QUOTA_REFUSED));
+    expect(startCalls).toEqual([]);
   });
 
   it("respects an operator stop", async () => {
@@ -1353,6 +1371,18 @@ describe("start_seat planner", () => {
     board(sized());
     fetchImpl = async (n) => ticket(n, { body: GOOD });
   });
+
+  it.each([true, false])(
+    "refuses planner starts while away even with research=%s",
+    async (research) => {
+      store.setSetting(
+        AWAY_SETTING,
+        JSON.stringify({ ...DEFAULT_AWAY, on: true, may: { ...DEFAULT_AWAY.may, research } }),
+      );
+      expect(await plan()).toEqual(refused(AWAY_PLANNER_REFUSED));
+      expect(startCalls).toEqual([]);
+    },
+  );
 
   it("starts the planner with no loop on a complete Size M Backlog ticket", async () => {
     expect(await plan()).toEqual({ text: "Started FAO-1 on mc#7." });
@@ -2048,6 +2078,43 @@ describe("sync_main", () => {
 
 describe("flight_state", () => {
   const state = async () => JSON.parse((await call("flight_state", {})).text) as unknown;
+
+  it("exposes the hub's away bug decision key only for the current head", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    const expected = {
+      headSha: "head",
+      about: "away-bug:mc#7:base:head",
+      testPaths: ["apps/a.test.ts"],
+    };
+    store.upsertRun(
+      run("r-bug", "guido-1", { loop: { ...NEW_LOOP, prNumber: 12, awayBugDecision: expected } }),
+    );
+    const pr = (headSha: string): PullRequestView => ({
+      repoId: "mc",
+      number: 12,
+      title: "PR",
+      url: "u",
+      branch: "feature/7-x",
+      ticket: "mc#7",
+      state: "open",
+      isDraft: true,
+      review: null,
+      ci: "passing",
+      createdAt: NOW,
+      updatedAt: NOW,
+      mergedAt: null,
+      headSha,
+      mergeable: null,
+    });
+    store.upsertPullRequests("mc", [pr("head")], NOW);
+    expect(JSON.parse((await call("flight_state", {})).text).prs[0].awayBugDecision).toEqual(
+      expected,
+    );
+    store.upsertPullRequests("mc", [pr("moved")], NOW);
+    expect(
+      JSON.parse((await call("flight_state", {})).text).prs[0].awayBugDecision,
+    ).toBeUndefined();
+  });
 
   it("marks signals delivered by flight_state while retaining active faults as told", async () => {
     await state(); // Seed pre-existing state.
@@ -4930,6 +4997,20 @@ describe("superuser housekeeping", () => {
       text: expect.stringContaining("superuser"),
     });
   });
+  it.each([
+    ["merge_pr", { pr: 12 }],
+    ["settle_park", { runId: "r", action: "accept" }],
+    ["rerun_ci", { pr: 12 }],
+    ["edit_card", { issue: 7, size: "S" }],
+  ])("rechecks away inside the queued %s handler", async (name, args) => {
+    elevated();
+    const pending = call(name as string, args as object);
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await pending).toEqual(refused(AWAY_WRITES_REFUSED));
+    expect(ghCalls).toEqual([]);
+    expect(moveCalls).toEqual([]);
+  });
+
   const runPr = () => {
     live("guido-1", "r-pr", {
       branch: "mc/7",
@@ -5321,6 +5402,19 @@ describe("track", () => {
     basis: "ticket",
   };
 
+  it("keeps #533 ledger tools available while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect(await call("track", entry)).toEqual({ text: trackedText(entry.key, true) });
+    expect(JSON.parse((await call("ledger", { limit: 1, offset: 0 })).text).entries).toHaveLength(
+      1,
+    );
+    expect(
+      (await call("untrack", { key: entry.key, outcome: "done", basis: "ticket" })).isError,
+    ).toBeUndefined();
+    expect(store.flightLedger("s1")[0]?.status).toBe("done");
+    expect(ghCalls).toEqual([]);
+  });
+
   it("creates and updates by key, retaining omitted fields and refusing invalid titles and owners", async () => {
     expect(await call("track", entry)).toEqual({ text: trackedText(entry.key, true) });
     nowMs = NOW + 1000;
@@ -5541,6 +5635,17 @@ describe("repo memory", () => {
     source: "#450",
     basis: "ticket",
   };
+  it("keeps remember, recall and forget available while away", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    expect((await call("remember", note)).isError).toBeUndefined();
+    expect(JSON.parse((await call("recall", { query: note.topic })).text).notes).toHaveLength(1);
+    expect(
+      (await call("forget", { topic: note.topic, basis: "obsolete" })).isError,
+    ).toBeUndefined();
+    expect(JSON.parse((await call("recall", { query: note.topic })).text).notes).toHaveLength(0);
+    expect(ghCalls).toEqual([]);
+  });
+
   it.each(["remember", "forget"])("%s preserves operator-authored notes", async (tool) => {
     const stored = {
       ...note,

@@ -1143,6 +1143,16 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
+  runsForAwayDigest(): Run[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE ended_at IS NULL OR json_extract(loop, '$.merging') IS NOT NULL ORDER BY started_at, seq",
+      )
+      .all() as Row[];
+    return rows.map(toRun);
+  }
+
   /**
    * The run the HUD shows for an agent: the one its seat holds when that is set and not ended
    * (a run woken from aside can be older than a run that ended meanwhile), else the newest.

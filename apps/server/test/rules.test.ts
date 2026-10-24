@@ -407,3 +407,10 @@ describe("this repo's own rules", () => {
     expect(DEFAULT_HARD_RULES.filter((p) => !own.includes(p))).toEqual([]);
   });
 });
+
+it.each(["[]", "null", "old-format", "{ bug: { profile: bugfix } }"])(
+  "tolerates legacy templates: %s",
+  (templates) => {
+    expect(parseRepoRules(block(`mc:\n  templates: ${templates}\n`)).templates).toEqual({});
+  },
+);

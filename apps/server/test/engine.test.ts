@@ -92,7 +92,12 @@ import type {
   RerunStateResult,
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
-import { MERGE_CONFLICTING, MERGE_HEAD_MOVED, MERGE_WAITS_ON_MAIN } from "../src/engine/publish.ts";
+import {
+  MERGE_CONFLICTING,
+  MERGE_HEAD_MOVED,
+  MERGE_WAITS_ON_MAIN,
+  READY_UNDO_FAILED,
+} from "../src/engine/publish.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
@@ -395,7 +400,7 @@ function harness(): Harness {
       const publisher: Publisher = {
         awayDiff: async () =>
           h.awayDiff === undefined
-            ? { base: SHA_B, changes: [{ path: "docs/guide.md", status: "A" }] }
+            ? { base: SHA_B, changes: [{ path: "apps/docs/guide.md", status: "A" }] }
             : h.awayDiff,
         isDescendant: async (_run, ancestor, head) => x.descends ?? ancestor === head,
         async push(r) {
@@ -472,6 +477,7 @@ function harness(): Harness {
           return res;
         },
         markReady: (r) => step("ready", r),
+        markDraft: (r) => step("draft", r),
         merge: (r) => step("merge", r),
         closeIssue: (r) => step("close", r),
         deleteRemoteBranch: (r) => step("delete-remote", r),
@@ -2697,18 +2703,18 @@ describe("the engine runs reviews", () => {
     );
 
     it.each(["draft", "merge"] as const)(
-      "away marks a safe PR ready in a %s repo, without merging",
+      "away respects %s repo autonomy when a PR is safe",
       async (autonomy) => {
         need(config.repos[0]).autonomy = autonomy;
         store.replaceBoard(REPO, [item({ labels: ["docs"], size: "S" })]);
         store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
         await gateOpen();
         await h.engine.reconcileRun(RUN);
-        expect(h.steps).toEqual(["ready"]);
+        expect(h.steps).toEqual(autonomy === "merge" ? ["ready"] : []);
       },
     );
 
-    it.each(["metadata", "toggle", "diff", "unreadable", "minor"])(
+    it.each(["metadata", "toggle", "diff", "unreadable", "minor", "unset", "pickUp", "area"])(
       "away holds a PR with unsafe %s",
       async (reason) => {
         store.replaceBoard(REPO, [
@@ -2719,9 +2725,12 @@ describe("the engine runs reviews", () => {
           JSON.stringify({
             ...DEFAULT_AWAY,
             on: true,
-            may: { ...DEFAULT_AWAY.may, safePr: reason !== "toggle" },
+            may: { ...DEFAULT_AWAY.may, safePr: reason !== "toggle", pickUp: reason !== "pickUp" },
           }),
         );
+        if (reason === "unset") h.rules = async () => DEFAULT_REPO_RULES;
+        if (reason === "area")
+          h.awayDiff = { base: SHA_B, changes: [{ path: "docs/outside.md", status: "A" }] };
         if (reason === "diff")
           h.awayDiff = { base: SHA_B, changes: [{ path: "src/main.ts", status: "M" }] };
         if (reason === "unreadable") h.awayDiff = null;
@@ -2733,31 +2742,124 @@ describe("the engine runs reviews", () => {
       },
     );
 
-    it("away requires a bug decision for the current base and head", async () => {
+    it.each(["sha", "test"])(
+      "away requires a bug decision for the current base and head with %s evidence",
+      async (evidence) => {
+        store.replaceBoard(REPO, [item({ labels: ["bug"], size: "S" })]);
+        h.awayDiff = {
+          base: SHA_B,
+          changes: [{ path: "apps/server/test/reproduce.test.ts", status: "A" }],
+        };
+        store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+        await gateOpen();
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual([]);
+        const decision = {
+          at: clock,
+          kind: "note" as const,
+          seatId: null,
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          decision: AWAY_BUG_VERIFIED,
+          basis:
+            evidence === "sha"
+              ? `${SHA}: fails on base, passes on branch`
+              : "apps/server/test/reproduce.test.ts fails on base, passes on branch",
+        };
+        store.addFlightDecision({
+          ...decision,
+          about: awayBugDecisionAbout(`${REPO}#7`, SHA, SHA),
+        });
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual([]);
+        expect(loopOf().awayBugDecision?.about).toBe(awayBugDecisionAbout(`${REPO}#7`, SHA_B, SHA));
+        store.addFlightDecision({
+          ...decision,
+          basis: "generic assertions",
+          about: awayBugDecisionAbout(`${REPO}#7`, SHA_B, SHA),
+        });
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual([]);
+        store.addFlightDecision({
+          ...decision,
+          about: awayBugDecisionAbout(`${REPO}#7`, SHA_B, SHA),
+        });
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual(evidence === "test" ? ["ready"] : []);
+      },
+    );
+
+    it.each([
+      ["apps/server/src/feature.ts", "M"],
+      ["apps/server/test/helpers.ts", "A"],
+      ["apps/server/test/fixtures/reproduce.ts", "A"],
+      ["apps/server/test/fixtures/reproduce.test.ts", "A"],
+      ["apps/server/test/reproduce.test.md", "A"],
+      ["apps/server/test/reproduce.test.ts", "M"],
+      ["apps/server/test/reproduce.test.ts", "D"],
+    ])("a bug without an added reproducing test stays draft: %s %s", async (path, status) => {
       store.replaceBoard(REPO, [item({ labels: ["bug"], size: "S" })]);
+      h.awayDiff = { base: SHA_B, changes: [{ path, status }] };
       store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
-      await gateOpen();
-      await h.engine.reconcileRun(RUN);
-      expect(h.steps).toEqual([]);
-      const decision = {
+      store.addFlightDecision({
         at: clock,
-        kind: "note" as const,
+        kind: "note",
         seatId: null,
         targetRunId: null,
         ref: null,
         questionId: null,
+        about: awayBugDecisionAbout(`${REPO}#7`, SHA_B, SHA),
         decision: AWAY_BUG_VERIFIED,
-        basis: "reproduce.test.ts fails on base, passes on branch",
-      };
-      store.addFlightDecision({ ...decision, about: awayBugDecisionAbout(`${REPO}#7`, SHA, SHA) });
+        basis: `${path} at ${SHA}: fails on base, passes on branch`,
+      });
+      await gateOpen();
       await h.engine.reconcileRun(RUN);
       expect(h.steps).toEqual([]);
-      store.addFlightDecision({
-        ...decision,
-        about: awayBugDecisionAbout(`${REPO}#7`, SHA_B, SHA),
-      });
+      expect(loopOf().awayBugDecision?.testPaths ?? []).toEqual([]);
+    });
+
+    it.each([false, true])(
+      "retries a failed ready rollback with a stale PR cache: %s",
+      async (moved) => {
+        store.replaceBoard(REPO, [item({ labels: ["docs"], size: "S" })]);
+        store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+        h.stepResults.ready = [{ ok: false, transient: true, text: READY_UNDO_FAILED }];
+        // Reporting the review also queues passes: keep rollback failing through those.
+        h.stepResults.draft = Array.from({ length: 10 }, () => ({
+          ok: false,
+          transient: true,
+          text: "GitHub unavailable",
+        }));
+        await gateOpen();
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready"] });
+        expect(loopOf().lastRefusal).toBe(READY_UNDO_FAILED);
+        expect(h.steps.filter((step) => step === "ready")).toHaveLength(1);
+        h.steps.length = 0;
+        // The poll may still have the original draft and head, or the new ready head.
+        setPr({ isDraft: !moved, headSha: moved ? SHA_B : SHA, ci: "passing" });
+        h.stepResults.draft = [{ ok: false, transient: true, text: "GitHub unavailable" }];
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual(["draft"]);
+        expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready"] });
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps).toEqual(["draft", "draft"]);
+        expect(loopOf().merging).toBeNull();
+        expect(loopOf().lastRefusal).toBeNull();
+      },
+    );
+
+    it("restores draft on the next pass when an away-ready head moves", async () => {
+      store.replaceBoard(REPO, [item({ labels: ["docs"], size: "S" })]);
+      store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+      await gateOpen();
       await h.engine.reconcileRun(RUN);
       expect(h.steps).toEqual(["ready"]);
+      setPr({ isDraft: false, headSha: SHA_B, ci: "passing" });
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).toEqual(["ready", "draft"]);
+      expect(loopOf().merging).toBeNull();
     });
 
     it("a merge workspace merges, then closes, deletes and takes the next ticket", async () => {

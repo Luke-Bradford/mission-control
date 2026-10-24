@@ -72,6 +72,8 @@ export const CI_LOG_MAX_BUFFER = 16 * 1024 * 1024;
 export const MERGE_NO_PR = "the run has no PR";
 export const MERGE_NO_SEAT = "the run's seat is no longer configured";
 export const MERGE_BAD_SHA = "not a commit sha";
+/** Ready succeeded but its head could not be confirmed and restoring draft failed. */
+export const READY_UNDO_FAILED = "the PR was marked ready but could not be restored to draft";
 export const MERGE_HEAD_MOVED = "the PR's head is not the commit that passed the gate";
 export const MERGE_CONFLICTING = "the PR conflicts with main";
 /** The run's Activity line, once per head, when its merge waits for main to be merged in. */
@@ -205,6 +207,7 @@ export interface Publisher {
   worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
+  markDraft(run: Run): Promise<PublishResult>;
   /** Merges the run's PR with a merge commit, only if its head is `sha`. */
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
@@ -1037,7 +1040,28 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (pr.state !== "OPEN") return final(MERGE_PR_NOT_OPEN);
         if (pr.headRefOid !== expectedSha) return final(MERGE_HEAD_MOVED);
       }
-      return ghDo(["pr", "ready", String(n), `--repo=${repo}`], "pr ready");
+      const ready = await ghDo(["pr", "ready", String(n), `--repo=${repo}`], "pr ready");
+      if (!ready.ok || expectedSha === undefined) return ready;
+      const after = await ghJson(
+        ["pr", "view", String(n), `--repo=${repo}`, "--json", "state,headRefOid"],
+        "pr view",
+      );
+      if (isRefusal(after) || after.headRefOid !== expectedSha) {
+        const undo = await ghDo(
+          ["pr", "ready", String(n), `--repo=${repo}`, "--undo"],
+          "pr ready --undo",
+        );
+        if (!undo.ok) return transient(READY_UNDO_FAILED);
+        return isRefusal(after) ? after : final(MERGE_HEAD_MOVED);
+      }
+      return ready;
+    },
+
+    async markDraft(run) {
+      const repo = repoOf(run);
+      const n = run.loop?.prNumber ?? null;
+      if (repo === undefined || n === null) return final(MERGE_NO_PR);
+      return ghDo(["pr", "ready", String(n), `--repo=${repo}`, "--undo"], "pr ready --undo");
     },
 
     async merge(run, sha) {
