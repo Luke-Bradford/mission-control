@@ -19,6 +19,8 @@ import {
   type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
   FLIGHT_LEDGER_OPEN,
+  FLIGHT_MEMORY_FULL,
+  FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_PLAN_LIMIT,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
@@ -28,6 +30,8 @@ import {
   type FlightDecision,
   type FlightDecisionKind,
   type FlightLedgerEntry,
+  type FlightMemoryNote,
+  type FlightMemoryTitle,
   type FlightMoveColumn,
   type FlightPlanInput,
   type FlightPlanOperation,
@@ -45,6 +49,7 @@ import {
   type LoopEvent,
   type MachineSample,
   type MoveColumn,
+  memoryTopicKey,
   type PrCheck,
   type ProfileOverride,
   type PullRequestView,
@@ -68,6 +73,7 @@ import {
   TITLE_MARKERS,
   type TokenUsage,
   type UsageSample,
+  validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
 
@@ -301,6 +307,11 @@ CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
   updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
+);
+CREATE TABLE IF NOT EXISTS flight_memory (
+  repo_id TEXT NOT NULL, topic TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL,
+  source TEXT NOT NULL, author TEXT NOT NULL, topic_key TEXT NOT NULL,
+  updated_at INTEGER NOT NULL, PRIMARY KEY (repo_id, topic_key)
 );
 CREATE TABLE IF NOT EXISTS flight_ledger (
   session_id TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
@@ -834,6 +845,9 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    this.db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
+    );
     if (this.getSetting("flight-wake-compact-v1") === null) {
       this.transaction(() => {
         if (this.getSetting("flight-wake-compact-v1") !== null) return;
@@ -2244,14 +2258,18 @@ export class Store {
     return row ? toReview(row) : null;
   }
 
-  reviewsIn(states: readonly ReviewState[]): ReviewRow[] {
+  reviewsIn(
+    states: readonly ReviewState[],
+    window?: { repo: string; since: number; until: number },
+  ): ReviewRow[] {
     if (states.length === 0) return [];
     const rows = this.db
       .prepare(
         `SELECT * FROM reviews WHERE state IN (${states.map(() => "?").join(", ")})
+         ${window ? "AND repo_id = ? AND ended_at >= ? AND ended_at <= ?" : ""}
          ORDER BY created_at, id`,
       )
-      .all(...states) as Row[];
+      .all(...states, ...(window ? [window.repo, window.since, window.until] : [])) as Row[];
     return rows.map(toReview);
   }
 
@@ -3605,6 +3623,76 @@ export class Store {
            text = excluded.text, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
       )
       .run(r.sessionId, r.section, r.text, r.updatedAt, r.updatedBy);
+  }
+
+  /** Lasting notes for one repo, in topic order. */
+  flightMemory(repo: string): FlightMemoryNote[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM flight_memory WHERE repo_id = ? ORDER BY topic")
+        .all(repo) as Row[]
+    ).map((r) => ({
+      repoId: r.repo_id as string,
+      topic: r.topic as string,
+      kind: r.kind as FlightMemoryNote["kind"],
+      body: r.body as string,
+      source: r.source as string,
+      author: r.author as FlightMemoryNote["author"],
+      updatedAt: r.updated_at as number,
+    }));
+  }
+
+  /** The state index never reads note bodies. */
+  flightMemoryTitles(repo: string): FlightMemoryTitle[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT topic, kind, updated_at, author FROM flight_memory WHERE repo_id = ? ORDER BY topic",
+        )
+        .all(repo) as Row[]
+    ).map((r) => ({
+      topic: r.topic as string,
+      kind: r.kind as FlightMemoryTitle["kind"],
+      updatedAt: r.updated_at as number,
+      author: r.author as FlightMemoryTitle["author"],
+    }));
+  }
+
+  putFlightMemory(note: FlightMemoryNote): void {
+    const parsed = validateMemoryNote(note);
+    const key = memoryTopicKey(parsed.topic);
+    this.transaction(() => {
+      const exists = this.db
+        .prepare("SELECT 1 FROM flight_memory WHERE repo_id = ? AND topic_key = ?")
+        .get(note.repoId, key);
+      const count = this.db
+        .prepare("SELECT COUNT(*) AS n FROM flight_memory WHERE repo_id = ?")
+        .get(note.repoId) as { n: number };
+      if (!exists && count.n >= FLIGHT_MEMORY_TOPICS_MAX) throw new Error(FLIGHT_MEMORY_FULL);
+      this.db
+        .prepare(`INSERT INTO flight_memory (repo_id, topic, topic_key, kind, body, source, author, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(repo_id, topic_key) DO UPDATE SET
+        topic = excluded.topic, kind = excluded.kind, body = excluded.body, source = excluded.source,
+        author = excluded.author, updated_at = excluded.updated_at`)
+        .run(
+          note.repoId,
+          parsed.topic,
+          key,
+          parsed.kind,
+          parsed.body,
+          parsed.source,
+          parsed.author,
+          note.updatedAt,
+        );
+    });
+  }
+
+  deleteFlightMemory(repo: string, topic: string): boolean {
+    return (
+      this.db
+        .prepare("DELETE FROM flight_memory WHERE repo_id = ? AND topic_key = ?")
+        .run(repo, memoryTopicKey(topic)).changes > 0
+    );
   }
 
   /** The full ledger for one crew session, including retained closed entries. */

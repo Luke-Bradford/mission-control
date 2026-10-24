@@ -38,11 +38,19 @@ import {
   FLIGHT_LEDGER_EDITS_PER_HOUR,
   FLIGHT_LEDGER_OPEN_MAX,
   FLIGHT_LIST_PAGES,
+  FLIGHT_MEMORY_BODY_MAX,
+  FLIGHT_MEMORY_EDITS_PER_HOUR,
+  FLIGHT_MEMORY_OPERATOR,
+  FLIGHT_MEMORY_RECALL_MAX,
+  FLIGHT_MEMORY_SOURCE_MAX,
+  FLIGHT_MEMORY_TOPIC_MAX,
+  FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
+  FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
@@ -65,6 +73,7 @@ import {
   NEW_LOOP,
   NOT_ON_BOARD,
   needsSuperuserText,
+  OPERATOR_HEADER,
   PROFILE_PAIR_TEXT,
   READ_NO_GITHUB,
   READ_NO_PR,
@@ -550,6 +559,9 @@ describe("tool list", () => {
       "track",
       "untrack",
       "ledger",
+      "remember",
+      "forget",
+      "recall",
     ]);
     for (const t of tools) {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
@@ -2327,6 +2339,7 @@ describe("flight_state", () => {
       headline: "",
       ledger: [],
       ledgerMore: 0,
+      memory: [],
       brief: FLIGHT_NOTE_SECTIONS.map((section) => ({
         section,
         title: FLIGHT_BRIEF_TITLES[section],
@@ -5333,5 +5346,291 @@ describe("headline", () => {
     expect(await save("a\nb")).toEqual(refused(headlineText(3)));
     expect(store.flightBrief("s1").find((r) => r.section === FLIGHT_HEADLINE)?.text).toBe("H");
     expect(await save("")).toEqual({ text: briefClearedText(FLIGHT_HEADLINE_TITLE) });
+  });
+});
+
+describe("repo memory", () => {
+  const note = {
+    topic: "#450 storage/path",
+    kind: "lesson",
+    body: "Use the store",
+    source: "#450",
+    basis: "ticket",
+  };
+  it.each(["remember", "forget"])("%s preserves operator-authored notes", async (tool) => {
+    const stored = {
+      ...note,
+      topic: "Main checks",
+      kind: "lesson" as const,
+      author: "operator" as const,
+      repoId: "mc",
+      updatedAt: NOW,
+    };
+    store.putFlightMemory(stored);
+    const before = store.flightMemory("mc");
+    const count = store.countFlightDecisions({ kinds: ["memory"], since: 0 });
+    const emit = vi.spyOn(bus, "emit");
+    expect(
+      await call(
+        tool,
+        tool === "remember"
+          ? { ...note, topic: "  MAIN   checks  ", body: "replacement" }
+          : { topic: "  MAIN   checks  ", basis: "obsolete" },
+      ),
+    ).toEqual(refused(FLIGHT_MEMORY_OPERATOR));
+    expect(store.flightMemory("mc")).toEqual(before);
+    expect(store.countFlightDecisions({ kinds: ["memory"], since: 0 })).toBe(count);
+    expect(emit).not.toHaveBeenCalled();
+    emit.mockRestore();
+  });
+
+  it("forget uses the delete result without reading bodies and checks the cap first", async () => {
+    await call("remember", note);
+    const bodies = vi.spyOn(store, "flightMemory");
+    const remove = vi.spyOn(store, "deleteFlightMemory").mockReturnValue(false);
+    const count = store.countFlightDecisions({ kinds: ["memory"], since: 0 });
+    const emit = vi.spyOn(bus, "emit");
+    try {
+      expect(await call("forget", { topic: note.topic, basis: "obsolete" })).toEqual(
+        refused(`No note named ${note.topic}.`),
+      );
+      expect(remove).toHaveBeenCalledExactlyOnceWith("mc", note.topic);
+      expect(bodies).not.toHaveBeenCalled();
+      expect(store.countFlightDecisions({ kinds: ["memory"], since: 0 })).toBe(count);
+      expect(emit).not.toHaveBeenCalled();
+      remove.mockClear();
+      const edits = vi
+        .spyOn(store, "countFlightDecisions")
+        .mockReturnValue(FLIGHT_MEMORY_EDITS_PER_HOUR);
+      try {
+        expect(await call("forget", { topic: note.topic, basis: "obsolete" })).toEqual(
+          refused(capText("memory edits", FLIGHT_MEMORY_EDITS_PER_HOUR)),
+        );
+        expect(remove).not.toHaveBeenCalled();
+      } finally {
+        edits.mockRestore();
+      }
+    } finally {
+      bodies.mockRestore();
+      remove.mockRestore();
+      emit.mockRestore();
+    }
+  });
+
+  it("normalises whitespace and case, rejects hidden characters and refuses missing deletes", async () => {
+    expect((await call("remember", { ...note, topic: "  Main   checks  " })).isError).not.toBe(
+      true,
+    );
+    expect((await call("remember", { ...note, topic: "MAIN checks" })).isError).not.toBe(true);
+    expect(store.flightMemory("mc")).toHaveLength(1);
+    for (const ch of [
+      "\t",
+      "\n",
+      "\0",
+      "\u007f",
+      "\u2028",
+      "\u2029",
+      "\u200b",
+      "\u200c",
+      "\u200d",
+      "\ufeff",
+    ]) {
+      expect((await call("remember", { ...note, topic: `a${ch}b` })).isError).toBe(true);
+    }
+    const count = store.countFlightDecisions({ kinds: ["memory"], since: 0 });
+    expect(await call("forget", { topic: "missing", basis: "test" })).toEqual(
+      refused("No note named missing."),
+    );
+    expect(store.countFlightDecisions({ kinds: ["memory"], since: 0 })).toBe(count);
+    expect((await call("forget", { topic: "main  checks", basis: "test" })).isError).not.toBe(true);
+    expect(store.flightMemory("mc")).toEqual([]);
+  });
+
+  it("shares a memory edit cap without spending log_decision's cap", async () => {
+    for (let n = 0; n < FLIGHT_NOTES_PER_HOUR - 1; n++)
+      expect(
+        (await call("log_decision", { about: "day", decision: "measure", basis: "report" }))
+          .isError,
+      ).not.toBe(true);
+    for (let n = 0; n < FLIGHT_MEMORY_EDITS_PER_HOUR / 2; n++) {
+      expect((await call("remember", note)).isError).not.toBe(true);
+      expect((await call("forget", { topic: note.topic, basis: "obsolete" })).isError).not.toBe(
+        true,
+      );
+    }
+    expect((await call("remember", note)).isError).toBe(true);
+    expect(
+      (await call("log_decision", { about: "day", decision: "summary", basis: "report" })).isError,
+    ).not.toBe(true);
+  });
+
+  it("state exposes titles only, recall includes author, and state marks the retrospective shown", async () => {
+    await call("remember", note);
+    store.setSetting(
+      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+      JSON.stringify({ day: "2026-10-22", told: false, report: { day: "2026-10-22" } }),
+    );
+    const state = JSON.parse((await call("flight_state", {})).text);
+    expect(state.memory).toEqual([
+      { topic: note.topic, kind: note.kind, updatedAt: NOW, author: "flight" },
+    ]);
+    expect(JSON.parse((await call("recall", { query: "" })).text).notes[0]).toMatchObject({
+      body: note.body,
+      author: "flight",
+    });
+    expect(JSON.parse(store.getSetting(`${FLIGHT_RETROSPECTIVE_SETTING}:mc`) ?? "{}").told).toBe(
+      true,
+    );
+  });
+
+  it("replaces by topic, persists across reopen, and forgets", async () => {
+    expect((await call("remember", note)).isError).not.toBe(true);
+    await call("remember", { ...note, body: "Use durable storage", kind: "playbook" });
+    expect(store.flightMemory("mc")).toHaveLength(1);
+    const reopened = new Store(join(dir, "mc.sqlite"));
+    expect(reopened.flightMemory("mc")[0]).toMatchObject({
+      body: "Use durable storage",
+      kind: "playbook",
+      source: "#450",
+      author: "flight",
+    });
+    reopened.close();
+    expect((await call("forget", { topic: note.topic, basis: "obsolete" })).isError).not.toBe(true);
+    expect(store.flightMemory("mc")).toEqual([]);
+  });
+  it("enforces body, source, topic and capacity at the tools and storage boundary", async () => {
+    for (const invalid of [
+      { body: "x".repeat(FLIGHT_MEMORY_BODY_MAX + 1) },
+      { source: undefined },
+      { source: "x".repeat(FLIGHT_MEMORY_SOURCE_MAX + 1) },
+      { topic: "x".repeat(FLIGHT_MEMORY_TOPIC_MAX + 1) },
+      { source: "  " },
+      { topic: " " },
+      { kind: "approval" },
+      { basis: undefined },
+    ])
+      expect((await call("remember", { ...note, ...invalid })).isError).toBe(true);
+    const stored = { ...note, author: "flight", repoId: "mc", updatedAt: NOW } as const;
+    expect(() =>
+      store.putFlightMemory({
+        ...stored,
+        kind: "lesson",
+        body: "x".repeat(FLIGHT_MEMORY_BODY_MAX + 1),
+      }),
+    ).toThrow();
+    expect(() => store.putFlightMemory({ ...stored, kind: "lesson", source: "" })).toThrow();
+    for (let n = 0; n < FLIGHT_MEMORY_TOPICS_MAX; n++)
+      store.putFlightMemory({ ...stored, kind: "lesson", topic: `note-${n}` });
+    expect((await call("remember", note)).isError).toBe(true);
+    expect((await call("remember", { ...note, topic: "note-0" })).isError).not.toBe(true);
+    expect(() => store.putFlightMemory({ ...stored, kind: "lesson" })).toThrow();
+    store.putFlightMemory({ ...stored, kind: "lesson", repoId: "other" });
+    expect(store.flightMemory("other")).toHaveLength(1);
+  });
+  it("recalls by literal substring and kind, with a ten-note limit and repo isolation", async () => {
+    for (let n = 0; n < FLIGHT_MEMORY_RECALL_MAX + 2; n++)
+      await call("remember", {
+        ...note,
+        topic: `note-${n}`,
+        body: "MATCH_%",
+        kind: n === 0 ? "crew" : "lesson",
+      });
+    store.putFlightMemory({
+      repoId: "other",
+      topic: "foreign",
+      author: "operator",
+      kind: "lesson",
+      body: "MATCH_%",
+      source: "test",
+      updatedAt: NOW,
+    });
+    const recall = async (args: Record<string, unknown>) =>
+      JSON.parse((await call("recall", args)).text).notes;
+    expect(await recall({ query: "match_%" })).toHaveLength(FLIGHT_MEMORY_RECALL_MAX);
+    expect(await recall({ query: "match_%", kind: "crew" })).toMatchObject([{ topic: "note-0" }]);
+    expect(await recall({ query: "note-1", kind: "lesson" })).toHaveLength(3);
+    expect(await recall({ query: "missing" })).toEqual([]);
+    live("guido-1", "r-guido");
+    for (const [name, args] of [
+      ["remember", note],
+      ["forget", { topic: note.topic, basis: "test" }],
+      ["recall", { query: "" }],
+    ] as const) {
+      expect(await call(name, args, ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
+    }
+    expect(ghCalls).toEqual([]);
+  });
+  it("allows the operator to read, replace and delete, with token and boundary validation", async () => {
+    const app = buildApp({ config: cfg, store, bus, operatorToken: "test-token" });
+    const url = `/api/flight/memory/mc/${encodeURIComponent(note.topic)}`;
+    const headers = { [OPERATOR_HEADER]: "test-token" };
+    const payload = { kind: note.kind, body: note.body, source: note.source };
+    try {
+      for (const method of ["PUT", "DELETE"] as const) {
+        expect(
+          (
+            await app.inject({
+              method,
+              url,
+              headers: { ...headers, origin: "https://evil.test" },
+              payload: method === "PUT" ? payload : undefined,
+            })
+          ).statusCode,
+        ).toBe(403);
+        expect(
+          (
+            await app.inject({
+              method,
+              url,
+              headers: { ...headers, "content-type": "text/plain" },
+              payload: "body",
+            })
+          ).statusCode,
+        ).toBe(415);
+      }
+
+      for (const method of ["PUT", "DELETE"] as const)
+        expect(
+          (await app.inject({ method, url, payload: method === "PUT" ? payload : undefined }))
+            .statusCode,
+        ).toBe(401);
+      for (const invalid of [
+        { source: "" },
+        { source: undefined },
+        { kind: "approval" },
+        { author: "flight" },
+        { source: "x".repeat(FLIGHT_MEMORY_SOURCE_MAX + 1) },
+        { body: "x".repeat(FLIGHT_MEMORY_BODY_MAX + 1) },
+      ])
+        expect(
+          (await app.inject({ method: "PUT", url, headers, payload: { ...payload, ...invalid } }))
+            .statusCode,
+        ).toBe(400);
+      expect((await app.inject({ method: "PUT", url, headers, payload })).statusCode).toBe(200);
+      expect(
+        (await app.inject({ method: "PUT", url, headers, payload: { ...payload, body: "edited" } }))
+          .statusCode,
+      ).toBe(200);
+      const res = await app.inject({ method: "GET", url: "/api/flight/memory?repo=mc" });
+      expect(res.json().notes).toMatchObject([
+        { topic: note.topic, body: "edited", author: "operator" },
+      ]);
+      expect((await app.inject({ method: "DELETE", url, headers })).statusCode).toBe(200);
+      expect(store.flightMemory("mc")).toEqual([]);
+      expect((await app.inject({ method: "DELETE", url, headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: "GET", url: "/api/flight/memory" })).statusCode).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: "PUT",
+            url: "/api/flight/memory/unknown/topic",
+            headers,
+            payload,
+          })
+        ).statusCode,
+      ).toBe(404);
+    } finally {
+      await app.close();
+    }
   });
 });

@@ -100,6 +100,10 @@ import {
   FLIGHT_LEDGER_TITLE_MAX,
   FLIGHT_LIST_MAX,
   FLIGHT_LIST_PAGES,
+  FLIGHT_MEMORY_EDITS_PER_HOUR,
+  FLIGHT_MEMORY_KINDS,
+  FLIGHT_MEMORY_OPERATOR,
+  FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
   FLIGHT_NOTED,
@@ -124,6 +128,7 @@ import {
   type FlightMoveColumn,
   type FlightPowers,
   type FlightPrRead,
+  FORGET_DESCRIPTION,
   flightFloorBlocked,
   GITHUB_WRITES_OFF,
   GUARD_ACK_PREFIX,
@@ -214,6 +219,8 @@ import {
   READ_OTHER_REPO,
   READ_PR_DESCRIPTION,
   READY_LABEL,
+  RECALL_DESCRIPTION,
+  REMEMBER_DESCRIPTION,
   type RepoId,
   type RepoRules,
   RUN_ID_NEEDS_UNPARK,
@@ -295,6 +302,8 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
+import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
+import { markRetrospectiveShown } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   flightArrivalSource,
@@ -516,6 +525,12 @@ const UntrackArgs = z.strictObject({
   status: z.enum(["done", "dropped"]).default("done"),
   outcome: text(FLIGHT_LEDGER_OUTCOME_MAX),
   basis: basisArg,
+});
+const RememberArgs = FlightMemoryInput.extend({ basis: basisArg }).strict();
+const ForgetArgs = z.strictObject({ topic: FlightMemoryTopic, basis: basisArg });
+const RecallArgs = z.strictObject({
+  query: z.string().max(MC_TEXT_MAX),
+  kind: z.enum(FLIGHT_MEMORY_KINDS).optional(),
 });
 const LedgerArgs = z.strictObject({
   kind: z.enum(FLIGHT_LEDGER_KINDS).optional(),
@@ -1625,6 +1640,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     markFlightSignalsShown(store, state, now());
     markPrsShown(store, state);
+    markRetrospectiveShown(store, state);
     deps.seen?.(ctx.runId, state);
     return {
       text: JSON.stringify({
@@ -2076,6 +2092,78 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ledgerEdits.push(at);
     bus.emit("flight");
     return { text: untrackedText(key) };
+  }
+
+  function memoryEditCap(): Result | null {
+    const n = store.countFlightDecisions({ kinds: ["memory"], since: now() - FLIGHT_HOUR_MS });
+    return n >= FLIGHT_MEMORY_EDITS_PER_HOUR ? fail(capText("memory edits", n)) : null;
+  }
+
+  function operatorMemory(repo: string, topic: string): boolean {
+    return store
+      .flightMemoryTitles(repo)
+      .some((n) => n.topic.toLowerCase() === topic.toLowerCase() && n.author === "operator");
+  }
+
+  async function remember(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, RememberArgs, args);
+    if (!c.ok) return c.result;
+    const repo = store.run(ctx.runId)?.repoId;
+    if (!repo) return fail(MC_FLIGHT_ONLY);
+    const capped = memoryEditCap();
+    if (capped) return capped;
+    const { basis, ...note } = c.args;
+    if (operatorMemory(repo, note.topic)) return fail(FLIGHT_MEMORY_OPERATOR);
+    try {
+      store.putFlightMemory({ ...note, author: "flight", repoId: repo, updatedAt: now() });
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : String(e));
+    }
+    bus.emit("flight");
+    record(now(), {
+      kind: "memory",
+      about: note.topic,
+      decision: `Remembered ${note.kind} from ${note.source}.`,
+      basis,
+    });
+    return { text: `Remembered ${note.topic}.` };
+  }
+
+  async function forget(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, ForgetArgs, args);
+    if (!c.ok) return c.result;
+    const repo = store.run(ctx.runId)?.repoId;
+    if (!repo) return fail(MC_FLIGHT_ONLY);
+    const capped = memoryEditCap();
+    if (capped) return capped;
+    if (operatorMemory(repo, c.args.topic)) return fail(FLIGHT_MEMORY_OPERATOR);
+    if (!store.deleteFlightMemory(repo, c.args.topic))
+      return fail(`No note named ${c.args.topic}.`);
+    bus.emit("flight");
+    record(now(), {
+      kind: "memory",
+      about: c.args.topic,
+      decision: "Forgot the memory note.",
+      basis: c.args.basis,
+    });
+    return { text: `Forgot ${c.args.topic}.` };
+  }
+
+  async function recall(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, RecallArgs, args);
+    if (!c.ok) return c.result;
+    const repo = store.run(ctx.runId)?.repoId;
+    if (!repo) return fail(MC_FLIGHT_ONLY);
+    const query = c.args.query.toLowerCase();
+    const notes = store
+      .flightMemory(repo)
+      .filter(
+        (n) =>
+          (c.args.kind === undefined || n.kind === c.args.kind) &&
+          (n.topic.toLowerCase().includes(query) || n.body.toLowerCase().includes(query)),
+      )
+      .slice(0, FLIGHT_MEMORY_RECALL_MAX);
+    return { text: JSON.stringify({ notes }) };
   }
 
   async function ledger(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -2798,6 +2886,30 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: ledger,
+    },
+    {
+      name: MC_TOOL_NAMES.remember,
+      description: REMEMBER_DESCRIPTION,
+      inputSchema: z.toJSONSchema(RememberArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: remember,
+    },
+    {
+      name: MC_TOOL_NAMES.forget,
+      description: FORGET_DESCRIPTION,
+      inputSchema: z.toJSONSchema(ForgetArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: forget,
+    },
+    {
+      name: MC_TOOL_NAMES.recall,
+      description: RECALL_DESCRIPTION,
+      inputSchema: z.toJSONSchema(RecallArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: recall,
     },
   ];
 }

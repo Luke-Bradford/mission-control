@@ -96,8 +96,8 @@ function readerComments(): Map<RouteKey, string> {
     const text = /^\s*\/\/ Reader: (.*\S)\s*$/.exec(line)?.[1];
     if (text === undefined) return;
     const rest = lines.slice(i + 1, i + 9).join("\n");
-    const literal = /\bapi\.(get|post)\b[^"]*"(\/[^"]*)"/.exec(rest);
-    const named = /\bapi\.(get|post)\(\s*([A-Z][A-Z0-9_]*)\s*,/.exec(rest);
+    const literal = /\bapi\.(get|post|put|delete)\b[^"]*"(\/[^"]*)"/.exec(rest);
+    const named = /\bapi\.(get|post|put|delete)\(\s*([A-Z][A-Z0-9_]*)\s*,/.exec(rest);
     const constPath = named ? exported[named[2] as string] : undefined;
     // the nearer route statement wins: a named path ahead of a later literal is the route
     if (named && typeof constPath === "string" && (!literal || named.index < literal.index)) {
@@ -168,6 +168,9 @@ describe("the route table", () => {
     expect(routes).toContain("GET /api/flight/schedule");
     expect(routes).toContain("GET /api/flight/summary");
     expect(routes).toContain("GET /api/flight/ledger");
+    expect(routes).toContain("GET /api/flight/memory");
+    expect(routes).toContain("PUT /api/flight/memory/:repo/:topic");
+    expect(routes).toContain("DELETE /api/flight/memory/:repo/:topic");
     expect(routes).toContain("POST /api/seats/:id/start");
     expect(routes).toContain("GET /api/attention/:key/discussion");
     expect(routes).toContain("POST /api/attention/:key/discussion");
