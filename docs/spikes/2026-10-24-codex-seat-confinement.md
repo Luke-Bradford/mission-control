@@ -85,3 +85,27 @@ A Node client drove one `turn/start` through `codex app-server`. It answered `ac
 - **MCP grants:** a Codex seat calling the hub's MCP server. Docs: `[mcp_servers.<name>] url = …` with `bearer_token_env_var`. Step B's first test confirms this against a real `codex app-server`.
 - **`thread/resume` after the app-server process is gone** (the no-keeper case). Threads are persisted under `~/.codex/sessions` unless `ephemeral`.
 - **Approval requests replayed after a hub restart.** The keeper replays stdout lines, so a request the old hub never answered is replayed to the new one, which must answer it.
+
+## Follow-up (same day, after the plan's review)
+
+This was a second `codex app-server` turn with the following setup:
+
+- a per-run `CODEX_HOME` holding only a copy of `auth.json` and a `config.toml` with `approvals_reviewer = "user"` and `project_doc_max_bytes = 0`;
+- the `mc` profile, with the run's own `CODEX_HOME` denied;
+- `-c 'shell_environment_policy.exclude=["MC_SEAT_TOKEN"]'`, with `MC_SEAT_TOKEN` set in the app-server's env;
+- `thread/start` with `approvalPolicy:"untrusted"` and `approvalsReviewer:"user"`.
+
+Every approval was answered `accept`, to see what runs.
+
+| Question | Result |
+|---|---|
+| Does Codex auto-run "trusted" reads under `untrusted`? | **No.** `ls`, `cat a.txt`, `rg hi`, `sed -n 1p a.txt`, `git log --oneline` and `head -c 5 a.txt` each raised `item/commandExecution/requestApproval` first. Every command reaches the hub. |
+| What does `thread/start` report? | `approvalPolicy:"untrusted"`, `approvalsReviewer:"user"`, `sandbox:{type:"workspaceWrite", networkAccess:false, …}`, `instructionSources:[]` and `permissionProfile:{id:"mc"}`. The hub can verify all of these before the seat runs. |
+| Command text | `params.command` is `/bin/zsh -lc <one shell word>`. The word is bare (`ls`), single-quoted (`'cat a.txt'`), or a mixed run of quoted segments (`"echo 'it'\"'\"'s' …"`). `params.proposedExecpolicyAmendment` carries the parsed argv: `["cat","a.txt"]` for simple commands, and `["/bin/zsh","-lc","<the exact inner script>"]` for anything with quoting, a heredoc or `&`. |
+| Approval fields | `kind:"command"`, `cwd` (the workspace), `environmentId:"local"`, `networkApprovalContext` absent, `reason` absent. |
+| Network | `curl http://127.0.0.1:7420/` (the hub) and `curl https://1.1.1.1` both fail with `Couldn't connect` (exit 7). |
+| Token in command env | `env \| grep -c MC_SEAT_TOKEN` prints `0` with the exclude set. |
+| Background | `sleep 20 &` was approved and ran. The guard must refuse `&` (see the plan). |
+| Denied read | Unchanged from the first run: denied. |
+
+The run folder, including the copied `auth.json`, was deleted after the turn.
