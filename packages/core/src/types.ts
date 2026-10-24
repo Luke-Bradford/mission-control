@@ -1,4 +1,5 @@
 import type { Owner, Stage } from "./board.ts";
+import type { CatchUpKind } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
@@ -788,7 +789,7 @@ export interface Crew {
 
 /** Catch-up text is evidence to display, never instructions to execute. */
 export interface BriefCatchUp {
-  kind: "new" | "follow-up" | "old";
+  kind: CatchUpKind;
   line: string;
   story: string[];
   aware: string[];
