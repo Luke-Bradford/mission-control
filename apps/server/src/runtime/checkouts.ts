@@ -9,7 +9,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   branchFor,
@@ -23,7 +23,7 @@ import {
   type SessionCheckoutOutcome,
   scratchName,
 } from "@mc/core";
-import { type CrewSessionConfig, managedSessionPath, SEAT_ID } from "../config.ts";
+import { type CrewSessionConfig, managedSessionPath, realish, SEAT_ID } from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 import { crewGit, crewGitBytes, overflowed, SAFE_CONFIG, timedOut } from "./git.ts";
 
@@ -79,6 +79,7 @@ export type CheckoutErrorCode =
   | "checkout"
   | "fetch"
   | "base"
+  | "branch"
   | "path"
   | "worktree"
   | "protected"
@@ -142,6 +143,12 @@ export type ReuseSync =
   | { kind: "conflict"; mainSha: string; files: string[] }
   | { kind: "skipped"; why: "dirty" | "merging" | "failed" };
 
+export interface PendingCheckouts {
+  isPending(path: string): boolean;
+  markPending(path: string): void;
+  clearPending(path: string): void;
+}
+
 export interface CheckoutInput {
   /** Mission Control's clone of the repo (a session's `checkout`). */
   checkout: string;
@@ -152,6 +159,7 @@ export interface CheckoutInput {
   seatId: string;
   issue: number;
   title: string;
+  pending?: PendingCheckouts;
   /** Checked at this start against the clone's git repository; none given, none checked. */
   peers?: readonly RepoPeer[];
 }
@@ -262,6 +270,76 @@ export async function adminDirOf(common: string, path: string): Promise<string |
     if ((await realpath(dirname(pointer)).catch(() => null)) === want) return join(dir, name);
   }
   return null;
+}
+
+/**
+ * A pending path is owned by this start even if add never finished its metadata. Check its
+ * location and any surviving pointers before removing it; never follow a redirected worktree.
+ */
+async function removePending(
+  common: string,
+  path: string,
+  root: string,
+  inClone: (args: string[], timeoutMs?: number) => Promise<string>,
+): Promise<void> {
+  const refuse = () => new CheckoutError("path", `${path} is not this run's checkout`);
+  const rootPath = realish(root);
+  const parent = realish(dirname(path));
+  const expectedParent =
+    resolve(dirname(path)) === resolve(root) ? rootPath : join(rootPath, basename(dirname(path)));
+  if (parent !== expectedParent) throw refuse();
+  const disk = await lstat(path).catch((e: NodeJS.ErrnoException) => {
+    if (e.code !== "ENOENT") throw e;
+    return null;
+  });
+  if (disk !== null && !disk.isDirectory()) throw refuse();
+  const adminRoot = join(common, "worktrees");
+  const admins = new Set<string>();
+  const dotGit = join(path, ".git");
+  const pointer = await lstat(dotGit).catch((e: NodeJS.ErrnoException) => {
+    if (e.code !== "ENOENT") throw e;
+    return null;
+  });
+  if (pointer !== null) {
+    if (!pointer.isFile()) throw refuse();
+    const text = (await readFile(dotGit, "utf8")).trim();
+    if (!text.startsWith("gitdir: ")) throw refuse();
+    const admin = resolve(path, text.slice("gitdir: ".length));
+    if (dirname(admin) !== adminRoot) throw refuse();
+    admins.add(admin);
+  }
+  for (const name of await readdir(adminRoot).catch(() => [])) {
+    const admin = join(adminRoot, name);
+    const back = (await readFile(join(admin, "gitdir"), "utf8").catch(() => "")).trim();
+    if (back && resolve(admin, back) === join(parent, basename(path), ".git")) admins.add(admin);
+  }
+  for (const admin of admins) {
+    const stat = await lstat(admin).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== "ENOENT") throw e;
+      return null;
+    });
+    if (stat === null) continue;
+    if (!stat.isDirectory() || (await realpath(admin)) !== admin) throw refuse();
+    for (const file of ["gitdir", "commondir"]) {
+      const entry = await lstat(join(admin, file)).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== "ENOENT") throw e;
+        return null;
+      });
+      if (entry === null) continue;
+      if (!entry.isFile()) throw refuse();
+      const value = (await readFile(join(admin, file), "utf8")).trim();
+      const expected = file === "gitdir" ? join(parent, basename(path), ".git") : common;
+      if (resolve(admin, value) !== expected) throw refuse();
+    }
+  }
+  // Two forces also remove Git's "initializing" lock left by an interrupted add.
+  await inClone(["worktree", "remove", "--force", "--force", "--", path], CREW_GIT_SLOW_MS).catch(
+    () => {},
+  );
+  // Git cannot remove a registration with missing HEAD/commondir, or an orphan with no .git.
+  await rm(path, { recursive: true, force: true });
+  for (const admin of admins) await rm(admin, { recursive: true, force: true });
+  await inClone(["worktree", "prune"]);
 }
 
 /**
@@ -823,6 +901,115 @@ async function fetchOriginBase(
   return baseSha;
 }
 
+async function ticketBranch(
+  inClone: (args: string[]) => Promise<string>,
+  issue: number,
+): Promise<string | null> {
+  let refs: string;
+  try {
+    refs = await inClone([
+      "for-each-ref",
+      "--format=%(refname)",
+      `refs/heads/feature/${issue}`,
+      `refs/heads/feature/${issue}-*`,
+      `refs/remotes/origin/feature/${issue}`,
+      `refs/remotes/origin/feature/${issue}-*`,
+    ]);
+  } catch (e) {
+    throw new CheckoutError("worktree", `could not list the branches of #${issue}`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  }
+  const pattern = new RegExp(`^feature/${issue}(?:-[^/]+)?$`);
+  const branches = new Set(
+    refs
+      .split("\n")
+      .map((ref) => ref.replace(/^refs\/(?:heads|remotes\/origin)\//, ""))
+      .filter((branch) => pattern.test(branch)),
+  );
+  if (branches.size > 1) {
+    throw new CheckoutError(
+      "branch",
+      `#${issue} has more than one branch (${branches.size}); delete the extra ones`,
+    );
+  }
+  return branches.values().next().value ?? null;
+}
+
+/** A fresh detached copy of the ticket's branch, or origin's default tip when it has none. */
+export async function prepareReadOnlyCheckout(
+  i: Omit<CheckoutInput, "title" | "pending">,
+): Promise<Checkout> {
+  const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
+  const path =
+    (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
+  const branch = await ticketBranch(inClone, i.issue);
+  const refSha = (ref: string) =>
+    inClone(["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`]).then(
+      (s) => s.trim(),
+      () => null,
+    );
+  const sha =
+    branch === null
+      ? baseSha
+      : ((await refSha(`refs/heads/${branch}`)) ??
+        (await refSha(`refs/remotes/origin/${branch}`)) ??
+        baseSha);
+  const cannotAdd = (e: unknown) =>
+    new CheckoutError("worktree", `could not create a read-only worktree for ${name}`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  if (await succeeds(lstat(path))) {
+    try {
+      await existingReadOnlyCheckout(i.checkout, path, branch);
+    } catch {
+      throw new CheckoutError(
+        "path",
+        `the worktree path for ${name} exists and is not this ticket's checkout`,
+        { detail: path },
+      );
+    }
+    await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch((e) => {
+      throw cannotAdd(e);
+    });
+  }
+  try {
+    await inClone(["worktree", "prune"]);
+    await inClone(["worktree", "add", "--quiet", "--detach", "--", path, sha], CREW_GIT_SLOW_MS);
+  } catch (e) {
+    throw cannotAdd(e);
+  }
+  try {
+    const gitDir = await adminDirOf(common, path);
+    if (gitDir === null) {
+      throw new CheckoutError(
+        "worktree",
+        `could not create a read-only worktree for ${name}: not registered`,
+      );
+    }
+    await installAll(
+      {
+        checkout: i.checkout,
+        common,
+        inClone,
+        path,
+        rev: sha,
+        base: baseSha,
+        compare: branch !== null,
+        subject: branch ? `branch ${branch}` : "origin's default branch",
+        name: branch ?? name,
+      },
+      execFileP,
+    );
+    return { branch: branch ?? "", path, created: true, baseSha, gitDir };
+  } catch (e) {
+    await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(() => {});
+    throw e;
+  }
+}
+
 /** A fresh detached worktree at origin's default tip, `{root}/{seatId}-{issue}`; no branch, no install. */
 export async function preparePlanCheckout(i: Omit<CheckoutInput, "title">): Promise<Checkout> {
   const name = `${i.seatId}-${i.issue}`;
@@ -1027,14 +1214,25 @@ export async function prepareCheckout(
   i: CheckoutInput,
   runInstall: InstallRunner = execFileP,
 ): Promise<Checkout> {
-  const branch = branchFor(i.issue, i.title);
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
+  const branch = (await ticketBranch(inClone, i.issue)) ?? branchFor(i.issue, i.title);
   // a worktree made before sessions had folders is reused where it is
   const path =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
 
+  const cannotAdd = (e: unknown) =>
+    new CheckoutError("worktree", `could not create a worktree for ${branch}`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  if (i.pending?.isPending(path)) {
+    await removePending(common, path, i.worktreesRoot, inClone).catch((e) => {
+      if (e instanceof CheckoutError) throw e;
+      throw cannotAdd(e);
+    });
+  }
   if (await succeeds(lstat(path))) {
     const gitDir = await adminDirOf(common, path);
     const head = gitDir
@@ -1050,11 +1248,6 @@ export async function prepareCheckout(
     return { branch, path, created: false, baseSha, gitDir };
   }
 
-  const cannotAdd = (e: unknown) =>
-    new CheckoutError("worktree", `could not create a worktree for ${branch}`, {
-      cause: e,
-      detail: gitReason(e),
-    });
   // A worktree whose directory was deleted is still registered and would block the add.
   await inClone(["worktree", "prune"]).catch((e) => {
     throw cannotAdd(e);
@@ -1083,6 +1276,7 @@ export async function prepareCheckout(
           ]
         : ["worktree", "add", "--quiet", "--no-track", "-b", branch, "--", path, baseSha];
   try {
+    i.pending?.markPending(path);
     await inClone(add, CREW_GIT_SLOW_MS);
   } catch (e) {
     throw cannotAdd(e);
@@ -1112,6 +1306,7 @@ export async function prepareCheckout(
       },
       runInstall,
     );
+    i.pending?.clearPending(path);
     return { branch, path, created: true, baseSha, gitDir };
   } catch (e) {
     await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(() => {});
@@ -1281,21 +1476,45 @@ export async function prepareScratch(
 }
 
 /**
- * A watch run's worktree as it stands: registered in the clone and detached. Writes nothing.
+ * A run's worktree as it stands: registered in the clone, detached, and with a valid HEAD. Writes nothing.
  */
 export async function existingDetached(
   checkout: string,
   path: string,
 ): Promise<{ path: string; gitDir: string }> {
-  const notIt = () => new CheckoutError("path", `${path} is not a detached checkout`);
+  const notIt = () => new CheckoutError("path", `${path} is not this run's checkout`);
   const common = await realpath(join(checkout, ".git")).catch(() => null);
   const gitDir = common === null ? null : await adminDirOf(common, path);
   if (common === null || gitDir === null) throw notIt();
-  // A resumed watch must still use a detached copy.
+  // A resumed read-only run must still use a detached copy.
   if (await succeeds(crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }))) {
     throw notIt();
   }
+  if (!(await succeeds(crewGit(path, ["rev-parse", "--verify", "HEAD"], common, { gitDir })))) {
+    throw notIt();
+  }
   return { path, gitDir };
+}
+
+/**
+ * Upgrade a verified legacy run without touching its files or branch ref. A retry after the
+ * HEAD write but before the store write also accepts the already detached checkout.
+ */
+export async function existingReadOnlyCheckout(
+  checkout: string,
+  path: string,
+  branch: string | null,
+): Promise<{ path: string; gitDir: string }> {
+  try {
+    return await existingDetached(checkout, path);
+  } catch (e) {
+    if (branch === null) throw e;
+  }
+  const { gitDir } = await existingCheckout(checkout, path, branch);
+  const common = await realpath(join(checkout, ".git"));
+  const head = (await crewGit(path, ["rev-parse", "--verify", "HEAD"], common, { gitDir })).trim();
+  await crewGit(path, ["update-ref", "--no-deref", "HEAD", head, head], common, { gitDir });
+  return existingDetached(checkout, path);
 }
 
 /**

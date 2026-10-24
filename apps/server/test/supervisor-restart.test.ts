@@ -24,6 +24,7 @@ import { restoreRuns } from "../src/runtime/restore.ts";
 import { CREW_LOCK_FILE, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewKeeperDir, crewMcpPath, crewPromptPath, crewTokenPath } from "../src/store.ts";
 import {
+  BRANCH,
   boardCard,
   clone,
   dbPath,
@@ -310,6 +311,21 @@ describe("reattach after a restart", () => {
       await until(() => expect(userLines()).toContain("fix it"));
     },
   );
+
+  it("resumes a read-only run in its detached worktree", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("retro", 42);
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    await noKeepers();
+    const second = make();
+    second.sup.start();
+    await until(() => expect(store.seatSession("retro")?.reason).toBe(RESUMED));
+    expect(store.run(runId)).toMatchObject({ branch: null, endedAt: null });
+    await until(() => expect(starts()).toHaveLength(2));
+    expect(starts()[1].cwd).toBe(join(root, "mc-crew", "retro-42"));
+  });
 
   it("resumes an active run once, appending to its transcript and sending nothing", async () => {
     const { runId, row, transcript } = await leftActive();
@@ -692,6 +708,99 @@ describe("reattach after a restart", () => {
     expect(starts()).toHaveLength(2); // the first start, and the holder's one resume
     expect(store.run(runId)?.status).toBe("running");
     expect(store.seatSession("guido-1")?.cliSessionId).toBe(row?.cliSessionId);
+  });
+});
+
+describe("read-only checkout upgrades at restart", () => {
+  it.each([
+    { keeper: false, writer: false },
+    { keeper: true, writer: false },
+    { keeper: false, writer: true },
+    { keeper: true, writer: true },
+  ])(
+    "detaches a legacy run (keeper: $keeper, former writer: $writer)",
+    async ({ keeper, writer }) => {
+      const seatId = writer ? "guido-1" : "retro";
+      const first = make();
+      first.sup.start();
+      const { runId } = await first.sup.startRun(seatId, 42);
+      await until(() => expect(seatState(seatId)).toBe("idle"));
+      await first.sup.stopAll();
+      if (!keeper) await noKeepers();
+      const path = join(root, "mc-crew", `${seatId}-42`);
+      if (!writer) {
+        // The checkout and run row an older hub would have left.
+        git(path, "checkout", "-q", "-b", BRANCH);
+        const run = store.run(runId);
+        if (run === null) throw new Error("run missing");
+        store.upsertRun({ ...run, branch: BRANCH });
+      }
+      writeFileSync(join(path, "staged.txt"), "staged");
+      git(path, "add", "staged.txt");
+      writeFileSync(join(path, "dirty.txt"), "dirty");
+      const before = git(path, "status", "--porcelain");
+      const tip = git(path, "rev-parse", "HEAD");
+      const second = make();
+      if (writer) {
+        const seat = second.cfg.crew?.sessions[0]?.seats.find((s) => s.id === seatId);
+        if (!seat) throw new Error("seat missing");
+        seat.role = "RETRO";
+      }
+      const seen: SupervisorEvent[] = [];
+      second.sup.on((e) => seen.push(e));
+      second.sup.start();
+      await until(() =>
+        expect(seen).toContainEqual({
+          kind: "idle",
+          seatId,
+          runId,
+          resumed: !keeper,
+        }),
+      );
+      expect(store.run(runId)).toMatchObject({ branch: null, endedAt: null });
+      expect(() => git(path, "symbolic-ref", "--quiet", "HEAD")).toThrow();
+      expect(git(path, "rev-parse", "HEAD")).toBe(tip);
+      expect(git(clone, "rev-parse", BRANCH)).toBe(tip);
+      expect(git(path, "status", "--porcelain")).toBe(before);
+      await until(() =>
+        expect(recorded().filter((l) => Array.isArray(l.argv))).toHaveLength(keeper ? 1 : 2),
+      );
+    },
+  );
+
+  it.each([false, true])("refuses an unexpected branch even with a keeper (%s)", async (keeper) => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("retro", 42);
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    if (!keeper) await noKeepers();
+    const path = join(root, "mc-crew", "retro-42");
+    git(path, "checkout", "-q", "-b", "unexpected");
+    make().sup.start();
+    await until(() => expect(store.run(runId)?.status).toBe("failed"));
+    expect(store.seatSession("retro")?.reason).toBe("could not resume: checkout missing");
+    expect(git(path, "symbolic-ref", "HEAD")).toBe("refs/heads/unexpected");
+  });
+
+  it("refuses a redirected legacy checkout before attaching its keeper", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("retro", 42);
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    const path = join(root, "mc-crew", "retro-42");
+    git(path, "checkout", "-q", "-b", BRANCH);
+    const run = store.run(runId);
+    if (!run) throw new Error("run missing");
+    store.upsertRun({ ...run, branch: BRANCH });
+    const other = join(root, "other");
+    git(clone, "worktree", "add", "--detach", other);
+    writeFileSync(join(path, ".git"), readFileSync(join(other, ".git")));
+    make().sup.start();
+    await until(() => expect(store.run(runId)?.status).toBe("failed"));
+    expect(store.seatSession("retro")?.reason).toBe("could not resume: checkout missing");
+    expect(recorded().filter((l) => Array.isArray(l.argv))).toHaveLength(1);
   });
 });
 
