@@ -65,6 +65,24 @@ describe("codexCommand", () => {
       "cat a.txt",
     );
   });
+
+  it("matches a segment amendment while retaining the whole chain for the guard", () => {
+    const script = 'rg -n "a|b" docs && sed -n 1,5p a; sed -n 1,5p b';
+    const raw = `/bin/zsh -lc '${script}'`;
+    for (const amendment of [
+      ["rg", "-n", "a|b", "docs"],
+      ["sed", "-n", "1,5p", "a"],
+      ["sed", "-n", "1,5p", "b"],
+      [CODEX_SHELL, "-lc", script],
+    ])
+      expect(codexCommand(raw, amendment)).toBe(script);
+    expect(codexCommand(raw, ["sed", "-n", "1,5p", "c"])).toBeNull();
+    expect(codexCommand(raw, ["rg", "-n"])).toBeNull();
+    expect(codexCommand(raw, [CODEX_SHELL, "-lc", "sed -n 1,5p a"])).toBeNull();
+    expect(codexCommand("/bin/zsh -lc 'sed -n 1p a && curl x'", ["sed", "-n", "1p", "a"])).toBe(
+      "sed -n 1p a && curl x",
+    );
+  });
 });
 
 const FULL = ["pnpm -s test", "pnpm -s vitest run", "pnpm -s vitest"];

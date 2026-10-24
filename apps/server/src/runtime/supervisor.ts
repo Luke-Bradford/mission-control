@@ -40,6 +40,7 @@ import {
   AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
   CANNOT_START,
+  CODEX_CLI_ENV,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
@@ -1259,6 +1260,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ),
         );
         Object.assign(env, {
+          ...CODEX_CLI_ENV,
           CODEX_HOME: home,
           [CODEX_SEAT_TOKEN_ENV]: token,
           SHELL: CODEX_SHELL,

@@ -9,10 +9,19 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CANNOT_START, codexCommand, type SessionEvent } from "@mc/core";
+import {
+  CANNOT_START,
+  codexCommand,
+  MC_MCP_SERVER,
+  MC_TOOL_NAMES,
+  type SessionEvent,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TestLock } from "../src/guard/lock.ts";
+import { createCodexApprover } from "../src/runtime/codex-approval.ts";
 import {
   attachCodexSession,
+  CODEX_MCP_ELICITATION,
   CODEX_OUTBOX_FILE,
   type CodexAttachInput,
   type CodexSessionInput,
@@ -336,6 +345,52 @@ describe("Codex session", () => {
     );
     expect(approve.mock.calls[0]?.[2].aborted).toBe(false);
     await until(() => expect(approve.mock.calls.some((call) => call[2].aborted)).toBe(true));
+  });
+
+  it.each([
+    [MC_MCP_SERVER, MC_TOOL_NAMES.commit, "accept"],
+    ["other", MC_TOOL_NAMES.commit, "decline"],
+    [MC_MCP_SERVER, MC_TOOL_NAMES.mergePr, "decline"],
+  ])("answers the %s %s MCP approval with %s", async (server, tool, action) => {
+    const approve = createCodexApprover({
+      config: {
+        operator: { id: "op", timezone: "UTC" },
+        accounts: [],
+        repos: [{ id: "repo", github: "o/r", project: 1, statusMap: {}, autonomy: "draft" }],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      repoId: "repo",
+      seatId: "seat",
+      runId: "run",
+      mode: "writer",
+      area: [],
+      cwd: dir,
+      lock: new TestLock(),
+      record: vi.fn(),
+      seatGrants: () => [],
+    });
+    const { session } = start({}, { approve });
+    session.send(
+      JSON.stringify({
+        method: CODEX_MCP_ELICITATION,
+        mcp: { server, tool },
+        params: {
+          itemId: null,
+          serverName: server,
+          mode: "form",
+          _meta: { codex_approval_kind: "mcp_tool_call", persist: ["session", "always"] },
+          message: `Allow the ${server} MCP server to run tool "${tool}"?`,
+          requestedSchema: { type: "object", properties: {} },
+        },
+      }),
+    );
+    await until(() =>
+      expect(recorded()).toContainEqual({
+        id: "approval-1",
+        result: { action, content: action === "accept" ? {} : null },
+      }),
+    );
   });
 
   it("cancels a request resolved by the server without answering it again", async () => {
