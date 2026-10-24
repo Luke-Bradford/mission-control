@@ -1,0 +1,304 @@
+{
+  "feature": {
+    "trigger": "label type:feature",
+    "rounds": 3,
+    "budget": "400k",
+    "rules": {
+      "go/no-go": "no-go → back to plan",
+      "verify": "fail → fix → back to verify · max 3",
+      "review": "Critical or Important findings → fix → verify"
+    },
+    "path": ["plan", "go/no-go", "implement", "verify", "review", "draft PR"],
+    "nodes": [
+      {
+        "id": "plan",
+        "role": "FIDO, or the assigned GUIDO",
+        "checks": [
+          ["review", "Plan lists the acceptance criteria as a checklist verify can prove"],
+          ["rule", "Every file in the plan sits inside the agent's area"]
+        ]
+      },
+      {
+        "id": "go/no-go",
+        "gate": true,
+        "role": "FLIGHT polls, you decide",
+        "checks": [["gate", "FLIGHT polls every check; you make the call"]]
+      },
+      {
+        "id": "implement",
+        "role": "GUIDO",
+        "checks": [
+          ["cmd", "New test fails on the base commit (Mission Control re-runs it)"],
+          ["cmd", "The same test passes on the branch"]
+        ]
+      },
+      {
+        "id": "draft PR",
+        "role": "GUIDO",
+        "checks": [["rule", "PR is open as a draft"], ["rule", "Body lists the deploy steps"]]
+      },
+      {
+        "id": "review",
+        "role": "RETRO, fresh eyes: sees the ticket, plan, diff and check output, not the author's chat",
+        "checks": [
+          [
+            "review",
+            "Spec verdict: does what the ticket asks; every acceptance criterion has evidence"
+          ],
+          [
+            "review",
+            "Quality verdict: no Critical or Important findings (Minor ones are logged, not looped)"
+          ],
+          ["rule", "Blast radius: callers and shared code listed by Mission Control were checked"],
+          ["review", "Pages it touches opened in a real browser, with screenshots"]
+        ]
+      },
+      {
+        "id": "verify",
+        "role": "Mission Control runs it",
+        "max": 3,
+        "checks": [
+          ["cmd", "Full test suite passes (takes the test lock)"],
+          ["cmd", "Typecheck exits 0"],
+          ["rule", "No existing test weakened, skipped or deleted"],
+          ["rule", "Diff stays inside the area; no stray files"]
+        ]
+      },
+      {
+        "id": "fix",
+        "role": "GUIDO",
+        "checks": [["agent", "Each finding has a commit or a written ruling"]]
+      }
+    ]
+  },
+  "bugfix": {
+    "trigger": "label bug",
+    "rounds": 3,
+    "budget": "250k",
+    "rules": {
+      "verify": "fail → fix → back to verify · max 3",
+      "review": "Critical or Important findings → fix → verify"
+    },
+    "path": ["reproduce", "fix", "verify", "review", "draft PR"],
+    "nodes": [
+      {
+        "id": "reproduce",
+        "role": "GUIDO",
+        "checks": [
+          ["cmd", "A test reproduces the bug: fails on the base commit for the reported reason"]
+        ]
+      },
+      {
+        "id": "fix",
+        "role": "GUIDO",
+        "checks": [["cmd", "The reproducing test passes"]]
+      },
+      {
+        "id": "verify",
+        "role": "Mission Control runs it",
+        "max": 3,
+        "checks": [
+          ["cmd", "Full test suite passes (takes the test lock)"],
+          ["cmd", "Typecheck exits 0"],
+          ["rule", "No stray files"]
+        ]
+      },
+      {
+        "id": "draft PR",
+        "role": "GUIDO",
+        "checks": [["rule", "PR is open as a draft"]]
+      },
+      {
+        "id": "review",
+        "role": "RETRO, fresh eyes: sees the ticket, plan, diff and check output, not the author's chat",
+        "checks": [
+          [
+            "review",
+            "Spec verdict: does what the ticket asks; every acceptance criterion has evidence"
+          ],
+          [
+            "review",
+            "Quality verdict: no Critical or Important findings (Minor ones are logged, not looped)"
+          ],
+          ["rule", "Blast radius: callers and shared code listed by Mission Control were checked"],
+          ["review", "Pages it touches opened in a real browser, with screenshots"]
+        ]
+      }
+    ]
+  },
+  "small-change": {
+    "trigger": "chore, test or docs ticket",
+    "rounds": 2,
+    "budget": "120k",
+    "rules": {
+      "verify": "fail → back to implement · max 2",
+      "review": "Critical or Important findings → implement → verify"
+    },
+    "path": ["implement", "verify", "review", "draft PR"],
+    "nodes": [
+      {
+        "id": "implement",
+        "role": "GUIDO or INCO",
+        "checks": [
+          ["rule", "Only the paths this ticket type allows changed (tests for test, docs for docs)"]
+        ]
+      },
+      {
+        "id": "verify",
+        "role": "Mission Control runs it",
+        "max": 2,
+        "checks": [
+          ["cmd", "Full test suite passes (takes the test lock)"],
+          ["rule", "No existing test weakened, skipped or deleted"]
+        ]
+      },
+      {
+        "id": "review",
+        "role": "RETRO, fresh eyes",
+        "checks": [
+          [
+            "review",
+            "Spec verdict: does what the ticket asks; every acceptance criterion has evidence"
+          ],
+          [
+            "review",
+            "Quality verdict: no Critical or Important findings (Minor ones are logged, not looped)"
+          ],
+          ["rule", "Blast radius: callers and shared code listed by Mission Control were checked"],
+          ["review", "Pages it touches opened in a real browser, with screenshots"]
+        ]
+      },
+      {
+        "id": "draft PR",
+        "role": "GUIDO or INCO",
+        "checks": [["rule", "PR is open as a draft"]]
+      }
+    ]
+  },
+  "research": {
+    "trigger": "label research",
+    "rounds": 2,
+    "budget": "150k",
+    "rules": {
+      "review": "gaps → write-up again"
+    },
+    "path": ["investigate", "write-up", "review"],
+    "nodes": [
+      {
+        "id": "investigate",
+        "role": "NETWORK",
+        "checks": [["agent", "Every claim cites a file, doc, URL or message"]]
+      },
+      {
+        "id": "write-up",
+        "role": "NETWORK",
+        "checks": [["agent", "One-line answer first, then the evidence"]]
+      },
+      {
+        "id": "review",
+        "role": "RETRO (hand-off)",
+        "checks": [["review", "A second agent re-checked each citation"]]
+      }
+    ]
+  },
+  "review": {
+    "trigger": "PR opened in a lane",
+    "rounds": 1,
+    "budget": "120k",
+    "rules": {},
+    "path": ["read PR", "findings", "propose"],
+    "nodes": [
+      {
+        "id": "read PR",
+        "role": "RETRO",
+        "checks": [["agent", "Diff read against the ticket's intent"]]
+      },
+      {
+        "id": "findings",
+        "role": "RETRO",
+        "checks": [["agent", "Each finding has file:line and a failure scenario"]]
+      },
+      {
+        "id": "propose",
+        "role": "RETRO",
+        "checks": [["gate", "Comments wait for your approval; nothing posts on its own"]]
+      }
+    ]
+  },
+  "tiger-team": {
+    "trigger": "FLIGHT or you, for a blocker or a big ticket",
+    "rounds": 2,
+    "budget": "600k",
+    "rules": {
+      "work ×N": "runs in parallel, one sub-task per agent",
+      "verify each": "fail → that sub-task again · max 2",
+      "review": "findings → fix the combined branch"
+    },
+    "path": ["split", "work ×N", "verify each", "combine", "review"],
+    "nodes": [
+      {
+        "id": "split",
+        "role": "FLIGHT",
+        "checks": [["rule", "Sub-tasks have areas that don't overlap"]]
+      },
+      {
+        "id": "work ×N",
+        "role": "GUIDO ×N in parallel",
+        "checks": [["cmd", "Each sub-task's scoped tests pass"]]
+      },
+      {
+        "id": "verify each",
+        "role": "RETRO",
+        "max": 2,
+        "checks": [["review", "A verifier confirms each result"]]
+      },
+      {
+        "id": "combine",
+        "role": "GUIDO",
+        "checks": [["cmd", "Combined branch passes the full suite (takes the test lock)"]]
+      },
+      {
+        "id": "review",
+        "role": "RETRO, fresh eyes",
+        "checks": [
+          [
+            "review",
+            "Spec verdict: does what the ticket asks; every acceptance criterion has evidence"
+          ],
+          [
+            "review",
+            "Quality verdict: no Critical or Important findings (Minor ones are logged, not looped)"
+          ],
+          ["rule", "Blast radius: callers and shared code listed by Mission Control were checked"],
+          ["review", "Pages it touches opened in a real browser, with screenshots"]
+        ]
+      }
+    ]
+  },
+  "watch": {
+    "trigger": "every 10 min",
+    "rounds": 0,
+    "budget": "—",
+    "rules": {
+      "assign": "then poll again in 10 min"
+    },
+    "path": ["poll", "triage", "assign"],
+    "nodes": [
+      {
+        "id": "poll",
+        "role": "Mission Control",
+        "checks": [["rule", "Board reachable; new or changed tickets listed"]]
+      },
+      {
+        "id": "triage",
+        "role": "FLIGHT",
+        "checks": [["agent", "Each ticket matched to a lane and a template"]]
+      },
+      {
+        "id": "assign",
+        "role": "FLIGHT",
+        "checks": [["gate", "Starting an agent waits for you unless auto-approved"]]
+      }
+    ]
+  }
+}

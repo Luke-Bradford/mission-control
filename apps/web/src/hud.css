@@ -4208,3 +4208,16 @@ button.nrow.thread.tagged {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.sessionform fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.sessionform label,
+.sessionform input,
+.sessionform select {
+  min-width: 0;
+  max-width: 100%;
+}

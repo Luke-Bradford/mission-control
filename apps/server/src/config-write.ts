@@ -355,7 +355,7 @@ async function add(
  * Writes `bytes` to a new `<path>.bak-<UTC>` (a counter when that second is taken), created 0600
  * and exclusively, so it is never readable more widely and never overwrites an earlier backup.
  */
-async function backUp(path: string, bytes: Buffer, now: number): Promise<string> {
+export async function backUp(path: string, bytes: Buffer, now: number): Promise<string> {
   const stamp = compactUtc(now);
   for (let n = 0; n < MAX_SAME_SECOND; n++) {
     const backup = `${path}.bak-${stamp}${n === 0 ? "" : `-${n}`}`;
@@ -383,7 +383,7 @@ async function backUp(path: string, bytes: Buffer, now: number): Promise<string>
 }
 
 /** Writes a temp file beside `path` (0600, fsynced) and renames it over `path`; never half-written. */
-async function replace(path: string, text: string): Promise<void> {
+export async function replace(path: string, text: string): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}`;
   try {
     await rm(tmp, { force: true }); // a temp file left by a crashed process with this pid
@@ -405,7 +405,7 @@ async function replace(path: string, text: string): Promise<void> {
  * Deletes all but CONFIG_BACKUPS_KEEP backups this module named, no other file: `keep` (this add's
  * own backup, whatever its stamp says, since the clock may have gone back) and the newest others.
  */
-async function pruneBackups(path: string, keep: string): Promise<void> {
+export async function pruneBackups(path: string, keep: string): Promise<void> {
   const dir = dirname(path);
   const prefix = `${basename(path)}.bak-`;
   const ours = (await readdir(dir)).flatMap((name) => {

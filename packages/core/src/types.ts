@@ -20,6 +20,18 @@ export interface TokenUsage {
   cacheCreate: number;
 }
 
+/** Recorded usage; missing token measurements stay null. */
+export interface RunUsage {
+  input: number | null;
+  output: number | null;
+  cacheRead: number | null;
+  cacheCreate: number | null;
+  costUsd: number | null;
+  model: string | null;
+  turns: number | null;
+  durationMs: number;
+}
+
 /** The CLI's last word when a run ended without an accepted report. */
 export interface NoReport {
   code: number | null;
@@ -189,6 +201,12 @@ export interface LoopEvent {
 
 /** One try at a step of a looped run, oldest first. */
 export interface LoopTry {
+  trigger?: string;
+  /** Failures charged by Mission Control, separate from the number of executions. */
+  failures?: number;
+  usage?: TokenUsage | null;
+  models?: string[];
+  durationMs?: number | null;
   /** Measured input + output tokens; null when usage was not recorded. */
   tokens?: number | null;
   step: Exclude<LoopPhase, "parked">;
@@ -209,12 +227,13 @@ export interface RunLoopView {
   runId: string;
   /** Full diagnostics for the operator's single-run view only. */
   noReport?: NoReport | null;
+  usage?: RunUsage;
   loop: RunLoop | null;
   events: LoopEvent[];
   tries: LoopTry[];
   /** 1 + the fix lines sent in the loop's epoch, at most REVIEW_ROUNDS. null without a loop. */
   round: number | null;
-  /** crew.runTokenBudget + loop.budgetExtra. null without a loop or a crew section. */
+  /** null until the HUD and enforcement use the same token measure. */
   budget: number | null;
   /** reviewStatusOf for the pushed sha in the loop's epoch, else null. */
   review: ReviewStatus | null;
@@ -238,6 +257,7 @@ export type RunSummary = Omit<Run, "noReport"> & {
 /** `GET /api/agents/:id/runs` row: the run with its PRs joined and its ticket resolved. */
 export type RunView = Omit<RunSummary, "prs" | "ticket"> & {
   prs: RunPr[];
+  usage?: RunUsage;
   /** The run's own ticket, else the first of its PRs' tickets (see runTicket). */
   ticket: string | null;
   /** The title stored with the run, else the board's title for its ticket; null when neither is known. */
@@ -453,7 +473,13 @@ export interface LiveTask {
 export interface RunDigest {
   tasks?: LiveTask[];
   /** Timestamped message usage, retained for attempt attribution (not run totals). */
-  attemptUsage?: { id: string; at: number | null; tokens: number }[];
+  attemptUsage?: {
+    id: string;
+    at: number | null;
+    tokens: number;
+    usage?: TokenUsage;
+    model?: string | null;
+  }[];
   /** Committed lines; missing or null means unmeasured, including binary counts. */
   additions?: number | null;
   deletions?: number | null;
@@ -725,7 +751,7 @@ export interface CrewLoop {
   /** A planner's plan landed for the run's ticket (a `{runId}:plan` loop event); absent without a profile. */
   planned?: boolean;
   /** The current step's try and its limit (ci: CI tries; review: review rounds), else null. */
-  tries?: { n: number; max: number } | null;
+  tries?: { n: number; max: number; failures?: number; runs?: number } | null;
   /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
   wait?: LoopWait | null;
 }
