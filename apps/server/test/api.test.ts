@@ -82,6 +82,7 @@ import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
+import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { readStream } from "../src/stream.ts";
@@ -4743,6 +4744,7 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/looped/loop")).json().round).toBe(3);
     expect((await get("/api/runs/plain/loop")).json()).toEqual({
       runId: "plain",
+      noReport: null,
       loop: null,
       events: [{ key: "k2", runId: "plain", text: "other", at: NOW }],
       tries: [],
@@ -4751,6 +4753,34 @@ describe("the first loop's engine", () => {
       review: null,
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
+  });
+
+  it("serves full missing-report diagnostics only on the single-run loop view", async () => {
+    const r = run({ id: "unreported", agentId: "guido-1", loop });
+    store.upsertRun(r);
+    recordNoReport(store, r, "build", { code: 1, signal: null, lastStderr: null }, null, NOW);
+    const noReport = store.run(r.id)?.noReport;
+    if (!noReport) throw new Error("missing diagnostics");
+    store.recordNoReport(
+      r.id,
+      { ...noReport, lastAssistantText: "The unfinished work." },
+      {
+        key: `no_report:${r.id}`,
+        kind: "flag",
+        runId: r.id,
+        seatId: r.agentId,
+        repoId: r.repoId,
+        text: "Missing report",
+        at: NOW,
+      },
+    );
+    const view = (await get(`/api/runs/${r.id}/loop`)).json();
+    expect(view.noReport.lastAssistantText).toBe("The unfinished work.");
+    const rows = (await get("/api/agents/guido-1/runs")).json<RunView[]>();
+    expect(rows.find((row) => row.id === r.id)?.noReport).toMatchObject({ code: 1 });
+    expect(rows.find((row) => row.id === r.id)?.noReport).not.toHaveProperty("lastAssistantText");
+    expect((await get("/api/agents")).body).not.toContain("lastAssistantText");
+    expect((await get("/api/crew")).body).not.toContain("lastAssistantText");
   });
 });
 

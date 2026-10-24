@@ -1015,6 +1015,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             seatMode(who.seatId),
             { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
             deps.superuserTools,
+            deps.seatGrants?.(who.seatId),
           );
           if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {
@@ -2098,6 +2099,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
         const view: RunLoopView = {
           runId: run.id,
+          noReport: run.noReport ?? null,
           loop,
           events,
           tries: loopTries(run, events, review, [

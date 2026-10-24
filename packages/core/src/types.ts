@@ -20,6 +20,23 @@ export interface TokenUsage {
   cacheCreate: number;
 }
 
+/** The CLI's last word when a run ended without an accepted report. */
+export interface NoReport {
+  code: number | null;
+  signal: string | null;
+  stopReason: string | null;
+  resultSubtype: string | null;
+  terminalReason: string | null;
+  apiErrorStatus: number | null;
+  isError: boolean | null;
+  error: string | null;
+  /** Completed turns in the run (result frames), not the CLI's per-result num_turns. */
+  turns: number | null;
+  tokens: TokenUsage | null;
+  lastAssistantText: string | null;
+  lastStderr: string | null;
+}
+
 export interface Run {
   id: string;
   agentId: AgentId;
@@ -55,6 +72,8 @@ export interface Run {
   cliVersion?: string | null;
   /** Who ended the run; null while it runs, and on rows from before it was recorded. */
   endedBy?: "operator" | "engine" | "exit" | null;
+  /** Absent until a session ends without its loop's report. */
+  noReport?: NoReport | null;
 }
 
 export type LoopPhase = "working" | "ci" | "review" | "parked" | "done";
@@ -175,6 +194,8 @@ export interface LoopTry {
 /** `GET /api/runs/:id/loop`. */
 export interface RunLoopView {
   runId: string;
+  /** Full diagnostics for the operator's single-run view only. */
+  noReport?: NoReport | null;
   loop: RunLoop | null;
   events: LoopEvent[];
   tries: LoopTry[];
@@ -196,8 +217,13 @@ export interface RunPr {
   ticket: string | null;
 }
 
+/** A run in a list; full assistant text stays on the individual run record. */
+export type RunSummary = Omit<Run, "noReport"> & {
+  noReport?: Omit<NoReport, "lastAssistantText"> | null;
+};
+
 /** `GET /api/agents/:id/runs` row: the run with its PRs joined and its ticket resolved. */
-export type RunView = Omit<Run, "prs" | "ticket"> & {
+export type RunView = Omit<RunSummary, "prs" | "ticket"> & {
   prs: RunPr[];
   /** The run's own ticket, else the first of its PRs' tickets (see runTicket). */
   ticket: string | null;
@@ -377,7 +403,7 @@ export interface AgentView {
   accountId: AccountId;
   state: AgentState;
   stateSince: number;
-  currentRun: Run | null;
+  currentRun: RunSummary | null;
   paused: boolean;
   sourceError: string | null;
   /** The loop's own latest STOP note (studio loop), e.g. `stopped: quota ...`; display only. */

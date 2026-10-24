@@ -1,26 +1,19 @@
 /**
- * A repo's board rules: the `mc:` block in the yaml fence under the `## Mission Control` heading of
- * its `CLAUDE.md`, read at `origin/HEAD`. A bad block is refused with the key it names; the engine
+ * User-config rules with an optional `mc:` block under `## Mission Control` in the repo's
+ * `CLAUDE.md`, read at `origin/HEAD`. A bad block is refused with the key it names; the engine
  * stops refills for that repo until it is fixed.
  *
- * Only a repo with no such heading gets the defaults. A heading whose block is missing, unclosed,
- * empty or not a mapping is refused: the repo meant to set rules, and defaults would silently
+ * Only a repo with no such heading inherits all user-config rules. A heading whose block is missing,
+ * unclosed, empty or not a mapping is refused: the repo meant to set rules, and defaults would silently
  * widen what seats may pick.
  */
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  DEFAULT_HARD_RULES,
-  DEFAULT_REPO_RULES,
-  freezeRules,
-  HARD_RULES_BY,
-  REPO_NEEDS,
-  type RepoRules,
-} from "@mc/core";
+import { DEFAULT_REPO_RULES, type RepoRules } from "@mc/core";
 import { parse as parseYaml } from "yaml";
-import { z } from "zod";
 import { readRepoClaudeMd } from "../runtime/brief.ts";
 import { crewGit } from "../runtime/git.ts";
+import { overlayRepoBlock, repoRulesSchema } from "./rule-config.ts";
 
 export class RepoRulesError extends Error {
   constructor(message: string) {
@@ -59,32 +52,6 @@ export function mcSection(markdown: string): string | null {
 
 /** Keys accepted but not used here (other parts of the board automation own them). */
 const IGNORED_KEYS = ["ci"];
-
-/**
- * A label glob: repo-relative, and `**` only as a trailing `/**`, else it would match wrongly
- * against seat globs.
- */
-const labelGlob = z
-  .string()
-  .min(1)
-  .refine((g) => !g.startsWith("/"), "must be repo-relative, not start with /")
-  .refine((g) => !g.replace(/\/\*\*$/, "").includes("**"), "`**` only as a trailing /**");
-
-const nonEmpty = z.string().min(1);
-// `pick_from: []` is refused on purpose: pausing a repo is not this key's job. Status names are
-// not checked against the board here; the engine reports a status it cannot find.
-const schema = z.strictObject({
-  // Historically ignored; tolerate legacy shapes without weakening the away label gate.
-  templates: z.unknown().optional(),
-  pick_from: z.array(nonEmpty).min(1).optional(),
-  promote_backlog: z.boolean().optional(),
-  needs: z.array(z.enum(REPO_NEEDS)).optional(),
-  areas: z.record(nonEmpty, z.array(labelGlob).min(1)).optional(),
-  // `null` means the default only here (the example block writes `hard_rules: null`); `[]` is none.
-  hard_rules: z.array(nonEmpty).nullable().optional(),
-  hard_rules_by: z.enum(HARD_RULES_BY).optional(),
-  always_ask: z.array(nonEmpty).optional(),
-});
 
 /**
  * The text of the first yaml fence between the `## Mission Control` heading and the next `## `
@@ -132,10 +99,14 @@ export function mcBlock(markdown: string): string | null {
 const isMapping = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** The rules in a `CLAUDE.md`'s text; the defaults when it has no `## Mission Control` heading. */
-export function parseRepoRules(markdown: string | null): RepoRules {
+/** The optional repo block tightens user-config rules and fills omitted keys; notes go to the caller. */
+export function parseRepoRules(
+  markdown: string | null,
+  base: RepoRules = DEFAULT_REPO_RULES,
+  notes: string[] = [],
+): RepoRules {
   const block = markdown === null ? null : mcBlock(markdown);
-  if (block === null) return DEFAULT_REPO_RULES;
+  if (block === null) return base;
   let doc: unknown;
   try {
     doc = parseYaml(block);
@@ -150,10 +121,17 @@ export function parseRepoRules(markdown: string | null): RepoRules {
   const mc = doc.mc;
   if (!isMapping(mc)) throw new RepoRulesError("mc: must be a mapping");
   const known = Object.fromEntries(Object.entries(mc).filter(([k]) => !IGNORED_KEYS.includes(k)));
-  if (isMapping(known.areas) && Object.keys(known.areas).includes("__proto__")) {
-    throw new RepoRulesError('mc.areas: the label "__proto__" is not allowed');
+  if (
+    Object.hasOwn(known, "templates") &&
+    !repoRulesSchema.shape.templates.safeParse(known.templates).success
+  ) {
+    notes.push(
+      "mc.templates: invalid legacy value ignored; inheriting user templates when present",
+    );
+    if (base.templates === undefined) known.templates = {};
+    else delete known.templates;
   }
-  const parsed = schema.safeParse(known);
+  const parsed = repoRulesSchema.safeParse(known);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     if (issue === undefined) throw new RepoRulesError("invalid Mission Control block");
@@ -162,40 +140,26 @@ export function parseRepoRules(markdown: string | null): RepoRules {
     }
     throw new RepoRulesError(`mc.${issue.path.map(String).join(".")}: ${issue.message}`);
   }
-  const r = parsed.data;
-  return freezeRules({
-    ...(r.templates === undefined
-      ? {}
-      : {
-          templates: z.record(nonEmpty, nonEmpty).safeParse(r.templates).success
-            ? (r.templates as Record<string, string>)
-            : {},
-        }),
-    pickFrom: r.pick_from ?? DEFAULT_REPO_RULES.pickFrom,
-    promoteBacklog: r.promote_backlog ?? DEFAULT_REPO_RULES.promoteBacklog,
-    needs: r.needs ?? DEFAULT_REPO_RULES.needs,
-    areas:
-      r.areas === undefined
-        ? DEFAULT_REPO_RULES.areas
-        : Object.fromEntries(Object.entries(r.areas)),
-    hardRules: r.hard_rules ?? DEFAULT_HARD_RULES,
-    hardRulesSet: Array.isArray(r.hard_rules),
-    hardRulesBy: r.hard_rules_by ?? DEFAULT_REPO_RULES.hardRulesBy,
-    alwaysAsk: r.always_ask ?? DEFAULT_REPO_RULES.alwaysAsk,
-  });
+  return overlayRepoBlock(base, parsed.data);
 }
 
 /** The latest `origin/HEAD` sha read per checkout, and what it came to. */
-const cache = new Map<string, { sha: string; outcome: RepoRules | RepoRulesError }>();
+const cache = new Map<
+  string,
+  { sha: string; base: RepoRules; outcome: RepoRules | RepoRulesError }
+>();
 
 /**
  * The repo's rules at `origin/HEAD` of the crew clone at `checkout`. Returns the error rather than
  * throwing (a block that does not parse, or a clone that cannot be read); a parse outcome is cached
- * by sha (the latest per checkout), a failed read is not.
+ * by sha and user-config rules (the latest per checkout), a failed read is not.
+ * Nonfatal parse notes are appended for the caller to log, only on a fresh parse.
  */
 export async function readRepoRules(
   repo: string,
   checkout: string,
+  base: RepoRules = DEFAULT_REPO_RULES,
+  notes: string[] = [],
 ): Promise<RepoRules | RepoRulesError> {
   try {
     const common = await realpath(join(checkout, ".git"));
@@ -209,16 +173,18 @@ export async function readRepoRules(
       )
     ).trim();
     const known = cache.get(checkout);
-    if (known !== undefined && known.sha === sha) return known.outcome;
+    if (known !== undefined && known.sha === sha && known.base === base) return known.outcome;
     const markdown = await readRepoClaudeMd(checkout, sha);
     let outcome: RepoRules | RepoRulesError;
     try {
-      outcome = parseRepoRules(markdown);
+      const parseNotes: string[] = [];
+      outcome = parseRepoRules(markdown, base, parseNotes);
+      notes.push(...parseNotes.map((note) => `${repo}: ${note}`));
     } catch (e) {
       if (!(e instanceof RepoRulesError)) throw e;
       outcome = new RepoRulesError(`${repo}: ${e.message}`);
     }
-    cache.set(checkout, { sha, outcome });
+    cache.set(checkout, { sha, base, outcome });
     return outcome;
   } catch (e) {
     return new RepoRulesError(

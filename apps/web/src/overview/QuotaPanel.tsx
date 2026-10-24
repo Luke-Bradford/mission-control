@@ -34,7 +34,7 @@ export function QuotaPanel() {
   const cell = (account: string, window: "5h" | "7d") => {
     const row = rows.find((r) => r.accountId === account && r.window === window);
     return row ? (
-      <span title={title(row, now, tz)}>
+      <span className="quota-window" title={title(row, now, tz)}>
         <Meter
           label={window}
           pct={row.used}
@@ -42,9 +42,11 @@ export function QuotaPanel() {
         />
       </span>
     ) : (
-      <span className="meter">
-        <span className="track" />
-        <span className="num xs muted">{window}: none on this plan</span>
+      <span className="quota-window">
+        <span className="meter">
+          <span className="track" />
+          <span className="num xs muted">{window}: none on this plan</span>
+        </span>
       </span>
     );
   };

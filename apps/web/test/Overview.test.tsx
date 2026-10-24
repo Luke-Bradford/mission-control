@@ -253,7 +253,8 @@ describe("Agents panel", () => {
     const loop = await within(flight).findByText("turn 4 of 41");
     expect(flight.children[3]).toBe(loop);
     const line = within(flight).getByText("coordinates the crew and brings you decisions");
-    expect(line.className).toBe("xs muted block");
+    expect(line.className).toBe("xs muted block doing");
+    expect(line.title).toBe("coordinates the crew and brings you decisions");
     expect(line.previousElementSibling).toBe(flight.querySelector(".doing"));
     expect(within(flight).getByText("Head")).toBeTruthy();
     expect(within(flight).getByText("Error", { selector: ".pill > span" })).toBeTruthy();
@@ -1460,6 +1461,8 @@ describe("Account quota panel", () => {
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByText("read 4 min ago");
     const rows = quota.querySelectorAll(".quotarow");
+    expect(rows[0]?.querySelectorAll(":scope > .quota-window")).toHaveLength(2);
+    expect(rows[0]?.querySelectorAll(".quota-window .meter .track")).toHaveLength(2);
     expect(rows[0]?.textContent).not.toContain("9 min");
     expect(rows[1]?.textContent).toContain("read just now");
   });

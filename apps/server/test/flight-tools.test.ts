@@ -68,6 +68,8 @@ import {
   GH_READ_UNTRUSTED,
   GITHUB_WRITES_OFF,
   GUARD_ACK_PREFIX,
+  GUARD_ALLOW_OUTPUT,
+  GUARD_CHECK_PATH,
   headlineSavedText,
   headlineText,
   LEDGER_FULL_TEXT,
@@ -82,6 +84,7 @@ import {
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TICKET_READERS_ONLY,
+  MC_TOOLS,
   NEW_LOOP,
   NOT_ON_BOARD,
   needsSuperuserText,
@@ -129,6 +132,7 @@ import { attentionItems } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
+import { createMcTools } from "../src/mcp/tools.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -2019,6 +2023,89 @@ describe("sync_main", () => {
   beforeEach(() => {
     engineOn = true;
     live("guido-1", "r-g", { ticket: "mc#7" });
+  });
+
+  it("advertises and dispatches a separate sync_main schema for each caller mode", async () => {
+    const writerSync = vi.fn(async () => ({ text: "writer synced" }));
+    const writerTools = createMcTools({
+      config: cfg,
+      store,
+      bus,
+      inClone: (_checkout, fn) => fn(),
+      gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+      dbPath: join(dir, "mc.sqlite"),
+      knownSecrets: async () => [],
+      syncMain: writerSync,
+    });
+    const tokens = new RunTokens();
+    const writer = tokens.issue("guido-1", "r-g");
+    const flight = tokens.issue("flight-1", "r-flight");
+    const app = buildApp({
+      config: cfg,
+      store,
+      bus,
+      tokens,
+      seatMode: (id) => crewSeatMode(cfg, id),
+      seatGrants: (id) => crewSeatGrants(cfg, id),
+      mcpTools: () => [...writerTools, ...tools],
+    });
+    const rpc = async (token: string, method: string, params?: object) =>
+      (
+        await app.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: { authorization: `Bearer ${token}` },
+          payload: { jsonrpc: "2.0", id: 1, method, params },
+        })
+      ).json();
+    try {
+      const listed = async (token: string) =>
+        (await rpc(token, "tools/list")).result.tools.filter(
+          (t: { name: string }) => t.name === "sync_main",
+        );
+      const writerList = await listed(writer);
+      const flightList = await listed(flight);
+      expect(writerList).toHaveLength(1);
+      expect(flightList).toHaveLength(1);
+      expect(writerList[0].inputSchema).toEqual({
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      });
+      expect(flightList[0].inputSchema.required).toEqual(["runId", "basis"]);
+      expect(
+        (await rpc(writer, "tools/call", { name: "sync_main", arguments: {} })).result.content[0]
+          .text,
+      ).toBe("writer synced");
+      for (const token of [writer, flight]) {
+        const guarded = await app.inject({
+          method: "POST",
+          url: GUARD_CHECK_PATH,
+          headers: { authorization: `Bearer ${token}` },
+          payload: {
+            hook_event_name: "PreToolUse",
+            tool_name: MC_TOOLS.syncMain,
+            tool_use_id: "sync",
+            tool_input: {},
+          },
+        });
+        expect(guarded.body).toBe(GUARD_ALLOW_OUTPUT);
+      }
+      expect(writerSync).toHaveBeenCalledExactlyOnceWith("r-g");
+      expect(syncCalls).toEqual([]);
+      expect(
+        (await rpc(flight, "tools/call", { name: "sync_main", arguments: S() })).result.isError,
+      ).toBeUndefined();
+      expect(syncCalls).toEqual(["r-g"]);
+      expect(
+        (await rpc(flight, "tools/call", { name: "sync_main", arguments: {} })).result.isError,
+      ).toBe(true);
+      expect(
+        (await rpc(writer, "tools/call", { name: "sync_main", arguments: S() })).result.isError,
+      ).toBe(true);
+    } finally {
+      await app.close();
+    }
   });
 
   it("merges main through the engine, and records it", async () => {

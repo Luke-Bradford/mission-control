@@ -73,6 +73,8 @@ export interface GuardContext {
   /** The repo's current `flight_powers`, read from the live config on each call. */
   flightPowers: FlightPowers;
   fullSuite: readonly string[];
+  /** Extra role grants; FLIGHT shares sync_main with writers through its own tool. */
+  mcTools?: readonly string[];
 }
 
 export type GuardVerdict =
@@ -175,8 +177,8 @@ export interface GuardHitsView {
   counts: Record<GuardRule, number>;
 }
 
-/** The mc tools that write (hub-side git); a read-only seat may not call them. */
-export const MC_WRITER_TOOLS = [MC_TOOLS.commit] as const;
+/** The writer tools that write through hub-side git; FLIGHT has its own granted sync_main. */
+export const MC_WRITER_TOOLS = [MC_TOOLS.commit, MC_TOOLS.syncMain] as const;
 
 /** The mc tools a scratch seat may not call: a review answers with report_findings alone. */
 export const MC_SCRATCH_DENIED_TOOLS = [
@@ -1330,7 +1332,10 @@ export function guardDecision(
     if ((READ_ONLY_BUILTINS as readonly string[]).includes(e.tool)) {
       return deny("read-only", e.tool);
     }
-    if ((MC_WRITER_TOOLS as readonly string[]).includes(e.tool)) {
+    if (
+      (MC_WRITER_TOOLS as readonly string[]).includes(e.tool) &&
+      !(e.tool === MC_TOOLS.syncMain && ctx.mcTools?.includes(MC_TOOL_NAMES.syncMain))
+    ) {
       return deny("read-only", e.tool);
     }
   }

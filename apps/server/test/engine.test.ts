@@ -15,6 +15,7 @@ import {
   cleanupBranchNoteKey,
   closedIssueText,
   commsCutMarker,
+  conflictKey,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
@@ -35,7 +36,13 @@ import {
   MC_PUSH_MERGE,
   MC_PUSH_NO_COMMIT,
   MC_PUSH_ROOT,
+  MC_RUN_ENDED,
+  MC_SYNC_DIRTY,
+  MC_SYNC_NOT_WORKING,
+  MC_SYNC_OFF,
+  MC_SYNC_UP_TO_DATE,
   MINOR_POSTED,
+  mergedMainText,
   mergedText,
   mergeStepFailedText,
   minorNotPostedText,
@@ -68,9 +75,14 @@ import {
   reviewQueuedText,
   reviewStartedText,
   type SeatSessionRow,
+  SYNC_MAIN_GAP_MS,
   seatDef,
+  syncFailedText,
+  syncMergedText,
+  syncTooSoonText,
   wakeFailedText,
   wokenEventText,
+  writerSyncConflictText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
@@ -97,9 +109,11 @@ import {
   MERGE_HEAD_MOVED,
   MERGE_WAITS_ON_MAIN,
   READY_UNDO_FAILED,
+  UPDATE_UP_TO_DATE,
 } from "../src/engine/publish.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
-import { RepoRulesError } from "../src/engine/rules.ts";
+import { resolveRepoRules } from "../src/engine/rule-config.ts";
+import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
 import {
@@ -276,6 +290,9 @@ interface Harness {
   /** The next results of each merge step, oldest first; empty: success. */
   stepResults: Record<string, PublishResult[]>;
   /** The branch updates asked for, and their next results, oldest first; empty: wait. */
+  tip: string;
+  mergeHead?: string;
+  duringUpdate?: () => void;
   updates: { mainSha: string; worktree: string }[];
   updateResults: UpdateBranchResult[];
   /** The paths of a polled-after-merge request. */
@@ -359,6 +376,7 @@ function harness(): Harness {
     steps: [],
     stepEnded: {},
     stepResults: {},
+    tip: "d".repeat(40),
     updates: [],
     updateResults: [],
     polls: 0,
@@ -461,8 +479,11 @@ function harness(): Harness {
           if (x.gate === null) return { ok: false, text: "git is down", transient: true };
           return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
         },
+        mergeHead: async () => x.mergeHead ?? null,
+        mainTip: async () => ({ ok: true, sha: x.tip }),
         async updateBranch(r, mainSha, worktree): Promise<UpdateBranchResult> {
           x.updates.push({ mainSha, worktree });
+          x.duringUpdate?.();
           const res = x.updateResults.shift() ?? { ok: true, kind: "wait" };
           // like the real one, a clean merge is recorded
           if (res.ok && res.kind === "merged") {
@@ -681,6 +702,122 @@ afterEach(() => {
   h.engine.stop();
   store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("sync_main", () => {
+  const merged: UpdateBranchResult = {
+    ok: true,
+    kind: "merged",
+    sha: SHA_B,
+    parent: SHA,
+    prSame: true,
+  };
+
+  it("merges main into a working run's branch and records it", async () => {
+    h.updateResults.push(merged);
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncMergedText(h.tip, SHA_B) });
+    expect(h.updates).toEqual([{ mainSha: h.tip, worktree: join(dir, "wt") }]);
+    expect(store.runCommits(RUN)).toContain(SHA_B);
+    expect(loopOf().phase).toBe("working");
+    expect(loopTexts()).toContain(mergedMainText(h.tip));
+    expect(h.pushes).toEqual([]);
+    expect(h.steps).toEqual([]);
+  });
+
+  it("leaves a conflict for the seat and records mainMerge", async () => {
+    const files = ["apps/a.ts"];
+    h.updateResults.push({ ok: true, kind: "conflict", files });
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: writerSyncConflictText(files) });
+    expect(loopOf().mainMerge).toEqual({ mainSha: h.tip, files });
+    expect(store.claimedKeys(RUN)[conflictKey(RUN, h.tip)]).toBe(clock);
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent).toEqual([]);
+    expect(loopOf().phase).toBe("working");
+  });
+
+  it("repeats pending conflict instructions before the cap and origin tip read", async () => {
+    const files = ["apps/a.ts"];
+    h.updateResults.push({ ok: true, kind: "conflict", files });
+    await h.engine.writerSyncMain(RUN);
+    h.mergeHead = h.tip;
+    h.tip = SHA_B;
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: writerSyncConflictText(files) });
+    expect(h.updates).toHaveLength(1);
+  });
+
+  it("preserves loop edits made while the sync is in flight and reports install refusal", async () => {
+    const installNote = "dependencies changed; install refused: branch changes package.json";
+    h.duringUpdate = () => setLoop({ flightClearedSha: SHA });
+    h.updateResults.push({ ...merged, installNote });
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({
+      text: `${syncMergedText(h.tip, SHA_B)}\n${installNote}`,
+    });
+    expect(loopOf().flightClearedSha).toBe(SHA);
+  });
+
+  it("does not spend the cap on an up-to-date answer", async () => {
+    h.updateResults.push({ ok: false, text: UPDATE_UP_TO_DATE, transient: true }, merged);
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: MC_SYNC_UP_TO_DATE });
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncMergedText(h.tip, SHA_B) });
+  });
+
+  it("leaves the rate cap unused when the worktree is dirty", async () => {
+    h.updateResults.push({ ok: true, kind: "wait" }, merged);
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: MC_SYNC_DIRTY, isError: true });
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncMergedText(h.tip, SHA_B) });
+    expect(h.updates).toHaveLength(2);
+  });
+
+  it("refuses a run waiting for CI", async () => {
+    setLoop({ phase: "ci" });
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({
+      text: MC_SYNC_NOT_WORKING,
+      isError: true,
+    });
+    expect(h.updates).toEqual([]);
+  });
+
+  it("allows one sync per 10 minutes", async () => {
+    h.updateResults.push(merged, { ok: false, text: UPDATE_UP_TO_DATE, transient: true });
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncMergedText(h.tip, SHA_B) });
+    clock += SYNC_MAIN_GAP_MS - MIN;
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncTooSoonText(1), isError: true });
+    expect(h.updates).toHaveLength(1);
+    clock += MIN;
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: MC_SYNC_UP_TO_DATE });
+    expect(h.updates).toHaveLength(2);
+    h.updateResults.push(merged);
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncMergedText(h.tip, SHA_B) });
+  });
+
+  it("does not park or use the cap on a merge refusal", async () => {
+    h.updateResults.push({ ok: false, text: "git failed", transient: false }, merged);
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({
+      text: syncFailedText("git failed"),
+      isError: true,
+    });
+    expect(loopOf().phase).toBe("working");
+    expect(loopOf().parked).toBeNull();
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncMergedText(h.tip, SHA_B) });
+  });
+
+  it("refuses when the engine is off or the seat no longer holds the run", async () => {
+    seatIdle(null);
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: MC_RUN_ENDED, isError: true });
+    h.engine.stop();
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: MC_SYNC_OFF, isError: true });
+    expect(h.updates).toEqual([]);
+  });
+
+  it("only merges locally in away mode, without marking ready or merging the PR", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
+    h.updateResults.push(merged);
+    expect(await h.engine.writerSyncMain(RUN)).toEqual({ text: syncMergedText(h.tip, SHA_B) });
+    await h.engine.reconcileRun(RUN);
+    expect(h.pushes).toEqual([]);
+    expect(h.steps).toEqual([]);
+    expect(loopOf().phase).toBe("working");
+  });
 });
 
 describe("report to a draft PR", () => {
@@ -1558,6 +1695,43 @@ describe("a run that ends", () => {
 });
 
 describe("merged", () => {
+  it("clears missing-report notes at the hub time before notifying attention", async () => {
+    const key = `no_report:${RUN}`;
+    store.raiseNote({
+      key,
+      kind: "flag",
+      runId: RUN,
+      seatId: SEAT,
+      repoId: REPO,
+      text: "Missing report",
+      at: clock - 1000,
+    });
+    setPr({ state: "merged", mergedAt: clock });
+    setLoop({
+      prNumber: 12,
+      phase: "parked",
+      parked: { kind: "silent", reason: "no report", ended: true },
+    });
+    const cleared: unknown[] = [];
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    const emit = vi.spyOn(ChangeBus.prototype, "emit").mockImplementation((topic) => {
+      if (topic === "attention")
+        cleared.push(
+          db.prepare("SELECT cleared_at FROM attention_notes WHERE key = ?").get(key)?.cleared_at,
+        );
+    });
+    try {
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().phase).toBe("done");
+      expect(cleared.length).toBeGreaterThan(0);
+      expect(cleared.every((at) => at === clock)).toBe(true);
+      expect(noteKeys()).not.toContain(key);
+    } finally {
+      emit.mockRestore();
+      db.close();
+    }
+  });
+
   it("ends the run once and starts the next ticket once", async () => {
     report();
     await h.engine.reconcileRun(RUN);
@@ -2905,15 +3079,17 @@ describe("the engine runs reviews", () => {
     });
 
     it("does not merge while the rules leave hard_rules unset, and says which key to add", async () => {
-      h.rules = async () => DEFAULT_REPO_RULES;
+      h.rules = async () => parseRepoRules(null);
       await gateOpen();
       await vi.waitFor(() => expect(noteKeys()).toContain(hardRulesUnsetNoteKey(REPO)));
       await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
       expect(h.steps).toEqual([]);
       const unset = store.notes().filter((n) => n.key === hardRulesUnsetNoteKey(REPO));
       expect(unset.map((n) => n.text)).toEqual([hardRulesUnsetText(REPO)]);
-      // once the rules set the key the run merges and the note clears
-      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true });
+      expect(unset[0]?.text).toContain("~/.config/mission-control/config.yaml");
+      expect(unset[0]?.text).toContain("repos[].rules.hard_rules");
+      // user config alone enables the merge and clears the note
+      h.rules = async () => parseRepoRules(null, resolveRepoRules({ hard_rules: [] }));
       await h.engine.tick();
       await h.engine.reconcileRun(RUN);
       await vi.waitFor(() => expect(h.steps).toEqual(ALL));

@@ -22,10 +22,11 @@ vi.mock("../src/runtime/brief.ts", async (orig) => {
   };
 });
 
+import { parseConfig } from "../src/config.ts";
 import { parseRepoRules, RepoRulesError, readRepoRules } from "../src/engine/rules.ts";
 
 const block = (yaml: string) =>
-  `# Repo\n\nIntro.\n\n## Mission Control\n\n\`\`\`yaml\n${yaml}\`\`\`\n`;
+  `# Repo\n\nIntro.\n\n## Mission Control\n\n\`\`\`yaml\n${yaml}\n\`\`\`\n`;
 
 const EXAMPLE = `mc:
   pick_from: [Ready]
@@ -43,7 +44,152 @@ const EXAMPLE = `mc:
   always_ask: []
 `;
 
+/** Load the base through the same config parser as the hub. */
+const userRules = (rules: Record<string, unknown>) =>
+  parseConfig(
+    JSON.stringify({
+      operator: { timezone: "UTC" },
+      accounts: [],
+      repos: [{ id: "r", github: "o/r", project: 1, status_map: {}, rules }],
+      loops: [],
+      poll: { usage_minutes: 30, github_seconds: 60 },
+    }),
+    "test",
+  ).repos[0]?.rules;
+
 describe("parseRepoRules", () => {
+  it("inherits user config and only tightens its safety rules", () => {
+    const base = userRules({
+      templates: { bug: "bugfix", chore: "small-change" },
+      pick_from: ["Todo"],
+      promote_backlog: true,
+      needs: ["size"],
+      areas: { "area:api": ["src/**"] },
+      hard_rules: ["policy/**"],
+      hard_rules_by: "controller",
+      always_ask: ["deps"],
+    });
+    expect(parseRepoRules(null, base)).toEqual(base);
+    expect(parseRepoRules("# Repo\n", base)).toEqual(base);
+    expect(parseRepoRules(block("mc: {}\n"), base)).toEqual(base);
+    const merged = parseRepoRules(
+      block(
+        "mc:\n  promote_backlog: false\n  templates: {bug: custom}\n  areas: {}\n  needs: []\n  hard_rules: []\n",
+      ),
+      base,
+    );
+    expect(merged).toEqual({
+      ...base,
+      areas: {},
+      hardRules: ["policy/**"],
+      hardRulesSet: true,
+    });
+    expect(base?.hardRules).toEqual(["policy/**"]);
+  });
+
+  it("unions hard rules and always-ask labels and keeps operator authority", () => {
+    const base = userRules({
+      hard_rules: ["policy/**"],
+      always_ask: ["deps"],
+      hard_rules_by: "operator",
+    });
+    const rules = parseRepoRules(
+      block(
+        'mc: {hard_rules: ["repo/**", "policy/**"], always_ask: [security, deps], hard_rules_by: controller}',
+      ),
+      base,
+    );
+    expect(rules.hardRules).toEqual(["policy/**", "repo/**"]);
+    expect(rules.alwaysAsk).toEqual(["deps", "security"]);
+    expect(rules.hardRulesBy).toBe("operator");
+    expect(
+      parseRepoRules(
+        block("mc: {hard_rules_by: operator}"),
+        userRules({ hard_rules_by: "controller" }),
+      ).hardRulesBy,
+    ).toBe("operator");
+    expect(
+      parseRepoRules(
+        block("mc: {hard_rules_by: controller}"),
+        userRules({ hard_rules_by: "controller" }),
+      ).hardRulesBy,
+    ).toBe("controller");
+  });
+
+  it("preserves explicit empty user policy keys while allowing pick_from and areas", () => {
+    const rules = parseRepoRules(
+      block(
+        'mc: {templates: {bug: custom}, promote_backlog: true, needs: [size], pick_from: [Backlog], areas: {api: ["src/**"]}}',
+      ),
+      userRules({ templates: {}, promote_backlog: false, needs: [] }),
+    );
+    expect(rules).toMatchObject({
+      templates: {},
+      promoteBacklog: false,
+      needs: [],
+      pickFrom: ["Backlog"],
+      areas: { api: ["src/**"] },
+    });
+    expect(
+      parseRepoRules(
+        block("mc: {templates: {bug: custom}, promote_backlog: true, needs: []}"),
+        userRules({}),
+      ),
+    ).toMatchObject({ templates: { bug: "custom" }, promoteBacklog: true, needs: [] });
+  });
+
+  it.each(["/policy/**", "./policy/**", "policy/", "a//b", "a/../b", "a/./b", "~policy", "a?b"])(
+    "refuses malformed hard-rule globs in both sources: %s",
+    (glob) => {
+      expect(() => userRules({ hard_rules: [glob] })).toThrow(/hardRules/);
+      expect(() => parseRepoRules(block(`mc: {hard_rules: ["${glob}"]}`))).toThrow(/hard_rules/);
+    },
+  );
+
+  it("preserves explicit user choices through structuredClone", () => {
+    const base = userRules({ promote_backlog: false });
+    if (base === undefined) throw new Error("missing user rules");
+    expect(Object.isFrozen(base.userSet)).toBe(true);
+    expect(
+      parseRepoRules(block("mc: {promote_backlog: true}"), structuredClone(base)).promoteBacklog,
+    ).toBe(false);
+  });
+
+  it("inherits user templates for a malformed legacy block value and names the key", () => {
+    const notes: string[] = [];
+    expect(
+      parseRepoRules(
+        block("mc: {templates: [bad]}"),
+        userRules({ templates: { bug: "bugfix" } }),
+        notes,
+      ).templates,
+    ).toEqual({ bug: "bugfix" });
+    expect(notes).toEqual([expect.stringContaining("mc.templates")]);
+  });
+
+  it.each([{}, { hard_rules: null }, { hard_rules: [] }, { hard_rules: ["policy/**"] }])(
+    "keeps hardRulesSet when either source supplies a list: %j",
+    (config) => {
+      const base = userRules(config);
+      for (const value of ["", "  hard_rules: null\n"]) {
+        const rules = parseRepoRules(block(`mc:\n  always_ask: []\n${value}`), base);
+        expect(rules.hardRulesSet).toBe(Array.isArray(config.hard_rules));
+        expect(rules.hardRules).toEqual(base?.hardRules);
+      }
+      for (const value of ["[]", "[repo/**]"]) {
+        expect(parseRepoRules(block(`mc:\n  hard_rules: ${value}\n`), base).hardRulesSet).toBe(
+          true,
+        );
+      }
+    },
+  );
+
+  it("refuses a malformed override even with valid user-config rules", () => {
+    expect(() => parseRepoRules("## Mission Control\n", userRules({ hard_rules: [] }))).toThrow(
+      RepoRulesError,
+    );
+  });
+
   it("parses the example block", () => {
     const r = parseRepoRules(block(EXAMPLE));
     expect(r.templates).toEqual({ "type:feature": "feature", bug: "bugfix" });
@@ -69,7 +215,7 @@ describe("parseRepoRules", () => {
   it("reads hard_rules_by, defaults it to the operator, and refuses an unknown value", () => {
     const by = (v: string) =>
       parseRepoRules(block(`mc:\n  hard_rules: []\n  hard_rules_by: ${v}\n`));
-    expect(by("controller").hardRulesBy).toBe("controller");
+    expect(by("controller").hardRulesBy).toBe("operator");
     expect(by("operator").hardRulesBy).toBe("operator");
     expect(parseRepoRules(block("mc:\n  hard_rules: []\n")).hardRulesBy).toBe("operator");
     expect(() => by("flight")).toThrow(RepoRulesError);
@@ -330,6 +476,38 @@ describe("readRepoRules", () => {
   });
   afterEach(() => rmSync(repo, { recursive: true, force: true }));
 
+  it("returns malformed-template notes to the caller once per cached read", async () => {
+    commit(block("mc: {templates: [bad]}"));
+    const notes: string[] = [];
+    expect(await readRepoRules("test/repo", repo, DEFAULT_REPO_RULES, notes)).not.toBeInstanceOf(
+      Error,
+    );
+    expect(notes).toEqual([expect.stringContaining("test/repo: mc.templates")]);
+    const cachedNotes: string[] = [];
+    await readRepoRules("test/repo", repo, DEFAULT_REPO_RULES, cachedNotes);
+    expect(cachedNotes).toEqual([]);
+  });
+
+  it("carries parsed repo.rules through the engine read with a tightening block", async () => {
+    const base = userRules({
+      hard_rules: ["policy/**"],
+      promote_backlog: false,
+      needs: [],
+      templates: { bug: "bugfix" },
+    });
+    commit(
+      block(
+        'mc: {hard_rules: ["repo/**"], promote_backlog: true, needs: [size], templates: {bug: custom}}',
+      ),
+    );
+    expect(await readRepoRules("o/r", repo, base)).toMatchObject({
+      hardRules: ["policy/**", "repo/**"],
+      promoteBacklog: false,
+      needs: [],
+      templates: { bug: "bugfix" },
+    });
+  });
+
   it("reads origin/HEAD's CLAUDE.md once per sha", async () => {
     commit(promote(true));
     const first = await readRepoRules("o/r", repo);
@@ -393,6 +571,30 @@ describe("readRepoRules", () => {
     git("commit", "-qm", "c");
     git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
     expect(await readRepoRules("o/r", repo)).toEqual(DEFAULT_REPO_RULES);
+  });
+
+  it("uses user-config rules when the repo has no CLAUDE.md", async () => {
+    writeFileSync(join(repo, "README.md"), "hi\n");
+    git("add", "-A");
+    git("commit", "-qm", "c");
+    git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+    const base = userRules({ hard_rules: ["policy/**"], templates: { bug: "bugfix" } });
+    expect(await readRepoRules("o/r", repo, base)).toEqual(base);
+  });
+
+  it("does not reuse a cached result with different user-config rules", async () => {
+    commit(promote(true));
+    expect(await readRepoRules("o/r", repo, userRules({ hard_rules: [] }))).toMatchObject({
+      promoteBacklog: true,
+      hardRulesSet: true,
+    });
+    expect(
+      await readRepoRules("o/r", repo, userRules({ hard_rules: ["policy/**"] })),
+    ).toMatchObject({
+      promoteBacklog: true,
+      hardRules: ["policy/**"],
+    });
+    expect(await readRepoRules("o/r", repo)).toMatchObject({ hardRulesSet: false });
   });
 
   it("returns an error when origin/HEAD does not resolve", async () => {
