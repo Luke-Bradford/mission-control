@@ -298,7 +298,11 @@ it("reads only the latest transcript for Needs you and at most three for a threa
     expect(items.map((i) => i.text)).toEqual(["@CAPCOM stored"]);
     read.mockClear();
     const snapshot = (await app.inject({ url: "/api/comms/guido-1" })).json();
-    expect(read.mock.calls).toHaveLength(3);
+    // three runs scanned; run 8's transcript is unchanged since Needs you read it, so it comes from the cache
+    expect(read.mock.calls.map(([path]) => path)).toEqual([
+      join(f.dir, "6.jsonl"),
+      join(f.dir, "7.jsonl"),
+    ]);
     expect(
       snapshot.messages
         .filter((m: { id: string }) => m.id.startsWith("stream:"))

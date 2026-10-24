@@ -20,6 +20,7 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { useSeatName } from "../seatName.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
+import { LiveIndicator } from "./LiveIndicator.tsx";
 import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
@@ -61,6 +62,7 @@ export function Header({ page }: { page: Page }) {
         ))}
       </nav>
       <span className="spacer" />
+      <LiveIndicator />
       <Met />
       <MachineButton />
       <NeedsButton items={attention} />
