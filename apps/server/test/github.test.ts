@@ -1109,8 +1109,8 @@ describe("makeGql", () => {
 
   it.each([
     [new DOMException("deadline", "TimeoutError"), "github: response timed out after 20 s"],
-    [new DOMException("cancelled", "AbortError"), "github: response cut off (cancelled)"],
-    [new TypeError("terminated"), "github: response cut off (terminated)"],
+    [new DOMException("cancelled", "AbortError"), "github: response cut off"],
+    [new TypeError("terminated"), "github: response cut off"],
   ])("describes a failed body read: %s", async (error, message) => {
     const f = vi.fn(
       async () =>
@@ -1122,7 +1122,11 @@ describe("makeGql", () => {
           }),
         ),
     );
-    await expect(makeGql("t", f)("q", {})).rejects.toThrow(message);
+    await expect(makeGql("t", f)("q", {})).rejects.toMatchObject({
+      name: "GqlTransportError",
+      message,
+      status: null,
+    });
   });
 
   it("reports only content-type for a whole non-JSON body", async () => {
