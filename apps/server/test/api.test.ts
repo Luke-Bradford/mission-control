@@ -1856,10 +1856,15 @@ describe("crew and attention", () => {
     const first = (await get("/api/attention")).json() as AttentionItem[];
     expect(first[0]).not.toHaveProperty("brief");
     const brief = {
+      for: "operator" as const,
+      original: "Original question ".repeat(1000),
+      assessment: "a".repeat(8000),
+      did: [{ action: "d".repeat(8000), refs: ["mc#466"] }],
+      ask: "q".repeat(8000),
       context: "Waiting since yesterday.",
-      recommendation: "Pick A.",
+      recommendation: "r".repeat(8000),
       options: [
-        { label: "A", answer: "a" },
+        { label: "A", answer: "a".repeat(8000) },
         { label: "B", answer: "b" },
       ],
       basis: "read the issue",

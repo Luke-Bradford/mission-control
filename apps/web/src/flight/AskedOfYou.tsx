@@ -1,4 +1,4 @@
-import { ATTENTION_LABEL, type AttentionItem } from "@mc/core";
+import { ATTENTION_LABEL, type AttentionItem, FLIGHT_TRIAGE_LABEL } from "@mc/core";
 import { isOperatorItem } from "../attention.ts";
 import { useSecond, useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
@@ -34,7 +34,9 @@ export function AskedOfYou() {
   // A failed load counts as no threads, so the rest of the list still shows.
   if (attention === undefined || (notes.data === undefined && notes.error === null))
     return <p className="pb note">{DASH}</p>;
-  const threads = (notes.data?.open ?? []).filter((t) => inRepo(t.repoId));
+  const threads = (notes.data?.open ?? []).filter(
+    (t) => inRepo(t.repoId) && !attention.some((i) => i.key === t.key && !isOperatorItem(i)),
+  );
   const handled = (notes.data?.handledToday ?? []).filter((h) => inRepo(h.repoId));
   // An item with no repo belongs to no session, so it stays in view (as in Situation).
   const items = sortNeeds(
@@ -58,7 +60,8 @@ export function AskedOfYou() {
     <div>
       <div className="askcards">
         {threads.map((t) => {
-          const take = attention.find((i) => i.key === t.key)?.brief;
+          const item = attention.find((i) => i.key === t.key);
+          const take = item?.brief;
           return (
             <div className="askcard" key={t.key} data-testid="person-card">
               <div className="row">
@@ -78,6 +81,9 @@ export function AskedOfYou() {
                 <blockquote className="s qtext">
                   <MentionText text={t.snippet} />
                 </blockquote>
+              )}
+              {item?.flightTriage === "missed" && (
+                <p className="s note">{FLIGHT_TRIAGE_LABEL.missed}</p>
               )}
               {take && (
                 <div className="s">
@@ -107,6 +113,7 @@ export function AskedOfYou() {
               Open
             </button>
           </div>
+          {i.flightTriage === "missed" && <p className="s note">{FLIGHT_TRIAGE_LABEL.missed}</p>}
           {i.brief && (
             <div className="s">
               <b>FLIGHT's take:</b> <MarkdownInline text={i.brief.recommendation} />

@@ -1,4 +1,5 @@
 import type { Owner, Stage } from "./board.ts";
+import type { CatchUpKind } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
@@ -795,7 +796,7 @@ export interface Crew {
 
 /** Catch-up text is evidence to display, never instructions to execute. */
 export interface BriefCatchUp {
-  kind: "new" | "follow-up" | "old";
+  kind: CatchUpKind;
   line: string;
   story: string[];
   aware: string[];
@@ -883,6 +884,12 @@ export interface BriefOption {
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
 export interface AttentionBrief {
+  /** Missing on briefs written before triage routing was introduced. */
+  for?: "operator" | "flight";
+  original?: string;
+  assessment?: string;
+  did?: { action: string; refs: string[] }[];
+  ask?: string;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;
@@ -920,6 +927,8 @@ export interface AttentionItem {
   owner?: AttentionOwner;
   /** FLIGHT's brief, once it has written one. */
   brief?: AttentionBrief;
+  flightTriage?: "waiting" | "handling" | "missed";
+  triageDueAt?: number;
   acked: boolean;
 }
 

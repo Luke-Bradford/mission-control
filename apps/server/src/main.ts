@@ -268,6 +268,7 @@ async function main(): Promise<void> {
     bus,
     supervisor,
     login: hubLogin,
+    lockState: () => lock.state(),
     profiles,
     gh,
     dbPath,
@@ -291,6 +292,7 @@ async function main(): Promise<void> {
     supervisor,
     enabled: engineOn,
     login: hubLogin,
+    lockState: () => lock.state(),
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
       cliHold.reason !== null || crewReloader.status().pending.some((p) => p.seatId === seatId),

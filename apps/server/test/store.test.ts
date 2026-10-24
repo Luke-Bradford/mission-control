@@ -2004,6 +2004,12 @@ it("retains complete and legacy briefs across restart without inventing checked 
   const complete = {
     ...legacy,
     key: "note:complete",
+    for: "flight" as const,
+    original: "original".repeat(1500),
+    assessment: "a".repeat(8000),
+    did: [{ action: "d".repeat(8000), refs: ["mc#466"] }],
+    ask: "q".repeat(8000),
+    recommendation: "r".repeat(8000),
     catchUp: {
       kind: "follow-up" as const,
       line: "Scope is undecided",

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AttentionBrief, PersonMessage } from "@mc/core";
+import type { AttentionBrief, CatchUpKind, PersonMessage } from "@mc/core";
 import { GITHUB_COLLECTOR_PREFIX, type RepoId, startOfLocalDay } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { NotificationRead, NotificationRow, Store } from "../store.ts";
@@ -83,8 +83,6 @@ export function sourceReadUrl(repo: string, url: string): boolean {
     );
   return match !== null && match[1]?.toLowerCase() === repo.toLowerCase();
 }
-
-export type CatchUpKind = "new" | "follow-up" | "old";
 
 /** One GET against api.github.com: the status, headers and parsed body (null for a 304). */
 export type Rest = (
