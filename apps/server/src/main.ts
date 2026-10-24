@@ -266,6 +266,7 @@ async function main(): Promise<void> {
 
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    seen: (runId, state) => flightWatch.seen(runId, state),
     config,
     store,
     bus,

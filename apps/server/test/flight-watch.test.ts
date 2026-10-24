@@ -10,12 +10,14 @@ import {
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_NOTE_SECTIONS,
+  FLIGHT_REWAKE_MS,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
   type FlightLedgerEntry,
   type FlightSeatState,
   type FlightState,
+  type FlightWake,
   flightStartFailedText,
   NEW_LOOP,
   type PullRequestView,
@@ -301,8 +303,8 @@ describe("FLIGHT's PR list", () => {
     store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 }), stored(8)], T0);
     await watch.check();
     expect(startCalls).toHaveLength(1);
-    const first = JSON.parse(startCalls[0]?.first?.split("\n").at(-1) ?? "") as FlightState;
-    expect(first.prs.map((p) => [p.pr, p.state])).toEqual([
+    const first = JSON.parse(startCalls[0]?.first?.split("\n").at(-1) ?? "") as FlightWake;
+    expect(first.prs.entries.map((p) => [p.pr, p.state])).toEqual([
       [7, "merged"],
       [8, "open"],
     ]);
@@ -333,8 +335,8 @@ describe("FLIGHT's PR list", () => {
     sendFails = false;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
-    const last = JSON.parse(sendCalls[1]?.text.split("\n").at(-1) ?? "") as FlightState;
-    expect(last.prs.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+    const last = JSON.parse(sendCalls[1]?.text.split("\n").at(-1) ?? "") as FlightWake;
+    expect(last.prs.entries.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
     await watch.check();
     expect(sendCalls).toHaveLength(2);
   });
@@ -534,7 +536,7 @@ describe("FLIGHT's holds", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0]?.text).toContain("1 hold to release");
-    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightState;
+    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
     expect(sent.holds).toMatchObject([{ ref: "mc#9", waitsOn: 7, prState: "merged" }]);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
@@ -676,9 +678,9 @@ describe("FLIGHT's brief in the digest", () => {
   it("starts FLIGHT with the note sections", async () => {
     setNotes(T0);
     await watch.check();
-    const state = JSON.parse(startCalls[0]?.first?.split("\n")[2] ?? "") as FlightState;
-    expect(state.brief.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
-    expect(state.brief[3]?.text).toBe("Ship the brief.");
+    const state = JSON.parse(startCalls[0]?.first?.split("\n")[2] ?? "") as FlightWake;
+    expect(state.brief?.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
+    expect(state.brief?.[3]?.text).toBe("Ship the brief.");
   });
 
   it("carries a ledger index and headline without in_progress prose", async () => {
@@ -714,13 +716,13 @@ describe("FLIGHT's brief in the digest", () => {
     store.putFlightLedgerEntry("s1", { ...entry, key: "old", status: "done" }, 0);
     await watch.check();
     const line = startCalls[0]?.first ?? "";
-    const state = JSON.parse(line.split("\n")[2] ?? "") as FlightState;
-    expect(state.ledger).toEqual([
+    const state = JSON.parse(line.split("\n")[2] ?? "") as FlightWake;
+    expect(state.ledger.entries).toEqual([
       { kind: "work", key: "w-ledger", title: "Wire the page", status: "active", next: "plan it" },
     ]);
     expect(state.ledgerMore).toBe(0);
     expect(state.headline).toBe("H");
-    expect(state.brief.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
+    expect(state.brief?.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
     expect(line).not.toContain("Wiring the page.");
   });
 
@@ -733,6 +735,151 @@ describe("FLIGHT's brief in the digest", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(sent);
   });
+
+  const sentWake = (): FlightWake =>
+    JSON.parse(sendCalls.at(-1)?.text.split("\n").at(-1) ?? "") as FlightWake;
+
+  it("omits the brief after start and resends it after FLIGHT edits it", async () => {
+    setNotes(T0);
+    await watch.check();
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    live("guido-1", "r-guido");
+    ask();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sentWake().brief).toBeUndefined();
+    expect(sentWake().briefVersion).toBe(1);
+    store.setFlightBriefSection({
+      sessionId: "s1",
+      section: "lessons",
+      text: "A new lesson.",
+      updatedAt: nowMs,
+      updatedBy: "flight-1",
+    });
+    nowMs += FLIGHT_REWAKE_MS;
+    await watch.check();
+    expect(sentWake().brief?.find((b) => b.section === "lessons")?.text).toBe("A new lesson.");
+    expect(sentWake().briefVersion).toBe(2);
+    nowMs += FLIGHT_REWAKE_MS;
+    await watch.check();
+    expect(sentWake().brief).toBeUndefined();
+    expect(sentWake().briefVersion).toBe(2);
+  });
+
+  it("compares against the last delivered wake, never a failed send or a silent pass", async () => {
+    liveCrew();
+    setNotes(T0);
+    store.upsertPullRequests("mc", [stored(7)], T0);
+    ask();
+    await watch.check();
+    expect(sentWake().brief).toBeDefined();
+    store.markPullRequestsStale("mc");
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_REWAKE_MS;
+    sendFails = true;
+    await watch.check();
+    const failed = sentWake();
+    expect(failed.prs.entries).toMatchObject([{ pr: 7, stale: true }]);
+    sendFails = false;
+    await watch.check();
+    expect(sentWake()).toEqual(failed);
+    nowMs += FLIGHT_REWAKE_MS;
+    await watch.check();
+    expect(sentWake().prs).toEqual({ entries: [], unchanged: 1, removed: [] });
+    expect(sentWake().seats).toEqual({ entries: [], unchanged: 3, removed: [] });
+    expect(sentWake().brief).toBeUndefined();
+    expect(sentWake().facts.prs).toHaveLength(1);
+    expect(sentWake().questions).toHaveLength(1);
+  });
+
+  it("compares the next wake with the full state read mid-turn, including flips back", async () => {
+    liveCrew();
+    setNotes(T0);
+    ask();
+    await watch.check();
+    expect(sentWake().seats.entries.find((s) => s.id === "guido-1")?.state).toBe("idle");
+    store.setSeatSession(row("guido-1", "r-guido", "running"));
+    const read = flightState({ config, store, busy: [], now: nowMs });
+    read.headline = "Working";
+    for (const note of read.brief) note.text = "Mid-turn note";
+    read.tickets = [
+      {
+        ref: "mc#999",
+        title: "Seen mid-turn",
+        column: "Ready",
+        ready: true,
+        priority: null,
+        labels: [],
+        blockedBy: [],
+        laneLabel: null,
+        assignees: [],
+      },
+    ];
+    watch.seen("r-flight", read);
+    store.setSeatSession(row("guido-1", "r-guido", "idle"));
+    nowMs += FLIGHT_REWAKE_MS;
+    await watch.check();
+    const next = sentWake();
+    expect(next.seats.entries).toMatchObject([{ id: "guido-1", state: "idle" }]);
+    expect(next.seats.unchanged).toBe(2);
+    expect(next.headline).toBe("");
+    expect(next.brief?.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
+    expect(next.briefVersion).toBe(3);
+    expect(next.tickets.removed).toEqual(["mc#999"]);
+    nowMs += FLIGHT_REWAKE_MS;
+    await watch.check();
+    expect(sentWake().seats.entries).toEqual([]);
+    expect(sentWake().brief).toBeUndefined();
+  });
+
+  it("ignores a late tool read from a previous run", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    const stale = flightState({ config, store, busy: [], now: nowMs });
+    for (const seat of stale.seats) seat.state = "running";
+    watch.seen("old-flight", stale);
+    nowMs += FLIGHT_REWAKE_MS;
+    await watch.check();
+    expect(sentWake().seats.entries).toEqual([]);
+  });
+
+  it.each(["restart", "run", "rotation"])(
+    "sends the full brief and lists after a %s",
+    async (change) => {
+      liveCrew();
+      setNotes(T0);
+      ask();
+      await watch.check();
+      nowMs += FLIGHT_REWAKE_MS;
+      if (change === "restart") {
+        watch.stop();
+        makeWatch();
+      } else if (change === "run") {
+        live("flight-1", "new-flight");
+      } else {
+        watch.rotate();
+        await watch.check();
+        const first = JSON.parse(startCalls.at(-1)?.first?.split("\n").at(-1) ?? "") as FlightWake;
+        expect(first.brief).toBeDefined();
+        expect(first.seats.unchanged).toBe(0);
+        facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+        nowMs += FLIGHT_REWAKE_MS;
+        await watch.check();
+        expect(sendCalls.at(-1)?.runId).toBe(store.seatSession("flight-1")?.runId);
+        expect(sentWake().seats).toEqual({ entries: [], unchanged: 3, removed: [] });
+        expect(sentWake().brief).toBeUndefined();
+        expect(sentWake().briefVersion).toBe(1);
+        return;
+      }
+      await watch.check();
+      expect(sentWake().brief).toBeDefined();
+      expect(sentWake().seats.unchanged).toBe(0);
+      expect(sentWake().briefVersion).toBe(1);
+    },
+  );
 });
 
 describe("the FLIGHT watcher", () => {
@@ -742,8 +889,23 @@ describe("the FLIGHT watcher", () => {
     expect(startCalls[0]?.seatId).toBe("flight-1");
     const first = startCalls[0]?.first ?? "";
     expect(first.startsWith(`${FLIGHT_WAKE_HEAD} `)).toBe(true);
-    const state = flightState({ config, store, busy: [], now: T0 });
-    expect(JSON.parse(first.split("\n").at(-1) ?? "")).toEqual(state);
+    const digest = JSON.parse(first.split("\n").at(-1) ?? "") as FlightWake;
+    expect(digest.repo).toBe("mc");
+    expect(digest.seats.entries.map((s) => ({ id: s.id, state: s.state, free: s.free }))).toEqual([
+      { id: "guido-1", state: null, free: true },
+      { id: "inco-1", state: null, free: true },
+      { id: "retro-1", state: null, free: true },
+    ]);
+    expect(digest.seats.unchanged).toBe(0);
+    expect(digest.seats.removed).toEqual([]);
+    expect(digest.brief?.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
+    expect(digest.brief?.every((b) => b.text === "")).toBe(true);
+    expect(digest.headline).toBe("");
+    expect(digest.briefVersion).toBe(1);
+    for (const list of ["recent", "prs", "ledger", "tickets"] as const) {
+      expect(digest[list]).toEqual({ entries: [], unchanged: 0, removed: [] });
+    }
+    expect(digest.facts.q).toEqual([]);
   });
 
   it("a retiring watch seat is not FLIGHT; a retiring build seat is not free or counted", () => {

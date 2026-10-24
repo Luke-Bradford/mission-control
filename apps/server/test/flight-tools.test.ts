@@ -85,7 +85,7 @@ import {
   wrongAreaText,
   wrongColumnText,
 } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import {
@@ -162,6 +162,7 @@ let tool: McTool;
 let nowMs: number;
 let lockNow: TestLockState;
 let cfg: CcConfig;
+const stateSeen = vi.fn();
 let tools: McTool[];
 let startCalls: unknown[][];
 let endCalls: string[];
@@ -281,7 +282,9 @@ beforeEach(() => {
   ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
   secrets = [];
   logs = [];
+  stateSeen.mockClear();
   tools = createFlightTools({
+    seen: stateSeen,
     config: cfg,
     store,
     bus,
@@ -1982,6 +1985,15 @@ describe("flight_state", () => {
     expect((await call("flight_state", { x: 1 })).isError).toBe(true);
   });
 
+  it("refreshes the delivered snapshot with the state returned to the calling run", async () => {
+    const result = await state();
+    expect(stateSeen).toHaveBeenCalledExactlyOnceWith("r-flight", result);
+    stateSeen.mockClear();
+    await call("flight_state", { invalid: true });
+    await call("flight_state", {}, ctx("guido-1", "r-guido"));
+    expect(stateSeen).not.toHaveBeenCalled();
+  });
+
   it("lists a merged PR the first time FLIGHT reads it, and not again", async () => {
     store.upsertPullRequests(
       "mc",
@@ -2259,7 +2271,9 @@ describe("flight_state", () => {
         },
       ],
       holds: [],
-      recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
+      recent: [
+        { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
+      ],
       limits: { startsLeft: 8, messagesLeft: 29 },
       headline: "",
       ledger: [],
