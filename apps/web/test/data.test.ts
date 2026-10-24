@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTIONS, hub, parseTopic, RESOURCES, startStream } from "../src/data.ts";
+import { flightLedger, ledgerEntry } from "./flightSummaryFixture.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -18,6 +19,31 @@ describe("parseTopic", () => {
 });
 
 describe("hub", () => {
+  it("loads every ledger page and keeps the last copy of overlapping keys", async () => {
+    const path = RESOURCES.flightLedger.path;
+    const fetchMock = vi.fn(async (url: string) =>
+      Response.json(
+        url === path
+          ? { ...flightLedger([ledgerEntry()]), more: true, nextOffset: 1 }
+          : flightLedger([
+              ledgerEntry({ title: "Updated on next page" }),
+              ledgerEntry({ key: "closed", status: "done" }),
+            ]),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const off = hub.subscribe(path, "flight", () => {});
+    await vi.waitFor(() => expect(hub.snapshot(path, "flight").loading).toBe(false));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([path, `${path}&offset=1`]);
+    expect(hub.snapshot(path, "flight").data).toEqual(
+      flightLedger([
+        ledgerEntry({ title: "Updated on next page" }),
+        ledgerEntry({ key: "closed", status: "done" }),
+      ]),
+    );
+    off();
+  });
+
   it("refetches only the changed topic, and only what is on screen", async () => {
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

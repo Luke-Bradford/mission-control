@@ -38,6 +38,7 @@ import {
   type Escalation,
   type FileDiff,
   FLIGHT_HEADLINE,
+  FLIGHT_LIST_MAX,
   type FlightBriefView,
   type FlightLedgerEntry,
   type FlightSummaryView,
@@ -4989,7 +4990,12 @@ describe("operator token", () => {
 
 describe("FLIGHT ledger views", () => {
   it("returns empty views without a FLIGHT session", async () => {
-    expect((await get("/api/flight/ledger")).json()).toEqual({ session: null, entries: [] });
+    expect((await get("/api/flight/ledger")).json()).toEqual({
+      session: null,
+      entries: [],
+      more: false,
+      nextOffset: null,
+    });
     expect((await get("/api/flight/summary")).json()).toMatchObject({
       session: null,
       headline: "",
@@ -5067,6 +5073,20 @@ describe("FLIGHT ledger views", () => {
       dropped: 0,
     });
     expect(summary.incoming).toBe(1);
-    expect((await get("/api/flight/ledger")).json().entries).toHaveLength(24);
+    expect((await get("/api/flight/ledger")).json().entries).toHaveLength(22);
+    const first = (await get("/api/flight/ledger?limit=2")).json();
+    expect(first.entries.map((e: FlightLedgerEntry) => e.key)).toEqual(["waiting-work", "w2"]);
+    expect(first).toMatchObject({ more: true, nextOffset: 2 });
+    expect(
+      (await get(`/api/flight/ledger?limit=2&offset=${first.nextOffset}`))
+        .json()
+        .entries.map((e: FlightLedgerEntry) => e.key),
+    ).toEqual(["w5", "w3"]);
+    expect((await get("/api/flight/ledger?status=all")).json().entries).toHaveLength(24);
+    expect((await get("/api/flight/ledger?kind=watch&status=done")).json().entries[0]?.key).toBe(
+      "watch-done",
+    );
+    for (const query of [`limit=${FLIGHT_LIST_MAX + 1}`, "offset=-1", "offset=nope", "status=bad"])
+      expect((await get(`/api/flight/ledger?${query}`)).statusCode).toBe(400);
   });
 });

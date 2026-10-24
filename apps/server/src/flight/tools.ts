@@ -111,6 +111,7 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_MESSAGES_PER_SEAT_HOUR,
+  FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
   FLIGHT_POWERS,
@@ -201,7 +202,6 @@ import {
   notStartableSeatText,
   OWN_SEAT_TEXT,
   OWNER_OPERATOR,
-  orderLedger,
   PASSED_DECISION,
   PASSED_TEXT,
   PLAN_SIZES,
@@ -238,6 +238,7 @@ import {
   rerunStartedDecision,
   rerunStartedText,
   restartRefusedText,
+  retiredBriefText,
   rulingAcceptedDecision,
   rulingAcceptedText,
   rulingRefusedDecision,
@@ -313,6 +314,7 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { crewDir, type Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
+import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -543,19 +545,24 @@ const RecallArgs = z.strictObject({
   query: z.string().max(MC_TEXT_MAX),
   kind: z.enum(FLIGHT_MEMORY_KINDS).optional(),
 });
-const LedgerArgs = z.strictObject({
-  kind: z.enum(FLIGHT_LEDGER_KINDS).optional(),
-  status: z.enum(FLIGHT_LEDGER_STATUSES).optional(),
-});
 
-const UpdateBriefArgs = z.strictObject({
-  planned: PlanOperationArgs.optional(),
-  watch: WatchOperationArgs.optional(),
-  arrival: ArrivalOperationArgs.optional(),
-  section: z.enum([...FLIGHT_BRIEF_SECTIONS, FLIGHT_HEADLINE]),
-  text: z.string().max(FLIGHT_BRIEF_INPUT_MAX),
-  basis: basisArg,
-});
+const UpdateBriefArgs = z
+  .strictObject({
+    planned: PlanOperationArgs.optional(),
+    watch: WatchOperationArgs.optional(),
+    arrival: ArrivalOperationArgs.optional(),
+    section: z.enum([...FLIGHT_BRIEF_SECTIONS, FLIGHT_HEADLINE]).optional(),
+    text: z.string().max(FLIGHT_BRIEF_INPUT_MAX).optional(),
+    basis: basisArg,
+  })
+  .refine(
+    (a) => (a.section === undefined) === (a.text === undefined),
+    "section and text must be provided together.",
+  )
+  .refine(
+    (a) => [a.section, a.planned, a.watch, a.arrival].some((v) => v !== undefined),
+    "Provide section, planned, watch or arrival.",
+  );
 const AnswerArgs = z
   .strictObject({
     question_id: z.number().int().min(1),
@@ -2221,16 +2228,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   async function ledger(ctx: McToolContext, args: unknown): Promise<Result> {
-    const c = flightCall(deps, ctx, LedgerArgs, args);
+    const c = flightCall(deps, ctx, FlightLedgerArgs, args);
     if (!c.ok) return c.result;
     const session = flightSeat(config)?.session.id;
     if (session === undefined) return fail(MC_FLIGHT_ONLY);
-    const entries = orderLedger(store.flightLedger(session)).filter(
-      (e) =>
-        (c.args.kind === undefined || e.kind === c.args.kind) &&
-        (c.args.status === undefined || e.status === c.args.status),
-    );
-    return { text: JSON.stringify({ entries }) };
+    return { text: JSON.stringify(flightLedgerView(config, store, c.args)) };
   }
 
   async function updateBrief(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -2239,14 +2241,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { section, text: body, basis } = c.args;
     const session = flightSeat(config)?.session.id;
     if (session === undefined) return fail(MC_FLIGHT_ONLY);
-    const title =
-      section === FLIGHT_HEADLINE ? FLIGHT_HEADLINE_TITLE : FLIGHT_BRIEF_TITLES[section];
-    if (section === FLIGHT_HEADLINE && (body.length > FLIGHT_HEADLINE_MAX || /[\r\n]/.test(body)))
-      return fail(headlineText(body.length));
-    if (body.length > FLIGHT_BRIEF_SECTION_MAX) return fail(briefTooLongText(title, body.length));
     const at = now();
-    const n = lastHour(["brief"], at);
-    if (n >= FLIGHT_BRIEF_EDITS_PER_HOUR) return fail(capText("updated your brief", n));
+    let title = "";
+    if (section !== undefined && body !== undefined) {
+      const notes: readonly string[] = FLIGHT_NOTE_SECTIONS;
+      if (section !== FLIGHT_HEADLINE && !notes.includes(section))
+        return fail(retiredBriefText(section));
+      title = section === FLIGHT_HEADLINE ? FLIGHT_HEADLINE_TITLE : FLIGHT_BRIEF_TITLES[section];
+      if (section === FLIGHT_HEADLINE && (body.length > FLIGHT_HEADLINE_MAX || /[\r\n]/.test(body)))
+        return fail(headlineText(body.length));
+      if (body.length > FLIGHT_BRIEF_SECTION_MAX) return fail(briefTooLongText(title, body.length));
+      const n = lastHour(["brief"], at);
+      if (n >= FLIGHT_BRIEF_EDITS_PER_HOUR) return fail(capText("updated your brief", n));
+    }
     const arrival = c.args.arrival;
     const source = arrival ? flightArrivalSource(config, store, arrival) : null;
     if (arrival && !source)
@@ -2278,13 +2285,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           : "Not saved: at most 100 watch entries are allowed.",
       );
     }
+    bus.emit("flight");
+    if (section === undefined || body === undefined)
+      return { text: "Updated structured brief entries." };
     record(at, {
       kind: "brief",
       about: briefAboutText(title),
       decision: body === "" ? BRIEF_CLEARED_DECISION : briefSavedDecision(body.length),
       basis,
     });
-    bus.emit("flight");
     return {
       text:
         body === ""
@@ -2949,7 +2958,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.ledger,
       description: LEDGER_DESCRIPTION,
-      inputSchema: z.toJSONSchema(LedgerArgs),
+      inputSchema: z.toJSONSchema(FlightLedgerArgs, { io: "input" }),
       modes: [],
       grantable: ["read-only"],
       call: ledger,

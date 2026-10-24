@@ -132,7 +132,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
-import { flightLedgerView, flightSummary } from "./flight/ledger.ts";
+import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
@@ -1754,10 +1754,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("flight");
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#your-ledger (high-level tracking summary)
-      api.get("/flight/summary", async () => flightSummary(config, store, now()));
-      // Reader: roles/FLIGHT.md#your-ledger (full tracking details)
-      api.get("/flight/ledger", async () => flightLedgerView(config, store));
+      // Reader: apps/web/src/flight/Summary.tsx (high-level tracking summary)
+      api.get("/flight/summary", async () =>
+        flightSummary(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          deps.hubLogin?.() ?? null,
+        ),
+      );
+      // Reader: apps/web/src/flight/Summary.tsx (full tracking details)
+      api.get("/flight/ledger", async (req, reply) => {
+        const query = FlightLedgerArgs.extend({
+          limit: z.preprocess(
+            (v) => (typeof v === "string" ? Number(v) : v),
+            FlightLedgerArgs.shape.limit,
+          ),
+          offset: z.preprocess(
+            (v) => (typeof v === "string" ? Number(v) : v),
+            FlightLedgerArgs.shape.offset,
+          ),
+        }).safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: "Invalid ledger query" });
+        return flightLedgerView(config, store, query.data);
+      });
 
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),

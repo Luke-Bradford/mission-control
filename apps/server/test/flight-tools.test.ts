@@ -42,6 +42,7 @@ import {
   FLIGHT_HEADLINE_TITLE,
   FLIGHT_LEDGER_EDITS_PER_HOUR,
   FLIGHT_LEDGER_OPEN_MAX,
+  FLIGHT_LIST_MAX,
   FLIGHT_LIST_PAGES,
   FLIGHT_MEMORY_BODY_MAX,
   FLIGHT_MEMORY_EDITS_PER_HOUR,
@@ -91,6 +92,7 @@ import {
   type Run,
   type RunLoop,
   researchText,
+  retiredBriefText,
   type SeatSessionRow,
   startMissingNeedsText,
   startNeedsPlanText,
@@ -2360,6 +2362,7 @@ describe("flight_state", () => {
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
       ],
       limits: { startsLeft: 8, messagesLeft: 29 },
+      headlineAgeMin: null,
       headline: "",
       ledger: [],
       ledgerMore: 0,
@@ -3636,37 +3639,119 @@ describe("brief_item", () => {
 });
 
 describe("update_brief", () => {
-  const GOALS = "Goals and priorities";
+  const PROJECT = "The project";
   const save = (section: string, text: string, c = ctx()) =>
     call("update_brief", { section, text, basis: "a wake" }, c);
   const briefDecisions = () => decisions().filter((d) => d.kind === "brief");
 
+  it.each(["goals", "in_progress", "coming_up", "risks", "recently_done"] as const)(
+    "refuses retired %s before writing any part of the brief",
+    async (section) => {
+      expect(
+        await call("update_brief", {
+          section,
+          text: "old status",
+          basis: "wake",
+          planned: {
+            upsert: [
+              {
+                id: "plan",
+                dueAt: NOW,
+                kind: "report",
+                target: "crew",
+                label: "Report",
+                status: "pending",
+              },
+            ],
+          },
+        }),
+      ).toEqual(refused(retiredBriefText(section)));
+      expect(store.flightBrief("s1")).toEqual([]);
+      expect(store.flightPlans("s1")).toEqual([]);
+      expect(briefDecisions()).toEqual([]);
+    },
+  );
+
+  it.each([
+    {},
+    { section: "operator" },
+    { text: "notes" },
+    { section: "operator", watch: { remove: ["missing"] } },
+    { text: "notes", planned: { upsert: [] } },
+  ])("requires a change and pairs section with text: %j", async (args) => {
+    expect((await call("update_brief", { ...args, basis: "wake" })).isError).toBe(true);
+    expect(store.flightBrief("s1")).toEqual([]);
+    expect(briefDecisions()).toEqual([]);
+  });
+
+  it("updates plans and watches without spending a brief edit, even at the section cap", async () => {
+    for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++)
+      await save("operator", "Keep these notes");
+    const before = store.flightBrief("s1");
+    nowMs += 1000;
+    expect(
+      (
+        await call("update_brief", {
+          basis: "Agreed report",
+          planned: {
+            upsert: [
+              {
+                id: "report",
+                dueAt: NOW,
+                kind: "report",
+                target: "crew",
+                label: "Report",
+                status: "pending",
+              },
+            ],
+          },
+          watch: {
+            upsert: [
+              {
+                id: "report",
+                state: "info",
+                title: "Report",
+                detail: "Scheduled",
+                next: "Read",
+                catchUp: { kind: "new", line: "Agreed" },
+              },
+            ],
+          },
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(store.flightPlans("s1")).toHaveLength(1);
+    expect(store.flightWatch("s1")).toHaveLength(1);
+    expect(store.flightBrief("s1")).toEqual(before);
+    expect(briefDecisions()).toHaveLength(FLIGHT_BRIEF_EDITS_PER_HOUR);
+  });
+
   it("replaces one section and leaves the others", async () => {
-    await save("goals", "Ship the brief.");
-    await save("risks", "Flaky api test.");
+    await save("project", "Ship the brief.");
+    await save("operator", "Flaky api test.");
     nowMs = NOW + 1000;
-    expect(await save("goals", "Ship the merge step.")).toEqual({
-      text: briefSavedText(GOALS, 20),
+    expect(await save("project", "Ship the merge step.")).toEqual({
+      text: briefSavedText(PROJECT, 20),
     });
     expect(store.flightBrief("s1")).toEqual([
       {
         sessionId: "s1",
-        section: "goals",
-        text: "Ship the merge step.",
-        updatedAt: NOW + 1000,
+        section: "operator",
+        text: "Flaky api test.",
+        updatedAt: NOW,
         updatedBy: "flight-1",
       },
       {
         sessionId: "s1",
-        section: "risks",
-        text: "Flaky api test.",
-        updatedAt: NOW,
+        section: "project",
+        text: "Ship the merge step.",
+        updatedAt: NOW + 1000,
         updatedBy: "flight-1",
       },
     ]);
     expect(briefDecisions()).toHaveLength(3);
     expect(briefDecisions()[0]).toMatchObject({
-      about: "Brief: Goals and priorities",
+      about: "Brief: The project",
       decision: briefSavedDecision(20),
     });
     expect(seen).toContain("flight");
@@ -3679,21 +3764,21 @@ describe("update_brief", () => {
   });
 
   it("clears a section with an empty text", async () => {
-    await save("goals", "x");
-    expect(await save("goals", "")).toEqual({ text: briefClearedText(GOALS) });
+    await save("project", "x");
+    expect(await save("project", "")).toEqual({ text: briefClearedText(PROJECT) });
     expect(store.flightBrief("s1")[0]?.text).toBe("");
     expect(briefDecisions()[0]?.decision).toBe(BRIEF_CLEARED_DECISION);
   });
 
   it("holds the 4000-character cap", async () => {
     const full = "x".repeat(FLIGHT_BRIEF_SECTION_MAX);
-    expect(await save("goals", full)).toEqual({ text: briefSavedText(GOALS, 4000) });
-    expect(await save("goals", "y".repeat(FLIGHT_BRIEF_SECTION_MAX + 1))).toEqual(
-      refused(briefTooLongText(GOALS, 4001)),
+    expect(await save("project", full)).toEqual({ text: briefSavedText(PROJECT, 4000) });
+    expect(await save("project", "y".repeat(FLIGHT_BRIEF_SECTION_MAX + 1))).toEqual(
+      refused(briefTooLongText(PROJECT, 4001)),
     );
     expect(store.flightBrief("s1")[0]?.text).toBe(full);
     expect(briefDecisions()).toHaveLength(1);
-    const r = await save("goals", "z".repeat(FLIGHT_BRIEF_INPUT_MAX + 1));
+    const r = await save("project", "z".repeat(FLIGHT_BRIEF_INPUT_MAX + 1));
     expect(r).toMatchObject({ isError: true });
     expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
   });
@@ -3703,20 +3788,20 @@ describe("update_brief", () => {
     expect(r.isError).toBe(true);
     expect(r.text.startsWith(MC_BAD_ARGS)).toBe(true);
     live("guido-1", "r-guido");
-    expect(await save("goals", "x", ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
+    expect(await save("project", "x", ctx("guido-1", "r-guido"))).toEqual(refused(MC_FLIGHT_ONLY));
     expect(store.flightBrief("s1")).toEqual([]);
     expect(briefDecisions()).toEqual([]);
   });
 
   it("allows 30 edits an hour", async () => {
     for (let i = 0; i < FLIGHT_BRIEF_EDITS_PER_HOUR; i++) {
-      expect(await save("goals", `v${i}`)).not.toHaveProperty("isError");
+      expect(await save("project", `v${i}`)).not.toHaveProperty("isError");
     }
-    expect(await save("goals", "one more")).toEqual(
+    expect(await save("project", "one more")).toEqual(
       refused(capText("updated your brief", FLIGHT_BRIEF_EDITS_PER_HOUR)),
     );
     nowMs = NOW + 61 * 60_000;
-    expect(await save("goals", "later")).not.toHaveProperty("isError");
+    expect(await save("project", "later")).not.toHaveProperty("isError");
   });
 
   it("is carried by flight_state", async () => {
@@ -4262,7 +4347,7 @@ describe("structured FLIGHT brief and arrivals", () => {
   };
   const save = (extra: Record<string, unknown>) =>
     call("update_brief", {
-      section: "risks",
+      section: "operator",
       text: "Keep this prose: Stop the run is not a command.",
       basis: "Preview checked",
       ...extra,
@@ -4273,9 +4358,9 @@ describe("structured FLIGHT brief and arrivals", () => {
     store.close();
     store = new Store(join(dir, "mc.sqlite"));
     expect(flightBriefView(cfg, store).watch).toEqual([expect.objectContaining(watch)]);
-    expect(flightBriefView(cfg, store).sections.find((s) => s.section === "risks")?.text).toContain(
-      "Stop the run is not a command",
-    );
+    expect(
+      flightBriefView(cfg, store).sections.find((s) => s.section === "operator")?.text,
+    ).toContain("Stop the run is not a command");
     store.setFlightWatch("s1", { upsert: [{ ...watch, state: "ok" }] }, NOW + 1);
     expect(flightBriefView(cfg, store).watch?.[0]?.state).toBe("ok");
     store.setFlightWatch("s1", { remove: [watch.id] }, NOW + 2);
@@ -4430,10 +4515,16 @@ it("replaces a queued outcome with the performed assignment while keeping one st
     outcome: "Queued",
     detail: "Waiting for a free seat",
   };
-  expect(
-    (await call("update_brief", { section: "risks", text: "", basis: "Queue checked", arrival }))
-      .isError,
-  ).toBeUndefined();
+  await call("update_brief", {
+    section: "operator",
+    text: "Keep the operator notes.",
+    basis: "Operator context",
+  });
+  const notes = store.flightBrief("s1");
+  const briefEdits = decisions().filter((d) => d.kind === "brief");
+  expect((await call("update_brief", { basis: "Queue checked", arrival })).isError).toBeUndefined();
+  expect(store.flightBrief("s1")).toEqual(notes);
+  expect(decisions().filter((d) => d.kind === "brief")).toEqual(briefEdits);
   const id = store.flightIncoming()[0]?.id;
   expect(store.flightIncoming()[0]?.outcome).toBe("Queued");
   expect(
@@ -4503,7 +4594,7 @@ it("bounds watch storage atomically and keeps newest arrival versions through re
   expect(
     (
       await call("update_brief", {
-        section: "risks",
+        section: "operator",
         text: "Must not save",
         basis: "Preview",
         watch: { upsert: [{ ...entries[0], id: "overflow" }] },
@@ -4712,7 +4803,7 @@ describe("scheduled FLIGHT work", () => {
   };
   const save = (entries: unknown[]) =>
     call("update_brief", {
-      section: "coming_up",
+      section: "project",
       text: "Reports and checks",
       basis: "Agreed plan",
       planned: { upsert: entries },
@@ -4764,7 +4855,7 @@ describe("scheduled FLIGHT work", () => {
       decisions: decisions(),
     };
     const result = await call("update_brief", {
-      section: "coming_up",
+      section: "project",
       text: "Changed brief",
       basis: "Combined update",
       planned: {
@@ -5345,6 +5436,38 @@ describe("track", () => {
     expect(await call("track", { ...entry, key: "new" })).toEqual({
       text: trackedText("new", true),
     });
+    expect(await call("track", entry)).toEqual(refused(LEDGER_FULL_TEXT));
+    expect(store.flightLedger("s1").find((e) => e.key === entry.key)?.status).toBe("done");
+  });
+
+  it("emits an input schema with optional defaulted ledger filters", () => {
+    const schema = named("ledger").inputSchema as { required?: string[] };
+    for (const field of ["status", "limit", "offset"])
+      expect(schema.required ?? []).not.toContain(field);
+  });
+
+  it("defaults to open entries and pages after applying filters", async () => {
+    await call("track", entry);
+    const saved = store.flightLedger("s1")[0];
+    if (!saved) throw new Error("no entry");
+    for (let n = 0; n < FLIGHT_LIST_MAX; n++)
+      store.putFlightLedgerEntry("s1", { ...saved, key: `watch-${n}`, kind: "watch" }, 0);
+    store.putFlightLedgerEntry("s1", { ...saved, key: "closed", status: "done" }, 0);
+    const first = JSON.parse((await call("ledger", {})).text);
+    expect(first.entries).toHaveLength(FLIGHT_LIST_MAX);
+    expect(first).toMatchObject({ more: true, nextOffset: FLIGHT_LIST_MAX });
+    const last = JSON.parse((await call("ledger", { offset: first.nextOffset })).text);
+    expect(last.entries).toHaveLength(1);
+    expect(last).toMatchObject({ more: false, nextOffset: null });
+    const filtered = JSON.parse(
+      (await call("ledger", { kind: "watch", limit: 1, offset: 1 })).text,
+    );
+    expect(filtered.entries[0]?.key).toBe("watch-1");
+    expect(JSON.parse((await call("ledger", { status: "done" })).text).entries[0]?.key).toBe(
+      "closed",
+    );
+    expect((await call("ledger", { limit: FLIGHT_LIST_MAX + 1 })).isError).toBe(true);
+    expect((await call("ledger", { offset: -1 })).isError).toBe(true);
   });
 
   it("lists ordered entries with optional kind and status filters", async () => {

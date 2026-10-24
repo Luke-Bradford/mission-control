@@ -3,8 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  FLIGHT_HEADLINE,
+  FLIGHT_ITEMS_LISTED,
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_KEEP_MS,
+  FLIGHT_LIST_MAX,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_RETROSPECTIVE_SETTING,
   type FlightLedgerEntry,
@@ -17,7 +20,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { flightMetrics, flightSummary } from "../src/flight/ledger.ts";
+import { flightLedgerView, flightMetrics, flightSummary } from "../src/flight/ledger.ts";
 import {
   FLIGHT_RETROSPECTIVE_PARKS_MAX,
   FLIGHT_RETROSPECTIVE_PRS_MAX,
@@ -27,7 +30,7 @@ import {
   prepareRetrospective,
 } from "../src/flight/retrospective.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
-import { flightState } from "../src/flight/state.ts";
+import { flightState, flightWake } from "../src/flight/state.ts";
 import * as gitRuntime from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
 
@@ -134,17 +137,16 @@ describe("flightMetrics", () => {
       ],
       NOW,
     );
-    store.replaceFlow(
-      "mc",
-      [1, 2].map((number) => ({
+    for (const number of [1, 2])
+      store.addBoardMove({
+        runId: `dev-${number}`,
         repoId: "mc",
-        number,
-        size: "M",
-        startAt: mergedAt - number * 60 * MIN,
-        doneAt: mergedAt,
-      })),
-      [],
-    );
+        issue: number,
+        column: "Ready",
+        state: "done",
+        detail: null,
+        at: mergedAt - number * 60 * MIN,
+      });
     store.upsertRun(
       run("dev", "guido-1", {
         costUsd: 1.25,
@@ -233,6 +235,100 @@ describe("flightMetrics", () => {
     expect(claimsLookup.mock.calls).toEqual([["flight"]]);
   });
 
+  it("counts every start wake in the window as well as claimed wakes, beyond 50 runs", () => {
+    const since = NOW - FLIGHT_METRICS_DAY_MS;
+    for (let n = 0; n < 55; n++)
+      store.upsertRun(run(`flight-${n}`, "flight-1", { startedAt: since + n, endedAt: NOW }));
+    store.upsertRun(run("old-flight", "flight-1", { startedAt: since - 1 }));
+    store.upsertRun(run("foreign-flight", "flight-1", { repoId: "other" }));
+    for (const id of ["flight-0", "old-flight"])
+      store.claimLine(wakeKey(id, 1), {
+        runId: id,
+        seatId: "flight-1",
+        origin: "engine",
+        text: "wake",
+        at: NOW,
+      });
+    expect(flightMetrics(config, store, NOW).flight.wakes).toBe(57);
+  });
+
+  it("sorts live parks by descending count, breaking ties by kind", () => {
+    for (const [n, kind] of (
+      ["ci", "conflict", "ci", "review", "conflict", "ci"] as const
+    ).entries())
+      store.upsertRun(
+        run(`park-${n}`, "guido-1", {
+          loop: { ...NEW_LOOP, phase: "parked", parked: { kind, reason: kind, ended: false } },
+        }),
+      );
+    store.upsertRun(
+      run("ended", "guido-1", {
+        endedAt: NOW,
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "review", reason: "ended", ended: true },
+        },
+      }),
+    );
+    expect(flightMetrics(config, store, NOW).parks.live).toEqual([
+      { kind: "ci", n: 3 },
+      { kind: "conflict", n: 2 },
+      { kind: "review", n: 1 },
+    ]);
+  });
+
+  it("uses the latest successful Ready move with a flow-only fallback, omitting post-merge starts", () => {
+    store.upsertPullRequests("mc", [pr(1), pr(2), pr(3)], NOW);
+    for (const [issue, state, at] of [
+      [1, "failed", NOW - 100 * MIN],
+      [1, "pending", NOW - 90 * MIN],
+      [1, "done", NOW - 61 * MIN],
+      [1, "done", NOW - 31 * MIN],
+      [3, "done", NOW],
+    ] as const)
+      store.addBoardMove({
+        runId: "dev",
+        repoId: "mc",
+        issue,
+        column: "Ready",
+        state,
+        at,
+        detail: null,
+      });
+    store.replaceFlow(
+      "mc",
+      [{ repoId: "mc", number: 2, size: "M", startAt: NOW - 500 * MIN, doneAt: NOW }],
+      [],
+    );
+    expect(flightMetrics(config, store, NOW).readyToMergedMin).toBe(265);
+  });
+
+  it("uses the last promotion at or before each merge, even when re-promoted afterwards", () => {
+    store.upsertPullRequests(
+      "mc",
+      [pr(1), pr(2, { ticket: "mc#1", mergedAt: NOW - 40 * MIN })],
+      NOW,
+    );
+    for (const at of [NOW - 100 * MIN, NOW - 40 * MIN, NOW - 11 * MIN, NOW])
+      store.addBoardMove({
+        runId: "dev",
+        repoId: "mc",
+        issue: 1,
+        column: "Ready",
+        state: "done",
+        at,
+        detail: null,
+      });
+    store.replaceFlow(
+      "mc",
+      [{ repoId: "mc", number: 1, size: "M", startAt: NOW - 500 * MIN, doneAt: NOW }],
+      [],
+    );
+    // The first PR took 10 minutes; the second merged exactly at its last Ready move.
+    expect(flightMetrics(config, store, NOW).readyToMergedMin).toBe(5);
+  });
+
   it.each([
     ["ruling-rerun:sha", "FLIGHT re-ran the failed CI jobs on sha", 1, 0],
     ["ruling-rerun:sha:failed", "CI failed again on the re-run of sha", 0, 1],
@@ -257,6 +353,107 @@ describe("flightMetrics", () => {
 });
 
 describe("ledger storage and summaries", () => {
+  it("pages open entries after filtering without capping summary counts", () => {
+    for (let n = 0; n < FLIGHT_LIST_MAX + 2; n++)
+      store.putFlightLedgerEntry("s1", entry(`watch-${n}`, { kind: "watch" }), 0);
+    store.putFlightLedgerEntry("s1", entry("closed", { kind: "watch", status: "done" }), 0);
+    const first = flightLedgerView(config, store);
+    expect(first.entries).toHaveLength(FLIGHT_LIST_MAX);
+    expect(first).toMatchObject({ more: true, nextOffset: FLIGHT_LIST_MAX });
+    const last = flightLedgerView(config, store, { offset: first.nextOffset ?? 0 });
+    expect(last).toMatchObject({ more: false, nextOffset: null });
+    expect(new Set([...first.entries, ...last.entries].map((e) => e.key)).size).toBe(
+      FLIGHT_LIST_MAX + 2,
+    );
+    expect(flightLedgerView(config, store, { status: "done" }).entries.map((e) => e.key)).toEqual([
+      "closed",
+    ]);
+    expect(flightLedgerView(config, store, { kind: "work" }).entries).toEqual([]);
+    expect(flightSummary(config, store, NOW).watching.counts).toMatchObject({
+      active: FLIGHT_LIST_MAX + 2,
+      done: 1,
+    });
+  });
+
+  it("carries headline age into summaries and every digest without changing its version", () => {
+    expect(flightSummary(config, store, NOW).headlineAgeMin).toBeNull();
+    store.setFlightBriefSection({
+      sessionId: "s1",
+      section: FLIGHT_HEADLINE,
+      text: "H",
+      updatedAt: NOW - 2 * MIN,
+      updatedBy: "flight-1",
+    });
+    expect(flightSummary(config, store, NOW).headlineAgeMin).toBe(2);
+    const first = flightWake(flightState({ config, store, now: NOW, busy: [] }));
+    const second = flightWake(
+      flightState({ config, store, now: NOW + MIN, busy: [] }),
+      first.snapshot,
+    );
+    expect(first.digest.headlineAgeMin).toBe(2);
+    expect(second.digest).toMatchObject({
+      headlineAgeMin: 3,
+      briefVersion: first.digest.briefVersion,
+    });
+    expect(second.digest.headline).toBeUndefined();
+    store.setFlightBriefSection({
+      sessionId: "s1",
+      section: FLIGHT_HEADLINE,
+      text: "",
+      updatedAt: NOW,
+      updatedBy: "flight-1",
+    });
+    expect(flightSummary(config, store, NOW + MIN).headlineAgeMin).toBeNull();
+    expect(flightState({ config, store, now: NOW + MIN, busy: [] }).headlineAgeMin).toBeNull();
+  });
+
+  it("includes structured watch counts and uncapped triage, deduplicating incoming keys", () => {
+    store.setFlightWatch(
+      "s1",
+      {
+        upsert: (["warn", "info", "ok"] as const).map((state) => ({
+          id: state,
+          state,
+          title: state,
+          detail: state,
+          next: "check",
+          catchUp: { kind: "new", line: state },
+        })),
+      },
+      NOW,
+    );
+    store.upsertRun(run("dev", "guido-1"));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "dev",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    for (let n = 0; n < FLIGHT_ITEMS_LISTED + 2; n++) {
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "dev",
+        text: `Question ${n}?`,
+        at: NOW,
+      });
+      if (n === 0) store.putFlightLedgerEntry("s1", entry(`ask:${id}`, { kind: "incoming" }), 0);
+    }
+    store.putFlightLedgerEntry("s1", entry("extra", { kind: "incoming" }), 0);
+    expect(flightSummary(config, store, NOW)).toMatchObject({
+      watching: {
+        counts: { blocked: 1, active: 1, done: 1 },
+        top: [
+          { key: "structured:warn", title: "warn", status: "blocked", next: "check" },
+          { key: "structured:info", title: "info", status: "active", next: "check" },
+        ],
+      },
+      incoming: FLIGHT_ITEMS_LISTED + 3,
+    });
+  });
+
   it("reports open entries omitted from the digest index", () => {
     expect(flightState({ config, store, busy: [], now: NOW }).ledgerMore).toBe(0);
     for (let n = 0; n < FLIGHT_LEDGER_INDEX_MAX + 3; n++) {
@@ -269,7 +466,7 @@ describe("ledger storage and summaries", () => {
     expect(state.ledger).toHaveLength(FLIGHT_LEDGER_INDEX_MAX);
     expect(state.ledgerMore).toBe(3);
   });
-  it("prunes only this session's closed entries older than the retention boundary", () => {
+  it("prunes closed entries by updated time across sessions, including removed sessions", () => {
     const before = NOW - FLIGHT_LEDGER_KEEP_MS;
     store.putFlightLedgerEntry(
       "s1",
@@ -286,7 +483,7 @@ describe("ledger storage and summaries", () => {
     store.putFlightLedgerEntry("s2", entry("other", { status: "done", updatedAt: before - 1 }), 0);
     store.putFlightLedgerEntry("s1", entry("new"), before);
     expect(store.flightLedger("s1").map((e) => e.key)).toEqual(["boundary", "new", "old-open"]);
-    expect(store.flightLedger("s2")).toHaveLength(1);
+    expect(store.flightLedger("s2")).toHaveLength(0);
   });
 
   it("orders by kind, open state, priority, age and key without mutating the input", () => {

@@ -711,7 +711,7 @@ describe("FLIGHT's brief in the digest", () => {
     expect(state.brief?.[3]?.text).toBe("Ship the brief.");
   });
 
-  it("carries a ledger index and headline without in_progress prose", async () => {
+  it("carries a ledger index and headline, and a ledger edit does not wake FLIGHT", async () => {
     for (const [section, text] of [
       ["in_progress", "Wiring the page."],
       [FLIGHT_HEADLINE, "H"],
@@ -752,6 +752,17 @@ describe("FLIGHT's brief in the digest", () => {
     expect(state.headline).toBe("H");
     expect(state.brief?.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
     expect(line).not.toContain("Wiring the page.");
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    store.putFlightLedgerEntry("s1", { ...entry, next: "Review it", updatedAt: nowMs }, 0);
+    bus.emit("flight");
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    // A real question can wake FLIGHT at the same time; the ledger edit was not throttled.
+    live("guido-1", "r-guido");
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
   });
 
   it("a brief edit alone does not wake FLIGHT", async () => {
@@ -1520,6 +1531,7 @@ describe("wakeSummary", () => {
     recent: [],
     limits: { startsLeft: 4, messagesLeft: 30 },
     brief: [],
+    headlineAgeMin: null,
     headline: "",
     ledger: [],
     ledgerMore: 0,
