@@ -558,7 +558,7 @@ describe("state step", () => {
     const r = reconcile(snap({ tokens: 1001 }));
     expect(r.loop.parked).toEqual({
       kind: "budget",
-      reason: "over its 1000-token budget",
+      reason: "used 1001 input + output tokens of a 1000-token budget",
       ended: false,
     });
     expect(reconcile(snap({ tokens: 1001 }, { budgetExtra: 1 })).loop.phase).toBe("working");
@@ -1300,7 +1300,7 @@ describe("review round", () => {
 
   it("15: the budget text names the ceiling", () => {
     const r = reconcile(snap({ tokens: 1500 }, { budgetExtra: 400 }));
-    expect(r.loop.parked?.reason).toBe("over its 1400-token budget");
+    expect(r.loop.parked?.reason).toBe("used 1500 input + output tokens of a 1400-token budget");
   });
 
   describe("lines", () => {
