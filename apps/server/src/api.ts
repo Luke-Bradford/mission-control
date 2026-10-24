@@ -2150,7 +2150,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           round: loop
             ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
             : null,
-          budget: null,
+          budget:
+            loop &&
+            config.crew?.runTokenBudget !== undefined &&
+            run.tokens !== null &&
+            run.tokens.cacheRead + run.tokens.cacheCreate === 0
+              ? config.crew.runTokenBudget + loop.budgetExtra
+              : null,
           review,
         };
         return view;

@@ -70,6 +70,14 @@ describe("POST /api/profiles", () => {
       };
       const post = (body: object | string, headers = {}) =>
         app.inject({ method: "POST", url: "/api/profiles", payload: body, headers });
+      for (const steps of [
+        Array.from({ length: 31 }, (_, i) => ({ name: `step-${i}`, phase: "working" })),
+        [{ name: "x".repeat(101), phase: "working" }],
+      ]) {
+        const rejected = await post({ ...payload, profile: { ...payload.profile, steps } });
+        expect(rejected.statusCode).toBe(400);
+        expect(rejected.json().error).toContain("Too big");
+      }
       const added = await post(payload);
       expect(added.statusCode).toBe(201);
       expect(added.json().list.at(-1).name).toBe("custom");

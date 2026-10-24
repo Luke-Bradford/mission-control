@@ -4720,6 +4720,28 @@ describe("the first loop's engine", () => {
     expect((await get("/api/agents/guido-1/stream")).json().tasks).toEqual([]);
   });
 
+  it.each([
+    { cacheRead: 0, cacheCreate: 0, budget: 105000 },
+    { cacheRead: 20, cacheCreate: 0, budget: null },
+    { cacheRead: 0, cacheCreate: 20, budget: null },
+  ])(
+    "shows the budget only when HUD and enforced usage match: %j",
+    async ({ cacheRead, cacheCreate, budget }) => {
+      if (config.crew) config.crew.runTokenBudget = 100000;
+      store.upsertRun(
+        run({
+          id: "budgeted",
+          agentId: "guido-1",
+          loop: { ...loop, budgetExtra: 5000 },
+          tokens: { input: 100, output: 50, cacheRead, cacheCreate },
+        }),
+      );
+      const view = (await get("/api/runs/budgeted/loop")).json();
+      expect(view.usage).toMatchObject({ input: 100, output: 50, cacheRead, cacheCreate });
+      expect(view.budget).toBe(budget);
+    },
+  );
+
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));

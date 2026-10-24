@@ -37,7 +37,7 @@ const CHECKLIST_MAX = 4000;
 const LIMIT = z.number().int().min(1).max(10);
 
 const fileStep = z.strictObject({
-  name: z.string().min(1).max(100),
+  name: z.string().min(1),
   phase: z.enum(PROFILE_STEP_PHASES).nullish(),
   role: z.string().min(1).max(300).optional(),
   gate: z.boolean().optional(),
@@ -59,7 +59,7 @@ export const fileProfile = z
       .string()
       .regex(PROFILE_NAME, "must be a lowercase name of up to 32 letters, digits and -"),
     labels: z.array(z.string().min(1)).default([]),
-    steps: z.array(fileStep).min(1).max(30),
+    steps: z.array(fileStep).min(1),
     checklist: z.string().max(CHECKLIST_MAX).default(""),
     plan_required: z.boolean(),
     reviewer: z.strictObject({
@@ -265,9 +265,16 @@ const fileValue = (p: Profile) => ({
   nodes: p.nodes,
 });
 
+// Creation limits must not prevent previously valid profiles from loading or being preserved.
+const newStep = fileStep.extend({ name: z.string().min(1).max(100) });
+const newProfile = fileProfile.safeExtend({
+  steps: z.array(newStep).min(1).max(30),
+  nodes: z.array(newStep).min(1).max(30).optional(),
+});
+
 export const NewProfileBody = z.strictObject({
   base: z.string().regex(/^[0-9a-f]{64}$/),
-  profile: fileProfile,
+  profile: newProfile,
 });
 
 let writeQueue: Promise<unknown> = Promise.resolve();
@@ -275,7 +282,7 @@ let writeQueue: Promise<unknown> = Promise.resolve();
 /** Appends a validated executable profile to user config; never alters started-run snapshots. */
 export function createProfile(path: string, input: unknown, base: string, now: number) {
   const run = writeQueue.then(async () => {
-    const parsed = fileProfile.safeParse(input);
+    const parsed = newProfile.safeParse(input);
     if (!parsed.success) throw new ConfigWriteError("invalid", parsed.error.message);
     const p = parsed.data;
     const fail = (message: string): never => {

@@ -23,6 +23,35 @@ const entry = (name: string, extra = ""): string => `
 const two = `profiles:${entry("small-change")}${entry("feature")}\n`;
 
 describe("loadProfiles", () => {
+  it("loads legacy steps beyond creation limits and preserves routing and execution", async () => {
+    const steps = Array.from({ length: 31 }, (_, i) => ({
+      name: `${i}-${"x".repeat(101)}`,
+      phase: i === 0 ? "working" : null,
+    }));
+    const text = two.replace("[{ name: do, phase: working }]", JSON.stringify(steps));
+    const path = file(text);
+    const ps = loadProfiles(path);
+    expect(ps).not.toBeInstanceOf(ProfilesError);
+    expect(chooseRunProfile(ps, [], "S", null)).toMatchObject({
+      profile: { name: "small-change", steps, tries: 2, rounds: 2, planRequired: false },
+    });
+    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    await createProfile(
+      path,
+      {
+        name: "custom",
+        steps: [{ name: "implement", phase: "working" }],
+        plan_required: false,
+        reviewer: { role: "RETRO", depth: "light" },
+        tries: 2,
+        rounds: 2,
+      },
+      profilesVersion(ps as Profile[]),
+      1,
+    );
+    expect((loadProfiles(path) as Profile[]).slice(0, 2)).toEqual(ps);
+  });
+
   it("a missing file gives the defaults", () => {
     expect(loadProfiles(join(dir, "none.yaml"))).toEqual(DEFAULT_PROFILES);
   });
@@ -214,6 +243,21 @@ describe("profile creation", () => {
     rounds: 2,
     budget: 100000,
   };
+  it("enforces step count and name limits on creation", async () => {
+    const { createProfile, NewProfileBody, profilesVersion } = await import("../src/profiles.ts");
+    const path = file(two);
+    const base = profilesVersion(loadProfiles(path) as Profile[]);
+    for (const steps of [
+      Array.from({ length: 31 }, (_, i) => ({ name: `step-${i}`, phase: "working" })),
+      [{ name: "x".repeat(101), phase: "working" }],
+    ]) {
+      const profile = { ...input, steps };
+      expect(NewProfileBody.safeParse({ base, profile }).success).toBe(false);
+      await expect(createProfile(path, profile, base, 1)).rejects.toThrow(/Too big/);
+    }
+    expect(loadProfiles(path)).toEqual(loadProfiles(file(two)));
+  });
+
   it("creates and reloads, preserving fallbacks and a started snapshot", async () => {
     const { createProfile, profilesVersion } = await import("../src/profiles.ts");
     const path = join(dir, `new-${n++}.yaml`);
