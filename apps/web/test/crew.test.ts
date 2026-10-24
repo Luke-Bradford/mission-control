@@ -468,9 +468,23 @@ describe("needLine", () => {
     const ap = item({ key: "ap", agentId: "a", kind: "approval" });
     expect(needLine(row, [d, q, ap, p], NOW)).toEqual([
       { text: "Parked: Blocked on a rebase", action: "open", key: "p" },
+      { text: "Decision, question and approval for you", action: "answer", key: "d" },
+    ]);
+  });
+
+  it("combines a decision and question into one answer keyed to the oldest ask", () => {
+    const d = item({ key: "d", agentId: "a", kind: "decision", at: NOW - MIN });
+    const q = item({ key: "q", agentId: "a", kind: "question", at: NOW - 2 * MIN });
+    for (const asks of [
+      [d, q],
+      [q, d],
+    ]) {
+      expect(needLine(row, asks, NOW)).toEqual([
+        { text: "Decision and question for you", action: "answer", key: "q" },
+      ]);
+    }
+    expect(needLine(row, [d], NOW)).toEqual([
       { text: "Decision for you", action: "answer", key: "d" },
-      { text: "Approval for you", action: "answer", key: "ap" },
-      { text: "Question for you", action: "answer", key: "q" },
     ]);
   });
 

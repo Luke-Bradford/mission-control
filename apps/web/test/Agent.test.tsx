@@ -503,7 +503,7 @@ describe("Agent page: need banner", () => {
     const banner = $(container, "#needBanner .banner") as HTMLElement;
     expect(banner.textContent).toContain("shop-app-ta needs you.");
     expect(banner.textContent).toContain("Stalled 12:00 in Bash");
-    expect(banner.textContent).toContain("Decision for you");
+    expect(banner.textContent).toContain("Decision and question for you");
     fireEvent.click(within(banner).getByRole("button", { name: "Ack" }));
     await vi.waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(

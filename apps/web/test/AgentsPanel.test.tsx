@@ -148,7 +148,9 @@ it.each(["stopped", "observed", "flight"])("keeps needs visible for a %s agent",
   const { container } = render(<AgentsPanel />);
   await screen.findByText("Decision for you");
   expect(container.querySelector("details")).toBeNull();
-  expect(screen.getByRole("button", { name: "Answer" })).toBeTruthy();
+  const answer = screen.getByRole("button", { name: "Answer" });
+  expect(answer.classList.contains("sm")).toBe(true);
+  expect(answer.classList.contains("primary")).toBe(false);
 });
 
 it("shows Tagged you and Read unless an ask supplies the need action", async () => {
@@ -328,7 +330,7 @@ it("gives a free seat one line and removes the empty step column", async () => {
   const row = rowsIn(container)[1] as HTMLElement;
   expect(row.querySelector(".ticket-cell")?.textContent).toBe("—");
   expect(row.querySelector(".doing, .need")).toBeNull();
-  expect(container.querySelector("#agentsList")?.className).toBe("no-steps");
+  expect(container.querySelector("#agentsList")?.classList.contains("no-steps")).toBe(true);
 });
 
 it("keeps a real step column and puts the need alone on line two", async () => {
@@ -351,7 +353,7 @@ it("keeps a real step column and puts the need alone on line two", async () => {
   expect(row.querySelector(".need")?.parentElement).toBe(row);
   expect(within(row).getAllByRole("cell")).toHaveLength(10);
   expect(row.querySelector(".need")?.getAttribute("aria-colspan")).toBe("9");
-  expect(container.querySelector("#agentsList")?.className).toBe("has-steps");
+  expect(container.querySelector("#agentsList")?.classList.contains("has-steps")).toBe(true);
 });
 
 it("retains a stale quota reading with its age and the collector note", async () => {
@@ -696,4 +698,17 @@ it("does not light the token dot for output without digest token evidence", asyn
   render(<AgentsPanel />);
   await screen.findByText("quiet");
   expect(screen.queryByRole("img", { name: "Live token activity" })).toBeNull();
+});
+
+it.each([
+  [[], false],
+  [["one", "one"], true],
+  [["one", "two"], false],
+])("hides quota only for a shared visible account: %j", async (accounts, hidden) => {
+  stub(
+    accounts.map((accountId, i) => seatRow({ id: i === 0 ? "flight" : `seat-${i}`, accountId })),
+  );
+  const { container } = render(<AgentsPanel />);
+  await waitFor(() => expect(container.textContent).not.toContain("Loading…"));
+  expect(container.querySelector("#agentsList")?.classList.contains("no-quota")).toBe(hidden);
 });
