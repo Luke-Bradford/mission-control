@@ -1,7 +1,7 @@
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
- * lose: every pass rebuilds a snapshot from stored facts, asks `reconcile` (the pure function in
- * `@mc/core`) what to do, stores the run's new loop, then runs the actions. An action that fails
+ * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
+ * (the pure function in `@mc/core`) what to do, stores the new loop, then runs the actions. A failure
  * is logged and comes out again on the next pass; the lines it sends are keyed, so a repeat is
  * never written twice.
  *
@@ -34,6 +34,8 @@ import {
   ciVerdict,
   cleanupBranchNoteKey,
   closedIssueText,
+  conflictKey,
+  conflictText,
   deletedLocalText,
   deletedRemoteText,
   ENGINE_TICK_MS,
@@ -53,6 +55,11 @@ import {
   type LoopReviewFacts,
   type LoopSnapshot,
   localNotDeletedText,
+  MC_RUN_ENDED,
+  MC_SYNC_DIRTY,
+  MC_SYNC_NOT_WORKING,
+  MC_SYNC_OFF,
+  MC_SYNC_UP_TO_DATE,
   MERGE_STEP_WORDS,
   type MergeStep,
   MINOR_CLEARED,
@@ -88,11 +95,16 @@ import {
   reviewStartedText,
   reviewStatusOf,
   STDERR_TEXT_MAX,
+  SYNC_MAIN_GAP_MS,
   seatCallSign,
   seatDef,
+  syncFailedText,
+  syncMergedText,
+  syncTooSoonText,
   TAKE_STALE_MS,
   wakeFailedText,
   wokenEventText,
+  writerSyncConflictText,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
@@ -111,6 +123,7 @@ import {
   NO_FAILED_RUN,
   type Publisher,
   READY_UNDO_FAILED,
+  UPDATE_UP_TO_DATE,
   type UpdateBranchResult,
 } from "./publish.ts";
 import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
@@ -194,6 +207,8 @@ export interface Engine {
   acceptRuling(runId: string, opts: { mayRerun: boolean }): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
   syncMain(runId: string): Promise<SyncMainResult>;
+  /** Writer-requested local sync, capped per run; reports conflicts and dependency install refusals. */
+  writerSyncMain(runId: string): Promise<{ text: string; isError?: boolean }>;
   /** The paths the run's worktree holds uncommitted; null when it has no worktree or it cannot be read. */
   uncommitted(runId: string): Promise<string[] | null>;
   status(): { on: boolean; note: string | null };
@@ -264,6 +279,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const ruleNotes = new Map<RepoId, string>();
   /** Whether each repo's rules set `hard_rules` at their last good read. */
   const hardRulesSet = new Map<RepoId, boolean>();
+  /** Writer sync cap, per run; a restart clears it. */
+  const lastSync = new Map<string, number>();
   /** When each run last had a transient refusal counted: one counts per tick, however often it is tried. */
   const lastTransient = new Map<string, number>();
   /** Transient refusals of each run's local branch delete, and when the last was counted (in memory: a restart tries afresh). */
@@ -1647,7 +1664,10 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!deps.enabled || started) return;
       started = true;
       unsubscribe = supervisor.on((e) => {
-        if (e.kind === "run-ended") kickAside(e.seatId);
+        if (e.kind === "run-ended") {
+          lastSync.delete(e.runId);
+          kickAside(e.seatId);
+        }
         const rv = store.reviewOfRun(e.runId);
         if (rv !== null) {
           if (e.kind === "findings") {
@@ -1995,6 +2015,76 @@ export function createEngine(deps: EngineDeps): Engine {
         await pass(run.id);
         return { kind: passed ? "accepted" : "refused", sha };
       });
+    },
+
+    async writerSyncMain(runId) {
+      const refused = (text: string) => ({ text, isError: true });
+      if (!live()) return refused(MC_SYNC_OFF);
+      return onChainResult<{ text: string; isError?: boolean }>(
+        runId,
+        refused(syncFailedText("the sync did not run")),
+        async () => {
+          if (!live()) return refused(MC_SYNC_OFF);
+          const run = store.run(runId);
+          const row = run === null ? null : store.seatSession(run.agentId);
+          if (run === null || run.endedAt !== null || row?.runId !== runId) {
+            lastSync.delete(runId);
+            return refused(MC_RUN_ENDED);
+          }
+          const loop = run.loop;
+          if (loop == null) return refused(MC_SYNC_OFF);
+          if (loop.phase !== "working" || loop.aside) return refused(MC_SYNC_NOT_WORKING);
+          if (row.worktree === null) return refused(MC_RUN_ENDED);
+          if (loop.mainMerge && (await publisher.mergeHead(run, row.worktree))) {
+            return { text: writerSyncConflictText(loop.mainMerge.files) };
+          }
+          const at = now();
+          const last = lastSync.get(runId);
+          if (last !== undefined && at - last < SYNC_MAIN_GAP_MS) {
+            return refused(syncTooSoonText(Math.ceil((last + SYNC_MAIN_GAP_MS - at) / 60_000)));
+          }
+          const tip = await publisher.mainTip(run);
+          if (!tip.ok) return refused(syncFailedText(tip.text));
+          const r = await publisher.updateBranch(run, tip.sha, row.worktree);
+          if (!r.ok) {
+            if (r.text !== UPDATE_UP_TO_DATE) return refused(syncFailedText(r.text));
+            return { text: MC_SYNC_UP_TO_DATE };
+          }
+          if (r.kind === "wait") return refused(MC_SYNC_DIRTY);
+          if (store.run(runId)?.endedAt === null) lastSync.set(runId, at);
+          const latestLoop = store.run(runId)?.loop;
+          if (!latestLoop) return refused(MC_RUN_ENDED);
+          if (r.kind === "merged") {
+            store.setRunLoop(runId, { ...latestLoop, mainMerge: null });
+            store.addLoopEvent(`${runId}:update:${r.sha}`, runId, mergedMainText(tip.sha), at);
+          } else {
+            store.setRunLoop(runId, {
+              ...latestLoop,
+              mainMerge: { mainSha: tip.sha, files: r.files },
+            });
+            store.claimLine(conflictKey(runId, tip.sha), {
+              runId,
+              seatId: run.agentId,
+              origin: "engine",
+              text: conflictText(r.files),
+              at,
+            });
+            store.addLoopEvent(
+              `${runId}:update-conflict:${tip.sha}`,
+              runId,
+              mainConflictText(tip.sha, r.files.length),
+              at,
+            );
+          }
+          bus.emit("agents");
+          return {
+            text:
+              r.kind === "merged"
+                ? [syncMergedText(tip.sha, r.sha), r.installNote].filter(Boolean).join("\n")
+                : writerSyncConflictText(r.files),
+          };
+        },
+      );
     },
 
     syncMain(runId) {

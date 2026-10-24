@@ -54,6 +54,8 @@ import {
   MC_PUSH_ROOT,
   MC_REMOVE_REFUSED,
   MC_RUN_ENDED,
+  MC_SYNC_OFF,
+  MC_SYNC_UP_TO_DATE,
   MC_TOOL_GRANTS,
   MC_TOOLS,
   NEW_LOOP,
@@ -72,6 +74,7 @@ import {
   prSecretText,
   type Run,
   type RunLoop,
+  readOnlyToolText,
   removeLinkedText,
   removeMissingText,
   removeNotFileText,
@@ -81,6 +84,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
+import { createFlightTools } from "../src/flight/tools.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
@@ -299,6 +303,7 @@ describe("the mc tools", () => {
   it("serves commit (writer), ask_operator and report_evidence (writer and read-only) and report_findings (scratch) under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
       ["commit", ["writer"]],
+      ["sync_main", ["writer"]],
       ["ask_operator", ["writer", "read-only"]],
       ["report_evidence", ["writer", "read-only"]],
       ["report_findings", ["scratch"]],
@@ -306,6 +311,7 @@ describe("the mc tools", () => {
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
       MC_TOOLS.commit,
+      MC_TOOLS.syncMain,
       MC_TOOLS.askOperator,
       MC_TOOLS.reportEvidence,
       MC_TOOLS.reportFindings,
@@ -318,8 +324,56 @@ describe("the mc tools", () => {
       CREW_MODES.filter((m) => (MC_TOOL_GRANTS[m][key] as readonly string[]).includes(name));
     for (const t of tools) {
       expect([...t.modes], t.name).toEqual(modesWith("base", t.name));
-      expect([...(t.grantable ?? [])], t.name).toEqual(modesWith("grantable", t.name));
+      // FLIGHT's separate sync_main entry owns the read-only grant and its runId/basis schema.
+      expect([...(t.grantable ?? [])], t.name).toEqual(
+        t.name === "sync_main" ? [] : modesWith("grantable", t.name),
+      );
     }
+    const flight = createFlightTools({
+      ...deps(),
+      login: "me",
+      engine: null,
+      supervisor: {
+        message: vi.fn(),
+        busy: () => [],
+        startRun: vi.fn(),
+        endRun: vi.fn(),
+        endAsideRun: vi.fn(),
+      },
+      rules: vi.fn(),
+      fetchTicket: vi.fn(),
+      board: { move: vi.fn() },
+    });
+    expect(flight.find((t) => t.name === "sync_main")?.grantable).toEqual(["read-only"]);
+  });
+});
+
+describe("sync_main", () => {
+  it("sync_main hands the run to deps.syncMain, and answers MC_SYNC_OFF without it", async () => {
+    const calls: string[] = [];
+    const ts = make({
+      syncMain: async (id) => {
+        calls.push(id);
+        return { text: MC_SYNC_UP_TO_DATE };
+      },
+    });
+    expect(await tool("sync_main", ts).call(CTX, {})).toEqual({ text: MC_SYNC_UP_TO_DATE });
+    expect(calls).toEqual([RUN]);
+    expect(await tool("sync_main").call(CTX, {})).toEqual({ text: MC_SYNC_OFF, isError: true });
+    liveSeat("retro", "retro:1");
+    expect(await tool("sync_main", ts).call({ seatId: "retro", runId: "retro:1" }, {})).toEqual({
+      text: readOnlyToolText("sync_main"),
+      isError: true,
+    });
+    expect((await tool("sync_main", ts).call(CTX, { runId: RUN })).text).toMatch(
+      /^Invalid arguments:/,
+    );
+    store.upsertRun(run({ endedAt: NOW }));
+    expect(await tool("sync_main", ts).call(CTX, {})).toEqual({
+      text: MC_RUN_ENDED,
+      isError: true,
+    });
+    expect(calls).toEqual([RUN]);
   });
 });
 
@@ -964,7 +1018,12 @@ describe("through /mcp", () => {
           .then((r) => r.json());
       const names = async (tok: string) =>
         (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
-      expect(await names(writer)).toEqual(["commit", "ask_operator", "report_evidence"]);
+      expect(await names(writer)).toEqual([
+        "commit",
+        "sync_main",
+        "ask_operator",
+        "report_evidence",
+      ]);
       expect(await names(reader)).toEqual(["ask_operator", "report_evidence"]);
       write("apps/a.ts", "a2\n");
       const r = await rpc(writer, "tools/call", {

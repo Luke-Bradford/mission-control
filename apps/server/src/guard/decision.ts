@@ -15,11 +15,13 @@ export function crewGuardDecision(
   mode: CrewMode,
   event: GuardEvent,
   superuserTools: readonly McToolName[] = MC_SUPERUSER_TOOLS,
+  mcTools: readonly string[] = [],
 ): GuardVerdict {
   return guardDecision(
     event,
     {
       mode,
+      mcTools,
       repo: "dev",
       flightPowers: flightPowersOf(config, repoId),
       fullSuite: config.repos.find((r) => r.id === repoId)?.fullSuite ?? [],

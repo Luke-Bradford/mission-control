@@ -41,7 +41,7 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
   scratch: ["review"],
 };
 
-/** The mc tools the FLIGHT seat (a `watch` role) holds. Only `read_ticket` may also go to a `plan` role. */
+/** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.readTicket,
@@ -78,13 +78,13 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
 
 /**
  * The mc tools each mode has. `base`: every seat of the mode (`*_TOOLS` below lists the same);
- * `grantable`: a role may add. `commit` is a writer's only; `push` and `draft_pr` are the hub's
+ * `grantable`: a role may add. Writers commit and sync main; `push` and `draft_pr` are the hub's
  * own and never appear.
  */
 export const MC_TOOL_GRANTS: Readonly<
   Record<CrewMode, { base: readonly McToolName[]; grantable: readonly McToolName[] }>
 > = {
-  writer: { base: ["commit", "ask_operator", "report_evidence"], grantable: [] },
+  writer: { base: ["commit", "sync_main", "ask_operator", "report_evidence"], grantable: [] },
   "read-only": {
     base: ["ask_operator", "report_evidence"],
     grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
@@ -250,6 +250,7 @@ export const WRITER_TOOLS = [
   ...bashEntries(DEFAULT_SEAT_COMMANDS.writer),
   ...GIT_READ_TOOLS,
   MC_TOOLS.commit,
+  MC_TOOLS.syncMain,
   MC_TOOLS.askOperator,
   MC_TOOLS.reportEvidence,
 ] as const;
