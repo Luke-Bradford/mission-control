@@ -1697,6 +1697,72 @@ describe("Task 9 fix round 1: unclosedMarkdown and namesIssue (finding 8)", () =
 
 describe("closesIssue", () => {
   it.each([
+    ["a`x`Fixes #42", false],
+    ["Fixes #42`x`3", false],
+    ["Fixes`example`#42", false],
+    ["`example\r\n\r\nFixes #42`", true],
+  ] as const)("preserves code-span boundary and paragraph safety: %j", (md, expected) => {
+    expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(expected);
+  });
+
+  it.each([
+    "Fixes`example`#42",
+    "Fixes `example` #42",
+    "Fix`example`es #42",
+    "fi`code`es #42",
+    "Fixes o/`example`mc#42",
+    "Fixes #4`example`2",
+    "Fixes`example` GH-42",
+    "Fixes`example` https://github.com/o/mc/issues/42",
+  ])("does not assemble a closing reference across a code span: %j", (md) => {
+    expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(false);
+  });
+
+  it("does not forge a repository name from the code-span placeholder", () => {
+    expect(closesIssue("Fixes o/`example`mc#42", { repo: "o/xmc", issue: 42 })).toBe(false);
+  });
+
+  it.each(["Fixes #42 and `code`", "`code` and Fixes #42"])(
+    "recognizes a closing reference separated from a code span: %j",
+    (md) => {
+      expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(true);
+    },
+  );
+
+  it.each(["`example\nFixes #42`", "`example\r\nFixes #42`", "``example\nFixes #42 ` x``"])(
+    "blanks a code span across one line break: %j",
+    (md) => {
+      expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(false);
+    },
+  );
+
+  it.each(["\n\n", "\n \t\n", "\r\n\r\n", "\r\n \t\r\n"])(
+    "ends a code span's paragraph at %j",
+    (separator) => {
+      expect(closesIssue(`\`example${separator}Fixes #42\``, { repo: "o/mc", issue: 42 })).toBe(
+        true,
+      );
+    },
+  );
+
+  it.each(["distinct runs", "one long run"])(
+    "scans a 100k-character line with 10k unmatched backticks in under 50 ms (%s)",
+    (shape) => {
+      const runs = Array.from({ length: 139 }, (_, i) => "`".repeat(i + 1));
+      runs.push("`".repeat(270));
+      const md = (shape === "distinct runs" ? runs.join("x") : "`".repeat(10_000)).padEnd(
+        100_000,
+        "x",
+      );
+      const start = performance.now();
+      const closes = closesIssue(md, { repo: "o/mc", issue: 42 });
+      const elapsed = performance.now() - start;
+      expect(closes).toBe(false);
+      expect(elapsed).toBeLessThan(50);
+    },
+  );
+
+  it.each([
     ["Refs #42", false],
     ["#42", false],
     ["Refs o/mc#42", false],
