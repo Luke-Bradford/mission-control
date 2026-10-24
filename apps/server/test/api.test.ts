@@ -502,6 +502,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/agents/shop-app-ta/pause"],
   ["POST", "/api/agents/shop-app-ta/resume"],
   ["GET", "/api/crew"],
+  ["GET", "/api/overview/timeline"],
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
@@ -4756,6 +4757,15 @@ describe("the first loop's engine", () => {
       review: null,
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
+  });
+
+  it("omits toolStarts from /api/crew digests", async () => {
+    store.upsertRun(run({ id: "ticks", agentId: "guido-1", loop }));
+    store.setDigest("ticks", digest({ toolStarts: [NOW - 100, NOW] }));
+    const row = (await get("/api/crew")).json<Crew>().rows.find((r) => r.id === "guido-1");
+    expect(row?.digest).toBeTruthy();
+    expect(row?.digest).not.toHaveProperty("toolStarts");
+    expect(store.digest("ticks")?.toolStarts).toEqual([NOW - 100, NOW]);
   });
 
   it("serves full missing-report diagnostics only on the single-run loop view", async () => {

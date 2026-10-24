@@ -590,3 +590,22 @@ describe("activity reconciliation", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
+
+it("refetches the Overview timeline on agents and guard changes", async () => {
+  const fetchMock = vi.fn(async () => Response.json({ from: 0, to: 1, lanes: [] }));
+  vi.stubGlobal("fetch", fetchMock);
+  const ref = RESOURCES.overviewTimeline;
+  const off = hub.subscribe(ref.path, ref.topic, () => {});
+  try {
+    await settle();
+    fetchMock.mockClear();
+    for (const topic of ["agents", "guard"] as const) {
+      hub.refetchTopic(topic);
+      await settle();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(ref.path, expect.anything());
+  } finally {
+    off();
+  }
+});

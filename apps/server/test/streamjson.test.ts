@@ -624,6 +624,7 @@ describe("foldTranscript digest", () => {
     expect(foldTranscript(null, [], 1).digest).toEqual({
       tasks: [],
       attemptUsage: [],
+      toolStarts: [],
       toolCalls: 0,
       turns: 0,
       lastEventAt: null,
@@ -1056,4 +1057,42 @@ it("retains two hours of token buckets for the shared Overview axis", () => {
   expect(
     foldTranscript(null, lines, now).digest.minuteTokens.map(([at]) => (now - at) / 60_000),
   ).toEqual([100, 90, 0]);
+});
+
+it("records dated tool starts, including subagents, once per call across chunks", () => {
+  const now = Date.parse("2026-10-24T12:00:00Z");
+  const frame = (id: string, at: number, parent: string | null = null) =>
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(at).toISOString(),
+      parent_tool_use_id: parent,
+      message: { content: [{ type: "tool_use", id, name: "Read", input: {} }] },
+    });
+  const first = foldTranscript(null, [frame("a", now - 1000)], now);
+  const rest = [frame("a", now - 1000), frame("b", now, "parent")];
+  const next = foldTranscript(first, rest, now);
+  expect(first.digest.toolStarts).toEqual([now - 1000]);
+  expect(next.digest.toolStarts).toEqual([now - 1000, now]);
+  expect(next.digest).toEqual(foldTranscript(null, [frame("a", now - 1000), ...rest], now).digest);
+  expect(foldTranscript(next, [], now + 60 * 60_000 + 1).digest.toolStarts).toEqual([]);
+});
+
+it("retains only the newest 300 tool starts within the last hour", () => {
+  const now = Date.parse("2026-10-24T12:00:00Z");
+  const lines = Array.from({ length: 305 }, (_, i) =>
+    JSON.stringify({
+      type: "assistant",
+      timestamp: new Date(now - i).toISOString(),
+      message: { content: [{ type: "tool_use", id: `t${i}`, name: "Read" }] },
+    }),
+  );
+  lines.push(
+    JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "tool_use", id: "undated", name: "Read" }] },
+    }),
+  );
+  expect(foldTranscript(null, lines, now).digest.toolStarts).toEqual(
+    Array.from({ length: 300 }, (_, i) => now - 299 + i),
+  );
 });

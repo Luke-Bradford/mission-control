@@ -527,7 +527,7 @@ export function crew(
             : null,
         prs,
         summary: latest?.summary ?? null,
-        digest,
+        digest: digest ? (({ toolStarts: _, ...rest }) => rest)(digest) : null,
         contextWindow,
         lastOutputAt: view.lastOutputAt,
       };

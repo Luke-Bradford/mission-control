@@ -176,6 +176,7 @@ import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
+import { overviewTimeline } from "./timeline.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -2147,6 +2148,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }),
           ),
       );
+
+      api.get("/overview/timeline", async () => overviewTimeline(config, store, now()));
 
       api.get(
         "/crew",

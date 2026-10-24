@@ -457,6 +457,8 @@ export interface RunDigest {
   /** Committed lines; missing or null means unmeasured, including binary counts. */
   additions?: number | null;
   deletions?: number | null;
+  /** Tool starts in the last hour; absent on older stored digests. */
+  toolStarts?: number[];
   toolCalls: number;
   turns: number;
   /** Newest timestamp on any frame, subagents included. */
@@ -1115,4 +1117,15 @@ export interface NotificationEvent {
   category: NotificationCategory;
   at: number;
   text: string;
+}
+
+/** `GET /api/overview/timeline`: the last hour, in crew order. */
+export interface OverviewTimeline {
+  from: number;
+  to: number;
+  lanes: {
+    agentId: string;
+    spans: { kind: "turn" | "checks" | "lock" | "review"; from: number; to: number | null }[];
+    ticks: number[];
+  }[];
 }

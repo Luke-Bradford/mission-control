@@ -11,6 +11,8 @@ import {
   type RunDigest,
   STDERR_TEXT_MAX,
   type SubagentInfo,
+  TIMELINE_TICKS_MAX,
+  TIMELINE_WINDOW_MS,
   type TokenUsage,
   workSummary,
 } from "@mc/core";
@@ -92,6 +94,7 @@ interface DigestState {
   contextTokens: number | null;
   /** contextWindow per model from the latest `result` line. */
   windows: Record<string, number> | null;
+  toolStarts: Map<string, number>;
   toolCalls: number;
   /**
    * Tool calls without a result yet (every frame): id → name, timestamp, and `live`: a top-level
@@ -136,6 +139,7 @@ const emptyDigestState = (): DigestState => ({
   lastEventAt: null,
   contextTokens: null,
   windows: null,
+  toolStarts: new Map(),
   toolCalls: 0,
   pending: new Map(),
   tools: Object.create(null),
@@ -165,6 +169,7 @@ function copyDigestState(d: DigestState): DigestState {
     taskCalls: new Map(d.taskCalls),
     appliedTasks: new Set(d.appliedTasks),
     pending: new Map(d.pending),
+    toolStarts: new Map(d.toolStarts),
     tools,
     turns: new Map(d.turns),
     usage: new Map(d.usage),
@@ -416,6 +421,7 @@ function digestFrame(d: DigestState, ev: Json): void {
       const name = cleanStr(block.name) ?? "(unnamed)";
       if (id === null || d.pending.has(id)) continue;
       d.pending.set(id, { name, at, live: top, detail: toolDetail(name, block.input, d.cwd) });
+      if (at !== null && !d.toolStarts.has(id)) d.toolStarts.set(id, at);
       toolStats(d, name).calls += 1;
       if (top) d.toolCalls += 1;
     } else if (ev.type === "assistant" && block.type === "text" && top) {
@@ -517,6 +523,7 @@ function buildDigest(d: DigestState, model: string | null): RunDigest {
   return {
     tasks: [...d.tasks.values()].map((task) => ({ ...task })),
     attemptUsage: [...d.usage].map(([id, u]) => ({ id, at: u.at, tokens: u.tokens })),
+    toolStarts: [...d.toolStarts.values()].sort((a, b) => a - b),
     toolCalls: d.toolCalls,
     turns: d.turns.size,
     lastEventAt: d.lastEventAt,
@@ -744,6 +751,13 @@ export function foldTranscript(
   branchSources.set(facts, src);
   facts.tokens = sumTokens(seen);
   seenUsage.set(facts, seen);
+  const toolFrom = Math.max(fileMtime, d.lastEventAt ?? fileMtime) - TIMELINE_WINDOW_MS;
+  d.toolStarts = new Map(
+    [...d.toolStarts]
+      .filter(([, at]) => at >= toolFrom)
+      .sort((a, b) => a[1] - b[1])
+      .slice(-TIMELINE_TICKS_MAX),
+  );
   facts.digest = buildDigest(d, facts.model);
   digestStates.set(facts, d);
   return facts;
