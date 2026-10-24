@@ -81,9 +81,37 @@ describe("KpiStrip", () => {
   it("shows eight empty values when the endpoint is unavailable", async () => {
     stubFetch({ "/api/overview": () => ({ status: 503, body: {} }) });
     const { container } = render(<KpiStrip />);
+    await screen.findByRole("alert");
+    expect(screen.getByRole("alert").textContent).toBe("Could not load overview metrics.");
     await waitFor(() => expect(container.querySelectorAll(".overview-kpi .v")).toHaveLength(8));
     expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
       Array(8).fill("—"),
     );
+  });
+
+  it("keeps cached values marked stale after a failed refresh and clears the warning on recovery", async () => {
+    const at = new Date("2026-10-24T10:25:00Z").getTime();
+    let failed = false;
+    stubFetch({
+      "/api/overview": () => ({
+        status: failed ? 503 : 200,
+        body: failed ? {} : { at, kpis },
+      }),
+    });
+    render(<KpiStrip />);
+    await screen.findByText("41.2k");
+    expect(screen.queryByRole("alert")).toBeNull();
+    failed = true;
+    act(() => hub.refetchTopic("agents"));
+    const warning = await screen.findByRole("alert");
+    expect(warning.textContent).toBe(
+      `Last updated ${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`,
+    );
+    expect(screen.getByText("41.2k")).toBeTruthy();
+    expect(screen.getByText("$24.31")).toBeTruthy();
+    failed = false;
+    act(() => hub.refetchTopic("agents"));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("41.2k")).toBeTruthy();
   });
 });

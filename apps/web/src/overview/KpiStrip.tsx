@@ -20,7 +20,7 @@ const change = (series: number[] | undefined): string => {
 /** Live Overview KPIs, scoped by the header's session filter. */
 export function KpiStrip() {
   const [session] = useSession();
-  const summary = useResource<OverviewSummary>(RESOURCES.overview(session)).data;
+  const { data: summary, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
   const k = summary?.kpis;
   const tiles = [
     {
@@ -95,34 +95,43 @@ export function KpiStrip() {
     },
   ] as const;
   return (
-    <section className="overview-kpis" aria-label="Overview metrics">
-      {tiles.map((tile) => {
-        const path = PAGE_PATHS[tile.page];
-        const series = "series" in tile ? tile.series : undefined;
-        return (
-          <a
-            className="overview-kpi"
-            key={tile.label}
-            href={path}
-            onClick={(e) => followLink(e, path)}
-          >
-            <span className="lbl">{tile.label}</span>
-            <span className="v num">{tile.value}</span>
-            <span className="d num">{tile.delta}</span>
-            {series && series.length >= 2 ? (
-              <Sparkline
-                values={series}
-                color={tile.color}
-                label={`${tile.label} · ${"history" in tile ? tile.history : ""}`}
-              />
-            ) : (
-              <span className="kpi-no-trend" title="History unavailable">
-                —
-              </span>
-            )}
-          </a>
-        );
-      })}
-    </section>
+    <>
+      {error && (
+        <div className="pb crit-t" role="alert">
+          {summary
+            ? `Last updated ${new Date(summary.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · refresh failed. Showing stale values.`
+            : "Could not load overview metrics."}
+        </div>
+      )}
+      <section className="overview-kpis" aria-label="Overview metrics">
+        {tiles.map((tile) => {
+          const path = PAGE_PATHS[tile.page];
+          const series = "series" in tile ? tile.series : undefined;
+          return (
+            <a
+              className="overview-kpi"
+              key={tile.label}
+              href={path}
+              onClick={(e) => followLink(e, path)}
+            >
+              <span className="lbl">{tile.label}</span>
+              <span className="v num">{tile.value}</span>
+              <span className="d num">{tile.delta}</span>
+              {series && series.length >= 2 ? (
+                <Sparkline
+                  values={series}
+                  color={tile.color}
+                  label={`${tile.label} · ${"history" in tile ? tile.history : ""}`}
+                />
+              ) : (
+                <span className="kpi-no-trend" title="History unavailable">
+                  —
+                </span>
+              )}
+            </a>
+          );
+        })}
+      </section>
+    </>
   );
 }
