@@ -263,3 +263,27 @@ describe("notifications", () => {
     expect(parsePersonKey("note:1")).toBeNull();
   });
 });
+
+describe("REST response bodies", () => {
+  it.each([
+    [new DOMException("deadline", "TimeoutError"), "github: response timed out after 20 s"],
+    [new DOMException("cancelled", "AbortError"), "github: response cut off (cancelled)"],
+    [new TypeError("terminated"), "github: response cut off (terminated)"],
+    [null, "github: response was not JSON (text/html)"],
+  ])("describes the body failure: %s", async (error, message) => {
+    const f = vi.fn(async () =>
+      error
+        ? new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(error);
+              },
+            }),
+          )
+        : new Response("private body", { headers: { "content-type": "text/html" } }),
+    );
+    const caught = await makeRest("t", f)(NOTIFICATIONS_URL).catch((e: unknown) => e);
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe(message);
+  });
+});

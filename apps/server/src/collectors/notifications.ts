@@ -3,7 +3,15 @@ import type { AttentionBrief, CatchUpKind, PersonMessage } from "@mc/core";
 import { GITHUB_COLLECTOR_PREFIX, type RepoId, startOfLocalDay } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { NotificationRead, NotificationRow, Store } from "../store.ts";
-import { errMsg, GqlTransportError, HTTP_TIMEOUT_MS, isObj, ms, ssoRefusal } from "./github.ts";
+import {
+  errMsg,
+  GqlTransportError,
+  HTTP_TIMEOUT_MS,
+  isObj,
+  ms,
+  readGithubJson,
+  ssoRefusal,
+} from "./github.ts";
 
 export const NOTIFICATIONS_COLLECTOR = `${GITHUB_COLLECTOR_PREFIX}.notifications`;
 export const NOTIFICATIONS_MODIFIED_SETTING = "github.notifications.lastModified";
@@ -122,12 +130,7 @@ export function makeRest(token: string, doFetch: typeof fetch = fetch): Rest {
         res.headers.get("x-github-sso"),
       );
     }
-    let body: unknown;
-    try {
-      body = await res.json();
-    } catch {
-      throw new Error("github: response was not JSON");
-    }
+    const body = await readGithubJson(res);
     return { status: res.status, headers: res.headers, body };
   };
 }

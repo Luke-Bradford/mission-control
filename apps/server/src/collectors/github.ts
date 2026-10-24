@@ -257,6 +257,29 @@ export class GqlTransportError extends Error {
 export const isTransient = (e: unknown): boolean =>
   e instanceof GqlTransportError && (e.status === null || e.status >= 500);
 
+/** Read the body separately from parsing so an interrupted response keeps its cause. */
+export async function readGithubJson(res: Response): Promise<unknown> {
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (e) {
+    if (isObj(e) && e.name === "TimeoutError") {
+      throw new GqlTransportError(
+        `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`,
+        null,
+      );
+    }
+    throw new GqlTransportError(`github: response cut off (${errMsg(e)})`, null);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `github: response was not JSON (${res.headers.get("content-type") ?? "unknown"})`,
+    );
+  }
+}
+
 /** Starts the one line a token missing a scope gets; the scheduler looks for it to log at start-up. */
 export const MISSING_SCOPE_PREFIX = "gh token lacks the ";
 /** The scope GitHub asks for when its message does not name one (a board read). */
@@ -325,12 +348,10 @@ export function makeGql(
         res.headers.get("x-github-sso"),
       );
     }
-    let body: { data?: unknown; errors?: { message?: unknown }[] };
-    try {
-      body = (await res.json()) as typeof body;
-    } catch {
-      throw new Error("github: response was not JSON");
-    }
+    const body = (await readGithubJson(res)) as {
+      data?: unknown;
+      errors?: { message?: unknown }[];
+    };
     if (Array.isArray(body.errors) && body.errors.length > 0) {
       if (body.errors.some(isRateLimitedError)) {
         rates?.record(queryName(query), exhaustedReading(res.headers, now()));
@@ -1040,7 +1061,12 @@ export async function sweepPullRequests(
   const collector = prSweepCollector(repo.id);
   let boards = false;
   try {
-    const { prs, nodes } = await fetchPrs(repo, gql, now, true, store, observe);
+    const read = () => fetchPrs(repo, gql, now, true, store, observe);
+    const { prs, nodes } = await read().catch(async (e: unknown) => {
+      if (!isTransient(e)) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      return read();
+    });
     // GitHub returning no nodes at all is no data, not "no PRs": it must not wipe the rows until
     // the next poll. Nodes that are all older than the keep window do prune.
     if (nodes > 0) boards = store.sweepPullRequests(repo.id, prs, now);
