@@ -15,6 +15,7 @@ import { COMMS_CAPCOM, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { NO_LOCK } from "../src/hud.ts";
+import { overviewSummary } from "../src/overview.ts";
 import { Store } from "../src/store.ts";
 import { lockView, type TelemetryScope, telemetry } from "../src/telemetry.ts";
 
@@ -1548,4 +1549,34 @@ it("expires recovered running evidence at last activity plus the stall threshold
   expect(tel().utilisation[0]?.working).toBeCloseTo(((15 * MIN) / elapsed) * 100);
   store.upsertRun(run({ id: "recovered", startedAt: start, endedAt: start + 7 * MIN }));
   expect(tel().utilisation[0]?.working).toBeCloseTo(((7 * MIN) / elapsed) * 100);
+});
+
+it.each([
+  undefined,
+  [],
+  [{ id: "zero", at: NOW, tokens: 0 }],
+  [
+    { id: "old", at: at("2026-10-16T22:59:59Z"), tokens: 10 },
+    { id: "first", at: at("2026-10-16T23:00:00Z"), tokens: 20 },
+    { id: "second", at: at("2026-10-17T00:00:00Z"), tokens: 30 },
+    { id: "now", at: NOW, tokens: 10 },
+    { id: "unknown", at: null, tokens: 10 },
+    { id: "future", at: NOW + 1, tokens: 20 },
+  ],
+])("agrees with Overview spend for attempt usage %j", (attemptUsage) => {
+  store.upsertRun(
+    run({ startedAt: at("2026-10-16T22:00:00Z"), endedAt: null, status: "running", costUsd: 10 }),
+  );
+  store.setDigest("r", digest({ attemptUsage }));
+  const spend = overviewSummary(store, NOW, {
+    repoIds: config.repos.map((r) => r.id),
+    seatIds: config.loops.map((l) => l.id),
+    timezone: config.operator.timezone,
+    attention: [],
+  }).kpis.spendToday;
+  const today = telemetry(config, store, "1h", NOW, ALL).today;
+  expect(today.costUsd).toBeCloseTo(spend.usd);
+  expect(today.costUsd).toBeCloseTo(
+    attemptUsage?.length && attemptUsage[0]?.tokens ? 6 : (10 * 13) / 14,
+  );
 });
