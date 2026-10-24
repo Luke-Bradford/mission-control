@@ -70,6 +70,7 @@ const ITEM_FIELDS = `
 
 /** What the board reads from an issue. */
 const ISSUE_FIELDS = `
+              author { login }
               number title url state updatedAt createdAt labels(first: 20) { nodes { name } }
               assignees(first: 10) { nodes { login } }
               repository { name owner { login } }
@@ -126,6 +127,7 @@ const ISSUE_QUERY = `query Ticket($owner: String!, $name: String!, $number: Int!
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       number title url state body
+      author { login }
       labels(first: 20) { nodes { name } }
       milestone { title }
       subIssues(first: 50) { nodes { number title state repository { name owner { login } } } }
@@ -163,7 +165,7 @@ const PR_FIELDS = `
         number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName mergeable
         author { login }
         assignees(first: 10) { nodes { login } }
-        closingIssuesReferences(first: 3) { nodes { number } }
+        closingIssuesReferences(first: 100) { nodes { number repository { nameWithOwner } } }
         commits(last: 1) { nodes { commit { oid ${CHECK_CONTEXTS} } } }
       `;
 
@@ -564,6 +566,9 @@ function boardItem(
   return {
     repoId: repo.id,
     issueNumber: c.number as number,
+    ...(typeof path(c, "author", "login") === "string"
+      ? { author: str(path(c, "author", "login"), "") }
+      : {}),
     title: str(c.title, ""),
     status: status ?? "",
     state: state ?? "planned",
@@ -638,6 +643,9 @@ export async function fetchTicket(
   const chars = Array.from(str(issue.body, ""));
   return {
     number: issue.number,
+    ...(typeof path(issue, "author", "login") === "string"
+      ? { author: str(path(issue, "author", "login"), "") }
+      : {}),
     title: str(issue.title, ""),
     url: str(issue.url, ""),
     state: openClosed(issue.state),
@@ -899,7 +907,17 @@ function mapPr(
   if (typeof n.number !== "number") return null;
   const branch = str(n.headRefName, "");
   const closing = path(n, "closingIssuesReferences", "nodes");
-  const first = Array.isArray(closing) ? path(closing[0], "number") : undefined;
+  const closingIssues = Array.isArray(closing)
+    ? closing.flatMap((issue) =>
+        isObj(issue) &&
+        typeof issue.number === "number" &&
+        str(path(issue, "repository", "nameWithOwner"), "").toLowerCase() ===
+          repo.github.toLowerCase()
+          ? [issue.number]
+          : [],
+      )
+    : [];
+  const first = closingIssues[0];
   const rollup = path(n, "commits", "nodes");
   const last = Array.isArray(rollup) ? rollup[0] : undefined;
   const headOid = path(last, "commit", "oid");
@@ -913,6 +931,7 @@ function mapPr(
     // The loops name the ticket in the branch and almost never write "Closes #n".
     ticket:
       inferTicket(branch, repo.id) ?? (typeof first === "number" ? `${repo.id}#${first}` : null),
+    closingIssues,
     state: lookup(PR_STATES, n.state) ?? "closed",
     isDraft: n.isDraft === true,
     review: lookup(REVIEWS, n.reviewDecision),

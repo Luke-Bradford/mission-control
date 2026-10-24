@@ -73,7 +73,7 @@ import {
   removeMissingText,
   removeNotFileText,
 } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
@@ -2350,14 +2350,33 @@ describe("push and draft_pr", () => {
     it("serialises a run's draft_pr calls: the second answers with the open PR (finding 10)", async () => {
       await pushed();
       ghState({
-        "pr list": { stdout: "[]\n", sleepMs: 200 },
+        "pr list": { stdout: "[]\n" },
         "pr create": { stdout: `${PR_URL}\n`, marksOpen: true },
       });
       const d = pushDeps();
-      const both = await Promise.all([
-        openDraftPr(d, RUN, { title: "t", body: "b" }),
-        openDraftPr(d, RUN, { title: "t", body: "b" }),
-      ]);
+      const gh = d.gh;
+      let release = () => {};
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      let lists = 0;
+      d.gh = async (args, opts) => {
+        if (args[0] === "pr" && args[1] === "list") {
+          lists++;
+          await gate;
+        }
+        return gh(args, opts);
+      };
+      const first = openDraftPr(d, RUN, { title: "t", body: "b" });
+      await vi.waitFor(() => expect(lists).toBe(1));
+      const second = openDraftPr(d, RUN, { title: "t", body: "b" });
+      try {
+        await new Promise<void>((r) => setImmediate(r));
+        expect(lists).toBe(1);
+      } finally {
+        release();
+      }
+      const both = await Promise.all([first, second]);
       expect(both.map((r) => r.text).sort()).toEqual(
         [PR_URL, `A PR is already open: ${PR_URL}`].sort(),
       );
@@ -3575,4 +3594,13 @@ describe("commit: a merge of main in progress", () => {
       expect(mergeHead()).toBe(mainSha);
     }
   });
+});
+
+it("the gh runner sends structured card edits on stdin without a shell", async () => {
+  const payload = JSON.stringify({ labels: ["lane:work", "literal-$(echo-no)"], assignees: [] });
+  const result = await createGh(process.execPath)(["-e", "process.stdin.pipe(process.stdout)"], {
+    cwd: tmpdir(),
+    input: payload,
+  });
+  expect(result).toMatchObject({ code: 0, stdout: payload });
 });

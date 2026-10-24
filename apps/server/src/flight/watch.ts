@@ -5,7 +5,6 @@
  * changes. The operator's Stop holds. It starts only the watch seat, never another seat or a loop.
  */
 import {
-  FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_HOUR_MS,
   FLIGHT_MAX_WAKES,
@@ -15,6 +14,7 @@ import {
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
   flightStartFailedText,
+  type TestLockState,
   wakeKey,
   wakeLine,
 } from "@mc/core";
@@ -26,17 +26,18 @@ import type { Store } from "../store.ts";
 import {
   deliveredFacts,
   flightLive,
-  flightOwnSeatIds,
   flightSeat,
   flightState,
   flightWakes,
   markPrsShown,
+  operatorItems,
   pending,
   wakeFacts,
 } from "./state.ts";
 
 export interface FlightWatchDeps {
   config: CcConfig;
+  refreshAuthors?: (repoId: string) => Promise<void>;
   store: Store;
   bus: ChangeBus;
   supervisor: Pick<
@@ -47,6 +48,7 @@ export interface FlightWatchDeps {
   enabled: boolean;
   /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
   login?: string | null;
+  lockState?: () => TestLockState;
   /** True while the seat has a pending change; FLIGHT is not started until it settles. */
   blocked?: (seatId: string) => boolean;
   now?: () => number;
@@ -58,6 +60,8 @@ export interface FlightWatch {
   stop(): void;
   /** One pass; serialised; never throws. */
   check(): Promise<void>;
+  /** Refreshes FLIGHT between turns without consuming a crash restart. */
+  rotate(): void;
 }
 
 /** Whether any list of a `wakeFacts` string has an entry. */
@@ -77,8 +81,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** When FLIGHT itself was started; a rotation is left out. */
   let starts: number[] = [];
   let rotating = false;
+  let rotationRequested = false;
   let lastFailure: string | null = null;
-  const announced = new Set<number>();
+  const announced = new Set<string>();
 
   const noteOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_NOTE_KEY);
 
@@ -88,17 +93,20 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (found === null) return;
     const id = found.seat.id;
     const t = now();
+    await deps.refreshAuthors?.(found.session.repoId);
 
-    const own = flightOwnSeatIds(config);
     let added = false;
-    for (const q of store.openQuestions()) {
-      if (
-        own.has(q.agentId) &&
-        q.passedAt === null &&
-        t - q.at >= FLIGHT_ANSWER_WAIT_MS &&
-        !announced.has(q.id)
-      ) {
-        announced.add(q.id);
+    for (const item of operatorItems(
+      config,
+      store,
+      t,
+      deps.login ?? null,
+      undefined,
+      deps.lockState?.(),
+    )) {
+      const identity = `${item.key}:${item.at}`;
+      if (item.flightTriage === "missed" && !announced.has(identity)) {
+        announced.add(identity);
         added = true;
       }
     }
@@ -108,6 +116,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (!flightLive(config, store)) {
       if (
         row?.state === "stopped" ||
+        row?.state === "parked" ||
         noteOpen() ||
         accountAtStop(config, store, found.seat.accountId, t)
       ) {
@@ -134,9 +143,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         busy: supervisor.busy(),
         now: t,
         hubLogin: deps.login ?? null,
+        lock: deps.lockState?.(),
       });
       if (!rotating) starts.push(t);
       rotating = false;
+      rotationRequested = false; // the fresh session already sees the current config
       try {
         await supervisor.startWatch(id, { first: wakeLine(state) });
         markPrsShown(store, state);
@@ -159,9 +170,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (runId == null || facts === null || facts.inTurn) return;
     if (facts.rateLimitedUntil !== null && facts.rateLimitedUntil > t) return;
     const n = flightWakes(store, runId);
-    if (n >= FLIGHT_MAX_WAKES) {
+    if (rotationRequested || n >= FLIGHT_MAX_WAKES) {
       rotating = true;
       await supervisor.endRunByEngine(runId);
+      rotationRequested = false;
       return;
     }
     const state = flightState({
@@ -170,6 +182,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       busy: supervisor.busy(),
       now: t,
       hubLogin: deps.login ?? null,
+      lock: deps.lockState?.(),
     });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
@@ -226,12 +239,17 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   return {
     check,
+    rotate() {
+      rotationRequested = true;
+      void check();
+    },
     start() {
       if (interval !== null) return;
       stopped = false;
       offSupervisor = supervisor.on((e) => {
         if (e.seatId === flightSeat(config)?.seat.id) {
           if (e.kind === "idle") lastTurnEndAt = now();
+          if (!flightLive(config, store)) bus.emit("attention");
           void check();
         } else schedule();
       });

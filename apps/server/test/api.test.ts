@@ -39,6 +39,9 @@ import {
   fullAt5h,
   type MachineSample,
   NEW_LOOP,
+  OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
+  OPERATOR_TOKEN_REQUIRED,
   otherLaneText,
   type PrCheck,
   projectAtReset,
@@ -69,6 +72,7 @@ import type { CrewReloader } from "../src/crew-apply.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
@@ -113,6 +117,7 @@ let updaterResult: () => Promise<{ upToDate: true } | { restarting: true }>;
 let updaterCalls: string[];
 let updaterCheckError: Error | null = null;
 const stubUpdater = (): Updater => ({
+  changes: async () => null,
   version: async () => {
     updaterCalls.push("version");
     return updaterVersion;
@@ -181,6 +186,7 @@ const stubSupervisor = (): Supervisor => {
     wakeRun: call("wakeRun", undefined),
     endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
+    resumeRun: call("resumeRun", undefined),
     on: () => () => {},
     emitEvidence: () => {},
     emitFindings: () => {},
@@ -633,6 +639,7 @@ describe("add a repo (POST /api/repos)", () => {
       commands: DEFAULT_SEAT_COMMANDS,
       protectedFiles: [],
       autonomy: "draft",
+      flightPowers: "standard",
     });
     expect(events).toContain("config");
     expect(events).toContain("boards");
@@ -647,6 +654,7 @@ describe("add a repo (POST /api/repos)", () => {
       { statusMap: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`s${i}`, "done"])) },
     ],
     ["an extra key", { path: "/etc/passwd" }],
+    ["flightPowers (only the config file sets it)", { flightPowers: "superuser" }],
   ])("400 for %s, nothing written", async (_name, over) => {
     const r = await postBody("/api/repos", { ...NEW_REPO, ...over });
     expect(r.statusCode).toBe(400);
@@ -1853,10 +1861,15 @@ describe("crew and attention", () => {
     const first = (await get("/api/attention")).json() as AttentionItem[];
     expect(first[0]).not.toHaveProperty("brief");
     const brief = {
+      for: "operator" as const,
+      original: "Original question ".repeat(1000),
+      assessment: "a".repeat(8000),
+      did: [{ action: "d".repeat(8000), refs: ["mc#466"] }],
+      ask: "q".repeat(8000),
       context: "Waiting since yesterday.",
-      recommendation: "Pick A.",
+      recommendation: "r".repeat(8000),
       options: [
-        { label: "A", answer: "a" },
+        { label: "A", answer: "a".repeat(8000) },
         { label: "B", answer: "b" },
       ],
       basis: "read the issue",
@@ -2467,6 +2480,7 @@ describe("boards, escalations, health", () => {
       author: null,
       assignees: [] as string[],
       checks: [] as PrCheck[],
+      closingIssues: [] as number[],
     } as const;
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
@@ -2496,6 +2510,7 @@ describe("boards, escalations, health", () => {
       author: null,
       assignees: [],
       checks: [],
+      closingIssues: [] as number[],
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
     expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([pr(4, "shop-app#9")]);
@@ -4781,3 +4796,89 @@ it.each([false, true])(
     expect(completed[0].err).toMatchObject({ message: error.message, stack: error.stack });
   },
 );
+
+describe("operator token", () => {
+  let guarded: FastifyInstance;
+
+  beforeEach(async () => {
+    guarded = buildApp({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      configPath,
+      crewReloader: stubReloader(),
+      supervisor: stubSupervisor(),
+      updater: stubUpdater(),
+      operatorToken: "tok-1",
+    });
+    await guarded.ready();
+  });
+
+  afterEach(async () => {
+    await guarded.close();
+  });
+
+  const guardedPost = (url: string, headers: Record<string, string>, payload: object = {}) =>
+    guarded.inject({ method: "POST", url, headers: { ...json, ...headers }, payload });
+
+  it("refuses a mutating route without the operator token (401)", async () => {
+    const pause = "/api/agents/shop-app-ta/pause";
+    const bare = await guardedPost(pause, {});
+    expect(bare.statusCode).toBe(401);
+    expect(bare.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
+    expect(existsSync(join(stateDir, "PAUSE"))).toBe(false);
+    expect((await guardedPost(pause, { [OPERATOR_HEADER]: "wrong" })).statusCode).toBe(401);
+    const away = await guardedPost("/api/settings/away", {}, { ...DEFAULT_AWAY, on: true });
+    expect(away.statusCode).toBe(401);
+    const read = await guarded.inject({ method: "GET", url: "/api/settings/away" });
+    expect(read.json()).toEqual(DEFAULT_AWAY);
+  });
+
+  it("leaves GET routes and the guard check as they were", async () => {
+    expect((await guarded.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+    const check = await guardedPost(
+      "/api/guard/check",
+      {},
+      { hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "t1", tool_input: {} },
+    );
+    expect(check.statusCode).toBe(401);
+    expect(check.json().error).not.toBe(OPERATOR_TOKEN_REQUIRED);
+  });
+
+  it("runs a mutating route with the operator token", async () => {
+    const key = { [OPERATOR_HEADER]: "tok-1" };
+    const paused = await guardedPost("/api/agents/shop-app-ta/pause", key);
+    expect(paused.statusCode).toBe(200);
+    expect(existsSync(join(stateDir, "PAUSE"))).toBe(true);
+    const away = await guardedPost("/api/settings/away", key, { ...DEFAULT_AWAY, on: true });
+    expect(away.statusCode).toBe(200);
+    const read = await guarded.inject({ method: "GET", url: "/api/settings/away" });
+    expect(read.json()).toMatchObject({ on: true });
+  });
+
+  it("hands the token to a same-origin page only", async () => {
+    const boot = (headers: Record<string, string>) =>
+      guarded.inject({ method: "GET", url: OPERATOR_BOOTSTRAP_PATH, headers });
+    const ok = await boot({ "sec-fetch-site": "same-origin" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ token: "tok-1" });
+    expect(ok.headers["cache-control"]).toBe("no-store");
+    const bare = await boot({});
+    expect(bare.statusCode).toBe(403);
+    expect(bare.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect((await boot({ "sec-fetch-site": "cross-site" })).statusCode).toBe(403);
+    const fromAddress = (remoteAddress: string) =>
+      guarded.inject({
+        method: "GET",
+        url: OPERATOR_BOOTSTRAP_PATH,
+        headers: { "sec-fetch-site": "same-origin" },
+        remoteAddress,
+      });
+    const remote = await fromAddress("10.0.0.5");
+    expect(remote.statusCode).toBe(403);
+    expect(remote.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect((await fromAddress("::1")).statusCode).toBe(200);
+    expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
+  });
+});

@@ -1,4 +1,6 @@
 import type { Owner, Stage } from "./board.ts";
+import type { CatchUpKind } from "./flight.ts";
+import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles.ts";
 import type { ReviewStatus } from "./review.ts";
@@ -72,6 +74,11 @@ export interface CiRerun {
 
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
+  awaitingFlight?: string | null;
+  flightClearedSha?: string | null;
+  flightReruns?: Record<string, number>;
+  /** Fresh RETRO requests by FLIGHT, at most two per head. */
+  flightRereviews?: Record<string, number>;
   phase: LoopPhase;
   reportedEvidenceId: number;
   prNumber: number | null;
@@ -90,7 +97,7 @@ export interface RunLoop {
   budgetExtra: number;
   parked: { kind: string; reason: string; ended: boolean } | null;
   /** Hard-rule files in the pushed sha's diff. */
-  touches: { sha: string; paths: string[] } | null;
+  touches: { sha: string; paths: string[]; flightPowers?: FlightPowers } | null;
   /** `<phase>:<epoch>` whose card move is done. */
   cardFor: string | null;
   /** CAPCOM waived the review findings on this sha (un-park of a review park). */
@@ -107,6 +114,7 @@ export interface RunLoop {
   gate?: {
     sha: string;
     mainSha: string;
+    missionControlChanged?: boolean;
     containsMain: boolean;
     hubOnly: boolean;
     strays: string[];
@@ -231,6 +239,7 @@ export interface Escalation {
 }
 
 export interface BoardItem {
+  author?: string | null;
   repoId: RepoId;
   issueNumber: number;
   title: string;
@@ -287,6 +296,8 @@ export interface PullRequestView {
   /** `repo#number`, from the branch first, else the first closing reference; null when neither names one. */
   ticket: string | null;
   state: "open" | "closed" | "merged";
+  /** Issues in this repo the PR closes; absent on rows stored before closing references. */
+  closingIssues?: number[];
   isDraft: boolean;
   review: "approved" | "changes" | "requested" | null;
   ci: "passing" | "failing" | "pending" | null;
@@ -785,7 +796,7 @@ export interface Crew {
 
 /** Catch-up text is evidence to display, never instructions to execute. */
 export interface BriefCatchUp {
-  kind: "new" | "follow-up" | "old";
+  kind: CatchUpKind;
   line: string;
   story: string[];
   aware: string[];
@@ -873,6 +884,12 @@ export interface BriefOption {
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
 export interface AttentionBrief {
+  /** Missing on briefs written before triage routing was introduced. */
+  for?: "operator" | "flight";
+  original?: string;
+  assessment?: string;
+  did?: { action: string; refs: string[] }[];
+  ask?: string;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;
@@ -910,6 +927,8 @@ export interface AttentionItem {
   owner?: AttentionOwner;
   /** FLIGHT's brief, once it has written one. */
   brief?: AttentionBrief;
+  flightTriage?: "waiting" | "handling" | "missed";
+  triageDueAt?: number;
   acked: boolean;
 }
 

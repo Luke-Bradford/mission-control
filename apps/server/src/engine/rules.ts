@@ -36,6 +36,27 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const YAML_INFO = /^[ \t]*ya?ml(?:[ \t]|$)/i;
 const NO_BLOCK = "the Mission Control section has no yaml block";
 
+/** The whole Mission Control section, including its heading and prose. */
+export function mcSection(markdown: string): string | null {
+  const lines = markdown.replace(/^﻿/, "").split(/\r?\n/);
+  let fence: string | null = null;
+  let start = -1;
+  for (const [i, line] of lines.entries()) {
+    const f = FENCE.exec(line);
+    if (fence !== null) {
+      if (f && f[2]?.trim() === "" && f[1]?.[0] === fence[0] && (f[1]?.length ?? 0) >= fence.length)
+        fence = null;
+    } else if (f) {
+      fence = f[1] ?? null;
+    } else if (start < 0) {
+      if (HEADING.test(line)) start = i;
+    } else if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line)) {
+      return `${lines.slice(start, i).join("\n")}\n`;
+    }
+  }
+  return start < 0 ? null : lines.slice(start).join("\n");
+}
+
 /** Keys accepted but not used here (other parts of the board automation own them). */
 const IGNORED_KEYS = ["templates", "ci"];
 
@@ -70,7 +91,7 @@ const schema = z.strictObject({
  * Not handled: an HTML comment does not hide a heading or a fence; a `# ` H1 does not end the
  * section (only a `## ` heading does); a setext heading (text over `---`) is not a heading.
  */
-function mcBlock(markdown: string): string | null {
+export function mcBlock(markdown: string): string | null {
   const lines = markdown.replace(/^﻿/, "").split(/\r?\n/);
   let fence: { mark: string; yaml: boolean } | null = null;
   let seen = false;
@@ -195,4 +216,12 @@ export async function readRepoRules(
       `${repo}: cannot read CLAUDE.md at origin/HEAD: ${(e as Error).message}`,
     );
   }
+}
+
+/** Elevation is user config only; a repo cannot appoint FLIGHT itself. */
+export function hardRulesBy(
+  rules: RepoRules,
+  powers: "standard" | "superuser",
+): RepoRules["hardRulesBy"] {
+  return powers === "superuser" ? "flight" : rules.hardRulesBy;
 }

@@ -51,9 +51,10 @@ clean and CI is green.
 How the build loop treats this repo's board. Seats pick tickets from Ready, highest Priority first,
 oldest first within a Priority, matching their area labels; FLIGHT may promote complete Backlog
 tickets to Ready. Hard-rule files (the ones that confine or drive the crew, plus this file,
-`.github/**` and `config.example.yaml`) never auto-merge or auto-Update; the operator merges and updates
-those. The hub reads the block below at `origin/HEAD`, so a change here takes effect once merged and
-fetched.
+`.github/**` and `config.example.yaml`) need FLIGHT clearance on superuser repos before the engine merges;
+standard repos keep their operator/controller merge path. CI workflows and this Mission Control block
+still need the operator. Hard-rule changes never auto-Update; the operator or controller runs Update.
+The hub reads the block below at `origin/HEAD`, so a change here takes effect once merged and fetched.
 
 ```yaml
 mc:

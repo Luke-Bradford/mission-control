@@ -15,6 +15,7 @@ export interface GhResult {
 
 export interface GhOptions {
   cwd: string;
+  input?: string;
   /** Added after PATH and HOME; `GH_PROMPT_DISABLED=1` is always set last. */
   env?: NodeJS.ProcessEnv;
   /** Default `CREW_GIT_SLOW_MS`. */
@@ -32,7 +33,7 @@ const GH_MAX_BUFFER = 1024 * 1024;
 export function createGh(command = "gh"): GhRunner {
   return (args, opts) =>
     new Promise((resolve) => {
-      execFile(
+      const child = execFile(
         command,
         args,
         {
@@ -57,6 +58,10 @@ export function createGh(command = "gh"): GhRunner {
           resolve({ code: code as number | null, stdout, stderr });
         },
       );
+      if (opts.input !== undefined) {
+        child.stdin?.on("error", () => {});
+        child.stdin?.end(opts.input);
+      }
     });
 }
 

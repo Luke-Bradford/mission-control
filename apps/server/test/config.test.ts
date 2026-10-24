@@ -28,6 +28,7 @@ import {
   crewSeatMode,
   DEFAULT_PORT,
   findHubRoot,
+  flightPowersOf,
   isPreview,
   loadConfig,
   parseConfig,
@@ -90,6 +91,15 @@ describe("loadConfig", () => {
     expect(loadConfig(named).operator.id).toBe("op");
     const omitted = tmpConfig((y) => y.replace("  id: operator\n", ""));
     expect(loadConfig(omitted).operator.id).toBe("operator");
+  });
+
+  it("reads the assignee allowlist only from user config", () => {
+    const file = tmpConfig((y) =>
+      y.replace("github_logins: []", "github_logins: [work-user, home-user]"),
+    );
+    expect(loadConfig(file).operator.githubLogins).toEqual(["work-user", "home-user"]);
+    const bad = tmpConfig((y) => y.replace("github_logins: []", 'github_logins: ["someone/else"]'));
+    expect(() => loadConfig(bad)).toThrow(ConfigError);
   });
 
   it("still accepts a legacy operator.password_hash, and ignores it", () => {
@@ -1416,6 +1426,33 @@ describe("crewSeatMode", () => {
     expect(crewSeatMode(cfg, "retro")).toBe("read-only");
     expect(crewSeatMode(cfg, "nobody")).toBe("read-only");
     expect(crewSeatMode({ ...cfg, crew: undefined }, "guido-1")).toBe("read-only");
+  });
+});
+
+describe("repo flight_powers", () => {
+  const text = readFileSync(EXAMPLE, "utf8");
+  const withPowers = (repo: string, value: string) =>
+    text.replace(`    github: octo-org/${repo}\n`, `$&    flight_powers: ${value}\n`);
+  const guard = { hubRoot: mkdtempSync(join(tmpdir(), "mc-hub-")) };
+  const load = (t: string) => parseConfig(t, "test", guard);
+
+  it("defaults to standard", () => {
+    expect(load(text).repos.map((r) => r.flightPowers)).toEqual([
+      "standard",
+      "standard",
+      "standard",
+    ]);
+  });
+
+  it("accepts superuser, and says standard for a repo it does not list", () => {
+    const c = load(withPowers("mission-control", "superuser"));
+    expect(c.repos.map((r) => r.flightPowers)).toEqual(["standard", "standard", "superuser"]);
+    expect(flightPowersOf(c, "mission-control")).toBe("superuser");
+    expect(flightPowersOf(c, "nobody")).toBe("standard");
+  });
+
+  it("rejects any other value", () => {
+    expect(errorOf(() => load(withPowers("shop-app", "root"))).path).toBe("repos[0].flightPowers");
   });
 });
 

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import {
   CONTROL_TIMEOUT_MS,
   type ControlSubtype,
+  isObj,
   type SessionEvent,
   STDERR_TEXT_MAX,
   STOP_GRACE_MS,
@@ -21,6 +22,7 @@ import {
 import { cleanText } from "../clean.ts";
 import { CLAUDE_COMMAND } from "../cli-version.ts";
 import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
+import { sleep, str } from "../util.ts";
 import {
   CLI_PID_FILE,
   endKeeper,
@@ -108,9 +110,6 @@ export interface CrewSession {
 }
 
 type Json = Record<string, unknown>;
-const isObj = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
-const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * The longest partial stdout line kept, in characters (not bytes); a longer one is dropped, never

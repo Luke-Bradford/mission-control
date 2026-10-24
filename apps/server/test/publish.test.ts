@@ -1026,6 +1026,52 @@ describe("merge steps", () => {
     };
     const ANCESTOR = `merge-base --is-ancestor ${MAIN} ${SHA}`;
 
+    it.each([false, true])(
+      "checks the Mission Control block itself (changed: %s)",
+      async (changed) => {
+        const rules = "## Mission Control\n```yaml\nmc:\n  hard_rules: []\n```\n";
+        gitAnswers = {
+          "ls-remote": lsRemote(),
+          [HAVE_MAIN]: "",
+          [ANCESTOR]: "",
+          "merge-base": BASE,
+          "rev-list": "",
+          diff: "CLAUDE.md\0",
+          [`show ${BASE}:CLAUDE.md`]: `# Before\n${rules}`,
+          [`show ${SHA}:CLAUDE.md`]: `# After\n${changed ? rules.replace("[]", "[src/**]") : rules}`,
+        };
+        expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+          ok: true,
+          facts: { missionControlChanged: changed },
+        });
+      },
+    );
+
+    it.each([
+      ["before fence", "## Mission Control\nChanged prose\n```yaml\nmc: {}\n```\n", true],
+      ["after fence", "## Mission Control\n```yaml\nmc: {}\n```\nChanged prose\n", true],
+      [
+        "next heading",
+        "## Mission Control\n```yaml\nmc: {}\n```\n## Other\nChanged prose\n",
+        false,
+      ],
+    ])("compares the whole section: %s", async (_name, after, changed) => {
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": BASE,
+        "rev-list": "",
+        diff: "CLAUDE.md\0",
+        [`show ${BASE}:CLAUDE.md`]: "## Mission Control\n```yaml\nmc: {}\n```\n",
+        [`show ${SHA}:CLAUDE.md`]: after,
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        ok: true,
+        facts: { missionControlChanged: changed },
+      });
+    });
+
     it("reads main from origin, then the ancestry, the hub-only commits and the strays", async () => {
       store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
       gitAnswers = {

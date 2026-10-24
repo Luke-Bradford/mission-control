@@ -279,6 +279,17 @@ describe("Needs you", () => {
     expect(needs().querySelector("img")).toBeNull();
   });
 
+  it("marks a missed triage and leaves waiting items out of Needs you", async () => {
+    stub([
+      item({ key: "missed", flightTriage: "missed" }),
+      item({ key: "waiting", text: "Waiting item", owner: "flight", flightTriage: "waiting" }),
+    ]);
+    render(<Comms item={null} />);
+    expect(await screen.findByText("FLIGHT hasn't triaged this")).toBeTruthy();
+    expect(needs().querySelectorAll(":scope > .nrow")).toHaveLength(1);
+    expect(screen.queryByText("Waiting item")).toBeNull();
+  });
+
   it("counts only the operator's items and lists the rest, labelled, under Being handled", async () => {
     stub([
       item({ key: "a", text: "Mine" }),

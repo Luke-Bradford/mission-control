@@ -173,7 +173,7 @@ describe("Needs-you owners", () => {
       worktree: null,
       updatedAt: NOW,
     });
-    expect(owners(c)[key]).toBeUndefined();
+    expect(owners(c)[key]).toBe("flight");
     // FLIGHT passed it on
     store.passQuestion(id, NOW);
     expect(owners(c)[key]).toBe("operator");

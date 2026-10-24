@@ -846,6 +846,7 @@ export class Store {
     }
     // Board columns added with the Stage/Owner/hierarchy fields; the next GitHub poll fills them.
     const boardColumns: [string, string][] = [
+      ["author", "TEXT"],
       ["stage", "TEXT"],
       ["owner", "TEXT"],
       ["parent", "INTEGER"],
@@ -913,6 +914,8 @@ export class Store {
     this.addColumn("pull_requests", "author", "TEXT");
     this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
+    // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
+    this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
     // On every start: a row whose branch names a ticket the pattern did not know when the row was
     // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
     this.transaction(() => {
@@ -1136,6 +1139,14 @@ export class Store {
         )
         .get(repoId, branch) !== undefined
     );
+  }
+
+  /** Every run on the ticket, ended ones too; review runs do not count. */
+  runsOnTicket(repoId: RepoId, ticket: string): Run[] {
+    const rows = this.db
+      .prepare("SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL")
+      .all(repoId, ticket) as Row[];
+    return rows.map(toRun);
   }
 
   /** Whether a run is still going on the ticket (`repo#number`); a review run does not count. */
@@ -1549,8 +1560,8 @@ export class Store {
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
            updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id, assignees)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           closed, priority_source, created_at, item_id, project_id, assignees, author)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
            status = excluded.status, state = excluded.state, labels = excluded.labels,
            priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
@@ -1560,7 +1571,7 @@ export class Store {
            size = excluded.size, closed = excluded.closed,
            priority_source = excluded.priority_source, created_at = excluded.created_at,
            item_id = excluded.item_id, project_id = excluded.project_id,
-           assignees = excluded.assignees`,
+           assignees = excluded.assignees, author = excluded.author`,
       );
       for (const i of items) {
         ins.run(
@@ -1587,6 +1598,7 @@ export class Store {
           i.itemId,
           i.projectId,
           JSON.stringify(i.assignees ?? []),
+          i.author ?? null,
         );
       }
     });
@@ -1604,6 +1616,7 @@ export class Store {
       state: r.state as BoardItem["state"],
       labels: JSON.parse(r.labels as string) as string[],
       assignees: JSON.parse(r.assignees as string) as string[],
+      ...(typeof r.author === "string" ? { author: r.author } : {}),
       priority: r.priority as string | null,
       updatedAt: r.updated_at as number,
       url: r.url as string,
@@ -1672,15 +1685,16 @@ export class Store {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
-         assignees, checks)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         assignees, checks, closing_issues)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
          created_at = excluded.created_at, updated_at = excluded.updated_at,
          merged_at = excluded.merged_at, read_at = excluded.read_at,
          head_sha = excluded.head_sha, mergeable = excluded.mergeable, author = excluded.author,
-         assignees = excluded.assignees, checks = excluded.checks, stale = 0`,
+         assignees = excluded.assignees, checks = excluded.checks,
+         closing_issues = excluded.closing_issues, stale = 0`,
     );
     for (const p of prs) {
       ins.run(
@@ -1703,6 +1717,7 @@ export class Store {
         p.author ?? null,
         JSON.stringify(p.assignees ?? []),
         JSON.stringify(p.checks ?? []),
+        JSON.stringify(p.closingIssues ?? []),
       );
     }
   }
@@ -1730,6 +1745,7 @@ export class Store {
       author: (r.author as string | null) ?? null,
       assignees: JSON.parse(r.assignees as string) as string[],
       checks: JSON.parse(r.checks as string) as PrCheck[],
+      closingIssues: JSON.parse(r.closing_issues as string) as number[],
     }));
   }
 
@@ -2024,6 +2040,13 @@ export class Store {
         "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .run(key, value);
+  }
+
+  pruneCollaborators(before: number): void {
+    this.db
+      .prepare(`DELETE FROM settings WHERE key LIKE 'collaborator:%'
+      AND CASE WHEN json_valid(value) THEN coalesce(json_extract(value, '$.at'), 0) < ? ELSE 1 END`)
+      .run(before);
   }
 
   deleteSetting(key: string): void {

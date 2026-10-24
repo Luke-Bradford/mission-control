@@ -959,6 +959,25 @@ describe("FLIGHT's brief", () => {
     expect(t.indexOf("Wiring the page.")).toBeGreaterThan(t.indexOf("Ship the brief."));
   });
 
+  it("lists items FLIGHT is handling with its note", async () => {
+    stubFetch({
+      "/api/attention": [
+        item({
+          key: "kept",
+          text: "Parked PR",
+          owner: "flight",
+          flightTriage: "handling",
+          brief: brief({ assessment: "I asked the author to fix CI." }),
+        }),
+      ],
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    expect(await screen.findByText("FLIGHT is handling")).toBeTruthy();
+    expect(await screen.findByText("I asked the author to fix CI.")).toBeTruthy();
+    expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
+  });
+
   it("Situation says so with an empty brief", async () => {
     stubFetch({ "/api/flight/brief": briefView(), "/api/config": CONFIG });
     const { container } = render(<Flight />);
@@ -997,6 +1016,17 @@ describe("FLIGHT's brief", () => {
     expect(rows[1]?.textContent).not.toContain("FLIGHT's take:");
     fireEvent.click(within(rows[0] as HTMLElement).getByRole("button", { name: "Open" }));
     expect(screen.getByTestId("item").textContent).toBe("a");
+  });
+
+  it("keeps person notifications out of Asked of you until FLIGHT passes them up", async () => {
+    stubFetch({
+      "/api/attention": [{ ...personItem, owner: "flight", flightTriage: "waiting" }],
+      "/api/notifications": { open: [thread()], handledToday: [] },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    expect(await screen.findByText(NOBODY_WAITING)).toBeTruthy();
+    expect(screen.queryByTestId("person-card")).toBeNull();
   });
 
   it("Asked of you shows a person card for each open GitHub thread, with FLIGHT's take when briefed", async () => {

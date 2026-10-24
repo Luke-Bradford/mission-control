@@ -275,6 +275,8 @@ describe("FLIGHT's PR list", () => {
       {
         ref: "mc#7",
         pr: 7,
+        untrustedAuthor: true,
+        awaitingFlight: null,
         seat: "",
         runId: "",
         ready: false,
@@ -617,7 +619,14 @@ describe("FLIGHT's items to brief", () => {
     raiseBlocked();
     raiseBlocked("cleanup-branch:x");
     expect(items()).toEqual([
-      { key: "note:blocked:r1:0", kind: "blocked", ticket: null, text: "mc#7 parked", ageMin: 5 },
+      {
+        key: "note:blocked:r1:0",
+        kind: "blocked",
+        ticket: null,
+        text: "mc#7 parked",
+        ageMin: 5,
+        triageRemainingMs: 15 * MIN,
+      },
     ]);
     store.addBrief({
       key: "note:blocked:r1:0",
@@ -933,7 +942,9 @@ describe("the FLIGHT watcher", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0]?.key).toBe("flight:wake:r-flight:1");
-    expect(sendCalls[0]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 1 question\n`)).toBe(true);
+    expect(
+      sendCalls[0]?.text.startsWith(`${FLIGHT_WAKE_HEAD} 1 question · 1 item to brief\n`),
+    ).toBe(true);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
   });
@@ -1047,15 +1058,6 @@ describe("the FLIGHT watcher", () => {
   it("re-wakes hourly while something waits, and not otherwise", async () => {
     liveCrew();
     ask();
-    // the question is the operator's item after the 20-minute hold; briefed, it wakes nothing new
-    store.addBrief({
-      key: "ask:1",
-      context: "c",
-      recommendation: "r",
-      options: [],
-      basis: "b",
-      at: T0,
-    });
     await watch.check();
     nowMs = T0 + 59 * MIN;
     await watch.check();
@@ -1071,6 +1073,35 @@ describe("the FLIGHT watcher", () => {
     nowMs = T0 + 200 * MIN;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
+  });
+
+  it("a rotation requested before a fresh start needs no second session", async () => {
+    watch.rotate();
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(endCalls).toEqual([]);
+  });
+
+  it("a requested rotation waits for the turn and does not consume a start", async () => {
+    liveCrew();
+    facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    watch.rotate();
+    await watch.check();
+    expect(endCalls).toEqual([]);
+    facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(endCalls).toEqual(["r-flight"]);
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    startFails = "boom";
+    noFlight();
+    for (let i = 0; i < 3; i++) await watch.check();
+    expect(startCalls).toHaveLength(4);
+    expect(notesOpen()).toEqual([]);
+    await watch.check();
+    expect(notesOpen()).toHaveLength(1);
   });
 
   it("rotates after 40 wakes, and the next start is not counted", async () => {
@@ -1148,7 +1179,7 @@ describe("the FLIGHT watcher", () => {
     expect(startCalls).toEqual([]);
   });
 
-  it("leaves a question from another session's seat out of the digest and the announcement", async () => {
+  it("triages another session's question without gaining the power to answer it", async () => {
     const sessions = config.crew?.sessions ?? [];
     sessions.push({
       id: "s2",
@@ -1164,10 +1195,10 @@ describe("the FLIGHT watcher", () => {
       nowMs = T0 + 20 * MIN;
       expect(flightState({ config, store, busy: [], now: nowMs }).questions).toEqual([]);
       await watch.check();
-      expect(emitted.filter((t) => t === "attention")).toEqual([]);
+      expect(emitted.filter((t) => t === "attention")).toEqual(["attention"]);
       store.addQuestion({ agentId: "guido-1", runId: "r-guido", text: "Which lane?", at: T0 });
       await watch.check();
-      expect(emitted.filter((t) => t === "attention")).toEqual(["attention"]);
+      expect(emitted.filter((t) => t === "attention")).toEqual(["attention", "attention"]);
     } finally {
       sessions.pop();
     }
@@ -1177,6 +1208,7 @@ describe("the FLIGHT watcher", () => {
     liveCrew();
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
     ask();
+    raiseBlocked();
     nowMs = T0 + 19 * MIN;
     await watch.check();
     expect(emitted.filter((t) => t === "attention")).toEqual([]);
@@ -1208,7 +1240,14 @@ describe("wakeSummary", () => {
     ...over,
   });
   const park = { kind: "silent", reason: "x" };
-  const q = { id: 1, seat: "guido-1", ticket: null, text: "t", ageMin: 0 };
+  const q = {
+    id: 1,
+    seat: "guido-1",
+    ticket: null,
+    text: "t",
+    ageMin: 0,
+    triageRemainingMs: 20 * MIN,
+  };
   const pr = {
     ref: "mc#1",
     pr: 1,
@@ -1241,7 +1280,14 @@ describe("wakeSummary", () => {
   });
 
   it("counts the items to brief", () => {
-    const item = { key: "a", kind: "blocked" as const, ticket: null, text: "t", ageMin: 0 };
+    const item = {
+      key: "a",
+      kind: "blocked" as const,
+      ticket: null,
+      text: "t",
+      ageMin: 0,
+      triageRemainingMs: 20 * MIN,
+    };
     expect(wakeSummary(state({ items: [item] }))).toBe("1 item to brief");
     expect(wakeSummary(state({ items: [item, { ...item, key: "b" }] }))).toBe("2 items to brief");
   });
@@ -1292,6 +1338,14 @@ describe("wakeSummary", () => {
       laneLabel: null,
       assignees: [],
     };
+    it("an awaiting-flight head is a wake fact and remains pending", () => {
+      const before = state({ prs: [pr] });
+      const held = state({ prs: [{ ...pr, awaitingFlight: "head" }] });
+      expect(wakeFacts(held)).not.toBe(wakeFacts(before));
+      expect(pending(held)).toBe(true);
+      expect(pending(before)).toBe(false);
+    });
+
     it("is true for a question, a free build seat with a ticket, or a park FLIGHT can lift", () => {
       expect(pending(state({ questions: [q] }))).toBe(true);
       expect(pending(state({ seats: [s({ free: true })], tickets: [ticket] }))).toBe(true);

@@ -1,6 +1,6 @@
 /**
  * Mission Control server: loads config, opens the store, starts the collectors' scheduler and serves
- * the API on 127.0.0.1:7420 (loopback only; no sign-in).
+ * the API on 127.0.0.1:7420 (loopback only; mutating routes need the operator token in <data dir>/operator-token).
  *   MC_CONFIG  config path (default ~/.config/mission-control/config.yaml)
  *   MC_DB      sqlite path (default ~/.local/share/mission-control/mc.sqlite; its dir is created 0700)
  *   MC_PORT    port (default 7420; 1024–65535), e.g. for a preview server beside the live hub
@@ -37,21 +37,30 @@ import { createEngine } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { refreshAuthors } from "./flight/collaborators.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
-import { type Move, moveCard } from "./github-board.ts";
+import { editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
+import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
-import { Store } from "./store.ts";
-import { createAutoUpdate, createUpdater, crewRefusal, headSha, UPDATE_LOG } from "./update.ts";
+import { crewDir, Store } from "./store.ts";
+import {
+  createAutoUpdate,
+  createHeldUpdateNote,
+  createUpdater,
+  crewRefusal,
+  headSha,
+  UPDATE_LOG,
+} from "./update.ts";
 
 export const HOST = LOOPBACK_HOST;
 /** `pnpm build` output of apps/web, served by this process. */
@@ -79,6 +88,8 @@ async function main(): Promise<void> {
   }
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
+  const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
+  writeOperatorToken(dirname(dbPath), operatorToken);
   const hubStartedAt = Date.now();
   const store = new Store(dbPath);
   const bus = new ChangeBus();
@@ -195,6 +206,8 @@ async function main(): Promise<void> {
   /** Each seat's consecutive transient take failures; one map for the hub's life. */
   const transientTakes = new Map<string, number>();
   const engineBoard = {
+    edit: async (repoId: string, issue: number, fields: { size?: string; priority?: string }) =>
+      editCardFields({ gql: makeGql(await githubToken()), store, config }, repoId, issue, fields),
     move: async (m: Move) => {
       const moved = await moveCard({ gql: makeGql(await githubToken()), store, config }, m);
       // a card that moved shows on the boards now, not at the next poll
@@ -258,6 +271,7 @@ async function main(): Promise<void> {
     bus,
     supervisor,
     login: hubLogin,
+    lockState: () => lock.state(),
     profiles,
     gh,
     dbPath,
@@ -271,12 +285,17 @@ async function main(): Promise<void> {
 
   // Keeps FLIGHT running and wakes it with a digest; off with the engine (preview, no loop writes).
   const flightWatch = createFlightWatch({
+    refreshAuthors: async (repoId) => {
+      const repo = config.repos.find((r) => r.id === repoId);
+      if (repo) await refreshAuthors(store, gh, crewDir(dbPath), repoId, repo.github, Date.now());
+    },
     config,
     store,
     bus,
     supervisor,
     enabled: engineOn,
     login: hubLogin,
+    lockState: () => lock.state(),
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
       cliHold.reason !== null || crewReloader.status().pending.some((p) => p.seatId === seatId),
@@ -300,12 +319,14 @@ async function main(): Promise<void> {
         });
 
   // `updates.hub: auto`: the scheduler's `update` job runs Update when it would pass (never on a preview).
+  const heldUpdateNote = createHeldUpdateNote(store, bus, config.updates?.hub === "auto");
   const autoUpdate =
     updater === undefined
       ? undefined
       : createAutoUpdate({
           enabled: config.updates?.hub === "auto",
           updater,
+          held: heldUpdateNote,
           blocked: () =>
             crewRefusal(config, supervisor, (id) => store.seatSession(id)) ??
             (lock.state().holder !== null ? "the test lock is held" : null),
@@ -322,10 +343,12 @@ async function main(): Promise<void> {
     store,
     bus,
     supervisor,
+    rotateFlight: () => flightWatch.rotate(),
     log: (line) => log(`crew: ${line}`),
   });
 
   const app = buildApp({
+    operatorToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     config,

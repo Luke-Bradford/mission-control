@@ -5,7 +5,9 @@ import {
   DEFAULT_HARD_RULES,
   DEFAULT_REPO_RULES,
   dependsOn,
+  effectiveHardRules,
   eligibleToStart,
+  FLIGHT_FLOOR_PATHS,
   inLane,
   otherLaneText,
   type RepoRules,
@@ -43,7 +45,7 @@ describe("DEFAULT_REPO_RULES", () => {
     });
   });
 
-  it("holds exactly the sixteen hard-rule globs", () => {
+  it("holds exactly the nineteen hard-rule globs", () => {
     expect(DEFAULT_HARD_RULES).toEqual([
       "apps/server/src/guard/**",
       "apps/server/src/mcp/**",
@@ -53,15 +55,35 @@ describe("DEFAULT_REPO_RULES", () => {
       "packages/core/src/guard.ts",
       "packages/core/src/flight.ts",
       "packages/core/src/loop.ts",
-      "packages/core/src/review.ts",
       "packages/core/src/repo-rules.ts",
       "packages/core/src/runtime.ts",
+      "apps/server/src/update.ts",
+      "apps/server/src/config.ts",
+      "apps/server/src/crew-apply.ts",
+      "packages/core/src/review.ts",
       "loops/**",
       "roles/**",
       "CLAUDE.md",
       ".github/**",
       "config.example.yaml",
     ]);
+  });
+
+  it("effectiveHardRules adds the defaults on a superuser repo only", () => {
+    const own = { hardRules: ["x/**"] };
+    expect(effectiveHardRules(own, "standard")).toEqual(["x/**"]);
+    expect(effectiveHardRules(own, "superuser")).toEqual([
+      ...new Set(["x/**", ...DEFAULT_HARD_RULES, ...FLIGHT_FLOOR_PATHS]),
+    ]);
+    expect(effectiveHardRules({ hardRules: [] }, "superuser")).toEqual([
+      ...new Set([...DEFAULT_HARD_RULES, ...FLIGHT_FLOOR_PATHS]),
+    ]);
+    expect(effectiveHardRules(own, "superuser")).toEqual(
+      expect.arrayContaining([...FLIGHT_FLOOR_PATHS]),
+    );
+    // The fixed floor is included even when the repo omits it.
+    expect(FLIGHT_FLOOR_PATHS).toEqual(["CLAUDE.md", ".github/**"]);
+    expect(DEFAULT_HARD_RULES).toEqual(expect.arrayContaining(["CLAUDE.md", ".github/**"]));
   });
 
   it("cannot be mutated", () => {

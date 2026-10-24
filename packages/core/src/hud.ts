@@ -454,6 +454,11 @@ export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 /** Who an attention item waits on: the operator, FLIGHT, the controller, a lane's login or a loop. */
 export type AttentionOwner = "operator" | "flight" | "controller" | "loop" | `lane:${string}`;
 export const OWNER_OPERATOR = "operator" satisfies AttentionOwner;
+export const FLIGHT_TRIAGE_LABEL = {
+  waiting: "Waiting for FLIGHT triage",
+  handling: "FLIGHT is handling",
+  missed: "FLIGHT hasn't triaged this",
+} as const;
 export const OWNER_FLIGHT = "flight" satisfies AttentionOwner;
 export const OWNER_CONTROLLER = "controller" satisfies AttentionOwner;
 export const OWNER_LOOP = "loop" satisfies AttentionOwner;

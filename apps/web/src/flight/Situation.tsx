@@ -1,11 +1,13 @@
-import type {
-  AttentionItem,
-  BoardItem,
-  Crew,
-  PullRequestView,
-  ReplyDraft,
-  RepoView,
+import {
+  type AttentionItem,
+  type BoardItem,
+  type Crew,
+  FLIGHT_TRIAGE_LABEL,
+  type PullRequestView,
+  type ReplyDraft,
+  type RepoView,
 } from "@mc/core";
+import { isOperatorItem } from "../attention.ts";
 import { cardColumn, cardYouWait } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
@@ -44,15 +46,17 @@ export function Situation() {
   const items = (attention ?? []).filter((i) => i.repoId === null || inRepo(i.repoId));
   const known = attention !== undefined;
   const num = (n: number): string => (known ? String(n) : "—");
-  const decisions = count(items, ["decision"]);
-  const approvals = count(items, ["approval", "question"]);
+  const decisions = count(items.filter(isOperatorItem), ["decision"]);
+  const approvals = count(items.filter(isOperatorItem), ["approval", "question"]);
   const stalls = count(items, ["stalled", "error"]);
   const inProgress = inColumn("In progress");
   // An answer belongs to FLIGHT, not to a repo, so the session filter does not apply.
   const flightView = useResource<FlightView>(RESOURCES.flight).data;
   const tz = useTz();
   const now = useNow();
-  const people = notes?.open.filter((t) => inRepo(t.repoId)).length;
+  const people = notes?.open.filter(
+    (t) => inRepo(t.repoId) && !items.some((i) => i.key === t.key && !isOperatorItem(i)),
+  ).length;
   const otherPeople = all.filter((i) => {
     const col = cardColumn(i);
     return (
@@ -75,6 +79,21 @@ export function Situation() {
     <Panel id="sitP" title="Situation" sub="FLIGHT's read of everything, updated as things change">
       <div className="pb">
         <SituationText />
+        {items.some((i) => i.flightTriage === "handling") && (
+          <section aria-label={FLIGHT_TRIAGE_LABEL.handling}>
+            <h3>{FLIGHT_TRIAGE_LABEL.handling}</h3>
+            {items
+              .filter((i) => i.flightTriage === "handling")
+              .map((i) => (
+                <div key={i.key} className="nrow">
+                  <div>
+                    <b>{i.text}</b>
+                    <p>{i.brief?.assessment ?? i.brief?.context}</p>
+                  </div>
+                </div>
+              ))}
+          </section>
+        )}
         <div className="sitstats">
           <span className={people !== undefined && people > 0 ? "warn" : undefined}>
             <b className="num">{people ?? "—"}</b> {people === 1 ? "person" : "people"} waiting on

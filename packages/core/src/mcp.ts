@@ -23,6 +23,12 @@ export const MC_TOOL_NAMES = {
   promote: "promote",
   endRun: "end_run",
   acceptRuling: "accept_ruling",
+  mergePr: "merge_pr",
+  settlePark: "settle_park",
+  rerunCi: "rerun_ci",
+  editCard: "edit_card",
+  dismissItem: "dismiss_item",
+
   syncMain: "sync_main",
   createTicket: "create_ticket",
   commentTicket: "comment_ticket",
@@ -36,33 +42,42 @@ export const MC_TOOL_NAMES = {
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
 
+/** The name the CLI gives one mc tool. */
+export const mcTool = <T extends McToolName>(name: T) => `mcp__${MC_MCP_SERVER}__${name}` as const;
+
 /** The mc tools as the model, the allowlist and the guard name them: `mcp__mc__<tool>`. */
 export const MC_TOOLS = {
-  commit: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.commit}`,
-  push: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.push}`,
-  draftPr: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.draftPr}`,
-  askOperator: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.askOperator}`,
-  reportEvidence: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.reportEvidence}`,
-  reportFindings: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.reportFindings}`,
-  reportPlan: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.reportPlan}`,
-  logDecision: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.logDecision}`,
-  readTicket: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.readTicket}`,
-  answerQuestion: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.answerQuestion}`,
-  startSeat: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.startSeat}`,
-  messageSeat: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.messageSeat}`,
-  flightState: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.flightState}`,
-  promote: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.promote}`,
-  endRun: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.endRun}`,
-  acceptRuling: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.acceptRuling}`,
-  syncMain: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.syncMain}`,
-  createTicket: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.createTicket}`,
-  commentTicket: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.commentTicket}`,
-  briefItem: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.briefItem}`,
-  readPr: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.readPr}`,
-  readCiLog: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.readCiLog}`,
-  listTickets: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.listTickets}`,
-  updateBrief: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.updateBrief}`,
-  draftReply: `mcp__${MC_MCP_SERVER}__${MC_TOOL_NAMES.draftReply}`,
+  commit: mcTool(MC_TOOL_NAMES.commit),
+  push: mcTool(MC_TOOL_NAMES.push),
+  draftPr: mcTool(MC_TOOL_NAMES.draftPr),
+  askOperator: mcTool(MC_TOOL_NAMES.askOperator),
+  reportEvidence: mcTool(MC_TOOL_NAMES.reportEvidence),
+  reportFindings: mcTool(MC_TOOL_NAMES.reportFindings),
+  reportPlan: mcTool(MC_TOOL_NAMES.reportPlan),
+  logDecision: mcTool(MC_TOOL_NAMES.logDecision),
+  readTicket: mcTool(MC_TOOL_NAMES.readTicket),
+  answerQuestion: mcTool(MC_TOOL_NAMES.answerQuestion),
+  startSeat: mcTool(MC_TOOL_NAMES.startSeat),
+  messageSeat: mcTool(MC_TOOL_NAMES.messageSeat),
+  flightState: mcTool(MC_TOOL_NAMES.flightState),
+  promote: mcTool(MC_TOOL_NAMES.promote),
+  endRun: mcTool(MC_TOOL_NAMES.endRun),
+  acceptRuling: mcTool(MC_TOOL_NAMES.acceptRuling),
+  mergePr: mcTool(MC_TOOL_NAMES.mergePr),
+  settlePark: mcTool(MC_TOOL_NAMES.settlePark),
+  rerunCi: mcTool(MC_TOOL_NAMES.rerunCi),
+  editCard: mcTool(MC_TOOL_NAMES.editCard),
+  dismissItem: mcTool(MC_TOOL_NAMES.dismissItem),
+
+  syncMain: mcTool(MC_TOOL_NAMES.syncMain),
+  createTicket: mcTool(MC_TOOL_NAMES.createTicket),
+  commentTicket: mcTool(MC_TOOL_NAMES.commentTicket),
+  briefItem: mcTool(MC_TOOL_NAMES.briefItem),
+  readPr: mcTool(MC_TOOL_NAMES.readPr),
+  readCiLog: mcTool(MC_TOOL_NAMES.readCiLog),
+  listTickets: mcTool(MC_TOOL_NAMES.listTickets),
+  updateBrief: mcTool(MC_TOOL_NAMES.updateBrief),
+  draftReply: mcTool(MC_TOOL_NAMES.draftReply),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
@@ -171,6 +186,12 @@ export const ASKED_OPERATOR =
 
 /** The hub's address: loopback only. The guard hook sends its token nowhere else. */
 export const LOOPBACK_HOST = "127.0.0.1";
+/** The header carrying the per-boot operator token on every mutating /api request. */
+export const OPERATOR_HEADER = "x-mc-operator";
+/** Where the HUD reads the operator token at page load. */
+export const OPERATOR_BOOTSTRAP_PATH = "/api/operator/bootstrap";
+/** The 401 answer to a mutating /api request without the operator token. */
+export const OPERATOR_TOKEN_REQUIRED = "operator token required";
 /** The hub's MCP endpoint. */
 export const MCP_PATH = "/mcp";
 /**

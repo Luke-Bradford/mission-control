@@ -38,6 +38,12 @@ export const SIZE_FIELD = "Size";
 export const PRIORITY_FIELD = "Priority";
 export const PRIORITIES = ["P0", "P1", "P2"] as const;
 
+/** P0 is 0, P1 is 1; no priority (or a label that is not `P<n>`) sorts last. */
+export function priorityRank(p: string | null): number {
+  const m = p === null ? null : /^P(\d+)$/.exec(p);
+  return m?.[1] ? Number(m[1]) : 99;
+}
+
 /** The project's built-in single-select field the board columns come from. */
 export const STATUS_FIELD = "Status";
 

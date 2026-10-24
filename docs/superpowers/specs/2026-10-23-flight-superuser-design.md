@@ -49,15 +49,15 @@ repos:
 
 The hub enforces these even for a `superuser` FLIGHT. They are a recommendation; the operator can strike any line.
 1. **The default branch.** No force-push, history rewrite or direct push to it. No deleting a repo, or a branch that hasn't been merged.
-2. **The safety net.** No changes to branch protection, rulesets, secrets, collaborators, keys, repo settings or the CI workflow. That means FLIGHT doesn't merge a PR that touches `.github/workflows/**`; it gives the operator its recommendation instead.
+2. **The safety net.** No changes to branch protection, rulesets, secrets, collaborators, keys, repo settings or the CI workflow. That means FLIGHT doesn't merge a PR that touches `.github/**`; it gives the operator its recommendation instead.
 3. **Untrusted code.** No merging a PR from a fork whose author isn't a collaborator, and no approving a fork's workflow runs.
-4. **The operator's decisions.** An operator's pause, stop, hold or answer wins. So do money budgets and account stops. Each tool names the record it checks: seat state `stopped` versus `error`, budget and account parks, and the operator's holds. Away mode joins this list with #340.
+4. **The operator's decisions.** An operator's pause, stop, hold or answer wins. So do money budgets and account stops. Each tool names the record it checks: seat state `stopped` versus `error`, budget parks, account usage stops, and open operator questions. Away mode joins this list with #340.
 5. **Its own powers.** FLIGHT can't change `flight_powers`, the user config, or anything the operator approves. The one exception is #402's priority approval on `superuser` repos (#458).
 6. **Going live.**
    - **Auto-Update is an allowlist.** It applies only ranges whose every path is under `apps/web/src/**`, `apps/web/public/**`, `apps/web/index.html` or `docs/**`.
    - **Everything else waits:** server, packages, roles, any `package.json`, lockfiles, workspace and npm config, and build config. The operator, or the controller session on this repo, runs that Update after reading the held range, never FLIGHT. While a range is held, later web-only commits wait behind it.
    - **The check runs inside `update()` after its own fetch,** and it pulls exactly the SHA it checked.
-7. **The repo's own rules.** On a `superuser` repo, FLIGHT never clears a PR that changes the `## Mission Control` block in `CLAUDE.md` or `.github/workflows/**`. That block is read live at `origin/HEAD`, so a merge alone would change the rules. The engine enforces this at its merge step, from a fixed list in code. The effective hard-rule list there is the repo's list plus `DEFAULT_HARD_RULES`.
+7. **The repo's own rules.** On a `superuser` repo, FLIGHT never clears a PR that changes the `## Mission Control` section in `CLAUDE.md` (heading through the next section) or `.github/**`. That block is read live at `origin/HEAD`, so a merge alone would change the rules. The engine enforces this at its merge step, from a fixed list in code. The effective hard-rule list there is the repo's list plus `DEFAULT_HARD_RULES`.
 
 **Tradeoff, stated plainly.** FLIGHT can merge changes to its own guard and tools. By mistake, or through text injected into a ticket or PR, it could widen what it may do. That change only goes live when the operator or the controller session runs Update, and FLIGHT can't clear a change to the repo's rules or CI. Protection, the history of `main`, CI and the config stay out of its reach.
 
@@ -113,14 +113,14 @@ This replaces the merge queue that this design first planned. The operator turne
   - It clears an `awaiting-flight` run PR in FLIGHT's lane.
   - The clearance carries across a conflict merge of main when the PR's own diff is unchanged.
   - It refuses floors 2, 3, 4 and 7. Floor 4 is checked against seat state `stopped` versus `error`, park kinds and operator holds.
-  - The hub posts the basis after `scanSecrets` and the notifier check.
-- **`settle_park { runId, action, basis }`.** The actions are:
-  - `lift`: a stuck park whose head descends from the push;
-  - `rereview`: a fresh RETRO review;
-  - `accept`: accepts a ruling or a review through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"), and the engine merges the accepted head. It is refused for a blocked RETRO review of the hard-rule files that enforce the floor: `apps/server/src/{guard,flight,mcp,engine}/**`, `update.ts`, `config.ts`, `crew-apply.ts`, `apps/server/src/runtime/**`, and `packages/core/src/{guard,flight,runtime,loop,repo-rules}.ts`, so RETRO stays the independent check on FLIGHT's own powers;
+  - The hub checks the basis with `scanSecrets` and the notifier check, clears the head, then posts the basis.
+- **`settle_park { runId, action, basis }`.** Uses the same lane check as `merge_pr`. The actions are:
+  - `lift`: only a stuck park whose head descends from the push, sharing `FLIGHT_UNPARKS_PER_RUN` with `message_seat`;
+  - `rereview`: a fresh RETRO review, at most twice per head; the only action for a `review-failed` park;
+  - `accept`: only `review` and `review-ruling` parks, through the existing waiver path (`reviewWaivedSha`; `mc/review` is set to "waived"). CI must pass before merging. A head touching `FLIGHT_FLOOR_ENFORCING_PATHS` needs a reported, unblocked RETRO review on that head. CI `ruling` parks use `accept_ruling` (re-run, then accept);
   - `rework`: sends the findings to the seat.
-- **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, and 4 an hour shared with `accept_ruling`.
-- **Untrusted authors.** `read_ticket` and the digest mark text written by people who aren't collaborators, from a cached `GET collaborators/{login}/permission`. The role doesn't act on that text without the operator.
+- **`rerun_ci { pr, basis }`.** Re-runs a run PR's failed jobs, at most twice per head, and 4 an hour shared with `accept_ruling`. Refused calls spend no re-run budget.
+- **Untrusted authors.** `read_ticket` and the digest mark text written by people who aren't collaborators, from a cached `GET collaborators/{login}/permission`. Only `write`, `maintain` and `admin` are trusted; results last 24 hours, entries older than 7 days are pruned, and cached authors need no GitHub call on wake. The role doesn't act on that text without the operator.
 
 ### #458: FLIGHT runs the board and Needs you (M; depends on #198)
 
@@ -132,9 +132,6 @@ This replaces the merge queue that this design first planned. The operator turne
 - **`dismiss_item { key, basis }`.**
   - It clears items that aren't operator-owned or `lane:<login>`-owned, plus items whose subject has resolved.
   - It never clears guard acks, budget or account items, approvals, or the auto-Update hold.
-- **`restart_seat { seat, basis }`.**
-  - It restarts a crew seat in state `error`.
-  - It never restarts one that is `stopped` by the operator, an account or a budget, FLIGHT itself, or an observed loop.
 
 ### #459: FLIGHT reads GitHub and the web (M; depends on #198, and on #203's home-read build tickets or #203's recorded "accepted" decision)
 

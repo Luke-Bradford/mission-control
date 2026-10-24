@@ -18,7 +18,9 @@ import {
   type CrewRole,
   DEFAULT_CREW_NODE,
   DEFAULT_SEAT_COMMANDS,
+  FLIGHT_POWERS,
   FLIGHT_TOOLS,
+  type FlightPowers,
   hereOf,
   LOOP_KINDS,
   MC_TOOL_GRANTS,
@@ -173,7 +175,7 @@ export type TeamsConfig = z.infer<typeof TeamsConfig>;
 
 export interface CcConfig {
   sources?: { teams?: TeamsConfig };
-  operator: { id: string; timezone: string };
+  operator: { id: string; timezone: string; githubLogins?: string[] };
   accounts: { id: AccountId; vendor: "claude" | "codex"; alertAt: number; stopAt: number }[];
   repos: {
     id: RepoId;
@@ -192,6 +194,8 @@ export interface CcConfig {
     protectedFiles?: string[];
     /** `draft`: the board is only read. `merge`: the hub moves cards between Status columns; needs a crew session. */
     autonomy: RepoAutonomy;
+    /** What FLIGHT may do here; only config.yaml sets it. Loaded: always set (default `standard`). */
+    flightPowers?: FlightPowers;
   }[];
   loops: AdoptedLoop[];
   poll: {
@@ -212,6 +216,11 @@ export interface CcConfig {
 /** `auto`: the hub runs Update by itself when main has moved and Update's refusals do not apply. */
 export const HUB_UPDATES = ["off", "auto"] as const;
 export type HubUpdates = (typeof HUB_UPDATES)[number];
+
+/** A repo's current `flight_powers`; `standard` for a repo the config does not list. */
+export function flightPowersOf(config: CcConfig, repoId: RepoId): FlightPowers {
+  return config.repos.find((r) => r.id === repoId)?.flightPowers ?? "standard";
+}
 
 /** One configured agent: an observed loop, or a crew seat with its session. */
 export type ConfiguredAgent = { id: AgentId; repoId: RepoId; accountId: AccountId } & (
@@ -407,6 +416,10 @@ const fileSchema = z
           : v,
       z.strictObject({
         id: nonEmpty.default(DEFAULT_OPERATOR_ID),
+        github_logins: z
+          .array(z.string().regex(/^[A-Za-z0-9-]{1,39}$/))
+          .max(20)
+          .default([]),
         timezone: nonEmpty,
       }),
     ),
@@ -439,6 +452,7 @@ const fileSchema = z
           .optional(),
         protected: z.array(protectedGlob).default([]),
         autonomy: z.enum(REPO_AUTONOMIES).default("draft"),
+        flight_powers: z.enum(FLIGHT_POWERS).default("standard"),
       }),
     ),
     loops: z.array(
@@ -503,6 +517,9 @@ const fileSchema = z
       ...(f.sources === undefined ? {} : { sources: f.sources }),
       operator: {
         id: f.operator.id,
+        ...(f.operator.github_logins.length === 0
+          ? {}
+          : { githubLogins: f.operator.github_logins }),
         timezone: f.operator.timezone,
       },
       accounts: f.accounts.map((a) => ({
@@ -522,6 +539,7 @@ const fileSchema = z
         commands: r.commands ?? defaultSeatCommands(),
         protectedFiles: r.protected,
         autonomy: r.autonomy,
+        flightPowers: r.flight_powers,
       })),
       loops: f.loops.map((l) => ({
         id: l.id,

@@ -630,7 +630,7 @@ Setup's board action also creates the board's fields and the repo's type labels,
 
 Seat and role changes in `config.yaml` apply without a restart.
 
-- `curl -s -XPOST -H 'content-type: application/json' -d '{}' 127.0.0.1:7420/api/config/reload` re-reads the file the hub started with. A
+- `curl -s -XPOST -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}' 127.0.0.1:7420/api/config/reload` re-reads the file the hub started with. A
   file that doesn't load changes nothing, and the call answers with its error.
 - The reload answers with what it applied (`applied`), the seats as now loaded, any seat
   changes still waiting (`pending`, each with its reason), and `restartNeeded`: keys
@@ -713,7 +713,7 @@ The commit tool refuses such a message before it commits, so the seat can reword
 A run can stay parked after its seat has moved on. This happens when it was set aside at CI or review, and then parked on a ruling or a review. A message to the seat doesn't reach it, because the seat no longer holds the run. Resume it directly:
 
 ```sh
-curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: application/json' -d '{}'
+curl -s -X POST localhost:7420/api/runs/<run id>/resume -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{}'
 ```
 
 This lifts the park, as your message to a live seat would:
