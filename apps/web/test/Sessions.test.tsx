@@ -44,6 +44,7 @@ it("adds two sessions for one repo using returned IDs and folders, selecting and
     const panel = await screen.findByRole("region", { name: `s/harbor-${n}` });
     expect(within(panel).getByRole("form", { name: `Add agent to s/harbor-${n}` })).toBeTruthy();
     expect(within(panel).getByText("harbor/: free")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add session" }));
   }
   const posts = fetch.mock.calls.filter(([, i]) => i?.method === "POST");
   expect(posts).toHaveLength(2);
@@ -65,9 +66,26 @@ it("keeps a duplicate refusal visible and allows keyboard cancellation without p
   fireEvent.change(within(form).getByLabelText("Repo"), { target: { value: "/fictional/harbor" } });
   fireEvent.submit(form);
   expect(await screen.findByText("s/harbor already exists.")).toBeTruthy();
-  fireEvent.keyDown(form, { key: "Escape" });
+  const repo = within(form).getByLabelText("Repo");
+  repo.focus();
+  expect(document.activeElement).toBe(repo);
+  fireEvent.keyDown(repo, { key: "Escape" });
   expect(screen.queryByRole("form", { name: "Add session" })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add session" }));
   expect(fetch.mock.calls.filter(([, i]) => i?.method === "POST")).toHaveLength(1);
+});
+
+it("returns focus to Add session after Cancel without posting", () => {
+  const fetch = mount();
+  fireEvent.click(screen.getByRole("button", { name: "Add session" }));
+  const form = screen.getByRole("form", { name: "Add session" });
+  const cancel = within(form).getByRole("button", { name: "Cancel" });
+  cancel.focus();
+  expect(document.activeElement).toBe(cancel);
+  fireEvent.click(cancel);
+  expect(screen.queryByRole("form", { name: "Add session" })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add session" }));
+  expect(fetch.mock.calls.filter(([, i]) => i?.method === "POST")).toHaveLength(0);
 });
 
 it.each([
@@ -101,10 +119,14 @@ it.each([
       body: { id: "s1", checkout, retainedPath },
     }),
   });
-  fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+  const close = await screen.findByRole("button", { name: "Close" });
+  close.focus();
+  expect(document.activeElement).toBe(close);
+  fireEvent.click(close);
   expect(await screen.findByText(text)).toBeTruthy();
   expect(getSession()).toBe("all");
   expect(screen.queryByRole("region", { name: "s/s1" })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add session" }));
 });
 
 it("shows the server active-seat refusal and keeps the selected session", async () => {

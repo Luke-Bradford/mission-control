@@ -13,7 +13,7 @@ import {
   type ReloadResult,
   type SeatInput,
 } from "@mc/core";
-import { Fragment, useEffect, useId, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { modelLine, seatAreaText } from "../crew.ts";
@@ -329,7 +329,7 @@ function CrewSession({
   busy: boolean;
   error: string | null;
   save: SaveSeats;
-  close: () => void;
+  close: (opener: HTMLButtonElement) => void;
 }) {
   const nameOf = useSeatName();
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
@@ -382,7 +382,7 @@ function CrewSession({
       sub={`${session.checkout} · ${repo?.github ?? session.repoId}`}
       actions={
         <>
-          <button type="button" disabled={busy} onClick={close}>
+          <button type="button" disabled={busy} onClick={(e) => close(e.currentTarget)}>
             Close
           </button>
           {changes && (
@@ -579,6 +579,14 @@ export function Sessions({ config }: { config: ConfigView }) {
   const changes = useResource<CrewChanges>(RESOURCES.crewChanges).data;
   const { session, inRepo } = useSessionScope(config);
   const [adding, setAdding] = useState(false);
+  const addSessionButton = useRef<HTMLButtonElement>(null);
+  const sessionFormOpener = useRef<HTMLElement | null>(null);
+  const focusReturn = useRef<HTMLElement | null>(null);
+
+  function dismissSessionForm() {
+    focusReturn.current = sessionFormOpener.current;
+    setAdding(false);
+  }
   const [draft, setDraft] = useState({
     repoId: config.repos[0]?.id ?? "",
     source: "",
@@ -629,6 +637,13 @@ export function Sessions({ config }: { config: ConfigView }) {
     }
   }, [changes, form?.sessionId, requestedSessionId]);
   const [busy, setBusy] = useState(false);
+  // Restore only after the form unmounts and its opener is enabled again.
+  useEffect(() => {
+    if (adding || busy || !focusReturn.current) return;
+    const opener = focusReturn.current;
+    focusReturn.current = null;
+    (opener.isConnected ? opener : addSessionButton.current)?.focus();
+  });
   // Where a refusal shows: a session's panel, or (null) the page, for a reload.
   const [failure, setFailure] = useState<{ sessionId: string | null; text: string } | null>(null);
   const crewSessions = allSessions.filter(
@@ -671,7 +686,7 @@ export function Sessions({ config }: { config: ConfigView }) {
       ]);
       setSession(done.id);
       setForm(seatForm(currentConfig, done.id));
-      setAdding(false);
+      dismissSessionForm();
       toast(
         `s/${done.id} added${draft.checkoutStrategy === "separate" ? " with its own checkout" : ""}. Now add its first agent.`,
       );
@@ -685,7 +700,7 @@ export function Sessions({ config }: { config: ConfigView }) {
     }
   }
 
-  async function closeSession(id: string) {
+  async function closeSession(id: string, opener: HTMLButtonElement) {
     setBusy(true);
     setFailure(null);
     try {
@@ -704,6 +719,7 @@ export function Sessions({ config }: { config: ConfigView }) {
       toast(
         `s/${done.id} closed${done.checkout === "removed" ? "; its separate checkout is removed." : done.checkout === "unmanaged" ? `; repo folder retained: ${done.retainedPath}.` : `; checkout retained: ${done.retainedPath}. ${reason}`}`,
       );
+      focusReturn.current = opener;
       setClosed((s) => [...s, done.id]);
       if (getSession() === done.id) resetSession();
       setForm(null);
@@ -757,8 +773,10 @@ export function Sessions({ config }: { config: ConfigView }) {
           <button
             type="button"
             className="primary"
+            ref={addSessionButton}
             disabled={busy || config.repos.length === 0}
-            onClick={() => {
+            onClick={(e) => {
+              sessionFormOpener.current = e.currentTarget;
               setAdding(true);
               setFailure(null);
             }}
@@ -770,7 +788,7 @@ export function Sessions({ config }: { config: ConfigView }) {
             className="seatform sessionform"
             aria-label="Add session"
             onKeyDown={(e) => {
-              if (e.key === "Escape" && !busy) setAdding(false);
+              if (e.key === "Escape" && !busy) dismissSessionForm();
             }}
             onSubmit={(e) => {
               e.preventDefault();
@@ -826,7 +844,7 @@ export function Sessions({ config }: { config: ConfigView }) {
               <button type="submit" className="primary" disabled={!validSession || busy}>
                 {busy ? "Adding session…" : "Add session"}
               </button>
-              <button type="button" onClick={() => setAdding(false)}>
+              <button type="button" onClick={dismissSessionForm}>
                 Cancel
               </button>
             </fieldset>
@@ -901,7 +919,7 @@ export function Sessions({ config }: { config: ConfigView }) {
           busy={busy}
           error={failure?.sessionId === s.id ? failure.text : null}
           save={save}
-          close={() => void closeSession(s.id)}
+          close={(opener) => void closeSession(s.id, opener)}
         />
       ))}
     </>
