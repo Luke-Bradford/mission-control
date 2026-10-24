@@ -6,10 +6,12 @@ import type { NotificationRead, NotificationRow, Store } from "../store.ts";
 import {
   errMsg,
   GqlTransportError,
+  githubRequestError,
   HTTP_TIMEOUT_MS,
   isObj,
   ms,
   readGithubJson,
+  retryGithubRead,
   ssoRefusal,
 } from "./github.ts";
 
@@ -103,41 +105,37 @@ export type Rest = (
  * request, so the token cannot be sent anywhere else. The token never appears in an error.
  */
 export function makeRest(token: string, doFetch: typeof fetch = fetch): Rest {
-  return async (url, headers = {}) => {
-    if (!url.startsWith(API_ORIGIN))
-      throw new Error("github: refused a URL outside api.github.com");
-    let res: Response;
-    try {
-      res = await doFetch(url, {
-        method: "GET",
-        headers: {
-          ...headers,
-          Authorization: `bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "mission-control",
-        },
-        signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-      });
-    } catch (e) {
-      throw new GqlTransportError(
-        isObj(e) && e.name === "TimeoutError"
-          ? `github: response timed out after ${HTTP_TIMEOUT_MS / 1000} s`
-          : "github: request failed",
-        null,
-      );
-    }
-    if (res.status === 304) return { status: 304, headers: res.headers, body: null };
-    if (!res.ok) {
-      throw new GqlTransportError(
-        `github: HTTP ${res.status}`,
-        res.status,
-        res.headers.get("x-github-sso"),
-      );
-    }
-    const body = await readGithubJson(res);
-    return { status: res.status, headers: res.headers, body };
-  };
+  return (url, headers = {}) =>
+    retryGithubRead(async () => {
+      if (!url.startsWith(API_ORIGIN))
+        throw new Error("github: refused a URL outside api.github.com");
+      let res: Response;
+      try {
+        res = await doFetch(url, {
+          method: "GET",
+          headers: {
+            ...headers,
+            Authorization: `bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "mission-control",
+          },
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+        });
+      } catch (e) {
+        throw githubRequestError(e);
+      }
+      if (res.status === 304) return { status: 304, headers: res.headers, body: null };
+      if (!res.ok) {
+        throw new GqlTransportError(
+          `github: HTTP ${res.status}`,
+          res.status,
+          res.headers.get("x-github-sso"),
+        );
+      }
+      const body = await readGithubJson(res);
+      return { status: res.status, headers: res.headers, body };
+    });
 }
 
 type Thread = Pick<NotificationRow, "id" | "updatedAt">;
