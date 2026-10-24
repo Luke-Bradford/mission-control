@@ -291,7 +291,7 @@ export const briefAboutText = (title: string): string => `Brief: ${title}`;
 export const BRIEF_CLEARED_DECISION = "Cleared";
 /** A saved section in the decision log: its size, not its text (the brief itself holds that). */
 export const briefSavedDecision = (chars: number): string => `Saved (${chars} characters)`;
-export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, which comes back in every wake (brief in mc flight_state). Sections: ${FLIGHT_HEADLINE} (one line, at most ${FLIGHT_HEADLINE_MAX} characters), ${FLIGHT_NOTE_SECTIONS.join(", ")}; keep status in your ledger (mc track). text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. Optional watch upsert/remove maintains at most 100 structured entries with stable ids; actions reference an exact lock hold or draft, never prose commands. Optional planned upsert maintains at most 100 scheduled entries: stable id, dueAt (epoch milliseconds), kind (report, PR recheck, brief), target, label and status (pending, completed, cancelled). Schedule only agreed work, never guessed agent finish times. A due plan stays pending until its outcome is observed; completed requires detail describing that observation. Cancel obsolete plans explicitly. Optional arrival records No action with a reason, or Queued only for an already queued Board arrival; copy its source identity/version (Board version is createdAt, person version is source.revision). At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
+export const UPDATE_BRIEF_DESCRIPTION = `Replace one section of your brief, your working memory, whose changed sections come back in wakes (full brief in mc flight_state). Sections: ${FLIGHT_HEADLINE} (one line, at most ${FLIGHT_HEADLINE_MAX} characters), ${FLIGHT_NOTE_SECTIONS.join(", ")}; keep status in your ledger (mc track). text is the whole new section, at most ${FLIGHT_BRIEF_SECTION_MAX} characters; an empty text clears it. Keep it true: remove what is done or wrong. Optional watch upsert/remove maintains at most 100 structured entries with stable ids; actions reference an exact lock hold or draft, never prose commands. Optional planned upsert maintains at most 100 scheduled entries: stable id, dueAt (epoch milliseconds), kind (report, PR recheck, brief), target, label and status (pending, completed, cancelled). Schedule only agreed work, never guessed agent finish times. A due plan stays pending until its outcome is observed; completed requires detail describing that observation. Cancel obsolete plans explicitly. Optional arrival records No action with a reason, or Queued only for an already queued Board arrival; copy its source identity/version (Board version is createdAt, person version is source.revision). At most ${FLIGHT_BRIEF_EDITS_PER_HOUR} edits an hour.`;
 
 export const READ_OTHER_REPO =
   "Not read: you read only your session's repo, or the issue of an open loop escalation in another configured repo.";
@@ -663,7 +663,7 @@ export interface FlightSeatState {
   atStop: boolean;
 }
 
-/** The crew as FLIGHT reads it: in a wake line, and from the `flight_state` tool. */
+/** The full crew state returned by the `flight_state` tool. */
 export interface FlightState {
   headline: string;
   ledger: FlightLedgerIndexEntry[];
@@ -744,12 +744,37 @@ export interface FlightState {
     prState: "open" | "merged" | "closed" | "unknown";
     told: boolean;
   }[];
-  recent: { time: string; kind: FlightDecisionKind; about: string; decision: string }[];
+  recent: { id: number; time: string; kind: FlightDecisionKind; about: string; decision: string }[];
   limits: { startsLeft: number; messagesLeft: number };
   /** Pending scheduled work; only due entries prompt a wake. */
   planned?: FlightScheduleEntry[];
   /** Your brief, only FLIGHT_NOTE_SECTIONS in order; `text` is "" for a section never written. */
   brief: { section: FlightBriefSectionKey; title: string; text: string; ageMin: number | null }[];
+}
+
+export interface FlightWakeList<T> {
+  entries: T[];
+  unchanged: number;
+  /** Keys present in the previous delivered view but absent from this list now. */
+  removed: string[];
+}
+
+/** Only delivered changes are omitted; wake facts always describe the full current state. */
+export interface FlightWake
+  extends Omit<
+    FlightState,
+    "brief" | "headline" | "recent" | "prs" | "seats" | "ledger" | "tickets"
+  > {
+  brief?: FlightState["brief"];
+  headline?: string;
+  /** Version within this run, advanced when the brief changes. */
+  briefVersion: number;
+  recent: FlightWakeList<FlightState["recent"][number]>;
+  prs: FlightWakeList<FlightState["prs"][number]>;
+  seats: FlightWakeList<FlightSeatState>;
+  ledger: FlightWakeList<FlightLedgerIndexEntry>;
+  tickets: FlightWakeList<FlightState["tickets"][number] | string>;
+  facts: Record<string, unknown[]>;
 }
 
 export const FLIGHT_TICKETS_LISTED = 30;
@@ -775,6 +800,7 @@ export const FLIGHT_MAX_WAKES = 40;
 /** Starts of FLIGHT itself per hour, rotations not counted. */
 export const FLIGHT_STARTS_MAX = 3;
 export const FLIGHT_WAKE_HEAD = "[Mission Control] Wake:";
+export const FLIGHT_WAKE_STORED_BYTES = 1024;
 export const wakeKeyPrefix = (runId: string): string => `flight:wake:${runId}:`;
 export const wakeKey = (runId: string, n: number): string => `${wakeKeyPrefix(runId)}${n}`;
 /** Turn 1 is the start brief; wake k is turn k + 1, so a run's last turn is FLIGHT_MAX_WAKES + 1. */
@@ -785,7 +811,7 @@ export const FLIGHT_NOTE_KEY = "flight:start-failed";
 export const flightStartFailedText = (reason: string): string =>
   `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
 export const WAKE_ASK =
-  "Act on it with your mc tools (mc flight_state reads it again), then end your turn with your summary for the operator.";
+  "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary for the operator.";
 
 const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
@@ -810,8 +836,8 @@ export function wakeSummary(s: FlightState): string {
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }
 
-export function wakeLine(s: FlightState): string {
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)}\n${WAKE_ASK}\n${JSON.stringify(s)}`;
+export function wakeLine(s: FlightState, digest: FlightWake | FlightState = s): string {
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)}\n${WAKE_ASK}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

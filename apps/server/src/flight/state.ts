@@ -3,6 +3,7 @@
  * what `GET /api/flight` shows (the seat and the last day's decisions); and the crew as FLIGHT
  * reads it (`flightState`, the wake digest and the `flight_state` tool).
  */
+import { createHash } from "node:crypto";
 import {
   type AttentionItem,
   clockHm,
@@ -36,6 +37,8 @@ import {
   type FlightSeatState,
   type FlightState,
   type FlightView,
+  type FlightWake,
+  type FlightWakeList,
   hudColumnOf,
   type ItemDiscussion,
   inLane,
@@ -384,6 +387,7 @@ export function flightState(i: {
     .filter((d) => d.kind !== "brief")
     .slice(0, FLIGHT_RECENT_LISTED)
     .map((d) => ({
+      id: d.id,
       time: clockHm(d.at, tz),
       kind: d.kind,
       about: d.about,
@@ -533,7 +537,7 @@ export function flightState(i: {
 
   const ready = new Set(store.notes().flatMap((n) => (n.kind === "ready" ? [n.runId] : [])));
   // The list is the stored read of the repo's PRs, not any run's phase or park: an open PR is
-  // listed at every wake until it merges or closes. A PR that left the open state is listed once.
+  // in the full state until it merges or closes. A PR that left the open state is listed once.
   const holders = store
     .loopRuns(now)
     .filter(
@@ -726,6 +730,100 @@ export function flightState(i: {
     headline,
     ledger,
     ledgerMore: openLedger.length - ledger.length,
+  };
+}
+
+export interface FlightWakeSnapshot {
+  brief: Map<string, string>;
+  headlineHash: string;
+  briefVersion: number;
+  recent: Map<string, string>;
+  prs: Map<string, string>;
+  seats: Map<string, string>;
+  ledger: Map<string, string>;
+  tickets: Map<string, string>;
+}
+
+const entryHash = (entry: unknown): string =>
+  createHash("sha256").update(JSON.stringify(entry)).digest("hex");
+
+/** Prepare a wake without advancing the snapshot: only a delivered wake or tool read does that. */
+export function flightWake(
+  state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+  previous?: FlightWakeSnapshot,
+): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
+  const { brief, headline, recent, prs, seats, ledger, tickets, ...rest } = state;
+  const briefHashes = new Map(
+    brief.map(({ ageMin: _ageMin, ...note }) => [note.section, entryHash(note)]),
+  );
+  const changedNotes = brief.filter(
+    (note) => previous?.brief.get(note.section) !== briefHashes.get(note.section),
+  );
+  const headlineHash = entryHash(headline);
+  const changedHeadline = previous?.headlineHash !== headlineHash;
+  const briefVersion =
+    (previous?.briefVersion ?? 0) + (changedHeadline || changedNotes.length > 0 ? 1 : 0);
+  const snapshot: FlightWakeSnapshot = {
+    brief: briefHashes,
+    headlineHash,
+    briefVersion,
+    recent: new Map(),
+    prs: new Map(),
+    seats: new Map(),
+    ledger: new Map(),
+    tickets: new Map(),
+  };
+  const changed = <T>(
+    list: "recent" | "prs" | "seats" | "ledger" | "tickets",
+    entries: T[],
+    key: (entry: T) => string,
+    // Poll times and age counters stay in sent entries, but do not make an entry new.
+    content: (entry: T) => unknown = (entry) => entry,
+  ): FlightWakeList<T> => {
+    const kept = entries.filter((entry) => {
+      const id = key(entry);
+      const hash = entryHash(content(entry));
+      snapshot[list].set(id, hash);
+      return previous?.[list].get(id) !== hash;
+    });
+    return {
+      entries: kept,
+      unchanged: entries.length - kept.length,
+      removed: [...(previous?.[list].keys() ?? [])].filter((id) => !snapshot[list].has(id)),
+    };
+  };
+  const ticketChanges = changed("tickets", tickets.slice(0, FLIGHT_TICKETS_LISTED), (t) => t.ref);
+  return {
+    snapshot,
+    digest: {
+      ...rest,
+      ...(changedNotes.length > 0 ? { brief: changedNotes } : {}),
+      ...(changedHeadline ? { headline } : {}),
+      briefVersion,
+      recent: changed("recent", recent, (d) => String(d.id)),
+      prs: changed(
+        "prs",
+        prs,
+        (p) => String(p.pr),
+        ({ readAt: _readAt, ...pr }) => pr,
+      ),
+      seats: changed(
+        "seats",
+        seats,
+        (s) => s.id,
+        ({ idleMin: _idleMin, ...seat }) => seat,
+      ),
+      ledger: changed("ledger", ledger, (e) => e.key),
+      tickets: {
+        ...ticketChanges,
+        entries: ticketChanges.entries.map((t) =>
+          !t.ready && (t.column === "Backlog" || t.column === "Refinement")
+            ? `${t.ref.slice(t.ref.lastIndexOf("#"))} ${t.untrustedAuthor ? "[untrusted] " : ""}${t.title}`
+            : t,
+        ),
+      },
+      facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
+    },
   };
 }
 

@@ -305,6 +305,8 @@ import {
 } from "./state.ts";
 
 export interface FlightToolsDeps {
+  /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
+  seen?: (runId: string, state: ReturnType<typeof flightState>) => void;
   config: CcConfig;
   store: Store;
   bus: ChangeBus;
@@ -1618,6 +1620,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       lock: deps.lockState?.(),
     });
     markPrsShown(store, state);
+    deps.seen?.(ctx.runId, state);
     return {
       text: JSON.stringify({
         ...state,

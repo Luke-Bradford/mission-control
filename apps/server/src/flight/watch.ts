@@ -13,6 +13,7 @@ import {
   FLIGHT_REWAKE_MS,
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
+  type FlightState,
   flightStartFailedText,
   type TestLockState,
   wakeKey,
@@ -25,9 +26,11 @@ import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import {
   deliveredFacts,
+  type FlightWakeSnapshot,
   flightLive,
   flightSeat,
   flightState,
+  flightWake,
   flightWakes,
   markPrsShown,
   operatorItems,
@@ -62,6 +65,8 @@ export interface FlightWatch {
   check(): Promise<void>;
   /** Refreshes FLIGHT between turns without consuming a crash restart. */
   rotate(): void;
+  /** The full state just returned to this run by flight_state. */
+  seen(runId: string, state: FlightState): void;
 }
 
 /** Whether any list of a `wakeFacts` string has an entry. */
@@ -75,6 +80,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   let lastFacts = "";
   let lastWakeAt = 0;
+  let delivered: { runId: string; snapshot: FlightWakeSnapshot } | null = null;
   /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
   let lastTurnEndAt = 0;
   let stopped = false;
@@ -149,7 +155,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = false;
       rotationRequested = false; // the fresh session already sees the current config
       try {
-        await supervisor.startWatch(id, { first: wakeLine(state) });
+        const { digest, snapshot } = flightWake(state);
+        const { runId } = await supervisor.startWatch(id, { first: wakeLine(state, digest) });
+        delivered = { runId, snapshot };
         markPrsShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
@@ -194,7 +202,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       return;
     }
     if (due) {
-      if ((await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state))) === "sent") {
+      const { digest, snapshot } = flightWake(
+        state,
+        delivered?.runId === runId ? delivered.snapshot : undefined,
+      );
+      if (
+        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest))) === "sent"
+      ) {
+        delivered = { runId, snapshot };
         markPrsShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
@@ -239,6 +254,15 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   return {
     check,
+    seen(runId, state) {
+      const seatId = flightSeat(config)?.seat.id;
+      if (!seatId || store.seatSession(seatId)?.runId !== runId) return;
+      delivered = {
+        runId,
+        snapshot: flightWake(state, delivered?.runId === runId ? delivered.snapshot : undefined)
+          .snapshot,
+      };
+    },
     rotate() {
       rotationRequested = true;
       void check();

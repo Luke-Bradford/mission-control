@@ -19,6 +19,8 @@ import {
   FLIGHT_INCOMING_LIMIT,
   FLIGHT_LEDGER_OPEN,
   FLIGHT_PLAN_LIMIT,
+  FLIGHT_WAKE_HEAD,
+  FLIGHT_WAKE_STORED_BYTES,
   FLIGHT_WATCH_LIMIT,
   type FlightArrivalDisposition,
   type FlightBriefSectionKey,
@@ -65,6 +67,7 @@ import {
   TITLE_MARKERS,
   type TokenUsage,
   type UsageSample,
+  wakeKeyPrefix,
 } from "@mc/core";
 
 export const HISTORY_BATCH_ROWS = 500;
@@ -751,6 +754,21 @@ const seatRow = (r: Row): SeatSessionRow => ({
   lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
 });
 
+/** The sha256 identifies a wake, nothing more: the hub keeps no past wake JSON to retrieve. */
+function compactFlightWake(text: string): string {
+  const json = text.slice(text.lastIndexOf("\n") + 1);
+  const suffix = `\nsha256:${createHash("sha256").update(json).digest("hex")}`;
+  const limit = FLIGHT_WAKE_STORED_BYTES - Buffer.byteLength(suffix);
+  let header = "";
+  let bytes = 0;
+  for (const char of text.split("\n", 1)[0] ?? "") {
+    bytes += Buffer.byteLength(char);
+    if (bytes > limit) break;
+    header += char;
+  }
+  return header + suffix;
+}
+
 export class Store {
   private readonly db: DatabaseSync;
 
@@ -814,6 +832,19 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    if (this.getSetting("flight-wake-compact-v1") === null) {
+      this.transaction(() => {
+        if (this.getSetting("flight-wake-compact-v1") !== null) return;
+        const rows = this.db
+          .prepare(
+            "SELECT key, text FROM seat_lines WHERE key LIKE 'flight:wake:%' AND length(CAST(text AS BLOB)) > ?",
+          )
+          .all(FLIGHT_WAKE_STORED_BYTES) as { key: string; text: string }[];
+        const update = this.db.prepare("UPDATE seat_lines SET text = ? WHERE key = ?");
+        for (const row of rows) update.run(compactFlightWake(row.text), row.key);
+        this.setSetting("flight-wake-compact-v1", "1");
+      }, true);
+    }
     // Discard the old later-state fallback starts; the next flow collection reads Ready history.
     if (this.getSetting("flow-ready-start-v1") === null) {
       this.transaction(() => {
@@ -2352,12 +2383,20 @@ export class Store {
 
   /** Records a line under `key`; false (and nothing written) when the key is already there. */
   claimLine(key: string, line: SeatLine): boolean {
+    let text = line.text;
+    if (
+      line.origin === "engine" &&
+      key.startsWith(wakeKeyPrefix(line.runId)) &&
+      text.startsWith(FLIGHT_WAKE_HEAD)
+    ) {
+      text = compactFlightWake(text);
+    }
     const r = this.db
       .prepare(
         `INSERT OR IGNORE INTO seat_lines (key, run_id, seat_id, origin, text, at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(key, line.runId, line.seatId, line.origin, line.text, line.at);
+      .run(key, line.runId, line.seatId, line.origin, text, line.at);
     return r.changes === 1;
   }
 
