@@ -1481,6 +1481,34 @@ describe("commit: secrets (final review m6)", () => {
     expect(staged()).toBe("");
   });
 
+  it("reads a staged rename as the whole file added (--no-renames)", async () => {
+    const origin = join(dir, "origin.git");
+    git(dir, "init", "-q", "--bare", "-b", "main", origin);
+    git(clone, "remote", "add", "origin", origin);
+    git(clone, "checkout", "-q", "main");
+    writeFileSync(join(clone, "apps", "old.ts"), `${LOCAL}\n`);
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "fixture");
+    git(clone, "push", "-q", "origin", "main");
+    git(wt, "merge", "-q", "--ff-only", "main");
+    git(clone, "config", "diff.renames", "true");
+    renameSync(join(wt, "apps", "old.ts"), join(wt, "apps", "new.ts"));
+    expect(await commit("refactor: move", make({ knownSecrets: async () => [LOCAL] }))).toEqual({
+      text: `Not committed: apps/new.ts:1 looks like a local credential. ${SECRET_TAIL}`,
+      isError: true,
+    });
+  });
+
+  it("reads staged files as stored, not through a textconv driver (--no-textconv)", async () => {
+    writeFileSync(join(clone, ".git", "info", "attributes"), "*.dat diff=hide\n");
+    git(clone, "config", "diff.hide.textconv", "true");
+    write("apps/k.dat", `${TOKEN}\n`);
+    expect(await commit("feat: x")).toEqual({
+      text: `Not committed: apps/k.dat:1 looks like a GitHub token. ${SECRET_TAIL}`,
+      isError: true,
+    });
+  });
+
   it("refuses a known secret verbatim, and a file under * -diff read as stored", async () => {
     writeFileSync(join(clone, ".git", "info", "attributes"), "* -diff\n");
     write("apps/blob.dat", `bin\n${LOCAL}\n`);
