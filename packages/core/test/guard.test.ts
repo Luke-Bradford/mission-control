@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BACKGROUND_SUITE_TEXT,
   closesIssue,
+  codexCommand,
   decodeCharRefs,
   engineHitText,
   FREE_SUITE_HINT,
@@ -22,6 +23,49 @@ import {
   unclosedMarkdown,
 } from "../src/guard.ts";
 import { MC_TOOLS } from "../src/mcp.ts";
+import { CODEX_SHELL } from "../src/runtime.ts";
+
+describe("codexCommand", () => {
+  it("decodes the spike's bare, quoted, mixed-quote and heredoc commands", () => {
+    expect(codexCommand("/bin/zsh -lc ls", ["ls"])).toBe("ls");
+    expect(codexCommand("/bin/zsh -lc 'cat a.txt'", ["cat", "a.txt"])).toBe("cat a.txt");
+    const mixed = String.raw`echo 'it'"'"'s' "$HOME" \$x`;
+    const raw = String.raw`/bin/zsh -lc "echo 'it'\"'\"'s' \"\$HOME\" \\\$x"`;
+    expect(codexCommand(raw, [CODEX_SHELL, "-lc", mixed])).toBe(mixed);
+    const heredoc = "cat <<'E'\nline1\nE";
+    expect(codexCommand(`/bin/zsh -lc "${heredoc}"`, [CODEX_SHELL, "-lc", heredoc])).toBe(heredoc);
+    expect(codexCommand("/bin/zsh -lc c\"at \"'a.txt'", null)).toBe("cat a.txt");
+  });
+
+  it.each([
+    "/usr/bin/env zsh -lc x",
+    "/bin/bash -lc x",
+    "/bin/zsh -c x",
+    "/bin/zsh -lc x extra",
+    "/bin/zsh -lc",
+    "/bin/zsh -lc 'x",
+    '/bin/zsh -lc "$HOME"',
+    '/bin/zsh -lc "`id`"',
+    '/bin/zsh -lc "bad\\q"',
+    "/bin/zsh -lc $HOME",
+    "/bin/zsh -lc ls;id",
+    "/bin/zsh -lc ls\nid",
+    "/bin/zsh -lc *",
+    "/bin/zsh -lc ~",
+    "/bin/zsh -lc ls\0",
+  ])("declines ambiguous command %j", (raw) => {
+    expect(codexCommand(raw, null)).toBeNull();
+  });
+
+  it("checks both forms of amendment word for word", () => {
+    expect(codexCommand("/bin/zsh -lc 'cat a.txt'", ["cat", "b.txt"])).toBeNull();
+    expect(codexCommand("/bin/zsh -lc ls", [CODEX_SHELL, "-lc", "pwd"])).toBeNull();
+    expect(codexCommand("/bin/zsh -lc ls", [])).toBeNull();
+    expect(codexCommand("/bin/zsh -lc 'cat a.txt'", [CODEX_SHELL, "-lc", "cat a.txt"])).toBe(
+      "cat a.txt",
+    );
+  });
+});
 
 const FULL = ["pnpm -s test", "pnpm -s vitest run", "pnpm -s vitest"];
 const writer: GuardContext = {

@@ -76,6 +76,7 @@ const base: CrewCliInput = {
 };
 
 const count = (args: string[], x: string) => args.filter((a) => a === x).length;
+
 /** The allowlist as it reaches argv: Edit and Write come out anchored to the worktree (#41). */
 const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
