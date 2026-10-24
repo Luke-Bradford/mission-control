@@ -95,7 +95,7 @@ export const BRIEF_KEY_MAX = 500;
 export const briefNoItemText = (key: string): string =>
   `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
-export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling. The hub supplies original in full. Give assessment (two or three sentences), did (actions with refs, or []), ask (one question for the operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. Texts accept ${BRIEF_INPUT_MAX} characters without truncation. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
+export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling for at most 24 hours. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original in full. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. Texts accept ${BRIEF_INPUT_MAX} characters without truncation. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
 export const FLIGHT_BRIEF_SECTIONS = [
@@ -610,6 +610,8 @@ export const FLIGHT_ITEMS_LISTED = 20;
 export const FLIGHT_RECENT_LISTED = 10;
 /** How long Needs you gives FLIGHT to triage an operator-owned item. */
 export const FLIGHT_TRIAGE_WAIT_MS = 20 * 60_000;
+/** How long FLIGHT may keep an item after briefing it as handling. */
+export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
 /** Compatibility for callers of the former question-only hold. */
 export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;

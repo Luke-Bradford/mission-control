@@ -30,6 +30,7 @@ import {
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
   FLIGHT_GH_READS_PER_HOUR,
+  FLIGHT_HANDLING_MAX_MS,
   FLIGHT_LIST_PAGES,
   FLIGHT_NOTED,
   FLIGHT_NOTES_PER_HOUR,
@@ -2969,6 +2970,7 @@ describe("brief_item", () => {
   const B = (over: Record<string, unknown> = {}) => ({
     key: KEY,
     context: "mc#7 is parked since 11:00.",
+    ask: "Should I un-park it?",
     recommendation: "Un-park it.",
     options: [
       { label: "Un-park", answer: "go" },
@@ -3231,6 +3233,131 @@ describe("brief_item", () => {
       owner: "flight",
       flightTriage: "waiting",
     });
+  });
+
+  it.each(["mvp-ready", "operator-decision", "autonomy-question"] as const)(
+    "requires passing up a %s escalation with a brief",
+    async (kind) => {
+      store.replaceEscalations("mc", [
+        {
+          id: "mc#9",
+          repoId: "mc",
+          issueNumber: 9,
+          title: `[${kind}] choose`,
+          kind,
+          source: "title",
+          openedAt: NOW,
+          url: "https://github.com/o/mc/issues/9",
+          question: null,
+        },
+      ]);
+      const key = "esc:mc#9";
+      expect(await call("brief_item", B({ key, for: "flight" }))).toEqual(
+        refused(
+          "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
+        ),
+      );
+      expect(store.briefs().has(key)).toBe(false);
+      expect(seen).toEqual([]);
+      expect(await call("brief_item", B({ key, for: "operator" }))).toEqual({ text: BRIEFED_TEXT });
+    },
+  );
+
+  it.each([
+    ["hub-update-held", "blocked"],
+    ["flag:r1:hard-rules:abc", "flag"],
+    ["flag:r1:floor:abc", "flag"],
+    ["ratelimit:r1", "ratelimit"],
+  ])("requires passing up %s with a brief", async (noteKey, kind) => {
+    raise(noteKey, { kind });
+    const key = `note:${noteKey}`;
+    expect(await call("brief_item", B({ key, for: "flight" }))).toEqual(
+      refused(
+        "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
+      ),
+    );
+    expect(store.briefs().has(key)).toBe(false);
+    expect(seen).toEqual([]);
+    expect(await call("brief_item", B({ key, for: "operator" }))).toEqual({ text: BRIEFED_TEXT });
+  });
+
+  it.each(["budget", "account"])("requires passing up a %s park with a brief", async (kind) => {
+    store.upsertRun(
+      run("r-budget", "guido-1", {
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind, reason: "operator needed", ended: false },
+        },
+      }),
+    );
+    raise("blocked:r-budget:0", { runId: "r-budget" });
+    const key = "note:blocked:r-budget:0";
+    expect(await call("brief_item", B({ key, for: "flight" }))).toEqual(
+      refused(
+        "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
+      ),
+    );
+    expect(store.briefs().has(key)).toBe(false);
+    expect(seen).toEqual([]);
+    expect(await call("brief_item", B({ key, for: "operator" }))).toEqual({ text: BRIEFED_TEXT });
+  });
+
+  it("returns a kept item to the operator after 24 hours since its brief", async () => {
+    expect(FLIGHT_HANDLING_MAX_MS).toBe(24 * 60 * 60_000);
+    nowMs += 60 * 60_000;
+    expect(
+      (await call("brief_item", B({ for: "flight", ask: undefined }))).isError,
+    ).toBeUndefined();
+    const expiresAt = nowMs + FLIGHT_HANDLING_MAX_MS;
+    expect(attentionItems(cfg, store, expiresAt - 1).find((i) => i.key === KEY)).toMatchObject({
+      owner: "flight",
+      flightTriage: "handling",
+    });
+    for (const at of [expiresAt, expiresAt + 1]) {
+      expect(attentionItems(cfg, store, at).find((i) => i.key === KEY)).toMatchObject({
+        owner: "operator",
+        flightTriage: "missed",
+        brief: { for: "flight", at: nowMs },
+      });
+    }
+  });
+
+  it.each(["operator", "flight"])(
+    "retains only an operator brief when a %s-briefed stray moves its time",
+    async (forWhom) => {
+      const stray = {
+        sessionId: "s1",
+        path: "outside.ts",
+        agentId: "guido-1",
+        kind: "outside" as const,
+        at: NOW,
+      };
+      store.addStrays([stray]);
+      const key = store.strays()[0]?.key;
+      expect((await call("brief_item", B({ key, for: forWhom }))).isError).toBeUndefined();
+      nowMs += 1000;
+      store.addStrays([{ ...stray, at: nowMs }]);
+      const item = attentionItems(cfg, store, nowMs).find((i) => i.key === key);
+      if (forWhom === "operator") {
+        expect(item).toMatchObject({
+          owner: "operator",
+          at: nowMs,
+          brief: { for: "operator", at: NOW },
+        });
+      } else {
+        expect(item).toMatchObject({ owner: "flight", flightTriage: "waiting", at: nowMs });
+        expect(item).not.toHaveProperty("brief");
+      }
+    },
+  );
+
+  it.each([undefined, "operator"])("requires an ask when for is %s", async (forWhom) => {
+    for (const ask of [undefined, "", " \n\t"]) {
+      expect((await call("brief_item", B({ for: forWhom, ask }))).isError).toBe(true);
+      expect(store.briefs().size).toBe(0);
+      expect(seen).toEqual([]);
+    }
   });
 
   it("keeps legacy context uncut, allows no options, and rejects oversized text", async () => {
@@ -4327,6 +4454,7 @@ it.each([
           await call("brief_item", {
             key: `person:199:${NOW}`,
             context: "Review",
+            ask: "Will you review it?",
             recommendation: "Check it",
             basis: "Read message",
             person: { source, assessment: ["Needs review"] },

@@ -1583,6 +1583,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { key, context, recommendation, options, basis, ...structured } = c.args;
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
+    if (structured.for === "operator" && structured.ask === undefined)
+      return fail("Give a non-empty ask when passing an item to the operator.");
     const ids = (options ?? []).flatMap((o) => (o.id ? [o.id] : []));
     if (
       new Set(ids).size !== ids.length ||
@@ -1600,6 +1602,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     );
     if (item === undefined) {
       return fail(briefNoItemText(key));
+    }
+    if (structured.for === "flight") {
+      const note = store.notes().find((n) => `note:${n.key}` === key);
+      const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+      if (
+        ["approval", "decision", "flag", "ratelimit"].includes(item.kind) ||
+        key === "note:hub-update-held" ||
+        (item.kind === "blocked" && (park === "budget" || park === "account"))
+      )
+        return fail(
+          "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
+        );
     }
     try {
       store.addBrief({

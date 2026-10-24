@@ -25,6 +25,7 @@ import {
   driverStopKey,
   type Escalation,
   escalationKind,
+  FLIGHT_HANDLING_MAX_MS,
   FLIGHT_TRIAGE_WAIT_MS,
   fixesSent,
   hardRulesBySettingKey,
@@ -734,7 +735,7 @@ export function attentionItems(
     .map((i) => {
       const saved = briefs.get(i.key);
       // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
-      const brief = saved !== undefined && saved.at >= i.at ? saved : undefined;
+      const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
       const item: AttentionItem = {
         ...i,
         ...(brief === undefined ? {} : { brief }),
@@ -742,6 +743,8 @@ export function attentionItems(
       };
       if (i.owner !== OWNER_OPERATOR || passed.has(i.key) || ownReply(i, flightId)) return item;
       if (brief !== undefined && brief.for !== "flight") return item;
+      if (brief?.for === "flight" && now - brief.at >= FLIGHT_HANDLING_MAX_MS)
+        return { ...item, flightTriage: "missed" };
       if (!live) return item;
       if (brief?.for === "flight")
         return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
