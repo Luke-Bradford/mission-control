@@ -8,3 +8,4 @@ dist-next/
 dist-prev/
 .pnpm-store/
 CLAUDE.local.md
+apps/web/.vite-guard-test-*/
