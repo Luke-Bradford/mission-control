@@ -357,6 +357,9 @@ class Hub {
     for (const e of this.entries.values()) {
       // The server filters watch rows using both the lock and crew state. Refetch
       // the brief when either changes, including rows omitted from its last response.
+      const activityChanged =
+        e.path === RESOURCES.activity.path &&
+        (topic === "guard" || topic === "health" || topic === "boards");
       const timelineChanged = e.path === RESOURCES.overviewTimeline.path && topic === "guard";
       const briefChanged =
         e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
@@ -367,6 +370,7 @@ class Hub {
         (topic === "agents" || topic === "boards" || topic === "attention" || topic === "guard");
       if (
         ((Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
+          activityChanged ||
           timelineChanged ||
           briefChanged ||
           notificationSettingsChanged ||

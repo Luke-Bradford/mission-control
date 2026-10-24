@@ -1,6 +1,7 @@
-import type { MachineSample, MachineView } from "@mc/core";
+import type { MachineSample, MachineView, OverviewSummary } from "@mc/core";
 import { RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { Sparkline } from "../hud/Sparkline.tsx";
 import { LockBox } from "./LockBox.tsx";
 
 const GIB = 2 ** 30;
@@ -89,6 +90,7 @@ function AgentSlots({ view }: { view: MachineView }) {
 /** This Mac's CPU, memory and disk, the agents row and the test lock (catalogue 2.1.4). Lock history arrives with run records (2c). */
 export function MachinePanel() {
   const view = useResource<MachineView>(RESOURCES.machine).data;
+  const summary = useResource<OverviewSummary>(RESOURCES.overview()).data;
   const m = view?.latest ?? null;
   const u = usage(m);
   const none = m === null ? NO_SAMPLE : undefined;
@@ -102,16 +104,29 @@ export function MachinePanel() {
         >
           <div className="resrow">
             <span className="s fg2">CPU</span>
-            <Bar
-              segs={
-                u.cpu === null
-                  ? []
-                  : [
-                      { pct: u.agentsCpu, colour: AGENTS_COLOUR, label: "Claude/Codex processes" },
-                      { pct: u.cpu - u.agentsCpu, colour: OTHER_COLOUR, label: "other apps" },
-                    ]
-              }
-            />
+            {summary ? (
+              <Sparkline
+                label="CPU history"
+                values={summary.machine.cpu}
+                max={100}
+                color="var(--fg-2)"
+              />
+            ) : (
+              <Bar
+                segs={
+                  u.cpu === null
+                    ? []
+                    : [
+                        {
+                          pct: u.agentsCpu,
+                          colour: AGENTS_COLOUR,
+                          label: "Claude/Codex processes",
+                        },
+                        { pct: u.cpu - u.agentsCpu, colour: OTHER_COLOUR, label: "other apps" },
+                      ]
+                }
+              />
+            )}
             <span
               className="num s"
               title={none ?? (u.cpu === null ? "Not measured yet" : undefined)}
@@ -129,16 +144,29 @@ export function MachinePanel() {
           </div>
           <div className="resrow">
             <span className="s fg2">Memory</span>
-            <Bar
-              segs={
-                u.memPct === null
-                  ? []
-                  : [
-                      { pct: u.agentsMem, colour: AGENTS_COLOUR, label: "Claude/Codex processes" },
-                      { pct: u.memPct - u.agentsMem, colour: OTHER_COLOUR, label: "other apps" },
-                    ]
-              }
-            />
+            {summary ? (
+              <Sparkline
+                label="Memory history"
+                values={summary.machine.mem}
+                max={100}
+                color="var(--fg-2)"
+              />
+            ) : (
+              <Bar
+                segs={
+                  u.memPct === null
+                    ? []
+                    : [
+                        {
+                          pct: u.agentsMem,
+                          colour: AGENTS_COLOUR,
+                          label: "Claude/Codex processes",
+                        },
+                        { pct: u.memPct - u.agentsMem, colour: OTHER_COLOUR, label: "other apps" },
+                      ]
+                }
+              />
+            )}
             <span className="num s" title={none}>
               {u.memUsed === null ? DASH : (u.memUsed / GIB).toFixed(1)}
               <span className="muted">

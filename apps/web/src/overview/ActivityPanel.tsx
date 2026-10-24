@@ -1,6 +1,7 @@
 import {
   type ActivityEvent,
   type ActivityRow,
+  type AttentionItem,
   type ConfigView,
   type Crew,
   HUD_STATE_LABEL,
@@ -8,6 +9,7 @@ import {
   SEAT_TURN_START_TEXT,
 } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
+import { operatorItems } from "../attention.ts";
 import { useTz } from "../clock.ts";
 import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
 import { Expandable } from "../components/Expandable.tsx";
@@ -21,18 +23,35 @@ import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { useSessionScope } from "../shell/session.ts";
 
-type Filter = "steps" | "comms" | "all";
+type Filter = "steps" | "comms" | "all" | "reviews" | "merges" | "guard" | "needs";
 const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
   { value: "steps", label: "Steps" },
+  { value: "reviews", label: "Reviews" },
+  { value: "merges", label: "Merges" },
+  { value: "guard", label: "Guard" },
+  { value: "needs", label: "Needs you" },
   { value: "comms", label: "Messages" },
-  { value: "all", label: "Everything" },
 ];
 const SUB: Record<Filter, string> = {
+  reviews: "reviews and pull requests",
+  merges: "merge activity",
+  guard: "guard activity",
+  needs: "open items needing you",
   steps: "high-level steps from every agent",
   comms: "what agents said to each other",
   all: "every event",
 };
 const SHOWN = 120;
+const FILTER_KEY = "overview.live-log.filter";
+function rememberedFilter(): Filter {
+  try {
+    const value = localStorage.getItem(FILTER_KEY);
+    return FILTERS.find((f) => f.value === value)?.value ?? "steps";
+  } catch {
+    return "steps";
+  }
+}
 
 const FALLBACK_GLYPH = "◆";
 const FALLBACK_CLASS = "k-step";
@@ -160,9 +179,10 @@ export function ActivityPanel() {
   const events = useResource<ActivityRow[]>(RESOURCES.activity);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const tz = useTz();
   const { inView, inRepo } = useSessionScope();
-  const [filter, setFilter] = useState<Filter>("steps");
+  const [filter, setFilter] = useState<Filter>(rememberedFilter);
   const [frozen, setFrozen] = useState<ActivityRow[] | null>(null);
   const list = useRef<HTMLDivElement>(null);
 
@@ -175,10 +195,42 @@ export function ActivityPanel() {
   const repoOf = (who: string): string | null =>
     agents.get(who)?.repoId ?? [who, ...who.split(":")].find((p) => repoIds.has(p)) ?? null;
 
-  const source = frozen ?? events.data ?? [];
+  const needs: ActivityRow[] = operatorItems(attention ?? []).map((i) => ({
+    at: i.messageAt ?? i.at,
+    who: i.agentId ?? i.repoId ?? "Needs you",
+    kind: "escalation",
+    text: i.text,
+    ref: i.ticket,
+    url: i.url,
+    status: null,
+    prs: [],
+    summary: null,
+  }));
+  const source =
+    frozen ??
+    (filter === "needs"
+      ? needs
+      : filter === "all"
+        ? [...(events.data ?? []), ...needs]
+        : (events.data ?? []));
   const rows = source
     .filter((e) => {
-      if (filter === "all") return true;
+      if (filter === "all" || filter === "needs") return true;
+      if (filter === "guard") return e.kind === "guard";
+      if (filter === "reviews")
+        return (
+          e.kind === "pr-opened" ||
+          e.kind === "pr-merged" ||
+          (e.kind === "loop" && /review/i.test(e.text))
+        );
+      if (filter === "merges")
+        return (
+          e.kind === "pr-merged" ||
+          (e.kind === "loop" &&
+            /^(?:merged?\b|marked (?:PR #\d+|the PR) ready|closed #\d+|deleted origin's |deleted the local branch |could not delete the local branch |(?:mark ready|close the issue|delete the remote branch) failed:)/i.test(
+              e.text,
+            ))
+        );
       if (filter === "comms") return isComms(e);
       return (
         !isComms(e) &&
@@ -195,6 +247,7 @@ export function ActivityPanel() {
       const repo = repoOf(e.who);
       return repo === null || inRepo(repo);
     })
+    .sort((a, b) => b.at - a.at)
     .slice(0, SHOWN)
     .reverse();
   // Events have no id: key by content, and number repeats so twins never share a key.
@@ -216,15 +269,28 @@ export function ActivityPanel() {
   return (
     <Panel
       id="actP"
-      title="Activity"
+      title="Live log"
       sub={SUB[filter]}
       actions={
         <>
-          <Seg label="Activity filter" options={FILTERS} value={filter} onChange={setFilter} />
+          <Seg
+            label="Activity filter"
+            options={FILTERS}
+            value={filter}
+            onChange={(value) => {
+              setFilter(value);
+              setFrozen(null);
+              try {
+                localStorage.setItem(FILTER_KEY, value);
+              } catch {
+                /* Storage can be unavailable. */
+              }
+            }}
+          />
           <button
             type="button"
             className="sm ghost"
-            onClick={() => setFrozen(frozen ? null : (events.data ?? []))}
+            onClick={() => setFrozen(frozen ? null : source)}
           >
             {frozen ? "Resume" : "Pause"}
           </button>

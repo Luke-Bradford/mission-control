@@ -40,6 +40,13 @@ export function QuotaMeter({
       <Meter
         label={compact ? "" : (row?.window ?? window ?? "Quota")}
         pct={row?.used ?? null}
+        projected={
+          row?.projected ??
+          (row?.fullAt && row.fullAt > row.sampledAt
+            ? row.used +
+              ((100 - row.used) * (row.resetAt - row.sampledAt)) / (row.fullAt - row.sampledAt)
+            : null)
+        }
         detail={row && !compact && (showAge || row.stale || note) ? ` · ${age} ago` : undefined}
       />
     </span>

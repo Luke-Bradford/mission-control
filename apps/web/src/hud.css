@@ -4288,3 +4288,15 @@ button.nrow.thread.tagged {
   min-width: 0;
   max-width: 100%;
 }
+
+.meter .track {
+  position: relative;
+}
+.projection-tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--fg-2);
+  z-index: 1;
+}
