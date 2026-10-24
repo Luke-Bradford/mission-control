@@ -483,6 +483,8 @@ export interface RunDigest {
   /** Committed lines; missing or null means unmeasured, including binary counts. */
   additions?: number | null;
   deletions?: number | null;
+  /** Tool starts in the last hour; absent on older stored digests. */
+  toolStarts?: number[];
   toolCalls: number;
   turns: number;
   /** Newest timestamp on any frame, subagents included. */
@@ -1141,4 +1143,50 @@ export interface NotificationEvent {
   category: NotificationCategory;
   at: number;
   text: string;
+}
+
+/** `GET /api/overview/timeline`: the last hour, in crew order. */
+export interface OverviewTimeline {
+  from: number;
+  to: number;
+  lanes: {
+    agentId: string;
+    spans: { kind: "turn" | "checks" | "lock" | "review"; from: number; to: number | null }[];
+    ticks: number[];
+  }[];
+}
+
+/** Live Overview figures; minute series end at the last complete minute, oldest first. */
+export interface OverviewSummary {
+  at: number;
+  kpis: {
+    working: { now: number; of: number; series: number[] };
+    tokensPerMin: { now: number; series: number[] };
+    spendToday: { usd: number; perHour: number[] };
+    inFlight: { count: number; oldestAt: number | null };
+    mergedToday: { count: number; perHour: number[] };
+    ciPassRate24h: { pct: number | null; runs: number; redNow: number };
+    cycleTime: { medianMs: number | null; n: number; avg14dMs: number | null };
+    needsYou: { count: number; overHour: number };
+  };
+  pipeline: PipelineStage[];
+  /** Missing minute samples are null, rather than zero utilization. */
+  machine: { cpu: (number | null)[]; mem: (number | null)[]; diskFreeGb: number | null };
+}
+
+export interface PipelineStage {
+  stage: "ready" | "building" | "checks" | "review" | "merging" | "merged";
+  count: number;
+  oldestAt: number | null;
+  cards: PipelineCard[];
+}
+
+export interface PipelineCard {
+  repoId: string;
+  ticket: number;
+  title: string;
+  pr: number | null;
+  ci: ("pass" | "fail" | "pending")[];
+  since: number;
+  who: string | null;
 }

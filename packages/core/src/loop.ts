@@ -132,10 +132,22 @@ export const cardMark = (phase: string, epoch: number): string => `${phase}:${ep
 /** The key of a run's blocked note for one epoch. */
 export const blockedNoteKey = (runId: string, epoch: number): string => `blocked:${runId}:${epoch}`;
 
-/** Shared prefixes for CI failure activity events and parking reasons. */
+/** Shared prefixes for CI activity events and parking reasons. */
+export const CI_PASSED_EVENT_PREFIX = "CI passed on ";
 export const CI_FAILED_EVENT_PREFIX = "CI failed on ";
 export const CI_RERUN_FAILED_EVENT_PREFIX = "CI failed again on the re-run of ";
 export const CI_PARK_FAILED_PREFIX = "CI failed ";
+
+/** Failure outcomes shared by Overview and the FLIGHT ledger. */
+export function isCiFailureEvent(text: string): boolean {
+  return (
+    !text.includes("no run could be re-run") &&
+    (text.startsWith(CI_FAILED_EVENT_PREFIX) ||
+      text.startsWith("CI flaked on ") ||
+      text.startsWith(CI_RERUN_FAILED_EVENT_PREFIX) ||
+      text.startsWith(parkedEventText(CI_PARK_FAILED_PREFIX)))
+  );
+}
 
 /** `{sha7}` is the first 7 characters of the failed sha; the excerpt follows. */
 export const CI_FAILED_TEXT = `${CI_FAILED_EVENT_PREFIX}{sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
@@ -725,7 +737,7 @@ function stateStep(s: LoopSnapshot): Step {
     }
     if (pr.ci === "passing") {
       const flaked = loop.rerun?.sha === pushed.sha;
-      const actions: LoopAction[] = [{ kind: "event", text: `CI passed on ${short}` }];
+      const actions: LoopAction[] = [{ kind: "event", text: `${CI_PASSED_EVENT_PREFIX}${short}` }];
       if (flaked) actions.push({ kind: "event", text: `CI flaked on ${short}: passed on re-run` });
       return {
         loop: {

@@ -543,3 +543,7 @@ export const LOCK_HEADER_TITLE = "Full-suite test lock";
 export const lockUsualText = (min: number, over: boolean): string =>
   `usually about ${min} min${over ? " · over its usual time" : ""}`;
 export const LOCK_OUTCOME_TEXT = { done: "finished", freed: "freed with its run" } as const;
+
+/** Overview timeline window and maximum tool ticks per lane. */
+export const TIMELINE_WINDOW_MS = 60 * 60_000;
+export const TIMELINE_TICKS_MAX = 300;

@@ -1451,6 +1451,64 @@ export class Store {
     }));
   }
 
+  /** Timeline sources include work already in progress at the window's left edge. */
+  timelineSources(from: number, to: number) {
+    const events = this.db
+      .prepare(`SELECT agent_id, at, from_state, to_state FROM agent_events e WHERE at <= ?
+      AND (at >= ? OR at = (SELECT MAX(at) FROM agent_events
+        WHERE agent_id = e.agent_id AND at < ?)) ORDER BY at, agent_id`)
+      .all(to, from, from) as Row[];
+    const runs = this.db
+      .prepare(`SELECT * FROM runs WHERE started_at <= ?
+      AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at, seq`)
+      .all(to, from) as Row[];
+    const holds = this.db
+      .prepare(`SELECT seat_id, started_at, ended_at FROM test_lock_runs
+      WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)`)
+      .all(to, from) as { seat_id: string; started_at: number; ended_at: number | null }[];
+    const reviews = this.db
+      .prepare(`SELECT * FROM reviews WHERE started_at <= ?
+      AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at, id`)
+      .all(to, from) as Row[];
+    return {
+      events: events.map(
+        (r): Omit<AgentEvent, "text"> => ({
+          agentId: r.agent_id as string,
+          at: r.at as number,
+          from: r.from_state as HudState,
+          to: r.to_state as HudState,
+        }),
+      ),
+      runs: runs.map(toRun),
+      holds: holds.map((r) => ({ agentId: r.seat_id, from: r.started_at, to: r.ended_at })),
+      reviews: reviews.map(toReview),
+    };
+  }
+
+  /** Recent state changes plus the state carried into the window, for each scoped seat. */
+  overviewAgentEvents(agentIds: readonly string[], since: number, until: number): AgentEvent[] {
+    const query = this.db.prepare(`SELECT * FROM agent_events
+      WHERE agent_id = ? AND at >= COALESCE(
+        (SELECT MAX(at) FROM agent_events WHERE agent_id = ? AND at < ?), ?)
+        AND at <= ? ORDER BY at`);
+    return agentIds.flatMap((id) =>
+      (query.all(id, id, since, since, until) as Row[]).map((r) => ({
+        agentId: id,
+        at: r.at as number,
+        from: r.from_state as HudState,
+        to: r.to_state as HudState,
+        text: r.text as string,
+      })),
+    );
+  }
+
+  latestMachineSample(until: number): MachineSample | null {
+    const row = this.db
+      .prepare("SELECT sample FROM machine_samples WHERE at <= ? ORDER BY at DESC LIMIT 1")
+      .get(until) as { sample: string } | undefined;
+    return row ? (JSON.parse(row.sample) as MachineSample) : null;
+  }
+
   /** Records a card move; returns its id. */
   addBoardMove(m: Omit<BoardMove, "id">): number {
     const r = this.db
@@ -1821,6 +1879,29 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC")
       .all(repoId) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
+  overviewPullRequests(repoId: RepoId, since: number): PullRequestView[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM pull_requests WHERE repo_id = ? AND (state = 'open' OR merged_at >= ?) ORDER BY number DESC",
+      )
+      .all(repoId, since) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
+  /** Latest successful move into Ready, including moves before today's window. */
+  overviewReadyMoves(repoId: RepoId): Map<number, number> {
+    const rows = this.db
+      .prepare(
+        "SELECT issue, MAX(at) AS at FROM board_moves WHERE repo_id = ? AND board_column = 'Ready' AND state = 'done' GROUP BY issue",
+      )
+      .all(repoId) as { issue: number; at: number }[];
+    return new Map(rows.map((r) => [r.issue, r.at]));
+  }
+
+  private pullRequestRows(rows: Row[]): PullRequestView[] {
     return rows.map((r) => ({
       repoId: r.repo_id as string,
       number: r.number as number,
