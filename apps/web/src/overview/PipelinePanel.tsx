@@ -43,7 +43,7 @@ export function PipelinePanel() {
                   const to = ticketPath(card.repoId, card.ticket);
                   return (
                     <a
-                      key={`${card.repoId}#${card.ticket}`}
+                      key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
                       className="pipeline-card"
                       href={to}
                       onClick={(e) => followLink(e, to)}

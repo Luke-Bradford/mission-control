@@ -143,7 +143,8 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   });
   const shown = inLane.filter(
     (i) =>
-      (stage === null || pipelineStage(i, rows, prs, now, todayStart, loopViews) === stage) &&
+      (stage === null ||
+        pipelineStage(i, rows, prs, now, todayStart, loopViews, stage) === stage) &&
       (priority === "" || i.priority === priority) &&
       (!agentOnly || cardAgent(i, rows) !== null || cardQueue(i, rows) !== null) &&
       (!mineOnly || needsMe(i, items, rows)),

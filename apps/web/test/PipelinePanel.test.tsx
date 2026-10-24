@@ -1,6 +1,6 @@
 import type { OverviewSummary, PipelineStage } from "@mc/core";
-import { act, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { setSession } from "../src/shell/session.ts";
@@ -50,6 +50,39 @@ describe("Pipeline", () => {
       for (const state of ["pass", "fail", "pending"]) {
         expect(within(card).getByRole("img", { name: `CI ${state}` }).className).toContain(state);
       }
+    }
+  });
+
+  it("keeps multiple merged PRs for one ticket distinct across live updates", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const merged = pipeline[5] as PipelineStage;
+      const card = merged.cards[0];
+      if (!card) throw new Error("missing card");
+      const cards = [40, 41, 42].map((pr) => ({ ...card, pr, title: `Merge ${pr}` }));
+      let data = summary([{ ...merged, count: 3, cards }]);
+      stubFetch({ "/api/overview": () => ({ status: 200, body: data }) });
+      render(<PipelinePanel />);
+      const stage = await screen.findByRole("region", { name: "Merged today" });
+      expect(
+        within(stage)
+          .getAllByRole("link")
+          .map((link) => link.textContent),
+      ).toEqual(cards.map((card) => expect.stringContaining(`PR #${card.pr}`)));
+      data = summary([{ ...merged, count: 2, cards: cards.filter((_, i) => i !== 1).reverse() }]);
+      await act(async () => {
+        hub.refetchTopic("boards");
+      });
+      await waitFor(() =>
+        expect(
+          within(stage)
+            .getAllByRole("link")
+            .map((link) => link.textContent),
+        ).toEqual([expect.stringContaining("PR #42"), expect.stringContaining("PR #40")]),
+      );
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
     }
   });
 

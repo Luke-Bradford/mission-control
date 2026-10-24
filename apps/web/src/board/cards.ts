@@ -217,17 +217,23 @@ export function pipelineStage(
   now: number,
   todayStart: number | null,
   loops: RunLoopView[],
+  requestedStage?: PipelineStage["stage"],
 ): PipelineStage["stage"] | null {
   const ref = ticketRef(item);
-  if (
+  const merged =
     todayStart !== null &&
     prs.some(
       (p) =>
-        p.ticket === ref && p.mergedAt !== null && p.mergedAt >= todayStart && p.mergedAt <= now,
-    )
-  )
-    return "merged";
-  if (item.closed) return null;
+        p.repoId === item.repoId &&
+        (p.ticket === null ? p.closingIssues?.[0] === item.issueNumber : p.ticket === ref) &&
+        p.mergedAt !== null &&
+        p.mergedAt >= todayStart &&
+        p.mergedAt <= now,
+    );
+  // Merged PRs and active work are independent stages in the Overview API.
+  if (requestedStage === "merged") return merged ? "merged" : null;
+  const fallback = merged && requestedStage === undefined ? "merged" : null;
+  if (item.closed) return fallback;
   const agent = cardAgent(item, crew);
   const aside = crew.flatMap((row) => row.asideRuns ?? []).find((run) => run.ticket === ref);
   const loop =
@@ -240,5 +246,5 @@ export function pipelineStage(
     return "building";
   if (loop?.phase === "ci") return "checks";
   if (loop?.phase === "review" || column === "In review") return "review";
-  return column === "Ready" && !agent ? "ready" : null;
+  return column === "Ready" && !agent ? "ready" : fallback;
 }
