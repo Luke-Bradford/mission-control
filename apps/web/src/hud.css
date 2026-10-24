@@ -3357,6 +3357,15 @@ kbd {
 .pb.tlist {
   padding: 2px 14px 12px;
 }
+.loop-templates > li {
+  min-width: 0;
+}
+.loop-templates > li > button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* a template profile (setup/Loops.tsx): the step track, then a card per step */
 .ptrack {
   display: flex;

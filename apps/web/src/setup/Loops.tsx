@@ -136,7 +136,7 @@ function Templates({ profiles }: { profiles: NonNullable<ConfigView["profiles"]>
         ) : list.length === 0 ? (
           <p className="pb s muted">No template profiles.</p>
         ) : (
-          <ul className="pb tlist">
+          <ul className="pb tlist loop-templates">
             {list.map((x) => (
               <li key={x.name}>
                 <button
