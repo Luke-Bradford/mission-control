@@ -1837,8 +1837,9 @@ function blankCodeSpans(md: string): string {
   let end = 0;
   for (const run of runs) {
     if (run.start < end || run.next === undefined) continue;
-    // A non-whitespace word break keeps surrounding text from forming a reference across a span.
-    parts.push(md.slice(end, run.start), "\0");
+    // A word character preserves boundary blockers on both sides without joining a reference:
+    // x is not separator whitespace, starts no closing keyword, and ends no issue number.
+    parts.push(md.slice(end, run.start), "x");
     end = run.next.end;
   }
   parts.push(md.slice(end));

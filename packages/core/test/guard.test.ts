@@ -1697,6 +1697,15 @@ describe("Task 9 fix round 1: unclosedMarkdown and namesIssue (finding 8)", () =
 
 describe("closesIssue", () => {
   it.each([
+    ["a`x`Fixes #42", false],
+    ["Fixes #42`x`3", false],
+    ["Fixes`example`#42", false],
+    ["`example\r\n\r\nFixes #42`", true],
+  ] as const)("preserves code-span boundary and paragraph safety: %j", (md, expected) => {
+    expect(closesIssue(md, { repo: "o/mc", issue: 42 })).toBe(expected);
+  });
+
+  it.each([
     "Fixes`example`#42",
     "Fixes `example` #42",
     "Fix`example`es #42",
