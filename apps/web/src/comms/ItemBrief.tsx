@@ -1,105 +1,171 @@
 import type { AttentionBrief, AttentionItem, BriefOption } from "@mc/core";
-import { useEffect, useRef, useState } from "react";
-import { ExternalLink } from "../components/ExternalLink.tsx";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Expandable } from "../components/Expandable.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { hub, RESOURCES } from "../data.ts";
-import { rel } from "../fmt.ts";
-import { Pill } from "../hud/Pill.tsx";
-import {
-  CATCH_UP_LABEL,
-  handlePerson,
-  type PersonThreadView,
-  postPersonReply,
-  whereOf,
-} from "../notifications.ts";
-import { openItem } from "../shell/overlays.ts";
+import { handlePerson, type PersonThreadView, postPersonReply, whereOf } from "../notifications.ts";
 import { toast } from "../shell/Toast.tsx";
 
-/** FLIGHT's brief on an item: what it is and what FLIGHT recommends (all inert text). */
+export const BRIEF_LINES = 8;
+export const BRIEF_FOLD_AFTER = 12;
+
+function BriefSection({
+  title,
+  children,
+  after,
+}: {
+  title: string;
+  children: ReactNode;
+  after?: ReactNode;
+}) {
+  return (
+    <section className="brief-section">
+      <h3 className="bsec">{title}</h3>
+      <div className="s qtext">
+        <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={title}>
+          {children}
+        </Expandable>
+      </div>
+      {after}
+    </section>
+  );
+}
+
+/** The same brief for every kind of item, with source text for older items. */
 export function ItemBrief({
   brief,
-  approval = false,
+  original,
+  links,
+  afterOriginal,
+  catchUp,
+  viewLinks,
 }: {
-  brief: AttentionBrief;
-  approval?: boolean;
+  brief?: AttentionBrief;
+  original?: ReactNode;
+  links?: ReactNode;
+  afterOriginal?: ReactNode;
+  catchUp?: ReactNode;
+  viewLinks?: ReactNode;
 }) {
-  const recommended = brief.options.find(
-    (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
-  );
+  const ask = brief?.ask?.trim() || brief?.recommendation;
   return (
     <div className="brief">
-      <div className="ctx">
-        <div className="bsec">Catch-up</div>
-        {brief.catchUp ? (
-          <>
-            <div className="ctxline">
-              <span className={`pill ${brief.catchUp.kind === "new" ? "plain" : "warn"}`}>
-                {brief.catchUp.kind === "new"
-                  ? "New"
-                  : brief.catchUp.kind === "old"
-                    ? "Old thread"
-                    : "Follow-up"}
-              </span>
-              {brief.catchUp.line}
-            </div>
-            <div className="bsec">So far</div>
-            <ul className="checked">
-              {brief.catchUp.story.map((line, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: repeated lines have no identity
-                <li key={`${i}:${line}`}>{line}</li>
-              ))}
-            </ul>
-            <div className="bsec">Be aware</div>
-            <ul className="checked">
-              {brief.catchUp.aware.map((line, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: repeated lines have no identity
-                <li key={`${i}:${line}`}>{line}</li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <>
+      {brief?.catchUp ? (
+        <div className="ctx">
+          <div className="bsec">Catch-up</div>
+          <div className="ctxline">
+            <span className={`pill ${brief.catchUp.kind === "new" ? "plain" : "warn"}`}>
+              {brief.catchUp.kind === "new"
+                ? "New"
+                : brief.catchUp.kind === "old"
+                  ? "Old thread"
+                  : "Follow-up"}
+            </span>
+            {brief.catchUp.line}
+          </div>
+          <TextList title="So far" lines={brief.catchUp.story} />
+          <TextList title="Be aware" lines={brief.catchUp.aware} />
+        </div>
+      ) : (
+        (catchUp ??
+        (brief && (
+          <div className="ctx">
+            <div className="bsec">Catch-up</div>
             <div className="bsec">So far</div>
             <p className="note">Catch-up unavailable.</p>
             <div className="bsec">Be aware</div>
             <p className="note">Awareness unavailable.</p>
-          </>
-        )}
-      </div>
-      <div className="bsec">FLIGHT's brief</div>
-      <div className="s qtext">
-        <Markdown text={brief.context} />
-      </div>
-      <div className="bsec">{approval ? "If you approve" : "Why it came to you"}</div>
-      <div className="s qtext">
-        {brief.recommendation.trim() ? (
-          <Markdown text={brief.recommendation} />
-        ) : (
-          "Reason unavailable."
-        )}
-      </div>
-      {!approval && (
-        <>
-          <div className="bsec">What FLIGHT checked</div>
-          {brief.checked?.length ? (
-            <ul className="checked">
-              {brief.checked.map((check, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: repeated sources have no identity
-                <li key={`${i}:${check.source}`}>
-                  <span className="chipref">{check.source}</span> {check.finding}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="note">Checked sources unavailable.</p>
-          )}
-          <div className="bsec">FLIGHT recommends</div>
-          <div className="s qtext">
-            {recommended ? recommended.label : <Markdown text={brief.recommendation} />}
           </div>
+        )))
+      )}
+      <BriefSection
+        title="The question"
+        after={
+          <>
+            {afterOriginal}
+            {links}
+          </>
+        }
+      >
+        {original ?? (brief?.original && <Markdown text={brief.original} />)}
+      </BriefSection>
+      {brief && (
+        <>
+          <BriefSection
+            title="FLIGHT's view"
+            after={
+              <>
+                {brief.basis && <p className="note">checked: {brief.basis}</p>}
+                {viewLinks}
+              </>
+            }
+          >
+            <Markdown text={brief.assessment ?? brief.context} />
+            <TextList title="FLIGHT's assessment" lines={brief.person?.assessment} />
+            {brief.person && (
+              <p className="s qtext">
+                Here is what I know. {brief.person.take} I drafted{" "}
+                {brief.person.replies?.length ?? 0} replies below: send one, edit it first, or tell
+                me what you want to say.
+              </p>
+            )}
+            {Boolean(brief.checked?.length) && (
+              <>
+                <div className="bsec">What FLIGHT checked</div>
+                <ul className="checked">
+                  {brief.checked?.map((check, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: sources remain in source order
+                    <li key={i}>
+                      <span className="chipref">{check.source}</span> {check.finding}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </BriefSection>
+          {Boolean(brief.did?.length) && (
+            <BriefSection title="What FLIGHT did">
+              <ul className="checked">
+                {brief.did?.map((step, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: actions remain in source order
+                  <li key={i}>
+                    <Markdown text={step.action} />
+                    <span className="brief-refs">
+                      {step.refs.map((ref, j) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: references remain in source order
+                        <span className="chipref" key={j}>
+                          {ref}
+                        </span>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </BriefSection>
+          )}
+          {ask?.trim() && (
+            <BriefSection title="What FLIGHT needs from you">
+              <Markdown text={ask} />
+            </BriefSection>
+          )}
         </>
       )}
     </div>
+  );
+}
+
+function TextList({ title, lines }: { title: string; lines?: string[] }) {
+  if (!lines?.length) return null;
+  return (
+    <>
+      <div className="bsec">{title}</div>
+      <ul className="checked">
+        {lines.map((line, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: lines remain in source order
+          <li key={i}>{line}</li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -110,6 +176,7 @@ export function ItemBrief({
 export function BriefOptions(p: {
   options: BriefOption[];
   recommendedOptionId?: string;
+  recommendation?: string;
   primaryFirst?: boolean;
   live: boolean;
   disabled: boolean;
@@ -140,6 +207,10 @@ export function BriefOptions(p: {
   }
   return (
     <div className="optlist">
+      {p.recommendation &&
+        !p.options.some((o) => o.id !== undefined && o.id === p.recommendedOptionId) && (
+          <Recommendation text={p.recommendation} />
+        )}
       {p.options.map((o, i) => (
         // Labels can repeat, so the text is no key; the list never reorders.
         <OptionCard
@@ -156,121 +227,51 @@ export function BriefOptions(p: {
 function OptionCard(p: {
   option: BriefOption;
   recommended: boolean;
+  recommendation?: string;
   live: boolean;
   disabled: boolean;
   title?: string;
   onPick: (o: BriefOption) => void;
 }) {
-  const content = (
-    <>
-      <span className="row">
-        <b className="qtext">{p.option.label}</b>
-        {p.recommended && <span className="pill plain">FLIGHT recommends</span>}
-      </span>
-      <span className="xs fg2">{p.option.description ?? p.option.answer}</span>
-    </>
-  );
-  if (!p.live) return <div className={p.recommended ? "opt rec" : "opt"}>{content}</div>;
+  const label = <b className="qtext">{p.option.label}</b>;
   return (
-    <button
-      type="button"
-      className={p.recommended ? "opt rec" : "opt"}
-      aria-label={p.option.label}
-      title={p.title}
-      disabled={p.disabled}
-      onClick={() => p.onPick(p.option)}
-    >
-      {content}
-    </button>
+    <div className={p.recommended ? "opt rec" : "opt"}>
+      {p.live ? (
+        <button
+          type="button"
+          className="option-pick"
+          aria-label={p.option.label}
+          title={p.title}
+          disabled={p.disabled}
+          onClick={() => p.onPick(p.option)}
+        >
+          {label}
+        </button>
+      ) : (
+        label
+      )}
+      <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+        <span className="xs fg2">{p.option.description ?? p.option.answer}</span>
+      </Expandable>
+      {p.recommended &&
+        (p.recommendation?.trim() &&
+        p.recommendation.trim() !== (p.option.description ?? p.option.answer).trim() ? (
+          <Recommendation text={p.recommendation} />
+        ) : (
+          <span className="pill plain">FLIGHT recommends</span>
+        ))}
+    </div>
   );
 }
 
-export function PersonStory({
-  brief,
-  items,
-  tz,
-  now,
-  thread,
-}: {
-  brief: AttentionBrief;
-  items: AttentionItem[];
-  tz: string | null;
-  now: number;
-  thread: PersonThreadView;
-}) {
-  const person = brief.person;
-  if (!person) return null;
-  const catchUp = brief.catchUp ?? {
-    kind: thread.catchUp,
-    line: thread.reasonText,
-    story: [],
-    aware: [],
-  };
-  const list = (label: string, lines: string[] | undefined) =>
-    lines?.length ? (
-      <section>
-        <div className="bsec">{label}</div>
-        <ul className="checked">
-          {lines.map((line, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: source order is fixed
-            <li key={i}>{line}</li>
-          ))}
-        </ul>
-      </section>
-    ) : null;
+export function Recommendation({ text }: { text: string }) {
+  if (!text.trim()) return null;
   return (
-    <div className="brief">
-      {catchUp && (
-        <div className="ctx">
-          <span className="bsec">Catch-up</span>
-          <div className="ctxline">
-            <Pill tone={catchUp.kind === "new" ? "plain" : "warn"}>
-              {CATCH_UP_LABEL[catchUp.kind]}
-            </Pill>
-            <span>{catchUp.line}</span>
-          </div>
-          {list("So far", catchUp.story)}
-          {list("Be aware", catchUp.aware)}
-        </div>
-      )}
-      {(person.history ?? thread.history)?.length ? (
-        <section>
-          <div className="bsec">Earlier in the thread</div>
-          {(person.history ?? thread.history ?? []).map((message) => (
-            <p className="s qtext" key={message.source.messageId}>
-              <b>{message.author ?? "Someone"}</b> · {tz ? rel(message.at, now, tz) : "—"} ·{" "}
-              <span>{message.text}</span>
-            </p>
-          ))}
-        </section>
-      ) : null}
-      <b className="btitle qtext">{thread.title}</b>
-      <div className="bsec">The message</div>
-      <blockquote className="s qtext">
-        {thread.message?.text ?? thread.snippet ?? "Message text unavailable."}
-      </blockquote>
-      {list("FLIGHT's assessment", person.assessment)}
-      <div className="row">
-        {person.related?.map((ref, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: source order is fixed
-          <span className="chipref" key={i}>
-            {ref.url ? <ExternalLink url={ref.url}>{ref.label}</ExternalLink> : ref.label}
-          </span>
-        ))}
-        {person.decisionKey && items.some((i) => i.key === person.decisionKey) && (
-          <button
-            type="button"
-            className="sm"
-            onClick={() => openItem(person.decisionKey as string)}
-          >
-            Open the related decision
-          </button>
-        )}
-      </div>
-      <p className="s qtext">
-        Here is what I know. {person.take} I drafted {person.replies?.length ?? 0} replies below:
-        send one, edit it first, or tell me what you want to say.
-      </p>
+    <div className="recommendation">
+      <span className="pill plain">FLIGHT recommends</span>
+      <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+        <Markdown text={text} />
+      </Expandable>
     </div>
   );
 }
@@ -347,7 +348,7 @@ export function PersonChoices({
               <div className={i === 0 ? "opt rec" : "opt"} key={reply.id}>
                 <span className="row">
                   <b>{reply.label}</b>
-                  {i === 0 && <Pill tone="plain">FLIGHT suggests</Pill>}
+                  {i === 0 && <span className="pill plain">FLIGHT suggests</span>}
                 </span>
                 {editing === reply.id ? (
                   <textarea
@@ -360,7 +361,9 @@ export function PersonChoices({
                     disabled={busy}
                   />
                 ) : (
-                  <span className="s qtext">{drafts[reply.id] ?? reply.text}</span>
+                  <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER}>
+                    <span className="s qtext">{drafts[reply.id] ?? reply.text}</span>
+                  </Expandable>
                 )}
                 <span className="row">
                   <button

@@ -12,6 +12,11 @@ import { installKeys } from "../src/shell/keys.ts";
 import { closeItem, openItem, syncItem, toggleDock, useItem } from "../src/shell/overlays.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
 
+function openConversation() {
+  const summary = screen.getByText("Conversation with FLIGHT");
+  if (!summary.closest("details")?.open) fireEvent.click(summary);
+}
+
 const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 function stubFetch(routes: Parameters<typeof fetchRoutes>[0]) {
   const items = routes["/api/attention"];
@@ -204,19 +209,13 @@ describe("ItemPanel, an escalation with a question", () => {
     await waitFor(() => expect(head.textContent).toContain("opened 3 h ago"));
   });
 
-  it("opens with a catch-up: New under 24 hours, Follow-up after", async () => {
+  it("uses only the question section and conversation without a brief", async () => {
     open([item()]);
-    const catchup = (await screen.findByText("Catch-up")).parentElement as HTMLElement;
-    expect(within(catchup).getByText("New")).toBeTruthy();
-    expect(catchup.textContent).toContain("Opened 17 Oct on shop-app #4001");
-  });
-
-  it("is a Follow-up when it is older", async () => {
-    open([item()], [escalation({ question: QUESTION, openedAt: NOW - 30 * HOUR })]);
-    const catchup = (await screen.findByText("Catch-up")).parentElement as HTMLElement;
-    expect(within(catchup).getByText("Follow-up")).toBeTruthy();
-    expect(within(catchup).queryByText("New")).toBeNull();
-    expect(catchup.textContent).toContain("Opened 16 Oct on shop-app #4001");
+    await screen.findByText(QUESTION.question);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((el) => el.textContent)).toEqual([
+      "The question",
+    ]);
+    expect(screen.getByLabelText("Ask FLIGHT about this")).toBeTruthy();
   });
 
   it("renders the question's Markdown", async () => {
@@ -245,7 +244,7 @@ describe("ItemPanel, an escalation with a question", () => {
     );
     expect((await screen.findByText("prior")).tagName).toBe("STRONG");
     expect(screen.getByText("40").tagName).toBe("CODE");
-    expect(document.querySelectorAll("#dsBrief ul li").length).toBe(2);
+    expect(document.querySelectorAll("#dsBrief .md ul li").length).toBe(2);
   });
 
   it("shows the title and each part of the question", async () => {
@@ -253,33 +252,24 @@ describe("ItemPanel, an escalation with a question", () => {
     await screen.findByText(QUESTION.question);
     const brief = container.querySelector("#dsBrief") as HTMLElement;
     expect(brief.textContent).toContain("Choose a cache eviction policy");
-    const section = (label: string) => screen.getByText(label).nextElementSibling?.textContent;
-    expect(section("What is being asked")).toBe(QUESTION.question);
-    expect(section("Why it came to you")).toBe(QUESTION.reasoning_quote);
-    expect(section("Effort so far")).toBe(QUESTION.effort_sunk);
-    expect(section("If nobody answers")).toBe(QUESTION.default_if_ignored);
+    for (const text of [
+      QUESTION.question,
+      QUESTION.reasoning_quote,
+      QUESTION.effort_sunk,
+      QUESTION.default_if_ignored,
+    ]) {
+      expect(brief.textContent).toContain(text);
+    }
   });
 
-  it("lists the answers as cards, Recommended on the one the loop recommended", async () => {
+  it("keeps the source answers in the question and opens a conversation without a brief", async () => {
     open([item()]);
     await screen.findByText("LFU");
-    const cards = document.querySelectorAll("#dsOpts .opt");
-    expect([...cards].map((c) => c.querySelector("b")?.textContent)).toEqual(QUESTION.answers);
-    const rec = [...cards].filter((c) => c.textContent?.includes("Recommended"));
-    expect(rec).toHaveLength(1);
-    expect(rec[0]?.textContent).toContain("LRU with a 5 minute TTL");
-    expect(rec[0]?.querySelector(".pill")?.className).toBe("pill plain");
-    expect(screen.queryByText(/FLIGHT recommends/)).toBeNull();
-  });
-
-  it("keeps a card per answer when two answers say the same thing", async () => {
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    open([item()], [escalation({ question: { ...QUESTION, answers: ["Yes", "Yes", "No"] } })]);
-    await screen.findByText("No");
-    const cards = document.querySelectorAll("#dsOpts .opt");
-    expect([...cards].map((c) => c.querySelector("b")?.textContent)).toEqual(["Yes", "Yes", "No"]);
-    expect(errors.mock.calls.flat().join(" ")).not.toMatch(/same key/);
-    errors.mockRestore();
+    expect(
+      [...document.querySelectorAll(".source-answers li .qtext")].map((el) => el.textContent),
+    ).toEqual(QUESTION.answers);
+    expect(document.querySelector("#dsOpts .opt")).toBeNull();
+    expect(screen.getByLabelText("Ask FLIGHT about this")).toBeTruthy();
   });
 
   it("links to the issue on GitHub, in a new tab", async () => {
@@ -413,8 +403,9 @@ describe("ItemPanel, acting on an item", () => {
     const opt = (await within(panel()).findByRole("button", { name: "5174" })) as HTMLButtonElement;
     await waitFor(() => expect(opt.title).toBe(FLIGHT_STOPPED));
     expect(opt.disabled).toBe(true);
+    openConversation();
     expect(
-      (within(panel()).getByRole("button", { name: "Reply" }) as HTMLButtonElement).disabled,
+      (within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 
@@ -433,6 +424,41 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     expect((await screen.findByRole("alert")).textContent).toBe("no such open note");
     expect(document.querySelector("#discuss")).toBeTruthy();
+  });
+
+  it.each([false, true])(
+    "sends a typed FLIGHT answer with brief=%s through sendAnswer",
+    async (hasBrief) => {
+      const current = {
+        ...SEAT_Q,
+        agentId: "flight-1",
+        brief: hasBrief ? SEAT_Q.brief : undefined,
+      };
+      const fn = acting([current]);
+      const input = await screen.findByLabelText("Reply, or ask FLIGHT about this");
+      await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false));
+      fireEvent.change(input, { target: { value: "  Use my custom answer  " } });
+      fireEvent.click(await enabled("Reply"));
+      await waitFor(() =>
+        expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
+          { text: `Re: ${current.key} · ${current.text}\n\nUse my custom answer` },
+        ]),
+      );
+      expect(posts(fn, discussionPath(current.key))).toEqual([]);
+      await waitFor(() => expect((input as HTMLInputElement).value).toBe(""));
+    },
+  );
+
+  it("sends legacy person options through sendAnswer", async () => {
+    const current = { ...SEAT_Q, kind: "person" as const, agentId: "flight-1" };
+    const fn = acting([current]);
+    fireEvent.click(await enabled("5174"));
+    await waitFor(() =>
+      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
+        { text: `Re: ${current.key} · ${current.text}\n\nUse port 5174.` },
+      ]),
+    );
+    expect(posts(fn, discussionPath(current.key))).toEqual([]);
   });
 
   it("an item without a brief still offers Reply, Ask FLIGHT and Dismiss", async () => {
@@ -550,7 +576,7 @@ describe("ItemPanel, other items", () => {
     const plain = "Edited __init__.py and a*b, step 1. then - done; snake_case.";
     open([item({ kind: "error", escalationId: null, url: null, text: plain })]);
     await screen.findByText(plain);
-    expect(document.querySelector("#dsBrief .qtext")?.textContent).toBe(plain);
+    expect(document.querySelector("#dsBrief .md")?.textContent).toBe(plain);
   });
 
   it("never links a URL that is not GitHub", async () => {
@@ -890,10 +916,10 @@ describe("ItemPanel, person variant", () => {
     });
     render(<ItemPanel />);
     act(() => openItem(KEY));
-    await screen.findByText("The message");
+    await screen.findByText("can you look?");
     expect(screen.getByText("Asked of you")).toBeTruthy();
     expect(screen.getByText("alice")).toBeTruthy();
-    expect(screen.getByText("Catch-up")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "The question" })).toBeTruthy();
     expect(screen.getByText("can you look?")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open in GitHub ↗" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Mark handled" }));
@@ -929,7 +955,7 @@ describe("ItemPanel, person variant", () => {
     });
     render(<ItemPanel />);
     act(() => openItem(KEY));
-    await screen.findByText("The message");
+    await screen.findByText("can you look?");
     fireEvent.click(screen.getByRole("button", { name: "Mark handled" }));
     await waitFor(() =>
       expect(document.querySelector("#dsPerson")?.textContent).toBe("Handled: marked handled"),
@@ -958,7 +984,7 @@ describe("ItemPanel, person variant", () => {
     });
     render(<ItemPanel />);
     act(() => openItem(KEY));
-    await screen.findByText("The message");
+    await screen.findByText("can you look?");
     items.length = 0;
     act(() => hub.refetch(RESOURCES.attention.path));
     await screen.findByText("No longer open");
@@ -975,7 +1001,9 @@ describe("ItemPanel, person variant", () => {
     });
     render(<ItemPanel />);
     act(() => openItem(KEY));
-    await screen.findByText("The message");
+    await waitFor(() =>
+      expect(document.querySelector("#discuss blockquote")?.textContent).toBe(snippet),
+    );
     const quote = document.querySelector("#discuss blockquote") as HTMLElement;
     expect(quote.textContent).toBe(snippet);
     expect([...quote.querySelectorAll(".mention")].map((el) => el.textContent)).toEqual([
@@ -988,7 +1016,7 @@ describe("ItemPanel, person variant", () => {
 
   it("a refused Mark handled shows the server's error in the panel", async () => {
     openPerson(() => ({ status: 404, body: { error: "no such open thread" } }));
-    await screen.findByText("The message");
+    await screen.findByText("can you look?");
     fireEvent.click(screen.getByRole("button", { name: "Mark handled" }));
     expect((await screen.findByRole("alert")).textContent).toBe("no such open thread");
     expect(document.querySelector("#discuss")).not.toBeNull();
@@ -1011,7 +1039,7 @@ describe("ItemPanel choice state", () => {
     expect((choice as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "5180" }) as HTMLButtonElement).disabled).toBe(true);
   });
-  it("uses primary approval buttons and the catalogue call label", async () => {
+  it("uses option cards and the shared answer heading for approvals", async () => {
     const approval = { ...SEAT_Q, kind: "approval" as const };
     stubFetch({
       "/api/attention": [approval],
@@ -1019,8 +1047,9 @@ describe("ItemPanel choice state", () => {
     });
     render(<ItemPanel />);
     act(() => openItem(approval.key));
-    await screen.findByText("Your call:");
-    expect(screen.getByRole("button", { name: "5174" }).classList.contains("primary")).toBe(true);
+    await screen.findByRole("heading", { name: "Your answer" });
+    expect(screen.getByRole("button", { name: "5174" }).closest(".opt")).toBeTruthy();
+    // A brief with no checked sources shows no empty "What FLIGHT checked" heading.
     expect(screen.queryByText("What FLIGHT checked")).toBeNull();
   });
 });
@@ -1088,6 +1117,7 @@ describe("ItemPanel item chat isolation", () => {
       openItem(a.key);
     });
     await screen.findByText("No messages yet.");
+    openConversation();
     fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
       target: { value: "Why this port?" },
     });
@@ -1095,6 +1125,7 @@ describe("ItemPanel item chat isolation", () => {
     await screen.findByText("Why this port?");
     act(() => openItem(b.key));
     await screen.findByText("No messages yet.");
+    openConversation();
     expect(screen.queryByText("Why this port?")).toBeNull();
     first.messages.push({
       id: "reply",
@@ -1143,6 +1174,7 @@ it("retains the brief and choices while sending, and a late failure stays with i
   render(<ItemPanel />);
   act(() => openItem(a.key));
   await screen.findByText("No messages yet.");
+  openConversation();
   fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
     target: { value: "Check the evidence" },
   });
@@ -1154,6 +1186,7 @@ it("retains the brief and choices while sending, and a late failure stays with i
   expect(screen.getByRole("button", { name: "5174" })).toBeTruthy();
   act(() => openItem(b.key));
   await screen.findByText("No messages yet.");
+  openConversation();
   const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "A different question" } });
   await act(async () =>
@@ -1186,6 +1219,7 @@ it("sends a FLIGHT choice through the item discussion without opening the dock",
     openItem(q.key);
   });
   await screen.findByText("No messages yet.");
+  openConversation();
   fireEvent.click(screen.getByRole("button", { name: "5174" }));
   await waitFor(() =>
     expect(fn).toHaveBeenCalledWith(
@@ -1238,6 +1272,7 @@ it.each(["offline", "load failed", "echo failed"])(
     act(() => openItem(SEAT_Q.key));
     if (mode === "load failed") await screen.findByText("Discussion unavailable");
     else await screen.findByText("No messages yet.");
+    openConversation();
     fireEvent.click(screen.getByRole("button", { name: "5174" }));
     await screen.findByText("You chose:");
     const log = within(screen.getByRole("log", { name: "Item discussion" }));
@@ -1260,3 +1295,173 @@ it.each(["offline", "load failed", "echo failed"])(
     ).toHaveLength(1);
   },
 );
+
+describe("Needs-you brief layout", () => {
+  const full = brief({
+    original: "The original item, in full",
+    assessment: "The evidence supports option A",
+    did: [{ action: "Checked the latest run", refs: ["run:42"] }],
+    ask: "Choose the next step",
+    basis: "The run and the source",
+    recommendedOptionId: "a",
+    recommendation: "Option A is recommended because ".repeat(20),
+    options: [{ id: "a", label: "A", answer: "Proceed with A" }],
+  });
+
+  it.each(["question", "decision", "pr", "approval", "blocked", "person"] as const)(
+    "shows the full sections in order for %s items",
+    async (kind) => {
+      const current = { ...SEAT_Q, kind, brief: full };
+      stubFetch({
+        "/api/attention": [current],
+        "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+      });
+      render(<ItemPanel />);
+      act(() => openItem(current.key));
+      await screen.findByText(full.original as string);
+      expect(screen.getAllByRole("heading", { level: 3 }).map((el) => el.textContent)).toEqual([
+        "The question",
+        "FLIGHT's view",
+        "What FLIGHT did",
+        "What FLIGHT needs from you",
+        "Your answer",
+      ]);
+      expect(screen.getByText(`checked: ${full.basis}`)).toBeTruthy();
+      expect(document.querySelector(".opt.rec")?.textContent).toContain(full.recommendation);
+      expect(screen.getByRole("button", { name: "A" })).toBeTruthy();
+      expect(screen.getByText("Conversation with FLIGHT").closest("details")?.open).toBe(false);
+    },
+  );
+
+  it.each(["question", "person"] as const)(
+    "focuses the conversation without options for %s",
+    async (kind) => {
+      const current = { ...SEAT_Q, kind, brief: { ...full, options: [], did: [] } };
+      stubFetch({
+        "/api/attention": [current],
+        "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+      });
+      render(<ItemPanel />);
+      act(() => openItem(current.key));
+      const input = await screen.findByRole("textbox", { name: "Ask FLIGHT about this" });
+      await waitFor(() => expect(document.activeElement).toBe(input));
+      expect(screen.queryByRole("heading", { name: "What FLIGHT did" })).toBeNull();
+    },
+  );
+});
+
+it("keeps focus out of a folded conversation and returns it to the opener", async () => {
+  const opener = document.createElement("button");
+  document.body.append(opener);
+  opener.focus();
+  stubFetch({
+    "/api/attention": [SEAT_Q],
+    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+  });
+  render(<ItemPanel />);
+  act(() => openItem(SEAT_Q.key));
+  const summary = await screen.findByText("Conversation with FLIGHT");
+  const first = screen.getByRole("button", { name: "Dismiss" });
+  first.focus();
+  fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+  expect(document.activeElement).toBe(summary);
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(document.activeElement).toBe(opener);
+  opener.remove();
+});
+
+it("returns focus after opening a cached item directly into its conversation", async () => {
+  const current = { ...SEAT_Q, brief: brief({ options: [] }) };
+  stubFetch({
+    "/api/attention": [current],
+    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+  });
+  render(<ItemPanel />);
+  act(() => openItem(current.key));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this")),
+  );
+  act(() => closeItem());
+  const opener = document.createElement("button");
+  document.body.append(opener);
+  opener.focus();
+  act(() => openItem(current.key));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this")),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(document.activeElement).toBe(opener);
+  opener.remove();
+});
+
+it.each([QUESTION, null])(
+  "renders the loaded escalation and issue body even with brief.original (%s)",
+  async (question) => {
+    const current = item({ brief: brief({ original: "Title and raw JSON", options: [] }) });
+    stubFetch({
+      "/api/attention": [current],
+      "/api/escalations": [escalation({ question })],
+      "/api/boards/shop-app/items/4001": { body: "The full issue body", bodyTruncated: false },
+    });
+    render(<ItemPanel />);
+    act(() => openItem(current.key));
+    await screen.findByText("Choose a cache eviction policy");
+    expect(screen.queryByText("Title and raw JSON")).toBeNull();
+    if (question) {
+      for (const text of [
+        QUESTION.question,
+        "What is being asked",
+        "Why it came to you",
+        "Effort so far",
+        "If nobody answers",
+        "Recommended",
+      ])
+        expect(screen.getByText(text)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Show more, the issue's text" }));
+    }
+    expect(await screen.findByText("The full issue body")).toBeTruthy();
+  },
+);
+
+it("retains agent and GitHub links when using brief.original", async () => {
+  const current = { ...SEAT_Q, url: URL, brief: brief({ original: "Brief source text" }) };
+  open([current]);
+  await screen.findByText("Brief source text");
+  for (const name of ["Open mc-dev-1", "Open on GitHub ↗"]) {
+    const link = screen.getByRole("link", { name });
+    expect(link.closest(".brief-section")?.querySelector("h3")?.textContent).toBe("The question");
+    expect(link.closest(".expandable")).toBeNull();
+  }
+});
+
+it("keeps a loaded thread's title, message and link when brief.original is set", async () => {
+  const current = { ...personItem, brief: brief({ original: "Brief source text", options: [] }) };
+  stubFetch({
+    "/api/attention": [current],
+    "/api/notifications": { open: [thread()], handledToday: [] },
+  });
+  render(<ItemPanel />);
+  act(() => openItem(current.key));
+  await screen.findByText("can you look?");
+  expect(screen.getByText("Fix the stop race")).toBeTruthy();
+  expect(screen.queryByText("Brief source text")).toBeNull();
+  expect(screen.getByRole("link", { name: "Open in GitHub ↗" }).closest(".expandable")).toBeNull();
+});
+
+it("shows the recommendation under Your answer without any options", async () => {
+  const current = {
+    ...SEAT_Q,
+    brief: brief({
+      options: [],
+      ask: "Give your answer",
+      recommendation: "The recommended approach",
+    }),
+  };
+  open([current]);
+  const recommendation = await screen.findByText("The recommended approach");
+  const answer = screen.getByRole("heading", { name: "Your answer" });
+  expect(
+    answer.compareDocumentPosition(recommendation) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(recommendation.closest(".recommendation")).toBeTruthy();
+});

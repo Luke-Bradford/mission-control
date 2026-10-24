@@ -11,7 +11,14 @@ import {
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answer.ts";
-import { BriefOptions, ItemBrief, PersonChoices, PersonStory } from "../comms/ItemBrief.tsx";
+import {
+  BRIEF_FOLD_AFTER,
+  BRIEF_LINES,
+  BriefOptions,
+  ItemBrief,
+  PersonChoices,
+  Recommendation,
+} from "../comms/ItemBrief.tsx";
 import { ItemDiscussion } from "../comms/ItemDiscussion.tsx";
 import { MentionText } from "../comms/messages.tsx";
 import { Expandable, Toggle } from "../components/Expandable.tsx";
@@ -21,7 +28,6 @@ import { hub, RESOURCES, useResource } from "../data.ts";
 import { flightOffText } from "../flight/flightTypes.ts";
 import { dayMonth, hhmm, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
-import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import {
   CATCH_UP_LABEL,
@@ -33,19 +39,12 @@ import {
 } from "../notifications.ts";
 import { agentPath, followLink } from "../router.ts";
 import { BuildChips } from "./buildStatus.tsx";
-import { closeItem, trapTab, useItem, useOverlay, useReturnFocus } from "./overlays.ts";
+import { closeItem, openItem, trapTab, useItem, useOverlay, useReturnFocus } from "./overlays.ts";
 import { toast } from "./Toast.tsx";
 
-/** An escalation opened less than this long ago is New, an older one a Follow-up. */
-const NEW_MS = 24 * 3_600_000;
-
-/** The initial rendered height of the issue body, in lines. */
-export const BODY_LINES = 40;
-
 /**
- * The Item panel (catalogue §2.9.1): a 540px fly-out for one thing that needs the operator. An escalation
- * shows the loop's question, its reasoning and its options (all inert text), and sends the answer
- * to GitHub. Item discussion uses its own persisted history.
+ * A 540px fly-out for one thing that needs the operator. Every item uses the same brief sections;
+ * escalations retain their GitHub reply link. Item discussion uses its own persisted history.
  */
 export function ItemPanel() {
   const key = useItem();
@@ -89,9 +88,8 @@ export function ItemPanel() {
   const close = useRef<HTMLButtonElement>(null);
   const activeKey = useRef(key);
   activeKey.current = key;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset the composer when its item changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset action state when its item changes
   useEffect(() => {
-    if (!currentItem || currentItem.kind === "person") return;
     setText("");
     setBusy(false);
     setErr(null);
@@ -117,7 +115,7 @@ export function ItemPanel() {
     setBusy(true);
     setErr(null);
     const failed = await run();
-    if (item?.kind !== "person" && activeKey.current !== key) return;
+    if (activeKey.current !== key) return;
     setBusy(false);
     if (failed === null) done?.();
     else setErr(failed);
@@ -125,17 +123,9 @@ export function ItemPanel() {
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
     const body = text.trim();
-    if (!item || !target || body === "" || !replyOk) return;
+    if (!item || !target || !body || !replyOk || busy) return;
     void act(
       () => sendAnswer(target, seat, item, about, body),
-      () => setText(""),
-    );
-  };
-  const ask = () => {
-    const body = text.trim();
-    if (!item || body === "") return;
-    void act(
-      () => sendAnswer({ to: "flight" }, seat, item, about, body),
       () => setText(""),
     );
   };
@@ -202,7 +192,7 @@ export function ItemPanel() {
   const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
   const handledHow = handled?.how ?? justHandled[key];
   const flightTitle = live ? undefined : flightOffText(seat);
-  const options = item?.brief?.options ?? [];
+  const options = item?.brief?.person ? [] : (item?.brief?.options ?? []);
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
   return (
@@ -252,156 +242,148 @@ export function ItemPanel() {
             </button>
           </span>
         </div>
-        <div className="pb" id="dsBrief">
-          {!item || holding ? (
-            <p className="note">
-              {items === undefined || item ? "Loading…" : "This item is no longer open."}
-            </p>
-          ) : (
-            <>
-              {item.brief && !item.brief.person && (
-                <ItemBrief brief={item.brief} approval={item.kind === "approval"} />
-              )}
-              {esc ? (
-                <EscalationBrief esc={esc} tz={tz} now={now} hasBrief={Boolean(item.brief)} />
-              ) : thread ? (
-                item.brief?.person ? (
-                  <PersonStory
-                    brief={item.brief}
-                    items={items ?? []}
-                    tz={tz}
-                    now={now}
-                    thread={thread}
-                  />
-                ) : (
-                  <PersonBrief thread={thread} tz={tz} />
-                )
-              ) : item.kind === "person" ? (
-                <p className="note">
-                  {notesRes.error
-                    ? `Could not load the message: ${notesRes.error.message}`
-                    : notes === undefined
-                      ? "Loading the message…"
-                      : "This message is no longer open."}
-                </p>
-              ) : (
-                <div className="brief">
-                  <div className="s qtext">
-                    <Markdown text={item.text} />
-                  </div>
-                  <div className="row">
-                    {agentId !== null && (
-                      <a
-                        href={agentPath(agentId)}
-                        onClick={(e) => followLink(e, agentPath(agentId))}
-                      >
-                        Open {agentId}
-                      </a>
-                    )}
-                    {item.url && <ExternalLink url={item.url}>Open on GitHub ↗</ExternalLink>}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        {item && !item.brief?.person && !holding && (esc || options.length > 0) && (
-          <div className="composer" id="dsOpts">
-            {options.length > 0 && (
-              <>
-                <div className="bsec">{item.kind === "approval" ? "Your call:" : "Options"}</div>
-                {chosen[key] && (
-                  <p>
-                    You chose: <b>{chosen[key]}</b>
-                  </p>
-                )}
-                <BriefOptions
-                  options={options}
-                  recommendedOptionId={
-                    item.kind === "person" ? undefined : item.brief?.recommendedOptionId
-                  }
-                  live={target?.to !== "github"}
-                  disabled={busy || !replyOk || (item.kind !== "person" && Boolean(chosen[key]))}
-                  title={target?.to === "flight" ? flightTitle : undefined}
-                  variant={item.kind === "approval" ? "row" : "panel"}
-                  primaryFirst={item.kind === "approval"}
-                  onPick={pick}
-                />
-              </>
-            )}
-            {esc?.question && (item.kind === "person" || options.length === 0) && (
-              <div className="optlist">
-                {esc.question.answers.map((a, i) => (
-                  <div
-                    className={a === esc.question?.recommendation ? "opt rec" : "opt"}
-                    // Answers can repeat, so the text is no key; the list never reorders.
-                    // biome-ignore lint/suspicious/noArrayIndexKey: position is the only id, see above
-                    key={i}
-                  >
-                    <span className="row">
-                      <b className="qtext">
-                        <MarkdownInline text={a} />
-                      </b>
-                      {a === esc.question?.recommendation && <Pill tone="plain">Recommended</Pill>}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {esc && (
-              <div className="row">
-                <ExternalLink url={esc.url}>Reply on GitHub ↗</ExternalLink>
-              </div>
-            )}
-          </div>
-        )}
-        {item?.brief?.person && <PersonChoices key={item.key} item={item} thread={thread} />}
-        {item?.kind === "person" && !item.brief?.person && !holding && (
-          <div className="composer" id="dsPerson">
-            {handledHow ? (
-              <span>
-                Handled: <b>{handledHow}</b>
-              </span>
-            ) : !currentItem ? (
-              <span>No longer open</span>
+        <div className="item-body">
+          <div className="pb" id="dsBrief">
+            {!item || holding ? (
+              <p className="note">
+                {items === undefined || item ? "Loading…" : "This item is no longer open."}
+              </p>
             ) : (
-              <button
-                type="button"
-                className="primary"
-                disabled={busy}
-                onClick={() =>
-                  void act(
-                    () => markHandled(item.key),
-                    () => setJustHandled((prev) => ({ ...prev, [item.key]: "marked handled" })),
+              <ItemBrief
+                key={item.key}
+                brief={item.brief}
+                original={
+                  esc || thread || !item.brief?.original ? (
+                    <OriginalItem item={item} esc={esc} thread={thread} tz={tz} now={now} />
+                  ) : undefined
+                }
+                catchUp={
+                  esc || thread ? (
+                    <SourceCatchUp
+                      esc={esc}
+                      thread={thread}
+                      tz={tz}
+                      now={now}
+                      hasBrief={Boolean(item.brief)}
+                    />
+                  ) : undefined
+                }
+                afterOriginal={
+                  <>
+                    {esc && <IssueBody key={esc.id} esc={esc} folded={Boolean(esc.question)} />}
+                    {item.kind === "person" && !thread && (
+                      <p className="note">
+                        {notesRes.error
+                          ? `Could not load the message: ${notesRes.error.message}`
+                          : notes === undefined
+                            ? "Loading the message…"
+                            : "This message is no longer open."}
+                      </p>
+                    )}
+                  </>
+                }
+                links={<OriginalLinks item={item} thread={thread} />}
+                viewLinks={
+                  item.brief?.person && (
+                    <div className="row">
+                      {item.brief.person.related?.map((ref, i) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: references remain in source order
+                        <span className="chipref" key={i}>
+                          {ref.url ? (
+                            <ExternalLink url={ref.url}>{ref.label}</ExternalLink>
+                          ) : (
+                            ref.label
+                          )}
+                        </span>
+                      ))}
+                      {item.brief.person.decisionKey &&
+                        items?.some((i) => i.key === item.brief?.person?.decisionKey) && (
+                          <button
+                            type="button"
+                            className="sm"
+                            onClick={() => openItem(item.brief?.person?.decisionKey as string)}
+                          >
+                            Open the related decision
+                          </button>
+                        )}
+                    </div>
                   )
                 }
-              >
-                Mark handled
-              </button>
+              />
             )}
           </div>
-        )}
-        {item && item.kind !== "person" && !holding && (
-          <ItemDiscussion
-            itemKey={item.key}
-            live={live}
-            title={flightTitle}
-            receipt={receipts[item.key]}
-          />
-        )}
-        {(target?.to !== "github" || item?.kind === "person") && (
-          <form className="composer" id="dsForm" onSubmit={submit}>
-            <input
-              id="dsInput"
-              autoComplete="off"
-              aria-label="Reply, or ask FLIGHT about this"
-              placeholder="Reply, or ask FLIGHT about this…"
-              title={!replyOk && !live ? flightOffText(seat) : undefined}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              disabled={!replyOk && !live}
-            />
-            {target?.to !== "github" && (
+          {item?.brief && !holding && <h3 className="bsec answer-heading">Your answer</h3>}
+          {item?.brief && options.length === 0 && !holding && (
+            <div className="composer">
+              <Recommendation text={item.brief.recommendation} />
+            </div>
+          )}
+          {item && !item.brief?.person && !holding && (esc || options.length > 0) && (
+            <div className="composer" id="dsOpts">
+              {options.length > 0 && (
+                <>
+                  {chosen[key] && (
+                    <p>
+                      You chose: <b>{chosen[key]}</b>
+                    </p>
+                  )}
+                  <BriefOptions
+                    options={options}
+                    recommendedOptionId={item.brief?.recommendedOptionId}
+                    recommendation={item.brief?.recommendation}
+                    live={target?.to !== "github"}
+                    disabled={busy || !replyOk || Boolean(chosen[key])}
+                    title={target?.to === "flight" ? flightTitle : undefined}
+                    variant="panel"
+                    onPick={pick}
+                  />
+                </>
+              )}
+              {esc && (
+                <div className="row">
+                  <ExternalLink url={esc.url}>Reply on GitHub ↗</ExternalLink>
+                </div>
+              )}
+            </div>
+          )}
+          {item?.brief?.person && <PersonChoices key={item.key} item={item} thread={thread} />}
+          {item?.kind === "person" && !item.brief?.person && !holding && (
+            <div className="composer" id="dsPerson">
+              {handledHow ? (
+                <span>
+                  Handled: <b>{handledHow}</b>
+                </span>
+              ) : !currentItem ? (
+                <span>No longer open</span>
+              ) : (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy}
+                  onClick={() =>
+                    void act(
+                      () => markHandled(item.key),
+                      () => setJustHandled((prev) => ({ ...prev, [item.key]: "marked handled" })),
+                    )
+                  }
+                >
+                  Mark handled
+                </button>
+              )}
+            </div>
+          )}
+          {item && !holding && (target?.to === "seat" || target?.to === "flight") && (
+            <form className="composer" id="dsForm" onSubmit={submit}>
+              <input
+                id="dsInput"
+                autoComplete="off"
+                aria-label="Reply, or ask FLIGHT about this"
+                placeholder="Type your answer…"
+                title={!replyOk ? flightTitle : undefined}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                disabled={!replyOk || busy}
+              />
               <button
                 type="submit"
                 className="primary"
@@ -410,96 +392,162 @@ export function ItemPanel() {
               >
                 Reply
               </button>
-            )}
-            {item?.kind === "person" && (
-              <button type="button" title={flightTitle} disabled={!live || busy} onClick={ask}>
-                Ask FLIGHT
-              </button>
-            )}
-            {item?.kind === "person" && err !== null && (
-              <p className="note err" role="alert">
-                {err}
-              </p>
-            )}
-          </form>
-        )}
-        {item?.kind !== "person" && err !== null && (
-          <p className="note err" role="alert">
-            {err}
-          </p>
-        )}
+            </form>
+          )}
+          {item && !holding && (
+            <ItemDiscussion
+              itemKey={item.key}
+              live={live}
+              title={flightTitle}
+              receipt={receipts[item.key]}
+              focus={options.length === 0 && !item.brief?.person?.replies?.length}
+              collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
+            />
+          )}
+          {err !== null && (
+            <p className="note err" role="alert">
+              {err}
+            </p>
+          )}
+        </div>
       </div>
     </aside>
   );
 }
 
-function PersonBrief({
+function OriginalItem({
+  item,
+  esc,
   thread,
   tz,
-  source,
+  now,
 }: {
-  thread: PersonThreadView;
+  item: AttentionItem;
+  esc?: Escalation;
+  thread?: PersonThreadView;
   tz: string | null;
-  source?: "github" | "teams";
+  now: number;
 }) {
-  const tone = thread.catchUp === "new" ? "plain" : "warn";
+  if (esc) {
+    const q = esc.question;
+    return (
+      <>
+        <b className="btitle qtext">
+          <MarkdownInline text={esc.title} />
+        </b>
+        {q && (
+          <>
+            <div className="bsec">What is being asked</div>
+            <Markdown text={q.question} />
+            <div className="bsec">Why it came to you</div>
+            <Markdown text={q.reasoning_quote} />
+            <div className="bsec">Effort so far</div>
+            <Markdown text={q.effort_sunk} />
+            <div className="bsec">If nobody answers</div>
+            <Markdown text={q.default_if_ignored} />
+            <ul className="source-answers">
+              {q.answers.map((answer, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: answers remain in source order
+                <li key={i}>
+                  <span className="qtext">
+                    <MarkdownInline text={answer} />
+                  </span>
+                  {answer === q.recommendation && <span className="pill plain">Recommended</span>}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </>
+    );
+  }
   return (
-    <div className="brief">
-      <div className="ctx">
-        <span className="bsec">Catch-up</span>
-        <div className="ctxline">
-          <Pill tone={tone}>{CATCH_UP_LABEL[thread.catchUp]}</Pill>
-          <span>
-            {thread.reasonText} · first seen {tz ? dayMonth(thread.firstSeenAt, tz) : "—"}
-          </span>
-        </div>
-      </div>
-      <b className="btitle qtext">{thread.title}</b>
-      {thread.snippet !== null && (
+    <>
+      {thread ? (
         <>
+          {Boolean((item.brief?.person?.history ?? thread.history)?.length) && (
+            <>
+              <div className="bsec">Earlier in the thread</div>
+              {(item.brief?.person?.history ?? thread.history ?? []).map((message) => (
+                <p className="s qtext" key={message.source.messageId}>
+                  <b>{message.author ?? "Someone"}</b> · {tz ? rel(message.at, now, tz) : "—"} ·{" "}
+                  <span>{message.text}</span>
+                </p>
+              ))}
+            </>
+          )}
+          <b className="btitle qtext">{thread.title}</b>
           <div className="bsec">The message</div>
           <blockquote className="s qtext">
-            <MentionText text={thread.snippet} />
+            <MentionText text={thread.message?.text ?? thread.snippet ?? item.text} />
           </blockquote>
         </>
+      ) : (
+        <Markdown text={item.text} />
       )}
-      <div className="row">
-        <ExternalLink url={thread.message?.url ?? thread.url}>
-          Open in {source === "teams" ? "Teams" : "GitHub"} ↗
-        </ExternalLink>
-      </div>
+    </>
+  );
+}
+
+function OriginalLinks({ item, thread }: { item: AttentionItem; thread?: PersonThreadView }) {
+  return (
+    <div className="row">
+      {item.agentId !== null && (
+        <a
+          href={agentPath(item.agentId)}
+          onClick={(e) => followLink(e, agentPath(item.agentId as string))}
+        >
+          Open {item.agentId}
+        </a>
+      )}
+      {thread
+        ? !item.brief?.person && (
+            <ExternalLink url={thread.message?.url ?? thread.url}>
+              Open in {item.brief?.person?.source.kind === "teams" ? "Teams" : "GitHub"} ↗
+            </ExternalLink>
+          )
+        : item.url && <ExternalLink url={item.url}>Open on GitHub ↗</ExternalLink>}
     </div>
   );
 }
 
-function EscalationBrief({
+function SourceCatchUp({
   esc,
+  thread,
   tz,
   now,
   hasBrief,
 }: {
-  esc: Escalation;
+  esc?: Escalation;
+  thread?: PersonThreadView;
   tz: string | null;
   now: number;
   hasBrief: boolean;
 }) {
-  const fresh = now - esc.openedAt < NEW_MS;
-  const q = esc.question;
+  if (!esc && !thread) return null;
+  const kind =
+    thread?.catchUp ?? (esc && now - esc.openedAt < 24 * 3_600_000 ? "new" : "follow-up");
   return (
-    <div className="brief">
-      {!hasBrief && (
-        <div className="ctx">
-          <span className="bsec">Catch-up</span>
-          <div className="ctxline">
-            <Pill tone={fresh ? "plain" : "warn"}>{fresh ? "New" : "Follow-up"}</Pill>
-            <span>
-              Opened {tz ? dayMonth(esc.openedAt, tz) : "—"} on{" "}
-              <RepoRef repoId={esc.repoId} number={esc.issueNumber} url={esc.url} />
-            </span>
-          </div>
-        </div>
-      )}
-      {!hasBrief && (
+    <div className="ctx">
+      <div className="bsec">Catch-up</div>
+      <div className="ctxline">
+        <span className={`pill ${kind === "new" ? "plain" : "warn"}`}>{CATCH_UP_LABEL[kind]}</span>
+        <span>
+          {thread ? (
+            <>
+              {thread.reasonText} · first seen {tz ? dayMonth(thread.firstSeenAt, tz) : "—"}
+            </>
+          ) : (
+            esc && (
+              <>
+                Opened {tz ? dayMonth(esc.openedAt, tz) : "—"} on{" "}
+                <RepoRef repoId={esc.repoId} number={esc.issueNumber} url={esc.url} />
+              </>
+            )
+          )}
+        </span>
+      </div>
+      {esc && !hasBrief && (
         <>
           <div className="bsec">So far</div>
           <p className="note">Catch-up unavailable.</p>
@@ -509,38 +557,13 @@ function EscalationBrief({
           <p className="note">Checked sources unavailable.</p>
         </>
       )}
-      <b className="btitle qtext">
-        <MarkdownInline text={esc.title} />
-      </b>
-      {!q && <IssueBody key={esc.id} esc={esc} />}
-      {q && (
-        <>
-          <div className="bsec">What is being asked</div>
-          <div className="s qtext">
-            <Markdown text={q.question} />
-          </div>
-          <div className="bsec">Why it came to you</div>
-          <div className="s fg2 qtext">
-            <Markdown text={q.reasoning_quote} />
-          </div>
-          <div className="bsec">Effort so far</div>
-          <div className="s fg2 qtext">
-            <Markdown text={q.effort_sunk} />
-          </div>
-          <div className="bsec">If nobody answers</div>
-          <div className="s fg2 qtext">
-            <Markdown text={q.default_if_ignored} />
-          </div>
-          <IssueBody key={esc.id} esc={esc} folded />
-        </>
-      )}
     </div>
   );
 }
 
 /**
  * The question's own text: the escalation's issue body, from the ticket resource. With no
- * structured question it shows at once (clamped to BODY_LINES); with one it stays folded until asked
+ * structured question it shows at once; with one it stays folded until asked
  * for, and is not fetched before. Once asked for it stays subscribed, so hiding and showing it
  * again makes no new request. The caller keys it on the escalation, so no state carries over.
  */
@@ -572,7 +595,7 @@ function IssueBody({ esc, folded = false }: { esc: Escalation; folded?: boolean 
             {folded ? (
               <Markdown text={body} />
             ) : (
-              <Expandable lines={BODY_LINES}>
+              <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of="the issue's text">
                 <Markdown text={body} />
               </Expandable>
             )}

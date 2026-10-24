@@ -3,8 +3,9 @@ import { join } from "node:path";
 import type { AutonomyQuestion } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BRIEF_LINES as BODY_LINES, BRIEF_FOLD_AFTER } from "../src/comms/ItemBrief.tsx";
 import { TicketDetail } from "../src/components/TicketDetail.tsx";
-import { BODY_LINES, ItemPanel } from "../src/shell/ItemPanel.tsx";
+import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, crewRow, escalation, item, NOW } from "./fixtures.ts";
@@ -83,7 +84,7 @@ beforeEach(() => {
   ) {
     return this.textContent?.match(/line \d+/g)?.length ?? 0;
   });
-  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(BODY_LINES);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(BRIEF_FOLD_AFTER);
 });
 afterEach(() => {
   cleanup();
@@ -99,7 +100,7 @@ describe("Item panel: the question's own text", () => {
     const body = container.querySelector("#dsBrief .md") as HTMLElement;
     expect(body.querySelector("strong")?.textContent).toBe("now");
     expect(body.querySelector("code")?.textContent).toBe("--force");
-    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more, the issue's text" })).toBeNull();
   });
 
   it("says Loading… while the body is on its way", async () => {
@@ -120,20 +121,24 @@ describe("Item panel: the question's own text", () => {
 
   it("cuts a body over the limit and shows the rest on Show more, then Show less", async () => {
     const { container } = open(ticketView(lines(BODY_LINES + 20)));
-    await screen.findByRole("button", { name: "Show more" });
+    await screen.findByRole("button", { name: "Show more, the issue's text" });
     expect(bodyText(container)).toContain(`line ${BODY_LINES}`);
     expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
     expect(container.querySelector("#dsBrief .expandable.open")).toBeNull();
-    const content = container.querySelector("#dsBrief .expandable-content") as HTMLElement;
+    const content = container
+      .querySelector("#dsBrief .md")
+      ?.closest(".expandable-content") as HTMLElement;
     expect(content.classList.contains("expandable-text")).toBe(true);
     expect(content.style.webkitLineClamp).toBe(String(BODY_LINES));
-    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show more, the issue's text" }));
     expect(content.style.webkitLineClamp).toBe("unset");
     expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
-    expect(screen.getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe(
-      "true",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(
+      screen
+        .getByRole("button", { name: "Show less, the issue's text" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Show less, the issue's text" }));
     expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
     expect(container.querySelector("#dsBrief .expandable.open")).toBeNull();
   });
@@ -142,7 +147,7 @@ describe("Item panel: the question's own text", () => {
     const { container } = open(ticketView(lines(BODY_LINES)));
     await screen.findByText(new RegExp(`line ${BODY_LINES}`));
     expect(bodyText(container)).toContain(`line ${BODY_LINES}`);
-    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more, the issue's text" })).toBeNull();
   });
 
   it("links to GitHub to continue a truncated body", async () => {
@@ -166,12 +171,12 @@ describe("Item panel: the question's own text", () => {
   });
 
   it("shows the whole folded body after opening without a second disclosure", async () => {
-    const { container } = open(ticketView(lines(BODY_LINES + 20)), { question: QUESTION });
+    open(ticketView(lines(BODY_LINES + 20)), { question: QUESTION });
     fireEvent.click(await screen.findByRole("button", { name: "Show more, the issue's text" }));
     const body = await screen.findByText(new RegExp(`line ${BODY_LINES + 20}`));
     expect(body.textContent).toContain(`line ${BODY_LINES + 20}`);
-    expect(container.querySelector("#dsBrief .expandable")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    expect(body.closest(".expandable")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more, the issue's text" })).toBeNull();
   });
 
   it("makes one request across three toggles", async () => {
@@ -187,11 +192,11 @@ describe("Item panel: the question's own text", () => {
 
   it("does not carry Show more from one item to the next (no structured question)", async () => {
     const { container } = open(ticketView(lines(60)));
-    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show more, the issue's text" }));
     expect(bodyText(container)).toContain("line 60");
     act(() => openItem("esc:shop-app#4002"));
     await screen.findByText("Second");
-    await screen.findByRole("button", { name: "Show more" });
+    await screen.findByRole("button", { name: "Show more, the issue's text" });
     expect(bodyText(container)).toContain(`line ${BODY_LINES + 20}`);
     expect(container.querySelector("#dsBrief .expandable.open")).toBeNull();
   });
@@ -213,7 +218,7 @@ describe("Item panel: the question's own text", () => {
     const { container } = open(ticketView("b"), { question: QUESTION, title: "Cutover **now**" });
     await screen.findByText("Which policy?");
     expect(container.querySelector(".btitle strong")?.textContent).toBe("now");
-    expect(container.querySelector(".optlist .opt.rec strong")?.textContent).toBe("now");
+    expect(container.querySelector(".source-answers strong")?.textContent).toBe("now");
   });
 
   it("keeps the title and the answers to one line: a list marker is not a list", async () => {
@@ -223,8 +228,8 @@ describe("Item panel: the question's own text", () => {
     const title = container.querySelector(".btitle") as HTMLElement;
     expect(title.textContent).toBe("1. retry");
     expect(title.querySelector(BLOCKS)).toBeNull();
-    const opts = [...container.querySelectorAll<HTMLElement>(".optlist .opt")];
-    expect(opts.map((o) => o.querySelector(".qtext")?.textContent)).toEqual(["1. retry", "- skip"]);
+    const opts = [...container.querySelectorAll<HTMLElement>(".source-answers li .qtext")];
+    expect(opts.map((o) => o.textContent)).toEqual(["1. retry", "- skip"]);
     for (const o of opts) expect(o.querySelector(BLOCKS)).toBeNull();
   });
 
@@ -232,7 +237,7 @@ describe("Item panel: the question's own text", () => {
     const q = { ...QUESTION, answers: [t], recommendation: t };
     const { container } = open(ticketView("b"), { question: q, title: t });
     await screen.findByText("Which policy?");
-    for (const el of [".btitle", ".optlist .qtext"]) {
+    for (const el of [".btitle", ".source-answers li .qtext"]) {
       const e = container.querySelector(el) as HTMLElement;
       expect(e.textContent).toBe(t);
       expect(e.children).toHaveLength(0);
@@ -280,9 +285,17 @@ describe("Item panel layout (hud.css)", () => {
     await screen.findByText("x");
     const body = container.querySelector("#dsBrief .md") as HTMLElement;
     expect(body.closest(".qtext")).toBeTruthy();
-    expect(body.closest(".qtext")?.parentElement?.classList.contains("brief")).toBe(true);
+    expect(Boolean(body.closest(".brief-section")?.closest(".brief"))).toBe(true);
     expect(rule(String.raw`\.brief`)).toContain("minmax(0, 1fr)");
     expect(rule(String.raw`\.qtext`)).toContain("min-width: 0");
     expect(rule(String.raw`\.md`)).toContain("min-width: 0");
   });
+});
+
+it("wraps long references and spaces action chips in brief sections", () => {
+  const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+  expect(css).toMatch(
+    /\.brief-section \.chipref\s*\{[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/,
+  );
+  expect(css).toMatch(/\.brief-refs\s*\{[^}]*flex-wrap: wrap;[^}]*gap: 4px;/);
 });

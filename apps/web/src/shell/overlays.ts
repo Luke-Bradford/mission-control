@@ -74,6 +74,7 @@ const tabbable = (el: HTMLElement): boolean =>
   !el.hasAttribute("disabled") &&
   el.tabIndex >= 0 &&
   !el.closest("[hidden]") &&
+  !el.closest("details:not([open]) > :not(summary)") &&
   !(el instanceof HTMLInputElement && el.type === "hidden");
 
 /**

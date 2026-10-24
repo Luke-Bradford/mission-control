@@ -112,8 +112,12 @@ describe("persistent item discussion", () => {
 it("keeps the fly-out and composer within a narrow screen", () => {
   const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
   expect(css.match(/\.flyout \{([^}]*)\}/)?.[1]).toContain("width: min(540px, 100%)");
-  expect(css.match(/#dsBrief \{([^}]*)\}/)?.[1]).toContain("max-height: 46vh");
+  expect(css.match(/#discuss \.panel \{([^}]*)\}/)?.[1]).toContain("max-height: 86vh");
   expect(css.match(/#dsDiscussionForm \{([^}]*)\}/)?.[1]).toContain("flex-wrap: wrap");
   expect(css.match(/#dsDiscussionForm input \{([^}]*)\}/)?.[1]).toContain("min-width: 0");
-  expect(css.match(/#discuss \.panel \{([^}]*)\}/)?.[1]).toContain("overflow: auto");
+  expect(css.match(/#discuss \.item-body \{([^}]*)\}/)?.[1]).toContain("overflow: auto");
+  expect(css.match(/#discuss \.item-body \{([^}]*)\}/)?.[1]).toContain("overflow-anchor: none");
+  expect(css.match(/#discuss \.expandable.open \.expandable-content \{([^}]*)\}/)?.[1]).toContain(
+    "max-height: none",
+  );
 });

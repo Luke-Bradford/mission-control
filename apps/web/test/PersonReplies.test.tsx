@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AttentionItem } from "@mc/core";
+import type { AttentionBrief, AttentionItem } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
@@ -16,12 +16,14 @@ function setup(
   empty = false,
   url?: string,
   multiple = false,
+  briefOverride: Partial<AttentionBrief> = {},
 ) {
   const person: AttentionItem = item({
     key,
     kind: "person",
     escalationId: null,
     brief: {
+      original: "Raw brief message",
       context: "Context",
       recommendation: "Recommendation",
       options: [],
@@ -47,7 +49,7 @@ function setup(
         assessment: ["Review is needed"],
         take: "Check the change.",
         decisionKey: "decision:1",
-        related: [{ label: "Change 1" }],
+        related: [{ label: "Change 1", url: "https://github.com/example/demo/pull/1" }],
         replies: [{ id: "r1", label: "Acknowledge", text: "I will review <change>." }],
       },
     },
@@ -59,6 +61,7 @@ function setup(
       label: "Defer",
       text: "I will review tomorrow.",
     });
+  if (person.brief) person.brief = { ...person.brief, ...briefOverride };
   const fn = stubFetch({
     "/api/attention": [
       person,
@@ -111,8 +114,17 @@ it("shows the story, escaped history/message, assessment, references and related
     "<script>earlier</script>",
     "<img onerror=alert(1)>",
     "FLIGHT suggests",
+    "Review",
   ])
     expect(screen.getByText(text)).toBeTruthy();
+  expect(screen.queryByText("Raw brief message")).toBeNull();
+  expect(screen.getByText(/Here is what I know/).textContent).toContain("Check the change.");
+  const related = screen.getByRole("link", { name: "Change 1" });
+  expect(related.getAttribute("href")).toBe("https://github.com/example/demo/pull/1");
+  expect(related.closest(".expandable")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Open the related decision" }).closest(".expandable"),
+  ).toBeNull();
   expect(document.querySelector("#dsBrief script, #dsBrief img")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Open the related decision" }));
   await screen.findByText("Related question");
@@ -173,8 +185,8 @@ it("shows an empty reply state and keeps keyboard focus in the panel", async () 
   const first = screen.getByRole("link", { name: "Open in GitHub ↗" });
   first.focus();
   fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
-  // With FLIGHT unavailable, the final enabled control is the local handoff.
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Let FLIGHT handle it" }));
+  // With FLIGHT unavailable, history can still be refreshed.
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Refresh discussion" }));
   expect(last.hasAttribute("disabled")).toBe(true);
 });
 it.each(["loading", "failed", "empty"])("shows a %s person source response", async (state) => {
@@ -269,4 +281,16 @@ it.each(["github", "teams"] as const)("keeps independent reply drafts for %s", a
     await screen.findByText("reply copied for Teams");
     expect(writeText).toHaveBeenCalledWith("First draft");
   }
+});
+
+it("shows only PersonChoices when a person brief also contains generic options", async () => {
+  setup("github", false, false, undefined, false, {
+    recommendation: "",
+    options: [{ id: "generic", label: "Generic choice", answer: "Generic answer" }],
+  });
+  await screen.findByRole("button", { name: "Post on GitHub" });
+  expect(screen.queryByRole("button", { name: "Generic choice" })).toBeNull();
+  expect(screen.queryByText("FLIGHT recommends")).toBeNull();
+  expect(screen.getByText("FLIGHT suggests")).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "What FLIGHT needs from you" })).toBeNull();
 });
