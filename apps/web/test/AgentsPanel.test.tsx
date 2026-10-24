@@ -273,3 +273,11 @@ it("cuts the latest decision's about to 60 characters in coverage", async () => 
     `last action 3m ago (${"a".repeat(59)}…)`,
   );
 });
+
+it("keeps the FLIGHT placeholder's full title in the ticket column", async () => {
+  stub([]);
+  const { container } = render(<AgentsPanel />);
+  const text = await screen.findByText("No FLIGHT seat is configured.");
+  expect(text.title).toBe("No FLIGHT seat is configured.");
+  expect(container.querySelector(".flight > .agent-doing")?.contains(text)).toBe(true);
+});

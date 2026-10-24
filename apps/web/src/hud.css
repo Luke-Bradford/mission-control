@@ -1093,7 +1093,10 @@ main > section {
 }
 .trow {
   display: grid;
-  grid-template-columns: 108px 84px minmax(0, 1fr) 116px 112px 88px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 3fr) minmax(0, 1.1fr) minmax(
+      0,
+      1fr
+    ) minmax(0, 0.8fr);
   gap: 8px;
   align-items: center;
   padding: 8px 14px;
@@ -1343,7 +1346,10 @@ summary.agent-group-title,
 @media (min-width: 761px) {
   /* With no loop among the rows the Loop step column is all dashes: its room goes to the ticket. */
   .noloop .trow {
-    grid-template-columns: 108px 84px minmax(0, 1fr) 120px 104px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 3fr) minmax(0, 1fr) minmax(
+        0,
+        0.8fr
+      );
   }
   .noloop .trow > :nth-child(4) {
     display: none;
@@ -1507,12 +1513,23 @@ summary.agent-group-title,
 }
 .quotarow {
   display: grid;
-  grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   padding: 3px 0;
   font-size: var(--fs-s);
 }
+.quota-window .meter {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+.quota-window .num {
+  overflow-wrap: anywhere;
+}
+.agent-doing {
+  min-width: 0;
+}
+
 .arow {
   display: grid;
   grid-template-columns: 44px 16px minmax(0, 1fr) auto;

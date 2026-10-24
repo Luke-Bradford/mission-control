@@ -1460,6 +1460,8 @@ describe("Account quota panel", () => {
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await within(quota).findByText("read 4 min ago");
     const rows = quota.querySelectorAll(".quotarow");
+    expect(rows[0]?.querySelectorAll(":scope > .quota-window")).toHaveLength(2);
+    expect(rows[0]?.querySelectorAll(".quota-window .meter .track")).toHaveLength(2);
     expect(rows[0]?.textContent).not.toContain("9 min");
     expect(rows[1]?.textContent).toContain("read just now");
   });
