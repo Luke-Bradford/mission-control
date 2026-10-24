@@ -82,6 +82,11 @@ const senderSchema = z.strictObject({
   kind: z.enum(["human", "agent"]),
   delegation: delegationSchema.optional(),
 });
+export const knowledgeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("checked"), source: z.string(), asOf: z.string() }),
+  z.strictObject({ kind: z.literal("from-notes"), asOf: z.string() }),
+  z.strictObject({ kind: z.literal("cannot-confirm") }),
+]);
 const messageSchema = z.strictObject({
   id: z.string(),
   room: z.string(),
@@ -90,13 +95,7 @@ const messageSchema = z.strictObject({
   kind: z.enum(["question", "answer", "fyi", "request", "decision"]),
   body: z.string(),
   refs: z.array(z.string()).optional(),
-  knowledge: z
-    .discriminatedUnion("kind", [
-      z.strictObject({ kind: z.literal("checked"), source: z.string(), asOf: z.string() }),
-      z.strictObject({ kind: z.literal("from-notes"), asOf: z.string() }),
-      z.strictObject({ kind: z.literal("cannot-confirm") }),
-    ])
-    .optional(),
+  knowledge: knowledgeSchema.optional(),
   urgency: z.enum(["low", "normal", "high"]).optional(),
   replyBy: z.string().optional(),
   needsHuman: z.boolean().optional(),

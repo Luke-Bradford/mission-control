@@ -924,33 +924,21 @@ extracts WASM from the already installed libsodium package into ignored `dist/` 
 static loading on Workers. No credentials are ever committed to the repo or CI. Wrangler is an
 operator tool, not a project dependency.
 
-For a LAN relay, once the Task 7 CLI is available:
+For a LAN relay, with Node 25 and `packages/agentcomms/bin` on `PATH`:
 
 ```sh
 agentcomms relay --port 7480 --data "$HOME/.local/share/agentcomms/relay"
-```
-
-Until then, run the implemented library entry point from the repo root:
-
-```sh
-node --experimental-strip-types --input-type=module -e '
-  const { startNodeRelay } = await import("./packages/agentcomms/src/relay-node.ts");
-  const relay = await startNodeRelay({
-    port: 7480,
-    dataDir: `${process.env.HOME}/.local/share/agentcomms/relay`,
-  });
-  console.log(relay.url);
-'
 ```
 
 The Node relay listens on all interfaces; use the host's LAN address from the other machine.
 The returned URL uses loopback for local clients. Internet clients use the deployed Worker URL
 with `wss:`. WebSockets connect at `/rooms/<URL-encoded room>` on either transport.
 
-The transport bootstrap API supplies the room and invite operations needed by the later CLI:
+The transport bootstrap API supplies the CLI's room and invite operations:
 
-- `PUT /rooms/:room` creates a new room with JSON `{owner, hello}`. `owner` is the public `Member`
+- `PUT /rooms/:room` creates a new room with JSON `{owner, hello, grants}`. `owner` is the public `Member`
   record. `hello` is `{t:"hello", room, memberId, at, sig}`, signed by that owner's member key.
+  The CLI includes epoch-0 grants for the owner and every registered agent.
   An existing room returns 409 and is never overwritten.
 - `POST /rooms/:room/tokens` takes the owner's signed `hello` as JSON and returns `{token}`.
   Tokens are 32 random bytes in base64url and can be used once.
@@ -958,13 +946,237 @@ The transport bootstrap API supplies the room and invite operations needed by th
   `room|memberId|at`; it must be within 120 seconds of the relay's clock.
 - A joining socket sends `{t:"join", token, member}` before authentication. `{t:"grants",grants:[]}`
   acknowledges the pending request. It has no access to history until owner approval.
-- A member or approved delegated agent authenticates with `hello`; the reply carries its grants
-  and the current presence map. Immediately send `{t:"since",seq:lastStoredSequence}` (`0` for
+- A member or approved delegated agent authenticates with `hello`; the reply carries the public
+  member/agent directory, grants addressed to that identity and the current presence map.
+  Immediately send `{t:"since",seq:lastStoredSequence}` (`0` for
   a new client). This establishes the replay cursor before live delivery, so a concurrent post
   cannot overtake or duplicate replayed messages. Subsequent `since` requests on the same socket
   do not redeliver sequences already sent there.
-- The owner sends `approve` with the pending member's wrapped grant, or `remove` with grants for
-  every remaining member at the next epoch. The initial epoch is `0`. Removed sockets are closed.
+- The owner sends `approve` with grants wrapped to the pending member and each of their agents,
+  or `remove` with grants for every remaining member and agent at the next epoch. The initial
+  epoch is `0`. Removed sockets are closed.
 
 The relay accepts agent-signed connections under approved delegations, so a communicator never
 needs the human's private key. Only a human owner connection can approve or remove members.
+
+## Agent comms: home and work
+
+**Phase 1's home side is a standalone communicator.** `FLIGHT-comms` is its delegated agent
+name; it is not the running FLIGHT session. FLIGHT and HUD integration come later, in phases 2
+and 3. The daemon keeps the relay connection and inbox alive; a Claude session uses MCP to
+read and send. Automatic answers require an explicit `--answer` hook.
+
+Use Node 25 and a checkout with workspace dependencies installed on both machines. Deploy the
+Worker using [Agent comms relay](#agent-comms-relay) above, then use its base URL, for example
+`wss://agentcomms-relay.YOUR-SUBDOMAIN.workers.dev`. Do not append `/rooms/...`; the CLI does that.
+For a LAN test use `ws://RELAY-LAN-IP:7480`. The relay must be reachable from both machines.
+
+On the home Mac, from the repo root:
+
+```sh
+export PATH="$PWD/packages/agentcomms/bin:$PATH"
+export AGENTCOMMS_HOME="$HOME/.local/share/agentcomms"
+agentcomms init --member 'Luke home'
+agentcomms agent add FLIGHT-comms --subscription 'Claude · home'
+agentcomms room create wss://agentcomms-relay.YOUR-SUBDOMAIN.workers.dev home-work
+agentcomms invite home-work
+```
+
+`init` prints the member id (`--github <handle>` is optional metadata). `agent add` prints the
+agent id. Add all agents before creating or joining any room: phase 1 cannot update registered
+agents after that. `invite` prints a single-use `ac1.` code containing only the relay, room and
+token, never the room key. Transfer that code to the work machine.
+
+On a Windows work PC, use PowerShell and the CLI's TypeScript entry point directly (the `bin`
+shim requires a POSIX shell). Replace these example installation paths with your own:
+
+```powershell
+$env:AGENTCOMMS_HOME = "$env:USERPROFILE\.local\share\agentcomms"
+function agentcomms {
+  & 'C:\Program Files\nodejs\node.exe' --experimental-strip-types 'C:\src\mission-control\packages\agentcomms\src\cli.ts' @args
+}
+agentcomms init --member 'Luke work'
+agentcomms agent add work-comms --subscription 'Claude · work'
+agentcomms join 'ac1.PASTE-THE-INVITE-HERE'
+```
+
+In a POSIX work environment, put `packages/agentcomms/bin` on `PATH` as on the Mac and run the
+same `init`, `agent add` and `join` commands. `join` prints the work member id and leaves it
+pending. Confirm that id with the work operator and approve it from the home terminal:
+
+```sh
+agentcomms approve home-work WORK_MEMBER_ID
+```
+
+Approval wraps the room key to the work member's X25519 key **and each approved agent's**
+X25519 key. Each daemon authenticates as its own agent, gets the public directory, unwraps its
+own grants and follows key rotations without loading a member key. Only the human-run setup
+commands `init`, `agent add`, `room create`, `invite`, `approve` and `remove` may use the member
+key. `join`, `daemon`, the loopback API and `mcp` do not load it.
+
+Local files live under `~/.local/share/agentcomms` by default, or the exact directory set in
+`AGENTCOMMS_HOME`. Use the same directory for setup, daemon and MCP on a given machine, with
+one daemon per home:
+
+| File | Contents |
+|---|---|
+| `config.json` | Public member and agent records, delegations, optional GitHub handle and joined relay/room/token records. |
+| `keys/<identity-id>.json` | Private signing and box keys for a member or agent, mode `0600`. |
+| `keys/room-<sha256-of-room-name>.json` | Cached room keys by epoch, mode `0600`. |
+| `inbox.sqlite` (and SQLite sidecars) | Local decrypted messages, thread state and resume cursors. |
+| `api-url`, `api-token` | Daemon's loopback URL and bearer token, mode `0600`; rewritten when it starts. |
+| `relay/` | Default Node relay data directory; `relay --data <dir>` overrides it. |
+
+Private keys stay in `keys/`, outside the repo and config. The API listens on `127.0.0.1` at a
+random port; there is no daemon `--port` setting. MCP reads `api-url` and `api-token`, so do not
+hard-code a port or copy these files between machines. Protect the local inbox as plaintext.
+
+For the first test, save this fixed-response hook as
+`$AGENTCOMMS_HOME/first-answer.sh` on the Mac:
+
+```sh
+#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{"body":"I cannot confirm ownership from the shared notes.","knowledge":{"kind":"cannot-confirm"}}'
+```
+
+The daemon passes the incoming message JSON on stdin. A hook may print plain text or a JSON
+object `{ "body": "...", "knowledge": { "kind": "cannot-confirm" } }`. `knowledge` may also be
+`{"kind":"checked","source":"...","asOf":"..."}` or `{"kind":"from-notes","asOf":"..."}`.
+Omitting it defaults to `cannot-confirm`. Empty output means no answer; JSON objects that do not
+match this schema are not sent. The fixed hook is only a connectivity test, not a live FLIGHT or Claude integration.
+The hook runs for a peer's non-automatic `question` or `request` naming the agent, or in a room
+with two active members. Replies keep the thread and `inReplyTo`, and are always automatic.
+They pass the same body size, secret scan and rate guards as manual sends.
+
+On the Mac, save the following as `~/Library/LaunchAgents/com.agentcomms.home.plist`.
+Replace `/Users/YOU`, the checkout path and `/opt/homebrew/bin/node` with absolute paths on your
+machine (`command -v node` must resolve to Node 25). launchd does not expand `~` or `$HOME`.
+Create the home directory's `logs/` subdirectory before loading it.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.agentcomms.home</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>--experimental-strip-types</string>
+    <string>/Users/YOU/src/mission-control/packages/agentcomms/src/cli.ts</string>
+    <string>daemon</string>
+    <string>--answer</string>
+    <string>/bin/sh '/Users/YOU/.local/share/agentcomms/first-answer.sh'</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AGENTCOMMS_HOME</key><string>/Users/YOU/.local/share/agentcomms</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/YOU/.local/share/agentcomms/logs/daemon.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/.local/share/agentcomms/logs/daemon.err</string>
+</dict>
+</plist>
+```
+
+```sh
+mkdir -p "$AGENTCOMMS_HOME/logs" "$HOME/Library/LaunchAgents"
+plutil -lint "$HOME/Library/LaunchAgents/com.agentcomms.home.plist"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.agentcomms.home.plist"
+```
+
+This LaunchAgent starts at login and restarts after exit while the user session is active; the
+Mac must remain awake for continuous service. Stop it before switching to a foreground daemon:
+`launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.agentcomms.home.plist"`.
+Without launchd, the equivalent is `agentcomms daemon --answer '/bin/sh /absolute/path/first-answer.sh'`.
+With more than one registered agent, add `--agent <id>` (the id printed by `agent add`, not its
+name) to the daemon arguments. With exactly one, selection is automatic.
+
+On Windows, first check `agentcomms daemon` in the setup terminal, then stop it with Ctrl-C.
+For background operation, use Task Scheduler under the **same Windows account** as setup.
+Save `%USERPROFILE%\.local\share\agentcomms\run-daemon.ps1` with absolute paths:
+
+```powershell
+$env:AGENTCOMMS_HOME = 'C:\Users\YOU\.local\share\agentcomms'
+& 'C:\Program Files\nodejs\node.exe' --experimental-strip-types 'C:\src\mission-control\packages\agentcomms\src\cli.ts' daemon
+exit $LASTEXITCODE
+```
+
+Create a task triggered at that user's logon, with program `powershell.exe` and arguments
+`-NoProfile -NonInteractive -File "C:\Users\YOU\.local\share\agentcomms\run-daemon.ps1"`.
+Configure restart on failure, no execution time limit and no second instance while running;
+allow battery operation if needed. Use “Run whether user is logged on or not” if background
+operation after logout is required, subject to the work PC's account policy. This runs the
+foreground daemon under Task Scheduler, not as a native Windows Service. Keep the PC awake;
+sleep interrupts its connection. The work daemon needs no answer hook to send via MCP.
+
+Add an `agentcomms` stdio server entry to the Claude session's MCP configuration, merging it
+with existing entries. For a Claude Code project config (`.mcp.json`), the Mac entry is:
+
+```json
+{
+  "mcpServers": {
+    "agentcomms": {
+      "command": "/opt/homebrew/bin/node",
+      "args": ["--experimental-strip-types", "/Users/YOU/src/mission-control/packages/agentcomms/src/cli.ts", "mcp"],
+      "env": { "AGENTCOMMS_HOME": "/Users/YOU/.local/share/agentcomms" }
+    }
+  }
+}
+```
+
+On Windows use this entry instead:
+
+```json
+{
+  "mcpServers": {
+    "agentcomms": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": ["--experimental-strip-types", "C:\\src\\mission-control\\packages\\agentcomms\\src\\cli.ts", "mcp"],
+      "env": { "AGENTCOMMS_HOME": "C:\\Users\\YOU\\.local\\share\\agentcomms" }
+    }
+  }
+}
+```
+
+These invoke `agentcomms mcp` directly through Node. A POSIX session with the shim on its `PATH`
+can instead use `"command": "agentcomms", "args": ["mcp"]`. Start the daemon before using MCP
+tools, then reload the session's MCP servers. MCP is a separate stdio process; it does not start
+the daemon or load identity keys.
+
+From the work Claude session, make this first exchange:
+
+1. Call `comms_rooms {}` and confirm `home-work`. `comms_presence {"room":"home-work"}` should
+   show both agent ids online.
+2. Call `comms_send {"room":"home-work","kind":"request","body":"FLIGHT-comms, take #506"}`.
+   It must return the tool error `a request needs a reason`, with no message sent. Requests
+   need a non-blank `reason`; `requestedBy` can identify the human or agent asking.
+3. Call `comms_send {"room":"home-work","kind":"question","body":"FLIGHT-comms, is #506 yours?","thread":"first-test"}`.
+4. Call `comms_read {"room":"home-work","since":0}` until the question and one answer appear.
+   Check the answer body, `knowledge.kind: "cannot-confirm"`, `auto: true`, matching thread
+   and `inReplyTo`. Its `sender.delegation` names `FLIGHT-comms`, `Claude · home` and the home
+   member id; `sender.member.label` is `Luke home`. Member labels come from the authenticated
+   public directory, not the answer hook. Previously stored inbox entries may lack this label.
+5. Read again: there should be no automatic reply to the automatic answer. Use `comms_threads`
+   with the room to inspect the thread. Sequence numbers, not sender clocks, determine order.
+
+`Held:` means nothing was sent (for example a possible secret or rate limit); `Merged:` names
+an existing open question's thread. Bodies over 32,000 UTF-8 bytes are refused whole. For later
+reads, pass the last seen sequence as `since`. The daemon resumes from its persisted inbox after
+reconnect. To remove work access, the home owner runs `agentcomms remove home-work WORK_MEMBER_ID`;
+this rotates the key and distributes grants to all remaining members and agents, including
+those that reconnect later. Removed members retain earlier history but cannot read new messages.
+
+Run the automated local equivalent from the repo root on a machine that permits sockets:
+
+```sh
+npx vitest run packages/agentcomms/test/two-sides.test.ts --maxWorkers=2
+```
+
+It uses temporary homes and a local Node relay, runs CLI setup and two daemons, then calls work's
+MCP server over stdio. It needs no Cloudflare credentials. A sandbox that forbids listening
+sockets cannot run it (`listen EPERM`); run it outside that sandbox.

@@ -2,10 +2,15 @@ import { chmodSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Message, Sender } from "./envelope.ts";
 
-export type InboxEntry = { seq: number; room: string; msg: Message; sender: Sender };
+export type InboxEntry = {
+  seq: number;
+  room: string;
+  msg: Message;
+  sender: Sender & { member?: { id: string; label: string } };
+};
 export type Thread = { thread: string; closed: boolean; question?: Message };
 export interface Inbox {
-  add(seq: number, room: string, msg: Message, sender: Sender): void;
+  add(seq: number, room: string, msg: Message, sender: InboxEntry["sender"]): void;
   list(room: string, sinceSeq?: number): InboxEntry[];
   lastSeq(room: string): number;
   advance(room: string, seq: number): void;

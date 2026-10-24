@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Daemon } from "./daemon.ts";
+import { knowledgeSchema } from "./envelope.ts";
 import { writePrivate } from "./local-files.ts";
 import { FRAME_MAX } from "./relay-session.ts";
 
@@ -13,13 +14,7 @@ export const sendSchema = z.strictObject({
   thread: z.string().min(1).optional(),
   inReplyTo: z.string().optional(),
   refs: z.array(z.string()).optional(),
-  knowledge: z
-    .discriminatedUnion("kind", [
-      z.strictObject({ kind: z.literal("checked"), source: z.string(), asOf: z.string() }),
-      z.strictObject({ kind: z.literal("from-notes"), asOf: z.string() }),
-      z.strictObject({ kind: z.literal("cannot-confirm") }),
-    ])
-    .optional(),
+  knowledge: knowledgeSchema.optional(),
   urgency: z.enum(["low", "normal", "high"]).optional(),
   replyBy: z.string().optional(),
   needsHuman: z.boolean().optional(),

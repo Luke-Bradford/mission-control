@@ -4,8 +4,17 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { scanText } from "@mc/core";
 import { WebSocket } from "ws";
+import { z } from "zod";
 import { canonicalJson } from "./canonical.ts";
-import { BODY_MAX, BodyTooLarge, type Message, open, seal, verifySealed } from "./envelope.ts";
+import {
+  BODY_MAX,
+  BodyTooLarge,
+  knowledgeSchema,
+  type Message,
+  open,
+  seal,
+  verifySealed,
+} from "./envelope.ts";
 import { mayAutoReply, outgoingRate, similarOpen } from "./guards.ts";
 import { type InboxEntry, openInbox, type Thread } from "./inbox.ts";
 import { type Delegation, type Identity, verifyDelegation } from "./keys.ts";
@@ -19,6 +28,10 @@ import { readRoomKeys, saveRoomKeys } from "./room-keys.ts";
 export type Draft = Omit<Message, "id" | "sentAt" | "auto">;
 export type SendResult = { seq: number } | { held: string } | { merged: string };
 type Presence = Record<string, { status: string; seenAt: number }>;
+const answerSchema = z.strictObject({
+  body: z.string(),
+  knowledge: knowledgeSchema.optional(),
+});
 export interface Daemon {
   send(room: string, draft: Draft): Promise<SendResult>;
   read(room: string, sinceSeq?: number): InboxEntry[];
@@ -137,7 +150,7 @@ export async function startDaemon(opts: {
   };
   const answer = async (state: State, msg: Message) => {
     if (!opts.answer || stopped) return;
-    const body = await new Promise<string>((resolve) => {
+    const output = await new Promise<string>((resolve) => {
       const child = exec(
         opts.answer as string,
         { timeout: 30000, maxBuffer: BODY_MAX * 4 },
@@ -150,7 +163,18 @@ export async function startDaemon(opts: {
       child.stdin?.on("error", () => {});
       child.stdin?.end(JSON.stringify(msg));
     });
-    if (body && !stopped)
+    if (!output || stopped) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(output);
+    } catch {
+      // Plain text remains supported; structured output must match the hook contract.
+      parsed = { body: output };
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+      parsed = { body: output };
+    const reply = answerSchema.parse(parsed);
+    if (reply.body.trim() && !stopped)
       await send(
         state.invite.room,
         {
@@ -158,8 +182,8 @@ export async function startDaemon(opts: {
           thread: msg.thread,
           inReplyTo: msg.id,
           kind: "answer",
-          body,
-          knowledge: { kind: "cannot-confirm" },
+          body: reply.body,
+          knowledge: reply.knowledge ?? { kind: "cannot-confirm" },
         },
         true,
       );
@@ -258,7 +282,10 @@ export async function startDaemon(opts: {
               throw new Error("Room key unavailable for received epoch");
             }
             const msg = await open(incoming.sealed, key, publicKeyOf);
-            inbox.add(incoming.seq, state.invite.room, msg, incoming.sealed.sender);
+            inbox.add(incoming.seq, state.invite.room, msg, {
+              ...sender,
+              member: { id: member.id, label: member.label },
+            });
             if (incoming.sealed.sender.id === agent.id && state.pending?.id === msg.id) {
               clearTimeout(state.pending.timer);
               state.pending.resolve({ seq: incoming.seq });

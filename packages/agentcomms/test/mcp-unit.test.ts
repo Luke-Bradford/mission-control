@@ -13,6 +13,42 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 const request = (method: string, params?: unknown) => ({ jsonrpc: "2.0", id: 7, method, params });
+it.each([undefined, "", " \n\t"])(
+  "refuses a request with reason %j before contacting the API",
+  async (reason) => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    expect(
+      await mcpRequest(
+        home,
+        request("tools/call", {
+          name: "comms_send",
+          arguments: { room: "r", kind: "request", body: "Take #506", reason },
+        }),
+      ),
+    ).toMatchObject({
+      result: { isError: true, content: [{ text: "a request needs a reason" }] },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
+it("forwards a request with its reason and requestedBy intact", async () => {
+  await writeFile(join(home, "api-url"), "http://127.0.0.1:7481");
+  await writeFile(join(home, "api-token"), "test-token");
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ seq: 1 }));
+  vi.stubGlobal("fetch", fetcher);
+  const args = {
+    room: "r",
+    kind: "request",
+    body: "Take #506",
+    reason: "It is in your lane and blocks my work",
+    requestedBy: { kind: "agent", name: "work-comms" },
+  };
+  expect(
+    await mcpRequest(home, request("tools/call", { name: "comms_send", arguments: args })),
+  ).toMatchObject({ result: { content: [{ text: '{"seq":1}' }] } });
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual(args);
+});
 it("initializes and lists the five tools without opening identity or API files", async () => {
   expect(
     await mcpRequest(home, request("initialize", { protocolVersion: "2024-11-05" })),

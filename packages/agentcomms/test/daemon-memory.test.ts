@@ -96,7 +96,11 @@ it("delivers through the real session/core with agent signatures and scanned bod
   expect(await f.aDaemon.send("test-room", draft("hello"))).toEqual({ seq: 1 });
   await expect.poll(() => f.bDaemon.read("test-room").length).toBe(1);
   expect(f.bDaemon.read("test-room")[0]).toMatchObject({
-    sender: { kind: "agent", id: f.a.agent.id },
+    sender: {
+      kind: "agent",
+      id: f.a.agent.id,
+      member: { id: f.a.member.id, label: "Alice" },
+    },
     msg: { body: "hello", auto: false },
   });
   expect(await f.aDaemon.send("test-room", draft(`ghp_${"x".repeat(36)}`))).toHaveProperty("held");
@@ -126,6 +130,49 @@ it("runs both answer hooks without a ping-pong loop or answering its own questio
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(f.aDaemon.read("test-room").map((entry) => entry.msg.auto)).toEqual([false, true]);
   expect(f.aDaemon.read("test-room")[1].sender.id).toBe(f.b.agent.id);
+});
+it.each([
+  { kind: "cannot-confirm" },
+  { kind: "checked", source: "repo at abc123", asOf: "2026-10-24" },
+  { kind: "from-notes", asOf: "2026-10-23" },
+  undefined,
+])("passes JSON answer-hook body and knowledge through: %j", async (knowledge) => {
+  const output = JSON.stringify({ body: "I checked the shared notes", knowledge });
+  const f = await setup(`cat >/dev/null; printf '%s' '${output}'`);
+  await f.aDaemon.send("test-room", { ...draft("A question"), kind: "question" });
+  await expect.poll(() => f.aDaemon.read("test-room").length).toBe(2);
+  const [question, answer] = f.aDaemon.read("test-room");
+  expect(answer.msg).toMatchObject({
+    body: "I checked the shared notes",
+    knowledge: knowledge ?? { kind: "cannot-confirm" },
+    auto: true,
+    kind: "answer",
+    thread: question.msg.thread,
+    inReplyTo: question.msg.id,
+  });
+});
+it.each(["ok", "42", "true", "null", "[1,2]"])(
+  "keeps plain-text hook answer %s with cannot-confirm knowledge",
+  async (body) => {
+    const f = await setup(`cat >/dev/null; printf '%s' '${body}'`);
+    await f.aDaemon.send("test-room", { ...draft("A question"), kind: "question" });
+    await expect.poll(() => f.aDaemon.read("test-room").length).toBe(2);
+    expect(f.aDaemon.read("test-room")[1].msg).toMatchObject({
+      body,
+      knowledge: { kind: "cannot-confirm" },
+    });
+  },
+);
+it.each([
+  { body: "", knowledge: { kind: "cannot-confirm" } },
+  { body: "Do not send", knowledge: { kind: "checked" } },
+  { body: "Do not send", auto: false },
+  { body: `ghp_${"a".repeat(36)}` },
+])("does not send empty, invalid or secret-bearing JSON hook answers: %j", async (output) => {
+  const f = await setup(`cat >/dev/null; printf '%s' '${JSON.stringify(output)}'`);
+  await f.aDaemon.send("test-room", { ...draft("A question"), kind: "question" });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(transport.sent.filter((msg) => msg.t === "post")).toHaveLength(1);
 });
 it("reconnects from persisted sequence without duplicate delivery", async () => {
   const f = await setup();
