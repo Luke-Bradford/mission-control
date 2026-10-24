@@ -24,22 +24,22 @@ it("keeps all metrics on one padded line and only needs on line two", () => {
   expect(css).toContain("prefers-reduced-motion: reduce");
 });
 
-it("shrinks state pills independently of their age without overflowing the grid", () => {
-  expect(css).toMatch(/\.state-cell \.pill \{[^}]*min-width: 0;[^}]*overflow: hidden/);
+it("keeps State pills and their age from shrinking", () => {
+  expect(css).toMatch(/#agentsList \.state-cell \.pill \{\s*flex: none/);
   expect(css).toMatch(/\.state-cell > \.xs \{\s*flex: none/);
   expect(css).toMatch(/\.state-cell \.pill > span \{[^}]*text-overflow: ellipsis/);
   expect(css).not.toMatch(/\.trow \{[^}]*grid-template-columns:[^;]* 84px /);
 });
 
-it("compacts by panel width and stacks only below 1100 viewport pixels", () => {
+it("compacts and stacks by available panel width", () => {
   expect(css).not.toMatch(/#agentsList[^{}]*\.trow\s*\{[^}]*min-width: (?:960|1010)px/);
   const compact = css.slice(
     css.indexOf("@container agents (width < 1360px)"),
     css.indexOf(".activity-live {"),
   );
   expect(compact).toMatch(/\.agent-cli\s*\{\s*display: none/);
-  expect(compact).toMatch(/\.spark\s*\{\s*width: 24px/);
-  expect(compact.match(/105px minmax\(0, 1fr\)/g)).toHaveLength(2);
+  expect(css).toMatch(/#agentsList \.agent-activity \.spark \{\s*flex: 1;\s*min-width: 40px/);
+  expect(compact.match(/140px minmax\(0, 1fr\)/g)).toHaveLength(4);
   const stacked = css.slice(
     css.indexOf("@media (width < 1100px)"),
     css.indexOf("/* Summary disclosures"),
@@ -48,4 +48,12 @@ it("compacts by panel width and stacks only below 1100 viewport pixels", () => {
   expect(stacked).toContain("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)");
   expect(stacked).toMatch(/\.trow.head\s*\{\s*display: none/);
   expect(stacked).toContain("grid-row: auto");
+});
+
+it("keeps feed tags beside readable text on desktop and preserves the phone grid", () => {
+  expect(css).toMatch(
+    /@media \(min-width: 761px\) \{\s*\.arow \{\s*grid-template-columns: 44px 16px fit-content\(110ch\) auto;\s*justify-content: start/,
+  );
+  expect(css).toMatch(/\.arow > \.expandable \{\s*max-width: 110ch/);
+  expect(css).toMatch(/#agentsList\.no-quota \.trow > :nth-child\(9\) \{\s*display: none/);
 });

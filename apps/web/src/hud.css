@@ -1290,15 +1290,21 @@ main > section {
 }
 #agentsList .trow {
   min-width: 0;
-  grid-template-columns: minmax(145px, 1.1fr) minmax(125px, 1fr) 105px minmax(110px, 1.5fr) minmax(
-      75px,
-      0.7fr
-    ) 102px 55px 60px 60px;
+  grid-template-columns: 170px 200px 140px minmax(0, 1fr) 120px 180px 64px 72px 72px;
   column-gap: 8px;
 }
 #agentsList.no-steps .trow {
   min-width: 0;
-  grid-template-columns: minmax(145px, 1.1fr) minmax(125px, 1fr) 105px minmax(110px, 1.5fr) 102px 55px 60px 60px;
+  grid-template-columns: 170px 200px 140px minmax(0, 1fr) 180px 64px 72px 72px;
+}
+#agentsList.no-quota .trow {
+  grid-template-columns: 170px 200px 140px minmax(0, 1fr) 120px 180px 64px 72px;
+}
+#agentsList.no-steps.no-quota .trow {
+  grid-template-columns: 170px 200px 140px minmax(0, 1fr) 180px 64px 72px;
+}
+#agentsList.no-quota .trow > :nth-child(9) {
+  display: none;
 }
 #agentsList.no-steps .loopstep {
   display: none;
@@ -1311,6 +1317,12 @@ main > section {
   grid-row: 2;
   height: 20px;
   line-height: 20px;
+}
+#agentsList .state-cell .pill {
+  flex: none;
+}
+#agentsList .agent-activity > span {
+  flex: none;
 }
 #agentsList .meter {
   gap: 4px;
@@ -1325,8 +1337,8 @@ main > section {
   gap: 4px;
 }
 #agentsList .agent-activity .spark {
-  width: 40px;
-  flex: none;
+  flex: 1;
+  min-width: 40px;
 }
 /* Compact to the available panel width, including the space taken by FLIGHT. */
 @container agents (width < 1360px) {
@@ -1334,14 +1346,17 @@ main > section {
     display: none;
   }
   #agentsList .trow {
-    grid-template-columns: 130px 90px 105px minmax(0, 1fr) 65px 76px 50px 60px 60px;
+    grid-template-columns: 130px 120px 140px minmax(0, 1fr) 65px 110px 64px 60px 60px;
     column-gap: 6px;
   }
   #agentsList.no-steps .trow {
-    grid-template-columns: 130px 90px 105px minmax(0, 1fr) 76px 50px 60px 60px;
+    grid-template-columns: 130px 120px 140px minmax(0, 1fr) 110px 64px 60px 60px;
   }
-  #agentsList .agent-activity .spark {
-    width: 24px;
+  #agentsList.no-quota .trow {
+    grid-template-columns: 130px 120px 140px minmax(0, 1fr) 65px 110px 64px 60px;
+  }
+  #agentsList.no-steps.no-quota .trow {
+    grid-template-columns: 130px 120px 140px minmax(0, 1fr) 110px 64px 60px;
   }
 }
 .activity-live {
@@ -1687,6 +1702,17 @@ main > section {
 .arow .txt {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Keep references beside their text instead of at the panel's far edge. */
+@media (min-width: 761px) {
+  .arow {
+    grid-template-columns: 44px 16px fit-content(110ch) auto;
+    justify-content: start;
+  }
+  .arow > .expandable {
+    max-width: 110ch;
+  }
 }
 
 /* board */
@@ -2476,6 +2502,7 @@ button.nrow.thread.tagged {
   height: 100%;
 }
 .dock .dh {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2528,6 +2555,9 @@ button.nrow.thread.tagged {
   color: var(--accent);
 }
 .dwait {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--warn-soft);
@@ -3958,6 +3988,34 @@ button.nrow.thread.tagged {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Stack when the open dock leaves too little room for fixed metric columns. */
+@container agents (width < 940px) {
+  #agentsList .trow,
+  #agentsList.no-steps .trow,
+  #agentsList.no-quota .trow,
+  #agentsList.no-steps.no-quota .trow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto;
+    gap: 4px 10px;
+  }
+  #agentsList .trow.head {
+    display: none;
+  }
+  #agentsList .trow > * {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  #agentsList .trow > .state-cell,
+  #agentsList .trow > .ticket-cell,
+  #agentsList .trow > .loopstep,
+  #agentsList .trow > .need {
+    grid-column: 1 / -1;
+  }
+  #agentsList .trow > .need {
+    height: auto;
+    flex-wrap: wrap;
+  }
+}
 /* Below desktop width, keep every metric in the stacked phone layout. */
 @media (width < 1100px) {
   #agentsP .ph,
@@ -3966,7 +4024,9 @@ button.nrow.thread.tagged {
     min-width: 0;
   }
   #agentsList .trow,
-  #agentsList.no-steps .trow {
+  #agentsList.no-steps .trow,
+  #agentsList.no-quota .trow,
+  #agentsList.no-steps.no-quota .trow {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-rows: auto;
     gap: 4px 10px;

@@ -450,6 +450,7 @@ export function AgentsPanel() {
   const working = rows?.filter((r) => r.hudState === "running").length ?? 0;
 
   const allRows = [...(flight ? [flight] : []), ...(rows ?? [])];
+  const sharedQuota = allRows.length > 0 && new Set(allRows.map((r) => r.accountId)).size === 1;
   const hasSteps = allRows.some((r) => r.loop && (r.kind !== "crew" || isLoopInFlight(r)));
   const max = Math.max(1, ...allRows.flatMap((r) => activityValues(r.digest, now)));
   return (
@@ -477,7 +478,7 @@ export function AgentsPanel() {
         role="table"
         aria-label="Agents"
         id="agentsList"
-        className={hasSteps ? "has-steps" : "no-steps"}
+        className={`${hasSteps ? "has-steps" : "no-steps"}${sharedQuota ? " no-quota" : ""}`}
       >
         {/* biome-ignore lint/a11y/useFocusableInteractive: table headers have no interaction */}
         <div className="trow head" role="row">

@@ -183,11 +183,11 @@ export function FlightChat({ where }: { where: ChatPlace }) {
   }, [open, pending]);
 
   const count = shown.length;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows
+  // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows and changes to the space available for them
   useEffect(() => {
     const el = msgs.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [count]);
+  }, [count, asks.length]);
   const onScroll = () => {
     const el = msgs.current;
     if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
@@ -336,8 +336,7 @@ export function Dock() {
       >
         <div className="panel">
           <div className="dh" id="dockHead">
-            <AgentTag id="FLIGHT" index="flight" />
-            <Pill tone="neutral">Head agent</Pill>
+            <AgentTag id="FLIGHT" index="flight" showRole />
             <BuildChips panel="dock" />
             <span className="spacer" />
             {seat && !live && (
@@ -367,7 +366,7 @@ export function Dock() {
                       row?.accountId,
                       seat.model,
                       seat.turns && flightTurnText(seat.turns.n, seat.turns.max),
-                      ctx !== null && `context ${ctx}%`,
+                      ctx !== null && `context ${Math.round(ctx)}%`,
                       row ? doingLine(row, now, tz, repoPrs) : stateWord(seat),
                     ]
                       .filter(Boolean)

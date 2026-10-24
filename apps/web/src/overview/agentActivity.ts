@@ -13,8 +13,13 @@ export function activityValues(digest: RunDigest | null, now: number): number[] 
   );
 }
 
-export const age = (at: number, now: number): string =>
-  `${Math.max(0, Math.floor((now - at) / 60_000))}m`;
+export const age = (at: number, now: number): string => {
+  const minutes = Math.max(0, Math.floor((now - at) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+};
 
 /** Recent token evidence, without treating tool/metadata events as output. */
 export function activityLive(digest: RunDigest | null, now: number): boolean {

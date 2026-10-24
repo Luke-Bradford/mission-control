@@ -156,6 +156,10 @@ describe("doing lines and run rows (hud.css)", () => {
         viewport < 1200 ? inner : (solve(templateOf(shell), inner, gapOf(shell))[0] ?? 0);
       // Reserve space for a classic scrollbar as well as the panel borders.
       const panel = main - 16 - 2 * pxOf(rule(String.raw`\.panel`), "border");
+      if (panel < 940) {
+        expect(css).toContain("@container agents (width < 940px)");
+        return;
+      }
       const compact = css.slice(
         css.indexOf("@container agents (width < 1360px)"),
         css.indexOf(".activity-live {"),
@@ -163,6 +167,8 @@ describe("doing lines and run rows (hud.css)", () => {
       for (const selector of [
         String.raw`#agentsList \.trow`,
         String.raw`#agentsList\.no-steps \.trow`,
+        String.raw`#agentsList\.no-quota \.trow`,
+        String.raw`#agentsList\.no-steps\.no-quota \.trow`,
       ]) {
         const grid =
           panel < 1360
@@ -176,7 +182,11 @@ describe("doing lines and run rows (hud.css)", () => {
         expect(widths.reduce((a, b) => a + b, 0) + gap * (widths.length - 1)).toBeLessThanOrEqual(
           available + 0.01,
         );
-        expect(widths.slice(-2)).toEqual([60, 60]);
+        expect(widths[2]).toBe(140);
+        expect(tracks.filter((t) => t.fr > 0)).toHaveLength(1);
+        expect(tracks[3]?.fr).toBe(1);
+        expect(widths.at(-1)).toBe(panel < 1360 ? 60 : 72);
+        if (viewport >= 1440) expect(widths[3]).toBeGreaterThan(50);
       }
     },
   );

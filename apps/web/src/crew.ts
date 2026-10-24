@@ -363,7 +363,7 @@ export interface NeedPart {
   key: string;
 }
 
-const ASKS = ["decision", "approval", "question"] as const;
+const ASKS = ["decision", "question", "approval"] as const;
 
 /**
  * The need line under an agent row (catalogue 2.1.2, the parts that exist): its stall (age from
@@ -394,11 +394,15 @@ export function needLine(
   }
   const parked = mine.find((i) => i.kind === "parked");
   if (parked) parts.push({ text: `Parked: ${parked.text}`, action: "open", key: parked.key });
-  for (const kind of ASKS) {
-    const ask = mine.find((i) => i.kind === kind);
-    if (ask) {
-      parts.push({ text: `${ATTENTION_LABEL[kind]} for you`, action: "answer", key: ask.key });
-    }
+  const asks = mine.filter((i) => ASKS.some((kind) => i.kind === kind));
+  if (asks.length > 0) {
+    const oldest = asks.reduce((a, b) => (b.at < a.at ? b : a));
+    const labels = ASKS.filter((kind) => asks.some((i) => i.kind === kind)).map((kind, index) =>
+      index === 0 ? ATTENTION_LABEL[kind] : ATTENTION_LABEL[kind].toLowerCase(),
+    );
+    const kinds =
+      labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+    parts.push({ text: `${kinds} for you`, action: "answer", key: oldest.key });
   }
   const tag = mine.find((i) => i.kind === "tag");
   if (tag && !parts.some((p) => p.action === "answer")) {

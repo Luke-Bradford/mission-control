@@ -13,7 +13,7 @@ const LABEL = {
 } as const;
 
 const CLASS = {
-  answer: "sm primary",
+  answer: "sm",
   open: "sm",
   read: "sm",
   interrupt: "sm",
