@@ -1,5 +1,6 @@
 import { ActivityPanel } from "../overview/ActivityPanel.tsx";
 import { AgentsPanel } from "../overview/AgentsPanel.tsx";
+import { KpiStrip } from "../overview/KpiStrip.tsx";
 import { MachinePanel } from "../overview/MachinePanel.tsx";
 import { NeedsBanner } from "../overview/NeedsBanner.tsx";
 import { QuotaPanel } from "../overview/QuotaPanel.tsx";
@@ -10,6 +11,7 @@ export function Overview() {
   return (
     <section id="page-overview">
       <NeedsBanner />
+      <KpiStrip />
       <div className="overview-crew">
         <AgentsPanel />
         <TimelinePanel />

@@ -4364,3 +4364,77 @@ button.nrow.thread.tagged {
   min-width: 0;
   max-width: 100%;
 }
+
+/* Overview v2 metrics and stream freshness. */
+.overview-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.overview-kpi {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--fg);
+  text-decoration: none;
+}
+.overview-kpi:hover,
+.overview-kpi:focus-visible {
+  border-color: var(--accent);
+}
+.overview-kpi .lbl,
+.overview-kpi .d {
+  grid-column: 1 / -1;
+}
+.overview-kpi .v {
+  font-size: 26px;
+  line-height: 1.2;
+}
+.overview-kpi .d,
+.kpi-no-trend {
+  color: var(--fg-2);
+  font-size: var(--fs-xs);
+}
+.overview-kpi .spark,
+.kpi-no-trend {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
+}
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--ok);
+}
+.live-indicator.stale {
+  color: var(--warn);
+}
+.live-indicator.down {
+  color: var(--crit);
+}
+.live-indicator i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.live-indicator.fresh i {
+  animation: live-pulse 2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-indicator.fresh i {
+    animation: none;
+  }
+}
