@@ -2,6 +2,7 @@ export * from "./activity.ts";
 export * from "./board.ts";
 export * from "./collectors.ts";
 export * from "./flight.ts";
+export * from "./flight-memory.ts";
 export * from "./guard.ts";
 export * from "./hud.ts";
 export * from "./loop.ts";

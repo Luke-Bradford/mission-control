@@ -5,6 +5,7 @@ import {
   ACK_BATCH_MAX,
   ACTIVITY_LIMIT,
   type AgentStream,
+  API_PREFIX,
   type AttentionItem,
   type AwaySettings,
   areaOwnsFolder,
@@ -131,6 +132,7 @@ import {
   NO_WORKTREE_NOTE,
 } from "./files.ts";
 import { flightLedgerView, flightSummary } from "./flight/ledger.ts";
+import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
@@ -178,8 +180,6 @@ const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set([
   `::ffff:${LOOPBACK_HOST}`,
 ]);
 
-/** Every API route is under this prefix. */
-const API_PREFIX = "/api";
 /** `GUARD_CHECK_PATH` as registered inside the API prefix. */
 export const GUARD_CHECK_ROUTE = GUARD_CHECK_PATH.slice(API_PREFIX.length);
 if (`${API_PREFIX}${GUARD_CHECK_ROUTE}` !== GUARD_CHECK_PATH) {
@@ -552,19 +552,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // CSRF defence (there is no login, so these are the only cross-site guard): a cross-site form
   // cannot send application/json, and a cross-site fetch carries a foreign Origin.
   app.addHook("onRequest", async (req, reply) => {
-    if (req.method === "POST" && mediaType(req.headers["content-type"]) !== "application/json") {
-      return reply.code(415).send({ error: "POST requires Content-Type: application/json" });
+    const mutating = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+    const hasBody =
+      Number(req.headers["content-length"] ?? 0) > 0 ||
+      req.headers["transfer-encoding"] !== undefined;
+    if (
+      mutating &&
+      (req.method !== "DELETE" || hasBody) &&
+      mediaType(req.headers["content-type"]) !== "application/json"
+    ) {
+      return reply
+        .code(415)
+        .send({ error: `${req.method} requires Content-Type: application/json` });
     }
   });
 
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
-    if (req.method === "POST" && origin !== undefined && !isLocalOrigin(origin)) {
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      origin !== undefined &&
+      !isLocalOrigin(origin)
+    ) {
       return reply.code(403).send({ error: "cross-origin request refused" });
     }
   });
 
-  // The Origin hook covers POST only, and a cross-site no-cors GET (an <img>, fetch with
+  // A cross-site no-cors GET (an <img>, fetch with
   // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
   // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
   // callers that send no header (the guard hook, curl) are unaffected. The matched route is
@@ -1720,6 +1734,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline)
       api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
+      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      api.get("/flight/memory", async (req, reply) => {
+        const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid repo" });
+        if (!config.repos.some((r) => r.id === parsed.data.repo))
+          return reply.code(404).send({ error: "Unknown repo" });
+        return { notes: store.flightMemory(parsed.data.repo) };
+      });
+      const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
+      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      api.put("/flight/memory/:repo/:topic", async (req, reply) => {
+        const params = MemoryParams.safeParse(req.params);
+        const body = FlightMemoryInput.omit({ topic: true }).strict().safeParse(req.body);
+        if (!params.success || !body.success)
+          return reply.code(400).send({ error: "Invalid memory note" });
+        if (!config.repos.some((r) => r.id === params.data.repo))
+          return reply.code(404).send({ error: "Unknown repo" });
+        try {
+          store.putFlightMemory({
+            ...body.data,
+            topic: params.data.topic,
+            repoId: params.data.repo,
+            author: "operator",
+            updatedAt: now(),
+          });
+        } catch (e) {
+          return reply.code(409).send({ error: e instanceof Error ? e.message : String(e) });
+        }
+        bus.emit("flight");
+        return { ok: true };
+      });
+      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      api.delete("/flight/memory/:repo/:topic", async (req, reply) => {
+        const params = MemoryParams.safeParse(req.params);
+        if (!params.success) return reply.code(400).send({ error: "Invalid memory topic" });
+        if (!config.repos.some((r) => r.id === params.data.repo))
+          return reply.code(404).send({ error: "Unknown repo" });
+        if (!store.deleteFlightMemory(params.data.repo, params.data.topic))
+          return reply.code(404).send({ error: `No note named ${params.data.topic}.` });
+        bus.emit("flight");
+        return { ok: true };
+      });
       // Reader: roles/FLIGHT.md#your-ledger (high-level tracking summary)
       api.get("/flight/summary", async () => flightSummary(config, store, now()));
       // Reader: roles/FLIGHT.md#your-ledger (full tracking details)

@@ -1,10 +1,12 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_KEEP_MS,
   FLIGHT_METRICS_DAY_MS,
+  FLIGHT_RETROSPECTIVE_SETTING,
   type FlightLedgerEntry,
   FOR_THE_CONTROLLER,
   NEW_LOOP,
@@ -16,7 +18,17 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { flightMetrics, flightSummary } from "../src/flight/ledger.ts";
+import {
+  FLIGHT_RETROSPECTIVE_PARKS_MAX,
+  FLIGHT_RETROSPECTIVE_PRS_MAX,
+  FLIGHT_RETROSPECTIVE_REASON_MAX,
+  mergedTouchesScreen,
+  pendingRetrospective,
+  prepareRetrospective,
+} from "../src/flight/retrospective.ts";
+import { observeFlightMain } from "../src/flight/signals.ts";
 import { flightState } from "../src/flight/state.ts";
+import * as gitRuntime from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-24T12:00:00Z");
@@ -104,6 +116,7 @@ beforeEach(() => {
   store = new Store(join(dir, "mc.sqlite"));
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -332,4 +345,225 @@ describe("ledger storage and summaries", () => {
     expect(next[0]).toMatchObject({ kind: "plan", ageMin: 0 });
     expect(next[0]?.title).toHaveLength(80);
   });
+});
+
+describe("retrospective measures", () => {
+  it("carries the existing metrics, review failures, park reasons, red-main and costly runs", async () => {
+    store.upsertPullRequests("mc", [pr(1)], NOW);
+    store.upsertRun(run("dev", "guido-1", { costUsd: 3 }));
+    store.upsertRun(run("cheap", "guido-1", { costUsd: 1 }));
+    store.upsertRun(run("foreign", "guido-1", { repoId: "other", costUsd: 100 }));
+    store.addLoopEvent("dev:park", "dev", "parked: failed checks", NOW);
+    observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: NOW - MIN });
+    observeFlightMain(store, "mc", { sha: "green", ci: "passing", at: NOW });
+    for (const [repoId, spec, at] of [
+      ["mc", "pass", NOW],
+      ["mc", "fail", NOW],
+      ["other", "fail", NOW],
+      ["mc", "fail", NOW - 2 * FLIGHT_METRICS_DAY_MS],
+      ["mc", "fail", NOW + MIN],
+    ] as const) {
+      const id = store.requestReview({
+        authorRunId: "dev",
+        repoId,
+        seatId: "guido-1",
+        prNumber: 1,
+        sha: `${repoId}-${spec}-${at}`,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: NOW,
+      });
+      if (id === null) throw new Error("review not queued");
+      store.setReviewState(id, ["queued"], "running", { runId: spec, at: NOW });
+      store.recordFindings(id, spec, {
+        verdict: { spec, quality: "pass" },
+        summary: "reviewed",
+        findings: [],
+        at,
+      });
+    }
+    await prepareRetrospective(config, store, NOW);
+    const report = pendingRetrospective(store, "mc");
+    expect(report?.metrics).toEqual(flightMetrics(config, store, NOW));
+    expect(report).toMatchObject({
+      day: "2026-10-24",
+      at: NOW,
+      screenChanges: { touching: 0, unknown: 1, share: null },
+      reviews: { reported: 2, failed: 1, failRate: 0.5 },
+      parkReasons: [{ reason: "failed checks", n: 1 }],
+      redMain: [{ kind: "main_red", key: "red" }],
+      costlyRuns: [
+        { runId: "dev", costUsd: 3 },
+        { runId: "cheap", costUsd: 1 },
+      ],
+    });
+    await prepareRetrospective(config, store, NOW + MIN);
+    expect(pendingRetrospective(store, "mc")).toEqual(report);
+  });
+  it("replaces yesterday's untold report after 03:00 and withholds it while preparing", async () => {
+    await prepareRetrospective(config, store, NOW - FLIGHT_METRICS_DAY_MS);
+    expect(pendingRetrospective(store, "mc")?.day).toBe("2026-10-23");
+    expect(flightState({ config, store, now: NOW, busy: [] }).retrospective).toBeUndefined();
+    await prepareRetrospective(config, store, NOW);
+    expect(pendingRetrospective(store, "mc")?.day).toBe("2026-10-24");
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_RETROSPECTIVE_SETTING}:mc`) ?? "{}");
+    expect(saved.told).toBe(false);
+  });
+
+  it("normalises and bounds park reasons and includes old red-main episodes seen in the window", async () => {
+    store.upsertRun(run("dev", "guido-1"));
+    for (const sha of ["abcdef1", "abcdef2"])
+      store.addLoopEvent(`dev:park:${sha}`, "dev", `parked: failed on ${sha}`, NOW);
+    for (let n = 0; n < FLIGHT_RETROSPECTIVE_PARKS_MAX + 3; n++)
+      store.addLoopEvent(`dev:other:${n}`, "dev", `parked: reason ${n} ${"x".repeat(500)}`, NOW);
+    observeFlightMain(store, "mc", {
+      sha: "red",
+      ci: "failing",
+      at: NOW - 2 * FLIGHT_METRICS_DAY_MS,
+    });
+    observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: NOW - MIN });
+    await prepareRetrospective(config, store, NOW);
+    const report = pendingRetrospective(store, "mc");
+    expect(report?.parkReasons[0]).toEqual({ reason: "failed on <sha>", n: 2 });
+    expect(report?.parkReasons).toHaveLength(FLIGHT_RETROSPECTIVE_PARKS_MAX);
+    expect(
+      report?.parkReasons.every((p) => p.reason.length <= FLIGHT_RETROSPECTIVE_REASON_MAX),
+    ).toBe(true);
+    expect(report?.redMain).toMatchObject([{ key: "red", since: NOW - 2 * FLIGHT_METRICS_DAY_MS }]);
+  });
+
+  it("fetches once, pins the clone git dir, caps classification and excludes unknowns from share", async () => {
+    store.upsertPullRequests(
+      "mc",
+      Array.from({ length: FLIGHT_RETROSPECTIVE_PRS_MAX + 2 }, (_, n) =>
+        pr(n + 1, {
+          mergeCommitSha: n === FLIGHT_RETROSPECTIVE_PRS_MAX + 1 ? null : "a".repeat(40),
+        }),
+      ),
+      NOW,
+    );
+    const git = vi.spyOn(gitRuntime, "crewGit").mockImplementation(async (_, args) => {
+      if (args.includes("ls-remote"))
+        return `ref: refs/heads/main\tHEAD\n${"a".repeat(40)}\tHEAD\n`;
+      if (args.includes("ls-tree")) return "apps/web\n";
+      if (args.includes("--name-only")) return "apps/web/src/Page.tsx\0";
+      return "";
+    });
+    await prepareRetrospective(config, store, NOW);
+    expect(pendingRetrospective(store, "mc")?.screenChanges).toEqual({
+      touching: 99,
+      unknown: 3,
+      share: 1,
+    });
+    expect(git.mock.calls.filter(([, args]) => args.includes("fetch"))).toHaveLength(1);
+    expect(git.mock.calls.filter(([, args]) => args.includes("diff"))).toHaveLength(
+      FLIGHT_RETROSPECTIVE_PRS_MAX - 1,
+    );
+    for (const [, , common, options] of git.mock.calls) expect(options?.gitDir).toBe(common);
+  });
+});
+
+const batch = (sources: (string | null)[]): Buffer =>
+  Buffer.concat(
+    sources.map((source) =>
+      source === null
+        ? Buffer.from("file missing\n")
+        : Buffer.from(`${"a".repeat(40)} blob ${Buffer.byteLength(source)}\n${source}\n`),
+    ),
+  );
+
+describe("screen classification", () => {
+  it("detects web changes, with n/a for no apps/web or unavailable commits", async () => {
+    const git = vi.fn(async (args: string[]) =>
+      args.includes("ls-tree") ? "apps/web\n" : "apps/web/src/Page.tsx\0",
+    );
+    expect(await mergedTouchesScreen(git, "a".repeat(40))).toBe(true);
+    expect(git.mock.calls[1]).toEqual([
+      expect.arrayContaining(["--name-only", "--no-ext-diff", "--no-textconv"]),
+    ]);
+    expect(await mergedTouchesScreen(git, null)).toBeNull();
+    expect(await mergedTouchesScreen(async () => "", "a".repeat(40))).toBeNull();
+    expect(
+      await mergedTouchesScreen(async () => {
+        throw new Error("missing");
+      }, "a".repeat(40)),
+    ).toBeNull();
+  });
+
+  it.each([
+    [3, true],
+    [4, true],
+    [8, false],
+  ])("compares changed route line %s with one diff and one batch", async (line, expected) => {
+    const source = [
+      "      // Reader: apps/web/src/Page.tsx",
+      '      api.get("/screen", async () => {',
+      "        const value = 1;",
+      "        return value;",
+      "      });",
+      "",
+      '      api.get("/internal", async () => {',
+      "        return 2;",
+      "      });",
+    ].join("\n");
+    const changed = source
+      .split("\n")
+      .map((text, n) => (n === Number(line) - 1 ? `${text} // changed` : text))
+      .join("\n");
+    const git = vi.fn(async (args: string[], _input?: string) =>
+      args.includes("--name-only") ? "apps/server/src/api.ts\0" : batch(["", source, "", changed]),
+    );
+    expect(await mergedTouchesScreen(git, "a".repeat(40), true)).toBe(expected);
+    expect(git).toHaveBeenCalledTimes(2);
+    expect(git.mock.calls[1]?.[0]).toContain("--batch");
+    expect(git.mock.calls[1]?.[1]?.split("\n").filter(Boolean)).toHaveLength(4);
+  });
+
+  it("matches unannotated routes via the path table and handles missing files and Unicode byte sizes", async () => {
+    const paths = `path: \`/api/boards/\${enc(repoId)}?limit=10\``;
+    const source =
+      '      api.get("/boards/:repoId", async () => {\n        return ["é"];\n      });';
+    const git = async (args: string[]) =>
+      args.includes("--name-only")
+        ? "apps/server/src/api.ts\0"
+        : batch([paths, null, paths, source]);
+    expect(await mergedTouchesScreen(git, "a".repeat(40), true)).toBe(true);
+  });
+});
+
+it("reads real git batches with pinned git dirs and UTF-8 blobs", async () => {
+  const checkout = join(dir, "repo");
+  mkdirSync(join(checkout, "apps/web/src"), { recursive: true });
+  mkdirSync(join(checkout, "apps/server/src"), { recursive: true });
+  const runGit = (args: string[]) =>
+    execFileSync("git", args, { cwd: checkout, encoding: "utf8" }).trim();
+  runGit(["init", "-b", "main"]);
+  writeFileSync(join(checkout, "apps/web/src/data.ts"), 'const path = "/api/screen";');
+  const route = (value: string) => `api.get("/screen", async () => {\n  return "${value}";\n});`;
+  writeFileSync(join(checkout, "apps/server/src/api.ts"), route("é"));
+  const commit = () => {
+    runGit(["add", "."]);
+    runGit([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "test",
+    ]);
+  };
+  commit();
+  writeFileSync(join(checkout, "apps/server/src/api.ts"), route("日本語"));
+  commit();
+  const common = join(checkout, ".git");
+  const git = (args: string[], input?: string) =>
+    gitRuntime.crewGitBytes(checkout, args, common, { gitDir: common, input });
+  expect(await mergedTouchesScreen(git, runGit(["rev-parse", "HEAD"]))).toBe(true);
+  await expect(
+    git(["cat-file", "--invalid-batch-mode"], "x".repeat(1_000_000)),
+  ).rejects.toBeDefined();
 });

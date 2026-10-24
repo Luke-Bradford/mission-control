@@ -6,6 +6,7 @@ import {
   COMMS_CAPCOM,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_HEADLINE,
+  FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
   FLIGHT_LOOPS_SETTING,
   FLIGHT_MAIN_SETTING,
@@ -13,6 +14,7 @@ import {
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_NOTE_SECTIONS,
+  FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_REWAKE_MS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
@@ -35,6 +37,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
+import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
   markFlightSignalsShown,
@@ -209,6 +212,12 @@ beforeEach(() => {
   vi.useFakeTimers();
   dir = mkdtempSync(join(tmpdir(), "mc-flight-watch-"));
   store = new Store(join(dir, "mc.sqlite"));
+  // T0 is after 03:00 on Oct 22: these watcher tests start after today's report was delivered.
+  // The daily-retrospective tests below advance to later days to exercise preparation itself.
+  store.setSetting(
+    `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+    JSON.stringify({ day: "2026-10-22", told: true }),
+  );
   bus = new ChangeBus();
   emitted = [];
   bus.subscribe((t) => emitted.push(t));
@@ -594,6 +603,10 @@ describe("FLIGHT's holds", () => {
     markPrsShown(store, flightState({ config, store, busy: [], now: nowMs }));
     store.close();
     store = new Store(join(dir, "mc.sqlite"));
+    store.setSetting(
+      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+      JSON.stringify({ day: "2026-10-22", told: true }),
+    );
     expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
       { ref: "mc#9", prState: "closed", told: true },
     ]);
@@ -1126,6 +1139,10 @@ describe("the FLIGHT watcher", () => {
     expect(sendCalls).toHaveLength(1);
     store.close();
     store = new Store(join(dir, "mc.sqlite"));
+    store.setSetting(
+      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+      JSON.stringify({ day: "2026-10-22", told: true }),
+    );
     watch.stop();
     makeWatch();
     nowMs += 61 * MIN;
@@ -1771,6 +1788,10 @@ describe("ops signals", () => {
       watch.stop();
       store.close();
       store = new Store(join(dir, "mc.sqlite"));
+      store.setSetting(
+        `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+        JSON.stringify({ day: "2026-10-22", told: true }),
+      );
       makeWatch();
       expect(signalState().signals.filter((s) => !s.told)).toEqual([]);
       await watch.check();
@@ -2172,6 +2193,10 @@ describe("triage and quiet wakes", () => {
     watch.stop();
     store.close();
     store = new Store(join(dir, "mc.sqlite"));
+    store.setSetting(
+      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+      JSON.stringify({ day: "2026-10-22", told: true }),
+    );
     makeWatch();
     await watch.check();
     expect(sendCalls).toHaveLength(1);
@@ -2558,6 +2583,10 @@ describe("ops review regressions", () => {
     ).toEqual([`guido-1:${T0}`]);
     store.close();
     store = new Store(join(dir, "mc.sqlite"));
+    store.setSetting(
+      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+      JSON.stringify({ day: "2026-10-22", told: true }),
+    );
     expect(signalState().signals.filter((s) => s.key.startsWith("watch:"))).toEqual([
       expect.objectContaining({ key: `watch:flight-1:${T0}`, told: true }),
     ]);
@@ -2616,5 +2645,136 @@ describe("ops review regressions", () => {
     ["Need your approval", true],
   ])("classifies direct message %s", (text, question) => {
     expect(flightQuestion(text as string)).toBe(question);
+  });
+});
+
+describe("daily retrospective wakes", () => {
+  it("retries failed preparation at most once an hour without restarting", async () => {
+    liveCrew();
+    nowMs = Date.parse("2026-10-24T02:00:00Z");
+    const prepare = vi
+      .spyOn(retrospective, "prepareRetrospective")
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockRejectedValueOnce(new Error("still unavailable"));
+    try {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        await watch.check();
+        await watch.check();
+        expect(prepare).toHaveBeenCalledTimes(attempt);
+        expect(sendCalls).toHaveLength(0);
+        nowMs += FLIGHT_HOUR_MS - 1;
+        await watch.check();
+        expect(prepare).toHaveBeenCalledTimes(attempt);
+        nowMs++;
+      }
+      await watch.check();
+      await watch.check();
+      expect(prepare).toHaveBeenCalledTimes(3);
+      expect(sendCalls).toHaveLength(1);
+      expect(sendCalls[0]?.text).toContain('"day":"2026-10-24"');
+      nowMs += FLIGHT_HOUR_MS;
+      await watch.check();
+      expect(prepare).toHaveBeenCalledTimes(3);
+      expect(sendCalls).toHaveLength(1);
+    } finally {
+      prepare.mockRestore();
+    }
+  });
+
+  it("prepares off the serial chain once per day, serves questions meanwhile and replaces stale reports", async () => {
+    liveCrew();
+    nowMs = Date.parse("2026-10-24T02:00:00Z");
+    store.setSetting(
+      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
+      JSON.stringify({ day: "2026-10-23", told: false, report: { day: "2026-10-23" } }),
+    );
+    const original = retrospective.prepareRetrospective;
+    let finish: () => void = () => {};
+    const work = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const prepare = vi
+      .spyOn(retrospective, "prepareRetrospective")
+      .mockImplementation(async (...args) => {
+        await work;
+        await original(...args);
+      });
+    try {
+      ask();
+      await watch.check(); // Must resolve while retrospective git work is still pending.
+      expect(sendCalls).toHaveLength(1);
+      expect(
+        JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "{}").retrospective,
+      ).toBeUndefined();
+      await watch.check();
+      expect(prepare).toHaveBeenCalledTimes(1);
+      nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+      finish();
+      await work;
+      await watch.check();
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+      expect(sendCalls.at(-1)?.text).toContain('"day":"2026-10-24"');
+      expect(sendCalls.every((c) => !c.text.includes('"day":"2026-10-23"'))).toBe(true);
+      expect(prepare).toHaveBeenCalledTimes(1);
+    } finally {
+      finish();
+      prepare.mockRestore();
+    }
+  });
+
+  it.each([
+    ["2026-10-24T01:59:00Z", "2026-10-24T02:00:00Z", "2026-10-24"],
+    ["2026-10-25T02:59:00Z", "2026-10-25T03:00:00Z", "2026-10-25"],
+  ])("wakes at local 03:00 (%s), once across a durable restart", async (before, at, day) => {
+    liveCrew();
+    nowMs = Date.parse(before);
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    nowMs = Date.parse(at);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text).toContain('"retrospective":');
+    expect(sendCalls[0]?.text).toContain(`"${day}"`);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("woke on: retrospective (1)");
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    watch.stop();
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    makeWatch();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 25 * 60 * MIN;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
+  it("retries an undelivered fact after restart without recomputing it", async () => {
+    liveCrew();
+    nowMs = Date.parse("2026-10-24T02:00:00Z");
+    sendFails = true;
+    await watch.check();
+    const first = flightState({ config, store, busy: [], now: nowMs }).retrospective;
+    expect(first?.day).toBe("2026-10-24");
+    const failedAttempts = sendCalls.length;
+    watch.stop();
+    makeWatch();
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    sendFails = false;
+    await watch.check();
+    expect(sendCalls).toHaveLength(failedAttempts + 1);
+    expect(sendCalls.at(-1)?.text).toContain(`"at":${first?.at}`);
+    expect(flightState({ config, store, busy: [], now: nowMs }).retrospective).toBeUndefined();
+  });
+  it("includes the retrospective in a fresh run's first wake and honours Stop", async () => {
+    nowMs = Date.parse("2026-10-24T02:00:00Z");
+    store.setSeatSession(row("flight-1", null, "stopped"));
+    await watch.check();
+    expect(startCalls).toHaveLength(0);
+    store.setSeatSession(row("flight-1", null));
+    await watch.check();
+    expect(startCalls[0]?.first).toContain('"retrospective":');
+    expect(flightState({ config, store, busy: [], now: nowMs }).retrospective).toBeUndefined();
   });
 });

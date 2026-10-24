@@ -41,6 +41,9 @@ export const MC_TOOL_NAMES = {
   track: "track",
   untrack: "untrack",
   ledger: "ledger",
+  remember: "remember",
+  forget: "forget",
+  recall: "recall",
 } as const;
 
 export type McToolName = (typeof MC_TOOL_NAMES)[keyof typeof MC_TOOL_NAMES];
@@ -84,6 +87,9 @@ export const MC_TOOLS = {
   track: mcTool(MC_TOOL_NAMES.track),
   untrack: mcTool(MC_TOOL_NAMES.untrack),
   ledger: mcTool(MC_TOOL_NAMES.ledger),
+  remember: mcTool(MC_TOOL_NAMES.remember),
+  forget: mcTool(MC_TOOL_NAMES.forget),
+  recall: mcTool(MC_TOOL_NAMES.recall),
 } as const;
 
 /** The longest commit message and operator question the mc tools take. */
@@ -192,6 +198,8 @@ export const ASKED_OPERATOR =
 
 /** The hub's address: loopback only. The guard hook sends its token nowhere else. */
 export const LOOPBACK_HOST = "127.0.0.1";
+/** Every API route is under this prefix. */
+export const API_PREFIX = "/api";
 /** The header carrying the per-boot operator token on every mutating /api request. */
 export const OPERATOR_HEADER = "x-mc-operator";
 /** Where the HUD reads the operator token at page load. */

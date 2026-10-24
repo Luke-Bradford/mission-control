@@ -420,6 +420,9 @@ describe("startWatch", () => {
       "mcp__mc__track",
       "mcp__mc__untrack",
       "mcp__mc__ledger",
+      "mcp__mc__remember",
+      "mcp__mc__forget",
+      "mcp__mc__recall",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });

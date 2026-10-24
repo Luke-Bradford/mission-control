@@ -475,6 +475,9 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/flight/schedule"],
   ["GET", "/api/flight/summary"],
   ["GET", "/api/flight/ledger"],
+  ["GET", "/api/flight/memory?repo=shop-app"],
+  ["PUT", "/api/flight/memory/:repo/:topic", { kind: "lesson", body: "note", source: "test" }],
+  ["DELETE", "/api/flight/memory/:repo/:topic"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
   ["GET", "/api/activity"],
@@ -955,7 +958,16 @@ describe("local access", () => {
         expect((await post(url, json, body)).statusCode).toBe(401);
         continue;
       }
-      const r = method === "GET" ? await get(url) : await post(url, json, body);
+      const r =
+        method === "GET"
+          ? await get(url)
+          : method === "PUT" || method === "DELETE"
+            ? await app.inject({
+                method,
+                url: url.replace(":repo", "shop-app").replace(":topic", "topic"),
+                payload: body,
+              })
+            : await post(url, json, body);
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);

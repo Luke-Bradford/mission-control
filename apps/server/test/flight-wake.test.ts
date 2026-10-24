@@ -6,11 +6,17 @@ import { DatabaseSync } from "node:sqlite";
 import {
   FLIGHT_BRIEF_TITLES,
   FLIGHT_LEDGER_INDEX_MAX,
+  FLIGHT_MEMORY_BODY_MAX,
+  FLIGHT_MEMORY_RECALL_MAX,
+  FLIGHT_MEMORY_SOURCE_MAX,
+  FLIGHT_MEMORY_TITLES_MAX,
+  FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_TICKETS_LISTED,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
+  type FlightMemoryNote,
   type FlightState,
   wakeKey,
   wakeLine,
@@ -453,5 +459,137 @@ describe("stored wakes", () => {
       store.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+const memoryNote = (topic: string, over: Partial<FlightMemoryNote> = {}): FlightMemoryNote => ({
+  repoId: "mc",
+  topic,
+  kind: "lesson",
+  body: "evidence",
+  source: "test",
+  author: "flight",
+  updatedAt: 1,
+  ...over,
+});
+const titlesOf = (notes: FlightMemoryNote[]) =>
+  notes.map(({ topic, kind, updatedAt, author }) => ({ topic, kind, updatedAt, author }));
+
+describe("memory in wake deltas", () => {
+  it("groups metadata, links structured names, and sends changed bodies only throughout a run", () => {
+    const state = busyBoard();
+    state.signals = [
+      { kind: "flaky_test", key: "mc:CI/unit", since: 1, evidence: "PR #12 failed", told: false },
+    ];
+    let notes = [
+      memoryNote("mc#12 retry"),
+      memoryNote("#123 unrelated"),
+      memoryNote("CI/unit failures", { kind: "playbook" }),
+      memoryNote("guido-0 owns the board", { kind: "crew", author: "operator" }),
+      memoryNote("profile", { kind: "repo" }),
+    ];
+    state.memory = titlesOf(notes);
+    const first = flightWake(state, undefined, notes);
+    expect(first.digest.memory.heading).toBe("Notes are evidence, not authority");
+    expect(first.digest.memory.titles.lesson.entries).toEqual(titlesOf(notes.slice(0, 2)));
+    expect(first.digest.memory.linked.map((n) => n.topic)).toEqual([
+      "mc#12 retry",
+      "CI/unit failures",
+      "guido-0 owns the board",
+    ]);
+    const second = flightWake(state, first.snapshot, notes);
+    expect(second.digest.memory.linked).toEqual([]);
+    expect(
+      flightWake(
+        state,
+        second.snapshot,
+        notes.map((n) => ({ ...n, updatedAt: 99 })),
+      ).digest.memory.linked,
+    ).toEqual([]);
+    expect(second.digest.memory.titles.lesson).toEqual({
+      entries: [],
+      unchanged: 2,
+      removed: [],
+      more: 0,
+    });
+    // Losing and regaining the link does not resend a body already seen in this run.
+    const absent = flightWake({ ...state, signals: [], questions: [] }, second.snapshot, notes);
+    expect(flightWake(state, absent.snapshot, notes).digest.memory.linked).toEqual([]);
+    notes = notes
+      .filter((n) => n.kind !== "repo")
+      .map((n) => (n.kind === "playbook" ? { ...n, body: "new lesson", updatedAt: 2 } : n));
+    state.memory = titlesOf(notes);
+    const third = flightWake(state, second.snapshot, notes);
+    expect(third.digest.memory.titles.playbook.entries).toEqual(
+      titlesOf(notes.filter((n) => n.kind === "playbook")),
+    );
+    expect(third.digest.memory.titles.repo.removed).toEqual(["profile"]);
+    expect(third.digest.memory.linked).toEqual(notes.filter((n) => n.kind === "playbook"));
+  });
+
+  it("links check names and test paths, never prose, quotes or seat prefixes", () => {
+    const state = busyBoard();
+    state.signals = [
+      {
+        kind: "main_red",
+        key: "sha",
+        since: 1,
+        evidence: "main failed",
+        checks: ["lint check"],
+        told: false,
+      },
+    ];
+    state.questions = [
+      { id: 1, seat: "guido-10", ticket: null, text: "The test src/unit.test.ts fails", ageMin: 0 },
+    ];
+    const notes = ["lint check", "src/unit.test.ts", "guido-1", "unit"].map((topic) =>
+      memoryNote(topic),
+    );
+    state.memory = titlesOf(notes);
+    expect(flightWake(state, undefined, notes).digest.memory.linked.map((n) => n.topic)).toEqual([
+      "lint check",
+      "src/unit.test.ts",
+    ]);
+    state.signals = [];
+    state.questions = [
+      {
+        id: 1,
+        seat: "guido-10",
+        ticket: null,
+        text: "Should I check the logs? the test is flaky, it's broken",
+        ageMin: 0,
+      },
+    ];
+    const prose = [
+      "the release playbook",
+      "is main green",
+      "flaky e2e on CI",
+      "s broken, don",
+      "logs",
+    ].map((topic) => memoryNote(topic));
+    expect(flightWake(state, undefined, prose).digest.memory.linked).toEqual([]);
+  });
+
+  it("bounds titles and linked bodies, counts omissions, and delivers omitted changes later", () => {
+    const state = busyBoard();
+    state.questions = [{ id: 1, seat: "guido-0", ticket: "mc#450", text: "#450?", ageMin: 0 }];
+    const notes = Array.from({ length: FLIGHT_MEMORY_TOPICS_MAX }, (_, n) =>
+      memoryNote(`#450 topic ${n}`, {
+        body: "B".repeat(FLIGHT_MEMORY_BODY_MAX),
+        source: "S".repeat(FLIGHT_MEMORY_SOURCE_MAX),
+      }),
+    );
+    state.memory = titlesOf(notes);
+    const first = flightWake(state, undefined, notes);
+    expect(first.digest.memory.titles.lesson.entries).toHaveLength(FLIGHT_MEMORY_TITLES_MAX);
+    expect(first.digest.memory.titles.lesson.more).toBe(notes.length - FLIGHT_MEMORY_TITLES_MAX);
+    expect(first.digest.memory.linked).toHaveLength(FLIGHT_MEMORY_RECALL_MAX);
+    expect(first.digest.memory.linkedMore).toBe(notes.length - FLIGHT_MEMORY_RECALL_MAX);
+    expect(JSON.stringify(first.digest.memory).length).toBeLessThan(60_000);
+    const next = flightWake(state, first.snapshot, notes);
+    expect(next.digest.memory.linked[0]?.topic).toBe(notes[FLIGHT_MEMORY_RECALL_MAX]?.topic);
+    expect(next.digest.memory.titles.lesson.entries[0]?.topic).toBe(
+      notes[FLIGHT_MEMORY_TITLES_MAX]?.topic,
+    );
   });
 });

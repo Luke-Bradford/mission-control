@@ -9,7 +9,7 @@
  * from a ticket or a seat (a branch, a path, a ref) wherever git accepts one, so no such value is
  * ever read as an option.
  */
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -38,6 +38,8 @@ export const timedOut = (e: unknown): boolean =>
 export const SAFE_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor="];
 
 export interface CrewGitOptions {
+  /** Input for fixed batch commands such as cat-file. */
+  input?: string;
   /** Default `GIT_TIMEOUT_MS`; fetch, ls-remote and worktree add and remove need longer. */
   timeoutMs?: number;
   /** Default `GIT_MAX_BUFFER`. */
@@ -70,11 +72,27 @@ function execOptions(cwd: string, o: CrewGitOptions) {
   };
 }
 
+/** A batch command can exit before consuming stdin; handle that pipe error with its result. */
+async function withInput<T>(
+  result: Promise<T> & { child: ChildProcess },
+  input?: string,
+): Promise<T> {
+  const written = new Promise<void>((resolve, reject) => {
+    const stdin = result.child.stdin;
+    if (!stdin) return resolve();
+    stdin.once("error", reject);
+    stdin.end(input, resolve);
+  });
+  const [output] = await Promise.all([result, written]);
+  return output;
+}
+
 function run(cwd: string, args: string[], o: CrewGitOptions = {}): Promise<string> {
-  return execFileP("git", [...SAFE_CONFIG, ...args], {
+  const result = execFileP("git", [...SAFE_CONFIG, ...args], {
     ...execOptions(cwd, o),
     encoding: "utf8",
-  }).then((r) => r.stdout);
+  });
+  return withInput(result, o.input).then((r) => r.stdout);
 }
 
 const abs = (cwd: string, p: string) => realpath(isAbsolute(p) ? p : resolve(cwd, p));
@@ -119,9 +137,9 @@ export async function crewGitBytes(
   o: CrewGitOptions = {},
 ): Promise<Buffer> {
   await assertOwnGitDirs(cwd, expectedCommonDir, o);
-  const r = await execFileP("git", [...SAFE_CONFIG, ...args], {
+  const result = execFileP("git", [...SAFE_CONFIG, ...args], {
     ...execOptions(cwd, o),
     encoding: "buffer",
   });
-  return r.stdout;
+  return (await withInput(result, o.input)).stdout;
 }

@@ -15,6 +15,10 @@ import {
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_OPEN,
   FLIGHT_MAX_WAKES,
+  FLIGHT_MEMORY_HEADING,
+  FLIGHT_MEMORY_KINDS,
+  FLIGHT_MEMORY_RECALL_MAX,
+  FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MESSAGES_PER_HOUR,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
@@ -33,6 +37,9 @@ import {
   type FlightArrivalOperation,
   type FlightBriefSection,
   type FlightBriefView,
+  type FlightMemoryKind,
+  type FlightMemoryNote,
+  type FlightMemoryTitle,
   type FlightPark,
   type FlightScheduleView,
   type FlightSeatState,
@@ -65,6 +72,8 @@ import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
+import { linkedMemory } from "./memory.ts";
+import { pendingRetrospective } from "./retrospective.ts";
 import { flightSignals } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
@@ -356,6 +365,7 @@ export const deliveredFacts = (s: FlightState): string =>
   wakeFacts({
     ...s,
     signals: [],
+    retrospective: undefined,
     triage: [],
     prs: s.prs.filter((p) => p.state === "open"),
     holds: s.holds.map((h) => ({ ...h, told: true })),
@@ -712,6 +722,8 @@ export function flightState(i: {
   const planned = flightScheduleView(config, store, now).entries;
   return {
     ...flightSignals({ config, store, session, seats, now }),
+    memory: store.flightMemoryTitles(session.repoId),
+    retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
     discussions,
     time: clockHm(now, tz),
@@ -743,6 +755,8 @@ export function flightState(i: {
 }
 
 export interface FlightWakeSnapshot {
+  linked: Map<string, string>;
+  memory: Map<string, string>;
   signals: Map<string, string>;
   brief: Map<string, string>;
   headlineHash: string;
@@ -761,8 +775,20 @@ const entryHash = (entry: unknown): string =>
 export function flightWake(
   state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   previous?: FlightWakeSnapshot,
+  notes: FlightMemoryNote[] = [],
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
-  const { brief, headline, recent, prs, seats, ledger, tickets, signals, ...rest } = state;
+  const {
+    brief,
+    headline,
+    recent,
+    prs,
+    seats,
+    ledger,
+    tickets,
+    signals,
+    memory = [],
+    ...rest
+  } = state;
   const briefHashes = new Map(
     brief.map(({ ageMin: _ageMin, ...note }) => [note.section, entryHash(note)]),
   );
@@ -774,6 +800,8 @@ export function flightWake(
   const briefVersion =
     (previous?.briefVersion ?? 0) + (changedHeadline || changedNotes.length > 0 ? 1 : 0);
   const snapshot: FlightWakeSnapshot = {
+    linked: new Map(previous?.linked),
+    memory: new Map(),
     signals: new Map(),
     brief: briefHashes,
     headlineHash,
@@ -785,7 +813,7 @@ export function flightWake(
     tickets: new Map(),
   };
   const changed = <T>(
-    list: "recent" | "prs" | "seats" | "ledger" | "tickets" | "signals",
+    list: "recent" | "prs" | "seats" | "ledger" | "tickets" | "signals" | "memory",
     entries: T[],
     key: (entry: T) => string,
     // Poll times and age counters stay in sent entries, but do not make an entry new.
@@ -803,17 +831,56 @@ export function flightWake(
       removed: [...(previous?.[list].keys() ?? [])].filter((id) => !snapshot[list].has(id)),
     };
   };
+  const signalChanges = changed(
+    "signals",
+    signals,
+    (s) => `${s.kind}:${s.key}`,
+    (s) => (s.told ? { kind: s.kind, key: s.key, told: s.told } : s),
+  );
+  const memoryChanges = changed("memory", memory, (n) => `${n.kind}:${n.topic}`);
+  const titles = Object.fromEntries(
+    FLIGHT_MEMORY_KINDS.map((kind) => {
+      const changes = memoryChanges.entries.filter((n) => n.kind === kind);
+      const entries = changes.slice(0, FLIGHT_MEMORY_TITLES_MAX);
+      // Omitted titles have not been delivered; keep them eligible for the next wake.
+      for (const note of changes.slice(FLIGHT_MEMORY_TITLES_MAX)) {
+        const key = `${kind}:${note.topic}`;
+        const prior = previous?.memory.get(key);
+        if (prior === undefined) snapshot.memory.delete(key);
+        else snapshot.memory.set(key, prior);
+      }
+      return [
+        kind,
+        {
+          entries,
+          more: changes.length - entries.length,
+          unchanged: memory.filter((n) => n.kind === kind).length - changes.length,
+          removed: memoryChanges.removed
+            .filter((key) => key.startsWith(`${kind}:`))
+            .map((key) => key.slice(kind.length + 1)),
+        },
+      ];
+    }),
+  ) as Record<FlightMemoryKind, FlightWakeList<FlightMemoryTitle> & { more: number }>;
+  const linkedHash = ({ updatedAt: _updatedAt, ...note }: FlightMemoryNote): string =>
+    entryHash(note);
+  const linkedChanges = linkedMemory(notes, state).filter(
+    (note) => previous?.linked.get(note.topic.toLowerCase()) !== linkedHash(note),
+  );
+  const linked = linkedChanges.slice(0, FLIGHT_MEMORY_RECALL_MAX);
+  for (const note of linked) snapshot.linked.set(note.topic.toLowerCase(), linkedHash(note));
   const ticketChanges = changed("tickets", tickets.slice(0, FLIGHT_TICKETS_LISTED), (t) => t.ref);
   return {
     snapshot,
     digest: {
       ...rest,
-      signals: changed(
-        "signals",
-        signals,
-        (s) => `${s.kind}:${s.key}`,
-        (s) => (s.told ? { kind: s.kind, key: s.key, told: s.told } : s),
-      ),
+      memory: {
+        heading: FLIGHT_MEMORY_HEADING,
+        titles,
+        linked,
+        linkedMore: linkedChanges.length - linked.length,
+      },
+      signals: signalChanges,
       ...(changedNotes.length > 0 ? { brief: changedNotes } : {}),
       ...(changedHeadline ? { headline } : {}),
       briefVersion,
@@ -866,6 +933,7 @@ export function wakeFacts(
       ? s.seats.filter((x) => x.loop === "build" && x.free).map((x) => x.id)
       : [];
   return JSON.stringify({
+    retrospective: s.retrospective ? [s.retrospective.day] : [],
     signals: s.signals
       .filter((s) => !s.told)
       .map((s) => `${s.kind}:${s.key}`)
@@ -925,6 +993,7 @@ export function pending(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
 ): boolean {
   return (
+    s.retrospective !== undefined ||
     s.signals.some((s) => !s.told) ||
     s.triage.length > 0 ||
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||

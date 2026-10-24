@@ -24,6 +24,7 @@ import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
+import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   deliveredFacts,
@@ -107,11 +108,31 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let rotationRequested = false;
   let lastFailure: string | null = null;
   const announced = new Set<string>();
+  let preparingDay: string | null = null;
+  let attemptedDay: string | null = null;
+  let retryAt = 0;
+  function prepareDaily(t: number): void {
+    const day = retrospectiveDue(config, store, t);
+    if (day === null || day === attemptedDay || preparingDay !== null || stopped || t < retryAt)
+      return;
+    preparingDay = day;
+    attemptedDay = day;
+    void prepareRetrospective(config, store, t)
+      .catch((e) => {
+        attemptedDay = null;
+        retryAt = now() + FLIGHT_HOUR_MS;
+        log(`flight retrospective: ${e instanceof Error ? e.message : e}`);
+      })
+      .finally(() => {
+        preparingDay = null;
+        if (!stopped) void check();
+      });
+  }
 
   const noteOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_NOTE_KEY);
 
   async function pass(): Promise<void> {
-    if (!enabled || !supervisor.status().enabled) return;
+    if (stopped || !enabled || !supervisor.status().enabled) return;
     const found = flightSeat(config);
     if (found === null) return;
     const id = found.seat.id;
@@ -160,6 +181,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         return;
       }
       if (deps.blocked?.(id) === true) return;
+      prepareDaily(t);
       const state = flightState({
         config,
         store,
@@ -172,7 +194,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = false;
       rotationRequested = false; // the fresh session already sees the current config
       try {
-        const { digest, snapshot } = flightWake(state);
+        const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const { runId } = await supervisor.startWatch(id, {
           first: wakeLine(state, digest, causes.length > 0 ? causes : ["initial"]),
@@ -180,6 +202,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
+        markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
       } catch (e) {
@@ -205,6 +228,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotationRequested = false;
       return;
     }
+    prepareDaily(t);
     const state = flightState({
       config,
       store,
@@ -226,6 +250,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       const { digest, snapshot } = flightWake(
         state,
         delivered?.runId === runId ? delivered.snapshot : undefined,
+        store.flightMemory(state.repo),
       );
       if (
         (await supervisor.send(
@@ -237,6 +262,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
+        markRetrospectiveShown(store, state);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
       }

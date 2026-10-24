@@ -150,6 +150,7 @@ export function observeFlightMain(store: Store, repo: string, main: MainCi): voi
       key: episode,
       since: main.at,
       evidence: mainEvidence(store, repo, { ...main, episode }),
+      checks: (main.checks ?? []).map((c) => c.name),
     },
     main.at,
   );
@@ -264,9 +265,15 @@ export function flightSignals(i: {
   const state = read(store, repo, now);
   const cutoff = now - FLIGHT_SIGNAL_KEEP_MS;
   const active = new Set<string>();
-  const raise = (kind: FlightSignal["kind"], key: string, since: number, evidence: string) => {
+  const raise = (
+    kind: FlightSignal["kind"],
+    key: string,
+    since: number,
+    evidence: string,
+    checks?: string[],
+  ) => {
     active.add(`${kind}:${key}`);
-    raiseSignal(state, { kind, key, since, evidence }, now);
+    raiseSignal(state, { kind, key, since, evidence, ...(checks ? { checks } : {}) }, now);
   };
   const triage = (ref: string, cause: FlightTriage["cause"], since: number, evidence: string) => {
     if (since < cutoff) return;
@@ -383,7 +390,13 @@ export function flightSignals(i: {
 
   const main = stored<MainCi | null>(store, `${FLIGHT_MAIN_SETTING}:${repo}`, null);
   if (main?.ci === "failing") {
-    raise("main_red", main.episode ?? main.sha, main.at, mainEvidence(store, repo, main));
+    raise(
+      "main_red",
+      main.episode ?? main.sha,
+      main.at,
+      mainEvidence(store, repo, main),
+      (main.checks ?? []).map((c) => c.name),
+    );
   }
   const rate = stored<GithubRateState | null>(store, GITHUB_RATE_SETTING, null);
   for (const reading of Object.values(rate?.queries ?? {})) {
@@ -521,4 +534,17 @@ export function markFlightSignalsShown(store: Store, state: FlightState, now: nu
     if (entry) entry.told = true;
   }
   save(store, state.repo, saved);
+}
+
+/** Includes delivered and resolved causes retained for the daily retrospective. */
+export function flightSignalHistory(
+  store: Store,
+  repo: string,
+  now: number,
+): (FlightSignal & { lastSeen: number })[] {
+  return Object.values(read(store, repo, now).signals).map(({ toldAt, ...signal }) => ({
+    ...signal,
+    lastSeen: signal.lastSeen ?? signal.since,
+    told: toldAt !== null,
+  }));
 }
