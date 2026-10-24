@@ -1,0 +1,25 @@
+{
+  "name": "@mc/agentcomms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers-sumo": "^0.8.2",
+    "@types/ws": "^8.18.2"
+  },
+  "dependencies": {
+    "@mc/core": "workspace:*",
+    "libsodium-wrappers-sumo": "^0.8.4",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "bin": {
+    "agentcomms": "bin/agentcomms"
+  }
+}

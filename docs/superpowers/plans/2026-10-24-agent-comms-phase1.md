@@ -1,5 +1,26 @@
 # Agent Comms Phase 1 Implementation Plan
 
+> **Security review amendment (2026-10-24):** The review requirements below supersede the
+> original unsigned wire shapes and timestamp-only hello in this historical plan. The
+> follow-up is implemented without commits, per the operator's instruction.
+>
+> - B1/B2: invite-pinned owner id; self-signed member records and box-bound delegations;
+>   owner-signed grants and versioned active directories; locally pinned owner records;
+>   persistent monotonic trust; no sending below the highest verified key; removed/old-epoch
+>   traffic rejected after verified rotation.
+> - B3: quarantine poison messages with a reason and advance the cursor; application errors
+>   keep the connection; short-connection backoff is not reset by received messages.
+> - W1/W3/N3: single-use socket challenges, signed token/control requests, signature domains,
+>   operator creation secret and ten-second hello timeout.
+> - W4/W5/W6/W8: bounded serialized hooks, backlog/thread/mention checks and process-group
+>   timeout; message-id uniqueness; scanning/caps on all outgoing text; independent room
+>   retries and API status without blocking startup.
+> - N7/N8: enforce request reasons in daemon send; read limit defaults to 50 (maximum 500).
+> - Validation starts with fake-relay attack regressions, followed by Biome write/check on
+>   both packages, workspace typecheck and the agentcomms suite with two workers. Socket
+>   failures caused by sandbox bind restrictions are reported separately. No network access.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Two machines on different subscriptions (the home Mac and the work PC) join one invite-only room through a relay, and their agents exchange signed, end-to-end encrypted messages. A Claude or Codex session takes part through MCP tools, and an always-on communicator keeps each side connected.
@@ -32,6 +53,8 @@ A thin Cloudflare Worker with one Durable Object per room, in `apps/relay`, wrap
 - **The relay is ciphertext only.** It never holds a room key, and never sees a message body in plain text.
 - **Invites never carry the room key.** The key is sent only after owner approval, wrapped to the new member's X25519 public key.
 - **Who signs what.** Only member (human) keys sign `sender.kind: "human"` envelopes. Agent keys sign only `sender.kind: "agent"` envelopes, under a delegation signed by their member key. Agent tools (MCP and the communicator) never load the member key for signing.
+- **Which commands may load the member key** (settled during the build, 24 Oct). Only the human-run CLI setup commands: `init`, `agent add`, `room create`, `invite`, `approve` and `remove`. The daemon, the loopback API and the MCP server never load it.
+- **Agent-readable grants** (settled during the build, 24 Oct). On approval and on rotation, the room key is wrapped to the member's X25519 key and also to each approved agent's X25519 key. `Member.agents[]` therefore carries a `boxPublicKey`. The relay serves `grantsFor(recipientId)` for a member or agent id, and an authenticated client gets the room's directory of public keys (members and their agents) to verify senders. So a daemon running as an agent can read the room key and follow rotations without the human.
 - **Private keys** live only in `~/.local/share/agentcomms/keys/` (or `$AGENTCOMMS_HOME/keys/`) with file mode `0600`. They are never in the repo or the config, and never sent anywhere.
 - **Message body limit:** at most `BODY_MAX = 32_000` UTF-8 bytes before encryption. A longer message is refused whole, never cut.
 - **Outgoing check.** Every outgoing body passes `scanText` from `@mc/core`. A finding holds the message (`held: true`) and it is not sent.
