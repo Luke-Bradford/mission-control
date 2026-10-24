@@ -1,7 +1,4 @@
 import {
-  CI_FAILED_EVENT_PREFIX,
-  CI_PARK_FAILED_PREFIX,
-  CI_RERUN_FAILED_EVENT_PREFIX,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_LEDGER_KINDS,
   FLIGHT_LEDGER_OPEN,
@@ -17,6 +14,7 @@ import {
   type FlightSummaryItem,
   type FlightSummaryView,
   FOR_THE_CONTROLLER,
+  isCiFailureEvent,
   orderLedger,
   parkedEventText,
   priorityRank,
@@ -85,12 +83,7 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
   metrics.inReview = prs.filter((p) => p.state === "open" && !p.isDraft).length;
   metrics.inCi = prs.filter((p) => p.state === "open" && p.ci === "pending").length;
   for (const e of store.loopEvents(since, session.repoId)) {
-    if (
-      e.text.startsWith(CI_FAILED_EVENT_PREFIX) ||
-      e.text.startsWith(CI_RERUN_FAILED_EVENT_PREFIX) ||
-      e.text.startsWith(parkedEventText(CI_PARK_FAILED_PREFIX))
-    )
-      metrics.ciFailures++;
+    if (isCiFailureEvent(e.text)) metrics.ciFailures++;
     const key = e.key.startsWith(`${e.runId}:`) ? e.key.slice(e.runId.length + 1) : "";
     if (
       (key.startsWith("rerun:") && e.text.includes("; re-ran ")) ||

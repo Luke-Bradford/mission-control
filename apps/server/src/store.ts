@@ -1485,6 +1485,30 @@ export class Store {
     };
   }
 
+  /** Recent state changes plus the state carried into the window, for each scoped seat. */
+  overviewAgentEvents(agentIds: readonly string[], since: number, until: number): AgentEvent[] {
+    const query = this.db.prepare(`SELECT * FROM agent_events
+      WHERE agent_id = ? AND at >= COALESCE(
+        (SELECT MAX(at) FROM agent_events WHERE agent_id = ? AND at < ?), ?)
+        AND at <= ? ORDER BY at`);
+    return agentIds.flatMap((id) =>
+      (query.all(id, id, since, since, until) as Row[]).map((r) => ({
+        agentId: id,
+        at: r.at as number,
+        from: r.from_state as HudState,
+        to: r.to_state as HudState,
+        text: r.text as string,
+      })),
+    );
+  }
+
+  latestMachineSample(until: number): MachineSample | null {
+    const row = this.db
+      .prepare("SELECT sample FROM machine_samples WHERE at <= ? ORDER BY at DESC LIMIT 1")
+      .get(until) as { sample: string } | undefined;
+    return row ? (JSON.parse(row.sample) as MachineSample) : null;
+  }
+
   /** Records a card move; returns its id. */
   addBoardMove(m: Omit<BoardMove, "id">): number {
     const r = this.db
@@ -1855,6 +1879,29 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC")
       .all(repoId) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
+  overviewPullRequests(repoId: RepoId, since: number): PullRequestView[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM pull_requests WHERE repo_id = ? AND (state = 'open' OR merged_at >= ?) ORDER BY number DESC",
+      )
+      .all(repoId, since) as Row[];
+    return this.pullRequestRows(rows);
+  }
+
+  /** Latest successful move into Ready, including moves before today's window. */
+  overviewReadyMoves(repoId: RepoId): Map<number, number> {
+    const rows = this.db
+      .prepare(
+        "SELECT issue, MAX(at) AS at FROM board_moves WHERE repo_id = ? AND board_column = 'Ready' AND state = 'done' GROUP BY issue",
+      )
+      .all(repoId) as { issue: number; at: number }[];
+    return new Map(rows.map((r) => [r.issue, r.at]));
+  }
+
+  private pullRequestRows(rows: Row[]): PullRequestView[] {
     return rows.map((r) => ({
       repoId: r.repo_id as string,
       number: r.number as number,
