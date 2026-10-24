@@ -101,6 +101,20 @@ describe("Store", () => {
     expect(() => s.close()).not.toThrow();
   });
 
+  it("reads all runs on a repo's ticket, including ended runs but not reviews", () => {
+    store.upsertRun(run({ id: "live", ticket: "repo#7" }));
+    store.upsertRun(run({ id: "ended", ticket: "repo#7", endedAt: 2000 }));
+    store.upsertRun(run({ id: "review", ticket: "repo#7", reviewId: 1 }));
+    store.upsertRun(run({ id: "other-ticket", ticket: "repo#8" }));
+    store.upsertRun(run({ id: "other-repo", repoId: "other", ticket: "repo#7" }));
+    expect(
+      store
+        .runsOnTicket("repo", "repo#7")
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual(["ended", "live"]);
+  });
+
   it("upsertRun keeps one row with the latest fields", () => {
     store.upsertRun(run());
     store.upsertRun(
@@ -663,6 +677,7 @@ describe("Store", () => {
       author: "octo",
       assignees: ["a", "b"],
       checks: [],
+      closingIssues: [1, 3],
       ...over,
     });
     store.upsertPullRequests(

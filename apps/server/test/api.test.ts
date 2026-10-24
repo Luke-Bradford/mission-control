@@ -2475,6 +2475,7 @@ describe("boards, escalations, health", () => {
       author: null,
       assignees: [] as string[],
       checks: [] as PrCheck[],
+      closingIssues: [] as number[],
     } as const;
     store.upsertPullRequests("shop-app", [pr], 0);
     const r = await get("/api/repos/shop-app/prs");
@@ -2504,6 +2505,7 @@ describe("boards, escalations, health", () => {
       author: null,
       assignees: [],
       checks: [],
+      closingIssues: [] as number[],
     });
     store.upsertPullRequests("shop-app", [pr(4, "shop-app#9"), pr(5, null)], 0);
     expect((await get("/api/repos/shop-app/prs?linked=1")).json()).toEqual([pr(4, "shop-app#9")]);

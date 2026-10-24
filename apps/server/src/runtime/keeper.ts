@@ -41,6 +41,7 @@ import {
 import { createServer, type Server, type Socket } from "node:net";
 import { uptime } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 /** Bumped when the wire changes; a hub that finds another version ends that keeper and resumes. */
 export const KEEPER_PROTOCOL_VERSION = 1;
@@ -225,8 +226,6 @@ export function readKeeperExit(dir: string): KeeperExit | null {
     return null;
   }
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * Ends the run folder's keeper and CLI by their pids: SIGTERM, then SIGKILL after `waitMs`, and a
