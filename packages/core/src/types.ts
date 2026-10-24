@@ -874,6 +874,12 @@ export interface BriefOption {
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
 export interface AttentionBrief {
+  /** Missing on briefs written before triage routing was introduced. */
+  for?: "operator" | "flight";
+  original?: string;
+  assessment?: string;
+  did?: { action: string; refs: string[] }[];
+  ask?: string;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
   recommendedOptionId?: string;
@@ -911,6 +917,8 @@ export interface AttentionItem {
   owner?: AttentionOwner;
   /** FLIGHT's brief, once it has written one. */
   brief?: AttentionBrief;
+  flightTriage?: "waiting" | "handling" | "missed";
+  triageDueAt?: number;
   acked: boolean;
 }
 

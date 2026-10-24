@@ -25,7 +25,7 @@ import {
   driverStopKey,
   type Escalation,
   escalationKind,
-  FLIGHT_ANSWER_WAIT_MS,
+  FLIGHT_TRIAGE_WAIT_MS,
   fixesSent,
   hardRulesBySettingKey,
   hudState,
@@ -39,8 +39,10 @@ import {
   loopText,
   modeOfSeat,
   OWNER_CONTROLLER,
+  OWNER_FLIGHT,
   OWNER_LOOP,
   OWNER_OPERATOR,
+  PR_WAIT_MS,
   type PullRequestView,
   pathInArea,
   profileStep,
@@ -69,7 +71,7 @@ import { threadMessages } from "./comms.ts";
 import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
-import { flightLive, flightOwnSeatIds } from "./flight/state.ts";
+import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { type PrCache, parseTicket, runPrs, runTicket, runTicketTitle } from "./runview.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
@@ -717,13 +719,41 @@ export function attentionItems(
     });
   }
 
-  items.push(...crewItems(config, store, now, lock, rows));
+  items.push(...crewItems(config, store, lock, rows));
 
+  const live = flightLive(config, store);
+  const flightId = flightSeat(config)?.seat.id ?? null;
+  const passed = new Set(
+    store
+      .openQuestions()
+      .filter((q) => q.passedAt !== null || q.agentId === flightId)
+      .map((q) => `ask:${q.id}`),
+  );
   return items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
     .map((i) => {
-      const brief = briefs.get(i.key);
-      return { ...i, ...(brief === undefined ? {} : { brief }), acked: acks.has(i.key) };
+      const saved = briefs.get(i.key);
+      // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
+      const brief = saved !== undefined && saved.at >= i.at ? saved : undefined;
+      const item: AttentionItem = {
+        ...i,
+        ...(brief === undefined ? {} : { brief }),
+        acked: acks.has(i.key),
+      };
+      if (i.owner !== OWNER_OPERATOR || passed.has(i.key) || ownReply(i, flightId)) return item;
+      if (brief !== undefined && brief.for !== "flight") return item;
+      if (!live) return item;
+      if (brief?.for === "flight")
+        return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
+      // A PR only becomes an attention item after its existing quiet wait.
+      const raisedAt =
+        i.kind === "stalled"
+          ? (rows.find((r) => r.id === i.agentId)?.stateSince ?? i.at)
+          : i.at + (i.kind === "pr" ? PR_WAIT_MS : 0);
+      const triageDueAt = raisedAt + FLIGHT_TRIAGE_WAIT_MS;
+      return now < triageDueAt
+        ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
+        : { ...item, flightTriage: "missed", triageDueAt };
     });
 }
 
@@ -794,7 +824,6 @@ function noteOwner(store: Store, n: Pick<AttentionNote, "key" | "repoId">): Atte
 function crewItems(
   config: CcConfig,
   store: Store,
-  now: number,
   lock: TestLockState,
   rows: CrewRow[],
 ): OwnedItem[] {
@@ -853,20 +882,7 @@ function crewItems(
     );
   }
 
-  // While FLIGHT runs, it gets first go at a seat's question; it is the operator's once FLIGHT
-  // has passed it, or after FLIGHT_ANSWER_WAIT_MS.
-  const flightHolds = flightLive(config, store);
-  const flightOwn = flightOwnSeatIds(config);
   for (const q of store.openQuestions()) {
-    // Held back, not listed as FLIGHT's, until the web lists only the operator's items.
-    if (
-      flightHolds &&
-      flightOwn.has(q.agentId) &&
-      q.passedAt === null &&
-      now - q.at < FLIGHT_ANSWER_WAIT_MS
-    ) {
-      continue;
-    }
     out.push(
       item({
         key: `ask:${q.id}`,

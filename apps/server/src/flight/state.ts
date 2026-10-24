@@ -19,6 +19,7 @@ import {
   FLIGHT_STARTABLE,
   FLIGHT_STARTS_PER_HOUR,
   FLIGHT_TICKETS_LISTED,
+  FLIGHT_TRIAGE_WAIT_MS,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
@@ -35,7 +36,9 @@ import {
   type ItemDiscussion,
   inLane,
   LANE_LABEL_PREFIX,
+  OWNER_FLIGHT,
   OWNER_OPERATOR,
+  PR_WAIT_MS,
   PRIORITIES,
   READY_LABEL,
   RULING_PARK,
@@ -64,17 +67,23 @@ interface TeamsDigestState {
   };
 }
 
-/** The Needs-you items that wait on the operator (the owner is the operator's), briefed or not. */
+/** Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. */
 export function operatorItems(
   config: CcConfig,
   store: Store,
   now: number,
   hubLogin: string | null,
-  rows = crew(config, store, now, NO_LOCK, () => null).rows,
+  rows?: ReturnType<typeof crew>["rows"],
+  lock: TestLockState = NO_LOCK,
 ): AttentionItem[] {
-  return attentionItems(config, store, now, NO_LOCK, rows, hubLogin).filter(
-    (i) => i.owner === OWNER_OPERATOR,
-  );
+  return attentionItems(
+    config,
+    store,
+    now,
+    lock,
+    rows ?? crew(config, store, now, lock, () => null).rows,
+    hubLogin,
+  ).filter((i) => i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT);
 }
 
 /**
@@ -129,12 +138,18 @@ export function flightOwnSeatIds(config: CcConfig): ReadonlySet<string> {
   return new Set(found.session.seats.filter((s) => s.id !== found.seat.id).map((s) => s.id));
 }
 
-/** That seat's row holds an unended run in a state of ACTIVE_SEAT_STATES. */
+/** The watch seat has an unended active run and is not held (parked). */
 export function flightLive(config: CcConfig, store: Store): boolean {
   const found = flightSeat(config);
   if (found === null) return false;
   const row = store.seatSession(found.seat.id);
-  if (row === null || row.runId === null || !ACTIVE_SEAT_STATES.includes(row.state)) return false;
+  if (
+    row === null ||
+    row.runId === null ||
+    row.state === "parked" ||
+    !ACTIVE_SEAT_STATES.includes(row.state)
+  )
+    return false;
   return store.run(row.runId)?.endedAt === null;
 }
 
@@ -344,6 +359,7 @@ export function flightState(i: {
   busy: readonly SeatBusy[];
   now: number;
   hubLogin?: string | null;
+  lock?: TestLockState;
 }): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
   const discussions = store.pendingDiscussions();
@@ -399,7 +415,7 @@ export function flightState(i: {
   }
   const { session } = found;
   const board = store.board(session.repoId);
-  const crewRows = crew(config, store, now, NO_LOCK, () => null).rows;
+  const crewRows = crew(config, store, now, i.lock ?? NO_LOCK, () => null).rows;
   const stalled = stalledSeats(config, store, now, crewRows);
   const mine = session.seats.filter((s) => s.id !== found.seat.id && !s.retiring);
   const unended = (seatId: string) => {
@@ -408,6 +424,7 @@ export function flightState(i: {
     return run !== null && run.endedAt === null ? run : null;
   };
   const open = store.openQuestions();
+  const briefs = store.briefs();
 
   const seats = mine.map((s): FlightSeatState => {
     const row = store.seatSession(s.id);
@@ -442,6 +459,8 @@ export function flightState(i: {
     .filter(
       (q) =>
         q.passedAt === null &&
+        ((briefs.get(`ask:${q.id}`)?.at ?? -1) < q.at ||
+          briefs.get(`ask:${q.id}`)?.for === "flight") &&
         mine.some((s) => s.id === q.agentId) &&
         unended(q.agentId)?.id === q.runId,
     )
@@ -627,10 +646,21 @@ export function flightState(i: {
     ];
   });
 
-  const briefed = store.briefs();
-  const flightId = flightSeat(config)?.seat.id ?? null;
-  const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows)
-    .filter((x) => !briefed.has(x.key) && !ownReply(x, flightId))
+  const flightId = found.seat.id;
+  const questionKeys = new Set(
+    open
+      .filter(
+        (q) => q.agentId !== flightId && q.passedAt === null && store.run(q.runId)?.endedAt == null,
+      )
+      .map((q) => `ask:${q.id}`),
+  );
+  const items = operatorItems(config, store, now, i.hubLogin ?? null, crewRows, i.lock)
+    .filter(
+      (x) =>
+        !x.brief &&
+        !ownReply(x, flightId) &&
+        (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
+    )
     .sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
     .slice(0, FLIGHT_ITEMS_LISTED)
     .map((x) => ({
@@ -639,6 +669,10 @@ export function flightState(i: {
       ticket: x.ticket,
       text: cut(x.text, FLIGHT_ABOUT_MAX),
       ageMin: Math.floor((now - x.at) / 60_000),
+      triageRemainingMs: Math.max(
+        0,
+        (x.triageDueAt ?? x.at + (x.kind === "pr" ? PR_WAIT_MS : 0) + FLIGHT_TRIAGE_WAIT_MS) - now,
+      ),
     }));
 
   const planned = flightScheduleView(config, store, now).entries;

@@ -9,6 +9,7 @@ import {
   DEFAULT_PROFILES,
   driverStopKey,
   type Escalation,
+  FLIGHT_TRIAGE_WAIT_MS,
   NEW_LOOP,
   type Profile,
   type PullRequestView,
@@ -750,6 +751,48 @@ describe("attentionItems: PRs waiting on you", () => {
     store.replacePullRequests("shop-app", prs, 0);
   };
   const prItems = () => attentionItems(config, store, NOW).filter((i) => i.kind === "pr");
+
+  it("gives a newly eligible draft a full triage wait", () => {
+    config.crew = {
+      worktrees: dir,
+      maxSeats: 1,
+      sessions: [
+        {
+          id: "s",
+          repoId: "shop-app",
+          checkout: dir,
+          seats: [
+            { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "opus", area: [] },
+          ],
+        },
+      ],
+    };
+    store.upsertRun(run({ id: "f", agentId: "flight-1" }));
+    store.setSeatSession({
+      seatId: "flight-1",
+      runId: "f",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    seed([pr({ updatedAt: NOW - HOUR })]);
+    expect(prItems()[0]).toMatchObject({ owner: "flight", flightTriage: "waiting" });
+    expect(
+      attentionItems(config, store, NOW + FLIGHT_TRIAGE_WAIT_MS).find((i) => i.kind === "pr"),
+    ).toMatchObject({ owner: "operator", flightTriage: "missed" });
+    store.setSeatSession({
+      seatId: "flight-1",
+      runId: null,
+      cliSessionId: null,
+      state: "stopped",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    expect(prItems()[0]?.owner).toBe("operator");
+  });
 
   it("a 9-day-old draft on a board ticket is a pr item", () => {
     seed([pr()]);
@@ -1757,6 +1800,31 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         ...over,
       });
     flightRow({});
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW })]);
+    store.raiseNote({
+      key: "triage",
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Update needs approval",
+      at: NOW,
+    });
+    const newKeys = ["esc:shop-app#9", "note:triage"];
+    for (const key of newKeys) {
+      expect(attentionItems(c, store, NOW).find((i) => i.key === key)).toMatchObject({
+        owner: "flight",
+        flightTriage: "waiting",
+      });
+      expect(
+        attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS).find((i) => i.key === key),
+      ).toMatchObject({ owner: "operator", flightTriage: "missed" });
+    }
+    flightRow({ state: "parked" });
+    expect(attentionItems(c, store, NOW).find((i) => i.key === "note:triage")?.owner).toBe(
+      "operator",
+    );
+    flightRow({});
     const id = asked("GUIDO-1", "c1");
     const own = asked("FLIGHT-1", "f1");
     // younger than 20 minutes while FLIGHT is live: held back; its own is shown
@@ -1773,7 +1841,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     expect(keys(NOW)).toContain(`ask:${held}`);
   });
 
-  it("FLIGHT holds only its own session's questions", () => {
+  it("FLIGHT triages questions from every session", () => {
     const base = withCrew();
     const session = base.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
@@ -1818,7 +1886,8 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     const keys = attentionItems(c, store, NOW)
       .filter((i) => i.kind === "question" && i.owner === "operator")
       .map((i) => i.key);
-    expect(keys).toEqual([`ask:${other}`]);
+    expect(keys).toEqual([]);
+    expect(keys).not.toContain(`ask:${other}`);
     expect(keys).not.toContain(`ask:${mine}`);
   });
 

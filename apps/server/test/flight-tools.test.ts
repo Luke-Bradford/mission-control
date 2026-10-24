@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   type BoardItem,
   BRIEF_CLEARED_DECISION,
+  BRIEF_INPUT_MAX,
   BRIEFED_TEXT,
   briefClearedText,
   briefSavedDecision,
@@ -25,6 +26,7 @@ import {
   FLIGHT_BRIEF_SECTION_MAX,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_BRIEFS_PER_HOUR,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
   FLIGHT_GH_READS_PER_HOUR,
@@ -39,7 +41,6 @@ import {
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
-  MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   NEW_LOOP,
   NOT_ON_BOARD,
@@ -55,6 +56,7 @@ import {
   type SeatSessionRow,
   startMissingNeedsText,
   startNeedsPlanText,
+  type TestLockState,
   type TicketView,
   ticketHasRunText,
   twoAreasText,
@@ -77,6 +79,7 @@ import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts
 import { flightBriefView } from "../src/flight/state.ts";
 import { createFlightTools, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
+import { attentionItems } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -136,6 +139,7 @@ let bus: ChangeBus;
 let seen: string[];
 let tool: McTool;
 let nowMs: number;
+let lockNow: TestLockState;
 let cfg: CcConfig;
 let tools: McTool[];
 let startCalls: unknown[][];
@@ -212,6 +216,7 @@ beforeEach(() => {
   seen = [];
   bus.subscribe((t) => seen.push(t));
   nowMs = NOW;
+  lockNow = { holder: null, waiting: [] };
   cfg = config();
   startCalls = [];
   endCalls = [];
@@ -250,6 +255,7 @@ beforeEach(() => {
     store,
     bus,
     login: "me",
+    lockState: () => lockNow,
     gh: async (a) => {
       ghCalls.push(a);
       return ghImpl(a);
@@ -2172,7 +2178,24 @@ describe("flight_state", () => {
           failingChecks: [],
         },
       ],
-      items: [{ key: "note:ready:r-pr", kind: "ready", ticket: "mc#7", text: "ready", ageMin: 0 }],
+      items: [
+        {
+          key: "ask:1",
+          kind: "question",
+          ticket: null,
+          text: "INCO-1 asks: Which lane?",
+          ageMin: 5,
+          triageRemainingMs: 15 * 60_000,
+        },
+        {
+          key: "note:ready:r-pr",
+          kind: "ready",
+          ticket: "mc#7",
+          text: "ready",
+          ageMin: 0,
+          triageRemainingMs: 20 * 60_000,
+        },
+      ],
       holds: [],
       recent: [{ time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" }],
       limits: { startsLeft: 8, messagesLeft: 29 },
@@ -2961,7 +2984,7 @@ describe("brief_item", () => {
 
   it("stores a brief on an operator item and emits attention", async () => {
     expect(await call("brief_item", B())).toEqual({ text: BRIEFED_TEXT });
-    expect(store.briefs().get(KEY)).toEqual({
+    expect(store.briefs().get(KEY)).toMatchObject({
       context: "mc#7 is parked since 11:00.",
       recommendation: "Un-park it.",
       options: [
@@ -2971,7 +2994,7 @@ describe("brief_item", () => {
       basis: "read the park",
       at: NOW,
     });
-    expect(seen).toEqual(["attention"]);
+    expect(seen).toEqual(["attention", "flight"]);
     expect(decisions()).toEqual([]);
   });
 
@@ -3113,13 +3136,125 @@ describe("brief_item", () => {
     expect(ghCalls).toEqual([]);
   });
 
-  it("takes no options, and cuts long texts at MC_TEXT_MAX", async () => {
-    const long = "x".repeat(MC_TEXT_MAX + 50);
+  it("includes the live test lock in triage and can brief it", async () => {
+    live("guido-1", "r-lock", { startedAt: NOW - 30 * 60_000 });
+    store.setSeatSession({
+      ...row("guido-1", "r-lock"),
+      state: "running",
+      updatedAt: NOW - 30 * 60_000,
+    });
+    lockNow = {
+      holder: {
+        runId: "r-lock",
+        seatId: "guido-1",
+        command: "pnpm test",
+        since: NOW - 30 * 60_000,
+      },
+      waiting: [{ runId: "r-wait", seatId: "inco-1", command: "pnpm test", since: NOW }],
+    };
+    const key = `lock:r-lock:${NOW - 30 * 60_000}`;
+    const state = JSON.parse((await call("flight_state", {})).text);
+    expect(state.items).toContainEqual(expect.objectContaining({ key, kind: "lock" }));
+    expect((await call("brief_item", B({ key, for: "operator" }))).isError).toBeUndefined();
+  });
+
+  it("fills the original question and removes an answered question from triage", async () => {
+    live("guido-1", "r-guido");
+    const text = "Question? ".repeat(350);
+    const id = store.addQuestion({ agentId: "guido-1", runId: "r-guido", text, at: NOW });
+    const key = `ask:${id}`;
+    await call("brief_item", B({ key, for: "flight" }));
+    expect(store.briefs().get(key)?.original).toBe(text);
+    const state = JSON.parse((await call("flight_state", {})).text);
+    expect(state.items.some((i: { key: string }) => i.key === key)).toBe(false);
+    messageImpl = async () => {
+      store.answerQuestions("guido-1", nowMs, true);
+    };
+    expect(
+      (
+        await call("answer_question", {
+          question_id: id,
+          answer: "Use the existing path.",
+          basis: "Read the code",
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(attentionItems(cfg, store, nowMs).some((i) => i.key === key)).toBe(false);
+  });
+
+  it("stores the full triage brief and passes an item up immediately", async () => {
+    const long = "x".repeat(BRIEF_INPUT_MAX);
+    raise("full", { text: long });
+    const fields = {
+      for: "operator",
+      assessment: long,
+      did: [{ action: long, refs: ["mc#466"] }],
+      ask: long,
+      recommendation: long,
+      options: [
+        { label: "Go", answer: long },
+        { label: "Wait", answer: "wait" },
+      ],
+    };
+    const key = "note:full";
+    expect(attentionItems(cfg, store, nowMs).find((i) => i.key === key)?.owner).toBe("flight");
+    expect(
+      (await call("brief_item", B({ ...fields, key, context: undefined }))).isError,
+    ).toBeUndefined();
+    expect(store.briefs().get(key)).toMatchObject({ ...fields, original: long });
+    expect(attentionItems(cfg, store, nowMs).find((i) => i.key === key)).toMatchObject({
+      owner: "operator",
+      brief: { ...fields, original: long },
+    });
+    expect(ghCalls).toEqual([]);
+  });
+
+  it("keeps an item, lists it as handling, then passes it up or removes it on resolution", async () => {
+    expect((await call("brief_item", B({ for: "flight" }))).isError).toBeUndefined();
+    nowMs += 60 * 60_000;
+    expect(attentionItems(cfg, store, nowMs).find((i) => i.key === KEY)).toMatchObject({
+      owner: "flight",
+      flightTriage: "handling",
+    });
+    expect(attentionItems(cfg, store, nowMs).filter((i) => i.flightTriage === "handling")).toEqual([
+      expect.objectContaining({ key: KEY, brief: expect.objectContaining({ for: "flight" }) }),
+    ]);
+    expect((await call("brief_item", B({ for: "operator" }))).isError).toBeUndefined();
+    expect(attentionItems(cfg, store, nowMs).find((i) => i.key === KEY)?.owner).toBe("operator");
+    await call("brief_item", B({ for: "flight" }));
+    store.clearNote("blocked:r1:0", nowMs);
+    expect(attentionItems(cfg, store, nowMs).filter((i) => i.flightTriage === "handling")).toEqual(
+      [],
+    );
+    raise("blocked:r1:0", { at: nowMs + 1 });
+    expect(attentionItems(cfg, store, nowMs + 1).find((i) => i.key === KEY)).toMatchObject({
+      owner: "flight",
+      flightTriage: "waiting",
+    });
+  });
+
+  it("keeps legacy context uncut, allows no options, and rejects oversized text", async () => {
+    const long = "x".repeat(BRIEF_INPUT_MAX);
     await call("brief_item", B({ context: long, options: undefined }));
-    const b = store.briefs().get(KEY);
-    expect(b?.context).toHaveLength(MC_TEXT_MAX);
-    expect(b?.context.endsWith("…")).toBe(true);
-    expect(b?.options).toEqual([]);
+    expect(store.briefs().get(KEY)).toMatchObject({ context: long, assessment: long, options: [] });
+    for (const field of ["context", "assessment", "ask", "recommendation"]) {
+      expect((await call("brief_item", B({ [field]: `${long}x` }))).isError).toBe(true);
+    }
+    expect(
+      (
+        await call(
+          "brief_item",
+          B({
+            options: [
+              { label: "Go", answer: `${long}x` },
+              { label: "Wait", answer: "wait" },
+            ],
+          }),
+        )
+      ).isError,
+    ).toBe(true);
+    const schema = tools.find((t) => t.name === "brief_item")?.inputSchema;
+    expect(JSON.stringify(schema)).toContain(`"maxLength":${BRIEF_INPUT_MAX}`);
   });
 
   it("keeps the newest brief on a key", async () => {
@@ -3129,11 +3264,13 @@ describe("brief_item", () => {
     expect(store.briefs().get(KEY)?.recommendation).toBe("Leave it.");
   });
 
-  it("allows 20 briefs an hour, then refuses the 21st", async () => {
-    for (let i = 0; i < 20; i++) expect((await call("brief_item", B())).isError).toBeUndefined();
+  it("allows a full triage workload per hour, then enforces the cap", async () => {
+    expect(FLIGHT_BRIEFS_PER_HOUR).toBeGreaterThan(20);
+    for (let i = 0; i < FLIGHT_BRIEFS_PER_HOUR; i++)
+      expect((await call("brief_item", B())).isError).toBeUndefined();
     expect(await call("brief_item", B())).toEqual(
       refused(
-        "Not done: you briefed items 20 times in the last hour, the most allowed. Wait, or ask the operator.",
+        `Not done: you briefed items ${FLIGHT_BRIEFS_PER_HOUR} times in the last hour, the most allowed. Wait, or ask the operator.`,
       ),
     );
     nowMs = NOW + 61 * 60_000;
