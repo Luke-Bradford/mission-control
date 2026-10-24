@@ -20,7 +20,7 @@ import {
   DEFAULT_SEAT_COMMANDS,
   FLIGHT_TOOLS,
 } from "@mc/core";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   type CcConfig,
   ConfigError,
@@ -34,8 +34,63 @@ import {
   loadConfig,
   parseConfig,
   portFromEnv,
+  seatUnavailable,
 } from "../src/config.ts";
+import { CodexModels, codexModels } from "../src/runtime/codex-models.ts";
 import { configView } from "../src/views.ts";
+import { CODEX_MODELS, fakeModels, MODEL_PAGES } from "./config-codex.ts";
+
+const catalog = fakeModels();
+beforeAll(() => codexModels.load(catalog.deps));
+
+describe("Codex model catalog", () => {
+  it("fails closed when the binary cannot start", async () => {
+    const models = new CodexModels();
+    await expect(
+      models.load({ authPath: catalog.deps.authPath, command: "/missing/codex" }),
+    ).rejects.toThrow("Codex model/list unavailable");
+    expect(models.available).toBe(false);
+  });
+  it("reads every page once and shares the catalog across loads", async () => {
+    await Promise.all([codexModels.load(catalog.deps), codexModels.load(catalog.deps)]);
+    for (const { model, efforts } of CODEX_MODELS)
+      expect(codexModels.efforts(model)).toEqual(efforts);
+    const records = catalog.records();
+    expect(records.filter((r) => r.method === "initialize")).toHaveLength(1);
+    expect(records.filter((r) => r.method === "model/list").map((r) => r.params)).toEqual(
+      MODEL_PAGES.map((_, i) => ({
+        includeHidden: true,
+        ...(i === 0 ? {} : { cursor: `page-${i}` }),
+      })),
+    );
+    const first = records[0];
+    expect(first).toMatchObject({
+      auth: '{"fake":"auth"}',
+      mode: 0o600,
+      config: "project_doc_max_bytes = 0\n",
+    });
+    expect(first?.cwd).toBe(first?.home);
+    await expect.poll(() => existsSync(first?.home as string)).toBe(false);
+  });
+
+  for (const scenario of [
+    { error: true },
+    { pages: [{ data: [{ model: "gpt-6-astra" }], nextCursor: null }] },
+    { pages: [MODEL_PAGES[0], MODEL_PAGES[0]] },
+    { hang: true },
+  ]) {
+    const fake = fakeModels(scenario);
+    it(`fails closed: ${JSON.stringify(scenario)}`, async () => {
+      const models = new CodexModels();
+      const loading = models.load({ ...fake.deps, timeoutMs: 500 });
+      expect(models.load(fake.deps)).toBe(loading);
+      await expect(loading).rejects.toThrow("Codex model/list unavailable");
+      expect(models.available).toBe(false);
+      expect(models.efforts("gpt-6-astra")).toBeUndefined();
+      await expect.poll(() => existsSync(fake.records()[0]?.home as string)).toBe(false);
+    });
+  }
+});
 
 const EXAMPLE_SOURCE = resolve(import.meta.dirname, "../../../config.example.yaml");
 /** `crew.node` must be an executable file, and the default only exists on the author's Mac. */
@@ -63,6 +118,21 @@ function errorOf(fn: () => unknown): ConfigError {
 }
 
 describe("loadConfig", () => {
+  it("preserves legacy and custom Claude model identifiers when loading and writing", () => {
+    for (const model of [
+      "us.anthropic.claude-sonnet-4-6",
+      "my-custom-model",
+      "default",
+      "opusplan",
+    ]) {
+      const path = tmpConfig((text) => text.replace("model: sonnet", `model: ${model}`));
+      expect(loadConfig(path).crew?.sessions[0]?.seats[0]?.model).toBe(model);
+      expect(
+        parseConfig(readFileSync(path, "utf8"), "test").crew?.sessions[0]?.seats[0]?.model,
+      ).toBe(model);
+    }
+  });
+
   it("loads the example config", () => {
     const c = loadConfig(EXAMPLE);
     expect(c.operator.timezone).toBe("UTC");
@@ -755,10 +825,10 @@ ${modelless("flight-2", "FLIGHT")}
     expect(e.message).toContain("RETRO is read-only and takes no area");
   });
 
-  it("rejects an unknown repo, a codex account, an unknown account and an unknown role", () => {
+  it("rejects an unknown repo, a mismatched model, an unknown account and an unknown role", () => {
     expect(fails(crewText({ repo: "nope" })).path).toBe("crew.sessions[0].repoId");
     expect(fails(crewText({ seats: [seat("guido-1", "GUIDO", "", "codex-main")] })).path).toBe(
-      "crew.sessions[0].seats[0].accountId",
+      "crew.sessions[0].seats[0].model",
     );
     expect(fails(crewText({ seats: [seat("guido-1", "GUIDO", "", "nope")] })).path).toBe(
       "crew.sessions[0].seats[0].accountId",
@@ -923,6 +993,90 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
 `;
     const e = fails(`${crewText({})}${second}`);
     expect(e.path).toBe("crew.sessions[1].checkout");
+  });
+
+  it.each(CODEX_MODELS)(
+    "loads Codex $model with only its advertised efforts",
+    ({ model, efforts }) => {
+      const text = (extra = "", account = "codex-main") =>
+        crewText({
+          seats: [seat("guido-1", "GUIDO", extra, account).replace("sonnet", model)],
+        });
+      expect(load(text()).crew?.sessions[0]?.seats[0]).toMatchObject({
+        model,
+        accountId: "codex-main",
+      });
+      for (const effort of efforts) {
+        expect(load(text(`, effort: ${effort}`)).crew?.sessions[0]?.seats[0]?.effort).toBe(effort);
+      }
+      expect(fails(text("", "claude-main")).path).toBe("crew.sessions[0].seats[0].model");
+      expect(fails(text(", effort: unadvertised")).path).toBe("crew.sessions[0].seats[0].effort");
+    },
+  );
+
+  it("checks the model's own efforts, unknown models, role defaults and light_model", () => {
+    const text = (model: string, extra = "") =>
+      crewText({
+        seats: [seat("retro-1", "RETRO", extra, "codex-main").replace("sonnet", model)],
+      });
+    expect(fails(text("gpt-5.6-luna", ", effort: ultra")).path).toBe(
+      "crew.sessions[0].seats[0].effort",
+    );
+    expect(fails(text("gpt-unlisted")).path).toBe("crew.sessions[0].seats[0].model");
+    expect(fails(text("gpt-6-astra").replace(", model: gpt-6-astra", "")).path).toBe(
+      "crew.sessions[0].seats[0].model",
+    );
+    expect(fails(text("gpt-6-astra", ", light_model: sonnet")).path).toBe(
+      "crew.sessions[0].seats[0].lightModel",
+    );
+    expect(fails(text("gpt-6-astra", ", effort: ultra, light_model: gpt-5.6-luna")).path).toBe(
+      "crew.sessions[0].seats[0].effort",
+    );
+    expect(
+      load(text("gpt-6-astra", ", effort: high, light_model: gpt-5.6-luna")).crew?.sessions[0]
+        ?.seats[0]?.lightModel,
+    ).toBe("gpt-5.6-luna");
+    expect(
+      fails(crewText({ seats: [seat("retro-1", "RETRO", ", light_model: gpt-6-astra")] })).path,
+    ).toBe("crew.sessions[0].seats[0].lightModel");
+  });
+
+  it("refuses Codex seats when the catalog is unavailable, leaving Claude seats usable", () => {
+    const available = vi.spyOn(codexModels, "available", "get").mockReturnValue(false);
+    try {
+      const text = crewText({
+        seats: [seat("guido-1", "GUIDO", "", "codex-main").replace("sonnet", "gpt-6-astra")],
+      });
+      expect(fails(text).message).toContain("Codex model discovery pending");
+      expect(load(crewText({})).crew?.sessions[0]?.seats).toHaveLength(2);
+    } finally {
+      available.mockRestore();
+    }
+  });
+
+  it("checks a resume's saved model and vendor independently of the seat's new model", () => {
+    const configured = load(
+      crewText({
+        seats: [
+          seat("retro-1", "RETRO", ", effort: ultra", "codex-main").replace(
+            "sonnet",
+            "gpt-6-astra",
+          ),
+        ],
+      }),
+    ).crew?.sessions[0]?.seats[0];
+    if (!configured) throw new Error("missing seat");
+    expect(seatUnavailable(configured, "gpt-5.6-luna", "codex")).toContain(
+      'does not support effort "ultra"',
+    );
+    expect(seatUnavailable(configured, "us.anthropic.claude-sonnet-4-6", "claude")).toBeNull();
+    expect(
+      seatUnavailable(
+        { ...configured, modelVendor: "claude", model: "sonnet" },
+        "gpt-6-astra",
+        "codex",
+      ),
+    ).toBeNull();
   });
 
   it("reads a seat's light_model", () => {

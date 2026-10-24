@@ -119,6 +119,7 @@ import {
   gitCommonDir,
   isInside,
   realish,
+  seatUnavailable,
 } from "../config.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
@@ -1143,7 +1144,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * files).
    */
   async function checkedLaunch(...args: Parameters<typeof launch>): Promise<Live> {
-    const [, run] = args;
+    const [info, run] = args;
+    const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
+    if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
       const cliVersion = await probeCodexVersion(deps.codexCommand ?? CODEX_COMMAND);
       if (stopping) throw new Error(SHUTTING_DOWN);
@@ -1709,6 +1712,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     )
       return;
     row = current;
+    const seat = findSeat(row.seatId)?.seat;
+    const run = store.run(row.runId ?? "");
+    if (seat && run && seatUnavailable(seat, run.model ?? undefined, run.vendor ?? "claude"))
+      return;
     const l = live.get(row.seatId);
     if (starting.has(row.seatId) || l?.session.alive || l?.ending != null) return;
     starting.add(row.seatId);
@@ -1734,7 +1741,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function resumeRun(runId: string): Promise<void> {
     if (deps.cliHold?.reason != null) return;
-    if (!mayAct() || stopping || reattaching !== null) return;
+    if (!mayAct() || stopping) return;
+    if (reattaching !== null) {
+      // Discovery can finish while Claude recovery is still running; recover Codex after it.
+      if (store.run(runId)?.vendor !== "codex") return;
+      await reattaching;
+    }
+    if (!mayAct() || stopping) return;
     const run = store.run(runId);
     if (run === null || runGone(runId, run.agentId)) return;
     const row = store.seatSession(run.agentId);
@@ -2061,6 +2074,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     opts?: { loop?: RunLoop; override?: ProfileOverride; flight?: boolean; operator?: boolean },
   ) {
     const info = need(seatId);
+    const unavailable = seatUnavailable(info.seat);
+    if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     const def = seatDef(info.seat);
@@ -2367,6 +2382,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startWatch(seatId: string, opts?: { first?: string }): Promise<{ runId: string }> {
     const info = need(seatId);
+    const unavailable = seatUnavailable(info.seat);
+    if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
     if (seatDef(info.seat).loop !== "watch") {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
@@ -2479,6 +2496,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
+    const unavailable = seatUnavailable(info.seat);
+    if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     if (modeOfSeat(info.seat) !== "scratch") {
@@ -2860,6 +2879,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
     const seatId = run.agentId;
     const info = need(seatId);
+    const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
+    if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {

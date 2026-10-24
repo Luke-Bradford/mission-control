@@ -66,7 +66,12 @@ import {
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
-import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
+import {
+  type CcConfig,
+  type CrewSeatConfig,
+  type CrewSessionConfig,
+  seatUnavailable,
+} from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { attentionItems, crew, NO_LOCK } from "../hud.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
@@ -158,7 +163,7 @@ export function flightHeadline(
  */
 export function flightStartCap(config: CcConfig): number {
   const devSeats = (flightSeat(config)?.session.seats ?? []).filter(
-    (s) => !s.retiring && seatDef(s).loop === "build",
+    (s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "build",
   ).length;
   return FLIGHT_STARTS_PER_HOUR * Math.max(1, devSeats);
 }
@@ -168,7 +173,9 @@ export function flightSeat(
   config: CcConfig,
 ): { seat: CrewSeatConfig; session: CrewSessionConfig } | null {
   for (const session of config.crew?.sessions ?? []) {
-    const seat = session.seats.find((s) => !s.retiring && seatDef(s).loop === "watch");
+    const seat = session.seats.find(
+      (s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "watch",
+    );
     if (seat !== undefined) return { seat, session };
   }
   return null;
@@ -521,7 +528,7 @@ export function flightState(i: {
       loop: seatDef(s).loop,
       area: s.area,
       state: row?.state ?? null,
-      free: seatFree(store, busy, s.id),
+      free: !seatUnavailable(s) && seatFree(store, busy, s.id),
       ticket: run?.ticket ?? null,
       title: t === null ? null : (board.find((b) => b.issueNumber === t.number)?.title ?? null),
       phase: loop?.phase ?? null,

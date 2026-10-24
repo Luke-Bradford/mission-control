@@ -22,6 +22,21 @@ The server also needs `gh` logged in with the `project` and `repo` scopes for bo
 escalations, and `codex` on `PATH` for Codex usage. It reads the Claude OAuth token from the
 login Keychain, the same way the loops' `claude_usage.py` does.
 
+Codex crew seats need `codex` 0.154.0 or newer and the account's `~/.codex/auth.json`.
+Set the seat's `account_id` to its Codex account and `model` to a model advertised by
+`model/list` (for example `gpt-6-astra`). After HTTP and the Claude crew start, the hub
+reads the catalog in the background. An explicit `effort` must be advertised by
+that model, including any `light_model`; omit it to use the model's default.
+Until validation succeeds, the seat reports `unavailable: <reason>` and cannot
+start or resume. Discovery failures retry every minute, without a hub restart;
+Claude seats and HTTP remain available. A successful catalog is cached for config
+edits and reloads. Config writes refuse unvalidated Codex models and efforts with
+400. Existing Claude model identifiers and effort options keep loading.
+
+`updates.cli` remains Claude-only. It does not update Codex; Codex seats keep the
+binary they started on. Update Codex manually between runs. Resuming a run uses
+the run's saved model.
+
 ### Update
 
 The Setup toolbar reads `Version <sha> · <n> commits behind main · checked <when>`, then

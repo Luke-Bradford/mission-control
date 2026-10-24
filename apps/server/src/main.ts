@@ -48,6 +48,7 @@ import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
+import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
@@ -66,7 +67,7 @@ export const HOST = LOOPBACK_HOST;
 /** `pnpm build` output of apps/web, served by this process. */
 const WEB_ROOT = fileURLToPath(new URL("../../web/dist", import.meta.url));
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const configPath =
     process.env.MC_CONFIG ?? join(homedir(), ".config", "mission-control", "config.yaml");
   // absolute: the crew's prompt and transcript paths derive from it, and a seat runs elsewhere
@@ -382,11 +383,14 @@ async function main(): Promise<void> {
   });
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
+  let stopDiscovery = () => {};
+  app.addHook("onClose", async () => stopDiscovery());
 
   const shutdown = onSignal({
     drain: () => mcpCalls.drain(),
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
+      stopDiscovery();
       crewReloader.stop();
       flightWatch.stop();
       engine.stop();
@@ -423,9 +427,19 @@ async function main(): Promise<void> {
   engine.start();
   crewReloader.start();
   flightWatch.start();
+  stopDiscovery = startCodexDiscovery({
+    config,
+    bus,
+    store,
+    supervisor,
+    log,
+    models: { dataDir: dirname(dbPath) },
+  });
 }
 
-main().catch((e: unknown) => {
-  process.stderr.write(`fatal: ${e instanceof Error ? e.message : String(e)}\n`);
-  process.exit(1);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e: unknown) => {
+    process.stderr.write(`fatal: ${e instanceof Error ? e.message : String(e)}\n`);
+    process.exit(1);
+  });
+}

@@ -71,7 +71,13 @@ import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
 import { isPaused } from "./collectors/ta-loop.ts";
 import { flightQuestion, threadMessages } from "./comms.ts";
-import { agentIds, type CcConfig, type ConfiguredAgent, configuredAgents } from "./config.ts";
+import {
+  agentIds,
+  type CcConfig,
+  type ConfiguredAgent,
+  configuredAgents,
+  seatUnavailable,
+} from "./config.ts";
 import { asideWakeDue } from "./engine/aside.ts";
 import { reviewerOf } from "./engine/engine.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
@@ -170,7 +176,9 @@ function loopViews(
       const seatRow = store.seatSession(agent.id);
       const waiting = seatRow?.runId != null && inLine.has(seatRow.runId);
       const hud = crewHudState(seatRow, lastOutput, now, waiting);
-      const reason = hud === "waiting" ? LOCK_WAITING_TEXT : (seatRow?.reason ?? null);
+      const reason =
+        seatUnavailable(agent.seat) ??
+        (hud === "waiting" ? LOCK_WAITING_TEXT : (seatRow?.reason ?? null));
       const view: AgentView = {
         id: agent.id,
         repoId: agent.repoId,

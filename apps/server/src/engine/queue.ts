@@ -45,6 +45,7 @@ import {
   type CrewSeatConfig,
   type CrewSessionConfig,
   DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
+  seatUnavailable,
 } from "../config.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
@@ -116,7 +117,8 @@ function writerSeats(config: CcConfig): { session: CrewSessionConfig; seat: Crew
   const out: { session: CrewSessionConfig; seat: CrewSeatConfig }[] = [];
   for (const session of config.crew?.sessions ?? []) {
     for (const seat of session.seats) {
-      if (!seat.retiring && seatDef(seat).loop === "build") out.push({ session, seat });
+      if (!seat.retiring && !seatUnavailable(seat) && seatDef(seat).loop === "build")
+        out.push({ session, seat });
     }
   }
   return out;
