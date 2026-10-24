@@ -432,8 +432,8 @@ function treeEntry(tree: Buffer, name: string): { mode: string; id: string } | n
   return null;
 }
 
-/** The verified blob id of `file` in commit `baseSha`, or null when it is not a file there. */
-async function baseBlob(read: ReadObject, baseSha: string, file: string): Promise<string | null> {
+/** The verified entry at `file`, including non-regular entries, or null when absent. */
+async function baseEntry(read: ReadObject, baseSha: string, file: string) {
   const head = (await read("commit", baseSha, file)).toString("latin1").split("\n", 1)[0] ?? "";
   const tree = /^tree ([0-9a-f]{40})$/.exec(head)?.[1];
   if (tree === undefined) throw new CheckoutError("protected", NOT_ORIGIN);
@@ -441,14 +441,20 @@ async function baseBlob(read: ReadObject, baseSha: string, file: string): Promis
   const parts = file.split("/");
   for (const [k, part] of parts.entries()) {
     const e = treeEntry(await read("tree", id, file), part);
-    const last = k === parts.length - 1;
-    if (e === null || (last ? e.mode !== "100644" && e.mode !== "100755" : e.mode !== "40000")) {
-      return null;
-    }
+    if (e === null) return null;
+    if (k === parts.length - 1) return e;
+    if (e.mode !== "40000") return null;
     id = e.id;
   }
-  await read("blob", id, file);
-  return id;
+  return null;
+}
+
+/** The verified blob id of a regular file, or null. */
+async function baseBlob(read: ReadObject, baseSha: string, file: string): Promise<string | null> {
+  const entry = await baseEntry(read, baseSha, file);
+  if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return null;
+  await read("blob", entry.id, file);
+  return entry.id;
 }
 
 /**
@@ -463,6 +469,16 @@ export async function readBaseFile(
   baseSha: string,
   file: string,
 ): Promise<Buffer | null> {
+  const entry = await readBaseEntry(checkout, baseSha, file);
+  return entry?.body ?? null;
+}
+
+/** Reads the tree mode and bytes through the same verified reader used by install inputs. */
+export async function readBaseEntry(
+  checkout: string,
+  baseSha: string,
+  file: string,
+): Promise<{ mode: string; body: Buffer | null } | null> {
   const common = await realpath(join(checkout, ".git")).catch((e) => {
     throw new CheckoutError("checkout", CHECKOUT_TEXT, { cause: e });
   });
@@ -480,8 +496,10 @@ export async function readBaseFile(
     throw new CheckoutError("protected", `the crew clone is a ${format} repository`);
   }
   const read = verifiedObjects(inClone);
-  const id = await baseBlob(read, baseSha, file);
-  return id === null ? null : read("blob", id, file);
+  const entry = await baseEntry(read, baseSha, file);
+  if (entry === null) return null;
+  const regular = entry.mode === "100644" || entry.mode === "100755";
+  return { mode: entry.mode, body: regular ? await read("blob", entry.id, file) : null };
 }
 
 /**

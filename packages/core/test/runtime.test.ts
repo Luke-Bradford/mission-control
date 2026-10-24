@@ -244,6 +244,7 @@ describe("the allowlist in phase 2b", () => {
       askOperator: "mcp__mc__ask_operator",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
+      restoreFile: "mcp__mc__restore_file",
       reportPlan: "mcp__mc__report_plan",
       logDecision: "mcp__mc__log_decision",
       readTicket: "mcp__mc__read_ticket",
@@ -737,6 +738,7 @@ describe("scratch mode", () => {
       "Bash(git show:*)",
       "Bash(pnpm -s vitest:*)",
       "mcp__mc__report_findings",
+      "mcp__mc__restore_file",
     ]);
   });
 

@@ -90,6 +90,7 @@ import {
   START_NO_RULES,
   STDERR_TEXT_MAX,
   STOP_GRACE_MS,
+  scratchName,
   scratchStartRefusedText,
   seatBusyText,
   seatCallSign,
@@ -119,6 +120,7 @@ import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/que
 import { RepoRulesError } from "../engine/rules.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
+import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
@@ -2214,6 +2216,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             carriedFrom(author.loop?.carry, author.loop?.reviewWaivedSha, head) !== review.sha))
       ) {
         throw notWanted;
+      }
+      try {
+        assertScratchStorage(
+          join(crew?.worktrees ?? "", info.session.id, scratchName(seatId, reviewId)),
+          dirname(deps.dbPath),
+        );
+      } catch (e) {
+        throw new SupervisorError(409, (e as Error).message, { cause: e });
       }
       let ticket: TicketView | null;
       try {

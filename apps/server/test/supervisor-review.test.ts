@@ -538,6 +538,18 @@ describe("startReview", () => {
     return { reviewId, sha, fork, author };
   }
 
+  it("refuses scratch storage inside hub data before preparing a review", async () => {
+    const r = reviewOfPush();
+    const worktrees = join(dir, "db", "scratch");
+    const { sup } = make({ scratchRetro: true, worktrees });
+    sup.start();
+    await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow(
+      "outside the hub data directory",
+    );
+    expect(existsSync(worktrees)).toBe(false);
+    expect(store.runs("retro", 1)).toEqual([]);
+  });
+
   async function started() {
     const r = reviewOfPush();
     const m = make({ scratchRetro: true });
