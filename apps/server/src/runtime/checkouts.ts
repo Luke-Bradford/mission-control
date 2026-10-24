@@ -6,8 +6,9 @@
  * reused branch is never reset. A start that fails leaves nothing it created behind.
  */
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -18,9 +19,10 @@ import {
   REVIEW_DIFF_MAX_BUFFER,
   REVIEW_INPUT_DIR,
   REVIEW_SINCE_FILE,
+  type SessionCheckoutOutcome,
   scratchName,
 } from "@mc/core";
-import { SEAT_ID } from "../config.ts";
+import { type CrewSessionConfig, managedSessionPath, SEAT_ID } from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 import { crewGit, crewGitBytes, overflowed, SAFE_CONFIG, timedOut } from "./git.ts";
 
@@ -174,7 +176,12 @@ export async function cloneGitDir(
     common = await realpath(join(checkout, ".git"));
     const o = { gitDir: common };
     const top = (await crewGit(checkout, ["rev-parse", "--show-toplevel"], common, o)).trim();
-    const status = await crewGit(checkout, ["status", "--porcelain"], common, o);
+    const status = await crewGit(
+      checkout,
+      ["--no-optional-locks", "status", "--porcelain"],
+      common,
+      o,
+    );
     if ((await realpath(top)) !== (await realpath(checkout)) || status !== "") {
       throw new CheckoutError("checkout", CHECKOUT_TEXT);
     }
@@ -974,4 +981,195 @@ export async function writeReviewInputs(
   await writeFile(join(s.path, REVIEW_DIFF_FILE), pr.text, { flag: "wx" });
   if (since !== null) await writeFile(join(s.path, REVIEW_SINCE_FILE), since.text, { flag: "wx" });
   return { diffCut: pr.cut, since: since !== null };
+}
+
+const SESSION_OWNER_FILE = "mission-control-session.json";
+/** Read-only validation: sessions require a standalone clone and an existing local branch. */
+export async function validateSessionCheckout(
+  checkout: string,
+  branch: string,
+  github: string,
+  shared: boolean,
+  peers: readonly RepoPeer[],
+): Promise<string> {
+  if (!(await lstat(join(checkout, ".git"))).isDirectory()) {
+    throw new CheckoutError("checkout", "sessions require a standalone clone");
+  }
+  const common = await cloneGitDir(checkout, peers);
+  const git = (args: string[]) => crewGit(checkout, args, common, { gitDir: common });
+  await git(["check-ref-format", `refs/heads/${branch}`]);
+  await git(["rev-parse", "--verify", "--end-of-options", `refs/heads/${branch}^{commit}`]);
+  if (shared && (await git(["symbolic-ref", "--short", "HEAD"])).trim() !== branch) {
+    throw new CheckoutError("checkout", "the checkout is on a different branch");
+  }
+  const origin = (await git(["remote", "get-url", "origin"])).trim();
+  const githubOrigin = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)/;
+  const repo = origin.replace(githubOrigin, "").replace(/\.git$/, "");
+  if (repo.toLowerCase() !== github.toLowerCase() || !githubOrigin.test(origin)) {
+    throw new CheckoutError("checkout", "the checkout origin does not match the repo profile");
+  }
+  return origin;
+}
+
+/** The destination was confined by config validation before this call. Never reuse a directory. */
+export async function createSessionCheckout(
+  source: string,
+  path: string,
+  branch: string,
+  origin: string,
+  sessionId: string,
+): Promise<NonNullable<CrewSessionConfig["managedCheckout"]>> {
+  const sourceGit = await realpath(join(source, ".git"));
+  const upstream = await crewGit(
+    source,
+    ["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/origin"],
+    sourceGit,
+    { gitDir: sourceGit },
+  );
+  const upstreamHead = await crewGit(
+    source,
+    ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+    sourceGit,
+    { gitDir: sourceGit },
+  ).then(
+    (ref) => ref.trim(),
+    () => "",
+  );
+  await mkdir(dirname(path), { recursive: true });
+  await mkdir(path).catch((e) => {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new CheckoutError(
+        "path",
+        `the separate checkout destination already exists: ${path}; move or recover it before re-creating the session`,
+      );
+    }
+    throw e;
+  });
+  const stat = await lstat(path);
+  const proof = { token: randomUUID(), device: stat.dev, inode: stat.ino };
+  try {
+    await execFileP(
+      "git",
+      [
+        ...SAFE_CONFIG,
+        "clone",
+        "--no-local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "--single-branch",
+        "--branch",
+        branch,
+        "--no-tags",
+        "--",
+        source,
+        path,
+      ],
+      {
+        env: { ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0", GIT_NO_REPLACE_OBJECTS: "1" },
+        timeout: CREW_GIT_SLOW_MS,
+      },
+    );
+    const common = await realpath(join(path, ".git"));
+    const git = (args: string[]) => crewGit(path, args, common, { gitDir: common });
+    await git(["checkout", "--no-track", "-B", branch, `refs/remotes/origin/${branch}`, "--"]);
+    await git(["remote", "set-url", "origin", origin]);
+    // --single-branch saved a one-branch refspec; widen it so fetches bring origin's default branch
+    await git(["remote", "set-branches", "origin", "*"]);
+    // Clone's tracking refs described the source's local branches, not what was pushed upstream.
+    const refs = await git(["for-each-ref", "--format=%(refname)", "refs/remotes/origin"]);
+    for (const ref of refs.trim().split("\n").filter(Boolean))
+      await git(["update-ref", "-d", "--no-deref", ref]);
+    const copied = new Set<string>();
+    for (const line of upstream.trim().split("\n").filter(Boolean)) {
+      const [ref, sha] = line.split(" ");
+      if (!ref || !sha || ref === "refs/remotes/origin/HEAD") continue;
+      if (await succeeds(git(["cat-file", "-e", `${sha}^{commit}`]))) {
+        await git(["update-ref", ref, sha]);
+        copied.add(ref);
+      }
+    }
+    if (upstreamHead.startsWith("refs/remotes/origin/") && copied.has(upstreamHead)) {
+      await git(["symbolic-ref", "refs/remotes/origin/HEAD", upstreamHead]);
+    }
+    await writeFile(join(common, SESSION_OWNER_FILE), JSON.stringify({ sessionId, ...proof }), {
+      flag: "wx",
+      mode: 0o600,
+    });
+    return proof;
+  } catch (e) {
+    const current = await lstat(path).catch(() => null);
+    if (current?.dev === proof.device && current.ino === proof.inode && !current.isSymbolicLink()) {
+      await rm(path, { recursive: true });
+    }
+    throw e;
+  }
+}
+
+/** Fail closed: only this exact owned clone, with no data Git would lose, may be removed. */
+export async function removeSessionCheckout(
+  session: CrewSessionConfig,
+  worktrees: string,
+  rollback = false,
+): Promise<SessionCheckoutOutcome> {
+  const proof = session.managedCheckout;
+  if (!proof) return "unmanaged";
+  try {
+    const path = session.checkout;
+    if (path !== managedSessionPath(worktrees, session.id) || (await realpath(path)) !== path) {
+      return "retained-unproven";
+    }
+    const stat = await lstat(path);
+    if (!stat.isDirectory() || stat.dev !== proof.device || stat.ino !== proof.inode) {
+      return "retained-unproven";
+    }
+    const common = join(path, ".git");
+    if (!(await lstat(common)).isDirectory() || (await realpath(common)) !== common) {
+      return "retained-unproven";
+    }
+    const owner = JSON.parse(await readFile(join(common, SESSION_OWNER_FILE), "utf8"));
+    if (
+      owner.sessionId !== session.id ||
+      owner.token !== proof.token ||
+      owner.device !== proof.device ||
+      owner.inode !== proof.inode
+    )
+      return "retained-unproven";
+    const git = (args: string[]) => crewGit(path, args, common, { gitDir: common });
+    if ((await git(["worktree", "list", "--porcelain"])).split("worktree ").length !== 2) {
+      return "retained-unproven";
+    }
+    if (
+      await git([
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--ignored",
+        "--",
+        ".",
+        ":(exclude,glob)**/.DS_Store",
+      ])
+    ) {
+      return "retained-dirty";
+    }
+    if (!rollback) {
+      const refs = (await git(["for-each-ref", "--format=%(refname)", "refs/remotes/origin"]))
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+      if (
+        refs.length === 0 ||
+        (await git(["rev-list", "--max-count=1", "--all", "--reflog", "--not", ...refs])).trim()
+      ) {
+        return "retained-unpushed";
+      }
+    }
+    try {
+      await rm(path, { recursive: true });
+    } catch {
+      return existsSync(path) ? "removal-failed-partway" : "removed";
+    }
+    return existsSync(path) ? "removal-failed-partway" : "removed";
+  } catch {
+    return "retained-unproven";
+  }
 }

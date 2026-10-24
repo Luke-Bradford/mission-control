@@ -1029,3 +1029,22 @@ export interface CrewSessionFolders {
   readable: boolean;
   folders: { name: string; owners: AgentId[] }[];
 }
+
+/** `POST /api/crew/sessions`: the name/id is independent of the repo, branch and strategy. */
+export const SESSION_CHECKOUT_STRATEGIES = ["shared", "separate"] as const;
+export interface NewCrewSession {
+  id: string;
+  repoId: string;
+  source: string;
+  branch: string;
+  checkoutStrategy: (typeof SESSION_CHECKOUT_STRATEGIES)[number];
+}
+
+/** `POST /api/crew/sessions/:id/close`: what happened to the checkout after closing. */
+export type SessionCheckoutOutcome =
+  | "unmanaged"
+  | "removed"
+  | "retained-dirty"
+  | "retained-unpushed"
+  | "retained-unproven"
+  | "removal-failed-partway";

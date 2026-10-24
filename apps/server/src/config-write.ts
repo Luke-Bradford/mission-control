@@ -6,9 +6,17 @@
  * with the startup loader, keeps a backup beside it, and swaps the file in by an atomic rename.
  */
 import { type FileHandle, lstat, open, readdir, readFile, rename, rm } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { CONFIG_SEAT_MODES, CREW_EFFORTS, compactUtc, type NewRepo, ROLE_NAME } from "@mc/core";
+import {
+  CONFIG_SEAT_MODES,
+  CREW_EFFORTS,
+  compactUtc,
+  type NewCrewSession,
+  type NewRepo,
+  ROLE_NAME,
+  SESSION_CHECKOUT_STRATEGIES,
+} from "@mc/core";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
 import {
@@ -16,14 +24,23 @@ import {
   type CcConfig,
   ConfigError,
   type ConfigSeatInput,
+  type CrewSessionConfig,
   defaultSeatCommands,
   displayCallSign,
   MODEL_NAME,
+  managedSessionPath,
   parseConfig,
+  realish,
   SEAT_ID,
   seatInput,
   ticketState,
 } from "./config.ts";
+import {
+  CheckoutError,
+  createSessionCheckout,
+  removeSessionCheckout,
+  validateSessionCheckout,
+} from "./runtime/checkouts.ts";
 
 /** Backups (`config.yaml.bak-<UTC>`) kept beside the file; older ones are deleted. */
 export const CONFIG_BACKUPS_KEEP = 10;
@@ -490,6 +507,216 @@ export function setTeamsSelection(
     await replace(path, newText);
     await pruneBackups(path, basename(backup)).catch(() => undefined);
     return next;
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+export const NewSessionBody = z.strictObject({
+  id: z.string().regex(SEAT_ID),
+  repoId: z.string().min(1),
+  source: z.string().refine(isAbsolute, "must be an absolute clone path"),
+  branch: z
+    .string()
+    .min(1)
+    .max(255)
+    .refine((s) => !s.startsWith("-") && !CONTROL_CHAR.test(s)),
+  checkoutStrategy: z.enum(SESSION_CHECKOUT_STRATEGIES),
+}) satisfies z.ZodType<NewCrewSession>;
+
+export const sessionActiveText = (id: string, n: number): string =>
+  `Stop or remove the ${n} agent(s) in s/${id} first.`;
+
+function sessionConfig(text: string): CcConfig {
+  try {
+    return parseConfig(text, "the new config.yaml");
+  } catch (e) {
+    throw new ConfigWriteError(
+      "invalid",
+      e instanceof ConfigError ? e.message : "invalid sessions",
+    );
+  }
+}
+
+export async function createSession(
+  path: string,
+  input: NewCrewSession,
+  now: number,
+  applied?: CcConfig,
+) {
+  const parsed = NewSessionBody.safeParse(input);
+  if (!parsed.success) throw new ConfigWriteError("invalid", "invalid session");
+  const { bytes, text, current } = await readCurrent(path);
+  const crew = current.crew;
+  if (!crew) throw new ConfigWriteError("conflict", "configure crew before adding sessions");
+  const membership = (c: CcConfig) => c.crew?.sessions.map((s) => [s.id, s.repoId, s.checkout]);
+  if (
+    applied &&
+    (!isDeepStrictEqual(membership(current), membership(applied)) ||
+      !isDeepStrictEqual(current.loops, applied.loops) ||
+      crew.worktrees !== applied.crew?.worktrees ||
+      !isDeepStrictEqual(crew.denyRead, applied.crew?.denyRead))
+  ) {
+    throw new ConfigWriteError(
+      "conflict",
+      "session confinement changed on disk; apply it before adding a session",
+    );
+  }
+  if (crew.sessions.some((s) => s.id === input.id)) {
+    throw new ConfigWriteError("duplicate", `s/${input.id} already exists.`);
+  }
+  const repo = current.repos.find((r) => r.id === input.repoId);
+  if (!repo) throw new ConfigWriteError("invalid", "unknown repo profile");
+  const separate = input.checkoutStrategy === "separate";
+  const checkout = realish(separate ? managedSessionPath(crew.worktrees, input.id) : input.source);
+  const doc = parseDocument(text);
+  const sessions = doc.getIn(["crew", "sessions"], true);
+  if (!isSeq(sessions)) throw new ConfigWriteError("current", "config.yaml has no sessions list");
+  const node: YAMLMap = doc.createNode({
+    id: input.id,
+    repo_id: input.repoId,
+    checkout,
+    branch: input.branch,
+    seats: [],
+  });
+  sessions.add(node);
+  sessions.flow = false;
+  // Confinement, deny_read and every other config invariant are checked before creating anything.
+  sessionConfig(doc.toString({ lineWidth: 0 }));
+  const peers = current.loops.map((l) => ({ label: `loop ${l.id} worktree`, dir: l.worktree }));
+  let owned: CrewSessionConfig | undefined;
+  try {
+    const origin = await validateSessionCheckout(
+      input.source,
+      input.branch,
+      repo.github,
+      !separate,
+      peers,
+    ).catch((e) => {
+      throw new ConfigWriteError(
+        "invalid",
+        e instanceof CheckoutError ? e.message : "could not validate the checkout and branch",
+      );
+    });
+    if (separate) {
+      const proof = await createSessionCheckout(
+        input.source,
+        checkout,
+        input.branch,
+        origin,
+        input.id,
+      );
+      owned = {
+        id: input.id,
+        repoId: input.repoId,
+        checkout,
+        branch: input.branch,
+        managedCheckout: proof,
+        seats: [],
+      };
+      node.set("managed_checkout", doc.createNode(proof));
+    }
+    const newText = doc.toString({ lineWidth: 0 });
+    const next = sessionConfig(newText);
+    const added = next.crew?.sessions.at(-1);
+    if (
+      !added ||
+      !isDeepStrictEqual(next, {
+        ...current,
+        crew: { ...crew, sessions: [...crew.sessions, added] },
+      })
+    ) {
+      throw new ConfigWriteError(
+        "write",
+        "the new config.yaml would change more than the added session",
+      );
+    }
+    const folders = (await readdir(checkout, { withFileTypes: true }))
+      .filter((e) => e.isDirectory() && e.name !== ".git")
+      .map((e) => e.name)
+      .sort();
+    const run = queue.then(async () => {
+      const latest = await readCurrent(path);
+      if (latest.current.crew?.sessions.some((s) => s.id === input.id)) {
+        throw new ConfigWriteError("duplicate", `s/${input.id} already exists.`);
+      }
+      if (owned) {
+        const stat = await lstat(checkout);
+        if (
+          stat.dev !== owned.managedCheckout?.device ||
+          stat.ino !== owned.managedCheckout?.inode
+        ) {
+          throw new ConfigWriteError(
+            "conflict",
+            `checkout destination already exists or changed: ${checkout}`,
+          );
+        }
+      }
+      if (!latest.bytes.equals(bytes)) {
+        throw new ConfigWriteError(
+          "conflict",
+          "config.yaml changed while preparing the session; retry",
+        );
+      }
+      const backup = await backUp(path, latest.bytes, now);
+      await replace(path, newText);
+      await pruneBackups(path, basename(backup)).catch(() => undefined);
+      return { config: next, backup, folders };
+    });
+    queue = run.catch(() => undefined);
+    return await run;
+  } catch (e) {
+    if (owned) {
+      const outcome = await removeSessionCheckout(owned, crew.worktrees, true);
+      if (outcome !== "removed")
+        throw new ConfigWriteError("write", `config save failed; checkout ${outcome}`);
+    }
+    if (e instanceof CheckoutError) throw new ConfigWriteError("invalid", e.message);
+    throw e;
+  }
+}
+
+/** The caller holds live removal through crew-apply until the atomic save has finished. */
+export function closeSession(
+  path: string,
+  id: string,
+  stopped: (seatId: string) => boolean,
+  now: number,
+  expected: CrewSessionConfig,
+) {
+  const run = queue.then(async () => {
+    const { bytes, text, current } = await readCurrent(path);
+    const crew = current.crew;
+    const index = crew?.sessions.findIndex((s) => s.id === id) ?? -1;
+    const session = crew?.sessions[index];
+    if (!crew || !session) throw new ConfigWriteError("missing", noSessionText(id));
+    if (!isDeepStrictEqual(session, expected)) {
+      throw new ConfigWriteError(
+        "conflict",
+        "the session changed on disk; reload before closing it",
+      );
+    }
+    const active = session.seats.filter((s) => !stopped(s.id)).length;
+    if (active) throw new ConfigWriteError("conflict", sessionActiveText(id, active));
+    const doc = parseDocument(text);
+    doc.deleteIn(["crew", "sessions", index]);
+    const newText = doc.toString({ lineWidth: 0 });
+    const next = sessionConfig(newText);
+    if (
+      !isDeepStrictEqual(next, {
+        ...current,
+        crew: { ...crew, sessions: crew.sessions.filter((s) => s.id !== id) },
+      })
+    ) {
+      throw new ConfigWriteError(
+        "write",
+        "the new config.yaml would change more than the closed session",
+      );
+    }
+    const backup = await backUp(path, bytes, now);
+    await replace(path, newText);
+    await pruneBackups(path, basename(backup)).catch(() => undefined);
+    return { config: next, backup, session, worktrees: crew.worktrees };
   });
   queue = run.catch(() => undefined);
   return run;

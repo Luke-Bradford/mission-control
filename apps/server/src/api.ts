@@ -125,9 +125,12 @@ import {
   addAccount,
   addRepo,
   ConfigWriteError,
+  closeSession,
+  createSession,
   duplicateReason,
   NewAccountBody,
   NewRepoBody,
+  NewSessionBody,
   RepoLocation,
   SeatsBody,
   setSessionSeats,
@@ -166,7 +169,7 @@ import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from 
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { profilesView } from "./profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { adminDirOf, CheckoutError } from "./runtime/checkouts.ts";
+import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "./runview.ts";
@@ -1401,6 +1404,76 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const result = await deps.crewReloader.reload();
         if (result.error !== null) return reply.code(400).send({ error: result.error });
         return result;
+      });
+
+      // Reader: docs/runbook.md#reloading-the-config
+      api.post("/crew/sessions", async (req, reply) => {
+        const { configPath, crewReloader, seatWrites } = deps;
+        if (!configPath || !crewReloader || !seatWrites) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        const body = NewSessionBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await createSession(configPath, body.data, now(), config);
+          const changes = await crewReloader.reload();
+          return {
+            id: body.data.id,
+            folders: result.folders,
+            backup: basename(result.backup),
+            changes,
+          };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(e.kind === "invalid" ? 400 : e.kind === "write" ? 500 : 409)
+              .send({ error: e.message });
+          }
+          captureError(reply, e);
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
+      // Reader: docs/runbook.md#reloading-the-config
+      api.post<{ Params: { id: string } }>("/crew/sessions/:id/close", async (req, reply) => {
+        const { configPath, crewReloader, seatWrites } = deps;
+        if (!configPath || !crewReloader?.removeSession || !seatWrites) {
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        }
+        try {
+          const result = await crewReloader.removeSession(req.params.id, (stopped, session) =>
+            closeSession(configPath, req.params.id, stopped, now(), session),
+          );
+          const checkout = await removeSessionCheckout(result.session, result.worktrees);
+          return {
+            id: req.params.id,
+            checkout,
+            backup: basename(result.backup),
+            retainedPath: checkout === "removed" ? null : result.session.checkout,
+            outcome:
+              checkout === "retained-unproven"
+                ? "Checkout retained: ownership or safe removal is unproven (a seat worktree may still be registered)."
+                : checkout === "removal-failed-partway"
+                  ? "Checkout removal failed partway."
+                  : checkout,
+          };
+        } catch (e) {
+          if (e instanceof ConfigWriteError) {
+            return reply
+              .code(
+                e.kind === "missing"
+                  ? 404
+                  : e.kind === "invalid"
+                    ? 400
+                    : e.kind === "write"
+                      ? 500
+                      : 409,
+              )
+              .send({ error: e.message });
+          }
+          captureError(reply, e);
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
       });
 
       // Reader: docs/runbook.md#reloading-the-config
