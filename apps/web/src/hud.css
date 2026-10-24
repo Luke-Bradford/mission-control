@@ -808,6 +808,11 @@ textarea {
   gap: 8px 10px;
   flex-wrap: wrap;
 }
+@media (min-width: 1200px) {
+  .top {
+    gap: 8px 6px;
+  }
+}
 #sess {
   max-width: 132px;
 }
@@ -1024,6 +1029,9 @@ main > section {
   flex-direction: column;
   gap: 10px;
 }
+#page-overview > * {
+  flex-shrink: 0;
+}
 .nbanner {
   display: flex;
   align-items: center;
@@ -1073,8 +1081,8 @@ main > section {
   margin-top: 6px;
 }
 .ov {
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
+  min-height: 240px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
   align-items: start;
