@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import * as sessionDriver from "../src/runtime/session.ts";
 import type { Supervisor, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import type { Store } from "../src/store.ts";
 import {
@@ -763,6 +764,106 @@ describe("supervisor events (Plan 7a)", () => {
   const settle = () => new Promise((r) => setTimeout(r, 400));
 
   describe("run-ended: after the store write, exactly once", () => {
+    it("publishes a removed aside ending only while holding the crew lock", () => {
+      const { sup } = make();
+      const run: Run = {
+        id: "removed:1",
+        agentId: "removed",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1000,
+        endedAt: null,
+        status: "running",
+        sessionId: "s",
+        model: "sonnet",
+        branch: null,
+        ticket: null,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+        loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+      };
+      store.upsertRun(run);
+      const seen = watchStored(sup);
+      expect(sup.endRemovedAside?.(run.id)).toBe(false);
+      expect(store.run(run.id)?.endedAt).toBeNull();
+      expect(seen).toEqual([]);
+      sup.start();
+      expect(sup.endRemovedAside?.(run.id)).toBe(true);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.event).toEqual({
+        kind: "run-ended",
+        seatId: "removed",
+        runId: run.id,
+        endedBy: "operator",
+      });
+      expect(seen[0]?.run).toMatchObject({ status: "ok", endedBy: "operator" });
+      expect(seen[0]?.run?.endedAt).not.toBeNull();
+      expect(sup.endRemovedAside?.(run.id)).toBe(false);
+      expect(seen).toHaveLength(1);
+    });
+
+    it.each(["engine", "operator", "exit"])(
+      "frees the seat before %s ending and signals once",
+      async (ending) => {
+        const listeners = new Set<(event: sessionDriver.SessionEvent) => void>();
+        let alive = true;
+        const exit = () => {
+          alive = false;
+          for (const listener of [...listeners]) listener({ kind: "exit", code: 0, signal: null });
+        };
+        const session: sessionDriver.CrewSession = {
+          send: () => {},
+          control: async () => ({}),
+          close: async () => {
+            exit();
+            return 0;
+          },
+          detach: () => {},
+          on: (listener) => {
+            listeners.add(listener);
+            return () => {
+              listeners.delete(listener);
+            };
+          },
+          pid: undefined,
+          get alive() {
+            return alive;
+          },
+          ready: Promise.resolve(),
+          lines: 0,
+          closeSent: Promise.resolve(),
+        };
+        const launch = vi.spyOn(sessionDriver, "startSession").mockReturnValue(session);
+        const { sup } = make();
+        sup.start();
+        try {
+          const { runId } = await sup.startRun("guido-1", 42);
+          const occupied: boolean[] = [];
+          const signals: string[] = [];
+          sup.on((event) => {
+            if (event.runId !== runId) return;
+            if (event.kind === "run-ended" || event.kind === "seat-free") {
+              signals.push(event.kind);
+              occupied.push(sup.seatBusy("guido-1"));
+            }
+          });
+          if (ending === "engine") await sup.endRunByEngine(runId);
+          else if (ending === "operator") await sup.endRun("guido-1");
+          else exit();
+          await until(() => expect(signals).toContain("run-ended"));
+          await settle();
+          expect(occupied).toEqual(ending === "engine" ? [false, false] : [false]);
+          expect(signals).toEqual(ending === "engine" ? ["seat-free", "run-ended"] : ["run-ended"]);
+        } finally {
+          await sup.stopAll();
+          launch.mockRestore();
+        }
+      },
+    );
+
     it("failResume", async () => {
       const runId = await leftActive();
       rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });

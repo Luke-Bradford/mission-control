@@ -246,7 +246,7 @@ export function createCrewReloader(deps: {
   config: CcConfig;
   store: Store;
   bus: ChangeBus;
-  supervisor: Pick<Supervisor, "on" | "seatBusy">;
+  supervisor: Pick<Supervisor, "on" | "seatBusy" | "holdsCrewLock" | "endRemovedAside">;
   /** The watch rotates FLIGHT between turns, outside its crash restart limit. */
   rotateFlight?: () => void;
   now?: () => number;
@@ -270,6 +270,7 @@ export function createCrewReloader(deps: {
   let timer: NodeJS.Timeout | undefined;
   let off: (() => void) | undefined;
   let removing = false;
+  let settling = false;
 
   const statFile = (): FileStat => {
     const s = statSync(configPath);
@@ -312,22 +313,23 @@ export function createCrewReloader(deps: {
   };
 
   function settle(): string[] {
-    if (removing) return [];
+    if (removing || settling) return [];
+    settling = true;
     // Guards read powers per call. Apply them even if unrelated crew edits cannot settle.
     const powersApplied: string[] = [];
-    for (const repo of config.repos) {
-      const next = flightPowersOf(target, repo.id);
-      if ((repo.flightPowers ?? "standard") === next) continue;
-      repo.flightPowers = next;
-      powersApplied.push(`repo ${repo.id} flight_powers ${next}`);
-    }
-    if (powersApplied.length > 0) {
-      // Refresh the session's context after its turn; permissions already changed above.
-      deps.rotateFlight?.();
-      bus.emit("config");
-      bus.emit("agents");
-    }
     try {
+      for (const repo of config.repos) {
+        const next = flightPowersOf(target, repo.id);
+        if ((repo.flightPowers ?? "standard") === next) continue;
+        repo.flightPowers = next;
+        powersApplied.push(`repo ${repo.id} flight_powers ${next}`);
+      }
+      if (powersApplied.length > 0) {
+        // Refresh the session's context after its turn; permissions already changed above.
+        deps.rotateFlight?.();
+        bus.emit("config");
+        bus.emit("agents");
+      }
       // A newly created session has no agents or runtime state to migrate.
       if (
         config.crew &&
@@ -378,13 +380,14 @@ export function createCrewReloader(deps: {
       );
       const at = now();
       for (const seatId of removed) {
-        store.answerQuestions(seatId, at);
-        for (const note of store.notes()) {
-          if (note.seatId === seatId) store.clearNote(note.key, at);
-        }
-        for (const run of store.asideRuns()) {
-          if (run.agentId !== seatId) continue;
-          store.setRunEnded(run.id, at, "ok", "operator");
+        if (!supervisor.holdsCrewLock?.() || supervisor.seatBusy(seatId)) continue;
+        const open = store
+          .runsActiveSince(Number.MAX_SAFE_INTEGER)
+          .filter((run) => run.agentId === seatId && run.endedAt === null);
+        // A removed aside may be ended deliberately; every other open run keeps its attention.
+        if (open.some((run) => !run.loop?.aside)) continue;
+        for (const run of open) {
+          if (!supervisor.endRemovedAside?.(run.id)) continue;
           store.addComms({
             at,
             from: "CAPCOM",
@@ -392,6 +395,17 @@ export function createCrewReloader(deps: {
             ticket: run.ticket,
             text: `Seat ${seatId} removed; ended set-aside run ${run.id}.`,
           });
+        }
+        if (
+          store
+            .runsActiveSince(Number.MAX_SAFE_INTEGER)
+            .some((run) => run.agentId === seatId && run.endedAt === null)
+        )
+          continue;
+        if (!supervisor.holdsCrewLock?.() || supervisor.seatBusy(seatId)) continue;
+        store.answerQuestions(seatId, at);
+        for (const note of store.notes()) {
+          if (note.seatId === seatId) store.clearNote(note.key, at);
         }
       }
       if (removed.size > 0) {
@@ -424,6 +438,8 @@ export function createCrewReloader(deps: {
     } catch (e) {
       log(`could not apply config.yaml: ${e instanceof Error ? e.message : String(e)}`);
       return powersApplied;
+    } finally {
+      settling = false;
     }
   }
 
@@ -486,7 +502,9 @@ export function createCrewReloader(deps: {
       timer = setInterval(poll, CONFIG_POLL_MS);
       timer.unref();
       off = supervisor.on((e) => {
-        if (e.kind === "run-ended" || e.kind === "seat-free") settle();
+        if (e.kind === "run-ended") settle();
+        // An ended run already settles on run-ended, after its process is released.
+        if (e.kind === "seat-free" && store.run(e.runId)?.endedAt == null) settle();
       });
     },
     stop() {

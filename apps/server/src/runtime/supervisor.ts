@@ -465,6 +465,9 @@ export interface Supervisor {
   busy(): SeatBusy[];
   /** Whether the seat is starting, has a process, or its seat row is active; a store error counts as busy. */
   seatBusy(seatId: string): boolean;
+  holdsCrewLock?(): boolean;
+  /** Ends a removed seat's detached aside and publishes its lifecycle event synchronously. */
+  endRemovedAside?(runId: string): boolean;
   status(): { enabled: boolean; note: string | null };
   /**
    * Runs `fn` after everything queued for the clone `checkout` (a checkout, a commit); a failure
@@ -799,7 +802,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       setSeat(seatId, { state: "error", reason: `${why}${said}` });
     }
     emit({ kind: "run-ended", seatId, runId: l.run.id, endedBy: l.endedBy ?? "exit" });
-    emit({ kind: "seat-free", seatId, runId: l.run.id });
   }
 
   function onEvent(l: Live, e: SessionEvent): void {
@@ -2388,8 +2390,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     setSeat(seatId, { state: "idle", reason: null, runId: null });
     closeRunItems(info);
-    emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
     await closing;
+    if (l && live.get(seatId) === l) live.delete(seatId);
+    emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
     if (worktree === null) return;
     try {
       await inClone(info.session.checkout, () =>
@@ -2799,6 +2802,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     seat(seatId) {
       need(seatId);
       return store.seatSession(seatId);
+    },
+
+    holdsCrewLock: mayAct,
+
+    endRemovedAside(runId) {
+      if (!mayAct()) return false;
+      const run = store.run(runId);
+      if (!run || run.endedAt !== null || !run.loop?.aside) return false;
+      if (starting.has(run.agentId) || live.has(run.agentId)) return false;
+      if (
+        store
+          .runsActiveSince(Number.MAX_SAFE_INTEGER)
+          .some((r) => r.agentId === run.agentId && r.endedAt === null && !r.loop?.aside)
+      )
+        return false;
+      store.setRunEnded(run.id, now(), "ok", "operator");
+      transcripts.delete(run.transcriptPath);
+      digests.delete(run.id);
+      emit({ kind: "run-ended", seatId: run.agentId, runId, endedBy: "operator" });
+      return true;
     },
 
     seatBusy(seatId) {

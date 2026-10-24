@@ -415,7 +415,19 @@ describe("the reloader", () => {
   let rotateFlight: ReturnType<typeof vi.fn<() => void>>;
   let endRunByEngine: ReturnType<typeof vi.fn<(runId: string) => Promise<void>>>;
 
+  let holdsLock = true;
+  const endedRemoval = vi.fn();
   const supervisor = () => ({
+    holdsCrewLock: () => holdsLock,
+    endRemovedAside: (runId: string) => {
+      const run = store.run(runId);
+      if (!run) return false;
+      store.setRunEnded(runId, 2000, "ok", "operator");
+      const event = { kind: "run-ended", seatId: run.agentId, runId, endedBy: "operator" } as const;
+      endedRemoval(event);
+      listener?.(event);
+      return true;
+    },
     on: (fn: (e: SupervisorEvent) => void) => {
       listener = fn;
       return () => {
@@ -457,6 +469,8 @@ describe("the reloader", () => {
     topics = [];
     bus.subscribe((t) => topics.push(t));
     busy = new Set();
+    holdsLock = true;
+    endedRemoval.mockClear();
     endRunByEngine = vi.fn(async () => {});
     rotateFlight = vi.fn();
     listener = null;
@@ -625,6 +639,17 @@ describe("the reloader", () => {
     expect(listener).toBeNull();
   });
 
+  it("settles once when an ending emits both lifecycle events", () => {
+    const r = make();
+    r.start();
+    vi.spyOn(store, "run").mockReturnValue({ endedAt: 2000 } as Run);
+    const reads = vi.spyOn(store, "openQuestions");
+    listener?.({ kind: "run-ended", seatId: "guido-1", runId: "r", endedBy: "engine" });
+    listener?.({ kind: "seat-free", seatId: "guido-1", runId: "r" });
+    expect(reads).toHaveBeenCalledTimes(1);
+    r.stop();
+  });
+
   it("seat-free settles before the next poll", async () => {
     const r = make();
     r.start();
@@ -766,6 +791,54 @@ describe("the reloader", () => {
     expect(r.status().pending[0]?.change).toBe("remove");
   });
 
+  it.each(["live", "open", "parked", "aside", "unlocked"])(
+    "preserves absent-seat attention while %s",
+    async (state) => {
+      const seatId = "absent";
+      store.addQuestion({ agentId: seatId, runId: "r", text: "Continue?", at: 1000 });
+      store.raiseNote({
+        key: "absent",
+        kind: "blocked",
+        seatId,
+        runId: null,
+        repoId: "shop-app",
+        text: "Waiting",
+        at: 1000,
+      });
+      if (state === "live" || state === "aside") busy.add(seatId);
+      if (state === "unlocked") holdsLock = false;
+      if (["open", "parked", "aside"].includes(state)) {
+        store.upsertRun({
+          id: "r",
+          agentId: seatId,
+          repoId: "shop-app",
+          seq: 1,
+          startedAt: 1000,
+          endedAt: null,
+          status: "running",
+          sessionId: "s",
+          model: "sonnet",
+          branch: null,
+          ticket: null,
+          costUsd: null,
+          tokens: null,
+          transcriptPath: "",
+          prs: [],
+          summary: null,
+          ...(state === "aside"
+            ? { loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } } }
+            : {}),
+          ...(state === "parked"
+            ? { loop: { ...NEW_LOOP, parked: { kind: "silent", reason: "waiting", ended: false } } }
+            : {}),
+        });
+      }
+      await make().reload();
+      expect(store.openQuestions()).toHaveLength(1);
+      expect(store.notes()).toHaveLength(1);
+    },
+  );
+
   it.each([false, true])(
     "ends removed-seat aside runs (already absent at startup: %s)",
     async (restart) => {
@@ -831,6 +904,12 @@ describe("the reloader", () => {
       expect(store.notes()).toEqual([]);
       expect(store.run(aside.id)).toMatchObject({ endedBy: "operator", status: "ok" });
       expect(store.asideRuns()).toEqual([]);
+      expect(endedRemoval).toHaveBeenCalledExactlyOnceWith({
+        kind: "run-ended",
+        seatId: "guido-1",
+        runId: aside.id,
+        endedBy: "operator",
+      });
       expect(store.threadComms("guido-1").some((c) => c.text.includes(aside.id))).toBe(true);
     },
   );
