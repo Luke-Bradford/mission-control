@@ -169,6 +169,8 @@ export const RESOURCES = {
 
 /** Mutation endpoints. */
 export const ACTIONS = {
+  /** Body `{ base, profile }`; returns the refreshed template profiles. */
+  createProfile: "/api/profiles",
   flightMemory: (repoId: string, topic: string) =>
     `${FLIGHT_MEMORY_PATH}/${enc(repoId)}/${enc(topic)}`,
   notificationPreferences: RESOURCES.notificationPreferences.path,

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type ConfigProfile, type Crew, type CrewLoop, RETRY_NOTE } from "@mc/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -51,10 +53,23 @@ const steps = (region: HTMLElement): (string | null)[] =>
     .map((li) => li.textContent);
 
 describe("Setup › Loops templates", () => {
+  it("template rows wrap within their width (hud.css)", () => {
+    const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
+    const rule = (selector: string) =>
+      css.match(new RegExp(`${selector} \\{([^}]*)\\}`))?.[1] ?? "";
+    expect(rule(String.raw`\.loop-templates > li`)).toContain("min-width: 0;");
+    const button = rule(String.raw`\.loop-templates > li > button`);
+    expect(button).toContain("min-width: 0;");
+    expect(button).toContain("max-width: 100%;");
+    expect(button).toContain("white-space: normal;");
+    expect(button).toContain("overflow-wrap: anywhere;");
+  });
+
   it("the Templates panel lists the profiles and draws the first one's steps", () => {
     render(<Loops config={cfg} />);
     const t = screen.getByRole("region", { name: "Templates" });
     const buttons = within(within(t).getByRole("list")).getAllByRole("button");
+    expect(within(t).getByRole("list").classList.contains("loop-templates")).toBe(true);
     expect(buttons.map((b) => b.textContent)).toEqual([
       "feature · label type:feature, or any other ticket with no template label · — running · 6 steps",
       "small-change · label chore or test or docs, or Size XS or S with no template label · — running · 4 steps",

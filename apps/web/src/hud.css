@@ -3357,6 +3357,15 @@ kbd {
 .pb.tlist {
   padding: 2px 14px 12px;
 }
+.loop-templates > li {
+  min-width: 0;
+}
+.loop-templates > li > button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* a template profile (setup/Loops.tsx): the step track, then a card per step */
 .ptrack {
   display: flex;
@@ -4207,6 +4216,64 @@ button.nrow.thread.tagged {
 .awaypanel .awaygrid > div {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.ptrack .gate,
+.pcard.gate {
+  border: 1px solid var(--warn-mark);
+  background: var(--surface-2);
+}
+.tchip {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  padding: 1px 5px;
+  font-size: var(--fs-xs);
+  width: fit-content;
+  overflow-wrap: anywhere;
+}
+.ptrack .tchip {
+  display: block;
+}
+.template-editor fieldset {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.template-editor label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.template-editor input,
+.template-editor select {
+  min-width: 0;
+  max-width: 100%;
+}
+.template-check {
+  display: grid;
+  gap: 4px;
+}
+@media (max-width: 480px) {
+  .pcards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pcard,
+  .ptrack li {
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+}
+.ptrack b {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+.ptrack .gate b {
+  border-color: var(--warn-mark);
+  border-radius: var(--r-s);
 }
 
 .sessionform fieldset {
