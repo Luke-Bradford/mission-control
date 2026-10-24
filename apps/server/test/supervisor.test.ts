@@ -59,6 +59,7 @@ import {
   wrongAreaText,
 } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { assignIssue, claimAs } from "../src/claim.ts";
 import { CliHold } from "../src/cli-update.ts";
@@ -123,6 +124,9 @@ const prep = vi.hoisted(() => ({
   resumeGate: null as Promise<void> | null,
   /** Set: every attachSession (a restart's take-back) waits for it. */
   attachGate: null as Promise<void> | null,
+  attaches: [] as string[],
+  closeGate: null as Promise<void> | null,
+  closing: 0,
   /** The `peers` each prepare call was given, in order. */
   peers: [] as unknown[],
 }));
@@ -170,8 +174,18 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
   return {
     ...real,
     attachSession: async (...a: Parameters<typeof real.attachSession>) => {
+      prep.attaches.push(a[0].dir);
       if (prep.attachGate) await prep.attachGate;
-      return real.attachSession(...a);
+      const found = await real.attachSession(...a);
+      if (found.kind === "attached") {
+        const close = found.session.close.bind(found.session);
+        found.session.close = async () => {
+          prep.closing++;
+          if (prep.closeGate) await prep.closeGate;
+          return close();
+        };
+      }
+      return found;
     },
     startSession: (...a: Parameters<typeof real.startSession>) => {
       const session = real.startSession(...a);
@@ -429,6 +443,9 @@ beforeEach(() => {
   prep.failRemove = false;
   prep.resumeGate = null;
   prep.attachGate = null;
+  prep.attaches = [];
+  prep.closeGate = null;
+  prep.closing = 0;
   prep.failWrite = false;
   prep.sessions = [];
   prep.peers = [];
@@ -535,12 +552,18 @@ describe("the CLI update hold", () => {
 
     const hold = new CliHold();
     hold.hold("held");
-    const { sup, log } = make({ cliHold: hold });
+    const { sup, log, tokens } = make({ cliHold: hold });
     sup.start();
     await new Promise((r) => setTimeout(r, 200));
     expect(sup.seatFacts("guido-1")).toBeNull();
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(log).toHaveBeenCalledWith("guido-1: resume held: held");
+
+    const attaches = prep.attaches.length;
+    const revoke = vi.spyOn(tokens, "revoke");
+    for (let i = 0; i < 3; i++) await sup.resumeRun(runId);
+    expect(prep.attaches).toHaveLength(attaches);
+    expect(revoke).not.toHaveBeenCalled();
 
     hold.release();
     await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
@@ -2502,6 +2525,93 @@ describe("reattach after a restart", () => {
     expect(starts()[2].cwd).toBe(join(root, "mc-crew", "retro-43"));
   });
 
+  it("startup reattach racing engine resume spawns one CLI and fails the dead run once", async () => {
+    const first = make();
+    first.sup.start();
+    await first.sup.startRun("guido-1", 42);
+    const dead = await first.sup.startRun("retro", 43);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await until(() => expect(seatState("retro")).toBe("idle"));
+    await first.sup.stopAll();
+    await noKeepers();
+    rmSync(join(root, "mc-crew", "retro-43"), { recursive: true, force: true });
+    let release = () => {};
+    prep.resumeGate = new Promise<void>((r) => {
+      release = r;
+    });
+    const { sup } = make();
+    const setSeat = vi.spyOn(store, "setSeatSession");
+    sup.start();
+    try {
+      await until(() =>
+        expect(prep.attaches).toContain(
+          crewKeeperDir(dbPath, store.seatSession("guido-1")?.runId ?? ""),
+        ),
+      );
+      const racing = sup.resumeRun(dead.runId);
+      release();
+      await racing;
+      await until(() => expect(store.run(dead.runId)?.status).toBe("failed"));
+      await until(() => expect(starts()).toHaveLength(3));
+      await sup.resumeRun(dead.runId);
+      expect(
+        setSeat.mock.calls.filter(([row]) => row.seatId === "retro" && row.state === "error"),
+      ).toHaveLength(1);
+      expect(prep.attaches.filter((dir) => dir === crewKeeperDir(dbPath, dead.runId))).toHaveLength(
+        1,
+      );
+    } finally {
+      release();
+    }
+  });
+
+  it.each(["moved", "ended"])(
+    "skips a startup row that %s while another seat was resuming",
+    async (change) => {
+      const first = make();
+      first.sup.start();
+      await first.sup.startRun("guido-1", 42);
+      const other = await first.sup.startRun("retro", 43);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await until(() => expect(seatState("retro")).toBe("idle"));
+      await first.sup.stopAll();
+      await noKeepers();
+      let release = () => {};
+      prep.resumeGate = new Promise<void>((r) => {
+        release = r;
+      });
+      const { sup } = make();
+      sup.start();
+      try {
+        await until(() => expect(prep.attaches).toHaveLength(1));
+        const row = store.seatSession("retro");
+        if (row === null) throw new Error("missing seat");
+        if (change === "moved") store.setSeatSession({ ...row, runId: null });
+        else store.setRunEnded(other.runId, Date.now(), "ok", "engine");
+        const expected = store.seatSession("retro");
+        release();
+        await until(() => expect(starts()).toHaveLength(3));
+        expect(prep.attaches).toHaveLength(1);
+        expect(store.seatSession("retro")).toEqual(expected);
+      } finally {
+        release();
+      }
+    },
+  );
+
+  it("leaves a stopped seat holding an unended run alone", async () => {
+    const { runId, row } = await leftActive();
+    if (row === null) throw new Error("missing seat");
+    store.setSeatSession({ ...row, state: "stopped", reason: "stopped by CAPCOM" });
+    const { sup } = make();
+    sup.start();
+    await sup.resumeRun(runId);
+    expect(prep.attaches).toEqual([]);
+    expect(store.seatSession("guido-1")).toMatchObject({ state: "stopped", runId });
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(starts()).toHaveLength(1);
+  });
+
   it("resumes both of two active runs left by a stopped hub", async () => {
     const first = make();
     first.sup.start();
@@ -2692,18 +2802,15 @@ describe("reattach after a restart", () => {
     expect(store.seatSession("guido-1")?.reason).toBe("could not resume the session");
   });
 
-  it("does not resume a run that has already ended", async () => {
-    const { runId } = await leftActive();
+  it("does not resume or fail a run that has already ended", async () => {
+    const { runId, row } = await leftActive();
     const run = store.run(runId);
     if (run) store.upsertRun({ ...run, endedAt: Date.now(), status: "ok" });
     const { sup } = make();
     sup.start();
-    await until(() =>
-      expect(store.seatSession("guido-1")).toMatchObject({
-        state: "error",
-        reason: "could not resume the session",
-      }),
-    );
+    await sup.resumeRun(runId);
+    expect(store.seatSession("guido-1")).toEqual(row);
+    expect(prep.attaches).toEqual([]);
     expect(store.run(runId)?.status).toBe("ok");
     expect(starts()).toHaveLength(1);
   });
@@ -2970,8 +3077,21 @@ describe("a seat keeps running through a restart", () => {
     prep.failWrite = false;
     expect(seatState("guido-1")).toBe("starting");
     await first.sup.stopAll();
+    let release = () => {};
+    prep.closeGate = new Promise<void>((r) => {
+      release = r;
+    });
     const { sup } = make();
     sup.start();
+    try {
+      await until(() => expect(prep.closing).toBe(1));
+      expect(sup.busy()).toContainEqual({ seatId: "guido-1", state: "starting" });
+      const attaches = prep.attaches.length;
+      await sup.resumeRun(runId);
+      expect(prep.attaches).toHaveLength(attaches);
+    } finally {
+      release();
+    }
     await until(() =>
       expect(store.seatSession("guido-1")).toMatchObject({
         state: "error",
@@ -3924,7 +4044,7 @@ describe("supervisor events (Plan 7a)", () => {
       expect(await sup.send(second.runId, "k", "x")).toBe("sent");
     });
 
-    it("answers busy for a seat with no live process yet", async () => {
+    it("answers busy while crew is not started", async () => {
       const runId = await leftActive();
       const { sup } = make(); // not started: the run is not resumed
       expect(await sup.send(runId, "k", "x")).toBe("busy");
@@ -3938,6 +4058,65 @@ describe("supervisor events (Plan 7a)", () => {
       expect(await sup.send(runId, "k", "fix it")).toBe("no-session");
       expect(store.claimedKeys(runId)).toEqual({});
       expect(store.run(runId)?.endedAt).toBeNull();
+    });
+
+    it("answers no-session on a started hub with no process for the held run", async () => {
+      const runId = await leftActive();
+      const row = store.seatSession("guido-1");
+      if (row === null) throw new Error("missing seat");
+      store.setSeatSession({ ...row, runId: null, state: "stopped" });
+      const { sup } = make();
+      sup.start();
+      await Promise.resolve();
+      store.setSeatSession(row);
+      expect(await sup.send(runId, "k", "x")).toBe("no-session");
+      expect(store.claimedKeys(runId)).toEqual({});
+    });
+
+    it("resumes a missing CLI through the API message route and asks CAPCOM to retry", async () => {
+      const { sup, cfg, runId } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      const release = holdResume();
+      const app = buildApp({ config: cfg, store, bus, supervisor: sup });
+      try {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/message",
+          headers: { "content-type": "application/json" },
+          payload: { text: "fix it" },
+        });
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toEqual({
+          error: "GUIDO-1 is being resumed; try again in a moment",
+        });
+        release();
+        await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+        expect(store.seatSession("guido-1")?.runId).toBe(runId);
+        expect(prep.sessions).toHaveLength(2);
+        expect(userLines()).not.toContain("fix it");
+      } finally {
+        release();
+        await app.close();
+      }
+    });
+
+    it("keeps the previous error in Activity when resuming a held run", async () => {
+      const { sup, runId } = await idleRun();
+      prep.sessions[0]?.detach();
+      await noKeepers();
+      const row = store.seatSession("guido-1");
+      if (row === null) throw new Error("missing seat");
+      store.setSeatSession({ ...row, state: "error", reason: "CLI disappeared" });
+      await sup.resumeRun(runId);
+      expect(store.agentEvents(0)).toContainEqual(
+        expect.objectContaining({
+          agentId: "guido-1",
+          from: "error",
+          to: "idle",
+          text: expect.stringContaining("CLI disappeared"),
+        }),
+      );
     });
 
     it("resumes a missing CLI once on its run, then sends the pending line", async () => {

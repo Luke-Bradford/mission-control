@@ -729,6 +729,54 @@ describe("CI and review", () => {
     h.moves.length = 0;
   }
 
+  it("does not resume a missing CLI while its loop is parked", async () => {
+    h.facts = null;
+    h.noSession = true;
+    setLoop({ phase: "parked", parked: { kind: "ruling", reason: "wait", ended: false } });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.tick();
+    expect(h.resumes).toEqual([]);
+    expect(loopOf().phase).toBe("parked");
+  });
+
+  it("ends a run whose PR merged without resuming its missing CLI", async () => {
+    await inCi();
+    h.facts = null;
+    h.noSession = true;
+    setPr({ state: "merged", mergedAt: clock, ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    expect(h.ended).toEqual([RUN]);
+    expect(h.resumes).toEqual([]);
+  });
+
+  it("updates PR state without resuming a missing CLI", async () => {
+    await inCi();
+    h.facts = null;
+    h.noSession = true;
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("review");
+    expect(h.resumes).toEqual([]);
+  });
+
+  it("does not resume a missing CLI when its account is at a stop", async () => {
+    await inCi();
+    await failCi();
+    h.facts = null;
+    h.noSession = true;
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: clock,
+      pct: 96,
+      resetAt: clock + 60 * MIN,
+      source: "test",
+    });
+    await h.engine.reconcileRun(RUN);
+    await h.engine.tick();
+    expect(h.resumes).toEqual([]);
+  });
+
   it("passing CI on the pushed sha moves the card to In review and raises one review note", async () => {
     await inCi();
     setPr({ ci: "passing" });
@@ -2571,6 +2619,18 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       await h.engine.tick();
       expect(h.steps).toEqual(ALL);
+    });
+
+    it("merges without resuming the author's missing CLI", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      h.facts = null;
+      h.noSession = true;
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(authorEnded()).toEqual([RUN]);
+      expect(h.resumes).toEqual([]);
     });
 
     it("does not merge while the rules leave hard_rules unset, and says which key to add", async () => {

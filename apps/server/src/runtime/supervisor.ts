@@ -364,7 +364,11 @@ export interface Supervisor {
    * Allowed while the seat is rate-limited. Never answers questions.
    */
   send(runId: string, key: string, text: string): Promise<SendResult>;
-  /** Takes back a held run with no live CLI as at restart; a failed resume ends it once. */
+  /**
+   * Takes back a held run with no live CLI as at restart; a failed resume ends it once. Does
+   * nothing while crew is off, stopping, under a CLI hold, during startup reattach, or while a
+   * start, attach or end is in progress.
+   */
   resumeRun(runId: string): Promise<void>;
   /** null when the seat has no live process. */
   seatFacts(seatId: string): SeatFacts | null;
@@ -558,6 +562,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   let holdsLock = false;
   let lockNote: string | null = null;
   let stopping = false;
+  let reattaching: Promise<void> | null = null;
   /** Stops listening for the CLI hold's release (set by `start`). */
   let unholdResume: (() => void) | undefined;
   const listeners = new Set<(e: SupervisorEvent) => void>();
@@ -619,7 +624,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function liveOrRefuse(info: SeatInfo): Live {
     const l = live.get(info.seat.id);
-    if (!l?.session.alive || l.ending !== null) throw noLive(info);
+    if (!l?.session.alive) {
+      const row = store.seatSession(info.seat.id);
+      if (row?.runId != null && row.state !== "stopped" && store.run(row.runId)?.endedAt === null) {
+        void resumeRun(row.runId).catch((e: unknown) =>
+          log(`${info.seat.id}: could not resume: ${errText(e)}`),
+        );
+        throw new SupervisorError(409, `${call(info)} is being resumed; try again in a moment`);
+      }
+      throw noLive(info);
+    }
+    if (l.ending !== null) throw noLive(info);
     return l;
   }
 
@@ -1299,7 +1314,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
-  /** Held unended runs are recovered even when their seat's state was left stopped or in error. */
+  /** Held unended runs are recovered even after an error; stopped seats stay stopped. */
   function heldSessions(): SeatSessionRow[] {
     const rows = new Map(store.activeSeatSessions().map((row) => [row.seatId, row]));
     for (const { seatId } of store.liveSeatRuns()) {
@@ -1307,7 +1322,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const row = store.seatSession(seatId);
       if (row !== null) rows.set(seatId, row);
     }
-    return [...rows.values()];
+    return [...rows.values()].filter((row) => row.state !== "stopped");
   }
 
   /**
@@ -1320,14 +1335,29 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * stops the others; a store that cannot list the runs is logged (the caller catches it, so no
    * rejection escapes).
    */
-  async function reattach(): Promise<void> {
-    for (const row of heldSessions()) {
-      if (stopping) return;
-      await recoverSession(row);
-    }
+  function reattach(): Promise<void> {
+    if (reattaching !== null) return reattaching;
+    reattaching = (async () => {
+      for (const row of heldSessions()) {
+        if (stopping) return;
+        await recoverSession(row);
+      }
+    })().finally(() => {
+      reattaching = null;
+    });
+    return reattaching;
   }
 
   async function recoverSession(row: SeatSessionRow): Promise<void> {
+    const current = store.seatSession(row.seatId);
+    if (
+      row.runId === null ||
+      current?.runId !== row.runId ||
+      current.state === "stopped" ||
+      store.run(row.runId)?.endedAt !== null
+    )
+      return;
+    row = current;
     const l = live.get(row.seatId);
     if (starting.has(row.seatId) || l?.session.alive || l?.ending != null) return;
     starting.add(row.seatId);
@@ -1352,7 +1382,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   async function resumeRun(runId: string): Promise<void> {
-    if (!mayAct() || stopping) return;
+    if (deps.cliHold?.reason != null) return;
+    if (!mayAct() || stopping || reattaching !== null) return;
     const run = store.run(runId);
     if (run === null || runGone(runId, run.agentId)) return;
     const row = store.seatSession(run.agentId);
@@ -1491,7 +1522,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // The hub went down before the brief was sent: the CLI has no conversation to continue.
       l.off();
       if (live.get(seatId) === l) live.delete(seatId);
-      void l.session.close().then(() => failResume(row, RESUME_FAILED));
+      starting.add(seatId);
+      void l.session
+        .close()
+        .then(() => failResume(row, RESUME_FAILED))
+        .finally(() => starting.delete(seatId));
       return;
     }
     if (!l.inTurn) emit({ kind: "idle", seatId, runId: l.run.id, resumed: false });
@@ -1556,6 +1591,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch (e) {
       log(`${row.seatId}: could not start: ${errText(e)}`);
       return failResume(row, RESUME_FAILED);
+    }
+    // Keep the error that the successful resume is about to replace in Activity.
+    if (row.state === "error") {
+      const why = row.reason ? `: ${row.reason}` : "";
+      try {
+        store.addAgentEvent({
+          agentId: row.seatId,
+          at: now(),
+          from: row.state,
+          to: "idle",
+          text: `${HUD_STATE_LABEL[row.state]} → ${HUD_STATE_LABEL.idle}${why} (run #${run.seq} resumed)`,
+        });
+      } catch (e) {
+        log(`${row.seatId}: could not record its previous state: ${errText(e)}`);
+      }
     }
     try {
       setSeat(row.seatId, { state: "idle", reason: RESUMED });

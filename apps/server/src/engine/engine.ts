@@ -282,7 +282,16 @@ export function createEngine(deps: EngineDeps): Engine {
   /** A missing CLI leaves the line unclaimed; the next pass sends it after the take-back. */
   async function send(runId: string, key: string, text: string) {
     const sent = await supervisor.send(runId, key, text);
-    if (sent === "no-session") await supervisor.resumeRun(runId);
+    if (sent === "no-session") {
+      const run = store.run(runId);
+      const accountId = run === null ? undefined : seatConfig(run.agentId)?.accountId;
+      if (
+        run?.loop?.phase !== "parked" &&
+        (accountId === undefined || !accountAtStop(config, store, accountId, now()))
+      ) {
+        await supervisor.resumeRun(runId);
+      }
+    }
     return sent;
   }
 
@@ -435,7 +444,8 @@ export function createEngine(deps: EngineDeps): Engine {
         // a run off its seat is on no seat: the row is another run's, and so is its rate limit
         state: loop.aside ? "stopped" : (row?.state ?? "stopped"),
         holdsRun: current,
-        inTurn: !current || facts === null ? true : facts.inTurn,
+        // With no CLI, plan between turns; only a due line asks the supervisor to resume.
+        inTurn: !current || (facts?.inTurn ?? false),
         lastTurnEndedAt:
           current && turnEnded !== null && turnEnded >= run.startedAt ? turnEnded : null,
         resumedAt: current ? (facts?.resumedAt ?? null) : null,
@@ -1046,14 +1056,6 @@ export function createEngine(deps: EngineDeps): Engine {
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
     if (!seatKnown(run.agentId)) return;
-    if (
-      run.endedAt === null &&
-      supervisor.seat(run.agentId)?.runId === run.id &&
-      supervisor.seatFacts(run.agentId) === null
-    ) {
-      await supervisor.resumeRun(run.id);
-      return;
-    }
     const at = now();
     const input: RunLoop = { ...stored };
     const pr = findPr(run, input);
@@ -1316,10 +1318,6 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       const facts = supervisor.seatFacts(row.seatId);
       const holdsRun = seatRow?.runId === rrun.id && rrun.endedAt === null;
-      if (holdsRun && facts === null) {
-        await supervisor.resumeRun(rrun.id);
-        continue;
-      }
       const turnEnded = seatRow?.lastTurnEndedAt ?? null;
       const at = now();
       const action = reviewRunStep({
@@ -1339,7 +1337,7 @@ export function createEngine(deps: EngineDeps): Engine {
             .busy()
             .some((b) => b.seatId === row.seatId && b.state === "starting"),
           state: seatRow?.state ?? "stopped",
-          inTurn: holdsRun && facts !== null ? facts.inTurn : true,
+          inTurn: !holdsRun || (facts?.inTurn ?? false),
           lastTurnEndedAt:
             holdsRun && turnEnded !== null && turnEnded >= rrun.startedAt ? turnEnded : null,
           resumedAt: holdsRun ? (facts?.resumedAt ?? null) : null,
