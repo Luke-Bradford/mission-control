@@ -45,10 +45,14 @@ const prep = vi.hoisted(() => ({
   failRemove: false,
   /** Set: every line written to a CLI session throws, as to one whose process is gone. */
   failWrite: false,
+  sessions: [] as import("../src/runtime/session.ts").CrewSession[],
   /** Set: every existingCheckout (a resume's) waits for it. */
   resumeGate: null as Promise<void> | null,
   /** Set: every attachSession (a restart's take-back) waits for it. */
   attachGate: null as Promise<void> | null,
+  attaches: [] as string[],
+  closeGate: null as Promise<void> | null,
+  closing: 0,
   /** The `peers` each prepare call was given, in order. */
   peers: [] as unknown[],
 }));
@@ -96,11 +100,22 @@ vi.mock("../src/runtime/session.ts", async (importOriginal) => {
   return {
     ...real,
     attachSession: async (...a: Parameters<typeof real.attachSession>) => {
+      prep.attaches.push(a[0].dir);
       if (prep.attachGate) await prep.attachGate;
-      return real.attachSession(...a);
+      const found = await real.attachSession(...a);
+      if (found.kind === "attached") {
+        const close = found.session.close.bind(found.session);
+        found.session.close = async () => {
+          prep.closing++;
+          if (prep.closeGate) await prep.closeGate;
+          return close();
+        };
+      }
+      return found;
     },
     startSession: (...a: Parameters<typeof real.startSession>) => {
       const session = real.startSession(...a);
+      prep.sessions.push(session);
       return new Proxy(session, {
         get(target, key) {
           if (key === "send" && prep.failWrite) {
@@ -354,7 +369,11 @@ beforeEach(() => {
   prep.failRemove = false;
   prep.resumeGate = null;
   prep.attachGate = null;
+  prep.attaches = [];
+  prep.closeGate = null;
+  prep.closing = 0;
   prep.failWrite = false;
+  prep.sessions = [];
   prep.peers = [];
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
