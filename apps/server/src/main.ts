@@ -1,6 +1,6 @@
 /**
  * Mission Control server: loads config, opens the store, starts the collectors' scheduler and serves
- * the API on 127.0.0.1:7420 (loopback only; no sign-in).
+ * the API on 127.0.0.1:7420 (loopback only; mutating routes need the operator token in <data dir>/operator-token).
  *   MC_CONFIG  config path (default ~/.config/mission-control/config.yaml)
  *   MC_DB      sqlite path (default ~/.local/share/mission-control/mc.sqlite; its dir is created 0700)
  *   MC_PORT    port (default 7420; 1024–65535), e.g. for a preview server beside the live hub
@@ -45,6 +45,7 @@ import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
+import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -86,6 +87,8 @@ async function main(): Promise<void> {
   }
   mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
+  const operatorToken = newOperatorToken(); // per boot; seats cannot read the data dir
+  writeOperatorToken(dirname(dbPath), operatorToken);
   const hubStartedAt = Date.now();
   const store = new Store(dbPath);
   const bus = new ChangeBus();
@@ -338,6 +341,7 @@ async function main(): Promise<void> {
   });
 
   const app = buildApp({
+    operatorToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     config,
