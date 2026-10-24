@@ -9,11 +9,9 @@ export function Overview() {
   return (
     <section id="page-overview">
       <NeedsBanner />
+      <AgentsPanel />
       <div className="ov">
-        <div className="col">
-          <AgentsPanel />
-          <ActivityPanel />
-        </div>
+        <ActivityPanel />
         <div className="col">
           <MachinePanel />
           <QuotaPanel />

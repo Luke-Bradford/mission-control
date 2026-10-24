@@ -133,15 +133,15 @@ describe("Overview panels", () => {
 });
 
 describe("Agents panel", () => {
-  it("a row whose account has only a 7d window shows its 7d meter", async () => {
+  it("a row whose account has only a 7d window shows that first reading", async () => {
     stub({
       rows: [crewRow({ accountId: "codex-main" })],
       limits: [limit7d({ accountId: "codex-main", used: 69 })],
     });
     const { container } = render(<Overview />);
     await waitFor(() => expect(agentRows(container).length).toBe(1));
-    const text = container.querySelector("#agentsP .ph")?.textContent ?? "";
-    expect(text).toContain("7d 69%");
+    const text = agentRows(container)[0]?.textContent ?? "";
+    expect(text).toContain("69%");
     expect(text).not.toContain("5h");
   });
 
@@ -176,14 +176,15 @@ describe("Agents panel", () => {
     stub({ crewStatus: { enabled: false, note: "crew lock held by pid 123" } });
     const { container } = render(<Overview />);
     const line = await screen.findByRole("status");
-    expect(line.textContent).toBe("Crew is off: crew lock held by pid 123");
-    expect(container.querySelector("#agentsP")?.contains(line)).toBe(true);
+    expect(line.textContent).toBe("Crew off");
+    expect(line.title).toBe("crew lock held by pid 123");
+    expect(container.querySelector("#agentsP .ph")?.contains(line)).toBe(true);
   });
 
   it("says plain Crew is off with no note", async () => {
     stub({ crewStatus: { enabled: false, note: null } });
     render(<Overview />);
-    expect(await screen.findByText("Crew is off.")).toBeTruthy();
+    expect(await screen.findByText("Crew off")).toBeTruthy();
   });
 
   it("says nothing about crew when it is on", async () => {
@@ -202,8 +203,7 @@ describe("Agents panel", () => {
     expect(container.querySelector(".trow:not(.head)")).toBe(flight);
     expect(within(flight).getByText("FLIGHT")).toBeTruthy();
     expect(within(flight).getByText("head agent")).toBeTruthy();
-    expect(within(flight).getByText("Head").className).toContain("neutral");
-    expect(within(flight).getByText(FLIGHT_NO_SEAT)).toBeTruthy();
+    expect(flight.title).toBe(FLIGHT_NO_SEAT);
     expect(flight.textContent).toContain("—");
   });
 
@@ -230,7 +230,7 @@ describe("Agents panel", () => {
     },
   });
 
-  it("shows FLIGHT's turns and explains what it does under the doing line", async () => {
+  it("keeps FLIGHT's session turns in the loop tooltip", async () => {
     stub({
       config: flightConfig([{ id: "flight-1" }]),
       rows: [crewRow({ id: "flight-1", hudState: "error" })],
@@ -250,13 +250,12 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     const flight = container.querySelector(".trow.flight") as HTMLElement;
-    const loop = await within(flight).findByText("turn 4 of 41");
-    expect(flight.children[3]).toBe(loop);
-    const line = within(flight).getByText("coordinates the crew and brings you decisions");
-    expect(line.className).toBe("xs muted block doing");
-    expect(line.title).toBe("coordinates the crew and brings you decisions");
-    expect(line.previousElementSibling).toBe(flight.querySelector(".doing"));
-    expect(within(flight).getByText("Head")).toBeTruthy();
+    await waitFor(() =>
+      expect(flight.querySelector(".loopstep")?.getAttribute("title")).toBe(
+        "Turns this session: 4",
+      ),
+    );
+    expect(flight.querySelector(".loopstep")?.getAttribute("title")).toBe("Turns this session: 4");
     expect(within(flight).getByText("Error", { selector: ".pill > span" })).toBeTruthy();
   });
 
@@ -293,11 +292,10 @@ describe("Agents panel", () => {
     await screen.findByText("1 working · 2 agents · FLIGHT not counted");
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
     expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
-    expect(within(flight).getByText("Head")).toBeTruthy();
     expect(within(flight).getByText("head agent")).toBeTruthy();
     expect(within(flight).getByText("Error")).toBeTruthy();
-    expect(flight.querySelector(".doing")?.textContent).toBe("Run failed");
-    expect(flight.querySelector(".meters2")?.textContent).toContain("Context");
+    expect(flight.title).toBe("Run failed");
+    expect(flight.querySelector(".meter")?.textContent).toContain("ctx");
     expect(agentRows(container)).toHaveLength(2);
     expect(screen.queryByText("flight-1")).toBeNull();
     expect(screen.getAllByText("FLIGHT")).toHaveLength(1);
@@ -317,10 +315,10 @@ describe("Agents panel", () => {
     const { container, unmount } = render(<Overview />);
     await screen.findByText("shop-app-ta");
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
-    expect(within(flight).getByText("Loading…")).toBeTruthy();
+    expect(flight.title).toBe("Loading…");
     expect(within(flight).queryByText(FLIGHT_NO_SEAT)).toBeNull();
     release();
-    await within(flight).findByText(FLIGHT_NO_SEAT);
+    await waitFor(() => expect(flight.title).toBe(FLIGHT_NO_SEAT));
     unmount();
     hub.clear();
 
@@ -328,7 +326,7 @@ describe("Agents panel", () => {
     const failed = render(<Overview />);
     await screen.findByText("shop-app-ta");
     const row = failed.container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
-    expect(await within(row).findByText(FLIGHT_NO_SEAT)).toBeTruthy();
+    await waitFor(() => expect(row.title).toBe(FLIGHT_NO_SEAT));
     expect(within(row).queryByText("Loading…")).toBeNull();
   });
 
@@ -337,7 +335,7 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("shop-app-ta");
     const flight = container.querySelector<HTMLElement>(".trow.flight") as HTMLElement;
-    expect(flight.getAttribute("role")).toBeNull();
+    expect(flight.getAttribute("role")).toBe("row");
     expect(flight.hasAttribute("tabindex")).toBe(false);
     const btn = within(flight).getByRole("button", { name: "FLIGHT, open the dock" });
     // the accessible name starts with the call sign, the visible text's first words (WCAG 2.5.3)
@@ -365,7 +363,9 @@ describe("Agents panel", () => {
   /** The Loop step label, whose `<b>` splits its text, found by its whole text content. */
   const stepLabel = (text: string) =>
     screen.findByText(
-      (_, el) => el?.matches(".loopstep .ellip") === true && el.textContent === text,
+      (_, el) =>
+        el?.matches(".loopstep .ellip") === true &&
+        el.textContent === text.split(" › ").at(-1)?.split(" · try")[0],
     );
   const bar = (row: HTMLElement | undefined) =>
     [...(row?.querySelectorAll(".loopstep .stepbar i") ?? [])].map((i) => i.className);
@@ -395,9 +395,9 @@ describe("Agents panel", () => {
     await screen.findByText("other");
     const [a, b] = agentRows(container);
     const label = a?.querySelector(".loopstep .ellip") as HTMLElement;
-    expect(label.textContent).toBe("build › In review");
+    expect(label.textContent).toBe("In review");
     expect(label.querySelector("b")?.textContent).toBe("In review");
-    expect(label.getAttribute("title")).toBe("In review · PR #9");
+    expect(label.getAttribute("title")).toBe("build › In review · In review · PR #9");
     expect(a?.querySelector(".loopstep .stepbar")?.getAttribute("title")).toBe(
       "Working → CI → In review → Done",
     );
@@ -420,7 +420,9 @@ describe("Agents panel", () => {
     await stepLabel("build › Blocked");
     const step = agentRows(container)[0] as HTMLElement;
     expect(bar(step)).toEqual(["w", "w", "w", "w"]);
-    expect(step.querySelector(".loopstep .ellip")?.getAttribute("title")).toBe(text);
+    expect(step.querySelector(".loopstep .ellip")?.getAttribute("title")).toBe(
+      `build › Blocked · ${text}`,
+    );
     expect(step.querySelector(".loopstep .crit-t")).toBeNull();
   });
 
@@ -445,7 +447,7 @@ describe("Agents panel", () => {
   // The ticket ref the set-aside run carries: the repo, a hash sign, the number.
   const ASIDE_TICKET = "mission-control#12";
 
-  it("a seat's set-aside run gets its own line with its ticket, step and wait", async () => {
+  it("a seat's set-aside run stays in its identity tooltip, with one compact row", async () => {
     stub({
       rows: [
         seatRow({
@@ -466,23 +468,21 @@ describe("Agents panel", () => {
     await stepLabel("build › Working");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(":scope > .loopstep .loopwait")).toBeNull();
-    const lines = row.querySelectorAll(".asideline");
-    expect(lines).toHaveLength(1);
-    const aside = lines[0] as HTMLElement;
-    for (const text of ["Set aside", "#12", "Aside work", "build › In review"]) {
-      expect(aside.textContent).toContain(text);
+    expect(row.querySelector(".asideline")).toBeNull();
+    const model = row.querySelector(".agent-model") as HTMLElement;
+    expect(model.textContent).not.toContain("set aside");
+    for (const text of [
+      "Set aside",
+      "#12",
+      "Aside work",
+      "In review",
+      "waiting on RETRO's review",
+    ]) {
+      expect(model.title).toContain(text);
     }
-    expect(aside.textContent).toContain("waiting on RETRO's review");
-    expect(aside.querySelector(".loopwait")?.className).toContain("fg2");
-    expect([...aside.querySelectorAll(".stepbar i")].map((i) => i.className)).toEqual([
-      "d",
-      "d",
-      "c",
-      "",
-    ]);
   });
 
-  it("a free seat still lists its set-aside runs under a dash", async () => {
+  it("a free seat keeps its set-aside work available in the identity tooltip", async () => {
     stub({
       rows: [
         seatRow({
@@ -500,10 +500,12 @@ describe("Agents panel", () => {
       ],
     });
     const { container } = render(<Overview />);
-    await screen.findByText("waiting on GUIDO-1 for rework");
+    await screen.findByText("guido-1");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".loopstep")?.textContent).toBe("—");
-    expect(row.querySelectorAll(".asideline")).toHaveLength(1);
+    expect(row.querySelector(".agent-model")?.getAttribute("title")).toContain(
+      "waiting on GUIDO-1 for rework",
+    );
   });
 
   it("the Loop step shows the try from the second one on", async () => {
@@ -522,8 +524,8 @@ describe("Agents panel", () => {
       ],
     });
     render(<Overview />);
-    await stepLabel("build › CI · try 2 of 3");
-    await stepLabel("build › CI");
+    expect(await screen.findAllByText("CI", { selector: ".loopstep b" })).toHaveLength(2);
+    expect(screen.getByTitle(/try 2 of 3/)).toBeTruthy();
   });
 
   it("the Loop step names the run's template profile, else the build loop", async () => {
@@ -549,8 +551,8 @@ describe("Agents panel", () => {
       },
     });
     render(<Overview />);
-    const el = await screen.findByText("in line for the test lock · 1:05");
-    expect(el.className).toContain("warn-t");
+    const el = await screen.findByTitle(/in line for the test lock · 1:05/);
+    expect(el.closest(".trow")?.textContent).toContain("Waiting on lock");
   });
 
   it("the need line offers Interrupt and End the run next to Answer, for a seat with a live turn", async () => {
@@ -662,19 +664,19 @@ describe("Agents panel", () => {
     await screen.findByText("Stopped");
     const row = agentRows(container)[0] as HTMLElement;
     const line = "Stopped at the 7-day quota (88% of 80%) · resumes after Mon 13:00";
-    expect(row.querySelector(".doing")?.getAttribute("title")).toBe(line);
-    expect(row.querySelector(".doing")?.textContent).toBe(line);
+    expect(row.title).toBe(line);
+    expect(row.title).toBe(line);
   });
 
-  it("a stopped seat whose run merged says so, and shows its ticket muted as last", async () => {
+  it("a stopped seat whose run merged says so, and keeps its ticket in Work", async () => {
     stub({ rows: [stoppedSeat({ merged: true })] });
     const { container } = render(<Overview />);
     await screen.findByText("Stopped");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".doing")?.textContent).toBe("Run ended · PR #75 merged");
-    expect(row.textContent).toContain("Last mission-control #74");
-    expect(row.textContent).not.toContain("Dead collector fallback");
-    expect(row.querySelector(".muted .rref")?.textContent).toBe("mission-control #74");
+    expect(row.title).toBe("Run ended · PR #75 merged");
+    expect(row.querySelector(".ticket-cell")?.textContent).toContain("#74");
+    expect(row.title).not.toContain("Dead collector fallback");
+    expect(row.querySelector(".ticket-cell")?.textContent).toMatch(/^last #74/);
   });
 
   it("a seat stopped by you says so", async () => {
@@ -682,29 +684,32 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("Stopped");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".doing")?.textContent).toBe("Run ended by you");
-    expect(row.textContent).toContain("Last mission-control #74");
+    expect(row.title).toBe("Run ended by you");
+    expect(row.querySelector(".ticket-cell")?.textContent).toContain("#74");
   });
 
-  it("a seat in error says its run failed and shows its ticket muted as last", async () => {
+  it("a seat in error says its run failed and keeps its ticket in Work", async () => {
     stub({
       rows: [stoppedSeat({ hudState: "error", sourceError: "CLI never started" })],
     });
     const { container } = render(<Overview />);
     await screen.findByText("Error");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".doing")?.textContent).toBe("Run failed: CLI never started");
-    expect(row.textContent).toContain("Last mission-control #74");
-    expect(row.textContent).not.toContain("Dead collector fallback");
+    expect(row.querySelector(".need")?.textContent).toContain("CLI never started");
+    expect(row.querySelector(".doing")).toBeNull();
+    expect(row.querySelector(".ticket-cell")?.textContent).toContain("#74");
+    expect(row.title).not.toContain("Dead collector fallback");
   });
 
-  it("a loop in error still reads Error: … with its current ticket", async () => {
+  it("a loop in error keeps its last ticket without the title", async () => {
     stub({ rows: [crewRow({ hudState: "error", sourceError: "state dir gone" })] });
     const { container } = render(<Overview />);
     await screen.findByText("Error");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".doing")?.textContent).toBe("Error: state dir gone");
-    expect(row.textContent).toContain("Quote cache");
+    expect(row.querySelector(".need")?.textContent).toContain("state dir gone");
+    expect(row.querySelector(".doing")).toBeNull();
+    expect(row.textContent).not.toContain("Quote cache");
+    expect(row.querySelector(".ticket-cell")?.textContent).toBe("last #3349");
     expect(row.textContent).not.toContain("Last ");
     expect(row.querySelector(".muted .rref")).toBeNull();
   });
@@ -714,10 +719,10 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("Error");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".doing")?.textContent).toBe("Run failed");
+    expect(row.title).toBe("Run failed");
   });
 
-  it("on a wide screen a row's tag is the call sign alone; the role title is on the line under it", async () => {
+  it("a row keeps its call sign and full short role together", async () => {
     vi.stubGlobal("matchMedia", (q: string) => ({
       matches: false,
       media: q,
@@ -726,7 +731,7 @@ describe("Agents panel", () => {
     }));
     stub({ rows: [seatRow()] });
     const { container } = render(<Overview />);
-    await screen.findByText("Backend developer · writer");
+    await screen.findByText("backend");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".ag")?.textContent).toBe("guido-1");
     expect(row.querySelector(".ag")?.getAttribute("title")).toBe("Backend developer");
@@ -734,7 +739,7 @@ describe("Agents panel", () => {
     expect(flight.querySelector(".ag")?.textContent).toBe("FLIGHT");
   });
 
-  it("an agent's row carries model · effort · CLI version in the title of its role line", async () => {
+  it("an agent's row shows model, effort and CLI version with the full id on hover", async () => {
     stub({
       rows: [
         seatRow({ cli: { version: "2.1.302", effort: "high" } }),
@@ -744,10 +749,10 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
     const [seat, loop] = agentRows(container);
-    expect(within(seat as HTMLElement).getByText("Backend developer · writer").title).toBe(
+    expect(seat?.querySelector<HTMLElement>(".agent-model")?.title).toBe(
       "claude-opus-4-1 · high · CLI 2.1.302",
     );
-    expect(within(loop as HTMLElement).getByText(/^observed loop/).title).toBe("claude-opus-4-1");
+    expect(within(loop as HTMLElement).getByText("opus 4.1").title).toBe("claude-opus-4-1");
   });
 
   it.each([
@@ -755,19 +760,19 @@ describe("Agents panel", () => {
     ["approved", "In review · PR #77"],
     ["draft", "Draft PR #77"],
     ["changes", "Changes requested · PR #77"],
-  ] as const)("an idle seat's row says %s PR, linked", async (state, line) => {
-    stub({ rows: [seatRow({ hudState: "idle", review: { prNumber: 77, state } })] });
-    const { container } = render(<Overview />);
-    await screen.findByText("guido-1");
-    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
-    expect(doing.textContent).toBe(line);
-    expect(doing.getAttribute("title")).toBe(line);
-    await waitFor(() =>
-      expect(
-        within(doing).getByRole("link", { name: "shop-app PR #77" }).getAttribute("href"),
-      ).toBe("https://github.com/octo-org/shop-app/pull/77"),
-    );
-  });
+  ] as const)(
+    "an idle seat keeps %s PR in its tooltip and marks Work as last",
+    async (state, line) => {
+      stub({ rows: [seatRow({ hudState: "idle", review: { prNumber: 77, state } })] });
+      const { container } = render(<Overview />);
+      await screen.findByText("guido-1");
+      const row = agentRows(container)[0] as HTMLElement;
+      const doing = row.querySelector(".ticket-cell") as HTMLElement;
+      expect(row.title).toBe(line);
+      expect(doing.textContent).toBe("last #3349 · PR #77");
+      expect(doing.hasAttribute("title")).toBe(false);
+    },
+  );
 
   it("a seat's note outranks its review, and a seat that is not idle does not show one", async () => {
     const review = { prNumber: 77, state: "open" } as const;
@@ -782,7 +787,7 @@ describe("Agents panel", () => {
     const line = (id: string) =>
       agentRows(container)
         .find((r) => r.textContent?.includes(id))
-        ?.querySelector(".doing")?.textContent;
+        ?.getAttribute("title");
     expect(line("guido-1")).toBe("Rate limited until 14:00");
     expect(line("guido-2")).toMatch(/^run #12/);
   });
@@ -795,9 +800,10 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
-    await waitFor(() => expect(doing.textContent).toBe("In review · PR #77"));
-    expect(within(doing).queryByRole("link")).toBeNull();
+    const row = agentRows(container)[0] as HTMLElement;
+    const doing = row.querySelector(".ticket-cell") as HTMLElement;
+    await waitFor(() => expect(row.title).toBe("In review · PR #77"));
+    expect(within(doing).queryByRole("link", { name: "gone PR #77" })).toBeNull();
   });
 
   it("an idle seat with no PR stays Idle; a loop never reads as in review", async () => {
@@ -809,7 +815,7 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const lines = agentRows(container).map((r) => r.querySelector(".doing")?.textContent);
+    const lines = agentRows(container).map((r) => r.getAttribute("title"));
     expect(lines[0]).toMatch(/^Idle since/);
     expect(lines[1]).toMatch(/^Idle since/);
   });
@@ -820,9 +826,9 @@ describe("Agents panel", () => {
       config: () => ({ status: 503, body: { error: "loading" } }),
     });
     const { container } = render(<Overview />);
-    await screen.findByText("No ticket");
+    await screen.findByText("shop-app-ta");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".doing")?.textContent).toBe("Idle");
+    expect(row.title).toBe("Idle");
   });
 
   it("a row with no run and no digest shows No ticket, — tokens and ctx —", async () => {
@@ -839,16 +845,16 @@ describe("Agents panel", () => {
       ],
     });
     const { container } = render(<Overview />);
-    await screen.findByText("No ticket");
+    await screen.findByText("shop-app-ta");
     const row = agentRows(container)[0] as HTMLElement;
     expect(row.querySelector(".tok")?.textContent).toContain("0/min");
-    expect(row.textContent).toContain("Context —");
-    expect(container.querySelector("#agentsP .ph")?.textContent).toContain("5h —");
-    expect(row.textContent).toContain("Idle since");
+    expect(row.textContent).toContain("ctx —");
+    expect(row.querySelectorAll(".meter")[1]?.textContent).toContain("—");
+    expect(row.title).toContain("Idle since");
     expect(row.querySelector(".spark")).toBeTruthy();
   });
 
-  it("a loop cell shows the live tool and elapsed time once, beneath the step bar", async () => {
+  it("a loop cell stays one line with live tool detail in the row tooltip", async () => {
     const detail = "x".repeat(60);
     const row = crewRow({
       loop: { phase: "working", text: "Implement cache", prNumber: null, parked: null },
@@ -880,13 +886,13 @@ describe("Agents panel", () => {
     await screen.findByText("Quote cache");
     const agent = agentRows(container)[0] as HTMLElement;
     const cell = agent.querySelector(".loopstep") as HTMLElement;
-    expect(cell.textContent).toContain(`Bash ${"x".repeat(40)}… · 1:05`);
-    expect(cell.querySelector(".stepbar")?.nextElementSibling?.textContent).toContain("1:05");
-    expect(agent.querySelector(".doing")?.textContent).toBe("Implement cache");
-    expect(agent.querySelector(".doing")?.textContent).not.toContain("Bash");
+    expect(cell.textContent).toBe("Working");
+    expect(cell.querySelector(".process-line")).toBeNull();
+    expect(agent.title).toBe(`Bash 1:05 · ${detail}`);
+    expect(agent.querySelector(".doing")).toBeNull();
   });
 
-  it("a running seat's row says its tool, what it touches and for how long, on one line", async () => {
+  it("a running seat keeps tool detail and elapsed time in its tooltip", async () => {
     const detail = "pnpm -s vitest run apps/server/test/backfill.test.ts --reporter=verbose";
     stub({
       rows: [
@@ -911,22 +917,31 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findByText("Quote cache");
-    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
-    expect(doing.textContent).toBe(`Bash 1:05 · ${detail}`);
-    expect(doing.title).toBe(`Bash 1:05 · ${detail}`);
-    expect(doing.className).toContain("ellip");
+    const row = agentRows(container)[0] as HTMLElement;
+    expect(row.querySelector(".process-line, .doing")).toBeNull();
+    expect(row.title).toContain("Bash 1:05 · pnpm -s vitest");
   });
 
-  it("an idle seat's PR row shows the PR chip and its title, from the repo's PRs", async () => {
+  it("a waiting seat's PR row shows the PR chip and its title, from the repo's PRs", async () => {
     // as live data is: the seat's run records no PRs, the PR is only in the repo's PRs
     stub({
-      rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, prs: [] })],
+      rows: [
+        seatRow({
+          hudState: "waiting",
+          review: { prNumber: 166, state: "draft" },
+          ticketTitle: null,
+          prs: [],
+        }),
+      ],
       prs: [prView({ number: 166, title: "Backfill the quote cache" })],
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
-    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166 · Backfill the quote cache"));
+    const row = agentRows(container)[0] as HTMLElement;
+    const doing = row.querySelector(".ticket-cell") as HTMLElement;
+    await waitFor(() =>
+      expect(doing.textContent).toBe("#3349 · PR #166 · Backfill the quote cache"),
+    );
     await waitFor(() =>
       expect(within(doing).getByRole("link", { name: "shop-app PR #166" })).toBeTruthy(),
     );
@@ -934,14 +949,24 @@ describe("Agents panel", () => {
 
   it("the hover title is the visible line, PR title included", async () => {
     stub({
-      rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, prs: [] })],
+      rows: [
+        seatRow({
+          hudState: "waiting",
+          review: { prNumber: 166, state: "draft" },
+          ticketTitle: null,
+          prs: [],
+        }),
+      ],
       prs: [prView({ number: 166, title: "Backfill the quote cache" })],
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
-    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166 · Backfill the quote cache"));
-    expect(doing.title).toBe("Draft PR #166 · Backfill the quote cache");
+    const row = agentRows(container)[0] as HTMLElement;
+    const doing = row.querySelector(".ticket-cell") as HTMLElement;
+    await waitFor(() =>
+      expect(doing.textContent).toBe("#3349 · PR #166 · Backfill the quote cache"),
+    );
+    expect(doing.title).toBe("#3349 · PR #166 · Backfill the quote cache");
   });
 
   it("the ticket line's hover text is the ticket's whole title", async () => {
@@ -955,16 +980,16 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const line = agentRows(container)[0]?.querySelector(".min0 > .ellip.s") as HTMLElement;
-    expect(line.title).toBe("Quote cache: refresh on a timer, never on read");
+    const line = agentRows(container)[0]?.querySelector(".ticket-cell") as HTMLElement;
+    expect(line.title).toBe("#3349 · Quote cache: refresh on a timer, never on read");
   });
 
-  it("a seat with no ticket has no hover text on its ticket line", async () => {
+  it("a seat with no ticket has its placeholder as hover text", async () => {
     stub({ rows: [seatRow({ ticket: null, ticketTitle: "Stale title" })] });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const line = agentRows(container)[0]?.querySelector(".min0 > .ellip.s") as HTMLElement;
-    expect(line.getAttribute("title")).toBeNull();
+    const line = agentRows(container)[0]?.querySelector(".ticket-cell") as HTMLElement;
+    expect(line.getAttribute("title")).toBe("—");
   });
 
   it("while the repo's PRs load the line is the bare PR line, not the last text", async () => {
@@ -986,7 +1011,14 @@ describe("Agents panel", () => {
       compactions: 0,
     };
     const f = stub({
-      rows: [seatRow({ hudState: "idle", review: { prNumber: 166, state: "draft" }, digest })],
+      rows: [
+        seatRow({
+          hudState: "waiting",
+          review: { prNumber: 166, state: "draft" },
+          ticketTitle: null,
+          digest,
+        }),
+      ],
       prs: [prView({ number: 166, title: "Backfill the quote cache" })],
     });
     // hold the repo's PRs back until the test lets them through
@@ -1000,10 +1032,13 @@ describe("Agents panel", () => {
     });
     const { container } = render(<Overview />);
     await screen.findByText("guido-1");
-    const doing = agentRows(container)[0]?.querySelector(".doing") as HTMLElement;
-    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166"));
+    const row = agentRows(container)[0] as HTMLElement;
+    const doing = row.querySelector(".ticket-cell") as HTMLElement;
+    await waitFor(() => expect(doing.textContent).toBe("#3349 · PR #166"));
     release();
-    await waitFor(() => expect(doing.textContent).toBe("Draft PR #166 · Backfill the quote cache"));
+    await waitFor(() =>
+      expect(doing.textContent).toBe("#3349 · PR #166 · Backfill the quote cache"),
+    );
   });
 
   it("the repo's PRs are kept for a seat with an open review, whatever its state, and not for a note", async () => {
@@ -1060,17 +1095,19 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("Quote cache");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.textContent).toContain("shop-app #3349");
-    expect(row.textContent).toContain("run #12 · Bash 1:05");
-    expect(row.textContent).toContain("observed loop · ta-loop");
-    fireEvent.click(within(row).getByText("Run details"));
-    await waitFor(() => expect(row.textContent).toContain("Input 12.0k · Output 3.4k"));
-    expect(row.textContent).toContain("33/min");
+    expect(row.textContent).toContain("#3349");
+    expect(row.title).toContain("Bash");
+    expect(row.querySelector(".process-line")).toBeNull();
+    expect(row.querySelector('[title="observed loop · ta-loop"]')).toBeTruthy();
+    expect(row.querySelector(".tok span[title]")?.getAttribute("title")).toContain(
+      "Input 12.0k · Output 3.4k",
+    );
+    expect(row.textContent).toContain("133/min");
     expect(row.textContent).toContain("~$2.47");
-    expect(row.textContent).toContain("Context 48%");
-    expect(container.querySelector("#agentsP .ph")?.textContent).toContain("5h 82%");
+    expect(row.textContent).toContain("ctx 48%");
+    expect(row.textContent).toContain("82%");
     expect(row.querySelector(".spark")).toBeTruthy();
-    expect(container.querySelector("#agentsP .ph .meter.hi")).toBeTruthy(); // 82 % is amber
+    expect(row.querySelector(".meter.hi")).toBeTruthy(); // 82 % is amber
   });
 
   it("a running row's cost is the live estimate", async () => {
@@ -1079,7 +1116,6 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByText("Quote cache");
     const row = agentRows(container)[0] as HTMLElement;
-    fireEvent.click(within(row).getByText("Run details"));
     await waitFor(() => expect(row.textContent).toContain("~$3.10"));
     expect(row.textContent).not.toContain("~$2.47");
   });
@@ -1166,7 +1202,7 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await screen.findByRole("button", { name: "Answer" });
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.getAttribute("role")).toBeNull();
+    expect(row.getAttribute("role")).toBe("row");
     expect(row.hasAttribute("tabindex")).toBe(false);
     const link = within(row).getByRole("link", { name: "shop-app-ta" });
     expect(link.getAttribute("href")).toBe("/agent/shop-app-ta");
@@ -1300,19 +1336,18 @@ describe("Needs banner, acknowledged items", () => {
 describe("Machine panel: the test lock box", () => {
   const box = async () => {
     const { container } = render(<Overview />);
-    return container.querySelector("#machP .lock") as HTMLElement;
+    return waitFor(() => {
+      const box = container.querySelector("#machP .lock");
+      expect(box).toBeTruthy();
+      return box as HTMLElement;
+    });
   };
 
-  it("free: says so, with the next step taking it, no tooltip and no waiting list", async () => {
-    stub();
-    const b = await box();
-    await within(b).findByText("Free");
-    expect(b.textContent).toContain(
-      `${LOCK_FREE_TEXT} The next verify step takes it straight away.`,
-    );
-    expect(within(b).getByText("Full test suite · one at a time").title).toBe("");
-    expect(within(b).queryByText(LOCK_NOBODY_WAITING)).toBeNull();
-    expect(b.className).not.toContain("pulse-warn");
+  it("hides the test lock box when free with nobody waiting", async () => {
+    const fetch = stub();
+    const { container } = render(<Overview />);
+    await settled(fetch, "/api/test-lock");
+    expect(container.querySelector("#machP .lock")).toBeNull();
   });
 
   const HELD = {
@@ -1361,6 +1396,14 @@ describe("Machine panel: the test lock box", () => {
     expect(window.location.pathname).toBe("/agent/guido-2");
   });
 
+  it("shows queued seats even before there is a holder", async () => {
+    stub({ rows: [waiter()], lock: { holder: null, waiting: HELD.waiting } });
+    const b = await box();
+    expect(b.querySelector(".lockq")?.textContent).toContain("guido-3");
+    expect(b.querySelector(".lockq")?.textContent).toContain("0:12");
+    expect(within(b).queryByRole("button", { name: "Stop the run" })).toBeNull();
+  });
+
   it("held with nobody in line says so", async () => {
     stub({ rows: [holder()], lock: { ...HELD, waiting: [] } });
     const b = await box();
@@ -1370,7 +1413,7 @@ describe("Machine panel: the test lock box", () => {
 });
 
 describe("Machine panel", () => {
-  it("labels CPU, memory, disk and the legend", async () => {
+  it("labels CPU, memory and disk, keeping the legend on hover", async () => {
     stub();
     const { container } = render(<Overview />);
     const mach = container.querySelector("#machP") as HTMLElement;
@@ -1379,9 +1422,11 @@ describe("Machine panel", () => {
     expect(mach.textContent).toContain("37% of 16 threads");
     expect(mach.textContent).toContain("20.5 of 64 GB");
     expect(mach.textContent).toContain("412 GB free");
-    expect(mach.textContent).toContain("Claude/Codex processes (3)");
-    expect(mach.textContent).toContain("other apps");
-    expect(mach.textContent).toContain("Full test suite · one at a time");
+    expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
+      "Claude/Codex processes (3)",
+    );
+    expect(mach.querySelector(".res")?.getAttribute("title")).toContain("other apps");
+    expect(mach.querySelector(".lock")).toBeNull();
     expect(mach.textContent).not.toMatch(/slots|Room for/i);
     // agents 80 % of 16 threads = 5 % of the machine; the rest is other apps
     const cpu = mach.querySelectorAll(".resrow")[0] as HTMLElement;
@@ -1401,16 +1446,16 @@ describe("Machine panel", () => {
     expect(mach.querySelectorAll(".slots i").length).toBe(8);
     expect(mach.querySelectorAll(".slots i.used").length).toBe(6);
     expect(row.textContent).toContain("6 of 8");
-    expect(row.textContent).toContain("· up to 3 per session");
-    expect(row.textContent).toContain("Room for 2 more agents");
-    expect(within(row).getByText("Room for 2 more agents").className).toContain("ok-t");
+    expect(row.title).toContain("up to 3 per session");
+    expect(row.title).toContain("Room for 2 more agents");
+    expect(row.className).toContain("ok-t");
   });
 
   it("No room for another agent when every seat is used or 2 GB is free", async () => {
     stub({ seats: { maxSeats: 8, seats: 8, perSessionMax: 4 } });
     const first = render(<Overview />);
     const mach = first.container.querySelector("#machP") as HTMLElement;
-    const msg = await within(mach).findByText("No room for another agent");
+    const msg = await within(mach).findByTitle(/No room for another agent/);
     expect(msg.className).toContain("warn-t");
     expect(mach.querySelectorAll(".slots i.used").length).toBe(8);
     cleanup();
@@ -1422,7 +1467,7 @@ describe("Machine panel", () => {
     });
     const second = render(<Overview />);
     const mach2 = second.container.querySelector("#machP") as HTMLElement;
-    await within(mach2).findByText("No room for another agent");
+    await within(mach2).findByTitle(/No room for another agent/);
     expect(mach2.textContent).not.toContain("Room for");
   });
 
@@ -1433,7 +1478,9 @@ describe("Machine panel", () => {
     await waitFor(() => expect(mach.querySelectorAll(".resrow").length).toBe(3));
     expect(mach.querySelectorAll(".stack i").length).toBe(0);
     for (const row of mach.querySelectorAll(".resrow")) expect(row.textContent).toContain("—");
-    expect(mach.textContent).toContain("Claude/Codex processes (—)");
+    expect(mach.querySelector(".res")?.getAttribute("title")).toContain(
+      "Claude/Codex processes (—)",
+    );
   });
 
   it("a CPU not measured yet is —; zero cores is not '0 threads'", async () => {
@@ -1449,7 +1496,7 @@ describe("Machine panel", () => {
 });
 
 describe("Account quota panel", () => {
-  it("each account says when it was last read", async () => {
+  it("each account keeps its last reading time on hover", async () => {
     stub({
       limits: [
         limit5h({ accountId: "claude-main", sampledAt: NOW - 4 * MIN }),
@@ -1459,12 +1506,33 @@ describe("Account quota panel", () => {
     });
     const { container } = render(<Overview />);
     const quota = container.querySelector("#quotaP") as HTMLElement;
-    await within(quota).findByText("read 4 min ago");
+    await within(quota).findByTitle(/read 4 min ago/);
     const rows = quota.querySelectorAll(".quotarow");
-    expect(rows[0]?.querySelectorAll(":scope > .quota-window")).toHaveLength(2);
-    expect(rows[0]?.querySelectorAll(".quota-window .meter .track")).toHaveLength(2);
     expect(rows[0]?.textContent).not.toContain("9 min");
-    expect(rows[1]?.textContent).toContain("read just now");
+    expect(rows[1]?.querySelector("[title]")?.getAttribute("title")).toContain("read just now");
+  });
+
+  it("shows the last successful quota and collector note while rate limited", async () => {
+    stub({
+      limits: [
+        limit7d({ accountId: "claude-main", used: 86, sampledAt: NOW - 8 * HOUR, stale: true }),
+      ],
+      health: [
+        {
+          collector: "usage:claude-main",
+          ok: false,
+          error: "Usage endpoint rate limited",
+          at: NOW,
+          lastOkAt: NOW - 8 * HOUR,
+        },
+      ],
+    });
+    const { container } = render(<Overview />);
+    const quota = container.querySelector("#quotaP") as HTMLElement;
+    await within(quota).findByText("7d 86% · 8h ago");
+    await waitFor(() =>
+      expect(quota.querySelector('[title*="Usage endpoint rate limited"]')).toBeTruthy(),
+    );
   });
 
   const limits = [
@@ -1486,19 +1554,19 @@ describe("Account quota panel", () => {
     ).toBeTruthy();
     const rows = quota.querySelectorAll(".quotarow");
     expect(rows.length).toBe(2);
-    expect(rows[0]?.textContent).toContain("5h 100% used · resets 15:00");
-    expect(rows[0]?.textContent).toContain("7d 60% used · resets Sun 18 Oct 19:00");
-    expect(rows[1]?.textContent).toContain("5h: none on this plan");
+    expect(rows[0]?.textContent).toContain("5h 100%");
+    expect(rows[0]?.textContent).toContain("7d 60%");
+    expect(rows[1]?.textContent).toContain("5h —");
     expect(
       quota.querySelector('[title^="claude-main 7d: 60% used · not filling at this rate"]'),
     ).toBeTruthy();
     expect(quota.querySelector(".meter.full")).toBeTruthy();
-    expect(quota.textContent).toContain(
+    expect(within(quota).getByText("Account quota").title).toContain(
       "Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every 30 min.",
     );
   });
 
-  it("every slot reads used %, then the reset: the time today, else weekday, date and time", async () => {
+  it("every slot shows used %, with reset time and date on hover", async () => {
     stub({
       limits: [
         limit5h({ accountId: "claude-main", used: 21, resetAt: NOW + 4 * HOUR + 20 * MIN }),
@@ -1510,10 +1578,16 @@ describe("Account quota panel", () => {
     const quota = container.querySelector("#quotaP") as HTMLElement;
     await waitFor(() => expect(quota.querySelectorAll(".quotarow").length).toBe(2));
     const rows = quota.querySelectorAll(".quotarow");
-    expect(rows[0]?.textContent).toContain("5h 21% used · resets 17:20");
-    expect(rows[0]?.textContent).toContain("7d 73% used · resets Wed 28 Oct 02:00");
-    expect(rows[1]?.textContent).toContain("5h: none on this plan");
-    expect(rows[1]?.textContent).toContain("7d 9% used · resets Thu 29 Oct 16:22");
+    expect(rows[0]?.querySelector('[title*="5h: 21%"]')?.getAttribute("title")).toContain(
+      "resets 17:20",
+    );
+    expect(rows[0]?.querySelector('[title*="7d: 73%"]')?.getAttribute("title")).toContain(
+      "resets Wed 28 Oct 02:00",
+    );
+    expect(rows[1]?.textContent).toContain("5h —");
+    expect(rows[1]?.querySelector('[title*="7d: 9%"]')?.getAttribute("title")).toContain(
+      "resets Thu 29 Oct 16:22",
+    );
     // the none slot is shaped like a bar slot, and the 7d slots match across rows
     const slot = (r: Element | undefined, i: number) => r?.children[i];
     expect(slot(rows[1], 1)?.querySelector(".track")).toBeTruthy();
@@ -1838,7 +1912,7 @@ describe("Activity panel", () => {
     expect(row.querySelector(".txt")?.textContent?.endsWith(" · Cached quotes")).toBe(true);
     const chip = within(row).getByRole("link", { name: "shop-app PR #3240" });
     expect(chip.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/3240");
-    expect(row.textContent).toContain("shop-app #3349");
+    expect(row.textContent).toContain("#3349");
     expect(row.textContent).toContain("Merged");
   });
 
@@ -2214,7 +2288,7 @@ describe("Overview: agent text is formatted", () => {
 describe("Overview: what a seat is doing", () => {
   const ci = { phase: "ci" as const, text: "CI on 08a7cfc", prNumber: 9, parked: null };
 
-  it("a seat with an ended run is Free: No ticket, Free for work, no Loop step", async () => {
+  it("a seat with an ended run is Free, keeps its work reference, and has no loop step", async () => {
     const live = seatRow().run as NonNullable<CrewRow["run"]>;
     stub({
       rows: [
@@ -2232,9 +2306,9 @@ describe("Overview: what a seat is doing", () => {
       expect(within(el).getByText("Free")).toBeTruthy();
       return el;
     });
-    expect(row.textContent).toContain("No ticket");
+    expect(row.querySelector(".ticket-cell")?.textContent).toBe("last #3349 · PR #9");
     expect(row.textContent).not.toContain("Quote cache");
-    expect(row.querySelector(".doing")?.textContent).toBe("Free for work");
+    expect(row.querySelector(".doing")).toBeNull();
     expect(row.querySelector(".loopstep .stepbar")).toBeNull();
     expect(row.textContent).not.toContain("Done");
   });
@@ -2244,8 +2318,9 @@ describe("Overview: what a seat is doing", () => {
     const { container } = render(<Overview />);
     await screen.findByText("Waiting on CI");
     const row = agentRows(container)[0] as HTMLElement;
-    expect(row.querySelector(".pill")?.textContent).toBe("Waiting on CI · 25m");
-    expect(row.querySelector(".doing")?.textContent).toBe("CI on 08a7cfc");
+    expect(row.querySelector(".pill")?.textContent).toBe("Waiting on CI");
+    expect(row.querySelector(".state-cell")?.textContent).toContain("25m");
+    expect(row.title).toBe("CI on 08a7cfc");
     expect(row.textContent).toContain("Quote cache");
   });
 });

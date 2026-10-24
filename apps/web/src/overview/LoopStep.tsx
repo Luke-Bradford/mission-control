@@ -23,6 +23,7 @@ const MARK_CLASS: Record<StepMark, string | undefined> = {
  * second on, the step bar, then a line saying what the run waits on.
  */
 export function LoopStep({
+  compact = false,
   loop,
   hudState,
   wait,
@@ -30,6 +31,7 @@ export function LoopStep({
   live,
   now,
 }: {
+  compact?: boolean;
   loop: CrewLoop;
   hudState: HudState;
   wait: string | null;
@@ -42,9 +44,13 @@ export function LoopStep({
   const warn = loop.wait != null && WAIT_WARN.includes(loop.wait);
   return (
     <>
-      <span className="ellip xs" title={loop.text}>
-        {loopTemplate(loop)} › <b>{loopStepLabel(loop)}</b>
-        {loopTryText(loop)}
+      <span
+        className="ellip xs"
+        title={`${loopTemplate(loop)} › ${loopStepLabel(loop)}${loopTryText(loop)}${elapsed !== undefined ? ` · ${elapsed === null ? "—" : mss(elapsed)} in this step` : ""} · ${loop.text}${compact && wait ? ` · ${wait}` : ""}`}
+      >
+        {!compact && <>{loopTemplate(loop)} › </>}
+        <b>{loopStepLabel(loop)}</b>
+        {!compact && loopTryText(loop)}
         {elapsed !== undefined && (
           <>
             {" "}
@@ -58,20 +64,26 @@ export function LoopStep({
           <i key={`${i}:${steps[i]?.name}`} className={MARK_CLASS[m]} />
         ))}
       </span>
-      {wait === null && live && now !== undefined && (
-        <span
-          className="ellip xs fg2"
-          title={`${live.name}${live.detail ? ` ${live.detail}` : ""}`}
-        >
-          {cutText(`${live.name}${live.detail ? ` ${live.detail}` : ""}`, 46)} ·{" "}
-          {mss(now - live.since)}
-        </span>
-      )}
-      {wait !== null && (
+      {!compact && wait === null && <ProcessLine live={live} now={now} />}
+      {!compact && wait !== null && (
         <span className={`ellip xs loopwait ${warn ? "warn-t" : "fg2"}`} title={wait}>
           {wait}
         </span>
       )}
     </>
+  );
+}
+
+/** The live tool stays visible even when the agent has no build loop. */
+export function ProcessLine({ live, now }: { live?: RunDigest["liveTool"]; now?: number }) {
+  if (!live || now === undefined) return null;
+  const text = `${live.name}${live.detail ? ` ${live.detail}` : ""}`;
+  return (
+    <span className="process-line xs fg2" title={text}>
+      <span className="ellip" title={text}>
+        {cutText(text, 46)}
+      </span>
+      <span className="num"> · {mss(now - live.since)}</span>
+    </span>
   );
 }
