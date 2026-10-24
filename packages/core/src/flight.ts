@@ -1,5 +1,5 @@
 import { priorityRank } from "./board.ts";
-import { type AttentionKind, type HudColumn, TICKET_SIZES } from "./hud.ts";
+import type { AttentionKind, HudColumn, TicketSize } from "./hud.ts";
 import { pathsText, RULING_PARK } from "./loop.ts";
 import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime.ts";
@@ -358,9 +358,8 @@ export const FLIGHT_NOTED = "Noted in Decided without you.";
 export const READY_LABEL = "ready";
 export const hasPlanSection = (body: string): boolean => /^## Plan[ \t]*$/m.test(body);
 /** The sizes whose tickets get a plan before they reach Ready. */
-export const PLAN_SIZES: readonly string[] = TICKET_SIZES.filter(
-  (s) => s === "M" || s === "L" || s === "XL",
-);
+// Checked against TicketSize, so a typo fails the build; read as strings by repo-rules.ts.
+export const PLAN_SIZES: readonly string[] = ["M", "L", "XL"] satisfies readonly TicketSize[];
 /** The board columns a ticket FLIGHT starts may be in. */
 export const FLIGHT_STARTABLE: readonly HudColumn[] = ["Backlog", "Refinement", "Ready"];
 /**
