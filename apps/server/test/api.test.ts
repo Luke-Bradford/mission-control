@@ -2213,6 +2213,9 @@ describe("away settings", () => {
   it("digest accepts a since timestamp and stores away start only on activation", async () => {
     await postBody("/api/settings/away", { ...away, until: "" });
     expect(store.getSetting("awayStartedAt")).toBe(String(NOW));
+    expect((await get("/api/away/digest")).json().startedAt).toBe(NOW);
+    await postBody("/api/settings/away", { ...away, on: false });
+    expect((await get("/api/away/digest")).json().startedAt).toBe(NOW);
     store.addFlightDecision({
       at: NOW - 1,
       kind: "note",
