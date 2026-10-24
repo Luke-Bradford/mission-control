@@ -9,10 +9,14 @@ import {
   FLIGHT_ABOUT_MAX,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_ITEMS_LISTED,
+  FLIGHT_LEDGER_INDEX_MAX,
+  FLIGHT_LEDGER_OPEN,
   FLIGHT_MAX_WAKES,
   FLIGHT_MESSAGES_PER_HOUR,
+  FLIGHT_NOTE_SECTIONS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -38,6 +42,7 @@ import {
   LANE_LABEL_PREFIX,
   OWNER_FLIGHT,
   OWNER_OPERATOR,
+  orderLedger,
   PR_WAIT_MS,
   priorityRank,
   READY_LABEL,
@@ -384,12 +389,26 @@ export function flightState(i: {
       about: d.about,
       decision: d.decision,
     }));
-  const brief = flightBriefSections(store, found?.session.id ?? null).map((b) => ({
-    section: b.section,
-    title: b.title,
-    text: b.text,
-    ageMin: b.updatedAt === null ? null : Math.floor((now - b.updatedAt) / 60_000),
-  }));
+  const headline =
+    found === null
+      ? ""
+      : (store.flightBrief(found.session.id).find((r) => r.section === FLIGHT_HEADLINE)?.text ??
+        "");
+  const openLedger = orderLedger(found === null ? [] : store.flightLedger(found.session.id)).filter(
+    (e) => FLIGHT_LEDGER_OPEN.includes(e.status),
+  );
+  const ledger = openLedger
+    .slice(0, FLIGHT_LEDGER_INDEX_MAX)
+    .map(({ kind, key, title, status, next }) => ({ kind, key, title, status, next }));
+  const notes: readonly string[] = FLIGHT_NOTE_SECTIONS;
+  const brief = flightBriefSections(store, found?.session.id ?? null)
+    .filter((b) => notes.includes(b.section))
+    .map((b) => ({
+      section: b.section,
+      title: b.title,
+      text: b.text,
+      ageMin: b.updatedAt === null ? null : Math.floor((now - b.updatedAt) / 60_000),
+    }));
   if (found === null) {
     return {
       discussions,
@@ -407,6 +426,9 @@ export function flightState(i: {
       recent,
       limits,
       brief,
+      headline,
+      ledger,
+      ledgerMore: openLedger.length - ledger.length,
     };
   }
   const { session } = found;
@@ -701,6 +723,9 @@ export function flightState(i: {
     recent,
     limits,
     brief,
+    headline,
+    ledger,
+    ledgerMore: openLedger.length - ledger.length,
   };
 }
 

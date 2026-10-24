@@ -417,6 +417,9 @@ describe("startWatch", () => {
       "mcp__mc__list_tickets",
       "mcp__mc__update_brief",
       "mcp__mc__draft_reply",
+      "mcp__mc__track",
+      "mcp__mc__untrack",
+      "mcp__mc__ledger",
     ]);
     await until(() => expect(userLines()).toEqual([BRIEF]));
   });

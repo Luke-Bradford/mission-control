@@ -127,6 +127,7 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./files.ts";
+import { flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
@@ -154,7 +155,7 @@ import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/
 import { type BoardTitleCache, type PrCache, runPrs, runTicket, runView } from "./runview.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
-import { lockView, median, telemetry, usualLockMs } from "./telemetry.ts";
+import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -1709,6 +1710,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get("/flight/incoming", async () => ({ entries: store.flightIncoming() }));
       // Reader: apps/web/src/flight/Situation.tsx (planned-work timeline)
       api.get("/flight/schedule", async () => flightScheduleView(config, store, now()));
+      // Reader: roles/FLIGHT.md#your-ledger (high-level tracking summary)
+      api.get("/flight/summary", async () => flightSummary(config, store, now()));
+      // Reader: roles/FLIGHT.md#your-ledger (full tracking details)
+      api.get("/flight/ledger", async () => flightLedgerView(config, store));
 
       api.get("/crew/status", async () => ({
         ...(supervisor?.status() ?? { enabled: false, note: null }),

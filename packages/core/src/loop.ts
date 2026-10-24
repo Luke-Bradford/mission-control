@@ -132,8 +132,13 @@ export const cardMark = (phase: string, epoch: number): string => `${phase}:${ep
 /** The key of a run's blocked note for one epoch. */
 export const blockedNoteKey = (runId: string, epoch: number): string => `blocked:${runId}:${epoch}`;
 
+/** Shared prefixes for CI failure activity events and parking reasons. */
+export const CI_FAILED_EVENT_PREFIX = "CI failed on ";
+export const CI_RERUN_FAILED_EVENT_PREFIX = "CI failed again on the re-run of ";
+export const CI_PARK_FAILED_PREFIX = "CI failed ";
+
 /** `{sha7}` is the first 7 characters of the failed sha; the excerpt follows. */
-export const CI_FAILED_TEXT = `CI failed on {sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
+export const CI_FAILED_TEXT = `${CI_FAILED_EVENT_PREFIX}{sha7}. Fix it, commit, and call mc report_evidence again. If it is a flaky test that is not yours, report with a note starting "${EVIDENCE_RULING_PREFIX}" and say why; the operator will decide. The failing output:\n`;
 /** The park kind of a run whose author ruled on a CI failure instead of fixing it. */
 export const RULING_PARK = "ruling";
 /** The key of the line sent when FLIGHT's re-run of the failed jobs on `sha` failed too. */
@@ -742,11 +747,15 @@ function stateStep(s: LoopSnapshot): Step {
       const failed = { ...loop, ciFails: loop.ciFails + 1, ciFailedSha: pushed.sha };
       const named = pr.checks?.failing.length ? ` (failing: ${pr.checks.failing.join(", ")})` : "";
       if (failed.ciFails >= (s.limits?.tries ?? CI_TRIES)) {
-        return park(failed, "ci", `CI failed ${failed.ciFails} times; last on ${short}${named}`);
+        return park(
+          failed,
+          "ci",
+          `${CI_PARK_FAILED_PREFIX}${failed.ciFails} times; last on ${short}${named}`,
+        );
       }
       return {
         loop: { ...failed, phase: "working" },
-        actions: [{ kind: "event", text: `CI failed on ${short}${named}` }],
+        actions: [{ kind: "event", text: `${CI_FAILED_EVENT_PREFIX}${short}${named}` }],
       };
     }
     // a run the operator un-parked is judged from the un-park, not from a push made before it;

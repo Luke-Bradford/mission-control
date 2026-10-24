@@ -15,13 +15,16 @@ import {
   COMMS_CAPCOM,
   COMMS_TEXT_MAX,
   type Escalation,
+  type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
+  FLIGHT_LEDGER_OPEN,
   FLIGHT_PLAN_LIMIT,
   FLIGHT_WATCH_LIMIT,
   type FlightArrivalDisposition,
   type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
+  type FlightLedgerEntry,
   type FlightMoveColumn,
   type FlightPlanInput,
   type FlightPlanOperation,
@@ -295,6 +298,10 @@ CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
   updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
 );
+CREATE TABLE IF NOT EXISTS flight_ledger (
+  session_id TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
+  updated_at INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY(session_id, key)
+);
 CREATE TABLE IF NOT EXISTS flight_watch (
   session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
   PRIMARY KEY (session_id, id)
@@ -370,7 +377,7 @@ const notificationRow = (r: Row): NotificationRow => ({
 /** One section of FLIGHT's brief, as stored. */
 export interface FlightBriefRow {
   sessionId: string;
-  section: FlightBriefSectionKey;
+  section: FlightBriefSectionKey | typeof FLIGHT_HEADLINE;
   text: string;
   updatedAt: number;
   updatedBy: string;
@@ -1074,6 +1081,16 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?")
       .all(agentId, limit) as Row[];
+    return rows.map(toRun);
+  }
+
+  /** Runs still open or ended at or after `since`, across seats and repos. */
+  runsActiveSince(since: number): Run[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE ended_at IS NULL OR ended_at >= ? ORDER BY started_at, seq",
+      )
+      .all(since) as Row[];
     return rows.map(toRun);
   }
 
@@ -2503,11 +2520,16 @@ export class Store {
     return rows.map((r) => ({ at: r.at as number, text: r.text as string }));
   }
 
-  /** The loop events at or after `since`, oldest first. */
-  loopEvents(since: number): LoopEvent[] {
-    const rows = this.db
-      .prepare("SELECT * FROM loop_events WHERE at >= ? ORDER BY at, key")
-      .all(since) as Row[];
+  /** The loop events at or after `since`, oldest first, optionally scoped to a repo. */
+  loopEvents(since: number, repoId?: RepoId): LoopEvent[] {
+    const rows = (
+      repoId === undefined
+        ? this.db.prepare("SELECT * FROM loop_events WHERE at >= ? ORDER BY at, key").all(since)
+        : this.db
+            .prepare(`SELECT e.* FROM loop_events e JOIN runs r ON r.id = e.run_id
+          WHERE e.at >= ? AND r.repo_id = ? ORDER BY e.at, e.key`)
+            .all(since, repoId)
+    ) as Row[];
     return rows.map((r) => ({
       key: r.key as string,
       runId: r.run_id as string,
@@ -3511,6 +3533,30 @@ export class Store {
       .run(r.sessionId, r.section, r.text, r.updatedAt, r.updatedBy);
   }
 
+  /** The full ledger for one crew session, including retained closed entries. */
+  flightLedger(session: string): FlightLedgerEntry[] {
+    return (
+      this.db
+        .prepare("SELECT entry FROM flight_ledger WHERE session_id = ? ORDER BY key")
+        .all(session) as { entry: string }[]
+    ).map((r) => JSON.parse(r.entry) as FlightLedgerEntry);
+  }
+
+  /** Save an entry and prune old closed entries in its session, in one transaction. */
+  putFlightLedgerEntry(session: string, entry: FlightLedgerEntry, pruneBefore: number): void {
+    this.transaction(() => {
+      this.db
+        .prepare(`INSERT INTO flight_ledger (session_id, key, kind, status, updated_at, entry)
+        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id, key) DO UPDATE SET
+        kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at, entry = excluded.entry`)
+        .run(session, entry.key, entry.kind, entry.status, entry.updatedAt, JSON.stringify(entry));
+      this.db
+        .prepare(`DELETE FROM flight_ledger WHERE session_id = ? AND updated_at < ?
+        AND status NOT IN (${FLIGHT_LEDGER_OPEN.map(() => "?").join(", ")})`)
+        .run(session, pruneBefore, ...FLIGHT_LEDGER_OPEN);
+    });
+  }
+
   /** The stored sections of a session's brief. */
   flightBrief(sessionId: string): FlightBriefRow[] {
     const rows = this.db
@@ -3518,7 +3564,7 @@ export class Store {
       .all(sessionId) as Row[];
     return rows.map((r) => ({
       sessionId: r.session_id as string,
-      section: r.section as FlightBriefSectionKey,
+      section: r.section as FlightBriefRow["section"],
       text: r.text as string,
       updatedAt: r.updated_at as number,
       updatedBy: r.updated_by as string,

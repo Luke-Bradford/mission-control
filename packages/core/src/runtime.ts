@@ -67,6 +67,9 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.listTickets,
   MC_TOOL_NAMES.updateBrief,
   MC_TOOL_NAMES.draftReply,
+  MC_TOOL_NAMES.track,
+  MC_TOOL_NAMES.untrack,
+  MC_TOOL_NAMES.ledger,
 ];
 
 /**

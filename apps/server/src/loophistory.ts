@@ -1,5 +1,6 @@
 /** A looped run's tries at each step, worked out on read from its Activity rows. */
 import {
+  CI_FAILED_EVENT_PREFIX,
   type LoopEvent,
   type LoopTry,
   parkedEventText,
@@ -13,7 +14,6 @@ import {
 /** The event texts that move a run between steps; core's loop writes them. */
 const REPORTED_TEXT = "reported; pushing";
 const CI_PASSED_PREFIX = "CI passed on ";
-const CI_FAILED_PREFIX = "CI failed on ";
 const MERGED_TEXT = "merged";
 const PARKED_PREFIX = parkedEventText("");
 /** The engine's flake re-run of a failed CI: the run stays on CI, so it changes no try. */
@@ -34,7 +34,7 @@ function reviewIdOf(runId: string, key: string, step: string): string | null {
 function impliedStep(runId: string, e: LoopEvent): Step | null {
   if (e.text === REPORTED_TEXT) return "working";
   if (e.key.startsWith(RERUN_KEY(runId))) return "ci";
-  if (e.text.startsWith(CI_PASSED_PREFIX) || e.text.startsWith(CI_FAILED_PREFIX)) return "ci";
+  if (e.text.startsWith(CI_PASSED_PREFIX) || e.text.startsWith(CI_FAILED_EVENT_PREFIX)) return "ci";
   if (
     reviewIdOf(runId, e.key, "fix") !== null ||
     e.text === MERGED_TEXT ||
@@ -95,7 +95,7 @@ export function loopTries(
     } else if (e.text.startsWith(CI_PASSED_PREFIX)) {
       close(e.at, "pass");
       begin("review", e.at);
-    } else if (e.text.startsWith(CI_FAILED_PREFIX)) {
+    } else if (e.text.startsWith(CI_FAILED_EVENT_PREFIX)) {
       close(e.at, "fail", e.text);
       begin("working", e.at);
     } else if (fixOf !== null) {
