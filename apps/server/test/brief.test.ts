@@ -23,6 +23,7 @@ import {
   MC_RESTART_TEXT,
   type ReviewBriefInput,
   readRepoClaudeMd,
+  repoReferenceIndex,
   reviewBrief,
   rolePrompt,
   ticketBrief,
@@ -522,5 +523,49 @@ describe("reviewBrief", () => {
   it("puts the ticket's cut note first", () => {
     const t = reviewBrief({ ...review, bodyTruncated: true, bodyLength: 100 });
     expect(t).toContain("[The ticket body was cut at");
+  });
+});
+
+describe("repository references", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-references-")));
+    mkdirSync(join(dir, ".claude/skills/checks"), { recursive: true });
+    mkdirSync(join(dir, ".claude/agents"), { recursive: true });
+    writeFileSync(
+      join(dir, ".claude/skills/checks/SKILL.md"),
+      "---\nname: checks\ndescription: >-\n  Run the gates\n  before reporting.\n---\nSECRET BODY",
+    );
+    writeFileSync(
+      join(dir, ".claude/agents/reviewer.md"),
+      "---\nname: reviewer\ndescription: Review changes.\n---\nAGENT BODY",
+    );
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("lists names, descriptions and Read paths in the seat prompt, without inlining bodies", () => {
+    const prompt = rolePrompt("Role", null, repoReferenceIndex(dir));
+    expect(prompt).toContain(
+      "checks — Run the gates before reporting. (.claude/skills/checks/SKILL.md)",
+    );
+    expect(prompt).toContain("reviewer — Review changes. (.claude/agents/reviewer.md)");
+    expect(prompt).toContain("Read");
+    expect(prompt).toContain("never execute them as hooks");
+    expect(prompt).not.toContain("SECRET BODY");
+    expect(prompt).not.toContain("AGENT BODY");
+  });
+
+  it("ignores symlinks, malformed metadata and settings", () => {
+    symlinkSync("checks", join(dir, ".claude/skills/alias"));
+    writeFileSync(join(dir, ".claude/agents/broken.md"), "---\nname: [\n---\n");
+    writeFileSync(join(dir, ".claude/settings.json"), '{"hooks": "NEVER LOAD"}');
+    const index = repoReferenceIndex(dir);
+    expect(index).not.toContain("alias");
+    expect(index).not.toContain("broken");
+    expect(index).not.toContain("NEVER LOAD");
+    rmSync(join(dir, ".claude"), { recursive: true });
+    expect(repoReferenceIndex(dir)).toBe("");
+    symlinkSync(dir, join(dir, ".claude"));
+    expect(repoReferenceIndex(dir)).toBe("");
   });
 });

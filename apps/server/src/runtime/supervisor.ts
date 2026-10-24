@@ -135,7 +135,14 @@ import {
   type KeeperCursor,
   type Store,
 } from "../store.ts";
-import { readRepoClaudeMd, reviewBrief, rolePrompt, ticketBrief, watchBrief } from "./brief.ts";
+import {
+  readRepoClaudeMd,
+  repoReferenceIndex,
+  reviewBrief,
+  rolePrompt,
+  ticketBrief,
+  watchBrief,
+} from "./brief.ts";
 import {
   existingCheckout,
   existingScratch,
@@ -1058,7 +1065,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new Error(`crew: ${def.prompt} is outside the roles folder`);
       }
       const roleBrief = readFileSync(promptFile, "utf8");
-      writeFileSync(promptPath, rolePrompt(roleBrief, claudeMd), {
+      const references = resume ? "" : repoReferenceIndex(checkout.path);
+      writeFileSync(promptPath, rolePrompt(roleBrief, claudeMd, references), {
         mode: 0o600,
       });
     }

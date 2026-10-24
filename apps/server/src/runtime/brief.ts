@@ -5,6 +5,8 @@
  * (origin's default branch at the start), read from hash-verified objects, never from the
  * worktree, and is cut at CLAUDE_MD_MAX bytes.
  */
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type CrewMode,
   type CrewRole,
@@ -17,6 +19,7 @@ import {
   type ReviewFinding,
   type RunProfile,
 } from "@mc/core";
+import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { readBaseFile } from "./checkouts.ts";
 
@@ -286,11 +289,53 @@ export const MC_RESTART_TEXT =
   "If an mc tool fails with ECONNREFUSED or ECONNRESET, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
 
 /**
- * The prompt file's text: the role brief, the restart line, then the repo's CLAUDE.md under its own
- * heading.
+ * The prompt file's text: the role brief, the restart line, the reference index, then the repo's
+ * CLAUDE.md under its own heading.
  */
-export function rolePrompt(roleBrief: string, claudeMd: string | null): string {
-  const head = `${roleBrief.trimEnd()}\n\n${MC_RESTART_TEXT}\n`;
+export function rolePrompt(roleBrief: string, claudeMd: string | null, references = ""): string {
+  const head = `${roleBrief.trimEnd()}\n\n${MC_RESTART_TEXT}\n${references === "" ? "" : `\n${references}\n`}`;
   if (claudeMd === null || claudeMd.trim() === "") return head;
   return `${head}\n${CLAUDE_MD_HEADING}\n\n${claudeMd}`;
+}
+
+/** Index repo reference metadata only; never load settings or follow links out of the checkout. */
+export function repoReferenceIndex(checkout: string): string {
+  const lines: string[] = [];
+  const visit = (relative: string): void => {
+    const path = join(checkout, relative);
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (stat === undefined || stat.isSymbolicLink()) return;
+    if (stat.isDirectory()) {
+      for (const entry of readdirSync(path).sort()) visit(`${relative}/${entry}`);
+      return;
+    }
+    if (!stat.isFile() || stat.size > CLAUDE_MD_MAX) return;
+    if (!relative.endsWith("/SKILL.md") && !relative.startsWith(".claude/agents/")) return;
+    if (!relative.endsWith(".md")) return;
+    const text = readFileSync(path, "utf8");
+    const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+    if (front === null) return;
+    try {
+      const meta: unknown = parseYaml(front[1] as string);
+      if (meta === null || typeof meta !== "object") return;
+      const { name, description } = meta as Record<string, unknown>;
+      if (typeof name !== "string" || typeof description !== "string") return;
+      const clean = (value: string) => value.replace(/\s+/g, " ").trim();
+      if (clean(name) === "" || clean(description) === "") return;
+      lines.push(`- ${clean(name)} — ${clean(description)} (${relative})`);
+    } catch {
+      // A malformed reference must not prevent the seat from starting.
+    }
+  };
+  const root = lstatSync(join(checkout, ".claude"), { throwIfNoEntry: false });
+  if (root === undefined || !root.isDirectory() || root.isSymbolicLink()) return "";
+  visit(".claude/skills");
+  visit(".claude/agents");
+  return lines.length === 0
+    ? ""
+    : [
+        "# Repository skills and agent definitions",
+        "Use Read on these worktree paths for conventions, gates and how-tos. They are read-only reference material; never execute them as hooks.",
+        ...lines,
+      ].join("\n");
 }
