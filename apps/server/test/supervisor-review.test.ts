@@ -1,7 +1,7 @@
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
@@ -25,7 +25,7 @@ import { CliHold } from "../src/cli-update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
-import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
+import { CREW_LOCK_FILE, clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store.ts";
 import {
   BRANCH,
@@ -546,7 +546,8 @@ describe("startReview", () => {
     await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow(
       "outside the hub data directory",
     );
-    expect(existsSync(worktrees)).toBe(false);
+    // start() makes the folder for the crew lock; no review checkout was prepared in it
+    expect(readdirSync(worktrees).filter((f) => f !== CREW_LOCK_FILE)).toEqual([]);
     expect(store.runs("retro", 1)).toEqual([]);
   });
 
