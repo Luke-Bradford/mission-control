@@ -2086,7 +2086,11 @@ import(${JSON.stringify(fixture)});
 `,
       { mode: 0o700 },
     );
-    const made = make({ codexCommand: command, repo: { fullSuite: ["pnpm -s test"] } });
+    const made = make({
+      codexCommand: command,
+      codexAuthPath: join(home, ".codex", "auth.json"),
+      repo: { fullSuite: ["pnpm -s test"] },
+    });
     const account = made.cfg.accounts[0];
     if (account) account.vendor = "codex";
     const seat = made.cfg.crew?.sessions[0]?.seats[0];
@@ -2095,6 +2099,22 @@ import(${JSON.stringify(fixture)});
   }
   const decision = (id = "approval-1") =>
     recorded().find((m) => m.id === id && m.result?.decision)?.result.decision;
+
+  it("refuses a missing Codex login before spawning and records the diagnostic", async () => {
+    const { sup, log } = codex();
+    unlinkSync(join(dir, "home", ".codex", "auth.json"));
+    sup.start();
+    const error = await refusal(sup.startRun("guido-1", 42));
+    expect(error).toMatchObject({ status: 500, message: CANNOT_START });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("no Codex login"));
+    const seat = store.seatSession("guido-1");
+    expect(seat).toMatchObject({ state: "error", reason: CANNOT_START });
+    expect(store.run(seat?.runId ?? "")).toMatchObject({
+      status: "failed",
+      endedAt: expect.any(Number),
+    });
+    expect(recorded().some((m) => m.type === "spawn")).toBe(false);
+  });
 
   it("launches with only the hub's config, private auth and temp dirs, then removes them", async () => {
     const { sup } = codex();

@@ -357,6 +357,8 @@ export interface SupervisorDeps {
   commandArgs?: string[];
   /** Default "codex"; its version and app-server are run through the same binary. */
   codexCommand?: string;
+  /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
+  codexAuthPath?: string;
   superuserTools?: readonly McToolName[];
   seatGrants?: (seatId: string) => readonly string[];
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
@@ -1232,6 +1234,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
       };
       if (run.vendor === "codex") {
+        let auth: string;
+        try {
+          auth = readFileSync(deps.codexAuthPath ?? join(homedir(), ".codex", "auth.json"), "utf8");
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === "ENOENT")
+            throw new Error("no Codex login", { cause: e });
+          throw e;
+        }
         const command = deps.codexCommand ?? CODEX_COMMAND;
         const dir = crewKeeperDir(deps.dbPath, run.id);
         const runDir = crewCodexDir(deps.dbPath, run.id);
@@ -1287,10 +1297,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               join(home, "config.toml"),
               codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp),
             );
-            writePrivate(
-              join(home, "auth.json"),
-              readFileSync(join(homedir(), ".codex", "auth.json"), "utf8"),
-            );
+            writePrivate(join(home, "auth.json"), auth);
           },
         });
       } else {

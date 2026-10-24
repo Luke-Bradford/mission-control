@@ -118,6 +118,7 @@ function seat(id: string, mode: CrewMode, lock: TestLock) {
   });
   let n = 0;
   const ask = async (scenario: object) => {
+    if (n > 0) await session.control("interrupt");
     const requestId = `approval-${++n}`;
     session.send(JSON.stringify(scenario));
     let decision: string | undefined;
@@ -146,7 +147,7 @@ describe("Codex mode and seat boundaries", () => {
         ["a", "b", a],
         ["b", "a", b],
       ] as const) {
-        // Keep the turn open so a later test input cannot race the fake's completion timer.
+        // Each case holds its approval open; the next ask interrupts before starting a new turn.
         expect(await driver.ask({ command: "cat apps/a.txt", holdItem: true })).toBe("accept");
         expect(await driver.ask({ changes: [{ path: "apps/new.txt" }], holdItem: true })).toBe(
           mode === "read-only" ? "decline" : "accept",
