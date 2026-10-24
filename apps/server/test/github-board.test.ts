@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { BoardItem, PullRequestView, Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gql, GqlError, GqlTransportError } from "../src/collectors/github.ts";
-import type { CcConfig } from "../src/config.ts";
+import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { BOARD_IDS_TTL_MS, clearBoardIds, followPrs, moveCard } from "../src/github-board.ts";
 import { Store } from "../src/store.ts";
 
@@ -381,6 +382,7 @@ describe("followPrs", () => {
     url: "u",
     branch: "work/7-x",
     ticket: "mc#7",
+    closingIssues: [7],
     state: "open",
     isDraft: false,
     review: null,
@@ -413,11 +415,11 @@ describe("followPrs", () => {
     ...over,
   });
   /** A board with one card in `status` and the fake GitHub to match, then one follow. */
-  async function follow(status: string, optionId: string, prs: PullRequestView[]) {
+  async function follow(status: string, optionId: string, prs: PullRequestView[], cfg = config) {
     const b = fakeBoard({ itemStatus: optionId });
     store.replaceBoard("mc", [card(status)]);
     store.upsertPullRequests("mc", prs, NOW);
-    await followPrs({ gql: b.gql, store, config, now: () => now }, "mc");
+    await followPrs({ gql: b.gql, store, config: cfg, now: () => now }, "mc");
     return b;
   }
 
@@ -466,6 +468,160 @@ describe("followPrs", () => {
     store.upsertRun(run());
     const b = await follow("", "O_todo", [pr()]);
     expect(b.mutations()).toHaveLength(0);
+  });
+
+  it.each([
+    ["open", "", "O_todo", "O_review"],
+    ["merged", "In Review", "O_review", "O_done"],
+    ["closed", "In Review", "O_review", "O_todo"],
+  ] as const)(
+    "follows closing references for a %s PR, independent of its branch",
+    async (state, status, from, to) => {
+      const b = await follow(status, from, [pr({ state, ticket: "mc#99", closingIssues: [6, 7] })]);
+      expect(b.state.card).toBe(to);
+      expect(store.boardMoves(0)).toMatchObject([{ issue: 7, state: "done" }]);
+    },
+  );
+
+  it.each(["open", "merged", "closed"] as const)(
+    "follows a branch-named ticket without closing references for a %s PR",
+    async (state) => {
+      const b = await follow(
+        state === "open" ? "" : "In Review",
+        state === "open" ? "O_todo" : "O_review",
+        [pr({ state, closingIssues: [] })],
+      );
+      expect(b.state.card).toBe(
+        state === "open" ? "O_review" : state === "merged" ? "O_done" : "O_todo",
+      );
+      expect(b.mutations()).toHaveLength(1);
+    },
+  );
+
+  it("moves a migrated merged PR's ticket to Done with closing_issues defaulted to []", async () => {
+    store.close();
+    const old = join(dir, "old-prs.sqlite");
+    const db = new DatabaseSync(old);
+    db.exec(`CREATE TABLE pull_requests (
+      repo_id TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
+      branch TEXT NOT NULL, ticket TEXT, state TEXT NOT NULL, is_draft INTEGER NOT NULL,
+      review TEXT, ci TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      merged_at INTEGER, PRIMARY KEY (repo_id, number))`);
+    db.exec(
+      "INSERT INTO pull_requests VALUES ('mc', 91, 't', 'u', 'loop/7-fix', 'mc#7', 'merged', 0, NULL, NULL, 1, 2, 3)",
+    );
+    db.close();
+    store = new Store(old);
+    expect(store.pullRequests("mc")[0]).toMatchObject({ closingIssues: [], ticket: "mc#7" });
+    const b = fakeBoard({ itemStatus: "O_review" });
+    store.replaceBoard("mc", [card("In Review")]);
+    expect(await followPrs({ gql: b.gql, store, config, now: () => now }, "mc")).toBe(true);
+    expect(b.state.card).toBe("O_done");
+  });
+
+  it.each(["open", "merged", "closed"] as const)(
+    "leaves a planner's card alone for a %s PR, even after its run ended",
+    async (state) => {
+      const seats: CrewSeatConfig[] = [
+        { id: "fao", role: "FAO", accountId: "a", model: "m", area: [] },
+        {
+          id: "custom",
+          role: "planner",
+          accountId: "a",
+          model: "m",
+          area: [],
+          def: { mode: "read-only", loop: "plan", prompt: "p", mcTools: [], here: "" },
+        },
+        {
+          id: "no-build",
+          role: "research",
+          accountId: "a",
+          model: "m",
+          area: [],
+          def: { mode: "read-only", loop: "none", prompt: "p", mcTools: [], here: "" },
+        },
+      ];
+      const cfg = {
+        ...config,
+        crew: {
+          worktrees: dir,
+          maxSeats: 3,
+          sessions: [{ id: "s", repoId: "mc", checkout: dir, seats }],
+        },
+      } as CcConfig;
+      for (const seat of seats) {
+        store.upsertRun(run({ agentId: seat.id, status: "ok", endedAt: NOW }));
+        const b = await follow(
+          state === "open" ? "Todo" : "In Review",
+          state === "open" ? "O_todo" : "O_review",
+          [pr({ state })],
+          cfg,
+        );
+        expect(b.calls).toEqual([]);
+      }
+    },
+  );
+
+  it("retries a failed move after five minutes, but not before", async () => {
+    const b = fakeBoard();
+    b.state.mutationFailures = [new GqlTransportError("github: HTTP 403", 403)];
+    store.replaceBoard("mc", [card("Todo")]);
+    store.upsertPullRequests("mc", [pr()], NOW);
+    const deps = { gql: b.gql, store, config, now: () => now };
+    expect(await followPrs(deps, "mc")).toBe(false);
+    expect(store.boardMovesOfRun("pr:mc#91")).toMatchObject([{ state: "failed", at: NOW }]);
+    const calls = b.calls.length;
+    now += 5 * 60_000 - 1;
+    expect(await followPrs(deps, "mc")).toBe(false);
+    expect(b.calls).toHaveLength(calls);
+    now += 1;
+    expect(await followPrs(deps, "mc")).toBe(true);
+    expect(b.state.card).toBe("O_review");
+    expect(store.boardMovesOfRun("pr:mc#91").map((m) => m.state)).toEqual(["failed", "done"]);
+    b.state.card = "O_todo";
+    now += 5 * 60_000;
+    expect(await followPrs(deps, "mc")).toBe(false);
+    expect(b.mutations()).toHaveLength(2);
+  });
+
+  it("leaves a pending move alone even after five minutes", async () => {
+    store.addBoardMove({
+      runId: "pr:mc#91",
+      repoId: "mc",
+      issue: 7,
+      column: "In review",
+      state: "pending",
+      detail: null,
+      at: NOW,
+    });
+    now += 5 * 60_000;
+    const b = await follow("Todo", "O_todo", [pr()]);
+    expect(b.calls).toEqual([]);
+  });
+
+  it("leaves a draft PR's card out of In review until it is ready", async () => {
+    const b = await follow("Todo", "O_todo", [pr({ isDraft: true })]);
+    expect(b.calls).toEqual([]);
+    store.upsertPullRequests("mc", [pr()], NOW);
+    expect(await followPrs({ gql: b.gql, store, config, now: () => now }, "mc")).toBe(true);
+    expect(b.state.card).toBe("O_review");
+  });
+
+  it("follows a ready PR when another PR on the ticket is a draft", async () => {
+    const b = await follow("Todo", "O_todo", [pr({ number: 92, isDraft: true }), pr()]);
+    expect(b.state.card).toBe("O_review");
+    expect(store.boardMoves(0)[0]?.runId).toBe("pr:mc#91");
+  });
+
+  it("does not treat an open draft as a closed PR", async () => {
+    const b = await follow("In Review", "O_review", [pr({ isDraft: true })]);
+    expect(b.calls).toEqual([]);
+  });
+
+  it("moves a Blocked card after its run was parked", async () => {
+    store.upsertRun(run({ status: "blocked", endedAt: NOW }));
+    const b = await follow("Blocked", "O_blocked", [pr()]);
+    expect(b.state.card).toBe("O_review");
   });
 
   it("moves nothing in a draft repo", async () => {
