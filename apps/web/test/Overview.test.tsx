@@ -19,13 +19,15 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "../src/App.tsx";
 import { hub, RESOURCES } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { useItem } from "../src/shell/overlays.ts";
-import { setSession } from "../src/shell/session.ts";
+import { SESSION_ALL, setSession } from "../src/shell/session.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
 import {
   CONFIG,
@@ -126,9 +128,77 @@ const agentRows = (c: HTMLElement) => [
 ];
 
 describe("Overview panels", () => {
+  it("starts the stream before responses arrive and renders data without waiting for open", async () => {
+    const constructed = vi.fn();
+    class ConnectingStream {
+      constructor(url: string) {
+        constructed(url);
+      }
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal("EventSource", ConnectingStream);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = stub();
+    const answer = fetch.getMockImplementation();
+    if (!answer) throw new Error("Missing fetch stub");
+    fetch.mockImplementation(async (...args) => {
+      await pending;
+      return answer(...args);
+    });
+    const { container } = render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    expect(constructed).toHaveBeenCalledWith("/api/stream");
+    expect(screen.getByText("LIVE · connecting")).toBeTruthy();
+    await act(async () => release());
+    await waitFor(() =>
+      expect(
+        [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
+      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+    );
+    expect(container.querySelector("#timelineP")?.textContent).toContain(
+      "No activity in the last hour.",
+    );
+    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(6);
+    expect(await screen.findByText("No events yet.")).toBeTruthy();
+    expect(screen.getByText("LIVE · connecting")).toBeTruthy();
+  });
+
+  it("renders initial overview values and timeline through the resource layer in StrictMode", async () => {
+    setSession(SESSION_ALL);
+    stub();
+    const { container } = render(
+      <StrictMode>
+        <Overview />
+      </StrictMode>,
+    );
+    await waitFor(() =>
+      expect(
+        [...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent),
+      ).toEqual(["3", "41.2k", "$24.31", "4", "6", "92%", "1h 12m", "2"]),
+    );
+    expect(
+      await within(container.querySelector("#timelineP") as HTMLElement).findByText(
+        "No activity in the last hour.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("every panel carries its mockup id", async () => {
     stub();
     const { container } = render(<Overview />);
+    expect(container.querySelector(".overview-grid > #agentsP")).toBeTruthy();
+    expect(container.querySelector(".overview-work > #timelineP")).toBeTruthy();
+    expect(container.querySelector(".overview-work > #pipelineP")).toBeTruthy();
+    expect(container.querySelector(".ov > #actP")).toBeTruthy();
+    expect(container.querySelector(".ov > .col > #machP")).toBeTruthy();
+    expect(container.querySelector(".ov > .col > #quotaP")).toBeTruthy();
     for (const id of ["agentsP", "timelineP", "pipelineP", "actP", "machP", "quotaP"]) {
       expect(container.querySelector(`#${id}`), id).toBeTruthy();
     }

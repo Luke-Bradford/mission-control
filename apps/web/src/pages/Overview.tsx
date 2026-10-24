@@ -12,17 +12,21 @@ export function Overview() {
   return (
     <section id="page-overview">
       <NeedsBanner />
-      <KpiStrip />
-      <div className="overview-crew">
+      <div className="overview-grid">
+        <div className="overview-metrics">
+          <KpiStrip />
+        </div>
         <AgentsPanel />
-        <TimelinePanel />
-      </div>
-      <PipelinePanel />
-      <div className="ov">
-        <ActivityPanel />
-        <div className="col">
-          <MachinePanel />
-          <QuotaPanel />
+        <div className="overview-work">
+          <TimelinePanel />
+          <PipelinePanel />
+        </div>
+        <div className="ov">
+          <ActivityPanel />
+          <div className="col">
+            <MachinePanel />
+            <QuotaPanel />
+          </div>
         </div>
       </div>
     </section>

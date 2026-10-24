@@ -261,7 +261,10 @@ class Hub {
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
     const e = this.entry(path, topic);
     e.listeners.add(fn);
-    if (e.listeners.size === 1) void this.fetch(e);
+    if (e.listeners.size === 1 && !e.inflight) {
+      // A new visit reconciles the activity window before following deltas.
+      void this.fetch(e, path === RESOURCES.activity.path);
+    }
     return () => {
       e.listeners.delete(fn);
       if (e.listeners.size === 0) {
@@ -288,6 +291,7 @@ class Hub {
       const delta =
         activity &&
         !full &&
+        e.snap.data !== undefined &&
         e.activityFullAt !== undefined &&
         startedAt - e.activityFullAt < ACTIVITY_FULL_LOAD_MS;
       const previous = delta ? (e.snap.data as ActivityRow[] | undefined) : undefined;
@@ -484,12 +488,18 @@ export function parseTopic(data: unknown): Topic | null {
   }
 }
 
-export const streamStatus = store<{ connected: boolean; lastMessageAt: number | null }>({
+export const streamStatus = store<{
+  connected: boolean;
+  reconnecting: boolean;
+  lastMessageAt: number | null;
+}>({
   connected: false,
+  reconnecting: false,
   lastMessageAt: null,
 });
 
 const RETRY_MS = 5000;
+const STREAM_OPEN_TIMEOUT_MS = 10_000;
 
 /**
  * Subscribe to `/api/stream`. Each `changed` event refetches that topic only. After a reconnect
@@ -502,15 +512,20 @@ export function startStream(): () => void {
   let connectedBefore = false;
   let stopped = false;
 
-  streamStatus.set({ connected: false, lastMessageAt: null });
-  const received = () => streamStatus.set({ connected: true, lastMessageAt: Date.now() });
+  streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null });
+  const opening = setTimeout(() => {
+    if (!connectedBefore) streamStatus.set({ ...streamStatus.get(), reconnecting: true });
+  }, STREAM_OPEN_TIMEOUT_MS);
+  const received = () => streamStatus.set({ ...streamStatus.get(), lastMessageAt: Date.now() });
 
   const connect = () => {
     if (stopped) return;
     const source = new EventSource("/api/stream");
     es = source;
     source.addEventListener("open", () => {
-      streamStatus.set({ ...streamStatus.get(), connected: true });
+      if (stopped || source !== es || source.readyState !== EventSource.OPEN) return;
+      clearTimeout(opening);
+      streamStatus.set({ ...streamStatus.get(), connected: true, reconnecting: false });
       if (connectedBefore) hub.refetchAll();
       connectedBefore = true;
     });
@@ -521,7 +536,12 @@ export function startStream(): () => void {
       if (topic) hub.refetchTopic(topic);
     });
     source.addEventListener("error", () => {
-      streamStatus.set({ ...streamStatus.get(), connected: false });
+      if (stopped || source !== es || source.readyState === EventSource.OPEN) return;
+      streamStatus.set({
+        ...streamStatus.get(),
+        connected: false,
+        reconnecting: connectedBefore || streamStatus.get().reconnecting,
+      });
       if (source.readyState !== EventSource.CLOSED) return; // the browser is reconnecting
       source.close();
       retry = setTimeout(() => {
@@ -534,7 +554,8 @@ export function startStream(): () => void {
   connect();
   return () => {
     stopped = true;
-    streamStatus.set({ connected: false, lastMessageAt: null });
+    streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null });
+    clearTimeout(opening);
     clearTimeout(retry);
     es?.close();
   };

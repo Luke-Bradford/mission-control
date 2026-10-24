@@ -6,27 +6,34 @@ const css = readFileSync(join(import.meta.dirname, "../src/hud.css"), "utf8");
 const rule = (sel: string) => css.match(new RegExp(`\n${sel} \\{([^}]*)\\}`))?.[1] ?? "";
 
 describe("Overview layout (hud.css)", () => {
-  it("keeps the banner, KPIs, crew and pipeline at content height so main scrolls", () => {
-    expect(rule(String.raw`#page-overview > \*`)).toContain("flex-shrink: 0");
-    expect(rule(String.raw`\.overview-crew`)).toContain("flex: none");
-    expect(css).toMatch(/main \{[^}]*overflow: auto/);
-  });
-
-  it("fills remaining height with a 420px minimum and bounds Activity with an inner scroll", () => {
-    const grid = rule(String.raw`\.ov`);
-    expect(grid).toContain("flex: 1 0 0");
-    expect(grid).toContain("min-height: 420px");
-    expect(grid).toContain("grid-template-rows: minmax(0, 1fr)");
-    expect(grid).toContain("align-items: start");
-    expect(rule(String.raw`\.ov > #actP`)).toContain("min-height: 240px");
-    expect(rule(String.raw`\.ov > #actP`)).toContain("align-self: stretch");
-    expect(rule(String.raw`\.ov > #actP`)).toContain("overflow: hidden");
-    expect(rule(String.raw`\.panel`)).toContain("display: flex");
-    expect(rule(String.raw`\.panel`)).toContain("flex-direction: column");
+  it("bounds the four rows below the banner and shares remaining height equally", () => {
+    expect(rule(String.raw`\.overview-grid`)).toContain("flex: 1");
+    expect(rule(String.raw`\.overview-grid`)).toContain("min-height: 0");
+    expect(rule(String.raw`\.overview-grid`)).toContain(
+      "grid-template-rows: auto fit-content(38%) minmax(0, 1fr) minmax(0, 1fr)",
+    );
+    expect(rule(String.raw`\.overview-work`)).toContain(
+      "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)",
+    );
+    expect(rule(String.raw`\.ov`)).toContain("grid-template-columns: minmax(0, 1fr) 320px");
+    expect(rule("#agentsList")).toContain("overflow: auto");
     expect(rule(String.raw`\.scroll`)).toContain("min-height: 0");
     expect(rule(String.raw`\.scroll`)).toContain("overflow: auto");
-    expect(rule(String.raw`\.panel > \.pb.scroll`)).toContain("flex: 1 1 auto");
-    expect(rule(String.raw`\.col > \.panel`)).toContain("flex: none");
+    expect(rule(String.raw`\.ov > \.col > \.panel > \.pb`)).toContain("overflow: auto");
+  });
+
+  it("uses compact tiles, timeline lanes and single-line Pipeline cards", () => {
+    expect(rule(String.raw`\.overview-kpis`)).toContain("repeat(8, minmax(0, 1fr))");
+    expect(rule(String.raw`\.overview-kpi`)).toContain("height: 64px");
+    expect(rule(String.raw`\.overview-lane`)).toContain("height: 14px");
+    expect(rule(String.raw`\.pipeline-title`)).toContain("white-space: nowrap");
+    expect(rule(String.raw`\.pipeline-title`)).toContain("text-overflow: ellipsis");
+    expect(css).toMatch(
+      /@container overview \(width < 1100px\) \{\s*\.overview-kpis \{\s*grid-template-columns: repeat\(4,/,
+    );
+    expect(css).toMatch(
+      /@container overview \(width < 1100px\) \{\s*\.overview-work \{[^}]*grid-template-rows: minmax\(0, 1fr\) minmax\(0, 1fr\)/,
+    );
   });
 
   it("fits every measured header control at 1440px while keeping narrow wrapping", () => {
