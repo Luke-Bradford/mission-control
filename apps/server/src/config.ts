@@ -28,9 +28,9 @@ import {
   type McToolName,
   MODE_LOOPS,
   oneWatchSeatText,
-  protectedGlobShapeProblem,
   REVIEW_STATUS_CONTEXT,
   type RepoId,
+  type RepoRules,
   ROLE_NAME,
   ROLE_PROMPT,
   ROLE_PROMPT_DIR,
@@ -49,8 +49,12 @@ import {
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
+import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
+import { areaGlob, protectedGlob } from "./globs.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
+
+export { areaGlob } from "./globs.ts";
 
 export const REPO_AUTONOMIES = ["draft", "merge"] as const;
 export type RepoAutonomy = (typeof REPO_AUTONOMIES)[number];
@@ -103,6 +107,8 @@ export interface CrewSessionConfig {
   repoId: RepoId;
   /** Mission Control's own clone of the repo. */
   checkout: string;
+  branch?: string;
+  managedCheckout?: { token: string; device: number; inode: number };
   seats: CrewSeatConfig[];
 }
 
@@ -190,6 +196,8 @@ export interface CcConfig {
     requiredChecks?: string[];
     /** What the repo's seats may run: `writer` for writers, `review` for read-only and scratch seats. Loaded: always set. */
     commands?: SeatCommands;
+    /** Board rules from user config; the optional repo block tightens safety rules and fills omitted policy keys. */
+    rules?: RepoRules;
     /** Globs seats may not edit or commit, on top of core's PROTECTED_FILES. Loaded: always set (default []). */
     protectedFiles?: string[];
     /** `draft`: the board is only read. `merge`: the hub moves cards between Status columns; needs a crew session. */
@@ -344,16 +352,6 @@ export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
 const LAUNCHD_LABEL = /^[A-Za-z0-9._-]+$/;
 const nonEmpty = z.string().min(1);
-/** A repo-relative glob: no `/`, `./` or `~` start, no `..` segment, none of `{ [ ? ! , ( ) \\` or whitespace. */
-export const areaGlob = nonEmpty.refine(
-  (g) =>
-    !g.startsWith("/") &&
-    !g.startsWith("./") &&
-    !g.startsWith("~") &&
-    !g.split("/").includes("..") &&
-    !/[{[?!,()\\\s]/.test(g),
-  "must be a repo-relative glob without .. segments, a leading ~, whitespace or any of { [ ? ! , ( ) \\",
-);
 /** The default seat commands as fresh arrays: what a repo with no `commands` loads with. */
 export const defaultSeatCommands = (): SeatCommands => ({
   writer: [...DEFAULT_SEAT_COMMANDS.writer],
@@ -376,16 +374,6 @@ const seatCommand = z.string().superRefine((e, ctx) => {
   const problem = seatCommandProblem(e);
   if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
-/** A `protected` entry: an area glob in the characters core accepts. */
-const protectedGlob = areaGlob
-  .refine(
-    (g) => /^[A-Za-z0-9._/*@+-]+$/.test(g),
-    "must hold only letters, digits and . _ / * @ + -",
-  )
-  .superRefine((g, ctx) => {
-    const problem = protectedGlobShapeProblem(g);
-    if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
-  });
 const percent = z.number().min(0).max(100);
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 const MC_TOOL_VALUES = Object.values(MC_TOOL_NAMES) as [McToolName, ...McToolName[]];
@@ -458,6 +446,7 @@ const fileSchema = z
           .strictObject({ writer: z.array(seatCommand), review: z.array(seatCommand) })
           .optional(),
         protected: z.array(protectedGlob).default([]),
+        rules: repoRulesSchema.optional(),
         autonomy: z.enum(REPO_AUTONOMIES).default("draft"),
         flight_powers: z.enum(FLIGHT_POWERS).default("standard"),
       }),
@@ -501,6 +490,14 @@ const fileSchema = z
             id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
             repo_id: nonEmpty,
             checkout: nonEmpty,
+            branch: nonEmpty.optional(),
+            managed_checkout: z
+              .strictObject({
+                token: z.string().uuid(),
+                device: z.number().int().nonnegative(),
+                inode: z.number().int().nonnegative(),
+              })
+              .optional(),
             seats: z.array(
               z.strictObject({
                 id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
@@ -545,6 +542,7 @@ const fileSchema = z
         requiredChecks: r.required_checks,
         commands: r.commands ?? defaultSeatCommands(),
         protectedFiles: r.protected,
+        ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),
         autonomy: r.autonomy,
         flightPowers: r.flight_powers,
       })),
@@ -589,6 +587,10 @@ const fileSchema = z
                 id: x.id,
                 repoId: x.repo_id,
                 checkout: expandHome(x.checkout),
+                ...(x.branch === undefined ? {} : { branch: x.branch }),
+                ...(x.managed_checkout === undefined
+                  ? {}
+                  : { managedCheckout: x.managed_checkout }),
                 seats: x.seats.map((seat) => ({
                   id: seat.id,
                   ...(seat.display_call_sign === undefined
@@ -671,6 +673,9 @@ export function realish(p: string): string {
     }
   }
 }
+
+export const managedSessionPath = (worktrees: string, id: string): string =>
+  join(realish(`${worktrees}-sessions`), id);
 
 /** Whether `child` is `parent` or lies inside it (paths compared as given). */
 export function isInside(child: string, parent: string): boolean {
@@ -887,6 +892,15 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
       throw new ConfigError(`${at}.repoId`, `unknown repo "${session.repoId}"`);
     }
     checkPath(`${at}.checkout`, session.checkout);
+    if (
+      session.managedCheckout &&
+      (!session.branch || session.checkout !== managedSessionPath(crew.worktrees, session.id))
+    ) {
+      throw new ConfigError(
+        `${at}.managed_checkout`,
+        "managed sessions need a branch and their confined checkout path; moving crew.worktrees or its -sessions folder breaks managed sessions. Restore the original paths, or close the sessions before moving and re-create them afterward",
+      );
+    }
     const shared = sharedRepo(session.checkout);
     if (shared !== null) {
       throw new ConfigError(

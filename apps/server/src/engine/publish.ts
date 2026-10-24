@@ -861,9 +861,24 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (names.some((p) => p.toLowerCase() === "claude.md")) {
           missionControlChanged = true;
           try {
-            const before = await g(["show", `${base}:CLAUDE.md`]);
-            const after = await g(["show", `${sha}:CLAUDE.md`]);
-            missionControlChanged = mcSection(before) !== mcSection(after);
+            const readClaude = async (commit: string): Promise<string | null> => {
+              try {
+                await g(["cat-file", "-e", `${commit}:CLAUDE.md`]);
+              } catch (e) {
+                const error = e as { code?: unknown; stderr?: unknown } | null;
+                if (
+                  error?.code === 128 &&
+                  typeof error.stderr === "string" &&
+                  error.stderr.includes("path 'CLAUDE.md' does not exist in")
+                )
+                  return null;
+                throw e;
+              }
+              return g(["show", `${commit}:CLAUDE.md`]);
+            };
+            const before = await readClaude(base);
+            const after = await readClaude(sha);
+            missionControlChanged = mcSection(before ?? "") !== mcSection(after ?? "");
           } catch {
             /* an unreadable rules block stays protected */
           }

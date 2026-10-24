@@ -6,8 +6,9 @@
  * reused branch is never reset. A start that fails leaves nothing it created behind.
  */
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -19,9 +20,10 @@ import {
   REVIEW_DIFF_MAX_BUFFER,
   REVIEW_INPUT_DIR,
   REVIEW_SINCE_FILE,
+  type SessionCheckoutOutcome,
   scratchName,
 } from "@mc/core";
-import { SEAT_ID } from "../config.ts";
+import { type CrewSessionConfig, managedSessionPath, SEAT_ID } from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 import { crewGit, crewGitBytes, overflowed, SAFE_CONFIG, timedOut } from "./git.ts";
 
@@ -51,7 +53,7 @@ const INSTALL_MAX_BUFFER = 16 * 1024 * 1024;
  * What `pnpm install` reads (manifests in all three formats; pnpm 11 prefers `.pnpmfile.mjs`): a
  * branch whose copy of any of these is not origin's is not installed from.
  */
-const INSTALL_INPUTS = new Set([
+const PNPM_INPUTS = new Set([
   "package.json",
   "package.yaml",
   "package.json5",
@@ -110,14 +112,28 @@ export interface RepoPeer {
 }
 
 /**
- * What the commit tool's `add -A` stages: the whole worktree but any `.pnpm-store/`, at the top or
- * nested. A sandboxed pnpm that cannot write its global store makes one inside the worktree; the
- * seat's env points the store elsewhere (`crewPnpmStoreDir`), and this is the backstop.
+ * What the commit tool's `add -A` stages: the whole worktree except package stores, Python
+ * environments, caches, build metadata and coverage output, at the top or nested. The seat's env
+ * points the caches to the sandbox's temp root (`crewPnpmStoreDir`, `crewPythonEnv`); this is the
+ * backstop for a repo that does not ignore them.
  */
 export const COMMIT_ADD_PATHSPEC = [
   "--",
   ":(top)",
   `:(top,exclude,glob)**/${PNPM_STORE_DIR_NAME}/**`,
+  ":(top,exclude,glob)**/__pycache__/**",
+  ":(top,exclude,glob)**/.pytest_cache/**",
+  ":(top,exclude,glob)**/.ruff_cache/**",
+  ":(top,exclude,glob)**/.mypy_cache/**",
+  ":(top,exclude,glob)**/.venv/**",
+  ":(top,exclude,glob)**/.coverage",
+  ":(top,exclude,glob)**/.coverage.*",
+  ":(top,exclude,glob)**/.hypothesis/**",
+  ":(top,exclude,glob)**/*.egg-info/**",
+  ":(top,exclude,glob)**/.tox/**",
+  ":(top,exclude,glob)**/.nox/**",
+  ":(top,exclude,glob)**/htmlcov/**",
+  ":(top,exclude,glob)**/.ipynb_checkpoints/**",
 ] as const;
 
 export type ReuseSync =
@@ -208,7 +224,12 @@ export async function cloneGitDir(
     common = await realpath(join(checkout, ".git"));
     const o = { gitDir: common };
     const top = (await crewGit(checkout, ["rev-parse", "--show-toplevel"], common, o)).trim();
-    const status = await crewGit(checkout, ["status", "--porcelain"], common, o);
+    const status = await crewGit(
+      checkout,
+      ["--no-optional-locks", "status", "--porcelain"],
+      common,
+      o,
+    );
     if ((await realpath(top)) !== (await realpath(checkout)) || status !== "") {
       throw new CheckoutError("checkout", CHECKOUT_TEXT);
     }
@@ -252,6 +273,7 @@ async function refuseInstallInputs(
   baseSha: string,
   rev: string,
   subject: string,
+  inputs: ReadonlySet<string>,
 ): Promise<void> {
   let changed: string[];
   try {
@@ -273,7 +295,7 @@ async function refuseInstallInputs(
       { cause: e },
     );
   }
-  const hit = changed.find((f) => INSTALL_INPUTS.has(f.split("/").pop() ?? ""));
+  const hit = changed.find((f) => inputs.has(f.split("/").pop() ?? ""));
   if (hit !== undefined) {
     throw new CheckoutError(
       "protected",
@@ -299,14 +321,15 @@ const refuse = (subject: string, what: string) =>
   new CheckoutError("protected", `${subject} ${what}; Mission Control won't install from it`);
 
 /**
- * Refuses a branch whose tree has a symlink or anything under a `node_modules` directory: the host
- * install follows a committed `node_modules -> <anywhere>` link and writes (or deletes) there. The
+ * Refuses a branch whose tree has a symlink or anything under the tool's install directory: the
+ * host install could follow a committed link and write (or delete) outside the worktree. The
  * early, clearer refusal; `inspectDisk` is the check that counts.
  */
 async function refuseUnsafeTree(
   inClone: (args: string[]) => Promise<string>,
   rev: string,
   subject: string,
+  installDir: string,
 ): Promise<void> {
   let out: string;
   try {
@@ -323,31 +346,36 @@ async function refuseUnsafeTree(
     if (tab < 0) continue;
     const file = entry.slice(tab + 1);
     if (entry.startsWith("120000 ")) throw refuse(subject, `has a symlink at ${file}`);
-    if (file.split("/").includes("node_modules")) throw refuse(subject, `has ${file}`);
+    if (file.split("/").includes(installDir)) throw refuse(subject, `has ${file}`);
   }
 }
 
 /**
  * What makes the worktree on disk unsafe to install in, or null: any symlink (the top-level `.git`
- * pointer file aside; symlinked dirs are never followed), or any directory where `node_modules`
- * resolves. Every install input found on the way is added to `inputs`. Lookups go through the
+ * pointer file aside; symlinked dirs are never followed), or any directory where `tool.installDir`
+ * resolves. Every install input found on the way is added to `found`. Lookups go through the
  * filesystem (`lstat(join(dir, name))`), so its case and Unicode folding apply (a tracked
  * `NODE_MODULES` is `node_modules` on APFS). This, not the tree listing, is authoritative: the
  * ref another seat can move is not necessarily what was checked out.
  */
-async function inspectDisk(root: string, inputs: string[], rel = ""): Promise<string | null> {
+async function inspectDisk(
+  root: string,
+  tool: InstallTool,
+  found: string[],
+  rel = "",
+): Promise<string | null> {
   const dir = join(root, rel);
   const prefix = rel ? `${rel}/` : "";
-  if (await succeeds(lstat(join(dir, "node_modules")))) return `has ${prefix}node_modules`;
-  for (const name of INSTALL_INPUTS) {
-    if (await succeeds(lstat(join(dir, name)))) inputs.push(`${prefix}${name}`);
+  if (await succeeds(lstat(join(dir, tool.installDir)))) return `has ${prefix}${tool.installDir}`;
+  for (const name of tool.inputs) {
+    if (await succeeds(lstat(join(dir, name)))) found.push(`${prefix}${name}`);
   }
   for (const d of await readdir(dir, { withFileTypes: true })) {
     if (rel === "" && d.name === ".git" && d.isFile()) continue;
     if (d.isSymbolicLink()) return `has a symlink at ${prefix}${d.name}`;
     if (d.isDirectory()) {
-      const found = await inspectDisk(root, inputs, `${prefix}${d.name}`);
-      if (found !== null) return found;
+      const unsafe = await inspectDisk(root, tool, found, `${prefix}${d.name}`);
+      if (unsafe !== null) return unsafe;
     }
   }
   return null;
@@ -462,17 +490,17 @@ export async function readBaseFile(
  */
 async function refuseChangedInputs(
   path: string,
+  tool: InstallTool,
   inputs: string[],
   read: ReadObject,
   baseSha: string,
   subject: string,
 ): Promise<void> {
-  // Without its root workspace file, pnpm walks up and installs an ancestor's workspace.
-  if (
-    !inputs.includes(WORKSPACE_FILE) &&
-    (await baseBlob(read, baseSha, WORKSPACE_FILE)) !== null
-  ) {
-    throw refuse(subject, `changes ${WORKSPACE_FILE}`);
+  // Without its root project/workspace file, the tool walks up to an ancestor's.
+  for (const file of tool.rootInputs) {
+    if (!inputs.includes(file) && (await baseBlob(read, baseSha, file)) !== null) {
+      throw refuse(subject, `changes ${file}`);
+    }
   }
   for (const file of inputs) {
     const expected = await baseBlob(read, baseSha, file);
@@ -499,26 +527,221 @@ export function installEnv(worktree: string): NodeJS.ProcessEnv {
 }
 
 /**
- * The sandbox has no network, so dependencies are installed here (`INSTALL_ARGS`): scripts and a
- * `.pnpmfile.cjs` would run the branch's code outside the sandbox.
+ * Installs from the lockfile only and builds no sdist. The project, workspace and local deps are
+ * never built. Packages are copied, so writes to `.venv` never reach uv's cache. Never passes
+ * `--compile-bytecode`.
  */
-async function install(path: string, name: string): Promise<void> {
+export const UV_SYNC_ARGS = [
+  "sync",
+  "--no-config",
+  "--no-python-downloads",
+  "--frozen",
+  "--no-build",
+  "--no-install-workspace",
+  "--no-install-local",
+  "--link-mode=copy",
+] as const;
+
+/** Remove inherited Python settings and pin uv's environment to this worktree. */
+export function uvInstallEnv(worktree: string): NodeJS.ProcessEnv {
+  const env = installEnv(worktree);
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("UV_") || key.startsWith("PIP_")) delete env[key];
+  }
+  for (const key of ["VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP"]) {
+    delete env[key];
+  }
+  env.UV_PROJECT_ENVIRONMENT = join(worktree, ".venv");
+  return env;
+}
+
+interface InstallTool {
+  label: string;
+  command: string;
+  lockfile: string;
+  inputs: ReadonlySet<string>;
+  rootInputs: readonly string[];
+  required: readonly string[];
+  installDir: string;
+  args: readonly string[];
+  env: (worktree: string) => NodeJS.ProcessEnv;
+  reason: (out: string) => string | null;
+}
+
+const PNPM_TOOL: InstallTool = {
+  label: "pnpm install",
+  command: "pnpm",
+  lockfile: "pnpm-lock.yaml",
+  inputs: PNPM_INPUTS,
+  rootInputs: [WORKSPACE_FILE],
+  required: [],
+  installDir: "node_modules",
+  args: INSTALL_ARGS,
+  env: installEnv,
+  reason: (out) => /ERR_PNPM_[A-Z_]+/.exec(out)?.[0] ?? null,
+};
+const UV_TOOL: InstallTool = {
+  label: "uv sync",
+  command: "uv",
+  lockfile: "uv.lock",
+  inputs: new Set(["pyproject.toml", "uv.lock", "uv.toml", ".python-version"]),
+  rootInputs: ["pyproject.toml", "uv.toml", ".python-version"],
+  required: ["pyproject.toml"],
+  installDir: ".venv",
+  args: UV_SYNC_ARGS,
+  env: uvInstallEnv,
+  reason: () => null,
+};
+const INSTALL_TOOLS = [PNPM_TOOL, UV_TOOL];
+
+/** Injectable process runner: tests never invoke a real uv. */
+export type InstallRunner = (
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    timeout: number;
+    maxBuffer: number;
+    encoding: "utf8";
+    env: NodeJS.ProcessEnv;
+  },
+) => Promise<unknown>;
+
+/** The sandbox has no network, so dependencies are installed here, without running package code. */
+async function install(
+  tool: InstallTool,
+  path: string,
+  name: string,
+  run: InstallRunner = execFileP,
+): Promise<void> {
   try {
-    await execFileP("pnpm", [...INSTALL_ARGS], {
+    await run(tool.command, [...tool.args], {
       cwd: path,
       timeout: INSTALL_TIMEOUT_MS,
       maxBuffer: INSTALL_MAX_BUFFER,
       encoding: "utf8",
-      env: installEnv(path),
+      env: tool.env(path),
     });
   } catch (e) {
     const x = e as { killed?: boolean; code?: unknown; stdout?: unknown; stderr?: unknown };
+    if (tool === UV_TOOL && x.code === "ENOENT") {
+      throw new CheckoutError("install", `uv sync failed for ${name} (uv not found)`, { cause: e });
+    }
     const out = `${String(x.stdout ?? "")}\n${String(x.stderr ?? "")}`;
-    const why = x.killed
-      ? "timed out"
-      : (/ERR_PNPM_[A-Z_]+/.exec(out)?.[0] ?? `exit ${String(x.code)}`);
-    throw new CheckoutError("install", `pnpm install failed for ${name} (${why})`, { cause: e });
+    const why = x.killed ? "timed out" : (tool.reason(out) ?? `exit ${String(x.code)}`);
+    throw new CheckoutError("install", `${tool.label} failed for ${name} (${why})`, { cause: e });
   }
+}
+
+/**
+ * Read registry assignments as TOML tokens, including quoted/escaped keys and dotted/table
+ * syntax. This deliberately accepts only single-line strings (as emitted by uv); unsupported
+ * string syntax fails closed instead of hiding a registry. uv validates the remaining grammar.
+ */
+function refuseUnsafeUvRegistries(lock: string, subject: string): void {
+  const tokens: { value: string; string: boolean }[] = [];
+  const token = /\s+|#[^\r\n]*|"(?:\\[^\r\n]|[^"\\\r\n])*"|'[^'\r\n]*'|[\w-]+|[^\s]/gy;
+  for (const match of lock.matchAll(token)) {
+    const raw = match[0];
+    if (/^\s|^#/.test(raw)) continue;
+    const quoted = raw.startsWith('"') || raw.startsWith("'");
+    let value = raw;
+    if (quoted) {
+      // Triple-quoted strings may contain otherwise meaningful tokens; refuse them entirely.
+      if (lock.slice(match.index, match.index + 3) === raw[0].repeat(3) || raw.length < 2) {
+        throw refuse(subject, "has unsupported string syntax in uv.lock");
+      }
+      try {
+        value = raw.startsWith('"') ? JSON.parse(raw) : raw.slice(1, -1);
+      } catch {
+        throw refuse(subject, "has unsupported string syntax in uv.lock");
+      }
+    }
+    tokens.push({ value, string: quoted });
+  }
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].value !== "registry" || tokens[i + 1]?.value !== "=" || tokens[i + 1]?.string) {
+      continue;
+    }
+    const registry = tokens[i + 2];
+    let valid = false;
+    if (registry?.string && registry.value.startsWith("https://")) {
+      try {
+        valid = new URL(registry.value).protocol === "https:";
+      } catch {}
+    }
+    if (!valid) throw refuse(subject, "has a non-HTTPS registry in uv.lock");
+  }
+}
+
+/**
+ * Every present tool's checks first, then the installs in table order (pnpm's symlinked
+ * node_modules must not meet uv's disk check).
+ */
+async function installAll(
+  s: {
+    checkout: string;
+    common: string;
+    inClone: (args: string[]) => Promise<string>;
+    path: string;
+    rev: string;
+    base: string;
+    compare: boolean;
+    subject: string;
+    name: string;
+  },
+  run: InstallRunner,
+): Promise<void> {
+  const picked: InstallTool[] = [];
+  for (const tool of INSTALL_TOOLS) {
+    if (await succeeds(lstat(join(s.path, tool.lockfile)))) picked.push(tool);
+  }
+  for (const tool of picked) {
+    await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
+    if (s.compare) await refuseInstallInputs(s.inClone, s.base, s.rev, s.subject, tool.inputs);
+    const found: string[] = [];
+    const unsafe = await inspectDisk(s.path, tool, found);
+    if (unsafe !== null) throw refuse(s.subject, unsafe);
+    const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
+    if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
+    const read = verifiedObjects((args, maxBuffer) =>
+      crewGitBytes(s.checkout, args, s.common, { gitDir: s.common, maxBuffer }),
+    );
+    await refuseChangedInputs(s.path, tool, found, read, s.base, s.subject);
+    for (const file of tool.required) {
+      if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
+    }
+    if (tool === UV_TOOL) {
+      // --no-config does not disable discovery of a parent project's workspace.
+      let parent = dirname(await realpath(s.path));
+      for (;;) {
+        for (const file of ["pyproject.toml", "uv.toml"]) {
+          try {
+            await lstat(join(parent, file));
+          } catch (e) {
+            if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+            throw e;
+          }
+          throw refuse(s.subject, `has an ancestor ${file}`);
+        }
+        const next = dirname(parent);
+        if (next === parent) break;
+        parent = next;
+      }
+      for (const file of found.filter((file) => basename(file) === ".python-version")) {
+        const lines = (await readFile(join(s.path, file), "utf8")).split(/\r?\n/);
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line || line.startsWith("#")) continue;
+          if (!/^(cpython-|pypy-|graalpy-)?\d+(\.\d+){0,2}[a-z0-9.+-]*$/.test(line)) {
+            throw refuse(s.subject, `has a non-version interpreter in ${file}`);
+          }
+        }
+      }
+      refuseUnsafeUvRegistries(await readFile(join(s.path, "uv.lock"), "utf8"), s.subject);
+    }
+  }
+  for (const tool of picked) await install(tool, s.path, s.name, run);
 }
 
 /**
@@ -730,6 +953,10 @@ export async function syncReusedWorktree(
   return syncReused(worktree.path, common, worktree.gitDir, worktree.branch, worktree.baseSha);
 }
 
+/** A reused uv worktree is not reinstalled after a sync. */
+export const UV_REUSED_NOTE =
+  "dependencies changed; uv reinstall is not supported in a reused worktree";
+
 /**
  * After a recorded merge, install if its diff changed an install input. Retains checkout trust
  * checks; a refusal or failure is returned for the caller's answer, without hiding the merge.
@@ -746,21 +973,28 @@ export async function installAfterSync(
     const changed = (
       await w(["diff", "--name-only", "--no-renames", "-z", `${before}..HEAD`, "--"])
     ).split("\0");
-    if (!changed.some((file) => INSTALL_INPUTS.has(file.split("/").pop() ?? ""))) return;
+    // only a uv repo (a lockfile at the top) gets the note; a pnpm repo still reinstalls below
+    const uvNote =
+      (await succeeds(lstat(join(worktree.path, "uv.lock")))) &&
+      changed.some((file) => UV_TOOL.inputs.has(basename(file)))
+        ? UV_REUSED_NOTE
+        : undefined;
+    if (!changed.some((file) => PNPM_INPUTS.has(file.split("/").pop() ?? ""))) return uvNote;
     const g = (args: string[]) => crewGit(checkout, args, common, { gitDir: common });
     const subject = `branch ${worktree.branch}`;
-    await refuseUnsafeTree(w, "HEAD", subject);
-    await refuseInstallInputs(w, worktree.baseSha, "HEAD", subject);
+    await refuseUnsafeTree(w, "HEAD", subject, PNPM_TOOL.installDir);
+    await refuseInstallInputs(w, worktree.baseSha, "HEAD", subject, PNPM_TOOL.inputs);
     const inputs: string[] = [];
-    const unsafe = await inspectDisk(worktree.path, inputs);
+    const unsafe = await inspectDisk(worktree.path, PNPM_TOOL, inputs);
     if (unsafe !== null) throw refuse(subject, unsafe);
     const format = (await g(["rev-parse", "--show-object-format"])).trim();
     if (format !== "sha1") throw refuse(subject, `is in a ${format} repository`);
     const read = verifiedObjects((args, maxBuffer) =>
       crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer }),
     );
-    await refuseChangedInputs(worktree.path, inputs, read, worktree.baseSha, subject);
-    await install(worktree.path, worktree.branch);
+    await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, worktree.baseSha, subject);
+    await install(PNPM_TOOL, worktree.path, worktree.branch);
+    return uvNote;
   } catch (e) {
     return `dependencies changed; install refused: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -769,9 +1003,12 @@ export async function installAfterSync(
 /**
  * Gives a run its branch and worktree: reuses this ticket's worktree if it exists, else adds one
  * on the existing branch (local, or origin's tracked) or on a new branch from origin's default
- * branch, then installs dependencies when the worktree has a pnpm lockfile.
+ * branch, then installs dependencies when the worktree has a pnpm or uv lockfile (`installAll`).
  */
-export async function prepareCheckout(i: CheckoutInput): Promise<Checkout> {
+export async function prepareCheckout(
+  i: CheckoutInput,
+  runInstall: InstallRunner = execFileP,
+): Promise<Checkout> {
   const branch = branchFor(i.issue, i.title);
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
   // a worktree made before sessions had folders is reused where it is
@@ -843,24 +1080,20 @@ export async function prepareCheckout(i: CheckoutInput): Promise<Checkout> {
         `could not create a worktree for ${branch}: not registered`,
       );
     }
-    if (await succeeds(lstat(join(path, "pnpm-lock.yaml")))) {
-      await refuseUnsafeTree(inClone, rev, subject);
-      if (local !== null || remote !== null) {
-        await refuseInstallInputs(inClone, baseSha, rev, subject);
-      }
-      const inputs: string[] = [];
-      const unsafe = await inspectDisk(path, inputs);
-      if (unsafe !== null) throw refuse(subject, unsafe);
-      const format = (await inClone(["rev-parse", "--show-object-format"])).trim();
-      if (format !== "sha1") {
-        throw refuse(subject, `is in a ${format} repository`);
-      }
-      const read = verifiedObjects((args, maxBuffer) =>
-        crewGitBytes(i.checkout, args, common, { gitDir: common, maxBuffer }),
-      );
-      await refuseChangedInputs(path, inputs, read, baseSha, subject);
-      await install(path, branch);
-    }
+    await installAll(
+      {
+        checkout: i.checkout,
+        common,
+        inClone,
+        path,
+        rev,
+        base: baseSha,
+        compare: local !== null || remote !== null,
+        subject,
+        name: branch,
+      },
+      runInstall,
+    );
     return { branch, path, created: true, baseSha, gitDir };
   } catch (e) {
     await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(() => {});
@@ -949,7 +1182,10 @@ const COMMIT_SHA = /^[0-9a-f]{40}$/;
  * crew's own commits descend from and never changed them in. A leftover worktree of the same review
  * (a start that crashed) is replaced; a start that fails leaves nothing behind.
  */
-export async function prepareScratch(i: ScratchInput): Promise<Scratch> {
+export async function prepareScratch(
+  i: ScratchInput,
+  runInstall: InstallRunner = execFileP,
+): Promise<Scratch> {
   const name = scratchName(i.seatId, i.reviewId);
   if (
     !SEAT_ID.test(i.seatId) ||
@@ -1005,20 +1241,20 @@ export async function prepareScratch(i: ScratchInput): Promise<Scratch> {
     if (!COMMIT_SHA.test(mergeBase)) {
       throw new CheckoutError("base", "the PR head has no merge base with origin's default branch");
     }
-    if (await succeeds(lstat(join(path, "pnpm-lock.yaml")))) {
-      await refuseUnsafeTree(inClone, i.sha, subject);
-      await refuseInstallInputs(inClone, mergeBase, i.sha, subject);
-      const inputs: string[] = [];
-      const unsafe = await inspectDisk(path, inputs);
-      if (unsafe !== null) throw refuse(subject, unsafe);
-      const format = (await inClone(["rev-parse", "--show-object-format"])).trim();
-      if (format !== "sha1") throw refuse(subject, `is in a ${format} repository`);
-      const read = verifiedObjects((args, maxBuffer) =>
-        crewGitBytes(i.checkout, args, common, { gitDir: common, maxBuffer }),
-      );
-      await refuseChangedInputs(path, inputs, read, mergeBase, subject);
-      await install(path, subject);
-    }
+    await installAll(
+      {
+        checkout: i.checkout,
+        common,
+        inClone,
+        path,
+        rev: i.sha,
+        base: mergeBase,
+        compare: true,
+        subject,
+        name: subject,
+      },
+      runInstall,
+    );
     return { path, gitDir, baseSha, mergeBase };
   } catch (e) {
     await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(() => {});
@@ -1122,4 +1358,195 @@ export async function writeReviewInputs(
   await writeFile(join(s.path, REVIEW_DIFF_FILE), pr.text, { flag: "wx" });
   if (since !== null) await writeFile(join(s.path, REVIEW_SINCE_FILE), since.text, { flag: "wx" });
   return { diffCut: pr.cut, since: since !== null };
+}
+
+const SESSION_OWNER_FILE = "mission-control-session.json";
+/** Read-only validation: sessions require a standalone clone and an existing local branch. */
+export async function validateSessionCheckout(
+  checkout: string,
+  branch: string,
+  github: string,
+  shared: boolean,
+  peers: readonly RepoPeer[],
+): Promise<string> {
+  if (!(await lstat(join(checkout, ".git"))).isDirectory()) {
+    throw new CheckoutError("checkout", "sessions require a standalone clone");
+  }
+  const common = await cloneGitDir(checkout, peers);
+  const git = (args: string[]) => crewGit(checkout, args, common, { gitDir: common });
+  await git(["check-ref-format", `refs/heads/${branch}`]);
+  await git(["rev-parse", "--verify", "--end-of-options", `refs/heads/${branch}^{commit}`]);
+  if (shared && (await git(["symbolic-ref", "--short", "HEAD"])).trim() !== branch) {
+    throw new CheckoutError("checkout", "the checkout is on a different branch");
+  }
+  const origin = (await git(["remote", "get-url", "origin"])).trim();
+  const githubOrigin = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)/;
+  const repo = origin.replace(githubOrigin, "").replace(/\.git$/, "");
+  if (repo.toLowerCase() !== github.toLowerCase() || !githubOrigin.test(origin)) {
+    throw new CheckoutError("checkout", "the checkout origin does not match the repo profile");
+  }
+  return origin;
+}
+
+/** The destination was confined by config validation before this call. Never reuse a directory. */
+export async function createSessionCheckout(
+  source: string,
+  path: string,
+  branch: string,
+  origin: string,
+  sessionId: string,
+): Promise<NonNullable<CrewSessionConfig["managedCheckout"]>> {
+  const sourceGit = await realpath(join(source, ".git"));
+  const upstream = await crewGit(
+    source,
+    ["for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/origin"],
+    sourceGit,
+    { gitDir: sourceGit },
+  );
+  const upstreamHead = await crewGit(
+    source,
+    ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+    sourceGit,
+    { gitDir: sourceGit },
+  ).then(
+    (ref) => ref.trim(),
+    () => "",
+  );
+  await mkdir(dirname(path), { recursive: true });
+  await mkdir(path).catch((e) => {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new CheckoutError(
+        "path",
+        `the separate checkout destination already exists: ${path}; move or recover it before re-creating the session`,
+      );
+    }
+    throw e;
+  });
+  const stat = await lstat(path);
+  const proof = { token: randomUUID(), device: stat.dev, inode: stat.ino };
+  try {
+    await execFileP(
+      "git",
+      [
+        ...SAFE_CONFIG,
+        "clone",
+        "--no-local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "--single-branch",
+        "--branch",
+        branch,
+        "--no-tags",
+        "--",
+        source,
+        path,
+      ],
+      {
+        env: { ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0", GIT_NO_REPLACE_OBJECTS: "1" },
+        timeout: CREW_GIT_SLOW_MS,
+      },
+    );
+    const common = await realpath(join(path, ".git"));
+    const git = (args: string[]) => crewGit(path, args, common, { gitDir: common });
+    await git(["checkout", "--no-track", "-B", branch, `refs/remotes/origin/${branch}`, "--"]);
+    await git(["remote", "set-url", "origin", origin]);
+    // --single-branch saved a one-branch refspec; widen it so fetches bring origin's default branch
+    await git(["remote", "set-branches", "origin", "*"]);
+    // Clone's tracking refs described the source's local branches, not what was pushed upstream.
+    const refs = await git(["for-each-ref", "--format=%(refname)", "refs/remotes/origin"]);
+    for (const ref of refs.trim().split("\n").filter(Boolean))
+      await git(["update-ref", "-d", "--no-deref", ref]);
+    const copied = new Set<string>();
+    for (const line of upstream.trim().split("\n").filter(Boolean)) {
+      const [ref, sha] = line.split(" ");
+      if (!ref || !sha || ref === "refs/remotes/origin/HEAD") continue;
+      if (await succeeds(git(["cat-file", "-e", `${sha}^{commit}`]))) {
+        await git(["update-ref", ref, sha]);
+        copied.add(ref);
+      }
+    }
+    if (upstreamHead.startsWith("refs/remotes/origin/") && copied.has(upstreamHead)) {
+      await git(["symbolic-ref", "refs/remotes/origin/HEAD", upstreamHead]);
+    }
+    await writeFile(join(common, SESSION_OWNER_FILE), JSON.stringify({ sessionId, ...proof }), {
+      flag: "wx",
+      mode: 0o600,
+    });
+    return proof;
+  } catch (e) {
+    const current = await lstat(path).catch(() => null);
+    if (current?.dev === proof.device && current.ino === proof.inode && !current.isSymbolicLink()) {
+      await rm(path, { recursive: true });
+    }
+    throw e;
+  }
+}
+
+/** Fail closed: only this exact owned clone, with no data Git would lose, may be removed. */
+export async function removeSessionCheckout(
+  session: CrewSessionConfig,
+  worktrees: string,
+  rollback = false,
+): Promise<SessionCheckoutOutcome> {
+  const proof = session.managedCheckout;
+  if (!proof) return "unmanaged";
+  try {
+    const path = session.checkout;
+    if (path !== managedSessionPath(worktrees, session.id) || (await realpath(path)) !== path) {
+      return "retained-unproven";
+    }
+    const stat = await lstat(path);
+    if (!stat.isDirectory() || stat.dev !== proof.device || stat.ino !== proof.inode) {
+      return "retained-unproven";
+    }
+    const common = join(path, ".git");
+    if (!(await lstat(common)).isDirectory() || (await realpath(common)) !== common) {
+      return "retained-unproven";
+    }
+    const owner = JSON.parse(await readFile(join(common, SESSION_OWNER_FILE), "utf8"));
+    if (
+      owner.sessionId !== session.id ||
+      owner.token !== proof.token ||
+      owner.device !== proof.device ||
+      owner.inode !== proof.inode
+    )
+      return "retained-unproven";
+    const git = (args: string[]) => crewGit(path, args, common, { gitDir: common });
+    if ((await git(["worktree", "list", "--porcelain"])).split("worktree ").length !== 2) {
+      return "retained-unproven";
+    }
+    if (
+      await git([
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--ignored",
+        "--",
+        ".",
+        ":(exclude,glob)**/.DS_Store",
+      ])
+    ) {
+      return "retained-dirty";
+    }
+    if (!rollback) {
+      const refs = (await git(["for-each-ref", "--format=%(refname)", "refs/remotes/origin"]))
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+      if (
+        refs.length === 0 ||
+        (await git(["rev-list", "--max-count=1", "--all", "--reflog", "--not", ...refs])).trim()
+      ) {
+        return "retained-unpushed";
+      }
+    }
+    try {
+      await rm(path, { recursive: true });
+    } catch {
+      return existsSync(path) ? "removal-failed-partway" : "removed";
+    }
+    return existsSync(path) ? "removal-failed-partway" : "removed";
+  } catch {
+    return "retained-unproven";
+  }
 }

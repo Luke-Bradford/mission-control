@@ -434,6 +434,34 @@ describe("commit", () => {
     ]);
   });
 
+  it("never stages Python caches or a .venv, at the top or nested", async () => {
+    write("pkg/__pycache__/a.pyc", "cache\n");
+    write(".pytest_cache/v", "cache\n");
+    write(".venv/x", "cache\n");
+    write(".ruff_cache/x", "cache\n");
+    write("apps/.mypy_cache/x", "cache\n");
+    for (const prefix of ["", "pkg/"]) {
+      for (const file of [
+        ".coverage",
+        ".hypothesis/x",
+        "demo.egg-info/PKG-INFO",
+        ".tox/x",
+        ".nox/x",
+        "htmlcov/index.html",
+        ".ipynb_checkpoints/test.ipynb",
+      ]) {
+        write(`${prefix}${file}`, "cache\n");
+      }
+    }
+    write("apps/a.ts", "a2\n");
+    const r = await commit("feat: x");
+    expect(r.text).toMatch(/^Committed /);
+    expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim().split("\n")).toEqual([
+      "apps/a.ts",
+    ]);
+    expect(store.strays()).toEqual([]);
+  });
+
   it("answers Nothing to commit when only a .pnpm-store changed, recording no stray", async () => {
     write(".pnpm-store/v11/index.db", "db\n");
     expect(await commit("feat: x")).toEqual({ text: "Nothing to commit." });

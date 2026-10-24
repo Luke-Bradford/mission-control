@@ -49,6 +49,7 @@ import {
   crewCliArgs,
   crewMcpConfig,
   crewPnpmStoreDir,
+  crewSandboxTmp,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   eligibleToStart,
@@ -899,9 +900,25 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return p;
   }
 
+  /** Python's and its tools' caches, the seat's own in the sandbox's temp root; `uv run` uses the hub's install, offline. */
+  function crewPythonEnv(uid: number, seatId: string): Record<string, string> {
+    const tmp = crewSandboxTmp(uid);
+    return {
+      UV_NO_SYNC: "1",
+      UV_OFFLINE: "1",
+      UV_CACHE_DIR: `${tmp}/mc-uv-cache/${seatId}`,
+      PYTHONPYCACHEPREFIX: `${tmp}/mc-pycache/${seatId}`,
+      RUFF_CACHE_DIR: `${tmp}/mc-ruff-cache/${seatId}`,
+      MYPY_CACHE_DIR: `${tmp}/mc-mypy-cache/${seatId}`,
+      COVERAGE_FILE: `${tmp}/mc-pycache/${seatId}/.coverage`,
+      PYTEST_ADDOPTS: "-p no:cacheprovider",
+    };
+  }
+
   /**
    * No git identity: a seat cannot commit, and the mc commit tool names each commit's author.
    * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
+   * Python's caches likewise (`crewPythonEnv`).
    */
   function crewEnv(seatId: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
@@ -911,7 +928,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     env.HOME = homedir();
     const uid = process.getuid?.();
-    if (uid !== undefined) env[PNPM_STORE_ENV] = crewPnpmStoreDir(uid, seatId);
+    if (uid !== undefined) {
+      env[PNPM_STORE_ENV] = crewPnpmStoreDir(uid, seatId);
+      Object.assign(env, crewPythonEnv(uid, seatId));
+    }
     return { ...env, ...CREW_CLI_ENV };
   }
 

@@ -1089,6 +1089,7 @@ describe("merge steps", () => {
           [ANCESTOR]: "",
           "merge-base": BASE,
           "rev-list": "",
+          "cat-file": "",
           diff: "CLAUDE.md\0",
           [`show ${BASE}:CLAUDE.md`]: `# Before\n${rules}`,
           [`show ${SHA}:CLAUDE.md`]: `# After\n${changed ? rules.replace("[]", "[src/**]") : rules}`,
@@ -1115,6 +1116,7 @@ describe("merge steps", () => {
         [ANCESTOR]: "",
         "merge-base": BASE,
         "rev-list": "",
+        "cat-file": "",
         diff: "CLAUDE.md\0",
         [`show ${BASE}:CLAUDE.md`]: "## Mission Control\n```yaml\nmc: {}\n```\n",
         [`show ${SHA}:CLAUDE.md`]: after,
@@ -1122,6 +1124,53 @@ describe("merge steps", () => {
       expect(await withArea().gateFacts(R, SHA)).toMatchObject({
         ok: true,
         facts: { missionControlChanged: changed },
+      });
+    });
+
+    it.each([
+      ["added prose", null, "# Repo\nJust prose\n", false],
+      ["added block", null, "## Mission Control\n```yaml\nmc: {}\n```\n", true],
+      ["deleted prose", "# Repo\nJust prose\n", null, false],
+    ])("checks CLAUDE.md %s", async (_name, before, after, changed) => {
+      const absent = Object.assign(new Error("path absent"), {
+        code: 128,
+        stderr: "fatal: path 'CLAUDE.md' does not exist in commit",
+      });
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": BASE,
+        "rev-list": "",
+        diff: "CLAUDE.md\0",
+        [`cat-file -e ${BASE}:CLAUDE.md`]: before === null ? absent : "",
+        [`cat-file -e ${SHA}:CLAUDE.md`]: after === null ? absent : "",
+        [`show ${BASE}:CLAUDE.md`]: before ?? new Error("must not read absent file"),
+        [`show ${SHA}:CLAUDE.md`]: after ?? new Error("must not read absent file"),
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        ok: true,
+        facts: { missionControlChanged: changed },
+      });
+      if (before === null) expect(gitCalls).not.toContainEqual(["show", `${BASE}:CLAUDE.md`]);
+      if (after === null) expect(gitCalls).not.toContainEqual(["show", `${SHA}:CLAUDE.md`]);
+    });
+
+    it.each(["cat-file", "show"])("holds on other %s read errors", async (command) => {
+      gitAnswers = {
+        "ls-remote": lsRemote(),
+        [HAVE_MAIN]: "",
+        [ANCESTOR]: "",
+        "merge-base": BASE,
+        "rev-list": "",
+        diff: "CLAUDE.md\0",
+        "cat-file": "",
+        show: "# Just prose",
+        [command]: Object.assign(new Error("object read failed"), { code: 128 }),
+      };
+      expect(await withArea().gateFacts(R, SHA)).toMatchObject({
+        ok: true,
+        facts: { missionControlChanged: true },
       });
     });
 
