@@ -1,0 +1,89 @@
+import type { OverviewSummary } from "@mc/core";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import { hub } from "../src/data.ts";
+import { KpiStrip } from "../src/overview/KpiStrip.tsx";
+import { setSession } from "../src/shell/session.ts";
+import { stubFetch } from "./fetchStub.ts";
+
+const kpis: OverviewSummary["kpis"] = {
+  working: { now: 3, of: 5, series: [1, 2, 3] },
+  tokensPerMin: { now: 41200, series: [100, 200, 300] },
+  spendToday: { usd: 24.31, perHour: [1, 2] },
+  inFlight: { count: 4, oldestAt: null },
+  mergedToday: { count: 6, perHour: [1, 2] },
+  ciPassRate24h: { pct: 92, runs: 10, redNow: 1 },
+  cycleTime: { medianMs: 4320000, n: 8, avg14dMs: 5400000 },
+  needsYou: { count: 2, overHour: 1 },
+};
+
+describe("KpiStrip", () => {
+  it("formats eight linked metrics and labels the available histories honestly", async () => {
+    stubFetch({ "/api/overview": { kpis } });
+    render(<KpiStrip />);
+    await screen.findByText("41.2k");
+    const labels = [
+      "Agents working",
+      "Tokens/min",
+      "Spend today",
+      "In flight",
+      "Merged today",
+      "CI pass rate",
+      "Cycle time",
+      "Needs you",
+    ];
+    const paths = [
+      "/agent",
+      "/telemetry",
+      "/telemetry",
+      "/board",
+      "/board",
+      "/board",
+      "/board",
+      "/comms",
+    ];
+    labels.forEach((label, i) => {
+      expect(screen.getByRole("link", { name: new RegExp(label) }).getAttribute("href")).toBe(
+        paths[i],
+      );
+    });
+    for (const text of ["$24.31", "1h 12m", "92%", "1 red now", "of 5 agents", "1 over an hour"])
+      expect(screen.getByText(text)).toBeTruthy();
+    expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(2);
+    expect(screen.getAllByRole("img", { name: /hourly today/ })).toHaveLength(2);
+  });
+
+  it("shows dashes for unavailable values, preserves zero and follows session and SSE changes", async () => {
+    let data = {
+      kpis: {
+        ...kpis,
+        ciPassRate24h: { pct: null, runs: 0, redNow: 0 },
+        cycleTime: { medianMs: null, n: 0, avg14dMs: null },
+        tokensPerMin: { now: 0, series: [] },
+      },
+    };
+    stubFetch({ "/api/overview?session=s1": () => ({ status: 200, body: data }) });
+    setSession("s1");
+    render(<KpiStrip />);
+    await screen.findByText("0 red now");
+    expect(
+      within(screen.getByRole("link", { name: /CI pass rate/ })).getAllByText("—").length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(screen.getByRole("link", { name: /Cycle time/ })).getAllByText("—").length,
+    ).toBeGreaterThan(0);
+    expect(within(screen.getByRole("link", { name: /Tokens\/min/ })).getByText("0")).toBeTruthy();
+    data = { ...data, kpis: { ...data.kpis, tokensPerMin: { now: 1000, series: [] } } };
+    act(() => hub.refetchTopic("agents"));
+    await screen.findByText("1.0k");
+  });
+
+  it("shows eight empty values when the endpoint is unavailable", async () => {
+    stubFetch({ "/api/overview": () => ({ status: 503, body: {} }) });
+    const { container } = render(<KpiStrip />);
+    await waitFor(() => expect(container.querySelectorAll(".overview-kpi .v")).toHaveLength(8));
+    expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
+      Array(8).fill("—"),
+    );
+  });
+});

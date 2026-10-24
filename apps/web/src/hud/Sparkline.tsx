@@ -9,10 +9,12 @@ export function Sparkline({
   values,
   color,
   max: sharedMax,
+  label = "tokens per minute",
 }: {
   values: number[];
   color: string;
   max?: number;
+  label?: string;
 }) {
   const n = values.length;
   if (n < 2) return null;
@@ -23,13 +25,7 @@ export function Sparkline({
     .map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`)
     .join("");
   return (
-    <svg
-      data-max={max}
-      className="spark"
-      viewBox={`0 0 ${W} ${H}`}
-      role="img"
-      aria-label="tokens per minute"
-    >
+    <svg data-max={max} className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
       <path d={`${line}L${W - 4},${H}L0,${H}Z`} fill={color} fillOpacity={0.18} />
       <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
       <circle cx={W - 4} cy={y(values[n - 1] ?? 0)} r={2.2} fill={color} />
