@@ -3,9 +3,9 @@ import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { rel } from "../fmt.ts";
 import { GithubRateRow } from "../hud/GithubRateRow.tsx";
-import { Meter } from "../hud/Meter.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { quotaWarnings, resetLabel, resetWhen, timeToFull } from "../quota.ts";
+import { quotaWarnings, resetWhen, timeToFull } from "../quota.ts";
+import { QuotaMeter } from "./QuotaMeter.tsx";
 
 const DASH = "—";
 
@@ -14,7 +14,7 @@ function title(row: LimitRow, now: number, tz: string | null): string {
   return [
     `${row.accountId} ${row.window}: ${Math.round(row.used)}% used`,
     timeToFull(row, now),
-    `resets ${tz ? resetLabel(row, tz) : DASH}`,
+    `resets ${tz ? resetWhen(row, now, tz) : DASH}`,
     row.stale ? "stale" : null,
   ]
     .filter((p) => p !== null)
@@ -34,26 +34,26 @@ export function QuotaPanel() {
   const cell = (account: string, window: "5h" | "7d") => {
     const row = rows.find((r) => r.accountId === account && r.window === window);
     return row ? (
-      <span className="quota-window" title={title(row, now, tz)}>
-        <Meter
-          label={window}
-          pct={row.used}
-          detail={` used · resets ${tz ? resetWhen(row, now, tz) : DASH}`}
-        />
+      <span title={title(row, now, tz)}>
+        <QuotaMeter row={row} now={now} showAge />
       </span>
     ) : (
-      <span className="quota-window">
-        <span className="meter">
-          <span className="track" />
-          <span className="num xs muted">{window}: none on this plan</span>
-        </span>
-      </span>
+      <QuotaMeter row={null} accountId={account} window={window} now={now} />
     );
   };
   const warnings = tz ? quotaWarnings(rows, now, tz) : [];
 
   return (
-    <Panel id="quotaP" title="Account quota" sub="5-hour and 7-day windows">
+    <Panel
+      id="quotaP"
+      title={
+        <span
+          title={`Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every ${config?.poll.usageMinutes ?? DASH} min.`}
+        >
+          Account quota
+        </span>
+      }
+    >
       <div className="pb">
         {accounts.map((a) => {
           const mine = rows.filter((r) => r.accountId === a);
@@ -63,11 +63,10 @@ export function QuotaPanel() {
               : null;
           return (
             <div className="quotarow" key={a}>
-              <span className="min0">
+              <span className="min0 quota-account" title={read ?? undefined}>
                 <span className="ellip" title={a}>
                   {a}
                 </span>
-                {read && <span className="xs muted block">{read}</span>}
               </span>
               {cell(a, "5h")}
               {cell(a, "7d")}
@@ -78,17 +77,16 @@ export function QuotaPanel() {
         {warnings.length > 0 && (
           <p className="s quotawarn">
             {warnings.map((w) => (
-              <span key={w.text} className={w.crit ? "crit-t block" : "block"}>
+              <span
+                key={w.text}
+                className={w.crit ? "crit-t ellip block" : "ellip block"}
+                title={w.text}
+              >
                 {w.text}
               </span>
             ))}
           </p>
         )}
-        <p className="note xs quotanote">
-          Claude quota comes from the usage endpoint and from rate-limit events in the loops'
-          transcripts; Codex from its app-server, or its latest session log when that is
-          unavailable. Read every {config?.poll.usageMinutes ?? DASH} min.
-        </p>
       </div>
     </Panel>
   );

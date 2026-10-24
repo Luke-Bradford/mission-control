@@ -2560,7 +2560,7 @@ describe("merge workspace", () => {
     expect(r.actions).toContainEqual({ kind: "delete-remote-branch", sha: SHA });
   });
 
-  it("a draft workspace's merged PR is unchanged", () => {
+  it("a draft workspace's merged PR emits a Done move that the server refuses", () => {
     const r = reconcile(merge({ autoMerge: false, pr: pr({ state: "merged" }) }));
     expect(after(r)).toEqual(["end-run", "take-next", "event:merged"]);
     expect(r.actions.filter((x) => x.kind === "move-card")).toEqual([

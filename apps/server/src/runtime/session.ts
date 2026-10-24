@@ -80,11 +80,20 @@ export interface SessionInput {
   stderrLineMax?: number;
 }
 
+export class SessionControlError extends Error {
+  readonly kind: "ended" | "timeout" | "refused";
+  constructor(kind: "ended" | "timeout" | "refused", message: string) {
+    super(message);
+    this.name = "SessionControlError";
+    this.kind = kind;
+  }
+}
+
 export interface CrewSession {
   /** Writes one user line; throws `session ended` once the process is gone or closing. */
   send(text: string): void;
-  /** Resolves with the response's `response`; rejects `control timeout` or `session ended`. */
-  control(subtype: ControlSubtype): Promise<unknown>;
+  /** Resolves with the response; rejects a typed SessionControlError. onSuccess runs before resolution. */
+  control(subtype: ControlSubtype, opts?: { onSuccess?: () => void }): Promise<unknown>;
   /**
    * Ends stdin; SIGTERM after the grace period, SIGKILL after a second one. Resolves with the exit
    * code (null when a signal ended it).
@@ -120,6 +129,7 @@ const STDOUT_LINE_MAX = 64 * 1024 * 1024;
 const STDERR_LINE_MAX = 64 * 1024;
 
 interface Pending {
+  onSuccess?: () => void;
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
   timer: NodeJS.Timeout;
@@ -236,7 +246,7 @@ function createDriver(i: {
     for (const [id, p] of pending) {
       clearTimeout(p.timer);
       pending.delete(id);
-      p.reject(new Error("session ended"));
+      p.reject(new SessionControlError("ended", "session ended"));
     }
   };
 
@@ -311,8 +321,16 @@ function createDriver(i: {
       if (id === null || p === undefined) return;
       pending.delete(id);
       clearTimeout(p.timer);
-      if (r.subtype === "success") p.resolve(r.response);
-      else p.reject(new Error(cleanText(str(r.error) ?? "control request failed", 200)));
+      if (r.subtype === "success") {
+        p.onSuccess?.();
+        p.resolve(r.response);
+      } else
+        p.reject(
+          new SessionControlError(
+            "refused",
+            cleanText(str(r.error) ?? "control request failed", 200),
+          ),
+        );
     }
   }
 
@@ -383,7 +401,7 @@ function createDriver(i: {
 
   const session: CrewSession = {
     send(text) {
-      if (!writable()) throw new Error("session ended");
+      if (!writable()) throw new SessionControlError("ended", "session ended");
       transmit({
         t: "in",
         line: JSON.stringify({ type: "user", message: { role: "user", content: text } }),
@@ -392,15 +410,15 @@ function createDriver(i: {
       // The activity that follows a user line starts a turn, even mid-turn.
       inTurn = false;
     },
-    control(subtype) {
-      if (!writable()) return Promise.reject(new Error("session ended"));
+    control(subtype, opts) {
+      if (!writable()) return Promise.reject(new SessionControlError("ended", "session ended"));
       const id = randomUUID();
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
-          reject(new Error("control timeout"));
+          reject(new SessionControlError("timeout", "control timeout"));
         }, i.controlTimeoutMs);
-        pending.set(id, { resolve, reject, timer });
+        pending.set(id, { resolve, reject, timer, onSuccess: opts?.onSuccess });
         transmit({
           t: "in",
           line: JSON.stringify({

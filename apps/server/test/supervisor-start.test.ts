@@ -13,6 +13,7 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, relative } from "node:path";
@@ -590,6 +591,34 @@ describe("startRun", () => {
     expect(text).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule: keep tests green.\n`);
   });
 
+  it("indexes repo references and leaves them readable without loading repo hooks", async () => {
+    const { sup } = make();
+    mkdirSync(join(clone, ".claude/skills/gates"), { recursive: true });
+    const skill = "---\nname: gates\ndescription: Check the work.\n---\nRun the checks.";
+    writeFileSync(join(clone, ".claude/skills/gates/SKILL.md"), skill);
+    git(clone, "add", ".claude");
+    git(clone, "commit", "-qm", "Add reference");
+    git(join(dir, "origin.git"), "fetch", clone, "main:main");
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const cwd = recorded()[0].cwd as string;
+    const allowed = argv.slice(
+      argv.indexOf("--allowedTools") + 1,
+      argv.indexOf("--disallowedTools"),
+    );
+    expect(allowed).toContain("Read");
+    expect(readFileSync(join(cwd, ".claude/skills/gates/SKILL.md"), "utf8")).toBe(skill);
+    expect(argv).toContain("--restricted");
+    expect(argv).toContain("--disable-slash-commands");
+    expect(argv).toContain(`Edit(/${cwd}/.claude/**)`);
+    expect(argv).toContain(`Write(/${cwd}/.claude/**)`);
+    expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).toContain(
+      'gates — Check the work. (".claude/skills/gates/SKILL.md")',
+    );
+  });
+
   it("never follows a symlinked CLAUDE.md a seat left in its worktree", async () => {
     const { sup } = make();
     sup.start();
@@ -731,6 +760,32 @@ describe("startRun", () => {
       main,
       join(dir, "shop-app-loop", "var"),
     ]);
+  });
+
+  it("denies a bare loop repo and its worktree, without denying the repo's parent", () => {
+    const cfg = config();
+    const parent = join(dir, "bare");
+    const bare = join(parent, "shop-app.git");
+    const worktree = join(dir, "shop-app-loop");
+    mkdirSync(parent);
+    git(dir, "init", "-q", "--bare", "-b", "main", bare);
+    git(clone, "push", "-q", bare, "HEAD:main");
+    git(bare, "worktree", "add", "-q", "-b", "loop", worktree);
+    cfg.loops = [
+      {
+        id: "ta",
+        repoId: "mc",
+        kind: "ta-loop",
+        accountId: "claude-main",
+        stateDir: join(worktree, "var"),
+        worktree,
+        launchdLabel: "com.example.ta",
+      },
+    ];
+    const denied = seatDenyRead(cfg, join(dir, "hub"), "mc-crew");
+    expect(denied).toContain(realpathSync(worktree));
+    expect(denied).toContain(realpathSync(bare));
+    expect(denied).not.toContain(realpathSync(parent));
   });
 
   it("denies a loop repo's main working tree (`<repo>/.git` common dir), never the seat's own folders", () => {
@@ -1432,6 +1487,50 @@ describe("the crew lock", () => {
     expect(e.message).toBe(note);
     await sup.stopAll();
     expect(readFileSync(join(root, CREW_LOCK_FILE), "utf8").trim()).toBe(String(process.ppid));
+  });
+
+  it.each([
+    [
+      "throws",
+      (): never => {
+        throw new Error("lookup failed");
+      },
+      false,
+    ],
+    ["missing", (): null => null, false],
+    ["within margin", () => ({ startedAt: 60_000, command: "node worker.js" }), false],
+    ["after margin", () => ({ startedAt: 60_001, command: "node worker.js" }), true],
+    ["hub", () => ({ startedAt: 60_001, command: "node apps/server/src/main.ts" }), false],
+    ["nonfinite", () => ({ startedAt: Infinity, command: "node worker.js" }), false],
+  ] as const)("checks lock reuse: %s", async (_name, processStart, taken) => {
+    mkdirSync(root, { recursive: true });
+    const path = join(root, CREW_LOCK_FILE);
+    writeFileSync(path, `${process.ppid}\n`);
+    utimesSync(path, new Date(0), new Date(0));
+    const { sup } = make({ processStart });
+    sup.start();
+    expect(sup.status().enabled).toBe(taken);
+    expect(readFileSync(path, "utf8")).toBe(`${taken ? process.pid : process.ppid}\n`);
+    await sup.stopAll();
+    expect(existsSync(path)).toBe(!taken);
+  });
+
+  it("keeps a lock replaced during the process lookup", async () => {
+    mkdirSync(root, { recursive: true });
+    const path = join(root, CREW_LOCK_FILE);
+    writeFileSync(path, `${process.ppid}\n`);
+    utimesSync(path, new Date(0), new Date(0));
+    const { sup } = make({
+      processStart: () => {
+        unlinkSync(path);
+        writeFileSync(path, `${process.ppid}\n`);
+        return { startedAt: 60_001, command: "node worker.js" };
+      },
+    });
+    sup.start();
+    expect(sup.status().enabled).toBe(false);
+    await sup.stopAll();
+    expect(readFileSync(path, "utf8")).toBe(`${process.ppid}\n`);
   });
 
   it("treats a lock holding this process's own pid as stale (a previous run, the pid reused)", () => {

@@ -261,7 +261,9 @@ function make(
     rules?: SupervisorDeps["rules"];
     login?: string | null;
     profiles?: SupervisorDeps["profiles"];
+    processStart?: SupervisorDeps["processStart"];
     controlTimeoutMs?: number;
+    now?: () => number;
   } = {},
 ) {
   const fetchTicket = vi.fn(over.fetchTicket ?? anyTicket);
@@ -309,7 +311,9 @@ function make(
     cliVersion: over.cliVersion ?? (async () => null),
     enabled: over.enabled ?? true,
     stopGraceMs: 300,
+    processStart: over.processStart,
     controlTimeoutMs: over.controlTimeoutMs ?? 500,
+    now: over.now,
     log,
     tokens,
     lock,

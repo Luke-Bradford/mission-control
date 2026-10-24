@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PullRequestView, Run } from "@mc/core";
+import type { PullRequestView, Run, RunPlan } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { runPrs, runTicket } from "../src/runview.ts";
+import { runPrs, runTicket, runView } from "../src/runview.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;
@@ -156,5 +156,47 @@ it("serves full recorded usage with model, turns and duration", async () => {
     model: "model-a",
     turns: 1,
     durationMs: 1000,
+  });
+});
+
+describe("run plan", () => {
+  it.each([
+    { by: "fao-1", at: 100, ref: "shop-app#42" },
+    { by: null, at: null, ref: "shop-app#42" },
+    { skipped: "Size S" },
+  ] satisfies RunPlan[])("persists and serves %j unchanged after a fold", (plan) => {
+    store.upsertRun(run({ plan }));
+    store.upsertRun(run({ status: "failed" }), true);
+    const stored = store.run("r1");
+    expect(stored).not.toBeNull();
+    if (stored === null) throw new Error("missing run");
+    expect(stored.plan).toEqual(plan);
+    expect(runView(config, store, stored, new Map()).plan).toEqual(plan);
+  });
+
+  it("keeps older runs without a plan fact", () => {
+    store.upsertRun(run());
+    const stored = store.run("r1");
+    if (stored === null) throw new Error("missing run");
+    expect(runView(config, store, stored, new Map())).not.toHaveProperty("plan");
+  });
+
+  it("uses the latest report for the same repo and ticket, not other loop events", () => {
+    expect(store.ticketPlan("shop-app", "shop-app#42")).toBeNull();
+    for (const [id, agentId, repoId, ticket, at, kind] of [
+      ["old", "fao-1", "shop-app", "shop-app#42", 100, "plan"],
+      ["new", "fao-2", "shop-app", "shop-app#42", 200, "plan"],
+      ["other-ticket", "fao-3", "shop-app", "shop-app#43", 300, "plan"],
+      ["other-repo", "fao-4", "site-builder", "shop-app#42", 400, "plan"],
+      ["build", "guido-1", "shop-app", "shop-app#42", 500, "build"],
+    ] as const) {
+      store.upsertRun(run({ id, agentId, repoId, ticket }));
+      store.addLoopEvent(`${id}:${kind}`, id, "Reported", at);
+    }
+    expect(store.ticketPlan("shop-app", "shop-app#42")).toEqual({
+      by: "fao-2",
+      at: 200,
+      ref: "shop-app#42",
+    });
   });
 });

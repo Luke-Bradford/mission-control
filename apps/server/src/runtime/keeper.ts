@@ -109,6 +109,8 @@ export interface KeeperExit {
   signal: string | null;
   at: number;
   lastStderr: string | null;
+  lastStderrAt: number | null;
+  endReason: string | null;
 }
 
 /** The keeper's first line to a client. Its shape is frozen. */
@@ -221,7 +223,17 @@ export function readKeeperExit(dir: string): KeeperExit | null {
     const signal = typeof r.signal === "string" ? r.signal : null;
     const at = typeof r.at === "number" ? r.at : 0;
     const lastStderr = typeof r.lastStderr === "string" ? r.lastStderr : null;
-    return { code, signal, at, lastStderr };
+    return {
+      code,
+      signal,
+      at,
+      lastStderr,
+      lastStderrAt:
+        typeof r.lastStderrAt === "number" && Number.isFinite(r.lastStderrAt)
+          ? r.lastStderrAt
+          : null,
+      endReason: typeof r.endReason === "string" ? r.endReason : null,
+    };
   } catch {
     return null;
   }
@@ -364,10 +376,18 @@ export function runKeeper(
     resolveDone = r;
   });
   let lastStderr: string | null = null;
-  /** Why the keeper ended the CLI itself (the hub-absent limit): it outranks the CLI's last stderr line. */
+  let lastStderrAt: number | null = null;
+  /** The keeper's own failure or termination reason; it outranks the CLI's last stderr line. */
   let endReason: string | null = null;
   const writeExit = (code: number | null, signal: string | null) => {
-    const exit: KeeperExit = { code, signal, at: Date.now(), lastStderr: endReason ?? lastStderr };
+    const exit: KeeperExit = {
+      code,
+      signal,
+      at: Date.now(),
+      lastStderr: endReason ?? lastStderr,
+      lastStderrAt,
+      endReason,
+    };
     try {
       secret(KEEPER_EXIT_FILE, JSON.stringify(exit));
     } catch (e) {
@@ -379,7 +399,7 @@ export function runKeeper(
   const hubSecret =
     typeof spec.secret === "string" && SECRET_FORMAT.test(spec.secret) ? spec.secret : null;
   if (hubSecret === null) {
-    lastStderr = NO_SECRET_TEXT;
+    endReason = NO_SECRET_TEXT;
     writeExit(null, null);
     resolveDone();
     return { done, terminate: () => {} };
@@ -399,7 +419,7 @@ export function runKeeper(
     });
   } catch (e) {
     if (fd >= 0) closeSync(fd);
-    lastStderr = `could not start the CLI: ${(e as Error).message}`;
+    endReason = `could not start the CLI: ${(e as Error).message}`;
     writeExit(null, null);
     resolveDone();
     return { done, terminate: () => {} };
@@ -407,7 +427,7 @@ export function runKeeper(
   if (child.pid === undefined) {
     // a missing command or folder arrives as an 'error' event
     child.on("error", (e) => {
-      lastStderr = `could not start the CLI: ${e.message}`;
+      endReason = `could not start the CLI: ${e.message}`;
       closeSync(fd);
       writeExit(null, null);
       resolveDone();
@@ -578,7 +598,10 @@ export function runKeeper(
   });
 
   const stderrLine = (line: string) => {
-    if (line.trim() !== "") lastStderr = line.trim();
+    if (line.trim() !== "") {
+      lastStderr = line.trim();
+      lastStderrAt = Date.now();
+    }
     err(line);
   };
   stderr.setEncoding("utf8");
@@ -719,7 +742,7 @@ export function runKeeper(
   server.on("error", (e) => {
     // a keeper nobody can reach must not leave a CLI running: end it, and say why in exit.json
     process.stderr.write(`keeper socket: ${e.message}\n`);
-    lastStderr = `the keeper could not listen: ${e.message}`;
+    endReason = `the keeper could not listen: ${e.message}`;
     terminate();
   });
   const socketPath = join(dir, KEEPER_SOCKET);

@@ -756,6 +756,23 @@ export const SANDBOX_DENY_READ_HOME = [
   ".docker",
   ".kube",
   ".claude",
+  // the Claude CLI's account and MCP config, a sibling of .claude that the entry above misses
+  ".claude.json",
+  // the Codex CLI's login (auth.json) and its session transcripts
+  ".codex",
+  // other CLIs' logins and tokens a dev machine commonly holds
+  ".config/gcloud",
+  ".azure",
+  ".config/op",
+  ".pypirc",
+  ".cargo/credentials.toml",
+  ".gem/credentials",
+  ".vault-token",
+  ".terraform.d",
+  ".copilot",
+  // shell history often holds pasted secrets
+  ".zsh_history",
+  ".bash_history",
   // the login keychain: without this, code a seat runs sees it in `security list-keychains` and
   // opens it; with it, opening fails EPERM and only the System keychain is listed (probe
   // 2026-10-20; no real item was read). The CLI's own login runs outside the sandbox.

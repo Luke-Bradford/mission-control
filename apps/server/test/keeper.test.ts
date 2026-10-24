@@ -340,6 +340,8 @@ describe("the keeper", () => {
       signal: null,
       at: expect.any(Number),
       lastStderr: "last words",
+      lastStderrAt: expect.any(Number),
+      endReason: null,
     });
     expect(existsSync(join(folder, KEEPER_SOCKET))).toBe(false);
   });
@@ -466,6 +468,8 @@ describe("the hub-absent limit", () => {
       signal: "SIGTERM",
       at: expect.any(Number),
       lastStderr: HUB_ABSENT_TEXT,
+      lastStderrAt: null,
+      endReason: HUB_ABSENT_TEXT,
     });
 
     const folder = folderFor(stays, { hubAbsentMs: 200 });
@@ -479,6 +483,8 @@ describe("the hub-absent limit", () => {
     expect(readKeeperExit(folder)).toMatchObject({
       signal: "SIGTERM",
       lastStderr: HUB_ABSENT_TEXT,
+      lastStderrAt: null,
+      endReason: HUB_ABSENT_TEXT,
     });
   });
 });

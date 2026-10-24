@@ -56,7 +56,7 @@ describe("crewOrder", () => {
       crewRow({ id: "f", index: 5, hudState: "stalled" }),
     ];
     const items: AttentionItem[] = [item({ key: "esc:x", agentId: "d", ticket: null })];
-    expect(ids(crewOrder(rows, items))).toEqual(["d", "c", "f", "b", "a", "e"]);
+    expect(ids(crewOrder(rows, items))).toEqual(["d", "b", "c", "f", "a", "e"]);
   });
 
   it("does not reorder or mutate its input", () => {

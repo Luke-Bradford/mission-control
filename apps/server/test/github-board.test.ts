@@ -136,6 +136,22 @@ const move = (gql: Gql, over: Partial<Parameters<typeof moveCard>[1]> = {}) =>
   );
 
 describe("moveCard", () => {
+  it("resolves Done to its Status option for a merge repo and sends nothing for a draft repo", async () => {
+    const b = fakeBoard();
+    expect(await move(b.gql, { column: "Done" })).toEqual({ ok: true, changed: true });
+    expect(b.mutations()).toHaveLength(1);
+    expect(sentOption(b.mutations()[0])).toBe("O_done");
+    expect(b.state.card).toBe("O_done");
+
+    const draft = fakeBoard();
+    expect(await move(draft.gql, { repoId: "dr", column: "Done" })).toEqual({
+      ok: true,
+      changed: false,
+    });
+    expect(draft.calls).toEqual([]);
+    expect(store.boardMovesOfRun("r1").filter((m) => m.repoId === "dr")).toEqual([]);
+  });
+
   it("sends one mutation with the fixture ids and records a done row", async () => {
     const b = fakeBoard();
     expect(await move(b.gql)).toEqual({ ok: true, changed: true });

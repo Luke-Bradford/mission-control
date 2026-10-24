@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { flightTurnShort, flightTurnText, wakeKey, wakeKeyPrefix } from "../src/flight.ts";
+import {
+  flightTurnShort,
+  flightTurnText,
+  PLAN_SIZES,
+  wakeKey,
+  wakeKeyPrefix,
+} from "../src/flight.ts";
+import { TICKET_SIZES } from "../src/hud.ts";
+
+it("keeps plan sizes within the ticket sizes", () => {
+  // The declaration's `satisfies` fails the build on a typo; this checks the values too.
+  expect(PLAN_SIZES.every((s) => (TICKET_SIZES as readonly string[]).includes(s))).toBe(true);
+  expect(PLAN_SIZES).toEqual(["M", "L", "XL"]);
+});
 
 describe("flight turn texts", () => {
   it("keeps the wake key", () => {
