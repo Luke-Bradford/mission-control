@@ -170,7 +170,8 @@ describe("GUARD_RULES", () => {
     expect(GUARD_RULES["flight-powers"]).toBe(
       "Only repos with flight_powers: superuser may use these tools",
     );
-    expect(Object.keys(GUARD_RULES)).toHaveLength(8);
+    expect(GUARD_RULES["codex-allowlist"]).toContain("allowed commands or files");
+    expect(Object.keys(GUARD_RULES)).toHaveLength(9);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });

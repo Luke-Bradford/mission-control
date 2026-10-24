@@ -39,6 +39,10 @@ import { basename, dirname, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
+  CANNOT_START,
+  CODEX_COMMAND,
+  CODEX_SEAT_TOKEN_ENV,
+  CODEX_SHELL,
   type ContextUsage,
   CREW_CLI_ENV,
   CREW_DISABLED,
@@ -63,6 +67,7 @@ import {
   inferTicket,
   LOOPBACK_HOST,
   MCP_PATH,
+  type McToolName,
   mainConflictText,
   mergedMainText,
   modeOfSeat,
@@ -158,6 +163,10 @@ import {
   syncReusedWorktree,
   writeReviewInputs,
 } from "./checkouts.ts";
+import { createCodexApprover } from "./codex-approval.ts";
+import { codexSeatConfig } from "./codex-floor.ts";
+import { startCodexSession } from "./codex-session.ts";
+import { probeCodexVersion } from "./codex-version.ts";
 import {
   endKeeper,
   KEEPER_ENTRY,
@@ -195,7 +204,6 @@ const STDERR_RECENT_MS = 10_000;
 const LOCK_REUSE_MARGIN_MS = 60_000;
 const LAST_TURN_ERROR = "last turn ended in an error";
 const SHUTTING_DOWN = "the server is shutting down";
-const CANNOT_START = "could not start the CLI";
 const RESUMED = "resumed after a restart; send a message to continue";
 const RESUME_FAILED = "could not resume the session";
 /** How long `stopAll` waits for a Stop's `close` line to reach its keeper's socket. */
@@ -339,6 +347,10 @@ export interface SupervisorDeps {
   command?: string;
   /** Put before the CLI's own arguments. */
   commandArgs?: string[];
+  /** Default "codex"; its version and app-server are run through the same binary. */
+  codexCommand?: string;
+  superuserTools?: readonly McToolName[];
+  seatGrants?: (seatId: string) => readonly string[];
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Assigns the hub's own login to the issue, when a run starts on it (any repo, `merge` or `draft`). */
   claim?: (repo: CcConfig["repos"][number], n: number) => Promise<void>;
@@ -658,7 +670,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * The run's `cliVersion` field: the version it starts on, else nothing. Called just before the
    * run is created, so it also refuses a start the hold caught during the checkout or the read.
    */
-  async function startedOn(): Promise<{ cliVersion?: string }> {
+  const isCodex = (info: SeatInfo) =>
+    config.accounts.find((a) => a.id === info.seat.accountId)?.vendor === "codex";
+
+  async function startedOn(info: SeatInfo): Promise<{ cliVersion?: string }> {
+    if (isCodex(info)) return {};
     refuseWhileHeld();
     let v: string | null = null;
     try {
@@ -785,7 +801,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
-  function onExit(l: Live, e: { code: number | null; signal: string | null }): void {
+  function onExit(
+    l: Live,
+    e: { code: number | null; signal: string | null; reason?: string },
+  ): void {
     const seatId = l.info.seat.id;
     if (live.get(seatId) === l) live.delete(seatId);
     if (stopping && l.ending === null) {
@@ -844,13 +863,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const reason = failedResume
         ? `${RESUME_FAILED}: ${said ?? why}`
         : `${why}${said === null ? "" : `: ${said}`}`;
-      setSeat(seatId, { state: "error", reason });
+      setSeat(seatId, { state: "error", reason: e.reason ?? reason });
     }
     emit({ kind: "run-ended", seatId, runId: l.run.id, endedBy: l.endedBy ?? "exit" });
   }
 
   function onEvent(l: Live, e: SessionEvent): void {
     switch (e.kind) {
+      case "init":
+        if (isCodex(l.info)) {
+          l.run = { ...l.run, sessionId: e.sessionId };
+          store.upsertRun(l.run);
+          setSeat(l.info.seat.id, { cliSessionId: e.sessionId });
+        }
+        break;
+      case "turn-refused":
+        if (!e.active) {
+          l.inTurn = false;
+          setState(l, "idle", LAST_TURN_ERROR);
+        }
+        break;
       case "turn-start":
         l.inTurn = true;
         if (!l.parkedTurn) setState(l, "running", null);
@@ -1076,6 +1108,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * be built (before any token exists) or the spawn itself throws (after undoing the token and
    * files).
    */
+  async function checkedLaunch(...args: Parameters<typeof launch>): Promise<Live> {
+    const [info, run] = args;
+    if (isCodex(info)) {
+      const cliVersion = await probeCodexVersion(deps.codexCommand ?? CODEX_COMMAND);
+      if (stopping) throw new Error(SHUTTING_DOWN);
+      args[1] = { ...run, cliVersion };
+      store.upsertRun(args[1]);
+    }
+    return launch(...args);
+  }
+
   function launch(
     info: SeatInfo,
     run: Run,
@@ -1143,43 +1186,120 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               }),
             ]
           : [];
-      const args = crewCliArgs({
-        commands: info.repo.commands,
-        protectedFiles: info.repo.protectedFiles,
-        model: run.reviewId != null && run.model !== null ? run.model : info.seat.model,
-        effort: info.seat.effort,
-        mode: def.mode,
-        mcTools: def.mcTools,
-        rolePromptFile: promptPath,
-        sessionId: cliSessionId,
-        resume,
-        area: info.seat.area,
-        sandbox: {
-          cwd,
-          gitCommonDir: realpathSync(join(info.session.checkout, ".git")),
-          worktreeGitDir: realpathSync(checkout.gitDir),
-          home: homedir(),
-          dataDir: realpathSync(dirname(deps.dbPath)),
-          denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
-        },
-        mcpConfigFile: mcpPath,
-        hook: { command: hookCommand, timeoutS: GUARD_HOOK_TIMEOUT_S },
-      });
-      session = startSession({
-        command: deps.command,
-        args: [...(deps.commandArgs ?? []), ...args],
+      const sandbox = {
         cwd,
-        transcriptPath: run.transcriptPath,
-        env: crewEnv(info.seat.id),
-        node: crew?.node ?? DEFAULT_CREW_NODE,
-        entry: join(deps.hubRoot, KEEPER_ENTRY),
-        dir: crewKeeperDir(deps.dbPath, run.id),
-        spawn: keeperSpawn,
-        cliSessionId,
-        log,
-        controlTimeoutMs: deps.controlTimeoutMs,
-        stopGraceMs: deps.stopGraceMs,
-      });
+        gitCommonDir: realpathSync(join(info.session.checkout, ".git")),
+        worktreeGitDir: realpathSync(checkout.gitDir),
+        home: homedir(),
+        dataDir: realpathSync(dirname(deps.dbPath)),
+        denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+      };
+      if (isCodex(info)) {
+        const command = deps.codexCommand ?? CODEX_COMMAND;
+        const dir = crewKeeperDir(deps.dbPath, run.id);
+        const home = join(dir, "codex-home");
+        const zdotdir = join(dir, "zsh-empty");
+        const tmpPath = codexTmp(run.id);
+        mkdirSync(tmpPath, { recursive: true, mode: 0o700 });
+        const tmp = realpathSync(tmpPath);
+        const env = Object.fromEntries(
+          Object.entries(crewEnv(info.seat.id)).filter(
+            (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
+          ),
+        );
+        Object.assign(env, {
+          CODEX_HOME: home,
+          [CODEX_SEAT_TOKEN_ENV]: token,
+          SHELL: CODEX_SHELL,
+          ZDOTDIR: zdotdir,
+          TMPDIR: tmp,
+          [PNPM_STORE_ENV]: join(tmp, "pnpm-store"),
+          UV_CACHE_DIR: join(tmp, "uv-cache"),
+          PYTHONPYCACHEPREFIX: join(tmp, "pycache"),
+          RUFF_CACHE_DIR: join(tmp, "ruff-cache"),
+          MYPY_CACHE_DIR: join(tmp, "mypy-cache"),
+          COVERAGE_FILE: join(tmp, ".coverage"),
+        });
+        const marker = `mc_run="${run.id}"`;
+        session = startCodexSession({
+          command,
+          args: ["app-server", "-c", marker],
+          cwd,
+          env,
+          transcriptPath: run.transcriptPath,
+          node: crew?.node ?? DEFAULT_CREW_NODE,
+          entry: join(deps.hubRoot, KEEPER_ENTRY),
+          dir,
+          spawn: keeperSpawn,
+          marker,
+          model: run.reviewId != null && run.model !== null ? run.model : info.seat.model,
+          effort: info.seat.effort ?? null,
+          developerInstructions: readFileSync(promptPath, "utf8"),
+          resumeThreadId: resume ? cliSessionId : null,
+          approve: createCodexApprover({
+            config,
+            repoId: info.repo.id,
+            seatId: info.seat.id,
+            runId: run.id,
+            mode: def.mode,
+            area: info.seat.area,
+            cwd,
+            lock: deps.lock,
+            superuserTools: deps.superuserTools,
+            seatGrants: deps.seatGrants,
+            record: (rule, text) => {
+              store.addGuardHit({ agentId: info.seat.id, runId: run.id, rule, text, at: now() });
+              bus.emit("guard");
+            },
+          }),
+          log,
+          controlTimeoutMs: deps.controlTimeoutMs,
+          stopGraceMs: deps.stopGraceMs,
+          prepare: () => {
+            mkdirSync(home, { mode: 0o700 });
+            mkdirSync(zdotdir, { mode: 0o700 });
+            writePrivate(
+              join(home, "config.toml"),
+              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp),
+            );
+            writePrivate(
+              join(home, "auth.json"),
+              readFileSync(join(homedir(), ".codex", "auth.json"), "utf8"),
+            );
+          },
+        });
+      } else {
+        const args = crewCliArgs({
+          commands: info.repo.commands,
+          protectedFiles: info.repo.protectedFiles,
+          model: run.reviewId != null && run.model !== null ? run.model : info.seat.model,
+          effort: info.seat.effort,
+          mode: def.mode,
+          mcTools: def.mcTools,
+          rolePromptFile: promptPath,
+          sessionId: cliSessionId,
+          resume,
+          area: info.seat.area,
+          sandbox,
+          mcpConfigFile: mcpPath,
+          hook: { command: hookCommand, timeoutS: GUARD_HOOK_TIMEOUT_S },
+        });
+        session = startSession({
+          command: deps.command,
+          args: [...(deps.commandArgs ?? []), ...args],
+          cwd,
+          transcriptPath: run.transcriptPath,
+          env: crewEnv(info.seat.id),
+          node: crew?.node ?? DEFAULT_CREW_NODE,
+          entry: join(deps.hubRoot, KEEPER_ENTRY),
+          dir: crewKeeperDir(deps.dbPath, run.id),
+          spawn: keeperSpawn,
+          cliSessionId,
+          log,
+          controlTimeoutMs: deps.controlTimeoutMs,
+          stopGraceMs: deps.stopGraceMs,
+        });
+      }
     } catch (e) {
       release();
       throw e;
@@ -1196,6 +1316,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
     }
     return l;
+  }
+
+  function codexTmp(runId: string): string {
+    const uid = process.getuid?.();
+    if (uid === undefined) throw new Error("Codex seats require a sandbox temp root");
+    return join(crewSandboxTmp(uid), "mc-codex", runId);
   }
 
   /**
@@ -1217,6 +1343,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           rmSync(p, { force: true });
         } catch (e) {
           log(`${info.seat.id}: could not remove ${p}: ${errText(e)}`);
+        }
+      }
+      if (isCodex(info)) {
+        try {
+          rmSync(codexTmp(run.id), { recursive: true, force: true });
+        } catch (e) {
+          log(`${info.seat.id}: could not remove Codex temp files: ${errText(e)}`);
         }
       }
       removeKeeper(info.seat.id, run.id);
@@ -1752,7 +1885,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       // A spawn that fails asynchronously, or a CLI that cannot find the session, exits inside
       // the resume window: the exit handler records it.
-      l = launch(info, run, row.cliSessionId, checkout, true, null);
+      l = await checkedLaunch(info, run, row.cliSessionId, checkout, true, null);
     } catch (e) {
       log(`${row.seatId}: could not start: ${errText(e)}`);
       return failResume(row, `${RESUME_FAILED}: ${CANNOT_START}`);
@@ -1924,7 +2057,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
-      const on = await startedOn();
+      const on = await startedOn(info);
       const startedAt = now();
       const last = store.runs(seatId, 1)[0];
       const seq = (last?.seq ?? 0) + 1;
@@ -2013,7 +2146,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       let l: Live;
       try {
-        l = launch(info, run, cliSessionId, checkout, false, claudeMd);
+        l = await checkedLaunch(info, run, cliSessionId, checkout, false, claudeMd);
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
@@ -2103,7 +2236,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
-      const on = await startedOn();
+      const on = await startedOn(info);
       const startedAt = now();
       const last = store.runs(seatId, 1)[0];
       const seq = (last?.seq ?? 0) + 1;
@@ -2132,7 +2265,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       let l: Live;
       try {
-        l = launch(
+        l = await checkedLaunch(
           info,
           run,
           cliSessionId,
@@ -2269,7 +2402,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(409, SHUTTING_DOWN);
       }
 
-      const on = await startedOn();
+      const on = await startedOn(info);
       const startedAt = now();
       const seq = (store.runs(seatId, 1)[0]?.seq ?? 0) + 1;
       let runId = `${seatId}:${compactUtc(startedAt)}`;
@@ -2299,7 +2432,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       let l: Live;
       try {
-        l = launch(
+        l = await checkedLaunch(
           info,
           run,
           cliSessionId,
@@ -2589,7 +2722,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.setSeatTurnEnded(seatId, null);
       let l: Live;
       try {
-        l = launch(info, run, run.sessionId, checkout, true, null);
+        l = await checkedLaunch(info, run, run.sessionId, checkout, true, null);
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         return fail(CANNOT_START, e);

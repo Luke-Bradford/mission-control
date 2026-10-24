@@ -9,6 +9,7 @@ import {
   codexEditAllowed,
   codexReadAllowed,
   codexSeatConfig,
+  codexVersionAllowed,
 } from "../src/runtime/codex-floor.ts";
 
 const sandboxInput: CrewSandboxInput = {
@@ -32,7 +33,7 @@ describe("codexSeatConfig", () => {
     // Config permits extra keys; features.unified_exec is listed but false does not take effect
     // on 0.154.0. Keep the harmless key; refusing & and declining writeStdin enforce the floor.
     expect(config).toContain('web_search = "disabled"');
-    expect(config).toContain("[features]\nunified_exec = false");
+    expect(config).toContain("[features]\nunified_exec = false\nshell_snapshot = false");
     expect(config).toContain('[shell_environment_policy]\nexclude = ["MC_SEAT_TOKEN"]');
     expect(config).toContain(`[mcp_servers.mc]\nurl = "${url}"`);
     expect(config).toContain('bearer_token_env_var = "MC_SEAT_TOKEN"');
@@ -490,5 +491,23 @@ describe("Codex seat floor", () => {
     expect(codexEditAllowed(path, alias, ["apps/web/**"], [])).toBe(true);
     expect(codexEditAllowed(path, alias, ["other/**"], [])).toBe(false);
     expect(codexEditAllowed(path, alias, [], ["apps/web/a.ts"])).toBe(false);
+  });
+});
+
+describe("Codex version floor", () => {
+  it.each(["codex-cli 0.154.0", "codex-cli 0.154.1\n", "codex-cli 0.155.0", "codex-cli 1.0.0"])(
+    "accepts %s",
+    (version) => {
+      expect(codexVersionAllowed(version)).toBe(true);
+    },
+  );
+  it.each([
+    "",
+    "0.154.0",
+    "codex-cli 0.153.9",
+    "codex-cli 0.154.0-alpha",
+    "codex-cli 0.154.0 extra",
+  ])("refuses %s", (version) => {
+    expect(codexVersionAllowed(version)).toBe(false);
   });
 });

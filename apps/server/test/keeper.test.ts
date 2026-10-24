@@ -583,3 +583,91 @@ describe("endKeeper", () => {
     expect(() => process.kill(cliPid, 0)).toThrow();
   });
 });
+
+describe("Codex keeper turns and old specs", () => {
+  it("identifies a Codex process by its marker instead of cliSessionId", async () => {
+    const marker = 'mc_run="run-identity"';
+    const folder = folderFor("setInterval(() => {}, 1000);", {
+      turnEnd: "codex",
+      marker,
+      cliSessionId: "not-in-argv",
+    });
+    const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+    spec.args.push(marker);
+    writeFileSync(join(folder, KEEPER_SPEC_FILE), JSON.stringify(spec));
+    const k = keep(folder);
+    await until(() => expect(readPidFile(folder, "cli.pid")).not.toBeNull());
+    expect(await endKeeper(folder, 500)).toBe(true);
+    await k.done;
+    expect(readKeeperExit(folder)?.signal).toBe("SIGTERM");
+  });
+
+  it("attaches an old spec with Claude defaults", async () => {
+    const folder =
+      folderFor(`require("node:readline").createInterface({ input: process.stdin }).on("line", () => {
+      console.log(JSON.stringify({ type: "result" }));
+    });`);
+    const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+    expect(spec.turnEnd).toBeUndefined();
+    expect(spec.marker).toBeUndefined();
+    const k = keep(folder);
+    const a = await client(folder);
+    a.say({ t: "hello", from: 0 });
+    a.say({ t: "in", line: "hello", user: true });
+    await until(() => expect(a.outs()).toHaveLength(1));
+    const b = await client(folder);
+    expect(b.msgs[0]).toMatchObject({ awaiting: false });
+    b.say({ t: "hello", from: 1 });
+    b.say({ t: "close", graceMs: 100 });
+    await k.done;
+  });
+
+  it.each(["result", "error"])(
+    "only a parsed turn completion or matching error ends awaiting: %s",
+    async (ending) => {
+      const marker = 'mc_run="run-1"';
+      const folder = folderFor(
+        `require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+      const message = JSON.parse(line);
+      if (message.method === "turn/start") console.log(JSON.stringify({ id: message.id, result: {} }));
+      else if (message.method === "finish") console.log(JSON.stringify(message.output));
+      else console.log("ack");
+    });`,
+        { turnEnd: "codex", marker, cliSessionId: "not-the-marker" },
+      );
+      // Identity uses the marker even though cliSessionId is different.
+      const spec = JSON.parse(readFileSync(join(folder, KEEPER_SPEC_FILE), "utf8"));
+      spec.args.push(marker);
+      writeFileSync(join(folder, KEEPER_SPEC_FILE), JSON.stringify(spec));
+      const k = keep(folder);
+      let c = await client(folder);
+      c.say({ t: "hello", from: 0 });
+      c.say({ t: "in", line: JSON.stringify({ id: 1, method: "initialize" }), user: true });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: false });
+      c.say({ t: "hello", from: 1 });
+      c.say({ t: "in", line: JSON.stringify({ id: 2, method: "turn/start" }), user: true });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: true });
+      c.say({ t: "hello", from: 2 });
+      c.say({ t: "in", line: JSON.stringify({ method: "finish", output: { id: 1, error: {} } }) });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: true });
+      c.say({ t: "hello", from: 3 });
+      const output =
+        ending === "error"
+          ? { id: 2, error: { code: -1 } }
+          : { params: { turn: { status: "completed" } }, method: "turn/completed" };
+      c.say({ t: "in", line: JSON.stringify({ method: "finish", output }) });
+      await until(() => expect(c.outs()).toHaveLength(1));
+      c = await client(folder);
+      expect(c.msgs[0]).toMatchObject({ awaiting: false });
+      c.say({ t: "hello", from: 4 });
+      c.say({ t: "close", graceMs: 100 });
+      await k.done;
+    },
+  );
+});

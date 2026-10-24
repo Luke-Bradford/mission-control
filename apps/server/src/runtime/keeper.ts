@@ -98,6 +98,9 @@ export interface KeeperSpec {
   secret: string;
   /** The CLI's own session id, which its command line carries: `endKeeper` knows the CLI by it. */
   cliSessionId: string;
+  /** Absent in older specs: Claude's result prefix and CLI session id. */
+  turnEnd?: "claude" | "codex";
+  marker?: string;
   /** Default FIRST_HUB_WAIT_MS; tests that have no hub shorten it. */
   firstHubWaitMs?: number;
   /** Default KEEPER_HUB_ABSENT_MS; tests shorten it. */
@@ -257,10 +260,11 @@ export async function endKeeper(
 ): Promise<boolean> {
   type Role = "keeper" | "CLI";
   type Target = { pid: number; role: Role };
-  const cliSessionId = (): string | null => {
+  const marker = (): string | null => {
     try {
       const v: unknown = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"));
-      const id = (v as { cliSessionId?: unknown } | null)?.cliSessionId;
+      const spec = v as { marker?: unknown; cliSessionId?: unknown } | null;
+      const id = spec?.marker ?? spec?.cliSessionId;
       return typeof id === "string" && id !== "" ? id : null;
     } catch {
       return null;
@@ -268,7 +272,7 @@ export async function endKeeper(
   };
   const fits = (role: Role, command: string): boolean => {
     if (role === "keeper") return command.includes("keeper-cli") && command.includes(dir);
-    const id = cliSessionId();
+    const id = marker();
     return id !== null && command.includes(id);
   };
   /**
@@ -291,7 +295,7 @@ export async function endKeeper(
         found.push({ pid: stamp.pid, role });
         continue;
       }
-      if (info === null || (role === "CLI" && cliSessionId() === null)) {
+      if (info === null || (role === "CLI" && marker() === null)) {
         unknown.push({ pid: stamp.pid, role });
       }
       if (!quiet) {
@@ -464,6 +468,7 @@ export function runKeeper(
   let lineCount = 0;
   let transcriptFailed = false;
   let awaiting = false;
+  let awaitingId: number | string | null = null;
 
   const send = (c: Client, obj: Json) => {
     if (!c.sock.destroyed) c.sock.write(`${JSON.stringify(obj)}\n`);
@@ -558,7 +563,20 @@ export function runKeeper(
       held.set(n, line);
     }
     lineCount = n + 1;
-    if (line.startsWith(RESULT_PREFIX)) awaiting = false;
+    if (spec.turnEnd === "codex") {
+      try {
+        const m = JSON.parse(line) as Json | null;
+        if (
+          m?.method === "turn/completed" ||
+          (awaitingId !== null && m?.id === awaitingId && m.error != null)
+        ) {
+          awaiting = false;
+          awaitingId = null;
+        }
+      } catch {
+        // Non-JSON stdout does not end a turn.
+      }
+    } else if (line.startsWith(RESULT_PREFIX)) awaiting = false;
     if (client) pump(client);
   };
 
@@ -668,7 +686,22 @@ export function runKeeper(
       return; // a line before the hello does not count
     } else if (msg.t === "in" && typeof msg.line === "string") {
       if (stdinEnded || !alive) return;
-      if (msg.user === true) awaiting = true;
+      if (msg.user === true) {
+        if (spec.turnEnd === "codex") {
+          try {
+            const request = JSON.parse(msg.line) as Json | null;
+            if (
+              request?.method === "turn/start" &&
+              (typeof request.id === "string" || typeof request.id === "number")
+            ) {
+              awaiting = true;
+              awaitingId = request.id;
+            }
+          } catch {
+            // Only a turn/start request can start a Codex turn.
+          }
+        } else awaiting = true;
+      }
       stdin.write(`${msg.line}\n`);
     } else if (msg.t === "close") {
       const g = typeof msg.graceMs === "number" && msg.graceMs >= 0 ? msg.graceMs : 0;
