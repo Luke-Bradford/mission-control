@@ -22,14 +22,8 @@ it("hides the column headers and empty set-aside context cell on phones", () => 
   expect(phone).toMatch(/#agentsList \.asideline > :nth-child\(6\)[^{]*\{\s*display: none/);
 });
 
-it("gives the ticket the largest desktop share and quota windows full-width readable meters", () => {
+it("gives quota windows full-width readable meters", () => {
   const layout = css.replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")");
-  expect(layout).toMatch(
-    /\.trow \{[^}]*grid-template-columns: minmax\(0, 1fr\)\s+minmax\(0, 0\.8fr\)\s+minmax\(0, 3fr\)\s+minmax\(0, 1\.1fr\)\s+minmax\(0, 1fr\)\s+minmax\(0, 0\.8fr\)/,
-  );
-  expect(layout).toMatch(
-    /\.noloop \.trow \{[^}]*grid-template-columns: minmax\(0, 1fr\)\s+minmax\(0, 0\.8fr\)\s+minmax\(0, 3fr\)\s+minmax\(0, 1fr\)\s+minmax\(0, 0\.8fr\)/,
-  );
   expect(layout).toMatch(/\.quotarow \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
   expect(layout).toMatch(
     /\.quota-window \.meter \{[^}]*grid-template-columns: 64px minmax\(0, 1fr\)/,

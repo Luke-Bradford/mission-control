@@ -1093,10 +1093,7 @@ main > section {
 }
 .trow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 3fr) minmax(0, 1.1fr) minmax(
-      0,
-      1fr
-    ) minmax(0, 0.8fr);
+  grid-template-columns: 108px 84px minmax(0, 1fr) 116px 112px 88px;
   gap: 8px;
   align-items: center;
   padding: 8px 14px;
@@ -1346,10 +1343,7 @@ summary.agent-group-title,
 @media (min-width: 761px) {
   /* With no loop among the rows the Loop step column is all dashes: its room goes to the ticket. */
   .noloop .trow {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 3fr) minmax(0, 1fr) minmax(
-        0,
-        0.8fr
-      );
+    grid-template-columns: 108px 84px minmax(0, 1fr) 120px 104px;
   }
   .noloop .trow > :nth-child(4) {
     display: none;

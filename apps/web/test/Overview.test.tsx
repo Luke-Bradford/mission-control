@@ -253,7 +253,8 @@ describe("Agents panel", () => {
     const loop = await within(flight).findByText("turn 4 of 41");
     expect(flight.children[3]).toBe(loop);
     const line = within(flight).getByText("coordinates the crew and brings you decisions");
-    expect(line.className).toBe("xs muted block");
+    expect(line.className).toBe("xs muted block doing");
+    expect(line.title).toBe("coordinates the crew and brings you decisions");
     expect(line.previousElementSibling).toBe(flight.querySelector(".doing"));
     expect(within(flight).getByText("Head")).toBeTruthy();
     expect(within(flight).getByText("Error", { selector: ".pill > span" })).toBeTruthy();

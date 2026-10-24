@@ -281,3 +281,11 @@ it("keeps the FLIGHT placeholder's full title in the ticket column", async () =>
   expect(text.title).toBe("No FLIGHT seat is configured.");
   expect(container.querySelector(".flight > .agent-doing")?.contains(text)).toBe(true);
 });
+
+it("clamps the FLIGHT description with its full text in the title", async () => {
+  stub([]);
+  render(<AgentsPanel />);
+  const description = await screen.findByText("coordinates the crew and brings you decisions");
+  expect(description.classList.contains("doing")).toBe(true);
+  expect(description.title).toBe("coordinates the crew and brings you decisions");
+});

@@ -146,7 +146,12 @@ function FlightRow({
             {configPending ? "Loading…" : FLIGHT_NO_SEAT}
           </span>
         )}
-        <span className="xs muted block">coordinates the crew and brings you decisions</span>
+        <span
+          className="xs muted block doing"
+          title="coordinates the crew and brings you decisions"
+        >
+          coordinates the crew and brings you decisions
+        </span>
       </span>
       <span className="xs fg2">{turns ? flightTurnShort(turns.n, turns.max) : DASH}</span>
       {row ? <AgentActivity row={row} now={now} max={max} /> : <span>{DASH}</span>}
