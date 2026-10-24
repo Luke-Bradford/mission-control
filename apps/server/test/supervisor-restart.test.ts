@@ -827,6 +827,44 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
   });
 
+  it.each([
+    [10_000, null, "last words"],
+    [10_001, null, null],
+    [10_001, "keeper ended the CLI", "keeper ended the CLI"],
+  ] as const)(
+    "filters detached stderr at age %i with end reason %s",
+    async (age, endReason, expected) => {
+      const first = make();
+      first.sup.start();
+      const { runId } = await first.sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await first.sup.stopAll();
+      const keeperDir = crewKeeperDir(dbPath, runId);
+      process.kill(readPidFile(keeperDir, CLI_PID_FILE) as number, "SIGTERM");
+      const path = join(keeperDir, KEEPER_EXIT_FILE);
+      await until(() => expect(existsSync(path)).toBe(true));
+      const exit = JSON.parse(readFileSync(path, "utf8"));
+      writeFileSync(
+        path,
+        JSON.stringify({
+          ...exit,
+          lastStderr: "last words",
+          lastStderrAt: exit.at - age,
+          endReason,
+        }),
+      );
+      const { sup } = make();
+      sup.start();
+      await until(() =>
+        expect(store.seatSession("guido-1")).toMatchObject({
+          state: "error",
+          reason: `process exited SIGTERM${expected === null ? "" : `: ${expected}`}`,
+        }),
+      );
+      expect(store.run(runId)?.noReport?.lastStderr ?? null).toBe(expected);
+    },
+  );
+
   it("a run whose CLI exits while no hub is attached is recorded as ended on the next start", async () => {
     const first = make();
     first.sup.start();

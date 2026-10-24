@@ -13,6 +13,7 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, relative } from "node:path";
@@ -1432,6 +1433,50 @@ describe("the crew lock", () => {
     expect(e.message).toBe(note);
     await sup.stopAll();
     expect(readFileSync(join(root, CREW_LOCK_FILE), "utf8").trim()).toBe(String(process.ppid));
+  });
+
+  it.each([
+    [
+      "throws",
+      (): never => {
+        throw new Error("lookup failed");
+      },
+      false,
+    ],
+    ["missing", (): null => null, false],
+    ["within margin", () => ({ startedAt: 60_000, command: "node worker.js" }), false],
+    ["after margin", () => ({ startedAt: 60_001, command: "node worker.js" }), true],
+    ["hub", () => ({ startedAt: 60_001, command: "node apps/server/src/main.ts" }), false],
+    ["nonfinite", () => ({ startedAt: Infinity, command: "node worker.js" }), false],
+  ] as const)("checks lock reuse: %s", async (_name, processStart, taken) => {
+    mkdirSync(root, { recursive: true });
+    const path = join(root, CREW_LOCK_FILE);
+    writeFileSync(path, `${process.ppid}\n`);
+    utimesSync(path, new Date(0), new Date(0));
+    const { sup } = make({ processStart });
+    sup.start();
+    expect(sup.status().enabled).toBe(taken);
+    expect(readFileSync(path, "utf8")).toBe(`${taken ? process.pid : process.ppid}\n`);
+    await sup.stopAll();
+    expect(existsSync(path)).toBe(!taken);
+  });
+
+  it("keeps a lock replaced during the process lookup", async () => {
+    mkdirSync(root, { recursive: true });
+    const path = join(root, CREW_LOCK_FILE);
+    writeFileSync(path, `${process.ppid}\n`);
+    utimesSync(path, new Date(0), new Date(0));
+    const { sup } = make({
+      processStart: () => {
+        unlinkSync(path);
+        writeFileSync(path, `${process.ppid}\n`);
+        return { startedAt: 60_001, command: "node worker.js" };
+      },
+    });
+    sup.start();
+    expect(sup.status().enabled).toBe(false);
+    await sup.stopAll();
+    expect(readFileSync(path, "utf8")).toBe(`${process.ppid}\n`);
   });
 
   it("treats a lock holding this process's own pid as stale (a previous run, the pid reused)", () => {
