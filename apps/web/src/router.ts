@@ -29,6 +29,9 @@ function subscribe(fn: () => void): () => void {
 export const usePath = (): string =>
   useSyncExternalStore(subscribe, () => window.location.pathname);
 
+export const useSearch = (): string =>
+  useSyncExternalStore(subscribe, () => window.location.search);
+
 export const SETUP_TABS = [
   "sessions",
   "repos",

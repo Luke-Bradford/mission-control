@@ -8,6 +8,7 @@ import type {
   Escalation,
   GithubRateState,
   LimitRow,
+  OverviewSummary,
   PullRequestView,
   Run,
 } from "@mc/core";
@@ -427,3 +428,21 @@ export const GITHUB_RATE: GithubRateState = {
   pollCost: 7,
 };
 export const GITHUB_RATE_LINE = "GitHub API · 4750 left · 7 per poll · resets 15:00";
+
+const overviewKpis: OverviewSummary["kpis"] = {
+  working: { now: 3, of: 5, series: [1, 2, 3] },
+  tokensPerMin: { now: 41200, series: [100, 200, 300] },
+  spendToday: { usd: 24.31, perHour: [1, 2] },
+  inFlight: { count: 4, oldestAt: null },
+  mergedToday: { count: 6, perHour: [1, 2] },
+  ciPassRate24h: { pct: 92, runs: 10, redNow: 1 },
+  cycleTime: { medianMs: 4320000, n: 8, avg14dMs: 5400000 },
+  needsYou: { count: 2, overHour: 1 },
+};
+
+export const OVERVIEW: OverviewSummary = {
+  at: NOW,
+  kpis: overviewKpis,
+  pipeline: [],
+  machine: { cpu: [], mem: [], diskFreeGb: null },
+};

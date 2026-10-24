@@ -16,6 +16,7 @@ import {
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet } from "./api.ts";
+import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
   data: T | undefined;
@@ -357,6 +358,9 @@ class Hub {
     for (const e of this.entries.values()) {
       // The server filters watch rows using both the lock and crew state. Refetch
       // the brief when either changes, including rows omitted from its last response.
+      const activityChanged =
+        e.path === RESOURCES.activity.path &&
+        (topic === "guard" || topic === "health" || topic === "boards");
       const timelineChanged = e.path === RESOURCES.overviewTimeline.path && topic === "guard";
       const briefChanged =
         e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
@@ -367,6 +371,7 @@ class Hub {
         (topic === "agents" || topic === "boards" || topic === "attention" || topic === "guard");
       if (
         ((Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
+          activityChanged ||
           timelineChanged ||
           briefChanged ||
           notificationSettingsChanged ||
@@ -479,6 +484,11 @@ export function parseTopic(data: unknown): Topic | null {
   }
 }
 
+export const streamStatus = store<{ connected: boolean; lastMessageAt: number | null }>({
+  connected: false,
+  lastMessageAt: null,
+});
+
 const RETRY_MS = 5000;
 
 /**
@@ -492,19 +502,26 @@ export function startStream(): () => void {
   let connectedBefore = false;
   let stopped = false;
 
+  streamStatus.set({ connected: false, lastMessageAt: null });
+  const received = () => streamStatus.set({ connected: true, lastMessageAt: Date.now() });
+
   const connect = () => {
     if (stopped) return;
     const source = new EventSource("/api/stream");
     es = source;
     source.addEventListener("open", () => {
+      streamStatus.set({ ...streamStatus.get(), connected: true });
       if (connectedBefore) hub.refetchAll();
       connectedBefore = true;
     });
+    source.addEventListener("message", received);
     source.addEventListener("changed", (ev) => {
+      received();
       const topic = parseTopic((ev as MessageEvent).data);
       if (topic) hub.refetchTopic(topic);
     });
     source.addEventListener("error", () => {
+      streamStatus.set({ ...streamStatus.get(), connected: false });
       if (source.readyState !== EventSource.CLOSED) return; // the browser is reconnecting
       source.close();
       retry = setTimeout(() => {
@@ -517,6 +534,7 @@ export function startStream(): () => void {
   connect();
   return () => {
     stopped = true;
+    streamStatus.set({ connected: false, lastMessageAt: null });
     clearTimeout(retry);
     es?.close();
   };

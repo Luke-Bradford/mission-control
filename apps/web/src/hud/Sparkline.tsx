@@ -9,30 +9,34 @@ export function Sparkline({
   values,
   color,
   max: sharedMax,
+  label = "tokens per minute",
 }: {
-  values: number[];
+  values: (number | null)[];
   color: string;
   max?: number;
+  label?: string;
 }) {
   const n = values.length;
   if (n < 2) return null;
-  const max = Math.max(1, sharedMax ?? Math.max(...values));
+  const max = Math.max(1, sharedMax ?? Math.max(...values.filter((v) => v !== null)));
   const x = (i: number): number => (i / (n - 1)) * (W - 4);
   const y = (v: number): number => H - 2 - (v / max) * (H - 5);
   const line = values
-    .map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+    .map((v, i) =>
+      v === null
+        ? ""
+        : `${i === 0 || values[i - 1] === null ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`,
+    )
     .join("");
   return (
-    <svg
-      data-max={max}
-      className="spark"
-      viewBox={`0 0 ${W} ${H}`}
-      role="img"
-      aria-label="tokens per minute"
-    >
-      <path d={`${line}L${W - 4},${H}L0,${H}Z`} fill={color} fillOpacity={0.18} />
+    <svg data-max={max} className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
+      {!values.includes(null) && (
+        <path d={`${line}L${W - 4},${H}L0,${H}Z`} fill={color} fillOpacity={0.18} />
+      )}
       <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
-      <circle cx={W - 4} cy={y(values[n - 1] ?? 0)} r={2.2} fill={color} />
+      {values[n - 1] != null && (
+        <circle cx={W - 4} cy={y(values[n - 1] ?? 0)} r={2.2} fill={color} />
+      )}
     </svg>
   );
 }

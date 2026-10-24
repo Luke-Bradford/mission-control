@@ -15,16 +15,25 @@ export function Meter({
   label,
   pct,
   detail,
+  projected,
 }: {
   label: string;
   pct: number | null;
   /** Text after the percentage, e.g. ` used · resets 17:20`. */
   detail?: string;
+  projected?: number | null;
 }) {
   const n = pct === null ? null : Math.round(pct);
   return (
     <span className={`meter${meterLevel(pct)}`}>
       <span className="track">
+        {projected != null && Number.isFinite(projected) && (
+          <b
+            className="projection-tick"
+            title={`Projected at reset: ${Math.round(projected)}%`}
+            style={{ left: `${Math.min(100, Math.max(0, projected))}%` }}
+          />
+        )}
         {pct !== null && <i style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />}
       </span>
       <span className="num xs">{`${label} ${n === null ? "—" : `${n}%`}${detail ?? ""}`}</span>

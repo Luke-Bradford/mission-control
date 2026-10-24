@@ -451,6 +451,7 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
 export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
 const NOTIFICATION_RECONCILE_MS = 1000;
+const HUD_MEMO_MS = 2_000;
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
@@ -677,10 +678,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     responseCache.set(req.url, { payload, at: now(), stamp: started.stamp });
   });
 
+  let crewMemo: { key: string; value: Crew } | undefined;
+  const sharedCrew = (at = now()): Crew => {
+    const key = JSON.stringify([Math.floor(at / HUD_MEMO_MS), config, deps.lock?.state()]);
+    if (crewMemo?.key !== key)
+      crewMemo = { key, value: crew(config, store, at, deps.lock?.state() ?? NO_LOCK) };
+    return crewMemo.value;
+  };
+
   let attentionMemo: { at: number; items: AttentionItem[] } | undefined;
   const sharedAttention = (): AttentionItem[] => {
     const at = now();
-    if (!attentionMemo || at - attentionMemo.at >= 2_000) {
+    if (!attentionMemo || at - attentionMemo.at >= HUD_MEMO_MS) {
       attentionMemo = {
         at,
         items: attentionItems(
@@ -688,7 +697,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           at,
           deps.lock?.state() ?? NO_LOCK,
-          undefined,
+          sharedCrew(at).rows,
           deps.hubLogin?.() ?? null,
         ),
       };
@@ -717,6 +726,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       responseRevision++;
       responseCache.clear();
       attentionMemo = undefined;
+      crewMemo = undefined;
     }
     if (["attention", "agents", "limits", "boards", "escalations", "settings"].includes(topic))
       scheduleNotifications();
@@ -2201,10 +2211,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/overview/timeline", async () => overviewTimeline(config, store, now()));
 
-      api.get(
-        "/crew",
-        async (): Promise<Crew> => crew(config, store, now(), deps.lock?.state() ?? NO_LOCK),
-      );
+      api.get("/crew", async (): Promise<Crew> => sharedCrew());
 
       api.get<{ Querystring: { session?: string } }>("/overview", (req, reply) => {
         const selected = req.query.session;
@@ -2289,7 +2296,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           store,
           now(),
           deps.lock?.state() ?? NO_LOCK,
-          undefined,
+          sharedCrew().rows,
           deps.hubLogin?.() ?? null,
         ).find((item) => item.key === key && !item.acked);
         return item ? { ...item, version: attentionVersion(item) } : undefined;
@@ -2508,7 +2515,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             store,
             now(),
             deps.lock?.state() ?? NO_LOCK,
-            undefined,
+            sharedCrew().rows,
             deps.hubLogin?.() ?? null,
           ),
           config.repos.map((r) => r.id),

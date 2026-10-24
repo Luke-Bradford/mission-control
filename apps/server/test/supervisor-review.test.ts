@@ -1,7 +1,7 @@
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
@@ -537,6 +537,20 @@ describe("startReview", () => {
     }
     return { reviewId, sha, fork, author };
   }
+
+  it("refuses scratch storage inside hub data before preparing a review", async () => {
+    const r = reviewOfPush();
+    const worktrees = join(dir, "db", "scratch");
+    const { sup } = make({ scratchRetro: true, worktrees });
+    sup.start();
+    // start() makes the folder (crew lock, managed clones); the refused review adds nothing to it
+    const before = existsSync(worktrees) ? readdirSync(worktrees).sort() : [];
+    await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow(
+      "outside the hub data directory",
+    );
+    expect(existsSync(worktrees) ? readdirSync(worktrees).sort() : []).toEqual(before);
+    expect(store.runs("retro", 1)).toEqual([]);
+  });
 
   async function started() {
     const r = reviewOfPush();
