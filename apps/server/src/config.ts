@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type AccountId,
@@ -36,6 +36,7 @@ import {
   ROLE_PROMPT_DIR,
   type RoleDef,
   resolveSeatDef,
+  SANDBOX_DENY_READ_HOME,
   type SeatCommands,
   type SeatDef,
   type SeatInput,
@@ -49,6 +50,7 @@ import {
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
+import { resolveOnPath } from "./cli-version.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 
@@ -123,6 +125,11 @@ export interface CrewConfig {
    * Loaded: always set (default []).
    */
   denyRead?: string[];
+  /**
+   * Extra absolute read grants; none may be home, above home, or equal to/inside a denied path.
+   * Loaded: always set (default []).
+   */
+  allowRead?: string[];
   /** Input + output tokens one run may use. Loaded: always set (default DEFAULT_RUN_TOKEN_BUDGET). */
   runTokenBudget?: number;
   /** Unfinished runs (set aside, not done) a writer seat may hold before it takes no new ticket. Loaded: always set (default DEFAULT_MAX_OPEN_RUNS_PER_SEAT). */
@@ -484,6 +491,7 @@ const fileSchema = z
         max_seats: z.number().int().min(1).max(32).default(DEFAULT_MAX_SEATS),
         node: nonEmpty.default(DEFAULT_CREW_NODE),
         deny_read: z.array(nonEmpty).default([]),
+        allow_read: z.array(nonEmpty).default([]),
         run_token_budget: z.number().int().positive().default(DEFAULT_RUN_TOKEN_BUDGET),
         max_open_runs_per_seat: z.number().int().positive().default(DEFAULT_MAX_OPEN_RUNS_PER_SEAT),
         lane: z.enum(CREW_LANES).optional(),
@@ -565,6 +573,7 @@ const fileSchema = z
               maxSeats: f.crew.max_seats,
               node: expandHome(f.crew.node),
               denyRead: f.crew.deny_read.map(expandHome),
+              allowRead: f.crew.allow_read.map(expandHome),
               runTokenBudget: f.crew.run_token_budget,
               maxOpenRunsPerSeat: f.crew.max_open_runs_per_seat,
               ...(f.crew.lane === undefined ? {} : { lane: f.crew.lane }),
@@ -687,6 +696,47 @@ export function crewOwnFolders(crew: CrewConfig): string[] {
 }
 
 /**
+ * What a seat of session `sessionId` may not read beyond the credential folders and the data dir,
+ * deduped, in order: the hub's checkout, every loop's worktree, state dir and logs dir, every
+ * other crew session's checkout and worktree folder (`<crew.worktrees>/<id>`), then `crew.deny_read`. The hub's checkout and each loop's
+ * worktree are followed by their git common dir, which lies elsewhere when they are linked
+ * worktrees (a loop's worktree of `~/code/shop-app`). A loop's common dir that is `<repo>/.git` is
+ * followed by `<repo>` itself, the repo's main working tree (`~/code/shop-app`), unless that folder is
+ * or holds one the seat needs (`crewOwnFolders`). Each by its real path (a folder that doesn't
+ * exist yet by its deepest existing ancestor's), since the sandbox matches real paths. `extra`
+ * (a review seat's session-mates' worktrees) comes last.
+ */
+export function seatDenyRead(
+  config: CcConfig,
+  hubRoot: string,
+  sessionId: string,
+  extra: readonly string[] = [],
+): string[] {
+  const own = config.crew ? crewOwnFolders(config.crew) : [];
+  const withGitDir = (dir: string, mainTree: boolean) => {
+    const common = gitCommonDir(dir);
+    if (common === null) return [dir];
+    const repo = dirname(common);
+    const denyRepo = mainTree && basename(common) === ".git" && !own.some((f) => isInside(f, repo));
+    return denyRepo ? [dir, common, repo] : [dir, common];
+  };
+  const paths = [
+    ...withGitDir(hubRoot, false),
+    ...config.loops.flatMap((l) => [
+      ...withGitDir(l.worktree, true),
+      l.stateDir,
+      ...(l.logsDir ? [l.logsDir] : []),
+    ]),
+    ...(config.crew?.sessions ?? [])
+      .filter((x) => x.id !== sessionId)
+      .flatMap((x) => [x.checkout, ...(config.crew ? [join(config.crew.worktrees, x.id)] : [])]),
+    ...(config.crew?.denyRead ?? []),
+    ...extra,
+  ];
+  return [...new Set(paths.map(realish))];
+}
+
+/**
  * The real path of `dir`'s git common directory, or null when `dir` is not in a git repo (or git
  * cannot say). Read-only: `rev-parse` with hooks and fsmonitor off, no optional locks, no prompt
  * and none of the server's `GIT_*` settings. It runs in a live loop's worktree too.
@@ -779,7 +829,7 @@ function isPromptFile(hubRoot: string, prompt: string, rolesDirReal: string): bo
   }
 }
 
-function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
+function checkCrew(cfg: CcConfig, hubRootPath: string | null, dbPath: string): void {
   const crew = cfg.crew;
   if (!crew) return;
   const repoIds = new Set(cfg.repos.map((r) => r.id));
@@ -970,6 +1020,27 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
   const lower = (p: string) => realish(p).toLowerCase();
   const ownFolders = crewOwnFolders(crew).map(lower);
   const crewDirs = [crew.worktrees, ...crew.sessions.map((s) => s.checkout)].map(lower);
+  const denied = [
+    ...SANDBOX_DENY_READ_HOME.map((p) => join(homedir(), p)),
+    dirname(resolve(dbPath)),
+    ...crew.sessions.flatMap((session) => seatDenyRead(cfg, hubRootPath, session.id)),
+  ].map(lower);
+  for (const p of crew.allowRead ?? []) {
+    if (!isAbsolute(p)) throw new ConfigError("crew.allow_read", `${p} is not an absolute path`);
+    const real = lower(p);
+    if (isInside(lower(homedir()), real)) {
+      throw new ConfigError("crew.allow_read", `${p} is home or holds home`);
+    }
+    if (denied.some((d) => isInside(real, d))) {
+      throw new ConfigError("crew.allow_read", `${p} is equal to or inside a denied path`);
+    }
+    if (ownFolders.some((own) => isInside(real, own))) {
+      throw new ConfigError(
+        "crew.allow_read",
+        `${p} is inside the crew's own folders or a temp dir`,
+      );
+    }
+  }
   for (const p of crew.denyRead ?? []) {
     if (!isAbsolute(p)) throw new ConfigError("crew.deny_read", `${p} is not an absolute path`);
     const real = lower(p);
@@ -978,6 +1049,25 @@ function checkCrew(cfg: CcConfig, hubRootPath: string | null): void {
     }
     if (crewDirs.some((dir) => isInside(real, dir))) {
       throw new ConfigError("crew.deny_read", `${p} is inside the crew's own folders`);
+    }
+  }
+  if (crew.denyRead?.length) {
+    try {
+      const grants = [
+        ...crewToolchainPaths(resolveOnPath("node"), resolveOnPath("pnpm")),
+        realish(join(homedir(), ".gitconfig")),
+        realish(join(homedir(), ".config/git")),
+      ];
+      for (const grant of grants) {
+        const deniedBy = crew.denyRead.find((d) => isInside(lower(grant), lower(d)));
+        if (deniedBy) {
+          process.stderr.write(
+            `crew.deny_read: ${deniedBy} blocks computed read grant ${grant}; seat start will refuse it\n`,
+          );
+        }
+      }
+    } catch (e) {
+      process.stderr.write(`crew sandbox: ${(e as Error).message}\n`);
     }
   }
   if (seatCount > crew.maxSeats) {
@@ -1050,7 +1140,7 @@ function seatsMayRun(writer: readonly string[], cmd: string): boolean {
 export function parseConfig(
   text: string,
   source: string,
-  guard?: { hubRoot: string | null },
+  guard?: { hubRoot: string | null; dbPath?: string },
 ): CcConfig {
   let raw: unknown;
   try {
@@ -1148,6 +1238,53 @@ export function parseConfig(
       }
     }
   });
-  checkCrew(cfg, guard ? guard.hubRoot : findHubRoot());
+  checkCrew(
+    cfg,
+    guard ? guard.hubRoot : findHubRoot(),
+    guard?.dbPath ?? process.env.MC_DB ?? join(homedir(), ".local/share/mission-control/mc.sqlite"),
+  );
   return cfg;
+}
+
+/** Resolved executable files, plus only a verified pnpm package's supporting libraries. */
+export function crewToolchainPaths(node: string | null, pnpm: string | null): string[] {
+  const paths = [process.execPath, node, pnpm]
+    .filter((p): p is string => p !== null)
+    .map((p) => realpathSync(p));
+  if (pnpm !== null) {
+    const bin = dirname(realpathSync(pnpm));
+    if (basename(bin) === "bin") {
+      const install = dirname(bin);
+      let name: unknown;
+      try {
+        name = JSON.parse(readFileSync(join(install, "package.json"), "utf8")).name;
+      } catch {
+        // Standalone executable: never infer a package folder from its location alone.
+      }
+      if (name === "pnpm") {
+        if (isInside(realish(homedir()).toLowerCase(), install.toLowerCase())) {
+          throw new Error(`pnpm package grant ${install} is home or holds home`);
+        }
+        const storePath = execFileSync(pnpm, ["store", "path"], {
+          // Inspect the resolved executable without downloading a project-pinned pnpm.
+          env: {
+            ...process.env,
+            npm_config_manage_package_manager_versions: "false",
+            pnpm_config_pm_on_fail: "ignore",
+          },
+          encoding: "utf8",
+          timeout: GIT_TIMEOUT_MS,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        if (!isAbsolute(storePath))
+          throw new Error("pnpm store path did not report an absolute path");
+        const store = realish(storePath);
+        if (isInside(store.toLowerCase(), install.toLowerCase())) {
+          throw new Error(`pnpm package grant ${install} contains pnpm store ${store}`);
+        }
+        paths.push(install);
+      }
+    }
+  }
+  return [...new Set(paths)];
 }

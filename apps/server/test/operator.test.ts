@@ -22,6 +22,9 @@ describe("operator token", () => {
       gitCommonDir: "/w/clone/.git",
       worktreeGitDir: "/w/clone/.git/worktrees/seat",
       home: "/home/you",
+      toolchainPaths: ["/tools/node", "/tools/pnpm"],
+      gitConfigPaths: [],
+      allowRead: [],
       dataDir,
       denyRead: [],
     };

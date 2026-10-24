@@ -19,7 +19,7 @@ import {
   DEFAULT_SEAT_COMMANDS,
   FLIGHT_TOOLS,
 } from "@mc/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type CcConfig,
   ConfigError,
@@ -337,6 +337,7 @@ describe("crew", () => {
     maxSeats?: number;
     node?: string;
     denyRead?: string[];
+    allowRead?: string[];
     budget?: string;
     maxOpen?: string;
     lane?: string;
@@ -354,6 +355,7 @@ crew:
   worktrees: ${opts.worktrees ?? "~/code/mc-crew/worktrees"}
   ${opts.maxSeats === undefined ? "" : `max_seats: ${opts.maxSeats}`}
   ${opts.denyRead === undefined ? "" : `deny_read: ${JSON.stringify(opts.denyRead)}`}
+  ${opts.allowRead === undefined ? "" : `allow_read: ${JSON.stringify(opts.allowRead)}`}
   ${opts.budget === undefined ? "" : `run_token_budget: ${opts.budget}`}
   ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
@@ -1002,6 +1004,82 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
       `worktree: ${loopDir}\n`,
     );
     expect(fails(t).path).toBe("crew.sessions[0].checkout");
+  });
+
+  describe("allow_read", () => {
+    it("defaults to none and accepts extra tool config paths", () => {
+      expect(load(crewText({})).crew?.allowRead).toEqual([]);
+      expect(load(crewText({ allowRead: ["/opt/tools/config"] })).crew?.allowRead).toEqual([
+        "/opt/tools/config",
+      ]);
+    });
+
+    it("expands ~ for allowed config files outside temporary and crew folders", () => {
+      vi.stubEnv("HOME", "/mc-test-home");
+      try {
+        expect(load(crewText({ allowRead: ["~/.config/pip"] })).crew?.allowRead).toEqual([
+          "/mc-test-home/.config/pip",
+        ]);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("refuses a grant inside the hub's seatDenyRead entry", () => {
+      expect(fails(crewText({ allowRead: [join(hub, "secret")] })).message).toContain(
+        "inside a denied path",
+      );
+    });
+
+    it.each([
+      "config/pip",
+      "~other/config",
+      "~",
+      "/",
+      "~/.ssh/config",
+      "~/.local/share/mission-control",
+      "~/code/mc-crew/worktrees/tool",
+      "/tmp/tool",
+    ])("refuses %j", (path) => {
+      expect(fails(crewText({ allowRead: [path] })).path).toBe("crew.allow_read");
+    });
+
+    it("refuses grants equal to or inside an operator denial", () => {
+      for (const path of ["/opt/private", "/opt/private/config"]) {
+        expect(fails(crewText({ allowRead: [path], denyRead: ["/opt/private"] })).path).toBe(
+          "crew.allow_read",
+        );
+      }
+    });
+
+    it("warns when an operator denial blocks a computed toolchain grant", () => {
+      const warning = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        load(crewText({ denyRead: [realpathSync(process.execPath)] }));
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("blocks computed read grant"));
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    it("checks resolved symlink targets and the configured data directory", () => {
+      const link = join(mkdtempSync(join(tmpdir(), "mc-allow-")), "link");
+      mkdirSync(join(homedir(), ".ssh"), { recursive: true });
+      symlinkSync(join(homedir(), ".ssh"), link);
+      expect(fails(crewText({ allowRead: [link] })).message).toContain("inside a denied path");
+      vi.stubEnv("MC_DB", "/opt/mc-data/mc.sqlite");
+      try {
+        expect(fails(crewText({ allowRead: ["/opt/mc-data"] })).path).toBe("crew.allow_read");
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it.each(['"/opt/tools"', "[1]", "null", '[""]'])("refuses a malformed list: %s", (value) => {
+      expect(
+        fails(crewText({}).replace("crew:\n", `crew:\n  allow_read: ${value}\n`)).path,
+      ).toMatch(/^crew\.allowRead/);
+    });
   });
 
   describe("deny_read", () => {

@@ -725,8 +725,14 @@ export interface CrewSandboxInput {
   gitCommonDir: string;
   /** This worktree's own git dir, `<gitCommonDir>/worktrees/<name>`. */
   worktreeGitDir: string;
-  /** The operator's home directory, for the credential folders a seat may not read. */
+  /** The operator's home directory, denied except for the seat's read grants. */
   home: string;
+  /** Resolved node/pnpm executable files and verified pnpm package folders. */
+  toolchainPaths: string[];
+  /** Resolved global git config files, include targets, and git config directory. */
+  gitConfigPaths: string[];
+  /** Extra absolute read grants from `crew.allow_read`. */
+  allowRead: string[];
   /**
    * The hub's data directory (the DB's): the DB itself and every seat's transcripts and prompt
    * files, which no seat may read.
@@ -803,12 +809,48 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
   ] as const) {
     if (!v.startsWith("/")) throw new Error(`crew sandbox: ${k} must be absolute`);
   }
-  for (const p of i.denyRead) {
-    if (!p.startsWith("/")) throw new Error("crew sandbox: denyRead must be absolute");
+  for (const k of ["denyRead", "allowRead", "toolchainPaths", "gitConfigPaths"] as const) {
+    for (const p of i[k]) {
+      if (!p.startsWith("/")) throw new Error(`crew sandbox: ${k} must be absolute`);
+    }
   }
-  const denyRead = [
-    ...new Set([...SANDBOX_DENY_READ_HOME.map((d) => `${i.home}/${d}`), i.dataDir, ...i.denyRead]),
+  const protectedRead = [
+    ...SANDBOX_DENY_READ_HOME.map((d) => `${i.home}/${d}`),
+    i.dataDir,
+    ...i.denyRead,
   ];
+  const denyRead = [...new Set([i.home, ...protectedRead])];
+  const allowRead = [
+    ...new Set([
+      i.cwd,
+      i.gitCommonDir,
+      i.worktreeGitDir,
+      ...i.toolchainPaths,
+      ...i.gitConfigPaths,
+      ...i.allowRead,
+    ]),
+  ];
+  // CLI 2.1.302: a grant equal to or below a deny reopens it. Only home may be
+  // reopened; worktree/git-dir grants are intrinsic to the seat and exempt here.
+  const normalized = (path: string) => {
+    const parts: string[] = [];
+    for (const part of path.toLowerCase().split("/")) {
+      if (part === "..") parts.pop();
+      else if (part !== "" && part !== ".") parts.push(part);
+    }
+    return parts.join("/");
+  };
+  const inside = (child: string, parent: string) => {
+    const c = normalized(child);
+    const p = normalized(parent);
+    return p === "" || c === p || c.startsWith(`${p}/`);
+  };
+  for (const grant of [...i.toolchainPaths, ...i.gitConfigPaths, ...i.allowRead]) {
+    if (inside(i.home, grant))
+      throw new Error(`crew sandbox: read grant ${grant} is home or above home`);
+    const denied = protectedRead.find((d) => inside(grant, d));
+    if (denied) throw new Error(`crew sandbox: read grant ${grant} reopens denied path ${denied}`);
+  }
   return JSON.stringify({
     hooks: guardHooks(hook),
     sandbox: {
@@ -833,8 +875,9 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         // token, MCP, prompt or transcript file would reach the hub (a prompt file becomes the
         // system prompt on resume, R28).
         denyWrite: [writes ? `${i.cwd}/.git` : i.cwd, i.gitCommonDir, i.worktreeGitDir, i.dataDir],
-        // Credentials and the hub's data dir, then what else on this Mac agent-run code may not
-        // read: the hub, the loops, the other crew clones and the operator's own working folders.
+        // The CLI reopens grants under home, then reapplies explicit denies nested under a grant.
+        // Keep every credential/data denial: .config/git must not expose .config/git/credentials.
+        allowRead,
         denyRead,
       },
     },

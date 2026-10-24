@@ -15,6 +15,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 import {
   type BoardItem,
@@ -47,6 +48,8 @@ import {
   wrongAreaText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
+import * as cliVersion from "../src/cli-version.ts";
+import { resolveOnPath } from "../src/cli-version.ts";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
@@ -59,6 +62,7 @@ import { CheckoutError } from "../src/runtime/checkouts.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
+  crewToolchainPaths,
   type Supervisor,
   seatDenyRead,
 } from "../src/runtime/supervisor.ts";
@@ -501,6 +505,67 @@ describe("startRun", () => {
     const rel = relative(start.cwd as string, store);
     expect(rel.startsWith("..") || isAbsolute(rel)).toBe(true);
     expect(relative(realpathSync(root), store).startsWith("..")).toBe(true);
+    const argv = start.argv as string[];
+    const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
+    expect(fs.allowRead).not.toContain(store);
+  });
+
+  it("skips absent pnpm once and still reaches the runtime grant backstop on every start", async () => {
+    const resolve = resolveOnPath;
+    const lookup = vi
+      .spyOn(cliVersion, "resolveOnPath")
+      .mockImplementation((name, path) => (name === "pnpm" ? null : resolve(name, path)));
+    const { sup, cfg, log } = make();
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.allowRead = [homedir()];
+    try {
+      sup.start();
+      for (const issue of [42, 43]) {
+        await expect(sup.startRun("guido-1", issue)).rejects.toThrow("could not start the CLI");
+      }
+      expect(
+        log.mock.calls.filter(([line]) => line.includes("skipping its sandbox read grant")),
+      ).toHaveLength(1);
+      expect(
+        log.mock.calls.filter(([line]) => line.includes("is home or above home")),
+      ).toHaveLength(2);
+      expect(recorded()).toEqual([]);
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
+  it("refuses a computed executable grant inside crew.deny_read before spawning", async () => {
+    const { sup, cfg, log } = make();
+    if (cfg.crew === undefined) throw new Error("no crew");
+    cfg.crew.denyRead = [realpathSync(process.execPath)];
+    sup.start();
+    await expect(sup.startRun("guido-1", 42)).rejects.toThrow("could not start the CLI");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("reopens denied path"));
+    expect(recorded()).toEqual([]);
+  });
+
+  it("passes the seat's resolved toolchain and configured read grants to a writer's sandbox", async () => {
+    const { sup, cfg } = make();
+    if (cfg.crew === undefined) throw new Error("no crew");
+    const tools = join(dir, "extra-tools");
+    const link = join(dir, "extra-tools-link");
+    mkdirSync(tools);
+    symlinkSync(tools, link);
+    cfg.crew.allowRead = [link];
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
+    const pnpm = resolveOnPath("pnpm");
+    if (pnpm === null) throw new Error("pnpm is not on PATH");
+    expect(fs.allowRead).toEqual(
+      expect.arrayContaining([
+        ...crewToolchainPaths(resolveOnPath("node"), pnpm),
+        realpathSync(tools),
+      ]),
+    );
   });
 
   it("writes the prompt file beside the transcript: role brief, then the repo's CLAUDE.md", async () => {

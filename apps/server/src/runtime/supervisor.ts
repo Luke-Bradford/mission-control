@@ -75,6 +75,7 @@ import {
   retiringText,
   reviewDepth,
   reworkFirstText,
+  SANDBOX_DENY_READ_HOME,
   type SeatSessionRow,
   type SeatState,
   START_NO_RULES,
@@ -92,16 +93,18 @@ import {
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli-update.ts";
-import { probeClaudeVersion } from "../cli-version.ts";
+import { probeClaudeVersion, resolveOnPath } from "../cli-version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
   type CrewSessionConfig,
   crewOwnFolders,
+  crewToolchainPaths,
   gitCommonDir,
   isInside,
   realish,
+  seatDenyRead,
 } from "../config.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -137,7 +140,10 @@ import {
   writeReviewInputs,
 } from "./checkouts.ts";
 import { endKeeper, KEEPER_ENTRY, type KeeperHello, keeperAlive, pidAlive } from "./keeper.ts";
+import { crewGitConfigPaths } from "./sandbox.ts";
 import { attachSession, type CrewSession, type SessionEvent, startSession } from "./session.ts";
+
+export { crewToolchainPaths, seatDenyRead } from "../config.ts";
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
@@ -170,48 +176,6 @@ const RESUME_MODE_CHANGED = "could not resume: the seat's mode changed";
 export const RESUME_WINDOW_MS = 5000;
 /** A run's token and MCP files, and the temp names they are written under, in `{DB dir}/crew/`. */
 const RUN_SECRET_FILE = /\.(token|mcp\.json)(\.tmp-[0-9a-f-]+)?$/;
-
-/**
- * What a seat of session `sessionId` may not read beyond the credential folders and the data dir,
- * deduped, in order: the hub's checkout, every loop's worktree, state dir and logs dir, every
- * other crew session's checkout and worktree folder (`<crew.worktrees>/<id>`), then `crew.deny_read`. The hub's checkout and each loop's
- * worktree are followed by their git common dir, which lies elsewhere when they are linked
- * worktrees (a loop's worktree of `~/code/shop-app`). A loop's common dir that is `<repo>/.git` is
- * followed by `<repo>` itself, the repo's main working tree (`~/code/shop-app`), unless that folder is
- * or holds one the seat needs (`crewOwnFolders`). Each by its real path (a folder that doesn't
- * exist yet by its deepest existing ancestor's), since the sandbox matches real paths. `extra`
- * (a review seat's session-mates' worktrees) comes last.
- */
-export function seatDenyRead(
-  config: CcConfig,
-  hubRoot: string,
-  sessionId: string,
-  extra: readonly string[] = [],
-): string[] {
-  const own = config.crew ? crewOwnFolders(config.crew) : [];
-  const withGitDir = (dir: string, mainTree: boolean) => {
-    const common = gitCommonDir(dir);
-    if (common === null) return [dir];
-    const repo = dirname(common);
-    const denyRepo =
-      mainTree && basename(common) === ".git" && ownFolderIn(own, repo) === undefined;
-    return denyRepo ? [dir, common, repo] : [dir, common];
-  };
-  const paths = [
-    ...withGitDir(hubRoot, false),
-    ...config.loops.flatMap((l) => [
-      ...withGitDir(l.worktree, true),
-      l.stateDir,
-      ...(l.logsDir ? [l.logsDir] : []),
-    ]),
-    ...(config.crew?.sessions ?? [])
-      .filter((x) => x.id !== sessionId)
-      .flatMap((x) => [x.checkout, ...(config.crew ? [join(config.crew.worktrees, x.id)] : [])]),
-    ...(config.crew?.denyRead ?? []),
-    ...extra,
-  ];
-  return [...new Set(paths.map(realish))];
-}
 
 /** The first of the crew's own folders that `repo` is or holds, if any. */
 function ownFolderIn(own: readonly string[], repo: string): string | undefined {
@@ -534,6 +498,7 @@ function toContextUsage(v: unknown): ContextUsage | null {
 export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  let warnedMissingPnpm = false;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
   const crew = config.crew;
 
@@ -847,15 +812,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * No git identity: a seat cannot commit, and the mc commit tool names each commit's author.
    * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
    */
-  function crewEnv(seatId: string): NodeJS.ProcessEnv {
+  function crewEnv(pnpmStoreDir: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
       const v = process.env[k];
       if (v !== undefined) env[k] = v;
     }
     env.HOME = homedir();
-    const uid = process.getuid?.();
-    if (uid !== undefined) env[PNPM_STORE_ENV] = crewPnpmStoreDir(uid, seatId);
+    env[PNPM_STORE_ENV] = pnpmStoreDir;
     return { ...env, ...CREW_CLI_ENV };
   }
 
@@ -938,14 +902,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * be built (before any token exists) or the spawn itself throws (after undoing the token and
    * files).
    */
-  function launch(
+  async function launch(
     info: SeatInfo,
     run: Run,
     cliSessionId: string,
     checkout: { path: string; branch: string; gitDir: string },
     resume: boolean,
     claudeMd: string | null,
-  ): Live {
+  ): Promise<Live> {
+    const cwd = realpathSync(checkout.path);
+    const gitConfig = await crewGitConfigPaths(
+      cwd,
+      realpathSync(join(info.session.checkout, ".git")),
+    );
+    if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+    if (store.run(run.id)?.endedAt != null) throw new Error("run ended during sandbox discovery");
     const def = seatDef(info.seat);
     const tokenPath = crewTokenPath(deps.dbPath, run.id);
     const mcpPath = crewMcpPath(deps.dbPath, run.id);
@@ -987,7 +958,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.deleteKeeperCursor(run.id);
       writePrivate(tokenPath, token);
       writePrivate(mcpPath, crewMcpConfig(`${hub}${MCP_PATH}`, token));
-      const cwd = realpathSync(checkout.path);
+      const uid = process.getuid?.() ?? 0;
+      const pnpmStoreDir = crewPnpmStoreDir(uid, info.seat.id);
+      const env = crewEnv(pnpmStoreDir);
+      const pnpm = resolveOnPath("pnpm", env.PATH);
+      if (pnpm === null && !warnedMissingPnpm) {
+        log("pnpm is not on the seat's PATH; skipping its sandbox read grant");
+        warnedMissingPnpm = true;
+      }
+      const toolchainPaths = crewToolchainPaths(resolveOnPath("node", env.PATH), pnpm);
       // a review seat reads nothing of its session-mates': the author's worktree is among them
       const mates =
         modeOfSeat(info.seat) === "scratch"
@@ -1019,9 +998,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cwd,
           gitCommonDir: realpathSync(join(info.session.checkout, ".git")),
           worktreeGitDir: realpathSync(checkout.gitDir),
-          home: homedir(),
+          home: realish(homedir()),
+          toolchainPaths,
+          gitConfigPaths: gitConfig.allowRead,
+          allowRead: (crew?.allowRead ?? []).map(realish),
           dataDir: realpathSync(dirname(deps.dbPath)),
-          denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+          denyRead: [
+            ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+            ...gitConfig.denyRead,
+            ...SANDBOX_DENY_READ_HOME.map((p) => realish(join(homedir(), p))),
+          ],
         },
         mcpConfigFile: mcpPath,
         hook: { command: hookCommand, timeoutS: GUARD_HOOK_TIMEOUT_S },
@@ -1031,7 +1017,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         args: [...(deps.commandArgs ?? []), ...args],
         cwd,
         transcriptPath: run.transcriptPath,
-        env: crewEnv(info.seat.id),
+        env,
         node: crew?.node ?? DEFAULT_CREW_NODE,
         entry: join(deps.hubRoot, KEEPER_ENTRY),
         dir: crewKeeperDir(deps.dbPath, run.id),
@@ -1586,8 +1572,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       // A spawn that fails asynchronously, or a CLI that cannot find the session, exits inside
       // the resume window: the exit handler records it.
-      l = launch(info, run, row.cliSessionId, checkout, true, null);
+      l = await launch(info, run, row.cliSessionId, checkout, true, null);
     } catch (e) {
+      if (runGone(run.id, row.seatId) || stopping) return;
       log(`${row.seatId}: could not start: ${errText(e)}`);
       return failResume(row, RESUME_FAILED);
     }
@@ -1771,7 +1758,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       let l: Live;
       try {
-        l = launch(info, run, cliSessionId, checkout, false, claudeMd);
+        l = await launch(info, run, cliSessionId, checkout, false, claudeMd);
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
@@ -1888,7 +1875,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       let l: Live;
       try {
-        l = launch(
+        l = await launch(
           info,
           run,
           cliSessionId,
@@ -2055,7 +2042,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       let l: Live;
       try {
-        l = launch(
+        l = await launch(
           info,
           run,
           cliSessionId,
@@ -2343,8 +2330,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.setSeatTurnEnded(seatId, null);
       let l: Live;
       try {
-        l = launch(info, run, run.sessionId, checkout, true, null);
+        l = await launch(info, run, run.sessionId, checkout, true, null);
       } catch (e) {
+        if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
+        if (store.run(runId)?.endedAt !== null) throw new SupervisorError(409, NOT_ASIDE);
         log(`${seatId}: could not start: ${errText(e)}`);
         return fail(CANNOT_START, e);
       }

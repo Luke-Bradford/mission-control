@@ -5,7 +5,7 @@
  * next poll has the answer.
  */
 import { execFile } from "node:child_process";
-import { statSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 
 /** The command that runs the Claude CLI: the version probe and the crew spawn both use it. */
@@ -27,13 +27,15 @@ interface Located {
   key: string;
 }
 
-/** The first file named `name` on `path` (default: the hub's PATH), else null. */
+/** The first executable file named `name` on `path` (default: the hub's PATH), else null. */
 export function resolveOnPath(name: string, path = process.env.PATH ?? ""): string | null {
   for (const dir of path.split(delimiter)) {
     if (dir === "") continue;
     const candidate = join(dir, name);
     try {
-      if (statSync(candidate).isFile()) return candidate;
+      if (!statSync(candidate).isFile()) continue;
+      accessSync(candidate, constants.X_OK);
+      return candidate;
     } catch {
       // not in this directory
     }
