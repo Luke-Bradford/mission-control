@@ -95,10 +95,10 @@ function dropTrailingToken(s: string): string {
 /**
  * Transcript text made safe to show as inert text: terminal escapes and control characters
  * removed, obvious credentials redacted to `[redacted]`, cut at `max` (default STREAM_TEXT_MAX) with
- * `…`. The input is first sliced to `max` + 4096 characters, so a multi-MB tool result is never
+ * `marker` (default `…`). The input is first sliced to `max` + 4096 characters, so a multi-MB tool result is never
  * scanned whole; when that slice cut the input, a trailing partial token is dropped too.
  */
-export function cleanText(s: string, max = STREAM_TEXT_MAX): string {
+export function cleanText(s: string, max = STREAM_TEXT_MAX, marker = "…"): string {
   const sliced = s.length > max + SLICE_SLACK;
   let out = sliced ? s.slice(0, max + SLICE_SLACK) : s;
   out = out.replace(ESCAPES, "").replace(CONTROLS, "");
@@ -107,8 +107,8 @@ export function cleanText(s: string, max = STREAM_TEXT_MAX): string {
   out = out.replace(AUTH_WORD, `$1 ${REDACTED}`);
   if (sliced) out = dropTrailingToken(out);
   if (!sliced && out.length <= max) return out;
-  let cut = out.slice(0, max - 1);
+  let cut = out.slice(0, Math.max(0, max - marker.length));
   // Never end on half a surrogate pair.
   if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
-  return `${cut}…`;
+  return `${cut}${marker}`;
 }

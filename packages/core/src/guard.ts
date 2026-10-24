@@ -2,7 +2,7 @@
  * The guard's pure core: the command rules, the full-suite matcher and the secret scan. The hub
  * route (`POST /api/guard/check`) and Mission Control's push and PR build on these; nothing here does I/O.
  */
-import { MC_TOOLS, type McToolName, mcTool, READ_ONLY_CANNOT_WRITE } from "./mcp.ts";
+import { MC_TOOL_NAMES, MC_TOOLS, type McToolName, mcTool, READ_ONLY_CANNOT_WRITE } from "./mcp.ts";
 import type { CrewMode } from "./runtime.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
@@ -59,6 +59,7 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   "rerun_ci",
   "edit_card",
   "dismiss_item",
+  MC_TOOL_NAMES.ghRead,
 ];
 
 /** What a power-gated tool says when the repo is not `superuser`. */
