@@ -856,6 +856,7 @@ describe("crew sandbox and scoped edits", () => {
         "/home/you/.docker",
         "/home/you/.kube",
         "/home/you/.claude",
+        "/home/you/.codex",
         "/home/you/Library/Keychains",
         // the DB, and every seat's transcripts and prompt files
         "/home/you/.local/share/mission-control",

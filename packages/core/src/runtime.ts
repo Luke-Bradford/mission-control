@@ -756,6 +756,8 @@ export const SANDBOX_DENY_READ_HOME = [
   ".docker",
   ".kube",
   ".claude",
+  // the Codex CLI's login (auth.json) and its session transcripts
+  ".codex",
   // the login keychain: without this, code a seat runs sees it in `security list-keychains` and
   // opens it; with it, opening fails EPERM and only the System keychain is listed (probe
   // 2026-10-20; no real item was read). The CLI's own login runs outside the sandbox.
