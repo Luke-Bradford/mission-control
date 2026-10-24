@@ -7,6 +7,7 @@ import { openItem } from "../shell/overlays.ts";
 const LABEL = {
   answer: "Answer",
   open: "Open",
+  read: "Read",
   interrupt: "Interrupt",
   stop: "Stop the run",
 } as const;
@@ -14,12 +15,13 @@ const LABEL = {
 const CLASS = {
   answer: "sm primary",
   open: "sm",
+  read: "sm",
   interrupt: "sm",
   stop: "sm warn",
 } as const;
 
 /**
- * The button a need-line part carries (Overview rows and the Agent banner): Answer and Open open
+ * The button a need-line part carries (Overview rows and the Agent banner): Answer, Open and Read open
  * the item's panel, Interrupt and Stop the run stop the seat's turn. A refusal shows beside it.
  */
 export function NeedButton({ part, row }: { part: NeedPart; row: Pick<CrewRow, "id"> }) {
@@ -28,7 +30,7 @@ export function NeedButton({ part, row }: { part: NeedPart; row: Pick<CrewRow, "
   const action = part.action;
   if (action === null) return null;
   const click = async () => {
-    if (action === "answer" || action === "open") {
+    if (action === "answer" || action === "open" || action === "read") {
       openItem(part.key);
       return;
     }

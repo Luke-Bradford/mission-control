@@ -65,7 +65,15 @@ function AgentSlots({ view }: { view: MachineView }) {
   const room = free > 0 && (memFree === null || memFree > LOW_MEM_GB);
   const used = Math.min(seats, maxSeats);
   return (
-    <div className="row s agentslots">
+    <div
+      className={`row s agentslots ${room ? "ok-t" : "warn-t"}`}
+      title={[
+        perSessionMax > 0 ? `up to ${perSessionMax} per session` : null,
+        room ? `Room for ${free} more agent${free === 1 ? "" : "s"}` : "No room for another agent",
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+    >
       <span className="fg2">Agents</span>
       <span className="slots">
         {Array.from({ length: maxSeats }, (_, i) => (
@@ -74,15 +82,6 @@ function AgentSlots({ view }: { view: MachineView }) {
         ))}
       </span>
       <span className="num">{`${seats} of ${maxSeats}`}</span>
-      {perSessionMax > 0 && <span className="muted">{`· up to ${perSessionMax} per session`}</span>}
-      <span className="spacer" />
-      {room ? (
-        <span className="ok-t">
-          Room for {free} more agent{free === 1 ? "" : "s"}
-        </span>
-      ) : (
-        <span className="warn-t">No room for another agent</span>
-      )}
     </div>
   );
 }
@@ -97,7 +96,10 @@ export function MachinePanel() {
   return (
     <Panel id="machP" title="Machine" sub="this Mac · every 2 s">
       <div className="pb">
-        <div className="res">
+        <div
+          className="res"
+          title={`Claude/Codex processes (${m?.agents ? m.agents.count : DASH}) · other apps`}
+        >
           <div className="resrow">
             <span className="s fg2">CPU</span>
             <Bar
@@ -155,16 +157,6 @@ export function MachinePanel() {
             <span className="num s" title={none}>
               {u.diskFree === null ? DASH : `${Math.round(u.diskFree / GIB)} GB`}
               <span className="muted"> free</span>
-            </span>
-          </div>
-          <div className="legend">
-            <span>
-              <i style={{ background: AGENTS_COLOUR }} />
-              Claude/Codex processes ({m?.agents ? m.agents.count : DASH})
-            </span>
-            <span>
-              <i style={{ background: OTHER_COLOUR }} />
-              other apps
             </span>
           </div>
           {view && typeof view.maxSeats === "number" && <AgentSlots view={view} />}
