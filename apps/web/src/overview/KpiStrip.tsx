@@ -76,7 +76,10 @@ export function KpiStrip() {
       label: "CI pass rate",
       page: "board",
       value: k?.ciPassRate24h?.pct == null ? "—" : `${Math.round(k.ciPassRate24h.pct)}%`,
-      delta: k?.ciPassRate24h?.redNow != null ? `${k.ciPassRate24h.redNow} red now` : "—",
+      delta:
+        k?.ciPassRate24h?.runs != null
+          ? `${k.ciPassRate24h.runs} runs · ${k.ciPassRate24h.redNow} red now`
+          : "—",
       color: "var(--crit)",
     },
     {
@@ -84,14 +87,16 @@ export function KpiStrip() {
       page: "board",
       value: duration(k?.cycleTime?.medianMs),
       delta:
-        k?.cycleTime?.avg14dMs == null ? "—" : `${duration(k.cycleTime.avg14dMs)} · 14d average`,
+        k?.cycleTime?.n == null
+          ? "—"
+          : `n=${k.cycleTime.n} · ${duration(k.cycleTime.avg14dMs)} avg (14d)`,
       color: "var(--think)",
     },
     {
       label: "Needs you",
       page: "comms",
       value: value(k?.needsYou?.count),
-      delta: k?.needsYou?.overHour != null ? `${k.needsYou.overHour} over an hour` : "—",
+      delta: k?.needsYou?.overHour != null ? `${k.needsYou.overHour} over 1 h` : "—",
       color: "var(--warn)",
     },
   ] as const;
@@ -121,9 +126,11 @@ export function KpiStrip() {
               <span className="v num">
                 {pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
               </span>
-              <span className="d num" title={pending ? undefined : tile.delta}>
-                {pending ? null : tile.delta}
-              </span>
+              {"series" in tile && (
+                <span className="d num" title={pending ? undefined : tile.delta}>
+                  {pending ? null : tile.delta}
+                </span>
+              )}
               {series && series.length >= 2 ? (
                 <Sparkline
                   values={series}
@@ -131,8 +138,11 @@ export function KpiStrip() {
                   label={`${tile.label} · ${"history" in tile ? tile.history : ""}`}
                 />
               ) : (
-                <span className="kpi-no-trend" title="History unavailable">
-                  {pending ? null : "—"}
+                <span
+                  className="kpi-secondary num"
+                  title={"series" in tile ? "History unavailable" : tile.delta}
+                >
+                  {pending ? null : "series" in tile ? "—" : tile.delta}
                 </span>
               )}
             </a>

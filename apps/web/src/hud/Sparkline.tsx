@@ -29,11 +29,25 @@ export function Sparkline({
     )
     .join("");
   return (
-    <svg data-max={max} className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
+    <svg
+      data-max={max}
+      className="spark"
+      preserveAspectRatio="none"
+      viewBox={`0 0 ${W} ${H}`}
+      role="img"
+      aria-label={label}
+    >
       {!values.includes(null) && (
         <path d={`${line}L${W - 4},${H}L0,${H}Z`} fill={color} fillOpacity={0.18} />
       )}
-      <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+      <path
+        d={line}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
       {values[n - 1] != null && (
         <circle cx={W - 4} cy={y(values[n - 1] ?? 0)} r={2.2} fill={color} />
       )}

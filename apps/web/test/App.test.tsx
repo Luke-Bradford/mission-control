@@ -43,24 +43,6 @@ describe("App", () => {
     expect(current.map((a) => a.textContent)).toEqual(tabName ? [tabName] : []);
   });
 
-  it("opens one event stream, and closes it when the app unmounts", () => {
-    const close = vi.fn();
-    const opened = vi.fn();
-    class RecordingEventSource {
-      constructor(url: string) {
-        opened(url);
-      }
-      addEventListener() {}
-      close = close;
-    }
-    vi.stubGlobal("EventSource", RecordingEventSource);
-    const { unmount } = at("/");
-    expect(opened.mock.calls).toEqual([["/api/stream"]]);
-    expect(close).not.toHaveBeenCalled();
-    unmount();
-    expect(close).toHaveBeenCalledTimes(1);
-  });
-
   it("an unknown path shows Overview at /", async () => {
     const { container } = at("/nope");
     await vi.waitFor(() => expect(window.location.pathname).toBe("/"));

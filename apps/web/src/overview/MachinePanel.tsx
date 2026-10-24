@@ -109,7 +109,7 @@ export function MachinePanel() {
                 label="CPU history"
                 values={summary.machine.cpu}
                 max={100}
-                color="var(--fg-2)"
+                color="var(--accent)"
               />
             ) : (
               <Bar
@@ -149,7 +149,7 @@ export function MachinePanel() {
                 label="Memory history"
                 values={summary.machine.mem}
                 max={100}
-                color="var(--fg-2)"
+                color="var(--think)"
               />
             ) : (
               <Bar

@@ -50,7 +50,7 @@ export function QuotaPanel() {
         <span
           title={`Claude quota comes from the usage endpoint and from rate-limit events in the loops' transcripts; Codex from its app-server, or its latest session log when that is unavailable. Read every ${config?.poll.usageMinutes ?? DASH} min.`}
         >
-          Account quota
+          Quota &amp; limits
         </span>
       }
     >

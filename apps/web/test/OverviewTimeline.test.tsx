@@ -1,10 +1,10 @@
-import type { OverviewTimeline } from "@mc/core";
+import type { CrewRow, OverviewTimeline } from "@mc/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { TimelinePanel } from "../src/overview/TimelinePanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { HOUR, MIN, NOW } from "./fixtures.ts";
+import { HOUR, MIN, NOW, seatRow } from "./fixtures.ts";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
@@ -12,8 +12,11 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-function stub(lanes: OverviewTimeline["lanes"] = []) {
-  return stubFetch({ "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes } });
+function stub(lanes: OverviewTimeline["lanes"] = [], rows: CrewRow[] = []) {
+  return stubFetch({
+    "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes },
+    "/api/crew": { rows },
+  });
 }
 
 it("clips spans and ticks to the last hour and extends open spans to now", async () => {
@@ -85,7 +88,7 @@ it("slides every second between fetches", async () => {
   const span = container.querySelector<HTMLElement>(".overview-span");
   expect(Number.parseFloat(span?.style.left ?? "")).toBeCloseTo(50 - 100 / 3600);
   expect(Number.parseFloat(span?.style.width ?? "")).toBeCloseTo(50 + 100 / 3600);
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls.filter(([path]) => path === "/api/overview/timeline")).toHaveLength(1);
 });
 
 it("caps cached open spans at the last good data time and reports failed refetches", async () => {
@@ -113,4 +116,23 @@ it("caps cached open spans at the last good data time and reports failed refetch
   await act(async () => hub.refetchTopic("agents"));
   expect(screen.queryByText("Could not refresh timeline. Showing stale data.")).toBeNull();
   expect(Number.parseFloat(span()?.style.width ?? "")).toBeCloseTo(50 + 100 / 30);
+});
+
+it("uses live crew names and colours and resizes its lane grid after updates", async () => {
+  const lanes = ["seat-1", "seat-2"].map((agentId) => ({ agentId, spans: [], ticks: [] }));
+  stub(lanes, [seatRow({ id: "seat-1", displayCallSign: "guido-cx", index: 2 })]);
+  const { container } = render(<TimelinePanel />);
+  const lane = await screen.findByRole("link", { name: "guido-cx" });
+  expect(lane.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--s3)");
+  const grid = () => container.querySelector<HTMLElement>(".overview-lanes");
+  expect(grid()?.style.getPropertyValue("--lane-count")).toBe("2");
+  stub(lanes.slice(0, 1), [seatRow({ id: "seat-1", displayCallSign: "renamed", index: 4 })]);
+  await act(async () => hub.refetchTopic("agents"));
+  const renamed = await screen.findByRole("link", { name: "renamed" });
+  expect(renamed.querySelector<HTMLElement>(".num")?.style.color).toBe("var(--s5)");
+  expect(grid()?.style.getPropertyValue("--lane-count")).toBe("1");
+  stub();
+  await act(async () => hub.refetchTopic("agents"));
+  expect(grid()?.childElementCount).toBe(0);
+  expect(grid()?.style.getPropertyValue("--lane-count")).toBe("0");
 });

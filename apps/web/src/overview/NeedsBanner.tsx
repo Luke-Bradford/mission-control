@@ -20,7 +20,7 @@ const BITS: { label: string; kinds: AttentionItem["kind"][]; plural: boolean }[]
 ];
 
 /** The Overview's banner (catalogue 2.1.1): the away strip when on, then All clear or the count. */
-export function NeedsBanner() {
+export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
   const all = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const items = all && operatorItems(all);
   const away = useResource<AwaySettings>(RESOURCES.away).data;
@@ -32,6 +32,7 @@ export function NeedsBanner() {
     : null;
   // Acknowledged items still count (catalogue §1.3: until the thing is acted on): say how many are not.
   const notAcked = items?.filter((i) => !i.acked).length ?? 0;
+  if (awayOnly && !away?.on) return null;
   return (
     <div id="nbanner">
       {away?.on && (
@@ -46,13 +47,13 @@ export function NeedsBanner() {
           </button>
         </div>
       )}
-      {items && items.length === 0 && (
+      {!awayOnly && items && items.length === 0 && (
         <div className="nbanner clear">
           <b>All clear</b>
           <span className="bits">Nothing is waiting on you.</span>
         </div>
       )}
-      {items && items.length > 0 && (
+      {!awayOnly && items && items.length > 0 && (
         <button type="button" className="nbanner" onClick={() => navigate(PAGE_PATHS.comms)}>
           {lamp && <Lamp {...lamp} />}
           <b className="num">{items.length}</b>
