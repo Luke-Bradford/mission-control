@@ -309,7 +309,8 @@ export function repoReferenceIndex(checkout: string): string {
   let omitted = false;
   let scanned = 0;
   let kept = 0;
-  // Strip Markdown delimiters even inside fields: paths and YAML strings are untrusted data.
+  const pathMax = 256;
+  // Strip Markdown delimiters from names and descriptions: YAML strings are untrusted data.
   const clean = (value: string): string =>
     value
       .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
@@ -344,6 +345,10 @@ export function repoReferenceIndex(checkout: string): string {
     if (!stat.isFile() || stat.size > CLAUDE_MD_MAX) return;
     if (!relative.endsWith("/SKILL.md") && !relative.startsWith(".claude/agents/")) return;
     if (!relative.endsWith(".md")) return;
+    if (relative.length > pathMax || /[\p{Cc}\p{Zl}\p{Zp}`]/u.test(relative)) {
+      omitted = true;
+      return;
+    }
     const text = readFileSync(path, "utf8");
     const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
     if (front === null) return;
@@ -353,7 +358,7 @@ export function repoReferenceIndex(checkout: string): string {
       const { name, description } = meta as Record<string, unknown>;
       if (typeof name !== "string" || typeof description !== "string") return;
       if (clean(name) === "" || clean(description) === "") return;
-      const line = `- ${clean(name)} — ${clean(description)} (${clean(relative)})`;
+      const line = `- ${clean(name)} — ${clean(description)} (${JSON.stringify(relative)})`;
       // Always reserve room for the omission notice, including its newline.
       if (used + 1 + line.length + 1 + notice.length > 16000) {
         omitted = true;
