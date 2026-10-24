@@ -382,9 +382,9 @@ describe("Agents panel", () => {
     const { container } = render(<Overview />);
     await stepLabel("feature › verify");
     const row = agentRows(container)[0];
-    expect(bar(row)).toEqual(["d", "", "d", "c", "", ""]);
+    expect(bar(row)).toEqual(["d", "", "c", "", ""]);
     expect(row?.querySelector(".stepbar")?.getAttribute("title")).toBe(
-      "plan → go/no-go → implement → verify → review → draft PR",
+      "implement → draft PR → verify → review → merge",
     );
   });
 

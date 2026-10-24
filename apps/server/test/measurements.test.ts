@@ -20,7 +20,15 @@ it("measures first content separately and replays timestamped usage once", () =>
   ];
   const whole = foldTranscript(null, lines, 0);
   expect(whole.digest.speed).toMatchObject({ firstTokenMs: 1000, turnMs: 4000 });
-  expect(whole.digest.attemptUsage).toEqual([{ id: "reply", at: 2000, tokens: 20 }]);
+  expect(whole.digest.attemptUsage).toEqual([
+    {
+      id: "reply",
+      at: 2000,
+      tokens: 20,
+      usage: { input: 0, output: 20, cacheRead: 0, cacheCreate: 0 },
+      model: null,
+    },
+  ]);
   expect(foldTranscript(foldTranscript(null, lines.slice(0, 2), 0), lines.slice(2), 0)).toEqual(
     whole,
   );

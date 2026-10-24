@@ -648,8 +648,35 @@ describe("stepMarks", () => {
     steps: feature?.steps,
   };
 
-  it("a run with a plan event shows plan done", () => {
-    expect(stepMarks({ ...loop, planned: true }, "running")).toEqual([
+  it("a run with a plan event shows plan done only for an explicit plan step", () => {
+    expect(loopSteps(loop).map((s) => s.name)).toEqual([
+      "implement",
+      "draft PR",
+      "verify",
+      "review",
+      "merge",
+    ]);
+    for (const planned of [true, false]) {
+      expect(stepMarks({ ...loop, planned }, "running")).toEqual([
+        "cur",
+        "todo",
+        "todo",
+        "todo",
+        "todo",
+      ]);
+    }
+    const legacy: CrewLoop = {
+      ...loop,
+      steps: [
+        { name: "plan", phase: null },
+        { name: "go/no-go", phase: null },
+        { name: "implement", phase: "working" },
+        { name: "verify", phase: "ci" },
+        { name: "review", phase: "review" },
+        { name: "draft PR", phase: null },
+      ],
+    };
+    expect(stepMarks({ ...legacy, planned: true }, "running")).toEqual([
       "done",
       "todo",
       "cur",
@@ -657,7 +684,7 @@ describe("stepMarks", () => {
       "todo",
       "todo",
     ]);
-    expect(stepMarks({ ...loop, planned: false }, "running")).toEqual([
+    expect(stepMarks({ ...legacy, planned: false }, "running")).toEqual([
       "todo",
       "todo",
       "cur",
@@ -669,19 +696,24 @@ describe("stepMarks", () => {
 
   it("parked without a known held phase completes unphased steps only from run evidence", () => {
     const parked: CrewLoop = { ...loop, phase: "parked" };
-    expect(stepMarks(parked, "parked")).toEqual(["todo", "todo", "held", "held", "held", "todo"]);
+    const legacyPlan: CrewLoop = {
+      ...parked,
+      steps: [{ name: "plan", phase: null }],
+    };
+    expect(stepMarks(legacyPlan, "parked")).toEqual(["todo"]);
+    expect(stepMarks({ ...legacyPlan, planned: true }, "parked")).toEqual(["done"]);
+    expect(stepMarks({ ...legacyPlan, phase: "done" }, "idle")).toEqual(["todo"]);
+    expect(stepMarks(parked, "parked")).toEqual(["held", "todo", "held", "held", "todo"]);
     expect(stepMarks({ ...parked, planned: true, prNumber: 9 }, "parked")).toEqual([
+      "held",
       "done",
+      "held",
+      "held",
       "todo",
-      "held",
-      "held",
-      "held",
-      "done",
     ]);
     expect(stepMarks({ ...parked, phase: "done" }, "idle")).toEqual([
-      "todo",
-      "todo",
       "done",
+      "todo",
       "done",
       "done",
       "todo",
@@ -715,7 +747,9 @@ describe("stepMarks", () => {
   });
 
   it("draft PR is done once a PR is open", () => {
-    expect(stepMarks({ ...loop, phase: "review", prNumber: 9 }, "running").at(-1)).toBe("done");
+    const index = loopSteps(loop).findIndex((s) => s.name === "draft PR");
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(stepMarks({ ...loop, phase: "review", prNumber: 9 }, "running")[index]).toBe("done");
   });
 
   it("Overview and the Agent page name the same current step", () => {
