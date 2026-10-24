@@ -22,6 +22,7 @@ import {
   CONTROL_TIMEOUT_MS,
   CREW_CLI_ENV,
   CREW_ISOLATION_FLAGS,
+  CREW_MODES,
   type CrewCliInput,
   crewAuthorName,
   crewCliArgs,
@@ -64,6 +65,9 @@ const base: CrewCliInput = {
     gitCommonDir: "/mc/clone/.git",
     worktreeGitDir: "/mc/clone/.git/worktrees/guido-1",
     home: "/home/you",
+    toolchainPaths: ["/home/you/tools/node", "/home/you/tools/pnpm"],
+    gitConfigPaths: ["/home/you/.gitconfig", "/home/you/.config/git"],
+    allowRead: [],
     dataDir: "/home/you/.local/share/mission-control",
     denyRead: [],
   },
@@ -756,6 +760,91 @@ describe("scratch mode", () => {
 });
 
 describe("crew sandbox and scoped edits", () => {
+  it.each(CREW_MODES)(
+    "%s denies home and reopens only the seat's paths, toolchain and git config",
+    (mode) => {
+      const f = JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook)).sandbox.filesystem;
+      expect(f.denyRead).toContain(base.sandbox.home);
+      expect(f.allowRead).toEqual([
+        base.sandbox.cwd,
+        base.sandbox.gitCommonDir,
+        base.sandbox.worktreeGitDir,
+        ...base.sandbox.toolchainPaths,
+        "/home/you/.gitconfig",
+        "/home/you/.config/git",
+      ]);
+    },
+  );
+
+  it.each(CREW_MODES)(
+    "%s retains explicit credential and data denies inside allowed parents",
+    (mode) => {
+      const allowRead = ["/home/you/.config", "/home/you/.local/share", "/home/you/.config"];
+      const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, allowRead }, mode, base.hook))
+        .sandbox.filesystem;
+      expect(f.allowRead.slice(-2)).toEqual(["/home/you/.config", "/home/you/.local/share"]);
+      expect(f.allowRead).toContain("/home/you/.config/git");
+      // The CLI reapplies these nested denies after opening the parent; don't collapse them
+      // into the home denial, which the grants intentionally override (spike 2026-10-23).
+      expect(f.denyRead).toEqual(
+        JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook)).sandbox.filesystem.denyRead,
+      );
+      expect(f.denyRead).toEqual(
+        expect.arrayContaining([
+          "/home/you/.config/git/credentials",
+          "/home/you/.config/gh",
+          "/home/you/.config/mission-control",
+          base.sandbox.dataDir,
+        ]),
+      );
+    },
+  );
+
+  it.each(["allowRead", "toolchainPaths", "gitConfigPaths"] as const)(
+    "refuses %s grants that reopen home, credentials, data or operator denies",
+    (key) => {
+      for (const grant of [
+        "/",
+        "/home",
+        "/home/you",
+        "/home/you/.ssh",
+        "/home/you/.ssh/config",
+        "/home/you/safe/../.ssh/config",
+        "/home/you/..",
+        base.sandbox.dataDir,
+        `${base.sandbox.dataDir}/mc.sqlite`,
+        "/home/you/Work/tool",
+      ]) {
+        expect(() =>
+          crewSandboxSettings(
+            { ...base.sandbox, [key]: [grant], denyRead: ["/home/you/Work"] },
+            "writer",
+            base.hook,
+          ),
+        ).toThrow(/read grant/);
+      }
+      expect(() =>
+        crewSandboxSettings(
+          { ...base.sandbox, [key]: ["/home/you/.sshelper"] },
+          "writer",
+          base.hook,
+        ),
+      ).not.toThrow();
+    },
+  );
+
+  it("keeps the data-dir denial even if it duplicates the broad home denial", () => {
+    expect(() =>
+      crewSandboxSettings({ ...base.sandbox, dataDir: base.sandbox.home }, "writer", base.hook),
+    ).toThrow(/reopens denied path/);
+  });
+
+  it("exempts worktree and git-dir grants from the backstop", () => {
+    expect(() =>
+      crewSandboxSettings({ ...base.sandbox, denyRead: ["/mc"] }, "writer", base.hook),
+    ).not.toThrow();
+  });
+
   it("builds the sandbox settings JSON: no git dir writable, the whole clone's .git denied", () => {
     const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook));
     expect(j.sandbox).toMatchObject({
@@ -844,6 +933,7 @@ describe("crew sandbox and scoped edits", () => {
       expect(
         JSON.parse(crewSandboxSettings(base.sandbox, mode, base.hook)).sandbox.filesystem.denyRead,
       ).toEqual([
+        "/home/you",
         "/home/you/.ssh",
         "/home/you/.config/gh",
         "/home/you/.config/mission-control",
@@ -903,6 +993,14 @@ describe("crew sandbox and scoped edits", () => {
       expect(() =>
         crewSandboxSettings({ ...base.sandbox, denyRead: ["/ok", bad] }, "writer", base.hook),
       ).toThrow("crew sandbox: denyRead must be absolute");
+    }
+  });
+
+  it.each(["allowRead", "toolchainPaths"] as const)("refuses a relative %s entry", (key) => {
+    for (const bad of ["tools", "~/tools", ""]) {
+      expect(() =>
+        crewSandboxSettings({ ...base.sandbox, [key]: ["/ok", bad] }, "writer", base.hook),
+      ).toThrow(`crew sandbox: ${key} must be absolute`);
     }
   });
 

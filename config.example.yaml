@@ -123,6 +123,15 @@ crew:
   # working folders. Absolute paths (~ allowed); none may be, hold or lie inside `worktrees`, a
   # `checkout` or a temp dir (the hub's, or /tmp).
   # deny_read: [~/code/work, ~/Documents]
+  # Home is unreadable except for the seat's worktree, git dirs, toolchain and git config.
+  # Extra files or folders its tools need (for example pip config). Absolute paths (~ allowed),
+  # default []. An entry may not be home, above home, or equal to/inside a denied path,
+  # a crew folder or a temp dir. Credential folders and the data dir stay denied under allowed parents.
+  # Node/pnpm executable files and verified pnpm packages are granted automatically; volta/corepack
+  # toolchains under home may need allow_read for their supporting files (never the pnpm store).
+  # ~/.gitconfig, ~/.config/git and discovered global include targets are resolved and granted.
+  # Symlinked or included git config outside these discovered paths needs allow_read.
+  # allow_read: [~/.config/pip]
   # Input + output tokens one build-loop run may use (the engine will park a run that goes over).
   # Default 400000.
   # run_token_budget: 400000
