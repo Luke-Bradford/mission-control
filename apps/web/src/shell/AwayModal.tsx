@@ -9,8 +9,8 @@ import { BuildChips } from "./buildStatus.tsx";
 import { closeAway, trapTab, useAwayOpen, useOverlay, useReturnFocus } from "./overlays.ts";
 import { toast } from "./Toast.tsx";
 
-/** Away mode is saved but nothing acts on it yet: every save says so. */
-export const AWAY_NOT_ACTING = "Saved. Mission Control acts on these settings from phase 4.";
+/** Confirmation for settings enforced by the hub. */
+export const AWAY_SAVED = "Saved. Away mode gates starts and PR readiness now.";
 /** Turning On with no date needs the operator's timezone; until it loads, the press says so. */
 export const AWAY_WAITING =
   "Still loading your timezone, which sets the end date. Try again in a moment, or pick an end date first.";
@@ -24,24 +24,24 @@ const MAY: { key: keyof AwaySettings["may"]; label: string }[] = [
   },
   {
     key: "research",
-    label:
-      "Research new tickets and reports, and draft findings for each ticket (posted when you are back)",
+    label: "Research new tickets and reports, and draft findings for each ticket (coming later)",
   },
   {
     key: "check",
-    label: "Check GitHub (and Teams, from P5) every 30 min for anything about me or my tickets",
+    label: "Check GitHub and Teams every 30 min for anything about me or my tickets (coming later)",
   },
   { key: "status", label: "Keep my tickets' Status in line with the work (my tickets only)" },
   {
     key: "safePr",
-    label: "Take a safe PR out of draft, label it safe-to-merge and ask its code owner to review",
+    label:
+      "Take a safe PR out of draft after the diff, CI and RETRO checks (merge-autonomy repos with explicit hard rules and ticket pickup on)",
   },
 ];
 
 const ALWAYS = [
-  "Other tickets may be worked to a draft PR (FLIGHT holds the go/no-go gate) and stay in draft, with a walkthrough brief for your return",
+  "Automatic starts are safe tickets only. FLIGHT may explicitly start other tickets, which stay in draft, with a walkthrough brief for your return",
   "Comments and nudges are drafted and wait for your return",
-  "Never merges, never posts to Teams, never changes settings, migrations or another team's code",
+  "Never merges, never posts, never changes settings, migrations or another team's code",
 ];
 
 const SAFE = [
@@ -98,7 +98,7 @@ export function AwayModal() {
     apiPost<AwaySettings>(ACTIONS.away, next).then(
       () => {
         saving.current--;
-        toast(message === null ? AWAY_NOT_ACTING : `${message} ${AWAY_NOT_ACTING}`);
+        toast(message === null ? AWAY_SAVED : `${message} ${AWAY_SAVED}`);
         hub.refetch(RESOURCES.away.path);
       },
       (err: unknown) => {
@@ -208,6 +208,9 @@ export function AwayModal() {
                       <li key={line}>{line}</li>
                     ))}
                   </ul>
+                  <p className="note xs">
+                    Label safe-to-merge and ask its code owner to review: coming later.
+                  </p>
                   <h3 className="gap">Limits</h3>
                   <ul className="rules">
                     {LIMITS.map((line) => (
@@ -217,10 +220,10 @@ export function AwayModal() {
                 </div>
                 <div>
                   <h3>When you come back</h3>
-                  <p className="s gap">The digest arrives with away mode (phase 4).</p>
+                  <p className="s gap">One digest, most urgent first.</p>
                   <p className="note xs">
-                    Also: mentions of you in Teams and GitHub, summarised, and quota spent against
-                    the reserve.
+                    Need you now; safe PRs ready for review; drafts to walk through; failed, with
+                    the reason; decisions FLIGHT made, with reasons; messages drafted for you.
                   </p>
                 </div>
               </div>

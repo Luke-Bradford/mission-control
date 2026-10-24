@@ -75,6 +75,10 @@ export const RESOURCES = {
     topic: "flight",
   }),
   machine: { path: "/api/machine", topic: "machine" },
+  awayDigest: (since = ""): ResourceRef => ({
+    path: `/api/away/digest${since ? `?since=${enc(since)}` : ""}`,
+    topic: "settings",
+  }),
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({

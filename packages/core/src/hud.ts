@@ -42,6 +42,7 @@ export const TELEMETRY_POINTS = 72;
 export const LIVE_MINUTES = 60;
 /** Cycle-time rows, in display order; issues without a size go in a last `NO_SIZE` row. */
 export const TICKET_SIZES = ["XS", "S", "M", "L", "XL"] as const;
+export type TicketSize = (typeof TICKET_SIZES)[number];
 export const NO_SIZE = "none";
 
 export const DEFAULT_AWAY: AwaySettings = {

@@ -663,6 +663,16 @@ const toSample = (r: Row): UsageSample => ({
   source: r.source as string,
 });
 
+/** A run's stored plan fact; a value that won't parse is dropped rather than failing every run read. */
+function parsePlan(raw: string): { plan?: Run["plan"] } {
+  try {
+    const plan = JSON.parse(raw) as Run["plan"];
+    return plan !== null && typeof plan === "object" ? { plan } : {};
+  } catch {
+    return {};
+  }
+}
+
 const toRun = (r: Row): Run => ({
   // Absent, not null, on a row from before the ticket's title was stored.
   ...(r.ticket_title === null || r.ticket_title === undefined
@@ -676,6 +686,7 @@ const toRun = (r: Row): Run => ({
   ...(r.loop === null || r.loop === undefined
     ? {}
     : { loop: JSON.parse(r.loop as string) as RunLoop }),
+  ...(r.plan == null ? {} : parsePlan(r.plan as string)),
   // Absent, not null, on a run that started without a profile.
   ...(r.profile === null || r.profile === undefined
     ? {}
@@ -938,6 +949,8 @@ export class Store {
       // `upsertRun` writes them on a new row only.
       ["profile", "TEXT"],
       ["profile_hash", "TEXT"],
+      // The plan at run creation; later transcript folds never rewrite it.
+      ["plan", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     this.db.exec(`
@@ -1064,8 +1077,8 @@ export class Store {
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version, profile, profile_hash)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ticket_title, review_id, cli_version, profile, profile_hash, plan)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1100,6 +1113,7 @@ export class Store {
         r.cliVersion ?? null,
         r.profile ? JSON.stringify({ profile: r.profile.profile, route: r.profile.route }) : null,
         r.profile?.hash ?? null,
+        r.plan === undefined ? null : JSON.stringify(r.plan),
       );
   }
 
@@ -2513,6 +2527,18 @@ export class Store {
       .run(key, runId, text, at);
     if (r.changes === 1 && key === `${runId}:plan`) this.clearNoReportNotes(runId, at);
     return r.changes === 1;
+  }
+
+  /** The latest report_plan record for a ticket, attributed to the reporting run's seat. */
+  ticketPlan(repoId: RepoId, ref: string): { by: AgentId; at: number; ref: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT r.agent_id, e.at FROM loop_events e JOIN runs r ON r.id = e.run_id
+         WHERE e.key = r.id || ':plan' AND r.repo_id = ? AND r.ticket = ?
+         ORDER BY e.at DESC, e.key DESC LIMIT 1`,
+      )
+      .get(repoId, ref) as Row | undefined;
+    return row ? { by: row.agent_id as AgentId, at: row.at as number, ref } : null;
   }
 
   /** Whether a `:plan` loop event exists for the run or any run on the same repo and ticket. */

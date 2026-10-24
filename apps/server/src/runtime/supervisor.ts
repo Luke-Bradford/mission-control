@@ -58,6 +58,7 @@ import {
   GUARD_HOOK_TIMEOUT_S,
   guardHookCommand,
   HUD_STATE_LABEL,
+  hasPlanSection,
   inferTicket,
   LOOPBACK_HOST,
   MCP_PATH,
@@ -68,6 +69,7 @@ import {
   notOnBoardText,
   notReviewSeatText,
   notWatchSeatText,
+  PLAN_SIZES,
   PNPM_STORE_ENV,
   type Profile,
   type ProfileOverride,
@@ -78,6 +80,7 @@ import {
   ROLE_PROMPT_DIR,
   type Run,
   type RunLoop,
+  type RunPlan,
   retiringText,
   reviewDepth,
   reworkFirstText,
@@ -341,10 +344,11 @@ export type EndedBy = NonNullable<Run["endedBy"]>;
 /**
  * What the supervisor tells its listeners. `idle`: a seat with an active run left a turn, or was
  * resumed. `run-ended`: after the store has the end, from every end path. `evidence`: the seat
- * reported through `mc report_evidence`.
+ * reported through `mc report_evidence`. `seat-free`: after exit cleanup releases the process.
  */
 export type SupervisorEvent =
   | { kind: "idle"; seatId: string; runId: string; resumed: boolean }
+  | { kind: "seat-free"; seatId: string; runId: string }
   | { kind: "run-ended"; seatId: string; runId: string; endedBy: EndedBy }
   | { kind: "evidence"; seatId: string; runId: string }
   | { kind: "findings"; seatId: string; runId: string };
@@ -464,6 +468,9 @@ export interface Supervisor {
   busy(): SeatBusy[];
   /** Whether the seat is starting, has a process, or its seat row is active; a store error counts as busy. */
   seatBusy(seatId: string): boolean;
+  holdsCrewLock?(): boolean;
+  /** Ends a removed seat's detached aside and publishes its lifecycle event synchronously. */
+  endRemovedAside?(runId: string): boolean;
   status(): { enabled: boolean; note: string | null };
   /**
    * Runs `fn` after everything queued for the clone `checkout` (a checkout, a commit); a failure
@@ -771,7 +778,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       );
     transcripts.delete(l.run.transcriptPath);
     digests.delete(l.run.id);
-    if (byEngine) return;
+    if (byEngine) {
+      emit({ kind: "seat-free", seatId, runId: l.run.id });
+      return;
+    }
     store.setRunEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
     closeRunItems(l.info);
     // read before the seat row changes
@@ -1807,6 +1817,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
       });
       if (refusal !== null) throw new SupervisorError(422, refusal);
+      // only a build run works from the ticket's plan; planner and review runs record none
+      const plan: RunPlan | undefined =
+        def.loop !== "build"
+          ? undefined
+          : hasPlanSection(ticket.body)
+            ? (store.ticketPlan(info.repo.id, ref) ?? { by: null, at: null, ref })
+            : card.size !== null && !PLAN_SIZES.includes(card.size)
+              ? { skipped: `Size ${card.size}` }
+              : undefined;
       const title = ticket.title;
       // A planner has no branch: a detached checkout of the default branch, for reading only
       const planner = def.loop === "plan";
@@ -1871,6 +1890,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         summary: null,
         ...(opts?.loop ? { loop: opts.loop } : {}),
         profile: { ...chosen, hash: profileHash(chosen.profile) },
+        ...(plan === undefined ? {} : { plan }),
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
@@ -2383,8 +2403,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     setSeat(seatId, { state: "idle", reason: null, runId: null });
     closeRunItems(info);
-    emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
     await closing;
+    if (l && live.get(seatId) === l) live.delete(seatId);
+    emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
     if (worktree === null) return;
     try {
       await inClone(info.session.checkout, () =>
@@ -2794,6 +2815,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     seat(seatId) {
       need(seatId);
       return store.seatSession(seatId);
+    },
+
+    holdsCrewLock: mayAct,
+
+    endRemovedAside(runId) {
+      if (!mayAct()) return false;
+      const run = store.run(runId);
+      if (!run || run.endedAt !== null || !run.loop?.aside) return false;
+      if (starting.has(run.agentId) || live.has(run.agentId)) return false;
+      if (
+        store
+          .runsActiveSince(Number.MAX_SAFE_INTEGER)
+          .some((r) => r.agentId === run.agentId && r.endedAt === null && !r.loop?.aside)
+      )
+        return false;
+      store.setRunEnded(run.id, now(), "ok", "operator");
+      transcripts.delete(run.transcriptPath);
+      digests.delete(run.id);
+      emit({ kind: "run-ended", seatId: run.agentId, runId, endedBy: "operator" });
+      return true;
     },
 
     seatBusy(seatId) {

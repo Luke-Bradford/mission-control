@@ -122,6 +122,8 @@ export function awayDiffSafe(
 }
 
 export interface AwayDigest {
+  /** Stored activation time, retained after away ends. */
+  startedAt?: number;
   active: boolean;
   groups: [
     { kind: "needYouNow"; items: AttentionItem[] },

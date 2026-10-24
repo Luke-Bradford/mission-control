@@ -8,7 +8,7 @@ import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, NOW } from "./fixtures.ts";
 
-const SAVED = "Saved. Mission Control acts on these settings from phase 4.";
+const SAVED = "Saved. Away mode gates starts and PR readiness now.";
 const ON_TOAST =
   "Safe tickets can reach ready for review; others stay in draft, and comments wait for you.";
 
@@ -86,18 +86,20 @@ describe("AwayModal", () => {
     for (const line of [
       "Mission Control keeps going while you're away, inside these limits",
       "While I'm away, Mission Control may",
-      "Never merges, never posts to Teams, never changes settings, migrations or another team's code",
+      "Never merges, never posts, never changes settings, migrations or another team's code",
       "A ticket counts as safe when",
       "Docs: only documentation changes",
       "Keep 30% of every weekly quota window in reserve",
       "Park a ticket after 2 failed verify rounds and leave it for you",
       "When you come back",
-      "The digest arrives with away mode (phase 4).",
+      "One digest, most urgent first.",
     ]) {
       expect(text).toContain(line);
     }
     expect(dialog.querySelectorAll(".sw.locked")).toHaveLength(3);
-    expect(text).not.toContain("need you now");
+    expect(text).not.toContain("phase 4");
+    expect(text).toContain("coming later");
+    expect(text).toContain("diff, CI and RETRO checks");
   });
 
   it("turning On before the timezone has loaded says it is waiting and saves nothing", async () => {

@@ -2430,7 +2430,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
 
-      // Reader: docs/runbook.md#away-mode (operator reads the digest; HUD follow-up is lane:work)
+      // Reader: apps/web/src/shell/AwayDigest.tsx
       api.get("/away/digest", async (req, reply) => {
         const query = z
           .object({ since: z.coerce.number().finite().nonnegative().optional() })

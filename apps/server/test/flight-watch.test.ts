@@ -2350,6 +2350,29 @@ describe("ops review regressions", () => {
     signalState();
   });
 
+  it("groups budget parks by their ceiling, not the tokens each one used", () => {
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    for (const [id, used] of [
+      ["budget-a", 1001],
+      ["budget-b", 1043],
+    ]) {
+      const reason = `used ${used} input + output tokens of a 1000-token budget`;
+      store.upsertRun(
+        run(id as string, "guido-1", {
+          ticket: "mc#176",
+          loop: { ...NEW_LOOP, phase: "parked", parked: { kind: "budget", reason, ended: false } },
+        }),
+      );
+      store.addLoopEvent(`${id}:park`, id as string, `parked: ${reason}`, T0);
+    }
+    expect(signalState().signals).toEqual([
+      expect.objectContaining({
+        kind: "repeat_park",
+        key: "mc#176:used <n> input + output tokens of a 1000-token budget",
+      }),
+    ]);
+  });
+
   it("normalizes SHA evidence and keys repeated parks by ticket and reason, excluding closed and absent tickets", () => {
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     for (const [id, sha] of [

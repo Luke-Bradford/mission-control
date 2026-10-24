@@ -320,7 +320,11 @@ export function flightSignals(i: {
     if (!run?.ticket || !onBoard.has(run.ticket)) continue;
     if (planned) triage(run.ticket, "plan", event.at, event.text);
     if (parked) {
-      const reason = event.text.slice(parkPrefix.length).replace(/\b[0-9a-f]{7,40}\b/g, "<sha>");
+      // a budget park names the tokens it used, which differs every time; group on the ceiling
+      const reason = event.text
+        .slice(parkPrefix.length)
+        .replace(/\b[0-9a-f]{7,40}\b/g, "<sha>")
+        .replace(/^used \d+ input \+ output tokens of/, "used <n> input + output tokens of");
       const key = `${run.ticket}:${reason}`;
       const entries = parks.get(key) ?? [];
       entries.push({

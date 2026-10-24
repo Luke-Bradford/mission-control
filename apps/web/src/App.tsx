@@ -15,6 +15,7 @@ import {
   route,
   usePath,
 } from "./router.ts";
+import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { Dock } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
@@ -115,7 +116,9 @@ export function App() {
       <Header page={shown.page} />
       <div className="shell">
         <main>
-          <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
+          <AwayDigest>
+            <Suspense fallback={<p>Loading…</p>}>{r && <PageView route={r} />}</Suspense>
+          </AwayDigest>
         </main>
         <Dock />
       </div>
