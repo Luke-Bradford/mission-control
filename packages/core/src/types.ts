@@ -999,6 +999,8 @@ export interface AttentionBrief {
 }
 
 export interface AttentionItem {
+  hold?: AttentionHold;
+  holdReleased?: string;
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;
@@ -1222,4 +1224,18 @@ export interface PipelineCard {
   ci: ("pass" | "fail" | "pending")[];
   since: number;
   who: string | null;
+}
+
+export type AttentionHoldCondition =
+  | { readonly kind: "date"; readonly at: number }
+  | { readonly kind: "ticket"; readonly ticket: string }
+  | { readonly kind: "crew" }
+  | { readonly kind: "manual" };
+
+export interface AttentionHold {
+  reason: string;
+  condition: AttentionHoldCondition;
+  by: string;
+  at: number;
+  releasedAt?: number;
 }

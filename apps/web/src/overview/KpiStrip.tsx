@@ -11,10 +11,10 @@ const duration = (ms: number | null | undefined): string => {
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
 };
 const value = (n: number | undefined): string => (n === undefined ? "—" : String(n));
-const change = (series: number[] | undefined): string => {
-  if (!series || series.length < 2) return "—";
+const change = (series: (number | null)[] | undefined, format = kTokens): string => {
+  if (!series || series.length < 2 || series[0] == null || series.at(-1) == null) return "—";
   const delta = (series.at(-1) ?? 0) - (series[0] ?? 0);
-  return `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${kTokens(Math.abs(delta))} · 30m`;
+  return `${delta > 0 ? "+" : delta < 0 ? "−" : ""}${format(Math.abs(delta))} · 30m`;
 };
 
 /** Live Overview KPIs, scoped by the header's session filter. */
@@ -28,7 +28,12 @@ export function KpiStrip() {
       label: "Agents working",
       page: "agent",
       value: value(k?.working?.now),
-      delta: k?.working?.of != null ? `of ${k.working.of} agents` : "—",
+      delta:
+        k?.working?.series !== undefined
+          ? change(k.working.series)
+          : k?.working?.of != null
+            ? `of ${k.working.of} agents`
+            : "—",
       series: k?.working?.series,
       color: "var(--ok)",
       history: "last 30 minutes",
@@ -46,40 +51,46 @@ export function KpiStrip() {
       label: "Spend today",
       page: "telemetry",
       value: k?.spendToday?.usd != null ? `$${k.spendToday.usd.toFixed(2)}` : "—",
-      delta: k?.spendToday?.perHour?.length
-        ? `$${(k.spendToday.perHour.at(-1) ?? 0).toFixed(2)} this hour`
-        : "—",
-      series: k?.spendToday?.perHour,
+      delta: change(k?.spendToday?.series, (n) => `$${n.toFixed(2)}`),
+      series: k?.spendToday?.series,
       color: "var(--think)",
-      history: "hourly today",
+      history: "last 30 minutes",
     },
     {
       label: "In flight",
       page: "board",
       value: value(k?.inFlight?.count),
       delta:
-        k?.inFlight?.oldestAt == null
-          ? "—"
-          : `${duration((summary?.at ?? Date.now()) - k.inFlight.oldestAt)} oldest`,
+        k?.inFlight?.series !== undefined
+          ? change(k.inFlight.series)
+          : k?.inFlight?.oldestAt == null
+            ? "—"
+            : `${duration((summary?.at ?? Date.now()) - k.inFlight.oldestAt)} oldest`,
+      series: k?.inFlight?.series,
+      history: "last 30 minutes",
       color: "var(--accent)",
     },
     {
       label: "Merged today",
       page: "board",
       value: value(k?.mergedToday?.count),
-      delta: k?.mergedToday?.perHour?.length ? `${k.mergedToday.perHour.at(-1)} this hour` : "—",
-      series: k?.mergedToday?.perHour,
+      delta: change(k?.mergedToday?.series),
+      series: k?.mergedToday?.series,
       color: "var(--ok)",
-      history: "hourly today",
+      history: "last 30 minutes",
     },
     {
       label: "CI pass rate",
       page: "board",
       value: k?.ciPassRate24h?.pct == null ? "—" : `${Math.round(k.ciPassRate24h.pct)}%`,
       delta:
-        k?.ciPassRate24h?.runs != null
-          ? `${k.ciPassRate24h.runs} runs · ${k.ciPassRate24h.redNow} red now`
-          : "—",
+        k?.ciPassRate24h?.series !== undefined
+          ? change(k.ciPassRate24h.series, (n) => `${kTokens(n)} pp`)
+          : k?.ciPassRate24h?.runs != null
+            ? `${k.ciPassRate24h.runs} runs · ${k.ciPassRate24h.redNow} red now`
+            : "—",
+      series: k?.ciPassRate24h?.series,
+      history: "last 30 minutes",
       color: "var(--crit)",
     },
     {
@@ -87,16 +98,27 @@ export function KpiStrip() {
       page: "board",
       value: duration(k?.cycleTime?.medianMs),
       delta:
-        k?.cycleTime?.n == null
-          ? "—"
-          : `n=${k.cycleTime.n} · ${duration(k.cycleTime.avg14dMs)} avg (14d)`,
+        k?.cycleTime?.series !== undefined
+          ? change(k.cycleTime.series, duration)
+          : k?.cycleTime?.n == null
+            ? "—"
+            : `n=${k.cycleTime.n} · ${duration(k.cycleTime.avg14dMs)} avg (14d)`,
+      series: k?.cycleTime?.series,
+      history: "last 30 minutes",
       color: "var(--think)",
     },
     {
       label: "Needs you",
       page: "comms",
       value: value(k?.needsYou?.count),
-      delta: k?.needsYou?.overHour != null ? `${k.needsYou.overHour} over 1 h` : "—",
+      delta:
+        k?.needsYou?.series !== undefined
+          ? change(k.needsYou.series)
+          : k?.needsYou?.overHour != null
+            ? `${k.needsYou.overHour} over 1 h`
+            : "—",
+      series: k?.needsYou?.series,
+      history: "last 30 minutes",
       color: "var(--warn)",
     },
   ] as const;
@@ -112,7 +134,10 @@ export function KpiStrip() {
       <section className="overview-kpis" aria-label="Overview metrics" aria-busy={pending}>
         {tiles.map((tile) => {
           const path = PAGE_PATHS[tile.page];
-          const series = "series" in tile ? tile.series : undefined;
+          const series = tile.series;
+          const contextOnly =
+            series === undefined &&
+            ["In flight", "CI pass rate", "Cycle time", "Needs you"].includes(tile.label);
           return (
             <a
               className="overview-kpi"
@@ -126,7 +151,7 @@ export function KpiStrip() {
               <span className="v num">
                 {pending ? <span className="kpi-skeleton" aria-hidden="true" /> : tile.value}
               </span>
-              {"series" in tile && (
+              {!contextOnly && (
                 <span className="d num" title={pending ? undefined : tile.delta}>
                   {pending ? null : tile.delta}
                 </span>
@@ -135,14 +160,11 @@ export function KpiStrip() {
                 <Sparkline
                   values={series}
                   color={tile.color}
-                  label={`${tile.label} · ${"history" in tile ? tile.history : ""}`}
+                  label={`${tile.label} · ${tile.history}`}
                 />
               ) : (
-                <span
-                  className="kpi-secondary num"
-                  title={"series" in tile ? "History unavailable" : tile.delta}
-                >
-                  {pending ? null : "series" in tile ? "—" : tile.delta}
+                <span className="kpi-secondary num" title="History unavailable">
+                  {pending ? null : contextOnly ? tile.delta : "—"}
                 </span>
               )}
             </a>

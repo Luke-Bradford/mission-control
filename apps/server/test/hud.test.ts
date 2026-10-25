@@ -981,6 +981,27 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "GUIDO-1")?.loop).toMatchObject({ profile: "feature", step: null });
   });
 
+  it("uses the run profile's review round limit", () => {
+    const c = withCrew();
+    const profile = { ...DEFAULT_PROFILES[0], rounds: 2 } as Profile;
+    store.upsertRun(
+      crewRun({
+        loop: { ...NEW_LOOP, phase: "review" },
+        profile: { profile, route: { by: "size", size: "S" }, hash: "h" },
+      }),
+    );
+    store.setSeatSession(seat({}));
+    for (let n = 1; n <= 3; n++)
+      store.claimLine(`fix:c1:0:${n}`, {
+        runId: "c1",
+        seatId: "GUIDO-1",
+        origin: "engine",
+        text: "fix",
+        at: NOW,
+      });
+    expect(rowOf(c, "GUIDO-1")?.loop?.tries).toMatchObject({ n: 2, max: 2 });
+  });
+
   it("a run without a profile has no profile or step on its loop", () => {
     const c = withCrew();
     store.upsertRun(crewRun({ ticket: "shop-app#5", loop: NEW_LOOP }));
@@ -996,12 +1017,14 @@ describe("crew seats in the rows", () => {
     const send = (at: number) =>
       store.addComms({ at, from: COMMS_CAPCOM, to: "GUIDO-1", ticket: null, text: "hello" });
     send(NOW - 20 * MIN);
+    send(NOW - 10 * MIN - 1);
+    send(NOW - 10 * MIN);
     send(NOW - 5 * MIN);
     send(NOW - MIN);
     store.setSeatSession(
       seat({ state: "parked", reason: "rate limited", updatedAt: NOW - 10 * MIN }),
     );
-    expect(rowOf(c, "GUIDO-1")).toMatchObject({ hudState: "parked", queuedMessages: 2 });
+    expect(rowOf(c, "GUIDO-1")).toMatchObject({ hudState: "parked", queuedMessages: 3 });
     store.setSeatSession(seat({ state: "running" }));
     expect(rowOf(c, "GUIDO-1")?.queuedMessages).toBe(0);
   });

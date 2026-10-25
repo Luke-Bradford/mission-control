@@ -24,6 +24,7 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./account-bindings.ts";
+import { evaluateHolds } from "./attention-holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
@@ -409,10 +410,53 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   };
 
+  let triageTimer: NodeJS.Timeout | null = null;
+  let triageAt = 0;
+  const scheduleTriage = () => {
+    const at = now();
+    if (triageTimer !== null && triageAt <= at) return;
+    if (triageTimer !== null) clearTimeout(triageTimer);
+    triageTimer = null;
+    const due = attentionItems(config, store, at, deps.lockState?.() ?? NO_LOCK).flatMap((item) =>
+      item.triageDueAt !== undefined && item.triageDueAt > at ? [item.triageDueAt] : [],
+    );
+    if (due.length === 0) return;
+    triageAt = Math.min(...due);
+    triageTimer = setTimeout(() => {
+      triageTimer = null;
+      bus.emit("attention");
+    }, triageAt - at);
+    triageTimer.unref();
+  };
+
   /** Drops acks whose item has been gone for ACK_ABSENT_MS (after each loop tick / GitHub poll). */
   const sweepAcks = (rows?: CrewRow[]) => {
     const at = now();
     const lock = deps.lockState?.() ?? NO_LOCK;
+    const currentRows = rows ?? crew(config, store, at, lock).rows;
+    if (
+      evaluateHolds(
+        store,
+        at,
+        (ticket) => {
+          const [repoId, number] = ticket.split("#");
+          return store
+            .pullRequests(repoId ?? "")
+            .some(
+              (p) =>
+                p.state === "merged" &&
+                (p.ticket === ticket || p.closingIssues?.includes(Number(number))),
+            );
+        },
+        (since) =>
+          currentRows.some((r) => {
+            if (r.kind !== "crew" || r.role === "FLIGHT" || r.hudState === "stopped") return false;
+            const seat = store.seatSession(r.id);
+            return seat !== null && seat.state !== "stopped" && seat.updatedAt > since;
+          }),
+      )
+    )
+      emit("attention");
     store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
   };
 
@@ -1063,7 +1107,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       unsubscribeCrew = bus.subscribe((t) => {
         if (t === "agents") recordCrewSoon();
+        if (["agents", "escalations", "attention", "flight", "boards", "config"].includes(t))
+          scheduleTriage();
       });
+      scheduleTriage();
       if (config.repos.length > 0) void loadGql();
       for (const job of JOBS) {
         // no engine, no engine timer (a scheduler without one has nothing to tick)
@@ -1107,6 +1154,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       clearUsageRetry();
       unsubscribeCrew?.();
       unsubscribeCrew = null;
+      if (triageTimer !== null) clearTimeout(triageTimer);
+      triageTimer = null;
       if (cliRetry !== null) clearTimeout(cliRetry);
       cliRetry = null;
       if (triggerTimer !== null) clearTimeout(triggerTimer);

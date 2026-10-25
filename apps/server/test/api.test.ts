@@ -511,6 +511,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
+  ["GET", "/api/runs/guido-1/attempts"],
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
@@ -523,6 +524,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
+  ["GET", "/api/attention/held"],
+  ["POST", "/api/attention/example/hold", { reason: "Waiting", condition: { kind: "manual" } }],
+  ["POST", "/api/attention/example/hold/release", {}],
+  ["GET", "/api/attention/unknown"],
   ["GET", "/api/attention/example/discussion"],
   ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
@@ -1001,7 +1006,13 @@ describe("local access", () => {
         expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
         continue;
       }
-      if (url.endsWith("/dismiss") || url.endsWith("/handled") || url.includes("/replies/")) {
+      if (
+        url.endsWith("/dismiss") ||
+        url.endsWith("/handled") ||
+        url.includes("/replies/") ||
+        url.endsWith("/hold") ||
+        url.endsWith("/hold/release")
+      ) {
         // the fixture has no such note: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
@@ -1023,6 +1034,10 @@ describe("local access", () => {
       if (url === "/api/accounts" && method === "POST") {
         expect(r.statusCode).toBe(409);
         expect(r.json().error).toContain("one account per provider");
+        continue;
+      }
+      if (url === "/api/attention/unknown") {
+        expect(r.statusCode).toBe(404);
         continue;
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
@@ -1150,12 +1165,14 @@ describe("local access", () => {
         ([m, u]) =>
           `${m} ${u
             .split("?")[0]
-            ?.replace("/shop-app-ta/", "/:id/")
+            ?.replace("/attention/unknown", "/attention/:key")
+            .replace("/shop-app-ta/", "/:id/")
             .replace("/guido-1/", "/:id/")
             .replace(/\/guido-1$/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
+            .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
@@ -4796,6 +4813,42 @@ describe("the first loop's engine", () => {
     },
   );
 
+  it("GET /api/runs/:id/attempts returns retained history and rejects unknown runs", async () => {
+    store.upsertRun(run({ id: "history", agentId: "guido-1" }));
+    store.setRunPush({ runId: "history", sha: "head", at: NOW });
+    const response = await get("/api/runs/history/attempts");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      runId: "history",
+      attempts: [{ kind: "run" }, { kind: "push", data: { sha: "head" } }],
+    });
+    expect((await get("/api/runs/unknown/attempts")).statusCode).toBe(404);
+  });
+
+  it("caps the served review round at the run profile limit", async () => {
+    store.upsertRun(
+      run({
+        id: "profiled",
+        agentId: "guido-1",
+        loop,
+        profile: {
+          profile: { ...DEFAULT_PROFILES[0], rounds: 2 },
+          route: { by: "size", size: "S" },
+          hash: "h",
+        },
+      }),
+    );
+    for (let n = 1; n <= 3; n++)
+      store.claimLine(`fix:profiled:${loop.epoch}:${n}`, {
+        runId: "profiled",
+        seatId: "guido-1",
+        origin: "engine",
+        text: "fix",
+        at: NOW,
+      });
+    expect((await get("/api/runs/profiled/loop")).json().round).toBe(2);
+  });
+
   it("GET /api/runs/:id/loop answers the run's loop and its events, or 404", async () => {
     store.upsertRun(run({ id: "looped", agentId: "guido-1", loop }));
     store.upsertRun(run({ id: "plain", agentId: "guido-1" }));
@@ -5414,4 +5467,31 @@ describe("overview", () => {
     expect((await get("/api/overview?session=missing")).statusCode).toBe(404);
     expect((await get("/api/overview")).statusCode).toBe(200);
   });
+});
+
+it("bounds tag text in attention and reads the whole message on open", async () => {
+  const text = `@CAPCOM ${"x".repeat(1000)}`;
+  store.addComms({ at: NOW, from: "shop-app-ta", to: "CAPCOM", ticket: null, text });
+  const items = (await get("/api/attention")).json<AttentionItem[]>();
+  const tag = items.find((i) => i.kind === "tag");
+  expect(tag).toBeDefined();
+  expect(tag?.text.length).toBeLessThanOrEqual(170);
+  const full = await get(`/api/attention/${encodeURIComponent(tag?.key ?? "")}`);
+  expect(full.statusCode).toBe(200);
+  expect(full.json().text).toBe(text);
+  expect((await get("/api/attention/unknown")).statusCode).toBe(404);
+});
+it("labels the test lock route's holder and waiting entries", async () => {
+  const state = {
+    holder: { runId: "h", seatId: "a", command: "make check", since: NOW },
+    waiting: [{ runId: "w", seatId: "b", command: "make verify", since: NOW }],
+  };
+  const a = buildApp({ config, store, bus, now: () => NOW, lock: { state: () => state } as never });
+  try {
+    const view = (await a.inject("/api/test-lock")).json();
+    expect(view.holder.label).toBe("make check");
+    expect(view.waiting[0].label).toBe("make verify");
+  } finally {
+    await a.close();
+  }
 });

@@ -52,7 +52,11 @@ describe("KpiStrip", () => {
     stubFetch({
       "/api/overview": {
         at: OVERVIEW.at,
-        kpis: { ...kpis, inFlight: { count: 4, oldestAt: OVERVIEW.at - 120_000 } },
+        kpis: {
+          ...kpis,
+          working: { ...kpis.working, series: undefined },
+          inFlight: { count: 4, oldestAt: OVERVIEW.at - 120_000 },
+        },
       },
     });
     render(<KpiStrip />);
@@ -91,8 +95,14 @@ describe("KpiStrip", () => {
       "1 over 1 h",
     ])
       expect(screen.getByText(text)).toBeTruthy();
-    expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(2);
-    expect(screen.getAllByRole("img", { name: /hourly today/ })).toHaveLength(2);
+    expect(screen.getAllByRole("img", { name: /last 30 minutes/ })).toHaveLength(1);
+    expect(screen.queryAllByRole("img", { name: /hourly today/ })).toHaveLength(0);
+    for (const label of ["Spend today", "Merged today"]) {
+      expect(
+        screen.getByRole("link", { name: new RegExp(label) }).querySelector(".kpi-secondary")
+          ?.textContent,
+      ).toBe("—");
+    }
     expect(screen.getByText("n=8 · 1h 30m avg (14d)")).toBeTruthy();
     for (const label of ["In flight", "CI pass rate", "Cycle time", "Needs you"]) {
       const tile = screen.getByRole("link", { name: new RegExp(label) });
