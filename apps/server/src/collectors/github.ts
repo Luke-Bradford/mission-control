@@ -1044,9 +1044,14 @@ async function fetchPrs(
   all: boolean,
   store: Store,
   observe: boolean,
-): Promise<{ prs: PullRequestView[]; nodes: number }> {
+): Promise<{
+  prs: PullRequestView[];
+  nodes: number;
+  main?: Parameters<typeof observeFlightMain>[2];
+}> {
   const [owner = "", name = ""] = repo.github.split("/");
   const out: PullRequestView[] = [];
+  let main: Parameters<typeof observeFlightMain>[2] | undefined;
   let nodes = 0;
   let after: string | null = null;
   for (let p = 0; p < (all ? PR_MAX_PAGES : 1); p++) {
@@ -1055,7 +1060,7 @@ async function fetchPrs(
       const head = path(data, "repository", "defaultBranchRef", "target");
       const sha = path(head, "oid");
       if (typeof sha === "string" && sha !== "") {
-        observeFlightMain(store, repo.id, {
+        main = {
           sha,
           ci: lookup(CHECKS, path(head, "statusCheckRollup", "state")),
           at: now,
@@ -1064,7 +1069,7 @@ async function fetchPrs(
               ? Date.parse(path(head, "committedDate") as string)
               : undefined,
           checks: mainFailures(path(head, "statusCheckRollup", "contexts", "nodes")),
-        });
+        };
       }
     }
     const conn = path(data, "repository", "pullRequests");
@@ -1087,7 +1092,7 @@ async function fetchPrs(
     after = pi.endCursor;
   }
   if (observe) observeFlightChecks(store, repo.id, out, now);
-  return { prs: out, nodes };
+  return { prs: out, nodes, main };
 }
 
 /** Which change topics a GitHub read changed: the scheduler emits only those (#26 A1). */
@@ -1114,7 +1119,7 @@ export async function sweepPullRequests(
   let boards = false;
   try {
     const read = () => fetchPrs(repo, gql, now, true, store, observe);
-    const { prs, nodes } = await read().catch(async (e: unknown) => {
+    const { prs, nodes, main } = await read().catch(async (e: unknown) => {
       if (!isTransient(e)) throw e;
       await new Promise((resolve) => setTimeout(resolve, 15_000));
       return read();
@@ -1122,6 +1127,7 @@ export async function sweepPullRequests(
     // GitHub returning no nodes at all is no data, not "no PRs": it must not wipe the rows until
     // the next poll. Nodes that are all older than the keep window do prune.
     if (nodes > 0) boards = store.sweepPullRequests(repo.id, prs, now);
+    if (main) observeFlightMain(store, repo.id, main);
     store.setStatus(collector, true, null);
   } catch (e) {
     store.setStatus(collector, false, `${errMsg(e)} at ${new Date(now).toISOString()}`);
@@ -1235,15 +1241,11 @@ export async function collectGithub(
     // Stamped just before the read, not at the poll's start: the board and escalation reads above
     // can take seconds, and a sweep that began in between must not count as newer than this read.
     const readAt = clock();
-    if (
-      store.upsertPullRequests(
-        repo.id,
-        (await fetchPrs(repo, gql, readAt, false, store, observe)).prs,
-        readAt,
-      )
-    ) {
+    const read = await fetchPrs(repo, gql, readAt, false, store, observe);
+    if (store.upsertPullRequests(repo.id, read.prs, readAt)) {
       changes.boards = true;
     }
+    if (read.main) observeFlightMain(store, repo.id, read.main);
   } catch (e) {
     // Keep the rows, but say they are the last good read.
     store.markPullRequestsStale(repo.id);

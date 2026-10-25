@@ -1346,28 +1346,32 @@ describe("auto update", () => {
     expect(diffs.some((c) => c.cmd.endsWith(" origin/main"))).toBe(false);
   });
 
-  it.each(["symlink", "gitlink"])("holds a %s even under the allowlist", async (kind) => {
-    mkdirSync(join(dev, "docs"));
-    if (kind === "symlink") {
-      symlinkSync("../apps/server", join(dev, "docs", "linked"));
-      git(dev, "add", "docs/linked");
-    } else {
-      git(dev, "update-index", "--add", "--cacheinfo", `160000,${head(dev)},docs/linked`);
-    }
-    git(dev, "commit", "-qm", "linked docs");
-    git(dev, "push", "-q", "origin", "main");
-    const a = auto();
-    await expect(a.tick()).resolves.toBe("waiting");
-    expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
-    const held = a.held.mock.calls.at(-1)?.[0];
-    expect(held?.unsafePaths).toEqual(["docs/linked"]);
-    expect(hubCodeHeldText(held)).toContain("symlink or submodule");
-    await expect(a.u.update({ auto: true })).rejects.toMatchObject({
-      status: 409,
-      message: HUB_CODE_NEEDS_PERSON,
-    });
-    expect(pulls(a.calls)).toHaveLength(0);
-  });
+  it.each(["symlink", "gitlink", "ignored gitlink"])(
+    "holds a %s even under the allowlist",
+    async (kind) => {
+      mkdirSync(join(dev, "docs"));
+      if (kind === "symlink") {
+        symlinkSync("../apps/server", join(dev, "docs", "linked"));
+        git(dev, "add", "docs/linked");
+      } else {
+        git(dev, "update-index", "--add", "--cacheinfo", `160000,${head(dev)},docs/linked`);
+      }
+      git(dev, "commit", "-qm", "linked docs");
+      git(dev, "push", "-q", "origin", "main");
+      if (kind === "ignored gitlink") git(hub, "config", "diff.ignoreSubmodules", "all");
+      const a = auto();
+      await expect(a.tick()).resolves.toBe("waiting");
+      expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
+      const held = a.held.mock.calls.at(-1)?.[0];
+      expect(held?.unsafePaths).toEqual(["docs/linked"]);
+      expect(hubCodeHeldText(held)).toContain("symlink or submodule");
+      await expect(a.u.update({ auto: true })).rejects.toMatchObject({
+        status: 409,
+        message: HUB_CODE_NEEDS_PERSON,
+      });
+      expect(pulls(a.calls)).toHaveLength(0);
+    },
+  );
 
   it("clears the held note when auto Update is off", async () => {
     const a = auto({ enabled: false });

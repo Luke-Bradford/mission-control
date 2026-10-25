@@ -400,6 +400,25 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   };
 
+  let triageTimer: NodeJS.Timeout | null = null;
+  let triageAt = 0;
+  const scheduleTriage = () => {
+    const at = now();
+    if (triageTimer !== null && triageAt <= at) return;
+    if (triageTimer !== null) clearTimeout(triageTimer);
+    triageTimer = null;
+    const due = attentionItems(config, store, at, deps.lockState?.() ?? NO_LOCK).flatMap((item) =>
+      item.triageDueAt !== undefined && item.triageDueAt > at ? [item.triageDueAt] : [],
+    );
+    if (due.length === 0) return;
+    triageAt = Math.min(...due);
+    triageTimer = setTimeout(() => {
+      triageTimer = null;
+      bus.emit("attention");
+    }, triageAt - at);
+    triageTimer.unref();
+  };
+
   /** Drops acks whose item has been gone for ACK_ABSENT_MS (after each loop tick / GitHub poll). */
   const sweepAcks = (rows?: CrewRow[]) => {
     const at = now();
@@ -1054,7 +1073,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       unsubscribeCrew = bus.subscribe((t) => {
         if (t === "agents") recordCrewSoon();
+        if (["agents", "escalations", "attention", "flight", "boards", "config"].includes(t))
+          scheduleTriage();
       });
+      scheduleTriage();
       if (config.repos.length > 0) void loadGql();
       for (const job of JOBS) {
         // no engine, no engine timer (a scheduler without one has nothing to tick)
@@ -1098,6 +1120,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       clearUsageRetry();
       unsubscribeCrew?.();
       unsubscribeCrew = null;
+      if (triageTimer !== null) clearTimeout(triageTimer);
+      triageTimer = null;
       if (cliRetry !== null) clearTimeout(cliRetry);
       cliRetry = null;
       if (triggerTimer !== null) clearTimeout(triggerTimer);

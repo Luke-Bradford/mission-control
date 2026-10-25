@@ -69,6 +69,7 @@ function stub(extra: Record<string, unknown> = {}) {
   return stubFetch({
     [RESOURCES.config.path]: CREW_CONFIG,
     [RESOURCES.flightSummary.path]: summary,
+    [RESOURCES.flightLedgerOpen.path]: flightLedger([...entries, ...watch, commitment]),
     [RESOURCES.flightLedger.path]: flightLedger([...entries, ...watch, commitment, incoming]),
     [RESOURCES.flightSchedule.path]: schedule,
     ...extra,
@@ -81,10 +82,14 @@ it("renders the headline, capped lists in served order, status counts, due times
   expect(await screen.findByText(summary.headline)).toBeTruthy();
   const now = screen.getByRole("list", { name: "Now" });
   const rows = within(now).getAllByRole("listitem");
-  expect(
-    rows.map((row) => row.querySelector("summary > span > span:not(.pill)")?.textContent),
-  ).toEqual(["Work 6", "Work 2", "Work 4", "Work 1", "Work 5"]);
-  expect(rows[0]?.querySelector("summary")?.textContent).toContain("guido-1");
+  expect(rows.map((row) => row.querySelector(".flight-summary-title")?.textContent)).toEqual([
+    "Work 6",
+    "Work 2",
+    "Work 4",
+    "Work 1",
+    "Work 5",
+  ]);
+  expect(rows[0]?.querySelector("summary .ag")?.textContent).toBe("guido-1");
   expect(rows[0]?.querySelector("summary")?.textContent).toContain("active");
   expect(rows[0]?.querySelector("summary")?.textContent).toContain("waiting on RETRO");
   expect(
@@ -142,9 +147,14 @@ it("opens a whole summary line in place to reveal next, linked refs and its upda
 it("opens full lists grouped by kind, including entries beyond the summary and closed work", async () => {
   stub();
   render(<Summary />);
-  fireEvent.click(await screen.findByRole("link", { name: "Ledger" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Ledger" }));
   const ledger = document.getElementById("flight-ledger") as HTMLDetailsElement;
   expect(ledger.open).toBe(true);
+  await within(ledger).findByRole("heading", { name: "Work" });
+  expect(document.activeElement).toBe(ledger.querySelector("summary"));
+  expect(screen.getByRole("button", { name: "Ledger" }).getAttribute("aria-controls")).toBe(
+    "flight-ledger",
+  );
   expect(
     within(ledger)
       .getAllByRole("heading")
@@ -154,13 +164,13 @@ it("opens full lists grouped by kind, including entries beyond the summary and c
     within(within(ledger).getByRole("region", { name: "Work" })).getAllByRole("listitem"),
   ).toHaveLength(6);
   expect(within(ledger).getByText("Work 3")).toBeTruthy();
-  expect(within(ledger).getByText("New request")).toBeTruthy();
+  expect(await within(ledger).findByText("New request")).toBeTruthy();
   expect(within(ledger).getByText("Check the PR")).toBeTruthy();
 });
 
 it("uses schedule details for plans without confusing them with ledger keys", async () => {
   stub({
-    [RESOURCES.flightLedger.path]: flightLedger([
+    [RESOURCES.flightLedgerOpen.path]: flightLedger([
       ledgerEntry({ key: "plan:1", title: "Unrelated" }),
     ]),
   });
@@ -179,7 +189,10 @@ it("uses schedule details for plans without confusing them with ledger keys", as
 
 it("keeps the summary when ledger details fail and reports the error", async () => {
   stub({
-    [RESOURCES.flightLedger.path]: () => ({ status: 500, body: { error: "Details unavailable" } }),
+    [RESOURCES.flightLedgerOpen.path]: () => ({
+      status: 500,
+      body: { error: "Details unavailable" },
+    }),
   });
   render(<Summary />);
   expect(await screen.findByText(summary.headline)).toBeTruthy();
@@ -197,8 +210,56 @@ it("refreshes summary metrics on run and board changes and ledger details on fli
     await waitFor(() =>
       expect(fetch.mock.calls.some(([path]) => path === RESOURCES.flightSummary.path)).toBe(true),
     );
-    expect(fetch.mock.calls.some(([path]) => path === RESOURCES.flightLedger.path)).toBe(
+    expect(fetch.mock.calls.some(([path]) => path === RESOURCES.flightLedgerOpen.path)).toBe(
       topic === "flight",
     );
   }
+});
+
+it("shows the no-seat state", async () => {
+  stub({ [RESOURCES.flightSummary.path]: flightSummary({ session: null }) });
+  render(<Summary />);
+  expect(await screen.findByText("No FLIGHT seat is configured.")).toBeTruthy();
+});
+it("shows a loading dash and a summary error", async () => {
+  stub({
+    [RESOURCES.flightSummary.path]: () => ({ status: 500, body: { error: "Summary unavailable" } }),
+  });
+  render(<Summary />);
+  expect(screen.getByText("—")).toBeTruthy();
+  expect((await screen.findByRole("alert")).textContent).toBe("Summary unavailable");
+});
+
+it("refreshes the summary when config changes", async () => {
+  const fetch = stub();
+  render(<Summary />);
+  await screen.findByText(summary.headline);
+  fetch.mockClear();
+  act(() => hub.refetchTopic("config"));
+  await waitFor(() =>
+    expect(fetch.mock.calls.some(([p]) => p === RESOURCES.flightSummary.path)).toBe(true),
+  );
+});
+it("coalesces bursts of agent events for the summary", async () => {
+  const fetch = stub();
+  render(<Summary />);
+  await screen.findByText(summary.headline);
+  fetch.mockClear();
+  act(() => {
+    for (let i = 0; i < 10; i++) hub.refetchTopic("agents");
+  });
+  await waitFor(() =>
+    expect(fetch.mock.calls.filter(([p]) => p === RESOURCES.flightSummary.path)).toHaveLength(1),
+  );
+});
+
+it("does not fetch the full ledger until opened", async () => {
+  const fetch = stub();
+  render(<Summary />);
+  await screen.findByText(summary.headline);
+  expect(fetch.mock.calls.some(([p]) => p === RESOURCES.flightLedger.path)).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Ledger" }));
+  await waitFor(() =>
+    expect(fetch.mock.calls.some(([p]) => p === RESOURCES.flightLedger.path)).toBe(true),
+  );
 });
