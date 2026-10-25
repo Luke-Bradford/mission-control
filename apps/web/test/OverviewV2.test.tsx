@@ -274,6 +274,6 @@ it.each([
   expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
     Array(8).fill("—"),
   );
-  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(6);
-  expect(container.querySelectorAll(".pipeline-card")).toHaveLength(0);
+  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0);
+  expect(container.querySelectorAll(".pipeline-chip")).toHaveLength(0);
 });

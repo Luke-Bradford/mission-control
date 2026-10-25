@@ -1,6 +1,6 @@
 import type { OverviewSummary, PipelineStage } from "@mc/core";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { hub } from "../src/data.ts";
 import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { setSession } from "../src/shell/session.ts";
@@ -14,7 +14,6 @@ const stages: PipelineStage["stage"][] = [
   "merging",
   "merged",
 ];
-const labels = ["Ready", "Building", "Checks", "Review", "Merging", "Merged today"];
 const now = Date.now();
 const pipeline: PipelineStage[] = stages.map((stage, i) => ({
   stage,
@@ -35,109 +34,62 @@ const pipeline: PipelineStage[] = stages.map((stage, i) => ({
 const summary = (p = pipeline) => ({ pipeline: p }) as OverviewSummary;
 
 describe("Pipeline", () => {
-  it("shows all six stages, counts, oldest ages, ticket links, PRs, seats and accessible CI dots", async () => {
-    stubFetch({ "/api/overview": summary() });
-    render(<PipelinePanel />);
-    for (const [i, label] of labels.entries()) {
-      const stage = await screen.findByRole("region", { name: label });
-      expect(within(stage).getByText("1", { selector: ".num" })).toBeTruthy();
-      expect(within(stage).getByText("oldest 2m")).toBeTruthy();
-      const card = within(stage).getByRole("link");
-      expect(card.getAttribute("href")).toBe(`/board/sample-app/${i + 1}`);
-      expect(card.textContent).toContain(`PR #${i + 20}`);
-      expect(card.title).toContain(i ? "seat-1" : "waiting on you");
-      expect(card.title).toContain("2m");
-      expect(within(card).getByText("2m")).toBeTruthy();
-      expect(within(card).getByText(i ? "seat-1" : "—")).toBeTruthy();
-      for (const state of ["pass", "fail", "pending"]) {
-        expect(within(card).getByRole("img", { name: `CI ${state}` }).className).toContain(state);
-      }
-    }
-  });
-
-  it("says merged, not waiting on you, for a merged card with no seat", async () => {
-    const merged = pipeline[5] as PipelineStage;
-    const card = merged.cards[0];
-    if (!card) throw new Error("missing merged card");
-    stubFetch({
-      "/api/overview": summary([{ ...merged, cards: [{ ...card, who: null }] }]),
-    });
-    render(<PipelinePanel />);
-    const stage = await screen.findByRole("region", { name: "Merged today" });
-    const link = within(stage).getByRole("link");
-    expect(link.title).toContain("merged");
-    expect(link.title).not.toContain("waiting on you");
-  });
-
-  it("keeps multiple merged PRs for one ticket distinct across live updates", async () => {
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const merged = pipeline[5] as PipelineStage;
-      const card = merged.cards[0];
-      if (!card) throw new Error("missing card");
-      const cards = [40, 41, 42].map((pr) => ({ ...card, pr, title: `Merge ${pr}` }));
-      let data = summary([{ ...merged, count: 3, cards }]);
-      stubFetch({ "/api/overview": () => ({ status: 200, body: data }) });
-      render(<PipelinePanel />);
-      const stage = await screen.findByRole("region", { name: "Merged today" });
-      expect(
-        within(stage)
-          .getAllByRole("link")
-          .map((link) => link.textContent),
-      ).toEqual([
-        ...cards.slice(0, 2).map((card) => expect.stringContaining(`PR #${card.pr}`)),
-        "+1 more",
-      ]);
-      data = summary([{ ...merged, count: 2, cards: cards.filter((_, i) => i !== 1).reverse() }]);
-      await act(async () => {
-        hub.refetchTopic("boards");
-      });
-      await waitFor(() =>
-        expect(
-          within(stage)
-            .getAllByRole("link")
-            .map((link) => link.textContent),
-        ).toEqual([expect.stringContaining("PR #42"), expect.stringContaining("PR #40")]),
-      );
-      expect(errors).not.toHaveBeenCalled();
-    } finally {
-      errors.mockRestore();
-    }
-  });
-
-  it("caps cards at two using the total count for the stage Board link", async () => {
+  it("shows populated board lanes as compact ticket chips with assignees, overflow and Board links", async () => {
     const ready = pipeline[0] as PipelineStage;
+    const building = pipeline[1] as PipelineStage;
+    const checks = pipeline[2] as PipelineStage;
     const card = ready.cards[0];
-    if (!card) throw new Error("missing card");
+    if (!card) throw new Error("missing ready card");
     stubFetch({
       "/api/overview": summary([
         {
           ...ready,
-          count: 9,
+          count: 10,
+          // The overview endpoint limits each stage to its chip capacity.
           cards: Array.from({ length: 8 }, (_, i) => ({
             ...card,
             ticket: i + 1,
-            title: `Ticket ${i + 1}`,
+            title: `Ready ticket ${i + 1}`,
+            who: "seat-1",
           })),
         },
+        { ...building, count: 1, cards: [{ ...card, ticket: 20, title: "Building ticket" }] },
+        { ...checks, count: 1, cards: [{ ...card, ticket: 21, title: "Checked ticket" }] },
       ]),
+      "/api/crew": { rows: [{ id: "seat-1", displayCallSign: "INCO", index: 3 }] },
     });
     render(<PipelinePanel />);
-    const stage = await screen.findByRole("region", { name: "Ready" });
-    expect(within(stage).getAllByRole("link")).toHaveLength(3);
-    expect(within(stage).getByRole("link", { name: "+7 more" }).getAttribute("href")).toBe(
+
+    const readyLane = await screen.findByRole("region", { name: "Ready" });
+    expect(within(readyLane).getAllByRole("link")).toHaveLength(10);
+    expect(within(readyLane).getByRole("link", { name: "+2" }).getAttribute("href")).toBe(
       "/board?stage=ready",
     );
-    expect(within(stage).queryByText(/Ticket 3/)).toBeNull();
+    expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
+    expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
+      "--c: var(--s4)",
+    );
+    expect(
+      within(readyLane)
+        .getByRole("link", { name: /Ready ticket 1/ })
+        .getAttribute("href"),
+    ).toBe("/board?stage=ready");
+
+    const progressLane = screen.getByRole("region", { name: "In progress" });
+    expect(within(progressLane).getByText("Building ticket")).toBeTruthy();
+    expect(within(progressLane).getByText("Checked ticket")).toBeTruthy();
+    expect(within(progressLane).getAllByRole("link")[0]?.getAttribute("href")).toBe(
+      "/board?stage=progress",
+    );
+    expect(screen.queryByRole("region", { name: "In review" })).toBeNull();
   });
 
-  it("keeps empty stages and refetches the selected session on SSE invalidation", async () => {
+  it("hides empty lanes and refetches the selected session on SSE invalidation", async () => {
     setSession("session-1");
     let data = summary(stages.map((stage) => ({ stage, count: 0, oldestAt: null, cards: [] })));
     stubFetch({ "/api/overview?session=session-1": () => ({ status: 200, body: data }) });
-    render(<PipelinePanel />);
-    expect(await screen.findAllByText("oldest —")).toHaveLength(6);
-    expect(screen.queryByText(/more$/)).toBeNull();
+    const { container } = render(<PipelinePanel />);
+    await waitFor(() => expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0));
     data = summary();
     await act(async () => {
       hub.refetchTopic("boards");
