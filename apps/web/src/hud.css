@@ -3807,7 +3807,13 @@ kbd {
     background: var(--surface);
   }
   #agentsList .trow.flight > :first-child {
-    background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+    /* The tint is translucent: paint it over an opaque surface so scrolled cells can't show through. */
+    background:
+      linear-gradient(
+        color-mix(in srgb, var(--accent-soft) 45%, transparent),
+        color-mix(in srgb, var(--accent-soft) 45%, transparent)
+      ),
+      var(--surface);
   }
   #agentsList .trow:not(.head):hover > :first-child,
   #agentsList .trow.sel > :first-child {

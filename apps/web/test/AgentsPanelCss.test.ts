@@ -70,7 +70,8 @@ it("lets phone users scroll every Crew column while keeping the agent pinned", (
   expect(narrow).toMatch(
     /#agentsList \.trow > :first-child \{[^}]*position: sticky;[^}]*left: 0;[^}]*z-index: 1;[^}]*background: var\(--surface\)/,
   );
-  expect(narrow).toMatch(/#agentsList \.trow\.flight > :first-child \{[^}]*var\(--surface\)/);
+  // The FLIGHT tint is translucent, so an opaque surface must be the last background layer.
+  expect(narrow).toMatch(/#agentsList \.trow\.flight > :first-child \{[^}]*\),\s*var\(--surface\);/);
   expect(narrow).toMatch(
     /#agentsList \.trow:not\(\.head\):hover > :first-child,\s*#agentsList \.trow\.sel > :first-child \{[^}]*background: var\(--surface-2\)/,
   );
