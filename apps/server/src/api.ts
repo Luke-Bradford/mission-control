@@ -1885,41 +1885,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         "/seats/:id/message",
         MessageBody,
         async (sup, id, b) => {
-          // ItemPanel sends operator choices to FLIGHT with the stable item key in its lead.
-          const choice = /^Re: (note:queue-reorder:[^\s·]+)(?: · [^\n]*)?\n\n(Approve|Deny)$/.exec(
-            b.text,
-          );
-          if (choice?.[1] && id === flightSeat(config)?.seat.id) {
-            if (!deps.queueReorder || deps.noLoopWrites)
-              throw new SupervisorError(409, "Queue Priority writes unavailable.");
-            try {
-              const result = await resolveQueueReorder(
-                deps.queueReorder,
-                choice[1],
-                choice[2] === "Approve" ? "approve" : "deny",
-              );
-              bus.emit("attention");
-              bus.emit("boards");
-              bus.emit("agents");
-              store.addComms({
-                at: now(),
-                from: id,
-                to: COMMS_CAPCOM,
-                ticket: null,
-                text: result.text,
-              });
-              if (!result.ok) throw new SupervisorError(409, result.text);
-              return result;
-            } catch (e) {
-              if (e instanceof SupervisorError) throw e;
-              throw new SupervisorError(
-                409,
-                e instanceof QueueReorderError
-                  ? e.message
-                  : "Queue changed; refresh and try again.",
-              );
-            }
-          }
           const runId = sup.seat(id)?.runId ?? null;
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           await sup.message(id, b.text, { interrupt: b.interrupt === true });
