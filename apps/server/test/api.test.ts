@@ -1044,6 +1044,32 @@ describe("local access", () => {
     }
   });
 
+  it("refuses a new CLI profile while an existing sandbox could read it", async () => {
+    store.upsertRun({ ...run({}), endedAt: null });
+    store.setSeatSession({
+      seatId: "fictional-seat",
+      runId: run({}).id,
+      cliSessionId: "fictional-session",
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: 1,
+    });
+    const before = readFileSync(configPath, "utf8");
+    const result = await app.inject({
+      method: "POST",
+      url: "/api/accounts",
+      payload: {
+        name: "fictional-profile",
+        provider: "codex",
+        cliProfile: join(dir, "fictional-profile"),
+      },
+    });
+    expect(result.statusCode).toBe(409);
+    expect(result.json().error).toContain("end existing seat processes");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
   it("grants no cross-origin read or preflight", async () => {
     const r = await app.inject({
       method: "GET",

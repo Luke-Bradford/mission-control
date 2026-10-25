@@ -4496,6 +4496,25 @@ describe("the engine runs reviews", () => {
       expect(loopOf().phase).toBe("parked");
     });
 
+    it("wakes a transferred run using destination quota", async () => {
+      await setAside();
+      config.accounts.push({ id: "destination", vendor: "claude", alertAt: 80, stopAt: 95 });
+      store.setSetting(
+        `account-transfer:${RUN}`,
+        JSON.stringify({ source: "claude-main", target: "destination", pending: false }),
+      );
+      store.addUsage({
+        accountId: "claude-main",
+        window: "5h",
+        at: clock,
+        pct: 96,
+        resetAt: clock + 60 * MIN,
+        source: "test",
+      });
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+    });
+
     it("an account at its stop: no wake", async () => {
       await setAside();
       for (const window of ["5h", "7d"] as const) {

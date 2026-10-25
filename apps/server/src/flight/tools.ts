@@ -282,6 +282,7 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
+import { runAccountId } from "../account-bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -2392,7 +2393,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           (q) =>
             q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
         ) ||
-      accountAtStop(config, store, seat.accountId, now())
+      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
     );
   }
   function prRun(pr: number): Run | null {

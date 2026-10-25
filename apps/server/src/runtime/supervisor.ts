@@ -432,6 +432,7 @@ interface AccountTransfer {
   source: string;
   target: string;
   pending: boolean;
+  continuationId?: string;
   handoffId?: string;
   handoffSessionId?: string;
   queued?: [string, string][];
@@ -652,7 +653,24 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const text = store.getSetting(transferKey(runId));
     return text === null ? null : (JSON.parse(text) as AccountTransfer);
   }
+  function runBindingProblem(run: Run, accountId: string): boolean {
+    const account = config.accounts.find((a) => a.id === accountId);
+    if (!account) return true;
+    // Legacy machine-login runs keep their saved provider across config edits.
+    return (
+      (transferState(run.id) !== null || account.cliProfile !== undefined) &&
+      account.vendor !== (run.vendor ?? "claude")
+    );
+  }
+
   const transfers = new Map<string, Promise<AccountTransferResult>>();
+  const profilePolicyKey = (runId: string) => `account-profile-denies:${runId}`;
+  const profileDenies = () =>
+    config.accounts.flatMap((a) => {
+      const profile = a.vendor === "codex" ? codexProfile(a) : a.cliProfile;
+      return profile === undefined ? [] : [realish(profile)];
+    });
+
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
@@ -1180,6 +1198,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? configured
         : { ...configured, seat: { ...configured.seat, accountId: binding.target } };
     args[0] = info;
+    if (runBindingProblem(run, info.seat.accountId))
+      throw new SupervisorError(
+        409,
+        "configured run account is missing or has a different provider",
+      );
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
@@ -1273,17 +1296,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         dataDir: realpathSync(dirname(deps.dbPath)),
         denyRead: [
           ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
-          ...config.accounts.flatMap((a) => {
-            const profile = a.vendor === "codex" ? codexProfile(a) : a.cliProfile;
-            return profile === undefined || !existsSync(profile) ? [] : [realpathSync(profile)];
-          }),
+          ...profileDenies(),
         ],
       };
       if (run.vendor === "codex") {
         let auth: string;
         try {
           const account = config.accounts.find((a) => a.id === info.seat.accountId);
-          const profile = account === undefined ? join(homedir(), ".codex") : codexProfile(account);
+          if (!account || runBindingProblem(run, info.seat.accountId))
+            throw new Error("configured Codex account is missing or has a different provider");
+          const profile = codexProfile(account);
           const path =
             account?.cliProfile === undefined && deps.codexAuthPath !== undefined
               ? deps.codexAuthPath
@@ -1389,9 +1411,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       release();
       throw e;
     }
+    store.setSetting(profilePolicyKey(run.id), JSON.stringify(profileDenies()));
     const l = track(info, run, session, release, {
       spawn: keeperSpawn,
-      resumedAt: resume ? Date.now() : null,
+      resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
       spawnedAt: resume ? Date.now() : null,
     });
     // the resume window runs from the CLI's start, not from the keeper's: its own boot is not the CLI's
@@ -1850,6 +1873,25 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     let checkoutMissing = false;
     const info = findSeat(row.seatId);
     const run = store.run(runId);
+    if (info && run?.endedAt === null) {
+      if (runBindingProblem(run, info.seat.accountId)) {
+        if (!(await endKeeper(dir, keeperEndWait(), log))) return;
+        dropGrant(row.seatId, runId);
+        setSeat(row.seatId, {
+          state: "error",
+          reason: "configured run account is missing or has a different provider",
+        });
+        return;
+      }
+      // Preserved processes may predate these profile denies. Rebuild before executing again.
+      const denied = JSON.parse(store.getSetting(profilePolicyKey(runId)) ?? "[]") as string[];
+      if (profileDenies().some((profile) => !denied.includes(profile))) {
+        if (!(await endKeeper(dir, keeperEndWait(), log))) return;
+        dropGrant(row.seatId, runId);
+        if (deps.cliHold?.reason != null || stopping) return;
+        return resumeOne(row);
+      }
+    }
     if (info && run?.endedAt === null && run.reviewId == null) {
       const def = seatDef(info.seat);
       if (def.mode === "read-only" && def.loop !== "plan") {
@@ -2157,7 +2199,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const info = findSeat(seatId);
     if (!info || !row || !run || !row.worktree || !row.cliSessionId || run.endedAt !== null)
       return refused("seat has no run to move");
+    const target = config.accounts.find((a) => a.id === transfer.target);
+    if (!target || target.vendor !== run.vendor) {
+      if (!(await endKeeper(crewKeeperDir(deps.dbPath, run.id), keeperEndWait(), log)))
+        return refused("old CLI process could not be safely ended");
+      dropGrant(seatId, run.id);
+      setSeat(seatId, {
+        state: "error",
+        reason: "transfer account is missing or has a different provider",
+      });
+      return refused("transfer account is missing or has a different provider");
+    }
     const save = () => store.setSetting(transferKey(run.id), JSON.stringify(transfer));
+    transfer.continuationId ??= randomUUID();
     const outboxPath = join(crewCodexDir(deps.dbPath, run.id), CODEX_OUTBOX_FILE);
     // A late source receipt can rewrite the file from its older in-memory queue.
     // Persist the snapshot before yielding, including across a hub restart.
@@ -2182,6 +2236,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       )
         return refused("old CLI process could not be safely ended; run retained for recovery");
     }
+    dropGrant(seatId, run.id);
     if (stopping) return refused(SHUTTING_DOWN);
     const sourceSessionId = row.cliSessionId;
     const checkout =
@@ -2203,6 +2258,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")))
         : new Map<string, string>();
       for (const [id, text] of transfer.queued ?? []) entries.set(id, text);
+      if (!handoff)
+        entries.set(
+          transfer.continuationId as string,
+          "Continue your work after the account transfer.",
+        );
+      else entries.delete(transfer.continuationId as string);
       if (handoff) {
         if (transfer.handoffSessionId !== sourceSessionId) {
           transfer.handoffId = randomUUID();
@@ -3086,6 +3147,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     closeRunItems(info);
     await closing;
     if (l && live.get(seatId) === l) live.delete(seatId);
+    // Closing can replay late turn events; the engine's final seat state must stand.
+    setSeat(seatId, { state: "idle", reason: null, runId: null });
     emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
     if (worktree === null) return;
     try {

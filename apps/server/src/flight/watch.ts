@@ -19,6 +19,7 @@ import {
   wakeKey,
   wakeLine,
 } from "@mc/core";
+import { runAccountId } from "../account-bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -178,7 +179,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         row?.state === "stopped" ||
         row?.state === "parked" ||
         noteOpen() ||
-        accountAtStop(config, store, found.seat.accountId, t)
+        accountAtStop(
+          config,
+          store,
+          runAccountId(store, row?.runId ?? null, found.seat.accountId),
+          t,
+        )
       ) {
         return;
       }

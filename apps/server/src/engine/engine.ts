@@ -107,6 +107,7 @@ import {
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
+import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
@@ -328,7 +329,8 @@ export function createEngine(deps: EngineDeps): Engine {
       const accountId = run === null ? undefined : seatConfig(run.agentId)?.accountId;
       if (
         run?.loop?.phase !== "parked" &&
-        (accountId === undefined || !accountAtStop(config, store, accountId, now()))
+        (accountId === undefined ||
+          !accountAtStop(config, store, runAccountId(store, runId, accountId), now()))
       ) {
         await supervisor.resumeRun(runId);
       }
@@ -362,7 +364,7 @@ export function createEngine(deps: EngineDeps): Engine {
             q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
         ) ||
       seat === undefined ||
-      accountAtStop(config, store, seat.accountId, now())
+      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
     );
   }
 
@@ -976,7 +978,11 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "wake": {
         const accountId = seatConfig(run.agentId)?.accountId;
-        if (accountId !== undefined && accountAtStop(config, store, accountId, at)) return;
+        if (
+          accountId !== undefined &&
+          accountAtStop(config, store, runAccountId(store, run.id, accountId), at)
+        )
+          return;
         const oldest = wakeDueAsideRun(store, run.agentId);
         if (oldest !== undefined && oldest.id !== run.id) return;
         try {

@@ -1173,6 +1173,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         const body = NewAccountBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (
+          (body.data.cliProfile !== undefined || body.data.provider === "codex") &&
+          (store.liveSeatRuns().length > 0 || (deps.supervisor?.busy().length ?? 0) > 0)
+        )
+          return reply
+            .code(409)
+            .send({ error: "end existing seat processes before adding a CLI profile" });
         const duplicate = accountDuplicateReason(config.accounts, body.data);
         if (duplicate) return reply.code(409).send({ error: duplicate });
         try {
