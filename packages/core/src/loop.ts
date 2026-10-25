@@ -392,6 +392,7 @@ export type LoopAction =
   | { kind: "mark-ready" }
   | { kind: "merge"; sha: string }
   | { kind: "close-issue" }
+  | { kind: "file-minor-issue" }
   | { kind: "delete-remote-branch"; sha: string }
   | { kind: "delete-local-branch" };
 
@@ -552,6 +553,7 @@ function afterMerge(s: LoopSnapshot): LoopAction[] {
   const sha = s.loop.merging?.sha ?? s.pr?.headSha ?? s.pushed?.sha ?? null;
   const actions: LoopAction[] = [];
   if (todo("close")) actions.push({ kind: "close-issue" });
+  if (todo("file-minor")) actions.push({ kind: "file-minor-issue" });
   if (todo("delete-remote")) {
     if (sha !== null) actions.push({ kind: "delete-remote-branch", sha });
     else {

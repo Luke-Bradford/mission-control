@@ -69,6 +69,7 @@ import {
   mergedMainText,
   mergedText,
   mergeStepFailedText,
+  minorIssueFailedText,
   minorNotPostedText,
   modeOfSeat,
   NEW_LOOP,
@@ -680,6 +681,7 @@ export function createEngine(deps: EngineDeps): Engine {
     "mark-ready",
     "merge",
     "close-issue",
+    "file-minor-issue",
     "delete-remote-branch",
     "delete-local-branch",
     "update-branch",
@@ -1069,6 +1071,46 @@ export function createEngine(deps: EngineDeps): Engine {
         stepDone("merge", a.sha, mergedText(cur.prNumber));
         deps.pollGithub?.();
         out.again = true;
+        return;
+      }
+      case "file-minor-issue": {
+        const pr = cur.prNumber;
+        let failure: string | null = null;
+        try {
+          const r = await publisher.fileMinorFindings(live(), pr ?? 0);
+          if (r.issueNumber !== undefined) cur.minorIssueNumber = r.issueNumber;
+          if (!r.ok) failure = r.text;
+          else if (r.issueNumber !== undefined) {
+            const moved = await deps.board.move({
+              runId: run.id,
+              repoId: run.repoId,
+              issue: r.issueNumber,
+              column: "Backlog",
+            });
+            if (!moved.ok) failure = moved.reason;
+          }
+        } catch (e) {
+          failure = e instanceof Error ? e.message : String(e);
+        }
+        if (failure !== null) {
+          store.raiseNote({
+            key: `${run.id}:file-minor`,
+            kind: "flag",
+            runId: run.id,
+            seatId: run.agentId,
+            repoId: run.repoId,
+            text: minorIssueFailedText(pr ?? 0, failure),
+            at,
+          });
+          bus.emit("attention");
+        }
+        stepDone(
+          "file-minor",
+          mergedSha(),
+          failure === null
+            ? "minor findings checked for Backlog"
+            : minorIssueFailedText(pr ?? 0, failure),
+        );
         return;
       }
       case "close-issue": {

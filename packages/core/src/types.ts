@@ -108,7 +108,13 @@ export interface Run {
 export type LoopPhase = "working" | "ci" | "review" | "parked" | "done";
 
 /** The steps after a PR is ready, in the order the engine does them; `done` holds those finished. */
-export type MergeStep = "ready" | "merge" | "close" | "delete-remote" | "delete-local";
+export type MergeStep =
+  | "ready"
+  | "merge"
+  | "close"
+  | "file-minor"
+  | "delete-remote"
+  | "delete-local";
 
 /**
  * FLIGHT's re-run of the failed Actions jobs on a ruled sha: the runs it re-ran (with the attempt
@@ -169,6 +175,8 @@ export interface RunLoop {
     hubOnly: boolean;
     strays: string[];
   } | null;
+  /** The tech-debt issue filed from this run's merged PR. */
+  minorIssueNumber?: number;
   /** The merge under way for `sha`, and the steps of it already done. */
   merging?: { sha: string; done: MergeStep[] } | null;
   /** Merging main into the branch conflicted: the markers are in the worktree, and the seat resolves them. */

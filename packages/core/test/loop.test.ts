@@ -2317,6 +2317,7 @@ describe("merge workspace", () => {
     it("a done run with a partly filled merging emits only the missing steps", () => {
       const r = reconcile(doneLoop(["ready", "merge", "close"]));
       expect(steps(r)).toEqual([
+        "file-minor-issue",
         "delete-remote-branch",
         "move-card",
         "end-run",
@@ -2329,6 +2330,7 @@ describe("merge workspace", () => {
       const r = reconcile(doneLoop(["ready", "merge", "delete-local"]));
       expect(steps(r)).toEqual([
         "close-issue",
+        "file-minor-issue",
         "delete-remote-branch",
         "move-card",
         "end-run",
@@ -2342,6 +2344,7 @@ describe("merge workspace", () => {
       const next = reconcile({ ...merge({ pr: pr({ state: "merged" }) }), loop: r.loop });
       expect(steps(next)).toEqual([
         "close-issue",
+        "file-minor-issue",
         "delete-remote-branch",
         "move-card",
         "end-run",
@@ -2355,6 +2358,7 @@ describe("merge workspace", () => {
       const r = reconcile(s);
       expect(steps(r)).toEqual([
         "close-issue",
+        "file-minor-issue",
         "note",
         "move-card",
         "end-run",
@@ -2516,6 +2520,7 @@ describe("merge workspace", () => {
     expect(r.loop.phase).toBe("done");
     expect(r.actions.filter((x) => x.kind !== "clear-note")).toEqual([
       { kind: "close-issue" },
+      { kind: "file-minor-issue" },
       { kind: "delete-remote-branch", sha: SHA },
       { kind: "move-card", column: "Done" },
       { kind: "end-run" },
@@ -2542,7 +2547,10 @@ describe("merge workspace", () => {
 
   it("a step already done does not come out again", () => {
     const r = reconcile(
-      merge({}, { merging: { sha: SHA, done: ["ready", "merge", "close", "delete-remote"] } }),
+      merge(
+        {},
+        { merging: { sha: SHA, done: ["ready", "merge", "close", "file-minor", "delete-remote"] } },
+      ),
     );
     expect(after(r)).toEqual(["end-run", "delete-local-branch", "take-next", "event:merged"]);
   });
@@ -2551,6 +2559,7 @@ describe("merge workspace", () => {
     const r = reconcile(merge({ pr: pr({ state: "merged", ci: "passing" }) }));
     expect(after(r)).toEqual([
       "close-issue",
+      "file-minor-issue",
       "delete-remote-branch",
       "end-run",
       "delete-local-branch",
