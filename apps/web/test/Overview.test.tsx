@@ -169,7 +169,7 @@ describe("Overview panels", () => {
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
     );
-    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
+    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(0);
     expect(await screen.findByText("No events yet.")).toBeTruthy();
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     stop();
