@@ -2415,6 +2415,24 @@ it("retains two CI failures, review and main merge after counters reset", () => 
   expect(store.runAttempts("other")).toEqual([]);
 });
 
+it("retains distinct wait completions with the same target and duration", () => {
+  store.upsertRun(run());
+  for (const at of [1600, 1800]) {
+    store.setRunLoop("r1", { ...NEW_LOOP, phase: "ci" }, at);
+    store.setRunLoop("r1", { ...NEW_LOOP, phase: "working" }, at + 100);
+    store.setRunLoop("r1", { ...NEW_LOOP, phase: "working" }, at + 100);
+  }
+  expect(
+    store
+      .runAttempts("r1")
+      .filter((a) => a.kind === "wait-end")
+      .map(({ at, data }) => ({ at, data })),
+  ).toEqual([
+    { at: 1700, data: { on: "ci", durationMs: 100 } },
+    { at: 1900, data: { on: "ci", durationMs: 100 } },
+  ]);
+});
+
 it("retains named CI attempts, findings, parks, waits and linked reviewer usage", () => {
   store.upsertRun(run({ model: "model-v1", loop: { ...NEW_LOOP, prNumber: 1 } }));
   const pr = {

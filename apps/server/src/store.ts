@@ -1132,10 +1132,11 @@ export class Store {
     const encoded = JSON.stringify(data);
     const previous = this.db
       .prepare(
-        "SELECT data FROM run_attempts WHERE run_id = ? AND kind = ? ORDER BY id DESC LIMIT 1",
+        "SELECT data, at FROM run_attempts WHERE run_id = ? AND kind = ? ORDER BY id DESC LIMIT 1",
       )
       .get(runId, kind) as Row | undefined;
-    if (previous?.data === encoded) return;
+    // Wait completions are events: equal durations at different times are distinct waits.
+    if (previous?.data === encoded && (kind !== "wait-end" || previous.at === at)) return;
     this.db
       .prepare("INSERT INTO run_attempts (run_id, kind, at, data) VALUES (?, ?, ?, ?)")
       .run(runId, kind, at, encoded);
