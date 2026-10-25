@@ -169,6 +169,7 @@ import {
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
+import { MapConflicts } from "./map/conflicts.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
@@ -463,6 +464,7 @@ const HUD_MEMO_MS = 2_000;
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const now = deps.now ?? Date.now;
+  const mapConflicts = new MapConflicts();
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountReads = new Map<string, Promise<CliAccountStatus>>();
   const accountStatus = (account: CcConfig["accounts"][number], refresh = false) => {
@@ -1275,6 +1277,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         };
         return { repo: view, backup: basename(result.backup) };
       });
+
+      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
+      api.get<{ Params: { repoId: string } }>(
+        "/repos/:repoId/map/conflicts",
+        async (req, reply) => {
+          const repo = config.repos.find((r) => r.id === req.params.repoId);
+          if (!repo) return reply.code(404).send({ error: "unknown repo" });
+          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
+          try {
+            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
+              return reply.code(503).send({ error: "map checkout unavailable" });
+            }
+            return { conflicts: await mapConflicts.read(checkout, store.pullRequests(repo.id)) };
+          } catch {
+            return reply.code(503).send({ error: "map conflicts unavailable" });
+          }
+        },
+      );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
       api.get<{ Params: { repoId: string }; Querystring: { linked?: unknown } }>(
