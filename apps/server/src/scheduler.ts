@@ -23,6 +23,7 @@ import {
   type UsageSample,
   usageCollector,
 } from "@mc/core";
+import { evaluateHolds } from "./attention-holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
@@ -404,6 +405,32 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const sweepAcks = (rows?: CrewRow[]) => {
     const at = now();
     const lock = deps.lockState?.() ?? NO_LOCK;
+    const currentRows = rows ?? crew(config, store, at, lock).rows;
+    if (
+      evaluateHolds(
+        store,
+        at,
+        (ticket) => {
+          const [repoId, number] = ticket.split("#");
+          return store
+            .pullRequests(repoId ?? "")
+            .some(
+              (p) =>
+                p.state === "merged" &&
+                (p.ticket === ticket || p.closingIssues?.includes(Number(number))),
+            );
+        },
+        (since) =>
+          currentRows.some(
+            (r) =>
+              r.kind === "crew" &&
+              r.role !== "FLIGHT" &&
+              r.hudState === "running" &&
+              r.stateSince > since,
+          ),
+      )
+    )
+      emit("attention");
     store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
   };
 

@@ -1,6 +1,7 @@
 import {
   ATTENTION_KINDS,
   ATTENTION_LABEL,
+  type AttentionHoldCondition,
   type AttentionItem,
   type AttentionKind,
   type BoardItem,
@@ -142,6 +143,8 @@ export function NeedsList({
   onAskFlight: () => void;
   onRead: (id: string) => void;
 }) {
+  const held = useResource<AttentionItem[]>(RESOURCES.heldAttention);
+  const [holding, setHolding] = useState<string | null>(null);
   const now = useSecond();
   const replies = useFlightUnread();
   const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
@@ -239,6 +242,7 @@ export function NeedsList({
                 <span className="kind">{ATTENTION_LABEL[i.kind]}</span>{" "}
                 {agentId !== null && <AgentTag id={agentId} index={row?.index ?? 0} sm />}{" "}
                 <NeedText item={i} now={now} lock={lock} />
+                {i.holdReleased && <div className="xs muted">hold released: {i.holdReleased}</div>}
                 {i.flightTriage === "missed" && (
                   <div className="xs muted">{FLIGHT_TRIAGE_LABEL.missed}</div>
                 )}
@@ -266,6 +270,26 @@ export function NeedsList({
                 )}
               </div>
               <div className="acts">
+                <button
+                  type="button"
+                  className="sm ghost"
+                  disabled={busy}
+                  onClick={() => setHolding(i.key)}
+                >
+                  Hold…
+                </button>
+                {holding === i.key && (
+                  <HoldForm
+                    busy={busy}
+                    onCancel={() => setHolding(null)}
+                    onHold={(reason, condition) =>
+                      act(async () => {
+                        await apiPost(ACTIONS.hold(i.key), { reason, condition });
+                        setHolding(null);
+                      })
+                    }
+                  />
+                )}
                 {isChannelItem(i) && agentId !== null && (
                   <button type="button" className="sm primary" onClick={() => onRead(agentId)}>
                     Read
@@ -352,6 +376,31 @@ export function NeedsList({
           );
         })}
       </div>
+      {held.data && held.data.length > 0 && (
+        <details>
+          <summary>Held · {held.data.length}</summary>
+          {held.data.map((i) => (
+            <div className="nrow" key={i.key}>
+              <div>
+                <span>{i.text}</span>
+                <div className="xs muted">{i.hold?.reason}</div>
+              </div>
+              <button
+                type="button"
+                className="sm"
+                disabled={busy}
+                onClick={() =>
+                  act(async () => {
+                    await apiPost(ACTIONS.releaseHold(i.key), {});
+                  })
+                }
+              >
+                Release
+              </button>
+            </div>
+          ))}
+        </details>
+      )}
       {handled.length > 0 && (
         <details id="cHandled" className="guard">
           <summary>Being handled · {handled.length}</summary>
@@ -439,5 +488,86 @@ function GuardDrawer({
         </div>
       ))}
     </details>
+  );
+}
+
+function HoldForm({
+  busy,
+  onCancel,
+  onHold,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onHold: (reason: string, condition: AttentionHoldCondition) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [kind, setKind] = useState<AttentionHoldCondition["kind"]>("manual");
+  const [date, setDate] = useState("");
+  const [ticket, setTicket] = useState("");
+  return (
+    <form
+      className="pb"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const condition: AttentionHoldCondition =
+          kind === "date"
+            ? { kind, at: new Date(date).getTime() }
+            : kind === "ticket"
+              ? { kind, ticket: ticket.trim() }
+              : { kind };
+        onHold(reason.trim(), condition);
+      }}
+    >
+      <label>
+        Reason
+        <input
+          required
+          maxLength={1000}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </label>
+      <label>
+        Release condition
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value as AttentionHoldCondition["kind"])}
+        >
+          <option value="manual">until I release it</option>
+          <option value="date">a date</option>
+          <option value="ticket">until a ticket merges</option>
+          <option value="crew">until the crew resumes</option>
+        </select>
+      </label>
+      {kind === "date" && (
+        <label>
+          Date
+          <input
+            required
+            type="datetime-local"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </label>
+      )}
+      {kind === "ticket" && (
+        <label>
+          Ticket
+          <input
+            required
+            pattern="[^#\\s]+#[1-9][0-9]*"
+            placeholder="repo#123"
+            value={ticket}
+            onChange={(e) => setTicket(e.target.value)}
+          />
+        </label>
+      )}
+      <button type="submit" className="sm" disabled={busy || !reason.trim()}>
+        Hold item
+      </button>
+      <button type="button" className="sm ghost" disabled={busy} onClick={onCancel}>
+        Cancel
+      </button>
+    </form>
   );
 }

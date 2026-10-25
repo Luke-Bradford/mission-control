@@ -86,6 +86,7 @@ import Fastify, {
 } from "fastify";
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
+import { holdItem, releaseHold } from "./attention-holds.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -2289,6 +2290,58 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
 
       api.get("/attention", async (): Promise<AttentionItem[]> => sharedAttention());
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.get("/attention/held", async () =>
+        attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew().rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ).filter((i) => i.hold),
+      );
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
+        const body = z
+          .object({
+            reason: z.string().trim().min(1).max(1000),
+            condition: z.discriminatedUnion("kind", [
+              z.object({ kind: z.literal("manual") }).strict(),
+              z.object({ kind: z.literal("crew") }).strict(),
+              z
+                .object({
+                  kind: z.literal("date"),
+                  at: z.number().int().min(0).max(8640000000000000),
+                })
+                .strict(),
+              z
+                .object({
+                  kind: z.literal("ticket"),
+                  ticket: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+                })
+                .strict(),
+            ]),
+          })
+          .strict()
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!sharedAttention().some((i) => i.key === req.params.key))
+          return reply.code(404).send({ error: "Item is no longer waiting." });
+        holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now());
+        bus.emit("attention");
+        return { ok: true };
+      });
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (!releaseHold(store, req.params.key, now()))
+          return reply.code(404).send({ error: "No active hold." });
+        bus.emit("attention");
+        return { ok: true };
+      });
 
       const discussionSends = new Set<string>();
       const currentDiscussionItem = (key: string) => {

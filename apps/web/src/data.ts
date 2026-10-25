@@ -64,6 +64,7 @@ export const RESOURCES = {
     path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
     topic: "attention",
   }),
+  heldAttention: { path: "/api/attention/held", topic: "attention" },
   attention: { path: "/api/attention", topic: "attention" },
   notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
   notificationEvents: { path: "/api/notifications/events", topic: "attention" },
@@ -185,6 +186,8 @@ export const ACTIONS = {
   pause: (agentId: string) => `/api/agents/${enc(agentId)}/pause`,
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
+  hold: (key: string) => `/api/attention/${enc(key)}/hold`,
+  releaseHold: (key: string) => `/api/attention/${enc(key)}/hold/release`,
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
