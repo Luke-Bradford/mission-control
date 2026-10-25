@@ -287,6 +287,7 @@ interface Harness {
   /** The merge gate's facts (null: unreadable), and the gate reads made. */
   gate: GateFacts | null;
   gateReads: { sha: string; known: boolean }[];
+  duringGate?: () => void;
   /** The merge steps the publisher was asked for, in order, with the ended runs seen at the time. */
   steps: string[];
   stepEnded: Record<string, string[]>;
@@ -479,6 +480,7 @@ function harness(): Harness {
         },
         async gateFacts(_r, sha, known): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
+          x.duringGate?.();
           if (x.gate === null) return { ok: false, text: "git is down", transient: true };
           return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
         },
@@ -602,7 +604,7 @@ function harness(): Harness {
             return { ok: true, changed: true };
           },
         },
-        rules: (repoId) => x.rules(repoId),
+        rules: (repoId, mainSha) => x.rules(repoId, mainSha),
         refillQueues: async () => void x.refills.push(x.taken.length),
         takeNext: async (seatId) => void x.taken.push(seatId),
         pollGithub: () => void x.polls++,
@@ -3843,6 +3845,29 @@ describe("the engine runs reviews", () => {
       h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["docs/**"] });
       await h.engine.reconcileRun(RUN);
       expect(h.hardRuleLists).toHaveLength(reads + 1);
+      expect(loopOf().touches?.paths).toEqual(["docs/new.md"]);
+    });
+
+    it("re-reads touches when fetching main introduces a matching hard rule", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: [] });
+      h.touches = ["docs/new.md"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().touches?.paths).toEqual([]);
+      const mainSha = need(h.gate).mainSha;
+      const reads = h.hardRuleLists.length;
+      const pinnedReads: (string | undefined)[] = [];
+      h.duringGate = () => {
+        h.rules = async (_repoId, sha) => {
+          pinnedReads.push(sha);
+          return { ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["docs/**"] };
+        };
+      };
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).not.toContain("merge");
+      expect(pinnedReads).toContain(mainSha);
+      expect(h.hardRuleLists.length).toBeGreaterThan(reads);
       expect(loopOf().touches?.paths).toEqual(["docs/new.md"]);
     });
 

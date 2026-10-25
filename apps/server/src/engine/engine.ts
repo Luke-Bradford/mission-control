@@ -164,8 +164,8 @@ export interface EngineDeps {
   board: { move: (m: Move) => Promise<MoveResult> };
   /** Asks for a GitHub poll now (after a merge, so the boards show it before the next one). */
   pollGithub?: () => void;
-  /** A repo's board rules (read at origin/HEAD); an error is a note in `status()`. */
-  rules: (repoId: RepoId) => Promise<RepoRules | RepoRulesError>;
+  /** A repo's board rules (at the gate's main sha, or origin/HEAD); errors are notes in `status()`. */
+  rules: (repoId: RepoId, mainSha?: string) => Promise<RepoRules | RepoRulesError>;
   /** Rebuilds the writer seats' queues from the board (each tick). */
   refillQueues: () => Promise<void>;
   /** Starts the seat's next queued ticket; it does nothing for a seat that may not take one. */
@@ -379,8 +379,8 @@ export function createEngine(deps: EngineDeps): Engine {
     );
   }
 
-  async function rulesFor(repoId: RepoId): Promise<RepoRules | null> {
-    const r = await deps.rules(repoId);
+  async function rulesFor(repoId: RepoId, mainSha?: string): Promise<RepoRules | null> {
+    const r = await deps.rules(repoId, mainSha);
     if (r instanceof Error) {
       ruleNotes.set(repoId, r.message);
       hardRulesSet.delete(repoId);
@@ -1194,10 +1194,7 @@ export function createEngine(deps: EngineDeps): Engine {
   async function pass(runId: string, round = 0): Promise<void> {
     // read before the run's row is, so no await sits between the row and the loop saved from it
     const repoId = store.run(runId)?.repoId;
-    const rules = repoId === undefined ? null : await rulesFor(repoId);
-    const mergeAllowed =
-      config.repos.find((r) => r.id === repoId)?.autonomy === "merge" &&
-      rules?.hardRulesSet === true;
+    let rules = repoId === undefined ? null : await rulesFor(repoId);
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
@@ -1242,6 +1239,30 @@ export function createEngine(deps: EngineDeps): Engine {
       !(input.carry?.from === input.flightClearedSha && input.carry.to === pushed.sha)
     )
       input.flightClearedSha = null;
+    // in ci, a conflicting PR needs main's sha to merge it in, reviewer or not
+    const conflicting = input.phase === "ci" && pr?.mergeable === "CONFLICTING";
+    if (
+      run.endedAt === null &&
+      pushed !== null &&
+      (input.phase === "review" || conflicting) &&
+      pr?.state === "open" &&
+      pr.headSha === pushed.sha &&
+      config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
+      (conflicting || reviewerOf(config, run.agentId, reviewRoleOf(run)) !== null)
+    ) {
+      // Origin's tip is read every pass; cached strays also depend on the seat area.
+      const area = [...(seatConfig(run.agentId)?.area ?? [])];
+      const known =
+        input.gate?.sha === pushed.sha && JSON.stringify(input.gate.area) === JSON.stringify(area)
+          ? input.gate
+          : null;
+      if (known === null) input.gate = null;
+      const g = await publisher.gateFacts(run, pushed.sha, known);
+      if (g.ok) {
+        input.gate = { sha: pushed.sha, ...g.facts, area };
+        rules = await rulesFor(run.repoId, g.facts.mainSha);
+      } else log(`${runId}: could not read the merge gate: ${g.text}`);
+    }
     const hardRulesHash =
       rules === null
         ? null
@@ -1274,30 +1295,11 @@ export function createEngine(deps: EngineDeps): Engine {
         }
       }
     }
-    // in ci, a conflicting PR needs main's sha to merge it in, reviewer or not
-    const conflicting = input.phase === "ci" && pr?.mergeable === "CONFLICTING";
-    if (
-      run.endedAt === null &&
-      pushed !== null &&
-      (input.phase === "review" || conflicting) &&
-      pr?.state === "open" &&
-      pr.headSha === pushed.sha &&
-      config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
-      (conflicting || reviewerOf(config, run.agentId, reviewRoleOf(run)) !== null)
-    ) {
-      // Origin's tip is read every pass; cached strays also depend on the seat area.
-      const area = [...(seatConfig(run.agentId)?.area ?? [])];
-      const known =
-        input.gate?.sha === pushed.sha && JSON.stringify(input.gate.area) === JSON.stringify(area)
-          ? input.gate
-          : null;
-      if (known === null) input.gate = null;
-      const g = await publisher.gateFacts(run, pushed.sha, known);
-      if (g.ok) input.gate = { sha: pushed.sha, ...g.facts, area };
-      else log(`${runId}: could not read the merge gate: ${g.text}`);
-    }
     if (flightPowers === "superuser" && pushed?.sha === input.reviewWaivedSha)
       await syncReviewStatus(runId);
+    const mergeAllowed =
+      config.repos.find((r) => r.id === repoId)?.autonomy === "merge" &&
+      rules?.hardRulesSet === true;
     const snap = snapshot(run, input, at, mergeAllowed);
     if (snap === null) {
       // a run the loop cannot read is never woken: a stale flag must not hold up a younger rework

@@ -521,6 +521,19 @@ describe("readRepoRules", () => {
     expect(reads.count).toBe(2);
   });
 
+  it("reads and caches the gate's main sha even when origin/HEAD differs", async () => {
+    const mainSha = commit(promote(false));
+    commit(promote(true));
+    expect(await readRepoRules("o/r", repo)).toMatchObject({ promoteBacklog: true });
+    expect(await readRepoRules("o/r", repo, DEFAULT_REPO_RULES, [], mainSha)).toMatchObject({
+      promoteBacklog: false,
+    });
+    expect(await readRepoRules("o/r", repo, DEFAULT_REPO_RULES, [], mainSha)).toMatchObject({
+      promoteBacklog: false,
+    });
+    expect(reads.count).toBe(2);
+  });
+
   it("reads origin's version, not a local commit's", async () => {
     commit(promote(true));
     commit(promote(false), true);
