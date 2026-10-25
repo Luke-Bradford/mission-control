@@ -140,6 +140,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     await deps.refreshAuthors?.(found.session.repoId);
 
     let added = false;
+    let nextDue = Infinity;
     for (const item of operatorItems(
       config,
       store,
@@ -148,11 +149,26 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       undefined,
       deps.lockState?.(),
     )) {
+      if (item.flightTriage === "waiting" && item.triageDueAt !== undefined)
+        nextDue = Math.min(nextDue, item.triageDueAt);
       const identity = `${item.key}:${item.at}`;
       if (item.flightTriage === "missed" && !announced.has(identity)) {
         announced.add(identity);
         added = true;
       }
+    }
+    if (triageTimer !== null) clearTimeout(triageTimer);
+    triageTimer = null;
+    if (Number.isFinite(nextDue)) {
+      triageTimer = setTimeout(
+        () => {
+          triageTimer = null;
+          bus.emit("attention");
+          void check();
+        },
+        Math.max(0, nextDue - now()),
+      );
+      triageTimer.unref();
     }
     if (added) bus.emit("attention");
 
@@ -279,6 +295,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     return chain;
   }
 
+  let triageTimer: NodeJS.Timeout | null = null;
   let timer: NodeJS.Timeout | null = null;
   function schedule(): void {
     if (timer !== null) return;
@@ -311,8 +328,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (!seatId || store.seatSession(seatId)?.runId !== runId) return;
       delivered = {
         runId,
-        snapshot: flightWake(state, delivered?.runId === runId ? delivered.snapshot : undefined)
-          .snapshot,
+        snapshot: flightWake(
+          state,
+          delivered?.runId === runId ? delivered.snapshot : undefined,
+          [],
+          true,
+        ).snapshot,
       };
     },
     rotate() {
@@ -344,6 +365,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       offBus = null;
       if (interval !== null) clearInterval(interval);
       interval = null;
+      if (triageTimer !== null) clearTimeout(triageTimer);
+      triageTimer = null;
       if (timer !== null) clearTimeout(timer);
       timer = null;
       if (gapTimer !== null) clearTimeout(gapTimer);

@@ -327,6 +327,7 @@ import {
   flightState,
   markPrsShown,
   operatorItems,
+  ownReply,
   stalledSeats,
 } from "./state.ts";
 
@@ -446,23 +447,30 @@ const StructuredBriefArgs = z.strictObject({
     })
     .optional(),
 });
-const BriefItemArgs = z.strictObject({
-  ...StructuredBriefArgs.shape,
-  key: z.string().min(1).max(BRIEF_KEY_MAX),
-  for: z.enum(["operator", "flight"]).default("operator"),
-  assessment: text(BRIEF_INPUT_MAX).optional(),
-  context: text(BRIEF_INPUT_MAX).optional(),
-  did: z
-    .array(
-      z.strictObject({ action: text(BRIEF_INPUT_MAX), refs: z.array(text(BRIEF_KEY_MAX)).max(20) }),
-    )
-    .max(20)
-    .default([]),
-  ask: text(BRIEF_INPUT_MAX).optional(),
-  recommendation: text(BRIEF_INPUT_MAX),
-  options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
-  basis: basisArg,
-});
+const BriefItemArgs = z
+  .strictObject({
+    ...StructuredBriefArgs.shape,
+    key: z.string().min(1).max(BRIEF_KEY_MAX),
+    for: z.enum(["operator", "flight"]).default("operator"),
+    assessment: text(BRIEF_INPUT_MAX).optional(),
+    context: text(BRIEF_INPUT_MAX).optional(),
+    did: z
+      .array(
+        z.strictObject({
+          action: text(BRIEF_INPUT_MAX),
+          refs: z.array(text(BRIEF_KEY_MAX)).max(20),
+        }),
+      )
+      .max(20)
+      .default([]),
+    ask: text(BRIEF_INPUT_MAX).optional(),
+    recommendation: text(BRIEF_INPUT_MAX),
+    options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
+    basis: basisArg,
+  })
+  .refine((args) => (args.assessment ?? args.context) !== undefined, {
+    message: "Give assessment (or legacy context).",
+  });
 const WatchEntryArgs = z.strictObject({
   id: BriefIdentity,
   state: z.enum(["warn", "info", "ok"]),
@@ -1759,7 +1767,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const item = operatorItems(config, store, at, deps.login, undefined, deps.lockState?.()).find(
       (i) => i.key === key,
     );
-    if (item === undefined) {
+    if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
       return fail(briefNoItemText(key));
     }
     if (structured.for === "flight") {
@@ -1778,7 +1786,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       store.addBrief({
         ...structured,
         key,
-        original: originalItemText(item),
+        original: originalItemText(item).slice(0, BRIEF_INPUT_MAX),
         assessment,
         context: assessment,
         ask: structured.ask ?? "",

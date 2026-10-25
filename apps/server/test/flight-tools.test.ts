@@ -125,7 +125,7 @@ import {
 } from "../src/config.ts";
 import type { AcceptRulingResult, SyncMainResult } from "../src/engine/engine.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
-import { flightBriefView } from "../src/flight/state.ts";
+import { flightBriefView, operatorItems } from "../src/flight/state.ts";
 import { createFlightTools, cut, requirePowers, seatFree } from "../src/flight/tools.ts";
 import type { Move, MoveResult } from "../src/github-board.ts";
 import { attentionItems } from "../src/hud.ts";
@@ -3344,6 +3344,31 @@ describe("brief_item", () => {
   beforeEach(() => {
     raise();
     seen.length = 0;
+  });
+
+  it("refuses to triage FLIGHT's own direct reply and tag", async () => {
+    store.addComms({ at: NOW, from: "CAPCOM", to: "flight-1", ticket: null, text: "Status?" });
+    store.addComms({
+      at: NOW + 1,
+      from: "flight-1",
+      to: "CAPCOM",
+      ticket: null,
+      text: "Waiting @CAPCOM",
+    });
+    const items = operatorItems(config(), store, NOW + 2, null).filter(
+      (i) => i.agentId === "flight-1" && ["message", "tag"].includes(i.kind),
+    );
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect((await call("brief_item", B({ key: item.key }))).isError).toBe(true);
+      expect(store.briefs().has(item.key)).toBe(false);
+    }
+  });
+
+  it("caps the original source text in a brief", async () => {
+    raise("large", { text: "X".repeat(BRIEF_INPUT_MAX * 2) });
+    await call("brief_item", B({ key: "note:large" }));
+    expect(store.briefs().get("note:large")?.original).toHaveLength(BRIEF_INPUT_MAX);
   });
 
   it("stores a brief on an operator item and emits attention", async () => {

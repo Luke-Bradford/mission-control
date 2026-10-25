@@ -1220,6 +1220,41 @@ describe("auto update", () => {
     });
   });
 
+  it("allows test-only paths while holding hard-rule tests and test tooling", () => {
+    for (const path of [
+      "apps/web/test/cards.test.ts",
+      "apps/server/test/views.test.ts",
+      "packages/core/test/board.test.ts",
+      "packages/agentcomms/test/inbox.test.ts",
+    ]) {
+      expect(autoUpdatePath(path), path).toBe(true);
+    }
+    for (const path of [
+      "apps/server/test/brief.test.ts",
+      "apps/server/test/checkouts.test.ts",
+      "apps/server/test/codex-approval.test.ts",
+      "apps/server/test/keeper.test.ts",
+      "apps/server/test/publish.test.ts",
+      "apps/server/test/queue.test.ts",
+      "apps/server/test/gh-read.test.ts",
+      "apps/server/test/remove.test.ts",
+      "packages/core/test/away.test.ts",
+      "apps/server/test/engine.test.ts",
+      "apps/server/test/flight-tools.test.ts",
+      "apps/server/test/supervisor-start.test.ts",
+      "apps/server/test/update.test.ts",
+      "packages/core/test/loop.test.ts",
+      "packages/core/test/guard.test.ts",
+      "apps/server/test/engine/helpers.ts",
+      "apps/web/test/package.json",
+      "apps/web/test/vite.config.ts",
+      "apps/web/test/../src/x.ts",
+      "apps/web/test/fixtures/x.ts",
+    ]) {
+      expect(autoUpdatePath(path), path).toBe(false);
+    }
+  });
+
   it("applies the page and docs", async () => {
     for (const p of [
       "apps/web/src/a.ts",
