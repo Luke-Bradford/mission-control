@@ -1151,8 +1151,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * The one way a seat's process is spawned, fresh or resumed: the prompt file (role brief + the
-   * repo's CLAUDE.md at the run's base, `claudeMd`), a new token with its two 0600 files, the guard
-   * hook and the sandbox for this worktree, the minimal env, and the run's transcript (appended
+   * repo's CLAUDE.md and reference index, read from verified objects at the run's base), a new
+   * token with its two 0600 files, the guard hook and the sandbox for this worktree, the minimal env, and the run's transcript (appended
    * to). A resume keeps the run's own prompt file (R28). It does not know the run's base, so it
    * rebuilds a missing one from the role brief alone: never from the worktree, which is the
    * seat's to write. Registers the live seat and its events; throws when the hook command cannot
@@ -1179,6 +1179,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     checkout: { path: string; branch: string; gitDir: string },
     resume: boolean,
     claudeMd: string | null,
+    references = "",
   ): Live {
     const def = seatDef(info.seat);
     const model = resume
@@ -1200,7 +1201,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (!resume || !existsSync(promptPath)) {
       if (resume) {
         log(
-          `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md`,
+          `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md or reference index`,
         );
       }
       // The role's prompt becomes the system prompt: only a file whose real path is in the roles folder.
@@ -1211,7 +1212,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new Error(`crew: ${def.prompt} is outside the roles folder`);
       }
       const roleBrief = readFileSync(promptFile, "utf8");
-      const references = resume ? "" : repoReferenceIndex(checkout.path);
       writeFileSync(promptPath, rolePrompt(roleBrief, claudeMd, references), {
         mode: 0o600,
       });
@@ -2218,8 +2218,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               : undefined;
       const title = ticket.title;
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
-      // The repo's CLAUDE.md as origin's default branch has it, never as the worktree does.
-      const { checkout, claudeMd } = await inClone(info.session.checkout, async () => {
+      // The repo's CLAUDE.md and index as origin's default branch has them, never the worktree.
+      const { checkout, claudeMd, references } = await inClone(info.session.checkout, async () => {
         const where = {
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -2241,7 +2241,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                   clearPending: (path) => store.clearCheckoutPending(path),
                 },
               });
-        return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
+        return {
+          checkout: c,
+          claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha),
+          references: await repoReferenceIndex(info.session.checkout, c.baseSha),
+        };
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // A writer claims the ticket for this hub (another hub on the board skips an assigned card);
@@ -2357,7 +2361,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       let l: Live;
       try {
-        l = await checkedLaunch(info, run, cliSessionId, checkout, false, claudeMd);
+        l = await checkedLaunch(info, run, cliSessionId, checkout, false, claudeMd, references);
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
@@ -2441,7 +2445,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     starting.add(seatId);
     try {
       // No ticket and no branch: a detached checkout of the default branch, for reading only.
-      const { checkout, claudeMd } = await inClone(info.session.checkout, async () => {
+      const { checkout, claudeMd, references } = await inClone(info.session.checkout, async () => {
         const c = await prepareDetachedCheckout({
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -2449,7 +2453,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           name: watchCheckoutName(seatId),
           peers: clonePeers(deps.config, deps.hubRoot),
         });
-        return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
+        return {
+          checkout: c,
+          claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha),
+          references: await repoReferenceIndex(info.session.checkout, c.baseSha),
+        };
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
@@ -2490,6 +2498,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           { path: checkout.path, branch: "", gitDir: checkout.gitDir },
           false,
           claudeMd,
+          references,
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
@@ -2605,7 +2614,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
-      const { scratch, inputs, claudeMd } = await inClone(checkout, async () => {
+      const { scratch, inputs, claudeMd, references } = await inClone(checkout, async () => {
         const s = await prepareScratch({
           checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -2620,6 +2629,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             scratch: s,
             inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
             claudeMd: await readRepoClaudeMd(checkout, s.baseSha),
+            references: await repoReferenceIndex(checkout, s.baseSha),
           };
         } catch (e) {
           await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
@@ -2671,6 +2681,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           { path: scratch.path, branch: "", gitDir: scratch.gitDir },
           false,
           claudeMd,
+          references,
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);

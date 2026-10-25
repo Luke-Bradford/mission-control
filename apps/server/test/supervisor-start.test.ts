@@ -764,7 +764,7 @@ describe("startRun", () => {
     expect(argv).toContain(`Edit(/${cwd}/.claude/**)`);
     expect(argv).toContain(`Write(/${cwd}/.claude/**)`);
     expect(readFileSync(crewPromptPath(dbPath, runId), "utf8")).toContain(
-      'gates — Check the work. (".claude/skills/gates/SKILL.md")',
+      '- name: "gates" description: "Check the work." path: ".claude/skills/gates/SKILL.md"',
     );
   });
 

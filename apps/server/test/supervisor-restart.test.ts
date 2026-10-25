@@ -656,7 +656,7 @@ describe("reattach after a restart", () => {
       rolePrompt(readFileSync(join(HUB_ROLES, "GUIDO.md"), "utf8"), null),
     );
     expect(log).toHaveBeenCalledWith(
-      "guido-1: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md",
+      "guido-1: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md or reference index",
     );
   });
 
