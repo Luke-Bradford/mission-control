@@ -404,3 +404,39 @@ it("refuses copied for GitHub, unknown and finished drafts without changing them
   expect(changed).not.toHaveBeenCalled();
   expect(gh).not.toHaveBeenCalled();
 });
+
+it("recognises a timed-out post on retry, including after rebuilding the app", async () => {
+  const id = store.addDraft("mc#12", "issue", "Prepared text", 123);
+  gh.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "timed out" });
+  expect((await post(id)).statusCode).toBe(502);
+  await app.close();
+  app = buildApp({ config, store, bus, gh, knownSecrets: async () => [] });
+  gh.mockResolvedValueOnce({
+    code: 0,
+    stdout: JSON.stringify({ comments: [{ body: "Prepared text" }] }),
+    stderr: "",
+  });
+  expect((await post(id)).statusCode).toBe(200);
+  expect(gh.mock.calls.map(([args]) => args[1])).toEqual(["comment", "view"]);
+  expect(store.drafts()).toEqual([]);
+});
+it("refuses a retry if the latest comment cannot be read", async () => {
+  const id = store.addDraft("mc#12", "issue", "Prepared text", 123);
+  gh.mockResolvedValue({ code: 1, stdout: "", stderr: "timed out" });
+  expect((await post(id)).statusCode).toBe(502);
+  expect((await post(id)).statusCode).toBe(502);
+  expect(gh.mock.calls.map(([args]) => args[1])).toEqual(["comment", "view"]);
+  expect(store.drafts()).toHaveLength(1);
+});
+it("posts a retry when the latest comment differs", async () => {
+  const id = store.addDraft("mc#12", "issue", "Prepared text", 123);
+  gh.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "timed out" });
+  expect((await post(id)).statusCode).toBe(502);
+  gh.mockResolvedValueOnce({
+    code: 0,
+    stdout: JSON.stringify({ comments: [{ body: "Other reply" }] }),
+    stderr: "",
+  });
+  expect((await post(id)).statusCode).toBe(200);
+  expect(gh.mock.calls.map(([args]) => args[1])).toEqual(["comment", "view", "comment"]);
+});

@@ -87,7 +87,9 @@ export function Situation() {
                 <div key={i.key} className="nrow">
                   <div>
                     <b>{i.text}</b>
-                    <p>{i.brief?.assessment ?? i.brief?.context}</p>
+                    {(i.brief?.assessment ?? i.brief?.context) && (
+                      <p>{i.brief?.assessment ?? i.brief?.context}</p>
+                    )}
                   </div>
                 </div>
               ))}

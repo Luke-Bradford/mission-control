@@ -1678,3 +1678,25 @@ it.each(["seat", "flight"] as const)(
     ).toHaveLength(1);
   },
 );
+
+it("fetches the whole tagged message when the list only has a preview", async () => {
+  const tag = item({
+    key: "tag:shop-app-ta:comms:1",
+    kind: "tag",
+    text: "Preview…",
+    escalationId: null,
+  });
+  const text = `@CAPCOM ${"whole message ".repeat(100)}`;
+  stubFetch({
+    "/api/attention": [tag],
+    [RESOURCES.attentionItem(tag.key).path]: { ...tag, text },
+    "/api/config": CONFIG,
+    "/api/crew": { rows: [], firstRunToday: null },
+    "/api/flight": { seat: null, decisions: [] },
+  });
+  render(<ItemPanel />);
+  act(() => openItem(tag.key));
+  await waitFor(() =>
+    expect(document.querySelector("#discuss")?.textContent).toContain(text.trim()),
+  );
+});

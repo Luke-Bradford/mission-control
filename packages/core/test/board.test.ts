@@ -11,6 +11,7 @@ import {
   OWNERS,
   PR_KEEP_DAYS,
   PR_MAX_PAGES,
+  priorityRank,
   SIZE_FIELD,
   STAGE_FIELD,
   STAGES,
@@ -76,3 +77,11 @@ describe("labelPriority", () => {
     expect(labelPriority([])).toBeNull();
   });
 });
+
+it.each([
+  ["P0", 0],
+  ["P2", 2],
+  ["P12", 12],
+  ["high", 99],
+  [null, 99],
+] as const)("ranks priority %s as %s", (label, rank) => expect(priorityRank(label)).toBe(rank));

@@ -1213,7 +1213,7 @@ describe("a seat keeps running through a restart", () => {
     await sup.endRun("guido-1");
     expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "operator" });
     expect(seatState("guido-1")).toBe("idle");
-    expect(pidAlive(cliPid)).toBe(false);
+    await until(() => expect(pidAlive(cliPid)).toBe(false));
     expect(existsSync(keeperDir)).toBe(false);
     expect(store.keeperCursor(runId)).toBeNull();
   });
