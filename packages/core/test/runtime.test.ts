@@ -291,8 +291,10 @@ describe("the allowlist in phase 2b", () => {
 
   it("keeps each seat's pnpm store in the sandbox's temp root, under the variable pnpm 11 reads", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
-    expect(crewPnpmStoreDir(501, "guido-1")).toBe("/tmp/claude-501/mc-pnpm-store/guido-1");
-    expect(crewPnpmStoreDir(501, "guido-2")).not.toBe(crewPnpmStoreDir(501, "guido-1"));
+    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
+    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(
+      crewPnpmStoreDir("/tmp/mc-test", "guido-1"),
+    );
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
   });
@@ -759,6 +761,20 @@ describe("scratch mode", () => {
 });
 
 describe("crew sandbox and scoped edits", () => {
+  it("isolates the run temp root from the operator's Claude sessions in every mode", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      const tempRoot = "/tmp/mc-seat-test";
+      const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
+        .sandbox.filesystem;
+      expect(f.allowWrite).toEqual([tempRoot]);
+      expect(f.allowRead).toEqual([tempRoot]);
+      expect(f.denyRead).toContain("/tmp/claude-*");
+      expect(f.denyRead).toContain("/private/tmp/claude-*");
+      expect(f.denyWrite).toContain("/tmp/claude-*");
+      expect(f.denyWrite).toContain("/private/tmp/claude-*");
+    }
+  });
+
   it("builds the sandbox settings JSON: no git dir writable, the whole clone's .git denied", () => {
     const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook));
     expect(j.sandbox).toMatchObject({

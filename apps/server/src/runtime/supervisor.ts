@@ -21,9 +21,10 @@
  * and settings carry the files' paths only. When the process exits, for any reason, the token is
  * revoked, the run's test-lock hold freed and both files removed.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -55,7 +56,6 @@ import {
   crewCliArgs,
   crewMcpConfig,
   crewPnpmStoreDir,
-  crewSandboxTmp,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   eligibleToStart,
@@ -861,7 +861,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return;
     }
     store.setRunEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
-    removeCodexHome(l.run.id);
+    removeRunFiles(l.run.id);
     closeRunItems(l.info);
     // read before the seat row changes
     const worktree = store.seatSession(seatId)?.worktree ?? null;
@@ -1021,8 +1021,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /** Python's and its tools' caches, the seat's own in the sandbox's temp root; `uv run` uses the hub's install, offline. */
-  function crewPythonEnv(uid: number, seatId: string): Record<string, string> {
-    const tmp = crewSandboxTmp(uid);
+  function crewPythonEnv(tmp: string, seatId: string): Record<string, string> {
     return {
       UV_NO_SYNC: "1",
       UV_OFFLINE: "1",
@@ -1040,18 +1039,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
    * Python's caches likewise (`crewPythonEnv`).
    */
-  function crewEnv(seatId: string): NodeJS.ProcessEnv {
+  function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
       const v = process.env[k];
       if (v !== undefined) env[k] = v;
     }
     env.HOME = homedir();
-    const uid = process.getuid?.();
-    if (uid !== undefined) {
-      env[PNPM_STORE_ENV] = crewPnpmStoreDir(uid, seatId);
-      Object.assign(env, crewPythonEnv(uid, seatId));
-    }
+    env.TMPDIR = tmp;
+    env.CLAUDE_CODE_TMPDIR = tmp;
+    env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
+    Object.assign(env, crewPythonEnv(tmp, seatId));
     return { ...env, ...CREW_CLI_ENV };
   }
 
@@ -1229,13 +1227,29 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               }),
             ]
           : [];
+      const tmpPath = seatTmp(run.id);
+      try {
+        mkdirSync(tmpPath, { mode: 0o700 });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      }
+      const st = lstatSync(tmpPath);
+      if (!st.isDirectory() || st.uid !== process.getuid?.() || (st.mode & 0o777) !== 0o700)
+        throw new Error("crew temp root must be a private directory owned by the server");
+      const tmp = realpathSync(tmpPath);
       const sandbox = {
         cwd,
+        ...(run.vendor === "codex" ? {} : { tempRoot: tmp }),
         gitCommonDir: realpathSync(join(info.session.checkout, ".git")),
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
-        denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+        denyRead: [
+          ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+          ...(run.vendor === "codex"
+            ? [`/tmp/claude-${process.getuid?.()}`, `/private/tmp/claude-${process.getuid?.()}`]
+            : []),
+        ],
       };
       if (run.vendor === "codex") {
         let auth: string;
@@ -1251,11 +1265,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const runDir = crewCodexDir(deps.dbPath, run.id);
         const home = join(runDir, "codex-home");
         const zdotdir = join(runDir, "zsh-empty");
-        const tmpPath = codexTmp(run.id);
-        mkdirSync(tmpPath, { recursive: true, mode: 0o700 });
-        const tmp = realpathSync(tmpPath);
         const env = Object.fromEntries(
-          Object.entries(crewEnv(info.seat.id)).filter(
+          Object.entries(crewEnv(info.seat.id, tmp)).filter(
             (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
           ),
         );
@@ -1326,7 +1337,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           args: [...(deps.commandArgs ?? []), ...args],
           cwd,
           transcriptPath: run.transcriptPath,
-          env: crewEnv(info.seat.id),
+          env: crewEnv(info.seat.id, tmp),
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
           dir: crewKeeperDir(deps.dbPath, run.id),
@@ -1374,19 +1385,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
   }
 
-  function removeCodexHome(runId: string): void {
+  function removeRunFiles(runId: string): void {
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
       rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
+      rmSync(seatTmp(runId), { recursive: true, force: true });
     } catch (e) {
-      log(`could not remove Codex home of ${runId}: ${errText(e)}`);
+      log(`could not remove run files of ${runId}: ${errText(e)}`);
     }
   }
 
-  function codexTmp(runId: string): string {
-    const uid = process.getuid?.();
-    if (uid === undefined) throw new Error("Codex seats require a sandbox temp root");
-    return join(crewSandboxTmp(uid), "mc-codex", runId);
+  function seatTmp(runId: string): string {
+    // Claude 2.1.308 falls back to /tmp when its temp path exceeds 44 bytes. Keep even the
+    // canonical macOS /private/tmp path plus the CLI's claude-<uid> suffix below that limit.
+    const key = createHash("sha256").update(`${deps.dbPath}:${runId}`).digest("hex").slice(0, 16);
+    return `/tmp/mc-${key}`;
   }
 
   /**
@@ -1410,12 +1423,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           log(`${info.seat.id}: could not remove ${p}: ${errText(e)}`);
         }
       }
-      if (run.vendor === "codex") {
-        try {
-          rmSync(codexTmp(run.id), { recursive: true, force: true });
-        } catch (e) {
-          log(`${info.seat.id}: could not remove Codex temp files: ${errText(e)}`);
-        }
+      try {
+        rmSync(seatTmp(run.id), { recursive: true, force: true });
+      } catch (e) {
+        log(`${info.seat.id}: could not remove crew temp files: ${errText(e)}`);
       }
       removeKeeper(info.seat.id, run.id);
     };
@@ -1426,7 +1437,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       rmSync(crewKeeperDir(deps.dbPath, runId), { recursive: true, force: true });
       store.deleteKeeperCursor(runId);
-      if (store.run(runId)?.endedAt != null) removeCodexHome(runId);
+      if (store.run(runId)?.endedAt != null) removeRunFiles(runId);
     } catch (e) {
       log(`${seatId}: could not remove the keeper folder of ${runId}: ${errText(e)}`);
     }
@@ -1511,7 +1522,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const at = now();
       const facts = foldOpenRun(run);
       store.setRunEnded(run.id, at, "failed", "exit");
-      removeCodexHome(run.id);
+      removeRunFiles(run.id);
       const info = findSeat(row.seatId);
       if (info && opts.record !== false)
         noteMissingReport(
@@ -2329,7 +2340,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
@@ -2462,7 +2473,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
@@ -2643,7 +2654,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
@@ -2735,7 +2746,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(ended, facts !== null);
       if (facts) persistDigest(store, digests, run.id, facts.digest);
       store.setRunEnded(run.id, at, "ok", "operator");
-      removeCodexHome(run.id);
+      removeRunFiles(run.id);
     }
     setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
     closeRunItems(info);
@@ -2761,7 +2772,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
     store.setRunEnded(run.id, at, "ok", endedBy);
-    removeCodexHome(run.id);
+    removeRunFiles(run.id);
     transcripts.delete(run.transcriptPath);
     digests.delete(run.id);
     emit({ kind: "run-ended", seatId: run.agentId, runId: run.id, endedBy });
@@ -2795,7 +2806,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
     store.setRunEnded(runId, at, "ok", "engine");
-    removeCodexHome(runId);
+    removeRunFiles(runId);
     let closing: Promise<void> | null = null;
     if (l && l.run.id === runId) {
       l.endedBy = "engine";
@@ -2906,7 +2917,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });
       };
@@ -3262,7 +3273,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       )
         return false;
       store.setRunEnded(run.id, now(), "ok", "operator");
-      removeCodexHome(run.id);
+      removeRunFiles(run.id);
       transcripts.delete(run.transcriptPath);
       digests.delete(run.id);
       emit({ kind: "run-ended", seatId: run.agentId, runId, endedBy: "operator" });

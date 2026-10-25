@@ -600,6 +600,7 @@ describe("startRun", () => {
       "LANG",
       "LC_ALL",
       "TMPDIR",
+      "CLAUDE_CODE_TMPDIR",
       "SHELL",
       "TERM",
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
@@ -630,6 +631,32 @@ describe("startRun", () => {
     expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
   });
 
+  it("gives runs private temp roots and removes them when stopped", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await sup.startRun("retro", 43);
+    await until(() => expect(recorded().filter((r) => r.argv).length).toBe(2));
+    const roots = recorded()
+      .filter((r) => r.argv)
+      .map((r) => r.env.TMPDIR);
+    expect(new Set(roots).size).toBe(2);
+    for (const r of recorded().filter((r) => r.argv)) {
+      const tmp = r.env.TMPDIR;
+      expect(tmp).toBeTruthy();
+      expect(r.env.CLAUDE_CODE_TMPDIR).toBe(tmp);
+      expect(tmp).not.toContain("/claude-");
+      expect(Buffer.byteLength(join(tmp, `claude-${process.getuid?.()}`))).toBeLessThanOrEqual(44);
+      expect(statSync(tmp).mode & 0o777).toBe(0o700);
+      writeFileSync(join(tmp, "test-output"), "ok");
+      const settings = JSON.parse(r.argv[r.argv.indexOf("--settings") + 1]);
+      expect(settings.sandbox.filesystem.allowWrite).toEqual([tmp]);
+    }
+    await sup.endRun("guido-1");
+    await sup.endRun("retro");
+    for (const tmp of roots) expect(existsSync(tmp)).toBe(false);
+  });
+
   it("points pnpm's store at the seat's own folder in the sandbox's temp root, outside the worktree", async () => {
     const { sup } = make();
     sup.start();
@@ -637,7 +664,7 @@ describe("startRun", () => {
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const [start] = recorded();
     const store = (start.env as Record<string, string>)[PNPM_STORE_ENV];
-    expect(store).toBe(`/tmp/claude-${process.getuid?.()}/mc-pnpm-store/guido-1`);
+    expect(store).toBe(`${start.env.TMPDIR}/mc-pnpm-store/guido-1`);
     // pnpm 11 reads pnpm_config_*, never npm_config_*: the name is the one it honours
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     // not the worktree, nor anything under it: a store there is what `add -A` picked up
@@ -653,7 +680,7 @@ describe("startRun", () => {
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const [start] = recorded();
     const env = start.env as Record<string, string>;
-    const tmp = `/tmp/claude-${process.getuid?.()}`;
+    const tmp = env.TMPDIR;
     expect(env).toMatchObject({
       UV_NO_SYNC: "1",
       UV_OFFLINE: "1",
@@ -754,13 +781,15 @@ describe("startRun", () => {
     const argv = recorded()[0].argv as string[];
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
     const common = join(clone, ".git");
-    expect(fs.allowWrite).toEqual([]);
+    expect(fs.allowWrite).toEqual([recorded()[0].env.TMPDIR]);
     expect(fs.denyWrite).toEqual([
       `${root}/mc-crew/guido-1-42/.git`,
       common,
       `${common}/worktrees/guido-1-42`,
       // the run's token, MCP, prompt and transcript files: no seat rewrites them (R28)
       join(dir, "db"),
+      "/tmp/claude-*",
+      "/private/tmp/claude-*",
     ]);
     // the DB, transcripts and prompt files: no seat reads another's (or its own)
     expect(fs.denyRead).toContain(join(dir, "db"));
@@ -772,6 +801,8 @@ describe("startRun", () => {
       join(dir, "db"),
       realpathSync(HUB_ROOT),
       hubGit,
+      "/tmp/claude-*",
+      "/private/tmp/claude-*",
     ]);
   });
 
@@ -2180,6 +2211,13 @@ import(${JSON.stringify(fixture)});
       expect(statSync(join(home, name)).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(home, "auth.json"), "utf8")).toBe('{"fake":"account"}');
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
+    expect(spawn.env.TMPDIR).not.toContain("/claude-");
+    expect(statSync(spawn.env.TMPDIR).mode & 0o777).toBe(0o700);
+    for (const prefix of ["/tmp", "/private/tmp"]) {
+      expect(readFileSync(join(home, "config.toml"), "utf8")).toContain(
+        `"${prefix}/claude-${process.getuid?.()}"="deny"`,
+      );
+    }
     expect(readFileSync(join(home, "config.toml"), "utf8")).not.toMatch(
       /notify|HOSTILE_INSTRUCTIONS/,
     );

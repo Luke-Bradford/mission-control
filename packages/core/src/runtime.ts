@@ -702,8 +702,7 @@ export const PNPM_STORE_DIR_NAME = ".pnpm-store";
  */
 export const PNPM_STORE_ENV = "pnpm_config_store_dir";
 /**
- * The CLI's temp root for sandboxed commands, which they may write: their `TMPDIR` (CLI 2.1.302,
- * seen from a sandboxed Bash, 2026-10-21).
+ * The CLI's default shared temp root. Crew processes use a private per-run root instead.
  */
 export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
 /**
@@ -711,8 +710,8 @@ export const crewSandboxTmp = (uid: number): string => `/tmp/claude-${uid}`;
  * in `~/Library`, and with no store set it falls back to `.pnpm-store/` at the top of the worktree,
  * where the commit tool's `add -A` would find it.
  */
-export const crewPnpmStoreDir = (uid: number, seatId: string): string =>
-  `${crewSandboxTmp(uid)}/mc-pnpm-store/${seatId}`;
+export const crewPnpmStoreDir = (tempRoot: string, seatId: string): string =>
+  `${tempRoot}/mc-pnpm-store/${seatId}`;
 
 /** How long a control request (interrupt, get_context_usage…) may go unanswered. */
 export const CONTROL_TIMEOUT_MS = 10_000;
@@ -756,6 +755,8 @@ export interface CrewSandboxInput {
    * `crew.deny_read`, in that order (`seatDenyRead`). Repeats are dropped.
    */
   denyRead: string[];
+  /** Private per-run temp directory, outside the operator's Claude session tree. */
+  tempRoot?: string;
 }
 
 /** Credential files and folders (relative to home) no seat's Bash may read. */
@@ -870,6 +871,9 @@ export function sandboxReadDenies(i: CrewSandboxInput): string[] {
 export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: CrewHook): string {
   const writes = mode !== "read-only";
   const denyRead = sandboxReadDenies(i);
+  const tempDenies = i.tempRoot === undefined ? [] : ["/tmp/claude-*", "/private/tmp/claude-*"];
+  if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
+    throw new Error("crew sandbox: tempRoot must be absolute");
   return JSON.stringify({
     hooks: guardHooks(hook),
     sandbox: {
@@ -885,7 +889,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         // of it closes that (spike 2026-10-21: commit, add, update-ref, objects and
         // config.worktree all fail; git reads and the full suite still work). That also covers
         // other seats' refs and objects (#31 R19, R24) and every file inside either git dir.
-        allowWrite: [],
+        allowWrite: i.tempRoot === undefined ? [] : [i.tempRoot],
+        ...(i.tempRoot === undefined ? {} : { allowRead: [i.tempRoot] }),
         // The worktree's `.git` pointer (a writer's worktree is otherwise writable), which
         // rewriting would send the host's own git calls elsewhere; the clone's whole git dir; and
         // the worktree's own git dir (inside it, named so the grant reads plainly). A read-only
@@ -893,10 +898,16 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         // every write grant, but a DB under a temp dir (a preview's) would not be, and a rewritten
         // token, MCP, prompt or transcript file would reach the hub (a prompt file becomes the
         // system prompt on resume, R28).
-        denyWrite: [writes ? `${i.cwd}/.git` : i.cwd, i.gitCommonDir, i.worktreeGitDir, i.dataDir],
+        denyWrite: [
+          writes ? `${i.cwd}/.git` : i.cwd,
+          i.gitCommonDir,
+          i.worktreeGitDir,
+          i.dataDir,
+          ...tempDenies,
+        ],
         // Credentials and the hub's data dir, then what else on this Mac agent-run code may not
         // read: the hub, the loops, the other crew clones and the operator's own working folders.
-        denyRead,
+        denyRead: [...denyRead, ...tempDenies],
       },
     },
   });
