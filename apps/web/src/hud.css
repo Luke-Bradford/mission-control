@@ -2211,6 +2211,8 @@ main > section {
   text-overflow: ellipsis;
 }
 .idrow .ctl {
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
   display: flex;
   gap: 6px;
@@ -4783,4 +4785,23 @@ button.nrow.thread.tagged {
 .crew-pause-form input:not([type="checkbox"]) {
   min-width: 0;
   flex: 1;
+}
+
+.account-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.account-chooser label,
+.account-chooser select {
+  min-width: 0;
+  max-width: 100%;
+}
+.account-chooser select {
+  width: 24ch;
 }
