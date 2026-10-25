@@ -13,6 +13,7 @@
  * card, and every card would meet it, so it is retried. A seat whose takes keep failing that way
  * raises one note of its own, which clears when a take succeeds. A note holds no raw error text.
  */
+
 import {
   AWAY_QUOTA_REFUSED,
   AWAY_START_REFUSED,
@@ -47,6 +48,7 @@ import {
   DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
   seatUnavailable,
 } from "../config.ts";
+import { pausedSeat } from "../crew-pause.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
@@ -458,7 +460,7 @@ async function foreignBranch(
  */
 export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const { config, store, supervisor } = deps;
-  if (!deps.enabled || deps.login === null) return;
+  if (!deps.enabled || deps.login === null || pausedSeat(store, seatId)) return;
   const found = writerSeats(config).find((s) => s.seat.id === seatId);
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
   if (!seatMayTake(store, seatId, maxOpenRunsOf(config))) return;
@@ -539,6 +541,10 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
       at: deps.now(),
     });
     deps.onNotes?.();
+    return;
+  }
+  if (pausedSeat(store, seatId)) {
+    store.untake(seatId, repoId, issue);
     return;
   }
   try {

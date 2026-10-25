@@ -1,4 +1,5 @@
 import type { Owner, Stage } from "./board.ts";
+import type { CrewPause } from "./crew-pause.ts";
 import type { CatchUpKind } from "./flight.ts";
 import type { FlightPowers } from "./guard.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud.ts";
@@ -801,6 +802,7 @@ export interface CrewEvent {
 
 /** One `/api/crew` row: a configured loop as the HUD shows it. */
 export interface CrewRow {
+  crewPause?: CrewPause | null;
   /** Current run events from the last two hours; absent on older servers. */
   events?: CrewEvent[];
   focus?: string | null;

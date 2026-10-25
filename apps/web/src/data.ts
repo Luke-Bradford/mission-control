@@ -92,6 +92,7 @@ export const RESOURCES = {
     path: `/api/away/digest${since ? `?since=${enc(since)}` : ""}`,
     topic: "settings",
   }),
+  crewPause: { path: "/api/settings/crew-pause", topic: "settings" },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
@@ -199,6 +200,7 @@ export const ACTIONS = {
   /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */
   handled: (key: string) => `/api/attention/${enc(key)}/handled`,
   /** Body: the whole AwaySettings. */
+  crewPause: RESOURCES.crewPause.path,
   away: RESOURCES.away.path,
   /** Body `{ github, project }`; answers a RepoPreview and writes nothing. */
   previewRepo: "/api/repos/preview",

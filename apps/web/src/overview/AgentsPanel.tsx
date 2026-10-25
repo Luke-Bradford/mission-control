@@ -11,6 +11,7 @@ import {
 import type { ReactNode } from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { useSecond, useTz } from "../clock.ts";
+import { CrewPauseControl } from "../components/CrewPause.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { NeedButton } from "../components/NeedButton.tsx";
@@ -377,8 +378,9 @@ function AgentRow({
   const go = () => navigate(agentPath(row.id));
   const crewStatus = useResource<{ enabled: boolean }>(RESOURCES.crewStatus).data;
   const status = seatStatus(row);
-  const statusLabel =
-    lockSince(lock, row.run?.id) !== null
+  const statusLabel = row.crewPause
+    ? status.label
+    : lockSince(lock, row.run?.id) !== null
       ? "Waiting on lock"
       : status.label === "Free" && crewStatus?.enabled === false
         ? "Idle (crew paused)"
@@ -510,14 +512,17 @@ export function AgentsPanel() {
         </>
       }
       actions={
-        <button
-          type="button"
-          className="sm"
-          disabled={!firstSession}
-          onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
-        >
-          Add agent
-        </button>
+        <>
+          <CrewPauseControl />
+          <button
+            type="button"
+            className="sm"
+            disabled={!firstSession}
+            onClick={() => firstSession && navigate(addAgentPath(firstSession.id))}
+          >
+            Add agent
+          </button>
+        </>
       }
     >
       <div role="table" aria-label="Crew" id="agentsList" aria-busy={!crew.data && !crew.error}>

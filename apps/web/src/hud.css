@@ -4734,3 +4734,34 @@ button.nrow.thread.tagged {
   display: flex;
   gap: 6px;
 }
+
+.crew-pause {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  position: relative;
+}
+.crew-pause-form {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  width: 300px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px #0005;
+}
+.crew-pause-form label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.crew-pause-form input:not([type="checkbox"]) {
+  min-width: 0;
+  flex: 1;
+}

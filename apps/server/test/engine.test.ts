@@ -1800,6 +1800,42 @@ describe("taking by rule", () => {
     h.taken.length = 0;
   });
 
+  it("paused seats wait through a restart; other seats take and unpausing resumes", async () => {
+    seatIdle(null);
+    config.crew?.sessions[0]?.seats.push({
+      id: "guido-2",
+      role: "GUIDO",
+      accountId: "claude-main",
+      model: "haiku",
+      area: [],
+    });
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: [SEAT], reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    h.engine.stop();
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    h.engine = h.make();
+    h.engine.start();
+    await h.engine.tick();
+    expect(h.taken).toEqual(["guido-2"]);
+    h.taken.length = 0;
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(h.taken).toEqual([SEAT, "guido-2"]);
+  });
+
+  it("an all-seat pause starts no tickets", async () => {
+    seatIdle(null);
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: "all", reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    await h.engine.tick();
+    expect(h.taken).toEqual([]);
+  });
+
   it("a tick refills the queues, then asks each idle writer seat with no run to take", async () => {
     seatIdle(null);
     await h.engine.tick();
@@ -2541,6 +2577,35 @@ describe("the engine runs reviews", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
   }
+  it("a paused reviewer keeps its queued review until unpaused", async () => {
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: [RETRO], reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    await toReview();
+    await h.engine.tick();
+    expect(first().state).toBe("queued");
+    expect(first().runId).toBeNull();
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(first().state).toBe("running");
+  });
+
+  it("a paused author starts no rework; unpausing resumes the pending findings", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: [SEAT], reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    reported(first().id, [finding("Important")]);
+    await h.engine.tick();
+    expect(h.sent.filter((s) => s.key.startsWith("fix:"))).toEqual([]);
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(h.sent.some((s) => s.key.startsWith("fix:"))).toBe(true);
+  });
+
   /** Another author run in review on its own PR 13, not yet reviewed. */
   async function secondAuthor(): Promise<void> {
     seats().push({

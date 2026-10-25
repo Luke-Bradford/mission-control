@@ -17,9 +17,11 @@ import {
   COMMS_MESSAGE_MAX,
   type ContextUsage,
   CREW_DISABLED,
+  CREW_PAUSE_SETTING,
   type Crew,
   type CrewChanges,
   type CrewMode,
+  type CrewPause,
   type CrewSessionFolders,
   DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
@@ -144,6 +146,7 @@ import {
   setTeamsSelection,
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
+import { CrewPauseBody, pausedSeat, readCrewPause, startUnpausedRun } from "./crew-pause.ts";
 import type { Engine } from "./engine/engine.ts";
 import {
   changedFiles,
@@ -1785,6 +1788,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
       seatAction("/seats/:id/start", StartBody, (sup, id, b) => {
+        const pause = pausedSeat(store, id);
+        if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const loop = crewSeatDef(config, id).loop;
         // the watch seat runs the crew and takes no ticket; every other seat needs one
         if (loop === "watch") {
@@ -1795,8 +1800,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
         return deps.engine?.status().on === true && loop === "build"
-          ? sup.startRun(id, b.issue, { loop: NEW_LOOP, operator: true })
-          : sup.startRun(id, b.issue, { operator: true });
+          ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
+          : startUnpausedRun(store, sup, id, b.issue, { operator: true });
       });
       seatAction(
         "/seats/:id/message",
@@ -2585,6 +2590,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               }
             : {}),
         };
+      });
+
+      // Reader: apps/web/src/components/CrewPause.tsx
+      api.get("/settings/crew-pause", async () => readCrewPause(store));
+
+      // Reader: apps/web/src/components/CrewPause.tsx
+      api.post("/settings/crew-pause", async (req, reply) => {
+        const body = CrewPauseBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const seats = body.data.seats;
+        const known = configuredAgents(config)
+          .filter((a) => a.kind === "crew")
+          .map((a) => a.id);
+        if (Array.isArray(seats) && seats.some((id) => !known.includes(id)))
+          return reply.code(400).send({ error: "unknown seat" });
+        const pause: CrewPause | null =
+          seats === null
+            ? null
+            : {
+                seats,
+                reason: body.data.reason,
+                at: now(),
+                by: config.operator.id,
+              };
+        store.setSetting(CREW_PAUSE_SETTING, JSON.stringify(pause));
+        bus.emit("settings");
+        bus.emit("agents");
+        return pause;
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));

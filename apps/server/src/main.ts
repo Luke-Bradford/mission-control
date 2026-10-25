@@ -14,6 +14,7 @@
  *               a preview started with MC_CREW=1, ignored (and logged) anywhere else
  *   MC_DEBUG   `1`: debug lines on stderr (each backfill tick's run count and duration)
  */
+
 import { chmodSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -33,6 +34,7 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
+import { startUnpausedRun } from "./crew-pause.ts";
 import { createEngine } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -275,7 +277,10 @@ export async function main(): Promise<void> {
     config,
     store,
     bus,
-    supervisor,
+    supervisor: {
+      ...supervisor,
+      startRun: (...args) => startUnpausedRun(store, supervisor, ...args),
+    },
     login: hubLogin,
     lockState: () => lock.state(),
     profiles,
