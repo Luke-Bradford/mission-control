@@ -2,8 +2,6 @@ import {
   type Crew,
   type CrewRow,
   FIX_STEP,
-  HUD_STATE_LABEL,
-  HUD_STATE_TONE,
   type RunLoopView,
 } from "@mc/core";
 import { heldStep } from "../agent/loopView.ts";
@@ -14,6 +12,7 @@ import {
   isLoopInFlight,
   loopSteps,
   runElapsed,
+  seatStatus,
   type StepMark,
   stepMarks,
 } from "../crew.ts";
@@ -91,7 +90,9 @@ function WorkRow({ r, now, tz }: { r: CrewRow; now: number; tz: string | null })
         <a className="agent-link" href={to} onClick={(e) => followLink(e, to)}>
           <AgentTag id={r.id} index={r.index} />
         </a>
-        <Pill tone={HUD_STATE_TONE[r.hudState]}>{HUD_STATE_LABEL[r.hudState]}</Pill>
+        <span title={seatStatus(r).reason ?? seatStatus(r).label}>
+          <Pill tone={seatStatus(r).tone}>{seatStatus(r).label}</Pill>
+        </span>
         {r.ticket && <TicketRef ticket={r.ticket} />}
         {r.ticketTitle && (
           <span className="s min0 ellip" title={r.ticketTitle}>

@@ -202,7 +202,7 @@ it("labels Context, leaves quota in Systems and preserves paused state", async (
   await screen.findByText("ctx 40%");
   expect(screen.queryByText("14%")).toBeNull();
   const paused = await screen.findByText("Idle");
-  expect(paused.closest(".state-cell")?.getAttribute("title")).toBe("Idle (crew paused)");
+  expect(paused.closest(".state-cell")?.getAttribute("title")).toBe("Crew is paused");
   expect(paused.closest<HTMLElement>(".trow")?.title).toBe("Crew is paused");
   expect(paused.closest(".trow")?.querySelector(".doing")).toBeNull();
   expect(rowsIn(container)[1]?.querySelector(".state-cell")?.textContent).toContain("25m");
@@ -830,7 +830,8 @@ it.each(["idle", "running", "stopped"] as const)(
     ]);
     const { container } = render(<AgentsPanel />);
     const row = container.querySelector(".flight") as HTMLElement;
-    await within(row).findByText("Paused: Save tokens");
+    await within(row).findByText("Paused");
+    expect(row.querySelector(".state-cell")?.getAttribute("title")).toBe("Save tokens");
     expect(within(row).getByText("head agent").getAttribute("title")).toContain(
       "next check paused",
     );

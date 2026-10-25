@@ -384,10 +384,17 @@ function AgentRow({
   const statusLabel = row.crewPause
     ? status.label
     : lockSince(lock, row.run?.id) !== null
-      ? "Waiting on lock"
-      : status.label === "Free" && crewStatus?.enabled === false
-        ? "Idle (crew paused)"
+      ? "Watching"
+    : status.label === "Free" && crewStatus?.enabled === false
+        ? "Idle"
         : status.label;
+  const statusTitle = row.crewPause
+    ? status.reason
+    : lockSince(lock, row.run?.id) !== null
+      ? "Waiting on test lock"
+      : status.label === "Free" && crewStatus?.enabled === false
+        ? "Crew is paused"
+        : status.reason ?? statusLabel;
   const cls = ["trow", mine.length > 0 ? "needs" : running ? "going" : "", selected ? "sel" : ""];
 
   const aside = row.asideRuns ?? [];
@@ -411,7 +418,7 @@ function AgentRow({
     <div
       role="row"
       className={cls.filter(Boolean).join(" ")}
-      title={statusLabel === "Idle (crew paused)" ? "Crew is paused" : doing}
+      title={statusTitle ?? doing}
       onClick={(e) => {
         // a link in the row (a ticket on GitHub) goes where it points, not to the Agent page
         if (!(e.target as Element).closest("a, button")) go();
@@ -436,9 +443,9 @@ function AgentRow({
         </span>
       </span>
       <ModelCell row={row} title={identityTitle} />
-      <span role="cell" className="state-cell" title={statusLabel}>
+      <span role="cell" className="state-cell" title={statusTitle}>
         <Pill tone={status.tone}>
-          <span>{statusLabel === "Idle (crew paused)" ? "Idle" : statusLabel}</span>
+          <span>{statusLabel}</span>
         </Pill>
         {row.stateSince > 0 && <span className="xs muted block">{age(row.stateSince, now)}</span>}
       </span>

@@ -11,6 +11,7 @@ import {
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
 import { AgentTag } from "../hud/AgentTag.tsx";
+import { seatStatus } from "../crew.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
@@ -122,7 +123,9 @@ export const Card = memo(function Card({
     agent && (
       <span key="agent" className="row">
         <AgentTag id={agent.id} index={agent.index} sm />
-        <Pill tone={HUD_STATE_TONE[agent.hudState]}>{HUD_STATE_LABEL[agent.hudState]}</Pill>
+        <span title={seatStatus(agent).reason ?? seatStatus(agent).label}>
+          <Pill tone={seatStatus(agent).tone}>{seatStatus(agent).label}</Pill>
+        </span>
         {step && <span className="xs">{step}</span>}
       </span>
     ),
