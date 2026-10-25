@@ -418,7 +418,7 @@ function AgentRow({
     <div
       role="row"
       className={cls.filter(Boolean).join(" ")}
-      title={statusTitle ?? doing}
+      title={status.label === "Free" && crewStatus?.enabled === false ? "Crew is paused" : doing}
       onClick={(e) => {
         // a link in the row (a ticket on GitHub) goes where it points, not to the Agent page
         if (!(e.target as Element).closest("a, button")) go();
