@@ -3390,7 +3390,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // runs whose resume was held back go once the CLI passes its smoke test again
       unholdResume = deps.cliHold?.onRelease(() => {
         if (!stopping) {
-          reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
+          // a pass still running has already skipped the held runs: take them back after it
+          (reattaching ?? Promise.resolve())
+            .then(() => (stopping ? undefined : reattach()))
+            .catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
         }
       });
       reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
