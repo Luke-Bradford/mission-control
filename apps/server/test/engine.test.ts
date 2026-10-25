@@ -3215,6 +3215,21 @@ describe("the engine runs reviews", () => {
         },
       );
 
+      it.each([true, false])(
+        "carries an accepted review ruling only across an unchanged diff (%s)",
+        async (prSame) => {
+          await toReview();
+          await h.engine.reconcileRun(RUN);
+          setLoop({ phase: "review", reviewWaivedSha: SHA });
+          behindMain();
+          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame }];
+          setPr({ ci: "passing", mergeable: "CONFLICTING" });
+          await h.engine.reconcileRun(RUN);
+          expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+          expect(loopOf().reviewWaivedSha).toBe(prSame ? SHA_B : SHA);
+        },
+      );
+
       it("a clean update moves the run to ci, pushes the merge, and reviews the new sha", async () => {
         behindMain();
         h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
@@ -4344,6 +4359,35 @@ describe("the engine runs reviews", () => {
       await toReview();
       expect(h.asides).toEqual([RUN]);
     }
+
+    it("resumes a parked aside run while its seat holds another run, deferring the wake", async () => {
+      await setAside();
+      setLoop({
+        phase: "parked",
+        parked: { kind: "review", reason: "review findings", ended: false },
+      });
+      const other = "guido-1:other";
+      store.upsertRun(run({ id: other, seq: 2 }));
+      seatIdle(other);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      await h.engine.onOperatorMessage(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf()).toMatchObject({
+        phase: "review",
+        parked: null,
+        reviewWaivedSha: SHA,
+        aside: { worktree: WT, wake: true },
+      });
+      expect(store.seatSession(SEAT)?.runId).toBe(other);
+      expect(h.sent).toEqual([]);
+      h.wakeError = null;
+      h.asideOn = false;
+      store.setRunEnded(other, clock, "ok", "operator");
+      store.setSeatSession({ ...need(store.seatSession(SEAT)), runId: null });
+      emit({ kind: "run-ended", seatId: SEAT, runId: other, endedBy: "operator" });
+      await vi.waitFor(() => expect(loopOf().aside).toBeNull());
+      expect(store.seatSession(SEAT)?.runId).toBe(RUN);
+    });
 
     it("freed at review", async () => {
       await setAside();
