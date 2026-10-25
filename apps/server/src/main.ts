@@ -26,6 +26,7 @@ import { CliHold } from "./cli-update.ts";
 import { fetchCardNow, fetchTicket, githubToken, makeGql } from "./collectors/github.ts";
 import {
   ConfigError,
+  configuredAgents,
   crewAllowed,
   findHubRoot,
   isPreview,
@@ -42,6 +43,7 @@ import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { editCardFields, type Move, moveCard } from "./github-board.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
+import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
@@ -383,6 +385,33 @@ export async function main(): Promise<void> {
   });
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
+  const mapRing = new CallRing(() => {
+    const seats = new Set(
+      configuredAgents(config)
+        .filter((a) => a.kind === "crew")
+        .map((a) => a.id),
+    );
+    return store.runsActiveSince(Date.now() - 15 * 60_000).flatMap((run): RingSource[] => {
+      if (!seats.has(run.agentId)) return [];
+      const session = store.seatSession(run.agentId);
+      const cwd =
+        run.loop?.aside?.worktree ?? (session?.runId === run.id ? session.worktree : null);
+      return cwd
+        ? [
+            {
+              id: run.id,
+              seat: run.agentId,
+              repoId: run.repoId,
+              cwd,
+              transcriptPath: run.transcriptPath,
+              vendor: run.vendor,
+            },
+          ]
+        : [];
+    });
+  });
+  const stopMapRing = mapRing.start();
+  app.addHook("onClose", async () => stopMapRing());
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
 
@@ -391,6 +420,7 @@ export async function main(): Promise<void> {
     stopCrew: () => supervisor.stopAll(),
     stop: async () => {
       stopDiscovery();
+      stopMapRing();
       crewReloader.stop();
       flightWatch.stop();
       engine.stop();
