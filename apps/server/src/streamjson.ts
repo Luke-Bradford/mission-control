@@ -1,4 +1,5 @@
 import {
+  type CrewVendor,
   cutAtWord,
   isObj,
   LIVE_DETAIL_MAX,
@@ -17,6 +18,7 @@ import {
   workSummary,
 } from "@mc/core";
 import { cleanText } from "./clean.ts";
+import { codexPlan, codexTool, transcriptVendor } from "./codex-transcript.ts";
 import { str } from "./util.ts";
 
 export interface TranscriptFacts {
@@ -87,6 +89,11 @@ const TASK_STATUS: Record<string, SubagentInfo["status"]> = {
  * fold (never mutated in place), so folding on from an earlier facts object stays correct.
  */
 interface DigestState {
+  vendor?: CrewVendor;
+  codexSeen: Set<string>;
+  codexMessage: Map<string, string>;
+  /** Latest observed turn per thread, retained for usage arriving after completion. */
+  codexTurns: Map<string, string>;
   tasks: Map<string, LiveTask>;
   taskPatches: Map<string, Json>;
   taskCalls: Map<string, { name: string; input: Json }>;
@@ -144,6 +151,9 @@ interface DigestState {
 const digestStates = new WeakMap<TranscriptFacts, DigestState>();
 
 const emptyDigestState = (): DigestState => ({
+  codexSeen: new Set(),
+  codexMessage: new Map(),
+  codexTurns: new Map(),
   tasks: new Map(),
   taskPatches: new Map(),
   taskCalls: new Map(),
@@ -177,6 +187,9 @@ function copyDigestState(d: DigestState): DigestState {
   }
   return {
     ...d,
+    codexSeen: new Set(d.codexSeen),
+    codexMessage: new Map(d.codexMessage),
+    codexTurns: new Map(d.codexTurns),
     tasks: new Map([...d.tasks].map(([id, task]) => [id, { ...task }])),
     taskPatches: new Map(d.taskPatches),
     taskCalls: new Map(d.taskCalls),
@@ -599,11 +612,66 @@ function foldCodex(
   ev: Json,
   fileMtime: number,
 ): void {
+  if (typeof ev.method !== "string") return;
   const p = isObj(ev.params) ? ev.params : {};
   const at = timeOf(ev.timestamp) ?? fileMtime;
   d.lastEventAt = Math.max(d.lastEventAt ?? at, at);
-  if (ev.method === "thread/started" && isObj(p.thread)) {
+  const threadId = str(p.threadId);
+  const turnId = str(isObj(p.turn) ? p.turn.id : p.turnId);
+  const turnKey =
+    threadId === null
+      ? null
+      : turnId !== null
+        ? `codex:${threadId}:${turnId}`
+        : (d.codexTurns.get(threadId) ?? null);
+  if ((ev.method === "item/started" || ev.method === "item/completed") && isObj(p.item)) {
+    const item = p.item;
+    const id = str(item.id);
+    if (id === null) return;
+    const key = `${p.threadId}:${id}`;
+    const completed = ev.method === "item/completed";
+    const eventKey = `${ev.method}:${key}`;
+    if (d.codexSeen.has(eventKey)) return;
+    d.codexSeen.add(eventKey);
+    if (item.type === "agentMessage" && turnKey !== null) d.codexMessage.set(turnKey, key);
+    if (completed && item.type === "agentMessage" && typeof item.text === "string") {
+      facts.lastAssistantText = cleanText(item.text, NO_REPORT_TEXT_MAX);
+      d.lastText = leadSentence(cleanText(item.text));
+    }
+    const tool = codexTool(item);
+    if (tool) {
+      const started = `tool:${key}`;
+      if (!d.codexSeen.has(started)) {
+        d.codexSeen.add(started);
+        d.toolCalls++;
+        toolStats(d, tool.name).calls++;
+        const startedAt = completed && tool.ms !== null ? at - tool.ms : at;
+        d.toolStarts.set(key, startedAt);
+        d.pending.set(key, {
+          name: tool.name,
+          at: startedAt,
+          live: true,
+          detail: toolDetail(tool.name, tool.input ? JSON.parse(tool.input) : null, d.cwd),
+        });
+      }
+      if (completed) {
+        const pending = d.pending.get(key);
+        const stats = toolStats(d, tool.name);
+        if (tool.error) stats.failed++;
+        const durationMs = tool.ms ?? (pending?.at == null ? null : Math.max(0, at - pending.at));
+        if (durationMs !== null) {
+          stats.durationsMs.push(durationMs);
+          if (stats.durationsMs.length > DURATIONS_KEEP) stats.durationsMs.shift();
+          if (!stats.slowest || durationMs > stats.slowest.durationMs)
+            stats.slowest = { detail: pending?.detail ?? null, durationMs };
+        }
+        d.pending.delete(key);
+      }
+    }
+  } else if (ev.method === "thread/started" && isObj(p.thread)) {
     facts.sessionId = str(p.thread.id) ?? facts.sessionId;
+    d.cwd = cleanStr(p.thread.cwd) ?? d.cwd;
+    facts.model = cleanStr(p.thread.model) ?? facts.model;
   } else if (ev.method === "thread/tokenUsage/updated" && isObj(p.tokenUsage)) {
     const u = p.tokenUsage;
     if (!isObj(u.total) || typeof p.threadId !== "string") return;
@@ -630,31 +698,65 @@ function foldCodex(
       return;
     const delta = usage.input + usage.output - (prev ? prev.input + prev.output : 0);
     seen.set(key, usage);
+    // Codex reports cumulative counters after each model step, without a message usage id.
+    // The counter snapshot identifies that attempt even when a step only called tools.
+    const messageId = turnKey === null ? key : (d.codexMessage.get(turnKey) ?? turnKey);
+    const message = `${messageId}:${input}:${cacheRead}:${usage.output}`;
+    const change = {
+      input: usage.input - (prev?.input ?? 0),
+      output: usage.output - (prev?.output ?? 0),
+      cacheRead: usage.cacheRead - (prev?.cacheRead ?? 0),
+      cacheCreate: 0,
+    };
+    if (delta !== 0 || change.cacheRead !== 0) {
+      const total = {
+        input: change.input,
+        output: change.output,
+        cacheRead: change.cacheRead,
+        cacheCreate: 0,
+      };
+      d.usage.set(message, {
+        at,
+        minute: null,
+        tokens: total.input + total.output,
+        usage: total,
+        model: facts.model,
+      });
+      const turn = turnKey === null ? undefined : d.turns.get(turnKey);
+      if (turnKey !== null && turn) {
+        d.turns.set(turnKey, {
+          input: turn.input + change.input,
+          output: turn.output + change.output,
+          cacheRead: turn.cacheRead + change.cacheRead,
+        });
+      }
+    }
     const minute = at - (at % MINUTE_MS);
     if (delta > 0) d.minutes.set(minute, (d.minutes.get(minute) ?? 0) + delta);
     d.contextTokens = isObj(u.last) ? numOrNull(u.last.totalTokens) : null;
     const window = numOrNull(u.modelContextWindow);
     if (window !== null && window > 0) d.contextWindow = window;
     facts.costUsd = null;
-  } else if (ev.method === "turn/plan/updated" && Array.isArray(p.plan)) {
-    const steps = p.plan.filter(
-      (step) => isObj(step) && typeof step.step === "string" && typeof step.status === "string",
-    );
-    if (steps.length !== p.plan.length) return;
-    facts.latestPlan = cleanText(
-      [
-        ...(typeof p.explanation === "string" && p.explanation !== "" ? [p.explanation] : []),
-        ...steps.map((step) => `[${step.status}] ${step.step}`),
-      ].join("\n"),
-    );
-  } else if (ev.method === "turn/started") {
-    facts.hasResult = false;
-  } else if (ev.method === "turn/completed" && isObj(p.turn)) {
-    facts.resultCount++;
-    facts.hasResult = true;
-    facts.stopReason = str(p.turn.status);
+  } else if (ev.method === "turn/plan/updated") {
+    const plan = codexPlan(p);
+    if (plan !== null) facts.latestPlan = cleanText(plan);
+  } else if ((ev.method === "turn/started" || ev.method === "turn/completed") && isObj(p.turn)) {
+    if (threadId === null || turnId === null || turnKey === null) return;
+    const key = `${ev.method}:${turnKey}`;
+    if (d.codexSeen.has(key)) return;
+    d.codexSeen.add(key);
+    d.codexTurns.set(threadId, turnKey);
+    if (!d.turns.has(turnKey)) d.turns.set(turnKey, { input: 0, output: 0, cacheRead: 0 });
+    facts.numTurns = d.turns.size;
+    facts.hasResult = ev.method === "turn/completed";
+    facts.stopReason = facts.hasResult ? str(p.turn.status) : null;
     facts.isError = p.turn.status === "failed";
-    facts.error = isObj(p.turn.error) ? str(p.turn.error.message) : null;
+    facts.error = isObj(p.turn.error) ? cleanStr(p.turn.error.message) : null;
+    if (facts.hasResult) {
+      facts.resultCount++;
+      if (facts.lastAssistantText) facts.summary = workSummary(facts.lastAssistantText);
+      for (const [id, use] of d.pending) if (use.live) d.pending.set(id, { ...use, live: false });
+    }
   }
 }
 
@@ -675,6 +777,7 @@ export function foldTranscript(
   prev: TranscriptFacts | null,
   lines: string[],
   fileMtime: number,
+  vendor?: CrewVendor,
 ): TranscriptFacts {
   const facts: TranscriptFacts = prev
     ? { ...prev, rateLimits: [...prev.rateLimits], prs: [...prev.prs] }
@@ -717,7 +820,9 @@ export function foldTranscript(
       continue;
     }
     if (!isObj(ev)) continue;
-    if (typeof ev.method === "string") {
+    d.vendor = transcriptVendor(ev, vendor ?? d.vendor);
+    if (d.vendor === undefined) continue;
+    if (d.vendor === "codex") {
       foldCodex(facts, seen, d, ev, fileMtime);
       continue;
     }

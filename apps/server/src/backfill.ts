@@ -86,7 +86,7 @@ export function backfillRuns(i: {
       store.upsertRun(run, true);
       return;
     }
-    const facts = foldPath(new Map<string, FoldState>(), run.transcriptPath);
+    const facts = foldPath(new Map<string, FoldState>(), run.transcriptPath, undefined, run.vendor);
     if (facts === null || noFacts(facts)) {
       store.upsertRun(run, true); // gone between the check and the read, or nothing in it
       return;
@@ -171,7 +171,12 @@ export function rewriteCrewSummaries(i: {
       store.setSetting(SUMMARY_REWRITE_CURSOR, `${run.startedAt}:${run.id}`);
       if (!readable(run.transcriptPath) || !inCrewDir(store, run.transcriptPath)) continue;
       try {
-        const facts = foldPath(new Map<string, FoldState>(), run.transcriptPath);
+        const facts = foldPath(
+          new Map<string, FoldState>(),
+          run.transcriptPath,
+          undefined,
+          run.vendor,
+        );
         if (facts === null || facts.summary === null) continue;
         if (facts.summary !== run.summary) {
           store.setRunSummary(run.id, facts.summary);

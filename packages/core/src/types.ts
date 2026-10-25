@@ -557,7 +557,15 @@ export interface StreamEvent {
   at: number | null;
   kind: StreamKind;
   text: string;
-  tool?: { name: string; input: string; result: string | null; ms: number | null; error: boolean };
+  tool?: {
+    name: string;
+    input: string;
+    result: string | null;
+    ms: number | null;
+    error: boolean;
+    status?: string;
+    exitCode?: number | null;
+  };
 }
 
 /** A bounded Comms thread snapshot. IDs survive folds and reloads; undated messages stay null. */

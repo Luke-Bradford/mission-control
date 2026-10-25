@@ -44,6 +44,8 @@ import { uptime } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { CODEX_APPROVAL_DECISION } from "./codex-wire.ts";
+
 /** Bumped when the wire changes; a hub that finds another version ends that keeper and resumes. */
 export const KEEPER_PROTOCOL_VERSION = 1;
 /** The keeper's entry, from the hub's root. */
@@ -184,7 +186,7 @@ export function keeperAlive(dir: string): boolean {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** One line of `ps -o lstart=,command=`: the process's start (local time, whole seconds) and its command. */
+/** One line of `TZ=UTC ps -o lstart=,command=`: the process's start (whole seconds) and its command. */
 export function parsePsLine(text: string): { startedAt: number; command: string } | null {
   const m = /^\s*\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})\s+(.*)$/s.exec(
     text,
@@ -192,14 +194,14 @@ export function parsePsLine(text: string): { startedAt: number; command: string 
   if (m === null) return null;
   const month = MONTHS.indexOf(m[1] as string);
   if (month < 0) return null;
-  const startedAt = new Date(
+  const startedAt = Date.UTC(
     Number(m[6]),
     month,
     Number(m[2]),
     Number(m[3]),
     Number(m[4]),
     Number(m[5]),
-  ).getTime();
+  );
   const command = (m[7] as string).trim();
   return Number.isFinite(startedAt) && command !== "" ? { startedAt, command } : null;
 }
@@ -209,7 +211,8 @@ export function processInfo(pid: number): { startedAt: number; command: string }
   try {
     const out = execFileSync("ps", ["-ww", "-o", "lstart=,command=", "-p", String(pid)], {
       encoding: "utf8",
-      env: { ...process.env, LC_ALL: "C" },
+      // Local lstart is ambiguous during the repeated hour when daylight saving ends.
+      env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
       timeout: 2000,
       stdio: ["ignore", "pipe", "ignore"],
     });
@@ -561,8 +564,8 @@ export function runKeeper(
     if (spec.turnEnd === "codex") {
       try {
         const m = JSON.parse(line) as Json | null;
-        // Codex usage has no timestamp. Persist arrival time so replay keeps its minute bucket.
-        if (m?.method === "thread/tokenUsage/updated") {
+        // Persist arrival time so replay keeps activity and usage in their original buckets.
+        if (typeof m?.method === "string" && m.timestamp === undefined) {
           line = JSON.stringify({ ...m, timestamp: new Date().toISOString() });
         }
       } catch {
@@ -721,6 +724,29 @@ export function runKeeper(
         } else awaiting = true;
       }
       stdin.write(`${msg.line}\n`);
+      if (spec.turnEnd === "codex") {
+        try {
+          const reply = JSON.parse(msg.line) as Json | null;
+          const result = reply?.result as Json | null;
+          if (
+            result &&
+            typeof result === "object" &&
+            (result.decision === "accept" ||
+              result.decision === "decline" ||
+              result.action === "accept" ||
+              result.action === "decline")
+          ) {
+            addLine(
+              JSON.stringify({
+                method: CODEX_APPROVAL_DECISION,
+                params: { requestId: reply?.id, decision: result.decision ?? result.action },
+              }),
+            );
+          }
+        } catch {
+          // Non-JSON input has no approval decision to record.
+        }
+      }
       if (deliveryId !== null) {
         deliveries.add(deliveryId);
         addLine(JSON.stringify({ type: CODEX_DELIVERY, id: deliveryId }));
