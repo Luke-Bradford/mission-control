@@ -4479,6 +4479,12 @@ button.nrow.thread.tagged {
   align-content: start;
   gap: 10px;
 }
+/* The pipeline's grid row is capped to keep the Overview on one screen: scroll inside it rather than cut cards off. */
+#pipelineP > .pipeline-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 .pipeline-stage {
   min-width: 0;
   --stage-colour: var(--muted);
