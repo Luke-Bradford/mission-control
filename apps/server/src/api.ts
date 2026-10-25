@@ -1978,7 +1978,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (source) postingItems.add(source.itemKey);
         const file = crewPrBodyPath(store.path);
         let wroteBody = false;
+        const attemptKey = `draft-post:${id}`;
+        const finish = () => {
+          store.finishDraft(id, "posted", body);
+          store.deleteSetting(attemptKey);
+          if (thread) {
+            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
+            bus.emit("attention");
+          }
+          bus.emit("flight");
+          return { ok: true };
+        };
         try {
+          if (store.getSetting(attemptKey)) {
+            const latest = await (deps.gh ?? createGh())(
+              [draft.kind, "view", String(n), `--repo=${repo.github}`, "--json=comments"],
+              { cwd: crewDir(store.path) },
+            );
+            let comments: { body: string }[] | undefined;
+            try {
+              comments = z
+                .object({ comments: z.array(z.object({ body: z.string() })) })
+                .parse(JSON.parse(latest.stdout)).comments;
+            } catch {
+              /* A failed read must not turn into a second post. */
+            }
+            if (latest.code !== 0 || !comments)
+              return reply
+                .code(502)
+                .send({ error: "Could not verify the latest comment. Nothing was posted." });
+            if (comments.at(-1)?.body === body && store.getSetting(attemptKey) === body)
+              return finish();
+          }
           if (source && thread) {
             try {
               const rest = deps.notificationRest ?? makeRest(await githubToken());
@@ -2040,19 +2071,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
           await writeFile(file, body, { mode: 0o600, flag: "wx" });
           wroteBody = true;
+          store.setSetting(attemptKey, body);
           const result = await (deps.gh ?? createGh())(
             [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
             { cwd: crewDir(store.path) },
           );
           if (result.code !== 0)
             return reply.code(502).send({ error: "GitHub refused the comment." });
-          store.finishDraft(id, "posted", body);
-          if (thread) {
-            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
-            bus.emit("attention");
-          }
-          bus.emit("flight");
-          return { ok: true };
+          return finish();
         } finally {
           postingDrafts.delete(id);
           if (source) postingItems.delete(source.itemKey);
@@ -2086,6 +2112,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (draft.via !== "Teams" || draft.state !== "pending")
           return reply.code(409).send({ error: "Only pending Teams drafts can be copied." });
         store.finishDraft(id, "copied");
+        store.deleteSetting(`draft-post:${id}`);
         bus.emit("flight");
         return { ok: true };
       });
@@ -2096,6 +2123,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!store.drafts().some((d) => d.id === id))
           return reply.code(404).send({ error: "No pending draft." });
         store.finishDraft(id, "discarded");
+        store.deleteSetting(`draft-post:${id}`);
         bus.emit("flight");
         return { ok: true };
       });
@@ -2170,7 +2198,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ),
           ]),
           round: loop
-            ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
+            ? Math.min(
+                run.profile?.profile.rounds ?? REVIEW_ROUNDS,
+                1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch),
+              )
             : null,
           budget:
             loop &&
@@ -2288,7 +2319,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      api.get("/attention", async (): Promise<AttentionItem[]> => sharedAttention());
+      api.get(
+        "/attention",
+        async (): Promise<AttentionItem[]> =>
+          sharedAttention().map((item) =>
+            item.kind === "tag" && item.text.length > 170
+              ? { ...item, text: `${item.text.slice(0, 169)}…` }
+              : item,
+          ),
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
+      api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
+        const item = sharedAttention().find((item) => item.key === req.params.key);
+        return item ?? reply.code(404).send({ error: "Item is no longer open." });
+      });
 
       const discussionSends = new Set<string>();
       const currentDiscussionItem = (key: string) => {

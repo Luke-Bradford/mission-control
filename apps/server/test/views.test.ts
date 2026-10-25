@@ -375,8 +375,9 @@ describe("crew seats in overview and activity", () => {
       toolUseId: "t",
       command: "pnpm -s test",
       since: NOW - 300,
-      queuedAt: NOW - 300,
+      queuedAt: NOW - 350,
     });
+    store.deleteLockHold("c1", "t", NOW - 250);
     store.addGuardHit({
       agentId: "GUIDO-1",
       runId: "c1",
@@ -390,9 +391,35 @@ describe("crew seats in overview and activity", () => {
         expect.objectContaining({ kind: "check", text: "CI passed on abc1234", who: "GUIDO-1" }),
         expect.objectContaining({ kind: "commit", text: "Committed a3f19c2", ref: "shop-app#7" }),
         expect.objectContaining({ kind: "lock", text: "Took the test lock: pnpm -s test" }),
+        expect.objectContaining({
+          kind: "lock",
+          text: "In line for the test lock: pnpm -s test",
+          at: NOW - 350,
+        }),
+        expect.objectContaining({
+          kind: "lock",
+          text: "Done with the test lock: pnpm -s test",
+          at: NOW - 250,
+        }),
         expect.objectContaining({ kind: "guard", text: "Denied: git push: use the mc push tool" }),
       ]),
     );
     expect(events.some((e) => e.kind === "loop" && e.text.startsWith("CI passed"))).toBe(false);
   });
+});
+
+it("includes lock completions in the activity window even when the hold started earlier", () => {
+  const day = 86_400_000;
+  store.upsertRun(run({ id: "c1", agentId: "a1" }));
+  store.addLockHold({
+    runId: "c1",
+    seatId: "a1",
+    toolUseId: "t",
+    command: "pnpm -s test",
+    since: NOW - 2 * day,
+    queuedAt: NOW - 2 * day - 1,
+  });
+  store.deleteLockHolds("c1", NOW - 1);
+  const events = activity(config, store, NOW).filter((e) => e.kind === "lock");
+  expect(events.map((e) => e.text)).toEqual(["Test lock freed: pnpm -s test"]);
 });

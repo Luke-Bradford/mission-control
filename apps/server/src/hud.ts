@@ -356,7 +356,8 @@ function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewL
     };
   if (loop.phase === "review") {
     const sent = fixesSent(store.claimedKeys(run.id), run.id, loop.epoch);
-    return { n: Math.min(REVIEW_ROUNDS, 1 + sent), max: REVIEW_ROUNDS };
+    const max = run.profile?.profile.rounds ?? REVIEW_ROUNDS;
+    return { n: Math.min(max, 1 + sent), max };
   }
   return null;
 }

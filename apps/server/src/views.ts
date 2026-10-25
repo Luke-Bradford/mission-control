@@ -283,7 +283,8 @@ export function activity(
     if (l.queuedAt < l.startedAt && l.queuedAt >= since) {
       events.push({ ...row, at: l.queuedAt, text: `In line for the test lock: ${label}` });
     }
-    events.push({ ...row, at: l.startedAt, text: `Took the test lock: ${label}` });
+    if (l.startedAt >= since)
+      events.push({ ...row, at: l.startedAt, text: `Took the test lock: ${label}` });
     if (l.endedAt !== null && l.endedAt >= since) {
       const text = l.outcome === "done" ? "Done with the test lock" : "Test lock freed";
       events.push({ ...row, at: l.endedAt, text: `${text}: ${label}` });

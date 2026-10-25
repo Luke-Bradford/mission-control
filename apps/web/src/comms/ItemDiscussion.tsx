@@ -9,7 +9,7 @@ type Receipt = { id: string; text: string; note?: string };
 
 type ItemDiscussionProps = {
   itemKey: string;
-  live: boolean;
+  live: boolean | undefined;
   title?: string;
   receipt?: Receipt;
   focus?: boolean;
@@ -43,19 +43,20 @@ function DiscussionBody({
   focus = false,
 }: {
   itemKey: string;
-  live: boolean;
+  live: boolean | undefined;
   title?: string;
   receipt?: Receipt;
   focus?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const initialFocus = useRef(focus && live);
+  const initialFocus = useRef(focus && live !== false);
   useEffect(() => {
     let active = true;
     // Let the panel remember its opener before moving focus into the conversation.
-    if (initialFocus.current)
+    if (initialFocus.current && live)
       queueMicrotask(() => {
         if (active && input.current) {
+          initialFocus.current = false;
           input.current.focus({ preventScroll: true });
           input.current.scrollIntoView?.({ block: "nearest" });
         }
@@ -63,7 +64,7 @@ function DiscussionBody({
     return () => {
       active = false;
     };
-  }, []);
+  }, [live]);
   const current = useResource<Discussion>(RESOURCES.discussion(itemKey));
   const resource = current.data ? RESOURCES.discussion(itemKey, current.data.id) : null;
   const history = useResource<Discussion>(resource);

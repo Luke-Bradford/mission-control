@@ -77,6 +77,8 @@ import {
   wakeKeyPrefix,
 } from "@mc/core";
 
+export const COMMS_RETENTION_DAYS = 90;
+export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
 export const HISTORY_BATCH_ROWS = 500;
 export const HISTORY_SWEEP_MAX_BATCHES = 10;
 
@@ -1623,6 +1625,8 @@ export class Store {
       ["loop_events", 30, "AND key NOT LIKE '%:plan'"],
       ["run_evidence", 30, ""],
       ["review_findings", 30, ""],
+      ["comms", COMMS_RETENTION_DAYS, ""],
+      ["flight_decisions", FLIGHT_DECISIONS_RETENTION_DAYS, ""],
     ] as const;
     let batches = 0;
     const start = this.historyNextTable;
@@ -1632,14 +1636,17 @@ export class Store {
       // Let other tables go first next time if this table consumes the sweep budget.
       this.historyNextTable = (index + 1) % tables.length;
       const findings = table === "review_findings";
-      const condition = findings
-        ? `EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
+      const condition =
+        table === "comms" || table === "flight_decisions"
+          ? "at < ?"
+          : findings
+            ? `EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
             AND v.ended_at < ? AND v.state IN ('reported', 'failed', 'superseded')
             AND (v.run_id IS NULL OR EXISTS
               (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
           AND EXISTS (SELECT 1 FROM runs r
             WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})`
-        : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
+            : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
             AND r.ended_at < ? AND ${endedRun}) ${extra}`;
       const select = this.db.prepare(
         `SELECT rowid AS id FROM ${table} WHERE rowid > ? AND ${condition}
@@ -3142,13 +3149,13 @@ export class Store {
       .run(at, runId);
   }
 
-  /** Holds of the test lock started since `since`, newest first, with their run's ticket. */
+  /** Holds of the test lock started or ended since `since`, newest first, with their run's ticket. */
   lockRuns(since: number): TestLockRun[] {
     const rows = this.db
       .prepare(`SELECT h.*, r.ticket FROM test_lock_runs h
-      LEFT JOIN runs r ON r.id = h.run_id WHERE h.started_at >= ?
+      LEFT JOIN runs r ON r.id = h.run_id WHERE h.started_at >= ? OR h.ended_at >= ?
       ORDER BY h.started_at DESC, h.id DESC`)
-      .all(since) as Row[];
+      .all(since, since) as Row[];
     return rows.map((r) => ({
       runId: r.run_id as string,
       seatId: r.seat_id as string,
