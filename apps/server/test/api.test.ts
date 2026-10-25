@@ -82,6 +82,7 @@ import type { CrewReloader } from "../src/crew-apply.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { CallRing } from "../src/map/ring.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
@@ -468,6 +469,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/map/conflicts"],
+  ["GET", "/api/repos/shop-app/map/diff"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -1037,6 +1039,11 @@ describe("local access", () => {
       }
       if (url === "/api/attention/unknown") {
         expect(r.statusCode).toBe(404);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/map/diff") {
+        expect(r.statusCode).toBe(503);
+        expect(r.json()).toEqual({ error: "map collector unavailable" });
         continue;
       }
       if (url === "/api/repos/shop-app/map/conflicts") {
@@ -2631,6 +2638,54 @@ describe("boards, escalations, health", () => {
     expect(r.json()).toEqual([item]);
     expect((await get("/api/boards/site-builder")).json()).toEqual([]);
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
+  });
+
+  it("exposes repo-scoped modified seat entries from the live map ring", async () => {
+    const cwd = join(dir, "diff-checkout");
+    mkdirSync(cwd);
+    const git = (...args: string[]) => execFileSync("git", ["-C", cwd, ...args]);
+    git("init", "-q");
+    git("config", "user.name", "Fixture");
+    git("config", "user.email", "fixture");
+    writeFileSync(join(cwd, "file.ts"), "base\n");
+    git("add", ".");
+    git("commit", "-qm", "base");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    writeFileSync(join(cwd, "file.ts"), "edited\nextra\n");
+    const transcriptPath = join(cwd, "transcript.jsonl");
+    writeFileSync(transcriptPath, "");
+    const ring = new CallRing(() => [
+      { id: "run", seat: "seat", repoId: "shop-app", cwd, transcriptPath },
+      { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
+    ]);
+    const a = buildApp({ config, store, bus, mapRing: ring });
+    const stop = ring.start();
+    try {
+      await expect
+        .poll(
+          async () => {
+            const r = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/diff" });
+            expect(r.statusCode).toBe(200);
+            return r.json();
+          },
+          { timeout: 4500 },
+        )
+        .toEqual({
+          seats: [
+            {
+              seat: "seat",
+              scope: { modified: [{ file: "file.ts", add: 2, rem: 1, source: "diff" }] },
+            },
+          ],
+        });
+      expect((await a.inject({ method: "GET", url: "/api/repos/nope/map/diff" })).statusCode).toBe(
+        404,
+      );
+    } finally {
+      stop();
+      await a.close();
+    }
   });
 
   it("serves computed map conflicts from stored open PR tips without changing the checkout", async () => {
