@@ -123,7 +123,7 @@ function Queue({ row }: { row: CrewRow }) {
         { move, above },
       );
       hub.refetch(RESOURCES.attention.path);
-      openItem(result.item.key);
+      openItem(result.item.key, result.item);
     } catch (e) {
       setFailure(e instanceof Error ? e.message : String(e));
     } finally {

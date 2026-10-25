@@ -230,3 +230,28 @@ it("cancels Focus with Escape and returns keyboard focus to Change", async () =>
   expect(screen.queryByRole("textbox", { name: "Focus" })).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Change" }));
 });
+
+it("keeps the returned approval actionable when the attention refresh fails", async () => {
+  let reads = 0;
+  const fn = setup({
+    "/api/attention": () =>
+      ++reads === 1 ? [] : { status: 503, body: { error: "Attention unavailable" } },
+    "POST /api/seats/guido-2/queue/reorder": { item: proposal },
+    [`POST ${actionPath}`]: () => ({
+      status: 409,
+      body: { ok: false, text: "Priority swap unconfirmed. Check both cards." },
+    }),
+  });
+  fireEvent.click(await screen.findByTitle("Ask FLIGHT to move this up"));
+  await waitFor(() => expect(reads).toBeGreaterThan(1));
+  expect(await screen.findByText(proposal.text)).toBeTruthy();
+  expect(screen.queryByText("This item is no longer open.")).toBeNull();
+  expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+  await screen.findByText("Priority swap unconfirmed. Check both cards.");
+  expect(screen.getByText(proposal.text)).toBeTruthy();
+  expect(fn).toHaveBeenCalledWith(
+    actionPath,
+    expect.objectContaining({ body: JSON.stringify({ action: "approve" }) }),
+  );
+});

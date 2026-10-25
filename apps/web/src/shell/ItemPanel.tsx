@@ -41,7 +41,15 @@ import {
 } from "../notifications.ts";
 import { agentPath, followLink } from "../router.ts";
 import { BuildChips } from "./buildStatus.tsx";
-import { closeItem, openItem, trapTab, useItem, useOverlay, useReturnFocus } from "./overlays.ts";
+import {
+  closeItem,
+  openItem,
+  trapTab,
+  useItem,
+  useOpenedItem,
+  useOverlay,
+  useReturnFocus,
+} from "./overlays.ts";
 import { toast } from "./Toast.tsx";
 
 /**
@@ -62,7 +70,9 @@ export function ItemPanel() {
   const [person, setPerson] = useState<{ item: AttentionItem; thread: PersonThreadView } | null>(
     null,
   );
-  const listedItem = items?.find((i) => i.key === key);
+  const openedItem = useOpenedItem();
+  const listedItem =
+    items?.find((i) => i.key === key) ?? (openedItem?.key === key ? openedItem : undefined);
   const wholeItem = useResource<AttentionItem>(
     listedItem?.kind === "tag" && key !== null ? RESOURCES.attentionItem(key) : null,
   ).data;
