@@ -2521,3 +2521,30 @@ it("retains named CI attempts, findings, parks, waits and linked reviewer usage"
     reason: "verify failed",
   });
 });
+
+it("prunes old comms and flight decisions at the retention boundary in bounded sweeps", async () => {
+  const now = 100 * 86_400_000;
+  const cutoff = now - 90 * 86_400_000;
+  for (const at of [cutoff - 1, cutoff, now]) {
+    store.addComms({ at, from: "a", to: "b", ticket: null, text: String(at) });
+    store.addFlightDecision({
+      at,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "note",
+      decision: String(at),
+      basis: "evidence",
+    });
+  }
+  await store.pruneHistory(now);
+  expect(
+    store
+      .comms(0)
+      .map((c) => c.at)
+      .sort((a, b) => a - b),
+  ).toEqual([cutoff, now]);
+  expect(store.flightDecisions(0, 10).map((d) => d.at)).toEqual([now, cutoff]);
+});

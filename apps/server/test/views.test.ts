@@ -157,6 +157,7 @@ describe("activity: board moves", () => {
         at: NOW - 200,
         who: "a1",
         kind: "board",
+        runId: "r1",
         text: "shop-app#3349 → Blocked failed: github: HTTP 502",
         ref: "shop-app#3349",
         url: null,
@@ -168,6 +169,7 @@ describe("activity: board moves", () => {
         at: NOW - 400,
         who: "a1",
         kind: "board",
+        runId: "r1",
         text: "shop-app#3349 → In review",
         ref: "shop-app#3349",
         url: null,
@@ -375,8 +377,9 @@ describe("crew seats in overview and activity", () => {
       toolUseId: "t",
       command: "pnpm -s test",
       since: NOW - 300,
-      queuedAt: NOW - 300,
+      queuedAt: NOW - 350,
     });
+    store.deleteLockHold("c1", "t", NOW - 250);
     store.addGuardHit({
       agentId: "GUIDO-1",
       runId: "c1",
@@ -390,9 +393,86 @@ describe("crew seats in overview and activity", () => {
         expect.objectContaining({ kind: "check", text: "CI passed on abc1234", who: "GUIDO-1" }),
         expect.objectContaining({ kind: "commit", text: "Committed a3f19c2", ref: "shop-app#7" }),
         expect.objectContaining({ kind: "lock", text: "Took the test lock: pnpm -s test" }),
+        expect.objectContaining({
+          kind: "lock",
+          text: "In line for the test lock: pnpm -s test",
+          at: NOW - 350,
+        }),
+        expect.objectContaining({
+          kind: "lock",
+          text: "Done with the test lock: pnpm -s test",
+          at: NOW - 250,
+        }),
         expect.objectContaining({ kind: "guard", text: "Denied: git push: use the mc push tool" }),
       ]),
     );
     expect(events.some((e) => e.kind === "loop" && e.text.startsWith("CI passed"))).toBe(false);
   });
+});
+
+it("includes lock completions in the activity window even when the hold started earlier", () => {
+  const day = 86_400_000;
+  store.upsertRun(run({ id: "c1", agentId: "a1" }));
+  store.addLockHold({
+    runId: "c1",
+    seatId: "a1",
+    toolUseId: "t",
+    command: "pnpm -s test",
+    since: NOW - 2 * day,
+    queuedAt: NOW - 2 * day - 1,
+  });
+  store.deleteLockHolds("c1", NOW - 1);
+  const events = activity(config, store, NOW).filter((e) => e.kind === "lock");
+  expect(events.map((e) => e.text)).toEqual(["Test lock freed: pnpm -s test"]);
+});
+
+it("carries exact run ids on run-derived activity and live-log rows", () => {
+  store.upsertPullRequests("shop-app", [pr({ createdAt: NOW - 90, mergedAt: NOW - 80 })], NOW);
+  store.upsertRun(run({ prs: [{ repo: "octo-org/shop-app", number: 41 }] }));
+  store.addLoopEvent("step", "r1", "Working", NOW - 500);
+  store.addGuardHit({
+    agentId: "a1",
+    runId: "r1",
+    rule: "git-write",
+    text: "Denied",
+    at: NOW - 400,
+  });
+  store.addRunCommit({
+    runId: "r1",
+    repoId: "shop-app",
+    branch: "b",
+    sha: "abcdef0",
+    at: NOW - 300,
+  });
+  store.addLockHold({
+    runId: "r1",
+    seatId: "a1",
+    toolUseId: "t",
+    command: "test",
+    since: NOW - 200,
+    queuedAt: NOW - 200,
+  });
+  store.addBoardMove({
+    runId: "r1",
+    repoId: "shop-app",
+    issue: 1,
+    column: "In review",
+    state: "done",
+    detail: null,
+    at: NOW - 100,
+  });
+  const rows = activity(config, store, NOW);
+  for (const kind of [
+    "run-start",
+    "run-end",
+    "loop",
+    "guard",
+    "commit",
+    "lock",
+    "board",
+    "pr-opened",
+    "pr-merged",
+  ]) {
+    expect(rows.find((row) => row.kind === kind)).toMatchObject({ runId: "r1" });
+  }
 });

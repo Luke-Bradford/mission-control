@@ -2313,3 +2313,29 @@ describe("Claude usage back-off", () => {
     },
   );
 });
+
+it("emits attention at the earliest triage deadline and cancels the timer on stop", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+  vi.spyOn(hud, "crew").mockReturnValue({ rows: [], firstRunToday: null });
+  vi.spyOn(hud, "attentionItems").mockImplementation(
+    (_config, _store, at) =>
+      [
+        {
+          key: "deadline",
+          triageDueAt: NOW + 2000,
+          flightTriage: at < NOW + 2000 ? "waiting" : "missed",
+        },
+      ] as ReturnType<typeof hud.attentionItems>,
+  );
+  const s = createScheduler({ config, store, bus, now: () => Date.now(), collectors: stubs() });
+  s.start();
+  await vi.advanceTimersByTimeAsync(EMIT_COALESCE_MS);
+  topics.length = 0;
+  await vi.advanceTimersByTimeAsync(2000 - EMIT_COALESCE_MS);
+  expect(topics).toContain("attention");
+  await s.stop();
+  topics.length = 0;
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(topics).toEqual([]);
+});

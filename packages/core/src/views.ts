@@ -77,6 +77,8 @@ export type ActivityKind =
 
 /** One `/api/activity` row, newest first. Derived from runs, escalations and collector health. */
 export interface ActivityEvent {
+  /** Exact source run when known; absent for events without a run. */
+  runId?: string;
   at: number;
   /** Agent id, repo id or collector name. */
   who: string;

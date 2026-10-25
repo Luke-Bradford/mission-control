@@ -4073,6 +4073,7 @@ button.nrow.thread.tagged {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+.opt .expandable,
 .opt .expandable > .sm,
 .opt a {
   position: relative;
@@ -4223,6 +4224,7 @@ button.nrow.thread.tagged {
 .flight-summary,
 .flight-summary section,
 .flight-summary-list > li {
+  list-style: none;
   min-width: 0;
 }
 .flight-summary {
@@ -4239,6 +4241,7 @@ button.nrow.thread.tagged {
   padding-left: 24px;
 }
 .flight-summary-list > li {
+  list-style: none;
   padding: 5px 0;
 }
 .flight-summary-line {

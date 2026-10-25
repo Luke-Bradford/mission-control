@@ -195,3 +195,13 @@ it("does not take focus when FLIGHT comes online after mounting offline", async 
   await act(async () => {});
   expect(document.activeElement).toBe(elsewhere);
 });
+
+it("focuses once when the live seat finishes loading", async () => {
+  stubFetch({ [path("a")]: thread("a") });
+  const view = render(<ItemDiscussion itemKey="a" live={undefined} focus />);
+  await screen.findByText("No messages yet.");
+  view.rerender(<ItemDiscussion itemKey="a" live focus />);
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this")),
+  );
+});

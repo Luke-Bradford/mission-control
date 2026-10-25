@@ -107,12 +107,12 @@ it("returns zeros and nulls from an empty store", () => {
   expect(result.kpis).toEqual({
     working: { now: 0, of: 0, series: Array(30).fill(0) },
     tokensPerMin: { now: 0, series: Array(30).fill(0) },
-    spendToday: { usd: 0, perHour: Array(14).fill(0) },
-    inFlight: { count: 0, oldestAt: null },
-    mergedToday: { count: 0, perHour: Array(14).fill(0) },
-    ciPassRate24h: { pct: null, runs: 0, redNow: 0 },
-    cycleTime: { medianMs: null, n: 0, avg14dMs: null },
-    needsYou: { count: 0, overHour: 0 },
+    spendToday: { usd: 0, perHour: Array(14).fill(0), series: Array(30).fill(0) },
+    inFlight: { count: 0, oldestAt: null, series: Array(30).fill(0) },
+    mergedToday: { count: 0, perHour: Array(14).fill(0), series: Array(30).fill(0) },
+    ciPassRate24h: { pct: null, runs: 0, redNow: 0, series: Array(30).fill(null) },
+    cycleTime: { medianMs: null, n: 0, avg14dMs: null, series: Array(30).fill(null) },
+    needsYou: { count: 0, overHour: 0, series: Array(30).fill(0) },
   });
   expect(result.pipeline).toHaveLength(6);
   expect(
@@ -122,6 +122,7 @@ it("returns zeros and nulls from an empty store", () => {
     cpu: Array(30).fill(null),
     mem: Array(30).fill(null),
     diskFreeGb: null,
+    disk: Array(30).fill(null),
   });
 });
 
@@ -157,7 +158,11 @@ it("assigns one card per stage, including set-aside review and merging precedenc
     ["merged", 1, 6],
   ]);
   expect(result.pipeline[2]?.cards[0]).toMatchObject({ who: "seat", pr: 103, ci: ["fail"] });
-  expect(result.kpis.inFlight).toEqual({ count: 4, oldestAt: NOW - HOUR });
+  expect(result.kpis.inFlight).toEqual({
+    count: 4,
+    oldestAt: NOW - HOUR,
+    series: Array(30).fill(4),
+  });
   expect(result.kpis.mergedToday.count).toBe(1);
   expect(result.kpis.ciPassRate24h.redNow).toBe(1);
 });
@@ -219,7 +224,11 @@ it("sums fleet token buckets and falls back to wall-time spend without attempt u
     ]),
   );
   expect(summary().kpis.tokensPerMin).toEqual({ now: 27, series: [10, ...Array(28).fill(0), 27] });
-  expect(summary().kpis.spendToday).toEqual({ usd: 2, perHour: [2, ...Array(13).fill(0)] });
+  expect(summary().kpis.spendToday).toEqual({
+    usd: 2,
+    perHour: [2, ...Array(13).fill(0)],
+    series: Array(30).fill(0),
+  });
 });
 
 it("counts CI outcomes in 24 hours, local-day merges and valid cycle times", () => {
@@ -249,9 +258,23 @@ it("counts CI outcomes in 24 hours, local-day merges and valid cycle times", () 
     ],
     [],
   );
-  expect(summary().kpis.ciPassRate24h).toEqual({ pct: 50, runs: 2, redNow: 0 });
-  expect(summary().kpis.mergedToday).toEqual({ count: 1, perHour: [1, ...Array(13).fill(0)] });
-  expect(summary().kpis.cycleTime).toEqual({ medianMs: 3 * HOUR, n: 2, avg14dMs: 4 * HOUR });
+  expect(summary().kpis.ciPassRate24h).toEqual({
+    pct: 50,
+    runs: 2,
+    redNow: 0,
+    series: [...Array(29).fill(0), 50],
+  });
+  expect(summary().kpis.mergedToday).toEqual({
+    count: 1,
+    perHour: [1, ...Array(13).fill(0)],
+    series: Array(30).fill(0),
+  });
+  expect(summary().kpis.cycleTime).toEqual({
+    medianMs: 3 * HOUR,
+    n: 2,
+    avg14dMs: 4 * HOUR,
+    series: Array(30).fill(3 * HOUR),
+  });
 });
 
 it("averages machine readings into complete minutes and takes the latest disk reading", () => {
@@ -275,6 +298,7 @@ it("averages machine readings into complete minutes and takes the latest disk re
     cpu: [...Array(29).fill(null), 30],
     mem: [...Array(29).fill(null), 50],
     diskFreeGb: 10,
+    disk: [...Array(29).fill(null), 10],
   });
 });
 
@@ -298,7 +322,11 @@ it("counts open operator attention, including acknowledgements, and scopes by re
     ...scope,
     attention: [...attention, { ...first, repoId: "other" }, { ...first, owner: "flight" }],
   });
-  expect(result.kpis.needsYou).toEqual({ count: 3, overHour: 1 });
+  expect(result.kpis.needsYou).toEqual({
+    count: 3,
+    overHour: 1,
+    series: [...Array(29).fill(2), 3],
+  });
 });
 
 it("uses the review column without a live run and excludes closed or out-of-scope cards", () => {
@@ -322,6 +350,7 @@ it("keeps a merge at local midnight in the first hourly bucket", () => {
   expect(overviewSummary(store, midnight, scope).kpis.mergedToday).toEqual({
     count: 1,
     perHour: [1],
+    series: Array(30).fill(0),
   });
 });
 
@@ -338,7 +367,11 @@ it("weights spend by attempt tokens and excludes undated, past-day and future at
       { id: "future", at: NOW + 1, tokens: 20 },
     ],
   });
-  expect(summary().kpis.spendToday).toEqual({ usd: 6, perHour: [2, 4, ...Array(12).fill(0)] });
+  expect(summary().kpis.spendToday).toEqual({
+    usd: 6,
+    perHour: [2, 4, ...Array(12).fill(0)],
+    series: Array(30).fill(0),
+  });
   store.setDigest("run-1", { ...digest([]), attemptUsage: [{ id: "zero", at: NOW, tokens: 0 }] });
   const fallback = summary().kpis.spendToday;
   store.setDigest("run-1", digest([]));
@@ -362,7 +395,7 @@ it("uses the latest successful Ready move and keeps the queue out of in-flight",
       at,
     });
   expect(summary().pipeline[0]?.cards.map((c) => c.since)).toEqual([NOW - 2 * HOUR, NOW - 2 * MIN]);
-  expect(summary().kpis.inFlight).toEqual({ count: 0, oldestAt: null });
+  expect(summary().kpis.inFlight).toEqual({ count: 0, oldestAt: null, series: Array(30).fill(0) });
 });
 
 it("limits pipeline to crew repos while retaining other repo metrics", () => {
@@ -417,5 +450,139 @@ it("includes an attempt at now in the current hour", () => {
     ...digest([]),
     attemptUsage: [{ id: "now", at: NOW, tokens: 10 }],
   });
-  expect(summary().kpis.spendToday).toEqual({ usd: 2, perHour: [...Array(13).fill(0), 2] });
+  expect(summary().kpis.spendToday).toEqual({
+    usd: 2,
+    perHour: [...Array(13).fill(0), 2],
+    series: Array(30).fill(0),
+  });
+});
+
+it("serves complete-minute KPI history with scoped run intervals and rolling outcomes", () => {
+  store.upsertRun(run(1, { startedAt: END - 2 * MIN, endedAt: END - MIN, status: "ok" }));
+  store.upsertRun(run(2, { repoId: "other", startedAt: END - 30 * MIN }));
+  store.addLoopEvent("pass", "run-1", `${CI_PASSED_EVENT_PREFIX}abc`, END - 2 * MIN);
+  store.addLoopEvent("fail", "run-1", `${CI_FAILED_EVENT_PREFIX}abc`, END - MIN);
+  store.replaceFlow(
+    "repo",
+    [{ repoId: "repo", number: 1, size: null, startAt: END - 3 * MIN, doneAt: END - MIN }],
+    [],
+  );
+  const kpis = summary().kpis;
+  expect(kpis.inFlight.series).toEqual([...Array(28).fill(0), 1, 0]);
+  expect(kpis.ciPassRate24h.series).toEqual([...Array(28).fill(null), 100, 50]);
+  expect(kpis.cycleTime.series).toEqual([...Array(29).fill(null), 2 * MIN]);
+  expect(kpis.needsYou.series).toEqual(Array(30).fill(0));
+});
+
+it("serves minute spend and merge buckets without changing today's hourly totals", () => {
+  store.upsertRun(run(1, { startedAt: END - 2 * MIN, endedAt: END, status: "ok", costUsd: 4 }));
+  store.replacePullRequests(
+    "repo",
+    [pr(1, { state: "merged", mergedAt: END - MIN }), pr(2, { state: "merged", mergedAt: END })],
+    NOW,
+  );
+  expect(summary().kpis.spendToday.series).toEqual([...Array(28).fill(0), 2, 2]);
+  expect(summary().kpis.spendToday.usd).toBe(4);
+  expect(summary().kpis.mergedToday.series).toEqual([...Array(29).fill(0), 1]);
+  expect(summary().kpis.mergedToday.count).toBe(2);
+});
+
+it("traces currently open operator needs back to their appearance", () => {
+  const item: AttentionItem = {
+    key: "question",
+    kind: "question",
+    agentId: "seat",
+    repoId: "repo",
+    text: "?",
+    at: END - MIN,
+    tool: null,
+    url: null,
+    escalationId: null,
+    ticket: null,
+    acked: true,
+  };
+  const result = overviewSummary(store, NOW, {
+    ...scope,
+    attention: [item, { ...item, key: "other", repoId: "other" }],
+  });
+  expect(result.kpis.needsYou.series).toEqual([...Array(29).fill(0), 1]);
+});
+
+it("averages known disk samples, preserving missing minutes and excluding the current minute", () => {
+  for (const [at, diskFreeBytes] of [
+    [END - MIN, 8 * 1024 ** 3],
+    [END - MIN + 1, 12 * 1024 ** 3],
+    [END, 50 * 1024 ** 3],
+  ] as const) {
+    store.addMachineSample({
+      at,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: null,
+      memTotalBytes: 100,
+      diskFreeBytes,
+      diskTotalBytes: null,
+      agents: null,
+    });
+  }
+  expect(summary().machine.disk).toEqual([...Array(29).fill(null), 10]);
+  expect(summary().machine.diskFreeGb).toBe(50);
+});
+
+it("counts review tickets after runs end and excludes closed tickets at bucket time", () => {
+  store.replaceBoard("repo", [
+    card(1, "In review", { updatedAt: END - 40 * MIN }),
+    card(2, "Done", { closed: true, updatedAt: END - 2 * MIN }),
+  ]);
+  store.upsertRun(run(1, { endedAt: END - 35 * MIN, status: "ok" }));
+  store.upsertRun(run(2));
+  expect(summary().kpis.inFlight.series).toEqual([...Array(28).fill(2), 1, 1]);
+});
+
+it("retains resolved operator needs in the buckets when they were open", () => {
+  const item: AttentionItem = {
+    key: "resolved-question",
+    kind: "question",
+    agentId: "seat",
+    repoId: "repo",
+    text: "?",
+    at: END - 3 * MIN,
+    tool: null,
+    url: null,
+    escalationId: null,
+    ticket: null,
+    acked: false,
+    owner: OWNER_OPERATOR,
+  };
+  overviewSummary(store, END - MIN, { ...scope, attention: [item] });
+  overviewSummary(store, END, scope);
+  expect(summary().kpis.needsYou).toEqual({
+    count: 0,
+    overHour: 0,
+    series: [...Array(27).fill(0), 1, 1, 0],
+  });
+});
+
+it("uses a question's recorded answer time between overview reads", () => {
+  const id = store.addQuestion({ agentId: "seat", runId: "run-1", text: "?", at: END - 4 * MIN });
+  overviewSummary(store, END - 3 * MIN, {
+    ...scope,
+    attention: [
+      {
+        key: `ask:${id}`,
+        kind: "question",
+        agentId: "seat",
+        repoId: "repo",
+        text: "?",
+        at: END - 4 * MIN,
+        tool: null,
+        url: null,
+        escalationId: null,
+        ticket: null,
+        acked: false,
+      },
+    ],
+  });
+  store.answerQuestions("seat", END - 2 * MIN);
+  expect(summary().kpis.needsYou.series).toEqual([...Array(26).fill(0), 1, 0, 0, 0]);
 });

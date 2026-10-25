@@ -56,6 +56,7 @@ import {
   prSecretText,
   pushReferenceText,
   pushSecretText,
+  REFUSAL_TRIES,
   REVIEW_STATUS_BLOCKED,
   REVIEW_STATUS_PASSED,
   REVIEW_STATUS_QUEUED,
@@ -105,6 +106,7 @@ import type {
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
 import {
+  createPublisher,
   MERGE_CONFLICTING,
   MERGE_HEAD_MOVED,
   MERGE_WAITS_ON_MAIN,
@@ -1149,9 +1151,19 @@ describe("CI and review", () => {
 
 describe("refusals", () => {
   it("keeps a 1000-character refusal in CI through to the park, note and loop event", async () => {
-    const text = `CI refused: ${"x".repeat(988)}`;
+    const stderr = "x".repeat(1000 - "gh run list failed: ".length);
+    const text = `gh run list failed: ${stderr}`;
     expect(text).toHaveLength(1000);
-    const refused = { ok: false, text, transient: true } as const;
+    const refused = await createPublisher({
+      config,
+      store,
+      bus: new ChangeBus(),
+      dbPath: store.path,
+      inClone: (_checkout, fn) => fn(),
+      knownSecrets: async () => [],
+      gh: async () => ({ code: 1, stdout: "", stderr }),
+    }).rerunRuling("o/mc", SHA);
+    expect(refused).toEqual({ ok: false, text, transient: true });
     h.pushResults = [refused, refused, refused];
     report();
     for (let i = 0; i < 3; i++) {
@@ -3903,13 +3915,10 @@ describe("the engine runs reviews", () => {
       expect(loopTexts().some((t) => t.includes(MERGE_HEAD_MOVED))).toBe(false);
     });
 
-    it.each([
-      ["MERGEABLE", MERGE_CONFLICTING],
-      ["UNKNOWN", MERGE_CONFLICTING],
-    ] as const)(
+    it.each(["MERGEABLE", "UNKNOWN"] as const)(
       "refreshes a stale %s PR after a merge conflict without counting refusals",
-      async (mergeable, text) => {
-        const refusal = { ok: false, text, transient: true } as const;
+      async (mergeable) => {
+        const refusal = { ok: false, text: MERGE_CONFLICTING, transient: true } as const;
         h.stepResults.merge = Array(4).fill(refusal);
         await toReview();
         await h.engine.reconcileRun(RUN);
@@ -3957,15 +3966,24 @@ describe("the engine runs reviews", () => {
       await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
       expect(loopOf().transient).toBe(1);
       expect(loopOf().lastRefusal).not.toBeNull();
+      for (let n = 1; n < REFUSAL_TRIES; n++) {
+        clock += ENGINE_TICK_MS;
+        await h.engine.reconcileRun(RUN);
+      }
+      expect(loopOf().phase).toBe("parked");
+      expect(loopOf().parked?.kind).toBe("merge-step");
+      expect(loopTexts()).not.toContain(MERGE_WAITS_ON_MAIN);
     });
 
     it("leaves one Activity line while a merge waits on a conflict", async () => {
-      h.stepResults.merge = Array(2).fill({ ok: false, text: MERGE_CONFLICTING, transient: true });
+      h.stepResults.merge = Array(3).fill({ ok: false, text: MERGE_CONFLICTING, transient: true });
       await toReview();
       await h.engine.reconcileRun(RUN);
       setPr({ ci: "passing", mergeable: "MERGEABLE" });
       reported(first().id, []);
       await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+      clock += ENGINE_TICK_MS;
+      await h.engine.reconcileRun(RUN);
       clock += ENGINE_TICK_MS;
       await h.engine.reconcileRun(RUN);
       expect(loopTexts().filter((t) => t === MERGE_WAITS_ON_MAIN)).toHaveLength(1);

@@ -56,11 +56,16 @@ export function ItemPanel() {
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const notesRes = useResource<NotificationsView>(RESOURCES.notifications);
   const notes = notesRes.data;
-  const seat = useResource<FlightView>(RESOURCES.flight).data?.seat ?? null;
+  const flight = useResource<FlightView>(RESOURCES.flight).data;
+  const seat = flight?.seat ?? null;
   const [person, setPerson] = useState<{ item: AttentionItem; thread: PersonThreadView } | null>(
     null,
   );
-  const currentItem = items?.find((i) => i.key === key);
+  const listedItem = items?.find((i) => i.key === key);
+  const wholeItem = useResource<AttentionItem>(
+    listedItem?.kind === "tag" && key !== null ? RESOURCES.attentionItem(key) : null,
+  ).data;
+  const currentItem = wholeItem?.key === key ? wholeItem : listedItem;
   const [savedAsk, setSavedAsk] = useState<AttentionItem | null>(null);
   useEffect(() => {
     if (currentItem && currentItem.kind !== "person") setSavedAsk(currentItem);
@@ -412,7 +417,7 @@ export function ItemPanel() {
           {item && !holding && (
             <ItemDiscussion
               itemKey={item.key}
-              live={live}
+              live={flight === undefined ? undefined : live}
               title={flightTitle}
               receipt={receipts[item.key]}
               focus={options.length === 0 && !item.brief?.person?.replies?.length}
