@@ -1,10 +1,13 @@
 import type { Crew, FileDiff, MapSnapshot, RepoView } from "@mc/core";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { useSessionScope } from "../shell/session.ts";
 import { MAP_REPO_KEY, readKey, writeKey } from "../storage.ts";
+import { AgentCards } from "./AgentCards.tsx";
+import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
+import type { BadgeKind } from "./cards.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree, pickRepo, pinToken } from "./model.ts";
 import "./map.css";
@@ -115,6 +118,11 @@ export function CrewMapView({
   const [focus, setFocus] = useState<string | null>(null);
   const [home, setHome] = useState(0);
   const [rotate, setRotate] = useState(false);
+  const [agent, setAgent] = useState<string | null>(null);
+  const [badge, setBadge] = useState<{ seat: string; kind: BadgeKind } | null>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const drawerId = useId();
+  const badgeSeat = snapshot.seats.find((s) => s.seat === badge?.seat);
   const treeKey = JSON.stringify(snapshot.tree);
   const nodes = useMemo(() => layoutTree(JSON.parse(treeKey)), [treeKey]);
   const allFiles = [
@@ -146,9 +154,11 @@ export function CrewMapView({
     displayNodes.find((n) => n.path === focus) ??
     displayNodes.find((n) => focus !== null && n.files.includes(focus));
   const select = (path: string) => {
+    setBadge(null);
     setSelected(path);
   };
   const searchSelect = (path: string) => {
+    setBadge(null);
     setSelected(path);
     setFocus(null);
     queueMicrotask(() => setFocus(path));
@@ -198,48 +208,86 @@ export function CrewMapView({
             drag to orbit · scroll to zoom · click a file · ⌖ zooms to a file
           </p>
         </div>
-        <aside className="map-detail" aria-label="Selected file">
-          {query && (
-            <div className="map-results">
-              {matches.slice(0, 60).map((n) => (
-                <button type="button" key={n} onClick={() => searchSelect(n)}>
-                  {n}
+        <div className="map-sidebar">
+          <AgentCards
+            snapshot={snapshot}
+            indices={indices}
+            selected={agent}
+            onSelect={setAgent}
+            drawerId={drawerId}
+            onBadge={(seat, kind, button) => {
+              opener.current = button;
+              setSelected(null);
+              setBadge({ seat, kind });
+            }}
+          />
+          <aside
+            id={drawerId}
+            className="map-detail"
+            aria-label={badge ? "Agent details" : "Selected file"}
+          >
+            {query && (
+              <div className="map-results">
+                {matches.slice(0, 60).map((n) => (
+                  <button type="button" key={n} onClick={() => searchSelect(n)}>
+                    {n}
+                  </button>
+                ))}
+                {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
+                {!matches.length && <p>No matching files.</p>}
+              </div>
+            )}
+            {badge ? (
+              badgeSeat ? (
+                <BadgeDrawer
+                  key={`${badge.seat}-${badge.kind}`}
+                  snapshot={snapshot}
+                  seat={badgeSeat}
+                  kind={badge.kind}
+                  onClose={() => {
+                    setBadge(null);
+                    queueMicrotask(() => opener.current?.focus());
+                  }}
+                />
+              ) : (
+                <>
+                  <button type="button" onClick={() => setBadge(null)}>
+                    Close
+                  </button>
+                  <p>Agent no longer on this repo.</p>
+                </>
+              )
+            ) : selected ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFocus(null);
+                    queueMicrotask(() => setFocus(selected));
+                  }}
+                >
+                  ⌖ Zoom to file
                 </button>
-              ))}
-              {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
-              {!matches.length && <p>No matching files.</p>}
-            </div>
-          )}
-          {selected ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setFocus(null);
-                  queueMicrotask(() => setFocus(selected));
-                }}
-              >
-                ⌖ Zoom to file
-              </button>
-              <button type="button" onClick={() => setSelected(null)}>
-                Close
-              </button>
-              <FileDrawer
-                snapshot={snapshot}
-                path={selected}
-                files={
-                  displayNodes.find((n) => n.path === selected)?.files.length
-                    ? (displayNodes.find((n) => n.path === selected)?.files ?? [])
-                    : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
-                        f.startsWith(`${selected}/`),
-                      )
-                }
-              />
-            </>
-          ) : (
-            <p>Click a node, or find one, to see who read or wrote it.</p>
-          )}
-        </aside>
+                <button type="button" onClick={() => setSelected(null)}>
+                  Close
+                </button>
+                <FileDrawer
+                  snapshot={snapshot}
+                  path={selected}
+                  files={
+                    displayNodes.find((n) => n.path === selected)?.files.length
+                      ? (displayNodes.find((n) => n.path === selected)?.files ?? [])
+                      : [...snapshot.tree.map((f) => f.path), ...extras].filter((f) =>
+                          f.startsWith(`${selected}/`),
+                        )
+                  }
+                />
+              </>
+            ) : (
+              <p>Click a node, or find one, to see who read or wrote it.</p>
+            )}
+          </aside>
+        </div>
       </div>
       <div className="map-legend">
         <span>dim: in scope (read on the branch)</span>
@@ -300,16 +348,7 @@ function FileDrawer({
       {snapshot.findings
         .filter((f) => listed.includes(f.file))
         .map((f) => (
-          <div className="map-finding" key={`${f.seat}-${f.file}-${f.line}-${f.summary}`}>
-            <strong style={{ color: `var(${pinToken(f.severity)})` }}>
-              ▲ {f.severity} · {f.seat} · round {f.round}
-            </strong>
-            <p>
-              {f.file}:{f.line} · {f.summary}
-            </p>
-            <p>{f.scenario}</p>
-            <p>Fix: {f.fix}</p>
-          </div>
+          <Finding finding={f} key={`${f.seat}-${f.file}-${f.line}-${f.summary}`} />
         ))}
       {snapshot.conflicts
         .filter((c) => listed.includes(c.file))

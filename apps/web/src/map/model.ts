@@ -1,4 +1,7 @@
-import type { FindingSeverity, MapDelta, MapSnapshot } from "@mc/core";
+import type { FindingSeverity, MapDelta, MapSeat, MapSnapshot } from "@mc/core";
+
+export const isDocked = (seat: MapSeat, now: number): boolean =>
+  seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
 
 export const level = (lines: number): number => [10, 50, 200, 500].filter((n) => lines > n).length;
 export const tokenBand = (tokens: number): number =>
@@ -86,8 +89,7 @@ export function fileStyle(
 ) {
   const has = (f: string) => files.includes(f);
   const seats = snapshot.seats.map((seat, index) => {
-    const docked =
-      seat.calls.length === 0 && seat.state !== "running" && now - seat.since >= 60_000;
+    const docked = isDocked(seat, now);
     const changes = seat.scope.modified.filter((c) => has(c.file));
     return { seat, index, docked, changes, read: !docked && seat.scope.read.some(has) };
   });
@@ -154,6 +156,7 @@ export function applyDelta(
   if (delta.seq !== snapshot.seq + 1) return null;
   const next = structuredClone(snapshot);
   next.seq = delta.seq;
+  if (delta.type === "message") return null;
   if (!("seat" in delta)) return next;
   const seat = next.seats.find((s) => s.seat === delta.seat);
   if (!seat) return null;
@@ -164,6 +167,8 @@ export function applyDelta(
         if (!seat.scope.read.includes(file)) seat.scope.read.push(file);
       break;
     case "call.end": {
+      // End frames lack a tool id and result time; fetch authoritative badge data.
+      if (delta.error || delta.refused || delta.tests) return null;
       const i = seat.calls.findIndex(
         (c) =>
           c.files.length === delta.files.length && c.files.every((f) => delta.files.includes(f)),
@@ -173,11 +178,14 @@ export function applyDelta(
       break;
     }
     case "state":
+      // A state frame does not carry the park reason or test-lock queue data.
+      if (delta.state === "parked" || seat.badges.waiting) return null;
       seat.state = delta.state;
       seat.since = delta.since;
       break;
     case "edit":
     case "diff": {
+      if (delta.type === "edit" && seat.badges.tests) seat.badges.tests.editedSince = true;
       let change = seat.scope.modified.find((c) => c.file === delta.file);
       if (!change) {
         change = {
