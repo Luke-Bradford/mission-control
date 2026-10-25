@@ -2380,6 +2380,27 @@ describe("Agent page: loop steps", () => {
   const pick = (panel: HTMLElement, name: "Steps" | "Runs") =>
     fireEvent.click(within(panel).getByRole("button", { name }));
 
+  it("opens on Steps for a later run after applying a deep link", async () => {
+    window.history.replaceState(null, "", "/agent/shop-app-ta?run=linked-run");
+    stub({
+      rows: [seat(loopOf())],
+      runs: [rv({ id: "linked-run", summary: "Linked summary" })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const panel = $(container, "#loopP") as HTMLElement;
+    expect(title(panel)).toBe("Runs");
+    expect(
+      within(panel).getByRole("button", { name: "Linked summary" }).getAttribute("aria-expanded"),
+    ).toBe("true");
+    await swap(loopOf({ text: "Ticket B" }), "r-13");
+    expect(within(panel).getByRole("button", { name: "Steps" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(title(panel)).toBe("Loop");
+    expect(panel.textContent).toContain("Ticket B");
+  });
+
   it("keeps the viewer's choice while the same loop moves between phases", async () => {
     const panel = await open(loopOf());
     pick(panel, "Runs");

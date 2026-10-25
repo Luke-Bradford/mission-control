@@ -17,7 +17,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { useSearch } from "../router.ts";
+import { navigate, useSearch } from "../router.ts";
 import { EndAsideButton, LoopSteps } from "./LoopSteps.tsx";
 import { LoopTimeline } from "./LoopTimeline.tsx";
 import { type LoopLimits, runLimits } from "./loopView.ts";
@@ -118,6 +118,10 @@ export function RunsPanel({ row, now, tz }: { row: CrewRow; now: number; tz: str
     if (requestedRun) {
       setPicked({ view: "runs", inFlight, runId });
       setOpen(new Set([requestedRun]));
+      // Consume the deep link so later loops keep their normal default view.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("run");
+      navigate(url.pathname + url.search + url.hash, { replace: true });
     }
   }, [requestedRun, inFlight, runId]);
   const toggle = (id: string) =>
