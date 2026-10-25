@@ -188,6 +188,8 @@ function RenameSeat({ row }: { row: CrewRow }) {
 
 function SwitchAccount({ row }: { row: CrewRow }) {
   const [open, setOpen] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkFailed, setCheckFailed] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
@@ -208,10 +210,28 @@ function SwitchAccount({ row }: { row: CrewRow }) {
     reading?.provider === provider &&
     reading?.status === "logged-in" &&
     !loadError &&
-    !loading;
+    !loading &&
+    !checking &&
+    !checkFailed;
   const close = () => {
     setOpen(false);
     button.current?.focus();
+  };
+  const retry = async () => {
+    if (checking) return;
+    setChecking(true);
+    setCheckFailed(false);
+    setError(null);
+    try {
+      await Promise.all(accounts.map((a) => apiPost<CliAccountStatus>(ACTIONS.checkAccount(a.id))));
+    } catch (e) {
+      setCheckFailed(true);
+      setError(seatError(e));
+    } finally {
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.accountStatus.path);
+      setChecking(false);
+    }
   };
   const transfer = async () => {
     if (busy || !available) return;
@@ -285,7 +305,7 @@ function SwitchAccount({ row }: { row: CrewRow }) {
             if (e.key === "Escape") {
               e.preventDefault();
               e.stopPropagation();
-              if (!busy) close();
+              if (!busy && !checking) close();
             }
           }}
         >
@@ -295,7 +315,7 @@ function SwitchAccount({ row }: { row: CrewRow }) {
               // biome-ignore lint/a11y/noAutofocus: focus the chooser opened by the Switch account button
               autoFocus
               value={accountId}
-              disabled={busy || !!loadError}
+              disabled={busy || checking || !!loadError}
               onChange={(e) => {
                 setAccountId(e.target.value);
                 setError(null);
@@ -321,9 +341,10 @@ function SwitchAccount({ row }: { row: CrewRow }) {
           <button type="submit" className="sm" disabled={busy || !available}>
             Transfer account
           </button>
-          <button type="button" className="sm ghost" disabled={busy} onClick={close}>
+          <button type="button" className="sm ghost" disabled={busy || checking} onClick={close}>
             Cancel
           </button>
+          {checking && <span className="s muted">Checking accounts…</span>}
           {loading && <span className="s muted">Loading accounts…</span>}
           {!loading && !loadError && accounts.length === 0 && (
             <span className="s muted">No other compatible accounts configured.</span>
@@ -338,10 +359,8 @@ function SwitchAccount({ row }: { row: CrewRow }) {
             <button
               type="button"
               className="sm ghost"
-              onClick={() => {
-                hub.refetch(RESOURCES.config.path);
-                hub.refetch(RESOURCES.accountStatus.path);
-              }}
+              disabled={checking}
+              onClick={() => void retry()}
             >
               Retry
             </button>

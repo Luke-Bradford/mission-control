@@ -170,3 +170,76 @@ it("reports a failed config load and lets the operator retry", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Retry accounts" }));
   await waitFor(() => expect(fetch.mock.calls.filter(([p]) => p === "/api/config").length).toBe(2));
 });
+
+it.each([true, false])("forces fresh CLI readings on retry (success: %s)", async (success) => {
+  const fetch = await setup();
+  const original = fetch.getMockImplementation();
+  if (!original) throw new Error("Missing fetch stub");
+  let finish!: (response: Response) => void;
+  let checked = false;
+  fetch.mockImplementation((path, init) => {
+    if (path === "/api/accounts/comet/check") {
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    }
+    if (path === "/api/accounts/nova/check") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ accountId: "nova", status: "logged-in" })),
+      );
+    }
+    if (path === "/api/accounts/status" && checked) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([{ accountId: "comet", provider: "codex", status: "logged-in" }]),
+        ),
+      );
+    }
+    return original(path, init);
+  });
+  fireEvent.change(await screen.findByRole("combobox", { name: "Account" }), {
+    target: { value: "comet" },
+  });
+  await screen.findByText(/Sign in with the codex CLI/);
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/accounts/comet/check",
+      expect.objectContaining({ method: "POST" }),
+    ),
+  );
+  expect(
+    (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(screen.getByText("Checking accounts…")).toBeTruthy();
+  await act(async () => {
+    checked = success;
+    finish(
+      new Response(
+        JSON.stringify(
+          success ? { accountId: "comet", status: "logged-in" } : { error: "CLI check failed" },
+        ),
+        { status: success ? 200 : 503 },
+      ),
+    );
+  });
+  if (success) {
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+  } else {
+    expect((await screen.findByRole("alert")).textContent).toContain("CLI check failed");
+    expect(
+      (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  }
+  expect(screen.getByTitle(/^orbit ·/)).toBeTruthy();
+  expect(fetch.mock.calls.some(([path]) => path === "/api/seats/guido-1/transfer")).toBe(false);
+  expect(
+    fetch.mock.calls.some(
+      ([path]) => path === "/api/accounts/other/check" || path === "/api/accounts/orbit/check",
+    ),
+  ).toBe(false);
+});
