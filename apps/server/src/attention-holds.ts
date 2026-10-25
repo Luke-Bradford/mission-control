@@ -1,4 +1,5 @@
 import type { AttentionHold, AttentionHoldCondition, AttentionItem } from "@mc/core";
+import { z } from "zod";
 import type { Store } from "./store.ts";
 
 const SETTING = "attention-holds";
@@ -82,4 +83,33 @@ export function partitionAttention(
       );
   }
   return { items: active, held };
+}
+
+export const AttentionHoldInput = z
+  .object({
+    reason: z.string().trim().min(1).max(1000),
+    condition: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("manual") }).strict(),
+      z.object({ kind: z.literal("crew") }).strict(),
+      z
+        .object({
+          kind: z.literal("date"),
+          at: z.number().int().min(0).max(8640000000000000),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("ticket"),
+          ticket: z.string().regex(/^[^#\s]+#[1-9]\d*$/),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+
+export function attentionHoldError(e: z.ZodError): string {
+  const issue = e.issues[0];
+  if (!issue) return "invalid body";
+  const path = issue.path.map(String).join(".");
+  return path === "" ? issue.message : `${path}: ${issue.message}`;
 }
