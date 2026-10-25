@@ -493,3 +493,153 @@ it.each([true, false])(
     expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(1);
   },
 );
+
+it("excludes launches until a profile update commits its in-memory policy", async () => {
+  const { sup, cfg } = setup();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const profile = join(dir, "fictional-new-profile");
+  const update = sup.withAccountUpdate(async () => {
+    await gate;
+    cfg.accounts.push({
+      id: "fictional-new",
+      vendor: "codex",
+      cliProfile: profile,
+      alertAt: 80,
+      stopAt: 95,
+    });
+  });
+  const starting = sup.startRun("guido-1", 42);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(0);
+  } finally {
+    release();
+  }
+  await update;
+  const { runId } = await starting;
+  expect(JSON.parse(store.getSetting(`account-profile-denies:${runId}`) ?? "[]")).toContain(
+    profile,
+  );
+});
+
+it.each([true, false])(
+  "validates unsafe recovery before a CLI hold (pending: %s)",
+  async (pending) => {
+    const { sup, cfg } = setup();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+    await sup.stopAll();
+    store.setSetting(
+      `account-transfer:${runId}`,
+      JSON.stringify({ source: cfg.accounts[0]?.id, target: "destination", pending }),
+    );
+    cfg.accounts.splice(1, 1);
+    const seat = cfg.crew?.sessions[0]?.seats[0];
+    if (!seat) throw new Error("missing seat");
+    seat.modelVendor = "codex";
+    const hold = new CliHold();
+    hold.hold("fictional hold");
+    const next = make({ codexCommand: join(dir, "codex"), cliHold: hold });
+    Object.assign(next.cfg, cfg);
+    next.sup.start();
+    await until(() => expect(store.seatSession("guido-1")?.state).toBe("error"));
+    expect(next.sup.seatFacts("guido-1")).toBeNull();
+    expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(1);
+  },
+);
+
+it("renews a receipted continuation when pending recovery replaces its keeper", async () => {
+  const { sup, cfg } = setup();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  expect(await sup.transferAccount("guido-1", "destination")).toEqual({ outcome: "resumed" });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  await until(() =>
+    expect(
+      recorded().filter(
+        (r) =>
+          r.method === "turn/start" &&
+          r.params.input[0].text === "Continue your work after the account transfer.",
+      ),
+    ).toHaveLength(1),
+  );
+  await sup.stopAll();
+  const key = `account-transfer:${runId}`;
+  const transfer = JSON.parse(store.getSetting(key) ?? "{}");
+  const oldId = transfer.continuationId;
+  const run = store.run(runId);
+  if (!run) throw new Error("missing run");
+  writeFileSync(
+    run.transcriptPath,
+    `${readFileSync(run.transcriptPath, "utf8")}\n${JSON.stringify({ type: "mc_codex_delivery", id: oldId })}\n${JSON.stringify({ type: "mc_codex_delivery", id: "fictional-user" })}\n`,
+  );
+  store.setSetting(
+    key,
+    JSON.stringify({
+      ...transfer,
+      pending: true,
+      queued: [
+        [oldId, "Continue your work after the account transfer."],
+        ["fictional-user", "already delivered user input"],
+      ],
+    }),
+  );
+  const next = make({ codexCommand: join(dir, "codex") });
+  Object.assign(next.cfg, cfg);
+  next.sup.start();
+  await until(() => expect(JSON.parse(store.getSetting(key) ?? "{}").pending).toBe(false));
+  expect(JSON.parse(store.getSetting(key) ?? "{}").continuationId).not.toBe(oldId);
+  await until(() =>
+    expect(
+      recorded().filter(
+        (r) =>
+          r.method === "turn/start" &&
+          r.params.input[0].text === "Continue your work after the account transfer.",
+      ),
+    ).toHaveLength(2),
+  );
+  expect(
+    recorded().some(
+      (r) => r.method === "turn/start" && r.params.input[0].text === "already delivered user input",
+    ),
+  ).toBe(false);
+});
+
+it.each([false, true])(
+  "ends a keeper with stale profile denies before discovery or a CLI hold (pending: %s)",
+  async (pending) => {
+    const { sup, cfg } = setup();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+    await sup.stopAll();
+    store.setSetting(`account-profile-denies:${runId}`, "[]");
+    const seat = cfg.crew?.sessions[0]?.seats[0];
+    if (!seat) throw new Error("missing seat");
+    seat.modelVendor = "codex";
+    const lock = new TestLock({ holds: store });
+    await lock.acquire(
+      { runId, toolUseId: "fictional-test" },
+      "guido-1",
+      "pnpm test",
+      100,
+      new AbortController().signal,
+    );
+    const hold = new CliHold();
+    if (pending) {
+      hold.hold("fictional hold");
+      store.setSetting(
+        `account-transfer:${runId}`,
+        JSON.stringify({ source: cfg.accounts[0]?.id, target: "destination", pending: true }),
+      );
+    }
+    const next = make({ codexCommand: join(dir, "codex"), lock, cliHold: hold });
+    Object.assign(next.cfg, cfg);
+    next.sup.start();
+    await until(() => expect(lock.state().holder).toBeNull());
+    expect(next.sup.seatFacts("guido-1")).toBeNull();
+    expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(1);
+  },
+);
