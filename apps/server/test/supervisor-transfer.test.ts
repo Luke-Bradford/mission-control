@@ -643,3 +643,95 @@ it.each([false, true])(
     expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(1);
   },
 );
+
+it("holds recovery exclusion while stale-policy checkout validation awaits", async () => {
+  const { sup, cfg } = setup();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  await sup.stopAll();
+  store.setSetting(`account-profile-denies:${runId}`, "[]");
+  const next = make({ codexCommand: join(dir, "codex") });
+  Object.assign(next.cfg, cfg);
+  let release!: () => void;
+  prep.resumeGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  prep.resumeChecks = 0;
+  next.sup.start();
+  try {
+    await until(() => expect(prep.resumeChecks).toBeGreaterThan(0));
+    await until(async () =>
+      expect(await next.sup.send(runId, "fictional-probe", "probe")).toBe("busy"),
+    );
+  } finally {
+    release();
+    prep.resumeGate = null;
+  }
+  await until(() => expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(2));
+});
+
+it("filters superseded unreceipted continuations after interrupted replacement", async () => {
+  const { sup, cfg } = setup();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  await sup.stopAll();
+  const key = `account-transfer:${runId}`;
+  const queued = [
+    ["fictional-old", "Continue your work after the account transfer."],
+    ["fictional-user", "preserved user input"],
+  ];
+  writeFileSync(join(crewCodexDir(dbPath, runId), "outbox.json"), JSON.stringify(queued));
+  store.setSetting(
+    key,
+    JSON.stringify({
+      source: cfg.accounts[0]?.id,
+      target: "destination",
+      pending: true,
+      continuationId: "fictional-replacement",
+      supersededContinuationIds: ["fictional-old"],
+      queued,
+    }),
+  );
+  const next = make({ codexCommand: join(dir, "codex") });
+  Object.assign(next.cfg, cfg);
+  let release!: () => void;
+  prep.resumeGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  next.sup.start();
+  try {
+    await until(() =>
+      expect(JSON.parse(store.getSetting(key) ?? "{}").continuationId).not.toBe(
+        "fictional-replacement",
+      ),
+    );
+    const saved = JSON.parse(store.getSetting(key) ?? "{}");
+    expect(saved.supersededContinuationIds).toEqual(["fictional-old", "fictional-replacement"]);
+    expect(saved.queued).toEqual([["fictional-user", "preserved user input"]]);
+  } finally {
+    release();
+    prep.resumeGate = null;
+  }
+  await until(() => expect(JSON.parse(store.getSetting(key) ?? "{}").pending).toBe(false));
+  await until(() =>
+    expect(
+      recorded().filter(
+        (r) =>
+          ["turn/start", "turn/steer"].includes(r.method) &&
+          r.params.input[0].text === "preserved user input",
+      ),
+    ).toHaveLength(1),
+  );
+  await until(() =>
+    expect(
+      recorded().filter(
+        (r) =>
+          ["turn/start", "turn/steer"].includes(r.method) &&
+          r.params.input[0].text === "Continue your work after the account transfer.",
+      ),
+    ).toHaveLength(1),
+  );
+  expect(JSON.parse(store.getSetting(key) ?? "{}").supersededContinuationIds).toContain(
+    "fictional-replacement",
+  );
+});

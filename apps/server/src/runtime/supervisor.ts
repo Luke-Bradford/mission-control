@@ -439,6 +439,7 @@ interface AccountTransfer {
   target: string;
   pending: boolean;
   continuationId?: string;
+  supersededContinuationIds?: string[];
   handoffId?: string;
   handoffSessionId?: string;
   queued?: [string, string][];
@@ -1873,7 +1874,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             seatUnavailable(seat, run.model ?? undefined, run.vendor ?? "claude")
           )
             return;
-          if (!transfer?.pending) return resumeOne(row);
+          if (!transfer?.pending) return await resumeOne(row);
         }
         if (seatUnavailable(seat, run.model ?? undefined, run.vendor ?? "claude")) return;
       }
@@ -2272,7 +2273,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const save = () => store.setSetting(transferKey(run.id), JSON.stringify(transfer));
     // A replaced keeper may already have receipted the previous continuation.
     // Its replacement needs a new delivery, while user-message IDs stay stable.
-    const oldContinuationId = transfer.continuationId;
+    const superseded = new Set(transfer.supersededContinuationIds ?? []);
+    if (transfer.continuationId) superseded.add(transfer.continuationId);
+    transfer.supersededContinuationIds = [...superseded];
     transfer.continuationId = randomUUID();
     const outboxPath = join(crewCodexDir(deps.dbPath, run.id), CODEX_OUTBOX_FILE);
     // A late source receipt can rewrite the file from its older in-memory queue.
@@ -2282,7 +2285,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(transfer.queued ?? []),
         ...(existsSync(outboxPath) ? JSON.parse(readFileSync(outboxPath, "utf8")) : []),
       ]),
-    ].filter(([id]) => id !== transfer.handoffId && id !== oldContinuationId);
+    ].filter(([id]) => id !== transfer.handoffId && !superseded.has(id));
     save();
     const old = live.get(seatId);
     if (old) {
@@ -2319,7 +2322,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const entries = existsSync(outboxPath)
         ? new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")))
         : new Map<string, string>();
-      if (oldContinuationId) entries.delete(oldContinuationId);
+      for (const id of superseded) entries.delete(id);
       for (const [id, text] of transfer.queued ?? []) entries.set(id, text);
       if (!handoff)
         entries.set(
