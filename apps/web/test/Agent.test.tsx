@@ -2521,7 +2521,7 @@ describe("Agent page: side tabs", () => {
     expect(rows).toEqual([
       "▸#3349 Quote cacheCI",
       "1#3 Retry the fetchP1",
-      "2#8 Fix the typoP2",
+      "2#8 Fix the typoP2↑",
       "✓#3349 ",
     ]);
     expect(side.textContent).toContain(
@@ -2570,9 +2570,7 @@ describe("Agent page: side tabs", () => {
     const empty = await sideOf(seatRow({ queue: [], run: null, ticket: null }), SEAT_ROUTES());
     fireEvent.click(within(empty).getByRole("button", { name: "Queue" }));
     expect(empty.textContent).toContain("Nothing assigned.");
-    expect(empty.textContent).toContain(
-      "Empty: the engine queues Ready cards in this seat's area, in merge repos only.",
-    );
+    expect(empty.textContent).toContain("Empty: FLIGHT fills this from the focus.");
     cleanup();
     const loopRow = await sideOf(crewRow({ digest: digest() }));
     fireEvent.click(within(loopRow).getByRole("button", { name: "Queue" }));

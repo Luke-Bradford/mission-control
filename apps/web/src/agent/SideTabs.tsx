@@ -1,5 +1,6 @@
 import {
   type AgentStream,
+  type AttentionItem,
   type BoardItem,
   type ChangedFiles,
   type CrewRow,
@@ -9,15 +10,18 @@ import {
   type RunView,
   SUBAGENT_PILL,
 } from "@mc/core";
-import { useState } from "react";
-import { errorNote } from "../api.ts";
+import { useEffect, useRef, useState } from "react";
+import { apiPost, errorNote } from "../api.ts";
 import { LOOP_PHASE_LABEL } from "../crew.ts";
-import { RESOURCES, type Resource, RUNS_LIMIT, useResource, useResources } from "../data.ts";
+import { hub, RESOURCES, type Resource, RUNS_LIMIT, useResource, useResources } from "../data.ts";
 import { dur, kTokens } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
+
+import { openItem } from "../shell/overlays.ts";
+import { toast } from "../shell/Toast.tsx";
 
 const DASH = "—";
 
@@ -81,6 +85,51 @@ function Plan({
 
 /** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
 function Queue({ row }: { row: CrewRow }) {
+  const focusRef = RESOURCES.focus(row.id);
+  const focus = useResource<{ focus: string | null }>(
+    row.kind === "crew" && row.mode === "writer" ? focusRef : null,
+  );
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ focus: string | null } | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const changeButton = useRef<HTMLButtonElement>(null);
+  const cancel = () => {
+    setEditing(false);
+  };
+  useEffect(() => {
+    if (editing) input.current?.focus();
+    else changeButton.current?.focus();
+  }, [editing]);
+  useEffect(() => {
+    setSaved(focus.data ?? null);
+  }, [focus.data]);
+  const change = () => {
+    setDraft((saved ?? focus.data)?.focus ?? "");
+    setEditing(true);
+    setFailure(null);
+    toast(
+      'Focus is what FLIGHT assigns from: a lane, labels or a ticket list. Change it here, or tell FLIGHT, e.g. "GUIDO-2: catalog bugs only this week".',
+    );
+  };
+  const propose = async (move: string, above: string) => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const result = await apiPost<{ item: AttentionItem }>(
+        `/api/seats/${encodeURIComponent(row.id)}/queue/reorder`,
+        { move, above },
+      );
+      hub.refetch(RESOURCES.attention.path);
+      openItem(result.item.key);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const runs = useResource<RunView[]>(RESOURCES.runs(row.id));
   // Tickets whose run finished its work, once each (a ticket can take several runs). A run the
   // operator or FLIGHT stopped also ends "ok", as `endedBy: "operator"`: that is not finished.
@@ -110,6 +159,87 @@ function Queue({ row }: { row: CrewRow }) {
   const holding = row.run !== null && row.run.endedAt === null && row.ticket !== null;
   return (
     <>
+      <div className="row s queue-focus">
+        <span className="muted">Focus</span>
+        {editing ? (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (busy) return;
+              setBusy(true);
+              setFailure(null);
+              try {
+                const result = await apiPost<{ focus: string | null }>(focusRef.path, {
+                  focus: draft.trim() || null,
+                });
+                setSaved(result);
+                setEditing(false);
+                hub.refetch(focusRef.path);
+                hub.refetchTopic("agents");
+              } catch (e) {
+                setFailure(e instanceof Error ? e.message : String(e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <input
+              aria-label="Focus"
+              ref={input}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && !busy) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  cancel();
+                }
+              }}
+              value={draft}
+              maxLength={500}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <span className="note xs">
+              Use lane:name, label:name or repo#issue selectors. Leave empty to clear.
+            </span>
+            <button type="submit" className="sm" disabled={busy}>
+              Save
+            </button>
+            <button type="button" className="sm ghost" disabled={busy} onClick={cancel}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <>
+            <span className="min0">
+              {(saved ?? focus.data)?.focus ??
+                (focus.data || saved ? "not set · FLIGHT will ask you" : "Loading…")}
+            </span>
+            <button
+              type="button"
+              className="sm ghost"
+              disabled={busy || !focus.data}
+              ref={changeButton}
+              onClick={change}
+            >
+              Change
+            </button>
+          </>
+        )}
+      </div>
+      {focus.error && (
+        <p className="note err" role="alert">
+          Could not load Focus: {focus.error.message}
+        </p>
+      )}
+      {failure && (
+        <p className="note err" role="alert">
+          {failure}
+        </p>
+      )}
+      {busy && (
+        <p role="status" className="note">
+          Saving…
+        </p>
+      )}
       <div className="qsec">Now</div>
       {holding && row.ticket ? (
         <div className="qi">
@@ -124,21 +254,46 @@ function Queue({ row }: { row: CrewRow }) {
       )}
       <div className="qsec">Next · from Ready, by priority</div>
       {queued.length === 0 ? (
-        <p className="s muted">
-          Empty: the engine queues Ready cards in this seat's area, in merge repos only.
-        </p>
+        <p className="s muted">Empty: FLIGHT fills this from the focus.</p>
       ) : (
-        queued.map((q) => {
+        queued.map((q, index) => {
           const item = boards[repoIds.indexOf(q.repoId)]?.data?.find(
             (b) => b.issueNumber === q.number,
           );
+          const above = queued[index - 1];
+          const previous =
+            above &&
+            boards[repoIds.indexOf(above.repoId)]?.data?.find(
+              (b) => b.issueNumber === above.number,
+            );
+          const eligible =
+            above &&
+            above.repoId === q.repoId &&
+            item?.prioritySource === "field" &&
+            previous?.prioritySource === "field" &&
+            /^P[0-9]+$/.test(item.priority ?? "") &&
+            /^P[0-9]+$/.test(previous.priority ?? "") &&
+            Number(item.priority?.slice(1)) > Number(previous.priority?.slice(1));
           return (
             <div className="qi" key={q.ref}>
               <span className="num muted">{q.pos}</span>
               <span className="min0">
                 <TicketRef ticket={q.ref} bare /> {item?.title}
               </span>
-              <span className="xs muted">{item?.priority}</span>
+              <span>
+                <span className="xs muted">{item?.priority}</span>
+                {eligible && (
+                  <button
+                    type="button"
+                    className="sm ghost"
+                    title="Ask FLIGHT to move this up"
+                    disabled={busy}
+                    onClick={() => void propose(q.ref, above.ref)}
+                  >
+                    ↑
+                  </button>
+                )}
+              </span>
             </div>
           );
         })
@@ -331,7 +486,7 @@ export function SideTabs({ row }: { row: CrewRow }) {
       </div>
       <div className="pb scroll" id="sideBody">
         {tab === "plan" && <Plan stream={stream} tasks={tasks} hasRun={row.run !== null} />}
-        {tab === "queue" && <Queue row={row} />}
+        {tab === "queue" && <Queue key={row.id} row={row} />}
         {tab === "subs" && <Subagents row={row} />}
         {tab === "files" && <Files agentId={row.id} files={files} />}
       </div>
