@@ -51,6 +51,7 @@ let origin: string;
 let seed: string;
 let clone: string;
 let root: string;
+let savedGitPath: string | undefined;
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", ...args], {
@@ -127,6 +128,31 @@ const hasBranch = (b: string) => {
   }
 };
 
+/** Plant disk changes after worktree creation without configuring a git helper. */
+function afterWorktreeAdd(script: string): void {
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const shim = join(dir, "checkout-shim");
+  mkdirSync(shim);
+  writeFileSync(
+    join(shim, "git"),
+    `#!/bin/sh
+"${realGit}" "$@" || exit "$?"
+case " $* " in
+  *" worktree add "*)
+    previous=""
+    last=""
+    for arg do previous="$last"; last="$arg"; done
+    cd "$previous" || exit 1
+    ${script}
+    ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  savedGitPath = process.env.PATH;
+  process.env.PATH = `${shim}:${savedGitPath}`;
+}
+
 const EMPTY_LOCK = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n";
 const PKG = '{"name":"x","version":"1.0.0","private":true}\n';
 
@@ -191,7 +217,13 @@ beforeEach(() => {
   git(seed, "push", "-q", "origin", "main");
   git(dir, "clone", "-q", origin, clone);
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  if (savedGitPath !== undefined) {
+    process.env.PATH = savedGitPath;
+    savedGitPath = undefined;
+  }
+  rmSync(dir, { recursive: true, force: true });
+});
 
 async function syncCheckout() {
   const checkout = await prepareCheckout(input());
@@ -199,6 +231,27 @@ async function syncCheckout() {
 }
 
 describe("prepareCheckout", () => {
+  it.each([false, true])("refuses helper config on reuse=%s", async (reuse) => {
+    if (reuse) await prepareCheckout(input());
+    git(clone, "config", "diff.x.textconv", "sentinel-helper");
+    await expect(prepareCheckout(input())).rejects.toThrow(
+      "the clone's git config defines helpers: diff.x.textconv",
+    );
+  });
+  it("checks worktree-specific helper config on reuse", async () => {
+    const checkout = await prepareCheckout(input());
+    git(clone, "config", "extensions.worktreeConfig", "true");
+    git(checkout.path, "config", "--worktree", "diff.x.textconv", "sentinel-helper");
+    await expect(prepareCheckout(input())).rejects.toThrow(
+      "the clone's git config defines helpers: diff.x.textconv",
+    );
+  });
+  it("accepts disabled fsmonitor config", async () => {
+    git(clone, "config", "core.fsmonitor", "false");
+    expect((await prepareCheckout(input())).created).toBe(true);
+    expect((await prepareCheckout(input())).created).toBe(false);
+  });
+
   describe("uv installs", () => {
     const run = useFakeUv();
     const prepare = () => prepareCheckout(input(), run);
@@ -356,7 +409,7 @@ describe("prepareCheckout", () => {
 
     const onCheckout = (script: string) => {
       push({ ".gitattributes": "x.txt filter=plant\n", "x.txt": "x\n" });
-      git(clone, "config", "filter.plant.smudge", `sh -c '${script}; cat'`);
+      afterWorktreeAdd(script);
     };
 
     it("refuses a .venv on disk that the tree does not have", async () => {
@@ -918,7 +971,7 @@ describe("prepareCheckout", () => {
       git(seed, "push", "-q", "origin", "main");
       git(clone, "pull", "-q");
       git(clone, "branch", BRANCH);
-      git(clone, "config", "filter.plant.smudge", "sh -c 'cat; echo modulesDir: /tmp/elsewhere'");
+      afterWorktreeAdd("echo modulesDir: /tmp/elsewhere >> pnpm-workspace.yaml");
       const e = await fail(prepareCheckout(input()));
       expect(e.code).toBe("protected");
       expect(e.message).toBe(
@@ -928,11 +981,11 @@ describe("prepareCheckout", () => {
       expect(hasBranch(BRANCH)).toBe(true);
     });
 
-    /** Checkout runs `script` (in the worktree root) as a side effect of smudging x.txt. */
+    /** Checkout runs `script` in the worktree root after git has written the tree. */
     const onCheckout = (script: string) => {
       commit(seed, { ".gitattributes": "x.txt filter=plant\n", "x.txt": "x\n" });
       git(seed, "push", "-q", "origin", "main");
-      git(clone, "config", "filter.plant.smudge", `sh -c '${script}; cat'`);
+      afterWorktreeAdd(script);
     };
 
     it.each([
@@ -1030,11 +1083,11 @@ describe("prepareCheckout", () => {
     });
 
     it("refuses a symlink that is on disk but not in the branch's tree", async () => {
-      // A smudge filter in the clone's own config plants a link during checkout: what is on disk
+      // Plant a link during checkout: what is on disk
       // differs from what ls-tree read, as when another seat moves the ref mid-start.
       commit(seed, { ".gitattributes": "x.txt filter=plant\n", "x.txt": "x\n" });
       git(seed, "push", "-q", "origin", "main");
-      git(clone, "config", "filter.plant.smudge", `sh -c 'ln -sf ${outside} planted; cat'`);
+      afterWorktreeAdd(`ln -sf "${outside}" planted`);
       const e = await fail(prepareCheckout(input()));
       expect(e.code).toBe("protected");
       expect(e.message).toBe(

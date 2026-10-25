@@ -1,0 +1,179 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CREW_GIT_ENV } from "@mc/core";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { assertSeatGitConfig, assertSeatGitVersion } from "../src/runtime/git.ts";
+
+let dir: string;
+let env: NodeJS.ProcessEnv;
+const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, env, encoding: "utf8" });
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "mc-seat-git-"));
+  env = {
+    PATH: process.env.PATH,
+    HOME: dir,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "fixture",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "fixture",
+  };
+  git("init", "-q");
+  writeFileSync(join(dir, "file"), "before\n");
+  git("add", "file");
+  git("commit", "-qm", "initial");
+  writeFileSync(join(dir, "file"), "after\n");
+  writeFileSync(join(dir, "helper"), '#!/bin/sh\nprintf ran > "$HOME/sentinel"\ncat "$1"\n', {
+    mode: 0o755,
+  });
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+it.each(
+  ["global", "system"].flatMap((scope) =>
+    [
+      "diff.external",
+      "diff.x.textconv",
+      "filter.x.clean",
+      "filter.x.process",
+      "core.fsmonitor",
+    ].map((key) => ({ scope, key })),
+  ),
+)("ignores $scope $key for every seat read", ({ scope, key }) => {
+  const config = join(dir, "operator-config");
+  const helper = `"${join(dir, "helper")}"`;
+  git("config", "--file", config, key, helper);
+  writeFileSync(join(dir, ".gitattributes"), "file diff=x filter=x\n");
+  env = {
+    ...env,
+    ...(scope === "global"
+      ? { GIT_CONFIG_GLOBAL: config }
+      : { GIT_CONFIG_SYSTEM: config, GIT_CONFIG_NOSYSTEM: "0" }),
+    ...CREW_GIT_ENV,
+  };
+  for (const args of [["diff"], ["log", "-p"], ["show"], ["status"]]) {
+    const output = git(...args);
+    if (args[0] === "diff") expect(output).toContain("+after");
+    expect(existsSync(join(dir, "sentinel"))).toBe(false);
+  }
+});
+
+it.each([
+  "diff.external",
+  "diff.x.textconv",
+  "filter.x.clean",
+  "filter.x.process",
+  "merge.x.driver",
+  "core.fsmonitor",
+])("refuses repo helper %s before seat reads", async (key) => {
+  git("config", key, join(dir, "helper"));
+  writeFileSync(join(dir, ".gitattributes"), "file diff=x filter=x merge=x\n");
+  await expect(assertSeatGitConfig(dir)).rejects.toThrow(
+    `the clone's git config defines helpers: ${key}`,
+  );
+  expect(existsSync(join(dir, "sentinel"))).toBe(false);
+});
+
+it("accepts a clean config and disabled fsmonitor", async () => {
+  await expect(assertSeatGitConfig(dir)).resolves.toBeUndefined();
+  for (const value of ["false", ""]) {
+    git("config", "core.fsmonitor", value);
+    await expect(assertSeatGitConfig(dir)).resolves.toBeUndefined();
+  }
+});
+
+it("requires git 2.32 for seat isolation", async () => {
+  const command = join(dir, "old-git");
+  writeFileSync(command, "#!/bin/sh\necho 'git version 2.30.0'\n", { mode: 0o755 });
+  await expect(assertSeatGitVersion(command)).rejects.toThrow(
+    "git ≥ 2.32 required for seat isolation",
+  );
+  await expect(assertSeatGitVersion()).resolves.toBeUndefined();
+});
+
+it("never includes helper values in the refusal", async () => {
+  git("config", "diff.x.textconv", "helper\n\tprivate-value do-not-log");
+  await expect(assertSeatGitConfig(dir)).rejects.toThrow(
+    /^the clone's git config defines helpers: diff.x.textconv$/,
+  );
+});
+
+it("checks included repo config", async () => {
+  const included = join(dir, "included-config");
+  git("config", "--file", included, "filter.x.smudge", "helper");
+  git("config", "include.path", included);
+  await expect(assertSeatGitConfig(dir)).rejects.toThrow("filter.x.smudge");
+});
+
+it.each(["included", "missing/target"])(
+  "refuses writable include target %s before it gains helpers",
+  async (name) => {
+    git("config", "include.path", join(dir, name));
+    if (name === "included") writeFileSync(join(dir, name), "");
+    await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+  },
+);
+
+it.each(["included", "missing/target"])(
+  "accepts a helper-free include protected by the Git directory: %s",
+  async (name) => {
+    const included = join(dir, ".git", name);
+    if (name === "included") writeFileSync(included, "[core]\n\tfsmonitor = false\n");
+    git("config", "include.path", included);
+    await expect(assertSeatGitConfig(dir)).resolves.toBeUndefined();
+  },
+);
+
+it("refuses a protected include symlink targeting seat-writable content", async () => {
+  const target = join(dir, "included");
+  writeFileSync(target, "");
+  symlinkSync(target, join(dir, ".git", "included"));
+  git("config", "include.path", join(dir, ".git", "included"));
+  await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+});
+
+it("uses seat write grants and exclusions for include targets and ancestors", async () => {
+  const included = join(dir, "included");
+  writeFileSync(included, "");
+  git("config", "include.path", included);
+  await expect(assertSeatGitConfig(dir, [])).resolves.toBeUndefined();
+  await expect(assertSeatGitConfig(dir, [dir], [dir])).resolves.toBeUndefined();
+  await expect(assertSeatGitConfig(dir, [dir])).rejects.toThrow("writable include");
+});
+
+it.each(["file", "directory", "chain"])(
+  "refuses a replaceable %s symlink into protected config",
+  async (kind) => {
+    const protectedDir = join(dir, ".git", "protected");
+    mkdirSync(protectedDir);
+    writeFileSync(join(protectedDir, "included"), "");
+    const link = join(dir, "link");
+    if (kind === "file") symlinkSync(join(protectedDir, "included"), link);
+    else symlinkSync(protectedDir, link);
+    let included = kind === "file" ? link : join(link, "included");
+    if (kind === "chain") {
+      symlinkSync(link, join(dir, ".git", "chain"));
+      included = join(dir, ".git", "chain", "included");
+    }
+    git("config", "include.path", included);
+    await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+    await expect(assertSeatGitConfig(dir, [])).resolves.toBeUndefined();
+    await expect(assertSeatGitConfig(dir, [dir], [dir])).resolves.toBeUndefined();
+  },
+);
+
+it("refuses a home-relative include into the seat worktree", async () => {
+  vi.stubEnv("HOME", dir);
+  try {
+    mkdirSync(join(dir, "worktrees", "seat"), { recursive: true });
+    writeFileSync(join(dir, "worktrees", "seat", "included"), "");
+    git("config", "include.path", "~/worktrees/seat/included");
+    await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+    await expect(assertSeatGitConfig(dir, [], [])).resolves.toBeUndefined();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});

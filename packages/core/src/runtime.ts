@@ -217,6 +217,19 @@ export const CREW_ISOLATION_FLAGS = [
   "--disable-slash-commands",
 ] as const;
 
+/** Git reads ignore operator config and disable repo hooks and filesystem monitors. */
+export const CREW_GIT_ENV = {
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_ATTR_NOSYSTEM: "1",
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "core.fsmonitor",
+  GIT_CONFIG_VALUE_0: "false",
+  GIT_CONFIG_KEY_1: "core.hooksPath",
+  GIT_CONFIG_VALUE_1: "/dev/null",
+  GIT_PAGER: "cat",
+} as const;
+
 export const GIT_READ_TOOLS = [
   "Bash(git status:*)",
   "Bash(git diff:*)",

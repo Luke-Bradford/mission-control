@@ -1124,6 +1124,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
             deps.superuserTools,
             deps.seatGrants?.(who.seatId),
+            store.seatSession(who.seatId)?.worktree ?? undefined,
           );
           if (verdict.kind === "allow") return answer();
           if (verdict.kind === "deny") {

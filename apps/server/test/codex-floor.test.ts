@@ -122,7 +122,13 @@ function referenceAllowed(segments: readonly ReferenceSegment[] | null, mode: Cr
         );
       });
     if (!claudeBashAllowed(argv, mode, DEFAULT_SEAT_COMMANDS)) return false;
-    if (argv[0] === "git" && argv[1] === "diff" && argv.includes("--no-index")) return false;
+    if (
+      argv[0] === "git" &&
+      argv[1] === "diff" &&
+      (argv.includes("--no-index") ||
+        argv.some((a) => a === "--output" || a.startsWith("--output=")))
+    )
+      return false;
     if (!piped && !segments[index + 1]?.piped) return true;
     if (argv[0] === "git") {
       return argv
@@ -696,6 +702,60 @@ describe("Codex seat floor", () => {
     },
   );
 
+  it("confines standalone git diff operands in every mode", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      for (const command of [
+        "git diff /outside/a /outside/b",
+        "git diff apps/web/a.ts ../outside/token",
+        "git diff escape/token apps/web/a.ts",
+        "git diff -- escape/token",
+      ]) {
+        expect(codexCommandAllowed(command, mode, DEFAULT_SEAT_COMMANDS, cwd, cwd), command).toBe(
+          false,
+        );
+      }
+      for (const command of [
+        "git status --short",
+        "git diff",
+        "git diff --stat",
+        "git diff HEAD~1..HEAD",
+        "git log --oneline -5",
+        "git log --oneline -5 | head",
+        "git log main",
+        "git log -- apps/server",
+        "git diff | head",
+        "git status | wc -l",
+        "git log | grep fix",
+      ]) {
+        expect(codexCommandAllowed(command, mode, DEFAULT_SEAT_COMMANDS, cwd, cwd), command).toBe(
+          true,
+        );
+      }
+      for (const command of [
+        "cd /tmp && git diff a b",
+        "pushd /tmp; git diff a b",
+        "popd; git diff a b",
+        "env -C /tmp git diff a b",
+        "env --chdir=/tmp git diff a b",
+        "unset -m 'GIT_*'; git diff",
+        "typeset -m 'GIT_*'; git diff",
+        "GIT_CONFIG_GLOBAL=x git diff",
+        "env GIT_CONFIG_GLOBAL=x git diff",
+        "env -i git diff",
+        "env -S 'GIT_CONFIG_GLOBAL=x git diff'",
+        "export GIT_CONFIG_COUNT=0; git diff",
+        "declare GIT_CONFIG_COUNT=0; git diff",
+        "builtin export GIT_CONFIG_COUNT=0; git diff",
+        "command env GIT_CONFIG_COUNT=0 git diff",
+        "exec -c git diff",
+        "git -c diff.external=x diff",
+        "git --git-dir=/outside diff",
+        "git --work-tree=/outside diff",
+        "git -C /outside diff",
+      ])
+        expect(codexCommandAllowed(command, mode, DEFAULT_SEAT_COMMANDS, cwd, cwd)).toBe(false);
+    }
+  });
   it("strictly validates Git pipeline options and operands", () => {
     for (const command of [
       "git diff --no-index /etc/passwd /etc/hosts",
