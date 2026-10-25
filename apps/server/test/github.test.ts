@@ -1743,10 +1743,25 @@ describe("sweepPullRequests", () => {
             },
           },
         },
-        prPage([pull(9)]),
+        prPage([
+          pull(9),
+          pull(6, {
+            state: "MERGED",
+            mergedAt: new Date(NOW).toISOString(),
+            mergeCommit: { oid: "trunk-red" },
+          }),
+        ]),
       ],
     });
+    const sweep = vi.spyOn(store, "sweepPullRequests");
+    sweep.mockImplementationOnce((...args) => {
+      expect(store.getSetting(`flight.signals:${repo.id}`) ?? "").not.toContain(
+        "main_red:trunk-red",
+      );
+      return Store.prototype.sweepPullRequests.apply(store, args);
+    });
     await sweepPullRequests(repo, store, gql, NOW, true);
+    expect(sweep.mock.results[0]?.type).toBe("return");
     expect(calls[0]?.q).toContain("defaultBranchRef");
     expect(calls[1]?.q).not.toContain("defaultBranchRef");
     const saved = JSON.parse(store.getSetting(`flight.signals:${repo.id}`) ?? "{}");

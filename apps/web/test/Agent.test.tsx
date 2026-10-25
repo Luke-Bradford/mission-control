@@ -273,6 +273,16 @@ describe("Agent page: what the seat is doing", () => {
 });
 
 describe("Agent page: what past runs were", () => {
+  it("opens the run named by an activity deep link", async () => {
+    window.history.replaceState(null, "", "/agent/shop-app-ta?run=linked-run");
+    stub({ runs: [rv({ id: "linked-run", summary: "Linked summary" })] });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    expect($(container, "#loopP .rsummary")?.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click($(container, "#loopP .runrow:not(.head)") as HTMLElement);
+    expect($(container, "#loopP .rsummary")?.getAttribute("aria-expanded")).toBe("false");
+  });
+
   const SUMMARY = "Cached the quotes. ".repeat(20).trim();
 
   it("each run shows its ticket's title beside the number", async () => {
@@ -2369,6 +2379,27 @@ describe("Agent page: loop steps", () => {
   const title = (panel: HTMLElement) => within(panel).getByRole("heading").textContent;
   const pick = (panel: HTMLElement, name: "Steps" | "Runs") =>
     fireEvent.click(within(panel).getByRole("button", { name }));
+
+  it("opens on Steps for a later run after applying a deep link", async () => {
+    window.history.replaceState(null, "", "/agent/shop-app-ta?run=linked-run");
+    stub({
+      rows: [seat(loopOf())],
+      runs: [rv({ id: "linked-run", summary: "Linked summary" })],
+    });
+    const { container } = render(<Agent id="shop-app-ta" />);
+    await loaded();
+    const panel = $(container, "#loopP") as HTMLElement;
+    expect(title(panel)).toBe("Runs");
+    expect(
+      within(panel).getByRole("button", { name: "Linked summary" }).getAttribute("aria-expanded"),
+    ).toBe("true");
+    await swap(loopOf({ text: "Ticket B" }), "r-13");
+    expect(within(panel).getByRole("button", { name: "Steps" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(title(panel)).toBe("Loop");
+    expect(panel.textContent).toContain("Ticket B");
+  });
 
   it("keeps the viewer's choice while the same loop moves between phases", async () => {
     const panel = await open(loopOf());
