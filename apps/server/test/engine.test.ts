@@ -3911,6 +3911,27 @@ describe("the engine runs reviews", () => {
       expect(loopOf().touches?.paths).toEqual(["docs/new.md"]);
     });
 
+    it("does not merge when fetching introduces a hard rule and the gate read fails", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: [] });
+      h.touches = ["docs/new.md"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().touches?.paths).toEqual([]);
+      expect(loopOf().gate).not.toBeNull();
+      h.duringGate = () => {
+        h.rules = async () => ({
+          ...DEFAULT_REPO_RULES,
+          hardRulesSet: true,
+          hardRules: ["docs/**"],
+        });
+        h.gate = null;
+      };
+      reported(first().id, []);
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps).not.toContain("merge");
+      expect(loopOf().gate).toBeNull();
+    });
+
     it("re-reads strays when the seat area changes for the same sha and main tip", async () => {
       await toReview();
       await h.engine.reconcileRun(RUN);

@@ -1305,7 +1305,10 @@ export function createEngine(deps: EngineDeps): Engine {
       if (g.ok) {
         input.gate = { sha: pushed.sha, ...g.facts, area };
         rules = await rulesFor(run.repoId, g.facts.mainSha);
-      } else log(`${runId}: could not read the merge gate: ${g.text}`);
+      } else {
+        input.gate = null;
+        log(`${runId}: could not read the merge gate: ${g.text}`);
+      }
     }
     const hardRulesHash =
       rules === null
