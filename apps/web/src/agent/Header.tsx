@@ -1,4 +1,4 @@
-import type { CrewChanges, CrewRow, LimitRow } from "@mc/core";
+import type { CliAccountStatus, ConfigView, CrewChanges, CrewRow, LimitRow } from "@mc/core";
 import { type CSSProperties, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
@@ -186,6 +186,182 @@ function RenameSeat({ row }: { row: CrewRow }) {
   );
 }
 
+function SwitchAccount({ row }: { row: CrewRow }) {
+  const [open, setOpen] = useState(false);
+  const [accountId, setAccountId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const config = useResource<ConfigView>(RESOURCES.config);
+  const statuses = useResource<CliAccountStatus[]>(open ? RESOURCES.accountStatus : null);
+  const provider = config.data?.accounts.find((a) => a.id === row.accountId)?.vendor;
+  // Transfers currently require independently logged-in Codex bindings; the server validates them.
+  const accounts = (config.data?.accounts ?? []).filter(
+    (a) => a.id !== row.accountId && a.vendor === provider && provider === "codex",
+  );
+  const reading = statuses.data?.find((s) => s.accountId === accountId);
+  const loadError = config.error ?? statuses.error;
+  const loading = config.loading || statuses.loading;
+  const available =
+    accounts.some((a) => a.id === accountId) &&
+    reading?.provider === provider &&
+    reading?.status === "logged-in" &&
+    !loadError &&
+    !loading;
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
+  const transfer = async () => {
+    if (busy || !available) return;
+    setBusy(true);
+    setError(null);
+    setResult("");
+    try {
+      const response = await apiPost<{ outcome: "resumed" | "fresh" | "refused"; reason?: string }>(
+        ACTIONS.seatTransfer(row.id),
+        { accountId },
+      );
+      if (response.outcome === "refused")
+        setError(`Transfer refused: ${response.reason ?? "No reason supplied"}`);
+      else if (response.outcome === "resumed")
+        setResult(`${callSign(row)}: resumed on ${accountId}.`);
+      else if (response.outcome === "fresh")
+        setResult(`${callSign(row)}: started fresh on ${accountId} with a handoff brief.`);
+      else setError("Transfer returned an unexpected response. Refresh and try again.");
+    } catch (e) {
+      setError(seatError(e));
+    } finally {
+      hub.refetch(RESOURCES.accountStatus.path);
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.crew.path);
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="sm"
+        aria-expanded={open}
+        disabled={busy || !provider}
+        onClick={() => {
+          if (open) return;
+          setAccountId("");
+          setResult("");
+          setError(null);
+          setOpen(true);
+          hub.refetch(RESOURCES.accountStatus.path);
+          toast(
+            `${callSign(row)}: pick another ${provider} account. Mission Control moves the session there and resumes it, or starts fresh with a handoff brief if the resume fails.`,
+          );
+        }}
+      >
+        Switch account
+      </button>
+      {!open && config.error && (
+        <span className="s crit-t" role="alert">
+          {config.error.message}{" "}
+          <button
+            type="button"
+            className="sm ghost"
+            onClick={() => hub.refetch(RESOURCES.config.path)}
+          >
+            Retry accounts
+          </button>
+        </span>
+      )}
+      {open && (
+        <form
+          className="account-chooser"
+          aria-label="Switch account"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void transfer();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!busy) close();
+            }
+          }}
+        >
+          <label>
+            Account
+            <select
+              // biome-ignore lint/a11y/noAutofocus: focus the chooser opened by the Switch account button
+              autoFocus
+              value={accountId}
+              disabled={busy || !!loadError}
+              onChange={(e) => {
+                setAccountId(e.target.value);
+                setError(null);
+                setResult("");
+              }}
+            >
+              <option value="">Choose account</option>
+              {accounts.map((a) => {
+                const status = statuses.data?.find((s) => s.accountId === a.id)?.status;
+                return (
+                  <option key={a.id} value={a.id}>
+                    {a.id} ·{" "}
+                    {status === "logged-in"
+                      ? "Available"
+                      : status === "not-logged-in"
+                        ? "Not signed in"
+                        : "Availability unknown"}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <button type="submit" className="sm" disabled={busy || !available}>
+            Transfer account
+          </button>
+          <button type="button" className="sm ghost" disabled={busy} onClick={close}>
+            Cancel
+          </button>
+          {loading && <span className="s muted">Loading accounts…</span>}
+          {!loading && !loadError && accounts.length === 0 && (
+            <span className="s muted">No other compatible accounts configured.</span>
+          )}
+          {accountId && !loading && !loadError && !available && (
+            <span className="s muted">
+              {reading?.detail} Sign in with the {provider} CLI on this machine, then retry the
+              availability check.
+            </span>
+          )}
+          {!busy && (
+            <button
+              type="button"
+              className="sm ghost"
+              onClick={() => {
+                hub.refetch(RESOURCES.config.path);
+                hub.refetch(RESOURCES.accountStatus.path);
+              }}
+            >
+              Retry
+            </button>
+          )}
+          {(error || loadError) && (
+            <span role="alert" className="crit-t s">
+              {error ?? loadError?.message}
+            </span>
+          )}
+          {(busy || result) && (
+            <span role="status" className="s">
+              {busy ? "Transferring account…" : result}
+            </span>
+          )}
+        </form>
+      )}
+    </>
+  );
+}
+
 /** Removal uses config.yaml's seat list, including changes that have not applied yet. */
 function SeatSettings({ row }: { row: CrewRow }) {
   const removable = row.hudState === "idle" || row.hudState === "stopped";
@@ -302,6 +478,7 @@ export function Header({ row, limits, now }: { row: CrewRow; limits: LimitRow[];
           {row.kind === "crew" && (
             <>
               <SeatControls key={`controls:${row.id}`} row={row} hold />
+              <SwitchAccount key={`account:${row.id}`} row={row} />
               <SeatSettings key={`settings:${row.id}`} row={row} />
             </>
           )}

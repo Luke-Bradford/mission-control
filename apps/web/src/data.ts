@@ -209,6 +209,8 @@ export const ACTIONS = {
   addRepo: "/api/repos",
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => `/api/boards/${enc(repoId)}/setup`,
+  /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */
+  seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
   /** Body `{ text, interrupt? }`. */
