@@ -1,5 +1,5 @@
 import type { MapSnapshot } from "@mc/core";
-import type { CSSProperties } from "react";
+import type { CSSProperties, Ref } from "react";
 import { useNow } from "../clock.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { agentCard, type BadgeKind, badgeModels } from "./cards.ts";
@@ -11,6 +11,7 @@ export function AgentCards({
   onSelect,
   onBadge,
   drawerId,
+  headingRef,
 }: {
   snapshot: MapSnapshot;
   indices: Record<string, number>;
@@ -18,11 +19,14 @@ export function AgentCards({
   onSelect: (seat: string | null) => void;
   onBadge: (seat: string, kind: BadgeKind, opener: HTMLButtonElement) => void;
   drawerId: string;
+  headingRef: Ref<HTMLHeadingElement>;
 }) {
   const now = useNow();
   return (
     <section className="map-agents" aria-label="Agents working in this repo">
-      <h3>Agents · work in flight</h3>
+      <h3 ref={headingRef} tabIndex={-1}>
+        Agents · work in flight
+      </h3>
       {!snapshot.seats.length && <p className="map-note">No crew activity on this repo.</p>}
       {snapshot.seats.map((seat, index) => {
         const card = agentCard(seat, now);

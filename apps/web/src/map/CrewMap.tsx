@@ -1,5 +1,5 @@
 import type { Crew, FileDiff, MapSnapshot, RepoView } from "@mc/core";
-import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -121,8 +121,22 @@ export function CrewMapView({
   const [agent, setAgent] = useState<string | null>(null);
   const [badge, setBadge] = useState<{ seat: string; kind: BadgeKind } | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
+  const agentsHeading = useRef<HTMLHeadingElement>(null);
   const drawerId = useId();
   const badgeSeat = snapshot.seats.find((s) => s.seat === badge?.seat);
+  const closeBadge = useCallback(() => {
+    setBadge(null);
+    queueMicrotask(() => {
+      const target = opener.current?.isConnected ? opener.current : agentsHeading.current;
+      target?.focus();
+    });
+  }, []);
+  useEffect(() => {
+    if (agent && !snapshot.seats.some((s) => s.seat === agent)) setAgent(null);
+  }, [agent, snapshot.seats]);
+  useEffect(() => {
+    if (badge && !badgeSeat) closeBadge();
+  }, [badge, badgeSeat, closeBadge]);
   const treeKey = JSON.stringify(snapshot.tree);
   const nodes = useMemo(() => layoutTree(JSON.parse(treeKey)), [treeKey]);
   const allFiles = [
@@ -215,6 +229,7 @@ export function CrewMapView({
             selected={agent}
             onSelect={setAgent}
             drawerId={drawerId}
+            headingRef={agentsHeading}
             onBadge={(seat, kind, button) => {
               opener.current = button;
               setSelected(null);
@@ -237,26 +252,14 @@ export function CrewMapView({
                 {!matches.length && <p>No matching files.</p>}
               </div>
             )}
-            {badge ? (
-              badgeSeat ? (
-                <BadgeDrawer
-                  key={`${badge.seat}-${badge.kind}`}
-                  snapshot={snapshot}
-                  seat={badgeSeat}
-                  kind={badge.kind}
-                  onClose={() => {
-                    setBadge(null);
-                    queueMicrotask(() => opener.current?.focus());
-                  }}
-                />
-              ) : (
-                <>
-                  <button type="button" onClick={() => setBadge(null)}>
-                    Close
-                  </button>
-                  <p>Agent no longer on this repo.</p>
-                </>
-              )
+            {badge && badgeSeat ? (
+              <BadgeDrawer
+                key={`${badge.seat}-${badge.kind}`}
+                snapshot={snapshot}
+                seat={badgeSeat}
+                kind={badge.kind}
+                onClose={closeBadge}
+              />
             ) : selected ? (
               <>
                 <button

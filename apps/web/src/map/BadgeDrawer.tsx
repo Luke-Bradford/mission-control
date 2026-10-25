@@ -1,6 +1,7 @@
-import type { MapSeat, MapSnapshot } from "@mc/core";
+import type { CommsThreadMessage, MapSeat, MapSnapshot } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { useNow } from "../clock.ts";
+import { RESOURCES, useResource } from "../data.ts";
 import {
   age,
   type BadgeKind,
@@ -61,7 +62,6 @@ export function BadgeDrawer({
           <p>
             {badge.text} · {badge.age}
           </p>
-          {kind === "questions" && <QuestionLane key={seat.seat} seat={seat} now={now} />}
           {kind === "failures" && (
             <>
               <p className="map-note">
@@ -83,9 +83,10 @@ export function BadgeDrawer({
           {kind === "review" && (
             <>
               <p className="map-note">Latest review only. Findings have no inferred fixed state.</p>
-              {currentFindings(snapshot, seat).map((finding) => (
+              {currentFindings(snapshot, seat).map((finding, index) => (
                 <Finding
-                  key={`${finding.file}-${finding.line}-${finding.summary}`}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: the contract identifies findings by position; duplicate locations and summaries are valid.
+                  key={`${finding.file}-${finding.line}-${finding.summary}-${index}`}
                   finding={finding}
                 />
               ))}
@@ -124,6 +125,8 @@ export function BadgeDrawer({
             <p className="map-reason">{seat.badges.waiting.reason}</p>
           )}
         </>
+      ) : kind === "questions" ? (
+        <p>No pending questions.</p>
       ) : (
         <p>
           No current{" "}
@@ -133,17 +136,34 @@ export function BadgeDrawer({
           .
         </p>
       )}
+      {kind === "questions" && <QuestionLane key={seat.seat} seat={seat} now={now} />}
     </div>
   );
 }
 
 function QuestionLane({ seat, now }: { seat: MapSeat; now: number }) {
+  const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(seat.seat));
   const lanes = questionLanes(seat);
+  // Answered questions leave the pending badge; retain their lanes in the open thread.
+  for (const message of activity.data?.messages ?? []) {
+    if (message.from !== seat.seat && message.to !== seat.seat) continue;
+    const ends = [message.from, message.to].sort() as [string, string];
+    const key = JSON.stringify(ends);
+    if (!lanes.some((l) => l.key === key)) lanes.push({ key, ends, questions: [] });
+  }
   const [picked, setPicked] = useState(lanes[0]?.key ?? "");
   const [ticket, setTicket] = useState("all");
   const lane = lanes.find((l) => l.key === picked) ?? lanes[0];
   const questions = lane?.questions ?? [];
-  const tickets = [...new Set(questions.map((q) => q.ticket))];
+  const messages = (activity.data?.messages ?? [])
+    .filter((m) => JSON.stringify([m.from, m.to].sort()) === lane?.key)
+    .sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
+  const tickets = [
+    ...new Set([
+      ...questions.map((q) => (q.ticket === null ? null : String(q.ticket))),
+      ...messages.map((m) => m.ticket),
+    ]),
+  ];
   const selectedTicket = tickets.some((t) => String(t) === ticket) ? ticket : "all";
   return (
     <>
@@ -192,6 +212,31 @@ function QuestionLane({ seat, now }: { seat: MapSeat; now: number }) {
             </p>
           </div>
         ))}
+      {activity.loading && <p role="status">Loading conversation…</p>}
+      {activity.error && <p role="alert">Could not load conversation: {activity.error.message}</p>}
+      {activity.data && (
+        <>
+          <ol aria-label="Lane messages">
+            {messages
+              .filter((m) => selectedTicket === "all" || String(m.ticket) === selectedTicket)
+              .map((m) => (
+                <li className="map-finding" key={m.id}>
+                  <strong>
+                    {m.from} → {m.to}
+                  </strong>
+                  <p>
+                    {m.ticket !== null && `#${m.ticket} · `}
+                    {m.at === null ? "Time unknown" : age(m.at, now)}
+                  </p>
+                  <p className="map-reason">{m.text}</p>
+                </li>
+              ))}
+          </ol>
+          {!messages.some(
+            (m) => selectedTicket === "all" || String(m.ticket) === selectedTicket,
+          ) && <p>No messages in this lane.</p>}
+        </>
+      )}
     </>
   );
 }

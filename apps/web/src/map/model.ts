@@ -168,7 +168,7 @@ export function applyDelta(
       break;
     case "call.end": {
       // End frames lack a tool id and result time; fetch authoritative badge data.
-      if (delta.error || delta.refused || delta.tests) return null;
+      if (delta.error || delta.refused || (delta.tests && delta.tests.runner !== null)) return null;
       const i = seat.calls.findIndex(
         (c) =>
           c.files.length === delta.files.length && c.files.every((f) => delta.files.includes(f)),
@@ -185,8 +185,12 @@ export function applyDelta(
       break;
     case "edit":
     case "diff": {
-      if (delta.type === "edit" && seat.badges.tests) seat.badges.tests.editedSince = true;
       let change = seat.scope.modified.find((c) => c.file === delta.file);
+      if (
+        seat.badges.tests &&
+        (delta.type === "edit" || change?.add !== delta.add || change?.rem !== delta.rem)
+      )
+        seat.badges.tests.editedSince = true;
       if (!change) {
         change = {
           file: delta.file,

@@ -1,12 +1,31 @@
-import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
+import { type CommsThreadMessage, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
+import { stubFetch } from "./fetchStub.ts";
 
 vi.mock("../src/map/MapScene.tsx", () => ({ MapScene: () => <div>3D scene</div> }));
-beforeEach(() => vi.spyOn(Date, "now").mockReturnValue(65_000));
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(65_000);
+  stubFetch({ "/api/comms/GUIDO-1": { messages: [] } });
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 const snapshot = (): MapSnapshot => structuredClone(mapSnapshotFixture);
+const message = (overrides: Partial<CommsThreadMessage>): CommsThreadMessage => ({
+  id: "comms:1",
+  at: 1000,
+  from: "GUIDO-1",
+  to: "CAPCOM",
+  ticket: "7",
+  text: "Question body",
+  tagged: true,
+  direct: true,
+  seen: false,
+  ...overrides,
+});
 
 it("renders fixture title, folder, counts and the run's actual context window", () => {
   render(<CrewMapView snapshot={snapshot()} indices={{ "GUIDO-1": 4 }} />);
@@ -56,7 +75,7 @@ it("shows parked waiting data and marks the state in warn when the wait exceeds 
   expect(screen.getByRole("dialog", { name: "Waiting" }).textContent).toContain("Needs CAPCOM");
 });
 
-it("filters pending questions by lane and ticket without inventing message bodies or answers", () => {
+it("filters pending-question headers by lane and ticket", () => {
   const s = snapshot();
   s.seats[0].badges.questions.push(
     { id: 2, from: "GUIDO-1", to: "CAPCOM", ticket: 8, since: 2000 },
@@ -78,6 +97,84 @@ it("filters pending questions by lane and ticket without inventing message bodie
   });
   expect(drawer.textContent).toContain("Question 3");
   expect(drawer.textContent).not.toContain("Question 2");
+});
+
+it("loads read-only lane messages oldest first and filters string tickets alongside pending headers", async () => {
+  const fetch = stubFetch({
+    "/api/comms/GUIDO-1": {
+      messages: [
+        message({ id: "comms:2", at: 2000, from: "CAPCOM", to: "GUIDO-1", text: "Answer body" }),
+        message({}),
+        message({ id: "comms:3", ticket: "8", text: "Other ticket body" }),
+        message({ id: "comms:4", from: "RETRO-1", to: "GUIDO-1", ticket: null, text: "Peer body" }),
+        message({ id: "comms:5", from: "CAPCOM", to: "RETRO-1", text: "Unrelated body" }),
+        message({ id: "comms:6", ticket: null, text: "No ticket body" }),
+      ],
+    },
+  });
+  const s = snapshot();
+  s.seats[0].badges.questions.push(
+    { id: 2, from: "GUIDO-1", to: "CAPCOM", ticket: 8, since: 2000 },
+    { id: 3, from: "RETRO-1", to: "GUIDO-1", ticket: null, since: 2500 },
+  );
+  const { rerender } = render(<CrewMapView snapshot={s} />);
+  expect(fetch).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: /Questions: 3/ }));
+  expect(screen.getByRole("status").textContent).toContain("Loading conversation");
+  const list = await screen.findByRole("list", { name: "Lane messages" });
+  const drawer = screen.getByRole("dialog");
+  expect(drawer.textContent).toContain("Question 1 · #7 · awaiting reply");
+  expect(list.textContent).toContain("Other ticket body");
+  expect(list.textContent).not.toContain("Peer body");
+  expect(list.textContent).not.toContain("Unrelated body");
+  fireEvent.change(screen.getByRole("combobox", { name: "Lane ticket" }), {
+    target: { value: "7" },
+  });
+  expect(
+    within(list)
+      .getAllByRole("listitem")
+      .map((row) => row.textContent),
+  ).toEqual([expect.stringContaining("Question body"), expect.stringContaining("Answer body")]);
+  expect(drawer.textContent).not.toContain("Question 2");
+  const next = structuredClone(s);
+  next.seats[0].badges.questions = [];
+  rerender(<CrewMapView snapshot={next} />);
+  expect(drawer.textContent).not.toContain("awaiting reply");
+  expect(drawer.textContent).toContain("No pending questions.");
+  expect(list.textContent).toContain("Question body");
+  expect(list.textContent).toContain("Answer body");
+  fireEvent.change(screen.getByRole("combobox", { name: "Lane ticket" }), {
+    target: { value: "null" },
+  });
+  expect(list.textContent).toContain("No ticket body");
+  expect(list.textContent).not.toContain("Question body");
+  fireEvent.change(screen.getByRole("combobox", { name: "Conversation lane" }), {
+    target: { value: JSON.stringify(["GUIDO-1", "RETRO-1"]) },
+  });
+  expect(list.textContent).toContain("Peer body");
+  expect(list.textContent).not.toContain("Answer body");
+  fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+  await act(async () => {});
+  expect(fetch.mock.calls.map(([path, init]) => [path, init?.method ?? "GET"])).toEqual([
+    ["/api/comms/GUIDO-1", "GET"],
+  ]);
+});
+
+it("shows a conversation load error while retaining the pending-question header", async () => {
+  stubFetch({
+    "/api/comms/GUIDO-1": () => ({ status: 503, body: { error: "Comms unavailable" } }),
+  });
+  render(<CrewMapView snapshot={snapshot()} />);
+  fireEvent.click(screen.getByRole("button", { name: /Questions: 1/ }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Comms unavailable");
+  expect(screen.getByRole("dialog").textContent).toContain("Question 1 · #7 · awaiting reply");
+});
+
+it("shows an empty conversation without fabricating bodies from pending-question metadata", async () => {
+  render(<CrewMapView snapshot={snapshot()} />);
+  fireEvent.click(screen.getByRole("button", { name: /Questions: 1/ }));
+  expect(await screen.findByText("No messages in this lane.")).toBeTruthy();
+  expect(screen.getByRole("dialog").textContent).toContain("Question 1 · #7 · awaiting reply");
 });
 
 it("keeps only the latest ticket review and updates an open drawer from new snapshots", () => {
@@ -103,6 +200,30 @@ it("keeps only the latest ticket review and updates an open drawer from new snap
   expect(drawer.textContent).not.toContain("Empty input throws");
 });
 
+it("updates duplicate-location findings independently without duplicate React keys", () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const s = snapshot();
+  s.findings = [
+    { ...s.findings[0], scenario: "First scenario", fix: "First fix" },
+    { ...s.findings[0], scenario: "Second scenario", fix: "Second fix" },
+  ];
+  const { rerender } = render(<CrewMapView snapshot={s} />);
+  fireEvent.click(screen.getByRole("button", { name: /Review round 1:/ }));
+  const drawer = screen.getByRole("dialog");
+  expect(drawer.textContent).toContain("First scenario");
+  expect(drawer.textContent).toContain("Second scenario");
+  const next = structuredClone(s);
+  next.findings = [{ ...s.findings[1], scenario: "Updated second scenario", fix: "Surviving fix" }];
+  rerender(<CrewMapView snapshot={next} />);
+  expect(drawer.textContent).not.toContain("First scenario");
+  expect(drawer.textContent).not.toContain("First fix");
+  expect(within(drawer).getAllByText("Updated second scenario")).toHaveLength(1);
+  expect(within(drawer).getAllByText("Fix: Surviving fix")).toHaveLength(1);
+  expect(
+    error.mock.calls.filter((args) => args.some((arg) => String(arg).includes("same key"))),
+  ).toEqual([]);
+});
+
 it("selects and dims cards without moving the camera; docked cards are one line until selected", () => {
   const s = snapshot();
   s.seats.push({
@@ -120,6 +241,55 @@ it("selects and dims cards without moving the camera; docked cards are one line 
   expect(button.getAttribute("aria-pressed")).toBe("true");
   expect(docked.textContent).toContain("Handle empty input");
   expect(screen.getByRole("article", { name: "GUIDO-1" }).className).toContain("dim");
+});
+
+it("focuses the agents heading on close when the badge opener disappears", async () => {
+  const s = snapshot();
+  const { rerender } = render(<CrewMapView snapshot={s} />);
+  const opener = screen.getByRole("button", { name: /1 refused in 10 min/ });
+  fireEvent.click(opener);
+  const next = snapshot();
+  next.seats[0].badges.failures = [];
+  rerender(<CrewMapView snapshot={next} />);
+  expect(opener.isConnected).toBe(false);
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await act(async () => {});
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "Agents · work in flight" }),
+  );
+});
+
+it("closes the badge drawer and restores fallback focus when its seat leaves the snapshot", async () => {
+  const s = snapshot();
+  const { rerender } = render(<CrewMapView snapshot={s} />);
+  const opener = screen.getByRole("button", { name: /1 refused in 10 min/ });
+  fireEvent.click(opener);
+  rerender(<CrewMapView snapshot={{ ...s, seats: [] }} />);
+  await act(async () => {});
+  expect(opener.isConnected).toBe(false);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByText("Agent no longer on this repo.")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "Agents · work in flight" }),
+  );
+  rerender(<CrewMapView snapshot={s} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("clears a removed agent selection so remaining and returning cards are unselected", () => {
+  const s = snapshot();
+  s.seats.push({ ...structuredClone(s.seats[0]), seat: "RETRO-1" });
+  const { rerender } = render(<CrewMapView snapshot={s} />);
+  fireEvent.click(screen.getByRole("button", { name: /GUIDO-1#7/ }));
+  expect(screen.getByRole("article", { name: "RETRO-1" }).className).toContain("dim");
+  rerender(<CrewMapView snapshot={{ ...s, seats: [s.seats[1]] }} />);
+  expect(screen.getByRole("article", { name: "RETRO-1" }).className).not.toContain("dim");
+  rerender(<CrewMapView snapshot={s} />);
+  expect(screen.getByRole("button", { name: /GUIDO-1#7/ }).getAttribute("aria-pressed")).toBe(
+    "false",
+  );
 });
 
 it("omits context with no reported window, and treats unparsed tests and empty CI as unknown", () => {

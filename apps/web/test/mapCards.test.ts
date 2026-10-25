@@ -1,4 +1,4 @@
-import { type MapSeat, mapSnapshotFixture } from "@mc/core";
+import { type MapSeat, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { agentCard, badgeModels, isStuck, recentFailures } from "../src/map/cards.ts";
 import { applyDelta } from "../src/map/model.ts";
@@ -149,6 +149,58 @@ describe("map badge data", () => {
 });
 
 describe("live badge changes", () => {
+  it.each([null, { runner: null, status: "unknown" } as const])(
+    "completes an ordinary Bash call without invalidation for tests=%j",
+    (tests) => {
+      const s = structuredClone(mapSnapshotFixture);
+      s.seq = 10;
+      s.seats[0].calls = [{ tool: "Bash", detail: "git status", files: [], since: now - 1000 }];
+      const next = applyDelta(
+        s,
+        {
+          seq: 11,
+          type: "call.end",
+          seat: s.seats[0].seat,
+          files: [],
+          resultTok: 1,
+          error: false,
+          refused: false,
+          why: null,
+          tests,
+        },
+        now,
+      );
+      expect(next?.seq).toBe(11);
+      expect(next?.seats[0].calls).toEqual([]);
+      expect(next?.seats[0].badges.tests).toEqual(s.seats[0].badges.tests);
+      expect(s.seats[0].calls).toHaveLength(1);
+    },
+  );
+  it.each([
+    ["changed additions", "src/main.ts", 99, 1, true],
+    ["changed removals", "src/main.ts", 3, 99, true],
+    ["new file", "src/new.ts", 1, 0, true],
+    ["unchanged counts", "src/main.ts", 3, 1, false],
+  ] as const)("marks test freshness for a diff with %s", (_, file, add, rem, editedSince) => {
+    const s: MapSnapshot = structuredClone(mapSnapshotFixture);
+    s.seq = 10;
+    s.seats[0].scope.modified = [{ file: "src/main.ts", add: 3, rem: 1, source: "diff" }];
+    s.seats[0].badges.tests = {
+      runner: "vitest",
+      status: "passed",
+      passed: 4,
+      failed: 0,
+      at: now - 1000,
+      editedSince: false,
+    };
+    const next = applyDelta(
+      s,
+      { seq: 11, type: "diff", seat: s.seats[0].seat, file, add, rem },
+      now,
+    );
+    expect(next?.seats[0].badges.tests).toMatchObject({ editedSince, at: now - 1000 });
+    expect(s.seats[0].badges.tests?.editedSince).toBe(false);
+  });
   it("refetches parsed tests even when a tool succeeded, so their age uses server time", () => {
     const s = structuredClone(mapSnapshotFixture);
     expect(
