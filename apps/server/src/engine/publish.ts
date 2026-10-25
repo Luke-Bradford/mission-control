@@ -3,7 +3,7 @@
  * (`pushRun` and `openDraftPr`, called directly), a failed CI run's log excerpt, and the
  * hard-rule files a pushed sha touches. Nothing here throws for a refusal; it answers.
  */
-import { realpath } from "node:fs/promises";
+import { realpath, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AWAY_WRITES_REFUSED,
@@ -24,8 +24,11 @@ import {
   MINOR_WITHHELD,
   minorFallback,
   minorIntro,
+  minorIssueBody,
+  minorIssueTitle,
   minorLine,
   minorMoreLine,
+  parseMinorFindings,
   pathInArea,
   prNotRunsText,
   REVIEW_STATUS_CONTEXT,
@@ -56,7 +59,7 @@ import {
   mainMergeArgs,
 } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
-import { crewDir } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store.ts";
 import { mcSection } from "./rules.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
@@ -227,6 +230,7 @@ export interface Publisher {
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
   closeIssue(run: Run): Promise<PublishResult>;
+  fileMinorFindings(run: Run, prNumber: number): Promise<PublishResult & { issueNumber?: number }>;
   /** Deletes origin's copy of the run's branch, only if its tip is `sha`. */
   deleteRemoteBranch(run: Run, sha: string): Promise<PublishResult>;
   /** Deletes the run's local branch, when its tip is the merged sha or already in main. */
@@ -1178,6 +1182,148 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           return transient(MERGE_CONFLICTING);
         return merged;
       });
+    },
+
+    async fileMinorFindings(run, prNumber) {
+      const repo = deps.config.repos.find((r) => r.id === run.repoId);
+      if (
+        repo?.autonomy !== "merge" ||
+        ownBranch(run) === null ||
+        run.loop == null ||
+        run.loop.prNumber !== prNumber
+      ) {
+        return final(MERGE_PR_NOT_RUNS);
+      }
+      // item-add returns the existing item, so it is safe to repeat after a restart
+      const addItem = async (
+        issueNumber: number,
+      ): Promise<PublishResult & { issueNumber: number }> => {
+        const [owner = ""] = repo.github.split("/");
+        const added = await ghDo(
+          [
+            "project",
+            "item-add",
+            String(repo.project),
+            `--owner=${owner}`,
+            `--url=https://github.com/${repo.github}/issues/${issueNumber}`,
+          ],
+          "project item-add",
+        );
+        return { ...added, issueNumber };
+      };
+      const remembered =
+        run.loop.minorIssueNumber ?? deps.store.run(run.id)?.loop?.minorIssueNumber;
+      if (remembered !== undefined) return addItem(remembered);
+      const file = crewPrBodyPath(deps.dbPath);
+      let wrote = false;
+      try {
+        const intent =
+          run.loop.minorIssueCreation ?? deps.store.run(run.id)?.loop?.minorIssueCreation;
+        if (intent !== undefined) {
+          if (intent.prNumber !== prNumber)
+            return final("minor issue creation intent names another PR");
+          const listed = await ghJson(
+            [
+              "issue",
+              "list",
+              `--repo=${repo.github}`,
+              "--state=all",
+              `--search=${minorIssueTitle(prNumber)} in:title`,
+              "--limit=100",
+              "--json=number,title,body",
+            ],
+            "issue list",
+          );
+          if (isRefusal(listed)) return listed;
+          if (!Array.isArray(listed) || listed.length >= 100)
+            return final(
+              "minor issue creation outcome is uncertain; collect the findings manually",
+            );
+          const matches = listed.filter(
+            (issue: unknown): issue is { number: number } =>
+              typeof issue === "object" &&
+              issue !== null &&
+              "title" in issue &&
+              issue.title === minorIssueTitle(prNumber) &&
+              "body" in issue &&
+              typeof issue.body === "string" &&
+              issue.body.split(/\r?\n/)[0] === `Minor findings from #${prNumber}.` &&
+              "number" in issue &&
+              Number.isSafeInteger(issue.number) &&
+              Number(issue.number) > 0,
+          );
+          if (matches.length !== 1)
+            return final(
+              "minor issue creation outcome is uncertain; collect the findings manually",
+            );
+          const issueNumber = matches[0]?.number;
+          if (issueNumber === undefined) return final("minor issue could not be recovered");
+          run.loop.minorIssueNumber = issueNumber;
+          deps.store.setRunLoop(run.id, run.loop);
+          return await addItem(issueNumber);
+        }
+        const pr = await ghJson(
+          ["pr", "view", String(prNumber), `--repo=${repo.github}`, "--json=body,labels"],
+          "pr view",
+        );
+        if (isRefusal(pr)) return pr;
+        if (typeof pr.body !== "string") return final("the PR body could not be read");
+        const findings = parseMinorFindings(pr.body);
+        if (findings.length === 0) {
+          const section = pr.body.split(MINOR_HEADING)[1]?.split(/^#{1,2}\s/m)[0] ?? "";
+          if (/logged [1-9]\d* minor findings?; they are listed in Mission Control\./.test(section))
+            return final(
+              "RETRO logged minor findings in Mission Control without listing them in the PR body",
+            );
+          return { ok: true };
+        }
+        const areas = (labels: unknown): string[] =>
+          Array.isArray(labels)
+            ? labels.flatMap((l: unknown) => {
+                const name =
+                  typeof l === "string"
+                    ? l
+                    : typeof l === "object" && l !== null && "name" in l
+                      ? l.name
+                      : null;
+                return typeof name === "string" && name.startsWith("area:") ? [name] : [];
+              })
+            : [];
+        const prAreas = areas(pr.labels);
+        const ticket = deps.store.board(run.repoId).find((b) => b.issueNumber === issueOf(run));
+        const labels = [
+          ...new Set([...(prAreas.length > 0 ? prAreas : areas(ticket?.labels)), "chore"]),
+        ];
+        await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
+        wrote = true;
+        run.loop.minorIssueCreation = { prNumber };
+        deps.store.setRunLoop(run.id, run.loop);
+        const made = await deps.gh(
+          [
+            "issue",
+            "create",
+            `--repo=${repo.github}`,
+            `--title=${minorIssueTitle(prNumber)}`,
+            `--label=${labels.join(",")}`,
+            `--body-file=${file}`,
+          ],
+          { cwd: cwd() },
+        );
+        if (made.code !== 0) return ghFailed("issue create", made.stderr);
+        const url = made.stdout.trim().split("\n").at(-1)?.trim() ?? "";
+        const prefix = `https://github.com/${repo.github}/issues/`;
+        const number = url.startsWith(prefix) ? url.slice(prefix.length) : "";
+        if (!/^[1-9]\d*$/.test(number) || !Number.isSafeInteger(Number(number)))
+          return final("gh issue create gave no issue URL");
+        const issueNumber = Number(number);
+        run.loop.minorIssueNumber = issueNumber;
+        deps.store.setRunLoop(run.id, run.loop);
+        return await addItem(issueNumber);
+      } catch (e) {
+        return transient(errText(e));
+      } finally {
+        if (wrote) await unlink(file).catch(() => {});
+      }
     },
 
     async closeIssue(run) {

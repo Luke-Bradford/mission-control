@@ -512,6 +512,10 @@ function harness(): Harness {
         markDraft: (r) => step("draft", r),
         merge: (r) => step("merge", r),
         closeIssue: (r) => step("close", r),
+        fileMinorFindings: async (r) => ({
+          ...(await step("file-minor", r)),
+          ...(r.loop?.minorIssueNumber ? { issueNumber: r.loop.minorIssueNumber } : {}),
+        }),
         deleteRemoteBranch: (r) => step("delete-remote", r),
         deleteLocalBranch: (r) => step("delete-local", r),
         localBranchGone: async () => x.branchGone,
@@ -3127,8 +3131,42 @@ describe("the engine runs reviews", () => {
   });
 
   describe("the merge", () => {
-    const ALL = ["ready", "merge", "close", "delete-remote", "delete-local"];
+    const ALL = ["ready", "merge", "close", "file-minor", "delete-remote", "delete-local"];
     const authorEnded = () => h.ended.filter((id) => id === RUN);
+    it("puts the filed issue in Backlog once and completes the step", async () => {
+      setLoop({ minorIssueNumber: 81 });
+      await gateOpen();
+      await vi.waitFor(() => expect(authorEnded()).toHaveLength(1));
+      expect(h.moves).toContainEqual({ runId: RUN, repoId: REPO, issue: 81, column: "Backlog" });
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps.filter((s) => s === "file-minor")).toHaveLength(1);
+      expect(loopOf().merging?.done).toContain("file-minor");
+    });
+    it("flags a failed minor issue create naming the PR and still ends the run", async () => {
+      h.stepResults["file-minor"] = [{ ok: false, text: "create denied", transient: true }];
+      await gateOpen();
+      await vi.waitFor(() => expect(authorEnded()).toHaveLength(1));
+      expect(store.notes()).toContainEqual(
+        expect.objectContaining({
+          kind: "flag",
+          text: expect.stringMatching(/PR #12.*create denied/),
+        }),
+      );
+      expect(loopOf().merging?.done).toContain("file-minor");
+      await h.engine.reconcileRun(RUN);
+      expect(h.steps.filter((s) => s === "file-minor")).toHaveLength(1);
+      await h.engine.tick();
+      expect(store.notes().some((n) => n.key === `${RUN}:file-minor`)).toBe(true);
+      h.engine.stop();
+      h.engine = h.make();
+      h.engine.start();
+      await h.engine.tick();
+      expect(store.notes().some((n) => n.key === `${RUN}:file-minor`)).toBe(true);
+      store.clearNote(`${RUN}:file-minor`, clock);
+      await h.engine.tick();
+      expect(store.notes().some((n) => n.key === `${RUN}:file-minor`)).toBe(false);
+    });
+
     /** A clean review of the pushed sha, with CI passing: the gate is open. */
     async function gateOpen(): Promise<void> {
       await toReview();
@@ -3325,7 +3363,7 @@ describe("the engine runs reviews", () => {
       expect(loopOf().phase).toBe("done");
       expect(loopOf().merging).toEqual({
         sha: SHA,
-        done: ["ready", "merge", "close", "delete-remote", "delete-local"],
+        done: ["ready", "merge", "close", "file-minor", "delete-remote", "delete-local"],
       });
       const texts = loopTexts();
       for (const t of [
@@ -3380,7 +3418,9 @@ describe("the engine runs reviews", () => {
       await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
       setPr({ state: "merged", ci: "passing", mergedAt: clock });
       await h.engine.reconcileRun(RUN);
-      await vi.waitFor(() => expect(h.steps).toEqual(["close", "delete-remote", "delete-local"]));
+      await vi.waitFor(() =>
+        expect(h.steps).toEqual(["close", "file-minor", "delete-remote", "delete-local"]),
+      );
       expect(h.steps).not.toContain("merge");
     });
 
@@ -4072,7 +4112,7 @@ describe("the engine runs reviews", () => {
       expect(loopOf().parked?.reason).toBe(
         mergeStepFailedText("delete the remote branch", "the branch moved"),
       );
-      expect(h.steps).toEqual(["ready", "merge", "close", "delete-remote"]);
+      expect(h.steps).toEqual(["ready", "merge", "close", "file-minor", "delete-remote"]);
       expect(authorEnded()).toEqual([]);
     });
 
@@ -4265,7 +4305,9 @@ describe("the engine runs reviews", () => {
     it("a merged run that crashed before deleting its local branch still finishes it", async () => {
       await gateOpen();
       await vi.waitFor(() => expect(h.steps).toEqual(ALL));
-      setLoop({ merging: { sha: SHA, done: ["ready", "merge", "close", "delete-remote"] } });
+      setLoop({
+        merging: { sha: SHA, done: ["ready", "merge", "close", "file-minor", "delete-remote"] },
+      });
       h.steps.length = 0;
       await h.engine.tick();
       await vi.waitFor(() => expect(h.steps).toEqual(["delete-local"]));
