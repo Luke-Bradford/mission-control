@@ -157,6 +157,7 @@ import {
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { flightBriefView, flightScheduleView, flightSeat, flightView } from "./flight/state.ts";
+import { seatFocus } from "./focus.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -181,6 +182,12 @@ import { evidenceProblemText, type McToolsDeps, prTextProblem, readKnown } from 
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
+import {
+  proposeQueueReorder,
+  type QueueReorderDeps,
+  QueueReorderError,
+  resolveQueueReorder,
+} from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { adminDirOf, CheckoutError, removeSessionCheckout } from "./runtime/checkouts.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
@@ -193,6 +200,7 @@ import {
   runUsage,
   runView,
 } from "./runview.ts";
+import { setSeatFocus } from "./seat-focus.ts";
 import { commsPosition, crewDir, crewPrBodyPath, type Store } from "./store.ts";
 import { lastOutputAt, readStream } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
@@ -262,6 +270,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  queueReorder?: QueueReorderDeps;
   mapRing?: CallRing;
   config: CcConfig;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
@@ -1683,6 +1692,86 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           captureError(reply, e);
           return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
+      // Reader: apps/web/src/pages/Agent.tsx (Queue focus)
+      api.get<{ Params: { id: string } }>("/seats/:id/focus", async (req, reply) => {
+        const seat = config.crew?.sessions
+          .flatMap((s) => s.seats)
+          .find((s) => s.id === req.params.id);
+        if (!seat) return reply.code(404).send({ error: "Seat unavailable." });
+        return { focus: seat.focus ?? null };
+      });
+
+      // Reader: apps/web/src/pages/Agent.tsx (Queue focus Change)
+      api.post<{ Params: { id: string } }>("/seats/:id/focus", async (req, reply) => {
+        const body = z.strictObject({ focus: seatFocus }).safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!deps.seatWrites || !deps.configPath || !deps.crewReloader)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        try {
+          return await setSeatFocus(
+            config,
+            deps.configPath,
+            deps.crewReloader,
+            req.params.id,
+            body.data.focus,
+            now(),
+          );
+        } catch (e) {
+          return reply
+            .code(e instanceof ConfigWriteError && e.kind === "missing" ? 404 : 409)
+            .send({ error: e instanceof ConfigWriteError ? e.message : CONFIG_WRITE_FAILED });
+        }
+      });
+
+      // Reader: apps/web/src/pages/Agent.tsx (Queue move-up approval item)
+      api.post<{ Params: { id: string } }>("/seats/:id/queue/reorder", async (req, reply) => {
+        const body = z
+          .strictObject({ move: z.string().min(1).max(100), above: z.string().min(1).max(100) })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!deps.queueReorder || deps.noLoopWrites)
+          return reply.code(409).send({ error: "Queue Priority writes unavailable." });
+        try {
+          const result = await proposeQueueReorder(
+            deps.queueReorder,
+            req.params.id,
+            body.data.move,
+            body.data.above,
+          );
+          bus.emit("attention");
+          return result;
+        } catch (e) {
+          return reply.code(409).send({
+            error:
+              e instanceof QueueReorderError ? e.message : "Queue changed; refresh and try again.",
+          });
+        }
+      });
+
+      // Reader: apps/web/src/shell/ItemPanel.tsx (operator Priority approval)
+      api.post<{ Params: { key: string } }>("/queue/reorder/:key", async (req, reply) => {
+        const body = z.strictObject({ action: z.enum(["approve", "deny"]) }).safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (!deps.queueReorder || deps.noLoopWrites)
+          return reply.code(409).send({ error: "Queue Priority writes unavailable." });
+        try {
+          const result = await resolveQueueReorder(
+            deps.queueReorder,
+            req.params.key,
+            body.data.action,
+          );
+          bus.emit("attention");
+          bus.emit("boards");
+          bus.emit("agents");
+          return reply.code(result.ok ? 200 : 409).send(result);
+        } catch (e) {
+          return reply.code(409).send({
+            error:
+              e instanceof QueueReorderError ? e.message : "Queue changed; refresh and try again.",
+          });
         }
       });
 

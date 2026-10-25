@@ -142,6 +142,7 @@ const CARD_NOW_QUERY = `query CardNow($owner: String!, $name: String!, $number: 
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       state
+      labels(first: 20) { nodes { name } }
       assignees(first: 10) { nodes { login } }
       projectItems(first: 20) {
         nodes {
@@ -152,6 +153,47 @@ const CARD_NOW_QUERY = `query CardNow($owner: String!, $name: String!, $number: 
     }
   }
 }`;
+
+const QUEUE_CARD_QUERY = `query QueueCard($owner: String!, $name: String!, $number: Int!, $projectNumber: Int!) {
+  repositoryOwner(login: $owner) {
+    ... on ProjectV2Owner { projectV2(number: $projectNumber) { id } }
+  }
+  ${RATE_LIMIT_SELECTION}
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      ${ISSUE_FIELDS}
+      projectItems(first: 20) { nodes { ${ITEM_FIELDS} project { id number } } }
+    }
+  }
+}`;
+
+/** Reads the issue's current project item, bypassing the potentially stale project list. */
+export async function fetchQueueCard(
+  repo: CcConfig["repos"][number],
+  number: number,
+  gql: Gql,
+  now: number,
+): Promise<BoardItem | null> {
+  const [owner = "", name = ""] = repo.github.split("/");
+  const data = await call(gql, QUEUE_CARD_QUERY, {
+    owner,
+    name,
+    number,
+    projectNumber: repo.project,
+  });
+  const projectId = path(data, "repositoryOwner", "projectV2", "id");
+  if (typeof projectId !== "string" || projectId === "") return null;
+  const issue = path(data, "repository", "issue");
+  const items = path(issue, "projectItems", "nodes");
+  const item = Array.isArray(items)
+    ? items.find((i) => isObj(i) && path(i, "project", "id") === projectId)
+    : undefined;
+  if (!isObj(item)) return null;
+  const card = boardItem(repo, { ...item, content: issue }, now);
+  return card === null || card === "unmapped"
+    ? null
+    : { ...card, projectId: str(path(item, "project", "id"), "") };
+}
 
 /** A longer issue body is cut here; the pane links to GitHub for the rest. */
 export const TICKET_BODY_MAX = 20_000;
@@ -533,7 +575,7 @@ interface BoardResult {
   recovered: number;
 }
 
-async function fetchBoard(
+export async function fetchBoard(
   repo: CcConfig["repos"][number],
   gql: Gql,
   now: number,
@@ -767,7 +809,9 @@ export async function fetchTicket(
 }
 
 /** What GitHub says of one card right now: enough to tell whether it is still Ready and unclaimed. */
-export type CardNow = Pick<BoardItem, "status" | "state" | "closed" | "assignees">;
+export type CardNow = Pick<BoardItem, "status" | "state" | "closed" | "assignees"> & {
+  labels?: string[];
+};
 
 /**
  * One issue and its card on the repo's project, read fresh. Null when GitHub has no such issue, the
@@ -802,6 +846,7 @@ export async function fetchCardNow(
     state: state ?? "planned",
     closed: issue.state === "CLOSED",
     assignees: logins(issue.assignees),
+    labels: names(issue.labels),
   };
 }
 

@@ -47,6 +47,7 @@ import {
   DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
   seatUnavailable,
 } from "../config.ts";
+import { matchesFocus } from "../focus.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
@@ -257,7 +258,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
     ];
     const board = store.board(repoId);
     const repo = config.repos.find((r) => r.id === repoId);
-    const cards: { issue: number; label: string }[] = [];
+    const cards: { issue: number; label: string; seats: string[] }[] = [];
     for (const card of readyCards(store, repoId)) {
       const ref = refOf(repoId, card.issueNumber);
       readyRefs.add(ref);
@@ -314,7 +315,13 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       const labels = areaLabelsOf(rules, card);
       const label = labels[0];
       if (labels.length === 1 && label !== undefined)
-        cards.push({ issue: card.issueNumber, label });
+        cards.push({
+          issue: card.issueNumber,
+          label,
+          seats: group
+            .filter(({ seat }) => matchesFocus(seat.focus, card))
+            .map(({ seat }) => seat.id),
+        });
     }
     const hands = dealQueues(
       order.map((s) => ({ id: s.seat.id, labels: areaLabelsFor(rules, s.seat.area) })),
@@ -338,7 +345,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
  */
 export function dealQueues(
   seats: readonly { id: string; labels: readonly string[] }[],
-  cards: readonly { issue: number; label: string }[],
+  cards: readonly { issue: number; label: string; seats?: readonly string[] }[],
   depth: number,
 ): Map<string, number[]> {
   const hands = new Map<string, number[]>(seats.map((s) => [s.id, []]));
@@ -349,6 +356,7 @@ export function dealQueues(
       const seat = seats[i];
       const hand = seat === undefined ? undefined : hands.get(seat.id);
       if (seat === undefined || hand === undefined) continue;
+      if (card.seats !== undefined && !card.seats.includes(seat.id)) continue;
       if (!seat.labels.includes(card.label) || hand.length >= depth) continue;
       hand.push(card.issue);
       next = i + 1;
@@ -410,7 +418,11 @@ async function claimBestReady(deps: TakeDeps, repoId: RepoId, seat: CrewSeatConf
     const l = areaLabelsOf(rules, c);
     const label = l[0];
     return (
-      holder.has(c.issueNumber) && l.length === 1 && label !== undefined && labels.includes(label)
+      matchesFocus(seat.focus, c) &&
+      holder.has(c.issueNumber) &&
+      l.length === 1 &&
+      label !== undefined &&
+      labels.includes(label)
     );
   });
   if (best === undefined) return;
@@ -476,7 +488,12 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const ref = refOf(repoId, issue);
   const card = store.board(repoId).find((c) => c.issueNumber === issue);
   // The card may have moved since the poll, and another seat may have been started on it by hand.
-  if (card === undefined || hudColumnOf(card) !== "Ready" || store.activeTickets().has(ref)) {
+  if (
+    card === undefined ||
+    !matchesFocus(found.seat.focus, card) ||
+    hudColumnOf(card) !== "Ready" ||
+    store.activeTickets().has(ref)
+  ) {
     store.dropQueued(seatId, repoId, issue);
     return;
   }
@@ -539,6 +556,13 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
       at: deps.now(),
     });
     deps.onNotes?.();
+    return;
+  }
+  const current = writerSeats(config).find(
+    (s) => s.seat.id === seatId && s.session.repoId === repoId,
+  );
+  if (!current || !matchesFocus(current.seat.focus, { ...card, labels: latest.labels ?? [] })) {
+    store.untake(seatId, repoId, issue);
     return;
   }
   try {

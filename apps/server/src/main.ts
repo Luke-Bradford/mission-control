@@ -23,7 +23,14 @@ import { buildApp, crewGuardDeps } from "./api.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
-import { fetchCardNow, fetchTicket, githubToken, makeGql } from "./collectors/github.ts";
+import {
+  fetchBoard,
+  fetchCardNow,
+  fetchQueueCard,
+  fetchTicket,
+  githubToken,
+  makeGql,
+} from "./collectors/github.ts";
 import {
   ConfigError,
   configuredAgents,
@@ -50,10 +57,12 @@ import { RunTokens } from "./mcp/tokens.ts";
 import { createMcTools, KNOWN_SECRETS_TIMEOUT_MS, type McToolsDeps } from "./mcp/tools.ts";
 import { newOperatorToken, writeOperatorToken } from "./operator.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
+import { proposeQueueReorder, type QueueReorderDeps } from "./queue-reorder.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
+import { setSeatFocus } from "./seat-focus.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir, Store } from "./store.ts";
 import {
@@ -125,14 +134,14 @@ export async function main(): Promise<void> {
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
   let hubLogin: string | null = null;
   // A repo's board rules as the engine reads them: the queue, FLIGHT and every start use them.
-  const engineRules = async (repoId: RepoId) => {
+  const engineRules = async (repoId: RepoId, mainSha?: string) => {
     const repo = config.repos.find((r) => r.id === repoId);
     const session = config.crew?.sessions.find((s) => s.repoId === repoId);
     if (repo === undefined || session === undefined) {
       return new RepoRulesError(`${repoId}: no crew session reads this repo's rules`);
     }
     const notes: string[] = [];
-    const rules = await readRepoRules(repo.github, session.checkout, repo.rules, notes);
+    const rules = await readRepoRules(repo.github, session.checkout, repo.rules, notes, mainSha);
     for (const note of notes) log(`engine: ${note}`);
     return rules;
   };
@@ -271,8 +280,38 @@ export async function main(): Promise<void> {
   mcDeps.syncMain = (runId) => engine.writerSyncMain(runId);
   scheduler.setEngine(engine);
 
+  const queueReorder: QueueReorderDeps = {
+    config,
+    store,
+    rules: engineRules,
+    profiles,
+    get login() {
+      return hubLogin;
+    },
+    enabled: () => engine.status().on && supervisor.status().enabled,
+    now: Date.now,
+    readBoard: async (repoId) => {
+      const repo = config.repos.find((r) => r.id === repoId);
+      if (!repo) throw new Error("Repository unavailable.");
+      return (await fetchBoard(repo, makeGql(await githubToken()), Date.now())).items;
+    },
+    readCard: async (repoId, issue) => {
+      const repo = config.repos.find((r) => r.id === repoId);
+      if (!repo) throw new Error("Repository unavailable.");
+      return fetchQueueCard(repo, issue, makeGql(await githubToken()), Date.now());
+    },
+    fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
+    edit: (repoId, issue, fields) => engineBoard.edit(repoId, issue, fields),
+  };
+
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    focus: (seatId, focus) => {
+      if (preview && process.env.MC_CONFIG === undefined)
+        throw new Error("Focus writes unavailable.");
+      return setSeatFocus(config, configPath, crewReloader, seatId, focus, Date.now());
+    },
+    queueReorder: (seatId, move, above) => proposeQueueReorder(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     config,
     store,
@@ -382,6 +421,7 @@ export async function main(): Promise<void> {
     });
   });
   const app = buildApp({
+    queueReorder,
     mapRing,
     operatorToken,
     gh,

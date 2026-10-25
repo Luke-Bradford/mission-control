@@ -30,6 +30,7 @@ import {
   setSessionSeats,
 } from "../src/config-write.ts";
 import { codexModels } from "../src/runtime/codex-models.ts";
+import { setSeatFocus } from "../src/seat-focus.ts";
 import { Store } from "../src/store.ts";
 import { fakeModels } from "./config-codex.ts";
 
@@ -462,6 +463,95 @@ describe("setSessionSeats", () => {
     setSessionSeats(path, SESSION, base, seats, NOW);
   const change = (id: string, over: Partial<ConfigSeatInput>) =>
     set(read().map((s) => (s.id === id ? { ...s, ...over } : s)));
+
+  it("bases repeated focus updates on persisted pending seat edits", async () => {
+    const live = loadConfig(path);
+    await change("guido-1", { model: "opus", focus: "label:first" });
+    const reload = vi.fn(async () => ({
+      sessions: [],
+      pending: [],
+      restartNeeded: [],
+      error: null,
+      checkedAt: NOW,
+      applied: [],
+    }));
+    await setSeatFocus(live, path, { reload }, "guido-1", "label:second", NOW);
+    await setSeatFocus(live, path, { reload }, "guido-1", "label:third", NOW);
+    expect(read().find((s) => s.id === "guido-1")).toMatchObject({
+      model: "opus",
+      focus: "label:third",
+    });
+  });
+
+  it("persists and reloads per-seat focus, preserves omitted focus and clears it explicitly", async () => {
+    await change("guido-1", { focus: "label:catalog lane:work" });
+    expect(read().find((s) => s.id === "guido-1")?.focus).toBe("label:catalog lane:work");
+    const base = read();
+    await set(
+      base.map(({ focus: _focus, ...s }) => s),
+      base,
+    );
+    expect(read().find((s) => s.id === "guido-1")?.focus).toBe("label:catalog lane:work");
+    await change("guido-1", { focus: null });
+    expect(read().find((s) => s.id === "guido-1")?.focus).toBeNull();
+  });
+
+  it("focus API saves through the session editor and reloads the readable focus", async () => {
+    const config = loadConfig(path);
+    const store = new Store(":memory:");
+    const changes = {
+      sessions: [],
+      pending: [],
+      restartNeeded: [],
+      error: null,
+      checkedAt: NOW,
+      applied: [],
+    };
+    const reload = vi.fn(async () => {
+      config.crew = loadConfig(path).crew;
+      return changes;
+    });
+    const app = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      configPath: path,
+      seatWrites: true,
+      crewReloader: {
+        start: () => {},
+        stop: () => {},
+        settle: () => [],
+        reload,
+        status: () => changes,
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/seats/guido-1/focus",
+        payload: { focus: "label:catalog" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect((await app.inject({ method: "GET", url: "/api/seats/guido-1/focus" })).json()).toEqual(
+        { focus: "label:catalog" },
+      );
+      expect(read().find((s) => s.id === "guido-1")?.focus).toBe("label:catalog");
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/seats/guido-1/focus",
+            payload: { focus: "unrecognised prose" },
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+      store.close();
+    }
+  });
 
   it("writes Codex models and advertised efforts through the cached startup catalog", async () => {
     await change("guido-1", { accountId: "codex-main", model: "gpt-6-astra", effort: "ultra" });
