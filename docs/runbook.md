@@ -1434,3 +1434,13 @@ npx vitest run packages/agentcomms/test/two-sides.test.ts --maxWorkers=2
 It uses temporary homes and a local Node relay, runs CLI setup and two daemons, then calls work's
 MCP server over stdio. It needs no Cloudflare credentials. A sandbox that forbids listening
 sockets cannot run it (`listen EPERM`); run it outside that sandbox.
+
+## Codex crew seats
+
+Add a Codex seat in **Setup › Sessions**, or in `config.yaml`: choose an account whose vendor is `codex`, a model from that account's discovered model list, and an advertised effort for that model. The seat's state is shown alongside the other crew seats in the hub.
+
+If a Codex seat says `unavailable: …`, it is waiting for Codex model discovery or validation. The hub still boots and Claude seats continue to run. No intervention is required: the state clears itself when discovery succeeds.
+
+Each Codex run has its own `CODEX_HOME` and a permission profile, with reads, writes, and network enforced by the OS. The hub approves every command and edit, and checks the confinement at start, resume, and reattach before allowing the seat to work.
+
+Known limits: pipelines such as `a | b` are declined for now. `unified_exec = false` is not proven on Codex CLI 0.154. A Codex seat keeps the CLI binary it started with; `updates.cli` applies only to Claude seats.
