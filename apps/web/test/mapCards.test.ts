@@ -140,6 +140,8 @@ describe("map badge data", () => {
       folder: "src",
       docked: false,
     });
+    // The card and the orb label read the same state.
+    expect(agentCard(s, now).state).toBe("reading src/main.ts 1s · +1 calls");
     s.calls = [];
     expect(agentCard(s, now).state).toBe("thinking");
     s.state = "idle";

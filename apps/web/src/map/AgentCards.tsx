@@ -9,6 +9,7 @@ export function AgentCards({
   indices,
   selected,
   onSelect,
+  onZoom,
   onBadge,
   drawerId,
   headingRef,
@@ -17,6 +18,7 @@ export function AgentCards({
   indices: Record<string, number>;
   selected: string | null;
   onSelect: (seat: string | null) => void;
+  onZoom: (seat: string) => void;
   onBadge: (seat: string, kind: BadgeKind, opener: HTMLButtonElement) => void;
   drawerId: string;
   headingRef: Ref<HTMLHeadingElement>;
@@ -61,6 +63,14 @@ export function AgentCards({
                 {card.stuck && "Stuck · "}
                 {card.state}
               </span>
+            </button>
+            <button
+              type="button"
+              className="map-agent-zoom"
+              aria-label={`Zoom to ${seat.seat}`}
+              onClick={() => onZoom(seat.seat)}
+            >
+              ⌖
             </button>
             {expanded && (
               <>

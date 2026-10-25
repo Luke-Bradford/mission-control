@@ -10,6 +10,7 @@ import { BadgeDrawer, Finding } from "./BadgeDrawer.tsx";
 import type { BadgeKind } from "./cards.ts";
 import { LiveMap } from "./live.ts";
 import { layoutTree, pickRepo, pinToken } from "./model.ts";
+import type { MessageArc, MotionEvent } from "./motion.ts";
 import "./map.css";
 
 const Scene = lazy(() => import("./MapScene.tsx").then((m) => ({ default: m.MapScene })));
@@ -52,10 +53,12 @@ function LiveCrewMap() {
   const [snapshot, setSnapshot] = useState<MapSnapshot | null>(null);
   const [skipped, setSkipped] = useState("");
   const [error, setError] = useState<Error | null>(null);
+  const [events, setEvents] = useState<MotionEvent[]>([]);
   useEffect(() => {
     setSnapshot(null);
     setSkipped("");
     setError(null);
+    setEvents([]);
     if (!repo) return;
     const live = new LiveMap(
       repo,
@@ -64,6 +67,10 @@ function LiveCrewMap() {
       setError,
       (calls, messages) =>
         setSkipped(`While this tab was hidden: ${calls} calls, ${messages} messages`),
+      (event) =>
+        setEvents((previous) =>
+          [...previous.filter((e) => e.at > event.at - 6000), event].slice(-200),
+        ),
     );
     live.start();
     return () => live.stop();
@@ -97,6 +104,7 @@ function LiveCrewMap() {
         <CrewMapView
           key={repo}
           snapshot={snapshot}
+          events={events}
           indices={Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, r.index]))}
         />
       ) : (
@@ -109,9 +117,11 @@ function LiveCrewMap() {
 export function CrewMapView({
   snapshot,
   indices = {},
+  events = [],
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
+  events?: MotionEvent[];
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
@@ -119,7 +129,12 @@ export function CrewMapView({
   const [home, setHome] = useState(0);
   const [rotate, setRotate] = useState(false);
   const [agent, setAgent] = useState<string | null>(null);
-  const [badge, setBadge] = useState<{ seat: string; kind: BadgeKind } | null>(null);
+  const [agentFocus, setAgentFocus] = useState<{ seat: string; request: number } | null>(null);
+  const [badge, setBadge] = useState<{
+    seat: string;
+    kind: BadgeKind;
+    conversation?: MessageArc;
+  } | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const agentsHeading = useRef<HTMLHeadingElement>(null);
   const drawerId = useId();
@@ -135,7 +150,7 @@ export function CrewMapView({
     if (agent && !snapshot.seats.some((s) => s.seat === agent)) setAgent(null);
   }, [agent, snapshot.seats]);
   useEffect(() => {
-    if (badge && !badgeSeat) closeBadge();
+    if (badge && !badgeSeat && !badge.conversation) closeBadge();
   }, [badge, badgeSeat, closeBadge]);
   const treeKey = JSON.stringify(snapshot.tree);
   const nodes = useMemo(() => layoutTree(JSON.parse(treeKey)), [treeKey]);
@@ -195,6 +210,7 @@ export function CrewMapView({
           onClick={() => {
             setHome(home + 1);
             setFocus(null);
+            setAgentFocus(null);
           }}
         >
           Home view
@@ -216,10 +232,19 @@ export function CrewMapView({
               selected={selected}
               indices={indices}
               onSelect={select}
+              events={events}
+              agent={agent}
+              agentFocus={agentFocus}
+              onAgentSelect={setAgent}
+              onArc={(conversation, button) => {
+                opener.current = button;
+                setSelected(null);
+                setBadge({ seat: conversation.from, kind: "questions", conversation });
+              }}
             />
           </Suspense>
           <p className="map-note">
-            drag to orbit · scroll to zoom · click a file · ⌖ zooms to a file
+            drag to orbit · scroll to zoom · click an orb or card to select · ⌖ zooms
           </p>
         </div>
         <div className="map-sidebar">
@@ -228,6 +253,11 @@ export function CrewMapView({
             indices={indices}
             selected={agent}
             onSelect={setAgent}
+            onZoom={(seat) => {
+              setFocus(null);
+              setRotate(false);
+              setAgentFocus((previous) => ({ seat, request: (previous?.request ?? 0) + 1 }));
+            }}
             drawerId={drawerId}
             headingRef={agentsHeading}
             onBadge={(seat, kind, button) => {
@@ -252,12 +282,13 @@ export function CrewMapView({
                 {!matches.length && <p>No matching files.</p>}
               </div>
             )}
-            {badge && badgeSeat ? (
+            {badge && (badgeSeat || badge.conversation) ? (
               <BadgeDrawer
-                key={`${badge.seat}-${badge.kind}`}
+                key={`${badge.seat}-${badge.kind}-${badge.conversation?.to ?? ""}-${badge.conversation?.ticket ?? ""}`}
                 snapshot={snapshot}
                 seat={badgeSeat}
                 kind={badge.kind}
+                conversation={badge.conversation}
                 onClose={closeBadge}
               />
             ) : selected ? (

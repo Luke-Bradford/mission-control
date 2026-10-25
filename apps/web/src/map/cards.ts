@@ -1,4 +1,5 @@
 import type { MapSeat, MapSnapshot } from "@mc/core";
+import { stateLabel } from "./agents.ts";
 import { isDocked } from "./model.ts";
 
 export type BadgeKind = "questions" | "failures" | "review" | "tests" | "ci" | "waiting";
@@ -115,17 +116,8 @@ export function agentCard(seat: MapSeat, now: number) {
   const common = folders[0] ?? [];
   let depth = 0;
   while (depth < common.length && folders.every((f) => f[depth] === common[depth])) depth++;
-  const call = [...seat.calls].sort((a, b) => a.since - b.since)[0];
-  const state =
-    seat.state === "stalled"
-      ? `stalled ${duration(now - seat.since)}`
-      : call
-        ? `${call.tool} ${call.detail} ${duration(now - call.since)}${seat.calls.length > 1 ? ` · +${seat.calls.length - 1} calls` : ""}`
-        : seat.state === "running"
-          ? "thinking"
-          : `${seat.state} ${duration(now - seat.since)}`;
   return {
-    state,
+    state: stateLabel(seat, now),
     folder: folders.length ? common.slice(0, depth).join("/") || "." : null,
     scope: scope.size,
     modified: new Set(seat.scope.modified.map((c) => c.file)).size,

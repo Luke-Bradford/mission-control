@@ -2,9 +2,12 @@ import type { MapSnapshot } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { type ActivityProps, activityLayer } from "./activity.ts";
+import { dockPosition } from "./agents.ts";
 import { areaTone, fileStyle, type MapNode, pinToken } from "./model.ts";
+import { emptyMotion, markerPosition } from "./motion.ts";
 
-type Props = {
+type Props = ActivityProps & {
   nodes: MapNode[];
   snapshot: MapSnapshot;
   focus: string | null;
@@ -13,21 +16,25 @@ type Props = {
   selected: string | null;
   indices: Record<string, number>;
   onSelect: (path: string) => void;
+  agentFocus?: { seat: string; request: number } | null;
 };
 type Shell = { update: (props: Props) => void; dispose: () => void };
 
-/** Geometry, picking and camera only; all map meaning comes from model.ts. */
+/** Geometry, picking and camera only; map meaning comes from the pure models. */
 export function MapScene(props: Props) {
   const host = useRef<HTMLDivElement>(null);
   const shell = useRef<Shell | null>(null);
+  const motion = useRef(emptyMotion());
   const view = useRef<{
     position: THREE.Vector3;
     target: THREE.Vector3;
     home: number;
     focus: string | null;
+    agentFocus: Props["agentFocus"];
   } | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const { nodes } = props;
+  const seatCount = props.snapshot.seats.length;
   useEffect(() => {
     const el = host.current;
     if (!el) return;
@@ -81,7 +88,11 @@ export function MapScene(props: Props) {
       new THREE.LineBasicMaterial({ transparent: true, opacity: 0.8 }),
     );
     scene.add(highlighted);
-    const box = new THREE.Box3().setFromPoints([...positions.values()]);
+    const box = new THREE.Box3().setFromPoints([
+      ...positions.values(),
+      new THREE.Vector3(...dockPosition(nodes, seatCount)),
+      ...["HUB", "CAPCOM"].map((id) => new THREE.Vector3(...markerPosition(id, nodes))),
+    ]);
     const centre = box.getCenter(new THREE.Vector3());
     const radius = Math.max(30, box.getSize(new THREE.Vector3()).length() * 0.8);
     const reset = () => {
@@ -104,11 +115,49 @@ export function MapScene(props: Props) {
     let projected: { el: HTMLElement; position: THREE.Vector3 }[] = [];
     const css = (token: string) =>
       getComputedStyle(document.documentElement).getPropertyValue(token).trim() || "#808999";
+    const activityLabels = document.createElement("div");
+    activityLabels.className = "map-labels";
+    el.append(activityLabels);
+    const activity = activityLayer(scene, activityLabels, nodes, motion, css);
+    let previousAgentFocus = view.current?.agentFocus;
+    let lastMotion = Date.now();
+    const flashes = new Map<string, number>();
+    const visuals: { color: THREE.Color; size: number; path: string; position: THREE.Vector3 }[] =
+      [];
     const draw = () => {
       frame = undefined;
       if (document.hidden) return;
       lastDraw = performance.now();
       if (current?.rotate && !reduced.matches) controls.update();
+      const now = Date.now();
+      const moving = activity.draw(
+        now,
+        Math.min(0.1, (now - lastMotion) / 1000),
+        camera,
+        el.clientWidth,
+        el.clientHeight,
+      );
+      lastMotion = now;
+      const glows = new Map(activity.glows(now).map((g) => [g.path, g.at]));
+      const matrix = new THREE.Matrix4();
+      let flashing = false;
+      visuals.forEach((visual, i) => {
+        const glow = glows.get(visual.path);
+        const strength = glow === undefined ? 0 : Math.max(0, 1 - (now - glow) / 6000);
+        const flash = flashes.get(visual.path);
+        const burst =
+          !reduced.matches && flash !== undefined ? Math.max(0, 1 - (now - flash) / 1200) : 0;
+        if (burst) flashing = true;
+        else flashes.delete(visual.path);
+        mesh.setColorAt(
+          i,
+          visual.color.clone().lerp(new THREE.Color("white"), Math.max(strength * 0.5, burst)),
+        );
+        const size = visual.size * (1 + strength * 0.3 + burst * 0.4);
+        mesh.setMatrixAt(i, matrix.makeScale(size, size, size).setPosition(visual.position));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       renderer.render(scene, camera);
       const w = el.clientWidth,
         h = el.clientHeight;
@@ -118,7 +167,7 @@ export function MapScene(props: Props) {
         label.el.style.top = `${((1 - p.y) * h) / 2}px`;
         label.el.hidden = p.z > 1 || p.z < -1;
       }
-      if (current?.rotate && !reduced.matches) schedule();
+      if ((current?.rotate && !reduced.matches) || moving || flashing) schedule();
     };
     const schedule = () => {
       if (frame === undefined && !document.hidden)
@@ -129,6 +178,7 @@ export function MapScene(props: Props) {
     };
     const update = (next: Props) => {
       current = next;
+      activity.update(next, reduced.matches);
       controls.autoRotate = next.rotate && !reduced.matches;
       if (next.home !== previousHome) {
         reset();
@@ -143,14 +193,24 @@ export function MapScene(props: Props) {
         }
         previousFocus = next.focus;
       }
+      if (next.agentFocus !== previousAgentFocus) {
+        const p = next.agentFocus ? activity.focus(next.agentFocus.seat) : undefined;
+        if (p) {
+          controls.target.set(...p);
+          camera.position.set(p[0] + 20, p[1] + 15, p[2] + 35);
+          controls.update();
+        }
+        previousAgentFocus = next.agentFocus;
+      }
       clearTimeout(expiry);
       const now = Date.now();
-      const deadlines = next.snapshot.seats
-        .flatMap((s) => [
+      const deadlines = [
+        ...activity.nextExpiry(now),
+        ...next.snapshot.seats.flatMap((s) => [
           ...(s.state !== "running" && !s.calls.length ? [s.since + 60_000] : []),
           ...s.recent.map((r) => r.at + 600_000),
-        ])
-        .filter((t) => t > now);
+        ]),
+      ].filter((t) => t > now);
       if (deadlines.length)
         expiry = setTimeout(
           () => {
@@ -176,6 +236,7 @@ export function MapScene(props: Props) {
         projected.push({ el: label, position });
       };
       const matrix = new THREE.Matrix4();
+      visuals.length = 0;
       spheres.forEach((node, i) => {
         const s = fileStyle(next.snapshot, node.files, node.area, Date.now(), next.indices);
         const size = (node.count > 1 ? 1 + Math.log2(node.count) * 0.3 : 0.8) * (1 + s.level * 0.4);
@@ -186,8 +247,18 @@ export function MapScene(props: Props) {
           const hsl = color.getHSL({ h: 0, s: 0, l: 0 });
           color.setHSL(areaTone(node.area), 0.15, hsl.l);
         } else color.multiplyScalar(s.brightness);
+        if (next.agent) {
+          const seat = next.snapshot.seats.find((seat) => seat.seat === next.agent);
+          const files = [
+            ...(seat?.scope.read ?? []),
+            ...(seat?.scope.modified.map((c) => c.file) ?? []),
+            ...(seat?.calls.flatMap((c) => c.files) ?? []),
+          ];
+          if (!node.files.some((f) => files.includes(f))) color.multiplyScalar(0.25);
+        }
         mesh.setColorAt(i, color);
         const p = new THREE.Vector3(...node.position);
+        visuals.push({ color, size, path: node.path, position: p });
         if (s.accessing || s.recent)
           addLabel(
             "○",
@@ -205,8 +276,10 @@ export function MapScene(props: Props) {
             s.overlap,
           );
         const previous = previousChanges.get(node.path);
-        const edited = previous && (s.add !== previous.add || s.rem !== previous.rem);
+        const edited =
+          !document.hidden && previous && (s.add !== previous.add || s.rem !== previous.rem);
         const grew = edited && s.level > previous.level;
+        if (grew) flashes.set(node.path, now);
         previousChanges.set(node.path, { add: s.add, rem: s.rem, level: s.level });
         if (s.label)
           addLabel(
@@ -293,7 +366,9 @@ export function MapScene(props: Props) {
         camera,
       );
       const hit = ray.intersectObject(mesh)[0];
-      if (hit?.instanceId !== undefined) current?.onSelect(spheres[hit.instanceId].path);
+      const agent = activity.pick(ray);
+      if (agent) current?.onAgentSelect?.(current.agent === agent ? null : agent);
+      else if (hit?.instanceId !== undefined) current?.onSelect(spheres[hit.instanceId].path);
     };
     renderer.domElement.addEventListener("pointerdown", pointerDown);
     renderer.domElement.addEventListener("pointerup", pick);
@@ -301,7 +376,14 @@ export function MapScene(props: Props) {
       if (document.hidden) {
         clearTimeout(frame);
         frame = undefined;
-      } else schedule();
+        clearTimeout(expiry);
+        activity.clear();
+        flashes.clear();
+      } else if (current) {
+        activity.clear();
+        lastMotion = Date.now();
+        update(current);
+      }
     };
     document.addEventListener("visibilitychange", visibility);
     const theme = new MutationObserver(() => {
@@ -325,12 +407,14 @@ export function MapScene(props: Props) {
           target: controls.target.clone(),
           home: current?.home ?? 0,
           focus: current?.focus ?? null,
+          agentFocus: current?.agentFocus,
         };
         clearTimeout(frame);
         clearTimeout(expiry);
         observer.disconnect();
         theme.disconnect();
         controls.dispose();
+        activity.dispose();
         document.removeEventListener("visibilitychange", visibility);
         reduced.removeEventListener("change", preference);
         themeMedia.removeEventListener("change", preference);
@@ -343,6 +427,7 @@ export function MapScene(props: Props) {
         renderer.dispose();
         renderer.domElement.remove();
         labels.remove();
+        activityLabels.remove();
       },
     };
     resize();
@@ -350,7 +435,7 @@ export function MapScene(props: Props) {
       shell.current?.dispose();
       shell.current = null;
     };
-  }, [nodes]);
+  }, [nodes, seatCount]);
   useEffect(() => {
     shell.current?.update(props);
   }, [props]);

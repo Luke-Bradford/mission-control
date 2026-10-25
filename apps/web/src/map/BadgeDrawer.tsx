@@ -11,6 +11,7 @@ import {
   recentFailures,
 } from "./cards.ts";
 import { pinToken } from "./model.ts";
+import type { MessageArc } from "./motion.ts";
 
 const titles: Record<BadgeKind, string> = {
   questions: "Conversation lane",
@@ -26,16 +27,18 @@ export function BadgeDrawer({
   seat,
   kind,
   onClose,
+  conversation,
 }: {
   snapshot: MapSnapshot;
-  seat: MapSeat;
+  seat?: MapSeat;
   kind: BadgeKind;
   onClose: () => void;
+  conversation?: Pick<MessageArc, "from" | "to" | "ticket">;
 }) {
   const now = useNow();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
-  const badge = badgeModels(seat, now).find((b) => b.kind === kind);
+  const badge = seat ? badgeModels(seat, now).find((b) => b.kind === kind) : undefined;
   return (
     <div
       role="dialog"
@@ -54,10 +57,10 @@ export function BadgeDrawer({
         {titles[kind]}
       </h3>
       <p>
-        {seat.seat}
-        {seat.ticket !== null && ` · #${seat.ticket}`}
+        {conversation ? `${conversation.from} ↔ ${conversation.to}` : seat?.seat}
+        {!conversation && seat?.ticket != null && ` · #${seat.ticket}`}
       </p>
-      {badge ? (
+      {badge && seat ? (
         <>
           <p>
             {badge.text} · {badge.age}
@@ -136,23 +139,41 @@ export function BadgeDrawer({
           .
         </p>
       )}
-      {kind === "questions" && <QuestionLane key={seat.seat} seat={seat} now={now} />}
+      {kind === "questions" && (
+        <QuestionLane key={seat?.seat} seat={seat} conversation={conversation} now={now} />
+      )}
     </div>
   );
 }
 
-function QuestionLane({ seat, now }: { seat: MapSeat; now: number }) {
-  const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(seat.seat));
-  const lanes = questionLanes(seat);
+function QuestionLane({
+  seat,
+  now,
+  conversation,
+}: {
+  seat?: MapSeat;
+  now: number;
+  conversation?: Pick<MessageArc, "from" | "to" | "ticket">;
+}) {
+  const id = conversation?.from ?? seat?.seat ?? "";
+  const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(id));
+  const lanes = seat ? questionLanes(seat) : [];
+  const initial = conversation ? JSON.stringify([conversation.from, conversation.to].sort()) : "";
+  if (conversation && !lanes.some((l) => l.key === initial))
+    lanes.push({
+      key: initial,
+      ends: [conversation.from, conversation.to].sort() as [string, string],
+      questions: [],
+    });
   // Answered questions leave the pending badge; retain their lanes in the open thread.
   for (const message of activity.data?.messages ?? []) {
-    if (message.from !== seat.seat && message.to !== seat.seat) continue;
+    if (message.from !== id && message.to !== id) continue;
     const ends = [message.from, message.to].sort() as [string, string];
     const key = JSON.stringify(ends);
     if (!lanes.some((l) => l.key === key)) lanes.push({ key, ends, questions: [] });
   }
-  const [picked, setPicked] = useState(lanes[0]?.key ?? "");
-  const [ticket, setTicket] = useState("all");
+  const [picked, setPicked] = useState(initial || lanes[0]?.key || "");
+  const [ticket, setTicket] = useState(conversation ? String(conversation.ticket) : "all");
   const lane = lanes.find((l) => l.key === picked) ?? lanes[0];
   const questions = lane?.questions ?? [];
   const messages = (activity.data?.messages ?? [])
@@ -160,6 +181,7 @@ function QuestionLane({ seat, now }: { seat: MapSeat; now: number }) {
     .sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
   const tickets = [
     ...new Set([
+      ...(conversation ? [conversation.ticket === null ? null : String(conversation.ticket)] : []),
       ...questions.map((q) => (q.ticket === null ? null : String(q.ticket))),
       ...messages.map((m) => m.ticket),
     ]),

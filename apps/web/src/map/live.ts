@@ -1,5 +1,6 @@
 import type { MapDelta, MapSnapshot } from "@mc/core";
 import { applyDelta } from "./model.ts";
+import type { MotionEvent } from "./motion.ts";
 
 /** One repo subscription; snapshot requests coalesce while deltas keep their order. */
 export class LiveMap {
@@ -19,6 +20,7 @@ export class LiveMap {
   private skipped: (calls: number, messages: number) => void;
   private hiddenCalls = 0;
   private hiddenMessages = 0;
+  private animate: (event: MotionEvent) => void;
   private visibility = () => {
     if (!document.hidden && (this.hiddenCalls || this.hiddenMessages)) {
       this.skipped(this.hiddenCalls, this.hiddenMessages);
@@ -33,12 +35,14 @@ export class LiveMap {
     receive: (s: MapSnapshot) => void,
     error: (e: Error | null) => void,
     skipped: (calls: number, messages: number) => void = () => {},
+    animate: (event: MotionEvent) => void = () => {},
   ) {
     this.repo = repo;
     this.get = get;
     this.receive = receive;
     this.error = error;
     this.skipped = skipped;
+    this.animate = animate;
   }
 
   start() {
@@ -72,7 +76,7 @@ export class LiveMap {
         if (document.hidden) {
           if (delta.type === "call.start") this.hiddenCalls++;
           if (delta.type === "message") this.hiddenMessages++;
-        }
+        } else this.animate({ delta, at: Date.now(), snapshot: this.snapshot ?? undefined });
         if (this.fetching || !this.snapshot) {
           this.pending.push(delta);
           return;

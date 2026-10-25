@@ -2,9 +2,10 @@ import { type CommsThreadMessage, type MapSnapshot, mapSnapshotFixture } from "@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CrewMapView } from "../src/map/CrewMap.tsx";
+import { MapScene } from "../src/map/MapScene.tsx";
 import { stubFetch } from "./fetchStub.ts";
 
-vi.mock("../src/map/MapScene.tsx", () => ({ MapScene: () => <div>3D scene</div> }));
+vi.mock("../src/map/MapScene.tsx", () => ({ MapScene: vi.fn(() => <div>3D scene</div>) }));
 beforeEach(() => {
   vi.spyOn(Date, "now").mockReturnValue(65_000);
   stubFetch({ "/api/comms/GUIDO-1": { messages: [] } });
@@ -70,7 +71,11 @@ it("shows parked waiting data and marks the state in warn when the wait exceeds 
   s.seats[0].badges.waiting = { kind: "parked", since: 65_000 - 900_001, reason: "Needs CAPCOM" };
   render(<CrewMapView snapshot={s} />);
   expect(screen.getByText(/Stuck ·/).className).toContain("stuck");
-  fireEvent.click(within(screen.getByRole("article", { name: "GUIDO-1" })).getByRole("button"));
+  fireEvent.click(
+    within(screen.getByRole("article", { name: "GUIDO-1" })).getByRole("button", {
+      name: /Stuck/,
+    }),
+  );
   fireEvent.click(screen.getByRole("button", { name: /Waiting: parked · Needs CAPCOM · 15m ago/ }));
   expect(screen.getByRole("dialog", { name: "Waiting" }).textContent).toContain("Needs CAPCOM");
 });
@@ -235,8 +240,8 @@ it("selects and dims cards without moving the camera; docked cards are one line 
   });
   render(<CrewMapView snapshot={s} />);
   const docked = screen.getByRole("article", { name: "RETRO-1" });
-  expect(docked.textContent).toBe("RETRO-1idle 1m");
-  const button = within(docked).getByRole("button");
+  expect(docked.textContent).toBe("RETRO-1idle 1m⌖");
+  const button = within(docked).getByRole("button", { name: /idle/ });
   fireEvent.click(button);
   expect(button.getAttribute("aria-pressed")).toBe("true");
   expect(docked.textContent).toContain("Handle empty input");
@@ -316,5 +321,58 @@ it("renders untrusted reasons as inert text and replaces the badge drawer when a
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByRole("complementary", { name: "Selected file" }).textContent).toContain(
     "edit churn",
+  );
+});
+
+it("shares card and orb selection with the scene, and sends zoom only from the card control", async () => {
+  render(<CrewMapView snapshot={snapshot()} />);
+  await screen.findByText("3D scene");
+  const scene = () => vi.mocked(MapScene).mock.lastCall?.[0];
+  const card = screen.getByRole("article", { name: "GUIDO-1" });
+  fireEvent.click(within(card).getByRole("button", { name: /GUIDO-1#7/ }));
+  expect(scene()?.agent).toBe("GUIDO-1");
+  expect(scene()?.agentFocus).toBeNull();
+  act(() => scene()?.onAgentSelect?.(null));
+  expect(
+    within(card)
+      .getByRole("button", { name: /GUIDO-1#7/ })
+      .getAttribute("aria-pressed"),
+  ).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "Zoom to GUIDO-1" }));
+  expect(scene()?.agentFocus?.seat).toBe("GUIDO-1");
+  fireEvent.click(screen.getByRole("button", { name: "Home view" }));
+  expect(scene()?.agentFocus).toBeNull();
+  expect(scene()?.home).toBe(1);
+});
+
+it("opens an arc's exact conversation pair and ticket even without a pending question", async () => {
+  const s = snapshot();
+  s.seats[0].badges.questions = [];
+  stubFetch({
+    "/api/comms/GUIDO-1": {
+      messages: [
+        message({ id: "a", to: "RETRO-1", text: "Review this", ticket: "7" }),
+        message({ id: "b", to: "RETRO-1", text: "Other ticket", ticket: "8" }),
+        message({ id: "c", to: "CAPCOM", text: "Other lane", ticket: "7" }),
+      ],
+    },
+  });
+  render(<CrewMapView snapshot={s} />);
+  await screen.findByText("3D scene");
+  const opener = screen.getByRole("button", { name: "Zoom to GUIDO-1" });
+  act(() =>
+    vi
+      .mocked(MapScene)
+      .mock.lastCall?.[0].onArc?.(
+        { from: "GUIDO-1", to: "RETRO-1", ticket: 7, kind: "review", at: 65000, count: 1 },
+        opener,
+      ),
+  );
+  const drawer = screen.getByRole("dialog", { name: "Conversation lane" });
+  await within(drawer).findByText("Review this");
+  expect(within(drawer).queryByText("Other ticket")).toBeNull();
+  expect(within(drawer).queryByText("Other lane")).toBeNull();
+  expect((screen.getByRole("combobox", { name: "Lane ticket" }) as HTMLSelectElement).value).toBe(
+    "7",
   );
 });
