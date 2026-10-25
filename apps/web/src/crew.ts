@@ -656,13 +656,15 @@ export const SEAT_STATUS_LABEL = {
 /** The doing line of a free seat. */
 export const SEAT_FREE_LINE = "Free for work";
 
-const ENGINE_STATES: readonly HudState[] = ["running", "stalled", "error", "stopped", "parked"];
+const ENGINE_STATES: readonly HudState[] = ["running", "stalled", "blocked", "error", "stopped", "parked"];
 
 /**
  * The one rule for a state pill: an observed loop keeps the engine's state; a crew seat says what
  * its open run is doing (waiting on CI or review, blocked, between turns) or that it is free.
  */
-export function seatStatus(row: CrewRow): { label: string; tone: HudTone; reason?: string } {
+export type SeatStatus = { label: string; tone: HudTone; reason?: string };
+
+export function seatStatus(row: CrewRow): SeatStatus {
   if (row.crewPause) return { label: "Paused", tone: "warn", reason: row.crewPause.reason };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
   const reason = row.loop?.parked ?? row.note ?? undefined;

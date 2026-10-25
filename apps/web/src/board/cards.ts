@@ -14,7 +14,7 @@ import {
   type RunLoopView,
   startOfLocalDay,
 } from "@mc/core";
-import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL } from "../crew.ts";
+import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL, type SeatStatus, seatStatus } from "../crew.ts";
 
 const DAY = 86_400_000;
 
@@ -149,6 +149,7 @@ export interface CardSeat {
   id: string;
   index: number;
   hudState?: CrewRow["hudState"];
+  status?: SeatStatus;
 }
 
 export const NOT_QUEUED = "Unassigned · FLIGHT will offer it to an agent";
@@ -192,7 +193,7 @@ export function cardReviewer(
     if (!rv) return false;
     return (pr && r.repoId === pr.repoId && rv.prNumber === pr.number) || rv.ref === ref;
   });
-  return row ? { id: row.id, index: row.index, hudState: row.hudState } : null;
+  return row ? { id: row.id, index: row.index, hudState: row.hudState, status: seatStatus(row) } : null;
 }
 
 const CHECK_WORST: Record<PrCheck["state"], number> = { passing: 0, pending: 1, failing: 2 };

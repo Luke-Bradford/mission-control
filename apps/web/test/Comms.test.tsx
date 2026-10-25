@@ -122,6 +122,27 @@ describe("Threads", () => {
     expect(doing.getAttribute("title")).toBe(line);
     expect(document.body.textContent).not.toContain("Dead collector fallback");
   });
+
+  it("shows a paused agent's reason in the thread and conversation state tooltips", async () => {
+    const paused = seatRow({
+      crewPause: { seats: ["shop-app-ta"], reason: "Save tokens", at: NOW, by: "operator" },
+    });
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew": { rows: [paused], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+    });
+    render(<Comms item={null} />);
+    const list = document.querySelector("#chanList") as HTMLElement;
+    const pill = await within(list).findByText("Paused");
+    expect(pill.parentElement?.getAttribute("title")).toBe("Save tokens");
+    fireEvent.click(pill.closest("button") as HTMLButtonElement);
+    const conversationPill = await within(document.querySelector("#chatP") as HTMLElement).findByText(
+      "Paused",
+    );
+    expect(conversationPill.parentElement?.getAttribute("title")).toBe("Save tokens");
+  });
 });
 
 describe("Threads: the FLIGHT entry", () => {

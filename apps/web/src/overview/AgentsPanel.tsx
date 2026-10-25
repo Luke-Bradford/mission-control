@@ -265,7 +265,7 @@ function FlightRow({
       <span
         role="cell"
         className={row ? "state-cell" : undefined}
-        title={row?.crewPause ? status?.reason : label}
+        title={status?.reason ?? label}
       >
         {label && (
           <Pill tone={label === "Watching" ? "ok" : (status?.tone ?? "neutral")}>

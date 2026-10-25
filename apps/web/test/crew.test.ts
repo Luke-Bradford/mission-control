@@ -945,6 +945,14 @@ describe("seatStatus", () => {
     });
   });
 
+  it("keeps a blocked crew seat's reason for its tooltip", () => {
+    expect(seatStatus(seat({ hudState: "blocked", note: "Needs operator approval" }))).toEqual({
+      label: "Blocked",
+      tone: "warn",
+      reason: "Needs operator approval",
+    });
+  });
+
   it("an idle seat between turns, with no loop or a working one, is Idle", () => {
     expect(seatStatus(seat()).label).toBe("Idle");
     expect(seatStatus(seat({ loop: loop("working") })).label).toBe("Idle");

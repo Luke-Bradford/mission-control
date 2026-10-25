@@ -2,15 +2,12 @@ import {
   type BoardItem,
   CI_PILL,
   type CrewRow,
-  HUD_STATE_LABEL,
-  HUD_STATE_TONE,
   type HudColumn,
   type PullRequestView,
   prPill,
   STATUS_OUT_OF_DATE,
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
-import { seatStatus } from "../crew.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -149,10 +146,10 @@ export const Card = memo(function Card({
           <a href={agentPath(reviewer.id)} onClick={(e) => followLink(e, agentPath(reviewer.id))}>
             <AgentTag id={reviewer.id} index={reviewer.index} sm />
           </a>
-          {reviewer.hudState && (
-            <Pill tone={HUD_STATE_TONE[reviewer.hudState]}>
-              {HUD_STATE_LABEL[reviewer.hudState]}
-            </Pill>
+          {reviewer.status && (
+            <span title={reviewer.status.reason ?? reviewer.status.label}>
+              <Pill tone={reviewer.status.tone}>{reviewer.status.label}</Pill>
+            </span>
           )}
         </span>
       ) : (
