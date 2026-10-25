@@ -18,6 +18,7 @@ import {
 } from "@mc/core";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
+import { accountBindingProblem } from "./account-bindings.ts";
 import {
   areaGlob,
   type CcConfig,
@@ -428,6 +429,7 @@ export async function pruneBackups(path: string, keep: string): Promise<void> {
 export const NewAccountBody = z.strictObject({
   name: z.string().regex(REPO_ID, "must be 1–40 letters, digits, . _ or -, starting alphanumeric"),
   provider: z.enum(["claude", "codex"]),
+  cliProfile: z.string().min(1).max(4096).refine(isAbsolute, "must be absolute").optional(),
 });
 
 export function accountDuplicateReason(
@@ -437,13 +439,16 @@ export function accountDuplicateReason(
   if (accounts.some((a) => a.id.toLowerCase() === account.name.toLowerCase())) {
     return "an account with that name is already configured";
   }
-  if (accounts.some((a) => a.vendor === account.provider)) {
-    return "only one account per provider is supported until independent bindings are available";
-  }
-  return null;
+  const problem = accountBindingProblem([
+    ...accounts,
+    { vendor: account.provider, cliProfile: account.cliProfile },
+  ]);
+  return problem === null
+    ? null
+    : `only one account per provider is supported without independent bindings: ${problem}`;
 }
 
-/** Adds configuration only: no login, credentials, folders or seat operations. */
+/** Validates existing login bindings and adds configuration; never logs in or creates profiles. */
 export function addAccount(path: string, account: z.infer<typeof NewAccountBody>, now: number) {
   const run = queue.then(async () => {
     const parsed = NewAccountBody.safeParse(account);
@@ -457,7 +462,13 @@ export function addAccount(path: string, account: z.infer<typeof NewAccountBody>
       throw new ConfigWriteError("current", "config.yaml has no accounts list");
     }
     accounts.add(
-      doc.createNode({ id: account.name, vendor: account.provider, alert_at: 80, stop_at: 100 }),
+      doc.createNode({
+        id: account.name,
+        vendor: account.provider,
+        alert_at: 80,
+        stop_at: 100,
+        ...(account.cliProfile === undefined ? {} : { cli_profile: account.cliProfile }),
+      }),
     );
     accounts.flow = false;
     const newText = doc.toString({ lineWidth: 0 });
@@ -467,7 +478,13 @@ export function addAccount(path: string, account: z.infer<typeof NewAccountBody>
     } catch {
       throw new ConfigWriteError("invalid", "the new account config would not load");
     }
-    const added = { id: account.name, vendor: account.provider, alertAt: 80, stopAt: 100 };
+    const added = {
+      id: account.name,
+      vendor: account.provider,
+      alertAt: 80,
+      stopAt: 100,
+      ...(account.cliProfile === undefined ? {} : { cliProfile: account.cliProfile }),
+    };
     if (!isDeepStrictEqual(next, { ...current, accounts: [...current.accounts, added] })) {
       throw new ConfigWriteError(
         "write",

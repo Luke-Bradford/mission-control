@@ -282,6 +282,7 @@ const pickWindow = (w: unknown): unknown =>
     : null;
 
 export interface AppServerDeps {
+  cliProfile?: string;
   spawn?: typeof spawn;
   timeoutMs?: number;
   maxBufferBytes?: number;
@@ -294,7 +295,10 @@ export function appServer(deps: AppServerDeps = {}): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const p = spawnFn("codex", ["app-server"], {
       stdio: ["pipe", "pipe", "ignore"],
-      env: usageProviderEnv("codex"),
+      env: {
+        ...usageProviderEnv("codex"),
+        ...(deps.cliProfile === undefined ? {} : { CODEX_HOME: deps.cliProfile }),
+      },
     });
     let buf = "";
     let done = false;

@@ -21,7 +21,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, crew, NO_LOCK } from "../src/hud.ts";
+import { agentViews, attentionItems, crew, NO_LOCK } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 
@@ -909,6 +909,22 @@ describe("crew seats in the rows", () => {
   const crewRun = (over: Partial<Run> = {}): Run =>
     run({ id: "c1", agentId: "GUIDO-1", repoId: "shop-app", ...over });
   const rowOf = (c: CcConfig, id: string) => crew(c, store, NOW).rows.find((r) => r.id === id);
+
+  it("shows a transferred run's binding without changing another seat or observed loop", () => {
+    const c = withCrew();
+    store.upsertRun(crewRun());
+    store.setSeatSession(seat({}));
+    store.setSetting(
+      "account-transfer:c1",
+      JSON.stringify({ source: "claude-main", target: "destination", pending: false }),
+    );
+    expect(rowOf(c, "GUIDO-1")?.accountId).toBe("destination");
+    expect(agentViews(c, store, NOW).find((a) => a.id === "GUIDO-1")?.accountId).toBe(
+      "destination",
+    );
+    expect(rowOf(c, "RETRO-1")?.accountId).toBe("claude-main");
+    expect(rowOf(c, "shop-app-ta")?.accountId).toBe("claude-main");
+  });
 
   it("lists seats after the loops, with role, mode, area, model and session", () => {
     const c = withCrew();

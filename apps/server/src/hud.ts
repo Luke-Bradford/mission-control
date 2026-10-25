@@ -66,6 +66,7 @@ import {
   type TestLockState,
   type TokenUsage,
 } from "@mc/core";
+import { runAccountId } from "./account-bindings.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
@@ -184,7 +185,7 @@ function loopViews(
         repoId: agent.repoId,
         ...crewFields(agent),
         loopKind: "crew",
-        accountId: agent.accountId,
+        accountId: runAccountId(store, seatRow?.runId ?? null, agent.accountId),
         state:
           hud === "error"
             ? "error"
@@ -468,7 +469,7 @@ export function crew(
         hudState: state,
         events: latest ? runEvents(store, latest, now, eventIndex) : [],
         stateSince,
-        accountId: agent.accountId,
+        accountId: view.accountId,
         kind: view.kind,
         loopKind: view.loopKind,
         role: view.role,

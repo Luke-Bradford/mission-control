@@ -1807,6 +1807,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         // Bound the encoded request before parsing; accepted messages stay whole.
         { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
       );
+      // Reader: apps/web/src/agent/Header.tsx
+      api.post<{ Params: { id: string } }>("/seats/:id/transfer", async (req, reply) => {
+        if (!crewGate(req.params.id, reply) || !supervisor) return reply;
+        const body = z.strictObject({ accountId: z.string().min(1).max(40) }).safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await supervisor.transferAccount(req.params.id, body.data.accountId);
+          bus.emit("agents");
+          return result;
+        } catch (e) {
+          return crewFail(e, reply);
+        }
+      });
       seatAction("/seats/:id/interrupt", NoBody, async (sup, id) => {
         await sup.interrupt(id);
         return { ok: true };

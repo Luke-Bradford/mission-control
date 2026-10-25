@@ -186,6 +186,7 @@ const stubSupervisor = (): Supervisor => {
   return {
     start: () => undefined,
     stopAll: async () => undefined,
+    transferAccount: call("transfer", { outcome: "resumed" as const }),
     startRun: call("start", { runId: "r-1", branch: "feature/5-x" }),
     startWatch: call("startWatch", { runId: "r-3" }),
     startReview: call("startReview", { runId: "r-2" }),
@@ -516,6 +517,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/start", { issue: 5 }],
   ["POST", "/api/seats/guido-1/message", { text: "hello", interrupt: true }],
   ["POST", "/api/seats/guido-1/interrupt"],
+  ["POST", "/api/seats/guido-1/transfer", { accountId: "destination" }],
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["POST", "/api/runs/shop-app-ta/resume", {}],
@@ -3469,6 +3471,16 @@ describe("crew routes", () => {
     store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
     expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
+
+  it("transfers one seat explicitly and returns the supervisor outcome", async () => {
+    const r = await post5("transfer", { accountId: "destination" });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ outcome: "resumed" });
+    expect(supervisorCalls).toEqual([["transfer", "guido-1", "destination"]]);
+    expect(
+      (await post5("transfer", { accountId: "destination", credential: "fictional" })).statusCode,
+    ).toBe(400);
   });
 
   it("start answers { runId, branch } and emits agents", async () => {

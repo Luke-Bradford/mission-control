@@ -106,6 +106,7 @@ import {
   watchCheckoutName,
   watchStartRefusedText,
 } from "@mc/core";
+import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
@@ -153,6 +154,7 @@ import {
   reviewBrief,
   rolePrompt,
   ticketBrief,
+  transferBrief,
   watchBrief,
 } from "./brief.ts";
 import {
@@ -176,6 +178,7 @@ import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
 import { probeCodexVersion } from "./codex-version.ts";
 import {
+  CODEX_DELIVERY,
   endKeeper,
   KEEPER_ENTRY,
   type KeeperHello,
@@ -421,7 +424,20 @@ export interface SeatFacts {
   rateLimitedUntil: number | null;
 }
 
+export type AccountTransferResult =
+  | { outcome: "resumed" | "fresh" }
+  | { outcome: "refused"; reason: string };
+
+interface AccountTransfer {
+  source: string;
+  target: string;
+  pending: boolean;
+  handoffId?: string;
+  handoffSessionId?: string;
+}
+
 export interface Supervisor {
+  transferAccount(seatId: string, accountId: string): Promise<AccountTransferResult>;
   /** Calls `fn` for each event from now on; returns the unsubscribe. A throwing `fn` is logged. */
   on(fn: (e: SupervisorEvent) => void): () => void;
   /** Tells listeners a seat's run got evidence (`mc report_evidence` calls this after recording). */
@@ -621,11 +637,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const seat = session.seats.find((s) => s.id === seatId);
       if (seat === undefined) continue;
       const repo = config.repos.find((r) => r.id === session.repoId);
-      return repo === undefined ? undefined : { seat, session, repo }; // the loader refuses a missing repo
+      const runId = store.seatSession(seatId)?.runId;
+      const binding =
+        runId == null || store.run(runId)?.endedAt !== null ? null : transferState(runId);
+      const bound = binding === null ? seat : { ...seat, accountId: binding.target };
+      return repo === undefined ? undefined : { seat: bound, session, repo }; // the loader refuses a missing repo
     }
     return undefined;
   }
 
+  const transferKey = (runId: string) => `account-transfer:${runId}`;
+  function transferState(runId: string): AccountTransfer | null {
+    const text = store.getSetting(transferKey(runId));
+    return text === null ? null : (JSON.parse(text) as AccountTransfer);
+  }
+  const transfers = new Map<string, Promise<AccountTransferResult>>();
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
@@ -828,6 +854,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     e: { code: number | null; signal: string | null; reason?: string },
   ): void {
     const seatId = l.info.seat.id;
+    if (transferState(l.run.id)?.pending) return;
     if (live.get(seatId) === l) live.delete(seatId);
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
@@ -1145,7 +1172,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * files).
    */
   async function checkedLaunch(...args: Parameters<typeof launch>): Promise<Live> {
-    const [info, run] = args;
+    const [configured, run] = args;
+    const binding = transferState(run.id);
+    const info =
+      binding === null
+        ? configured
+        : { ...configured, seat: { ...configured.seat, accountId: binding.target } };
+    args[0] = info;
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
@@ -1164,13 +1197,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     checkout: { path: string; branch: string; gitDir: string },
     resume: boolean,
     claudeMd: string | null,
+    keepPrompt = false,
   ): Live {
     const def = seatDef(info.seat);
-    const model = resume
-      ? resumeModel(info, run)
-      : run.reviewId != null && run.model !== null
-        ? run.model
-        : info.seat.model;
+    const model =
+      resume || keepPrompt
+        ? resumeModel(info, run)
+        : run.reviewId != null && run.model !== null
+          ? run.model
+          : info.seat.model;
     const tokenPath = crewTokenPath(deps.dbPath, run.id);
     const mcpPath = crewMcpPath(deps.dbPath, run.id);
     const hub = `http://${LOOPBACK_HOST}:${deps.hubPort}`;
@@ -1182,7 +1217,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       url: `${hub}${GUARD_CHECK_PATH}`,
     });
     const promptPath = crewPromptPath(deps.dbPath, run.id);
-    if (!resume || !existsSync(promptPath)) {
+    if ((!resume && !keepPrompt) || !existsSync(promptPath)) {
       if (resume) {
         log(
           `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md`,
@@ -1235,12 +1270,24 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
-        denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+        denyRead: [
+          ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+          ...config.accounts.flatMap((a) => {
+            const profile = a.vendor === "codex" ? codexProfile(a) : a.cliProfile;
+            return profile === undefined || !existsSync(profile) ? [] : [realpathSync(profile)];
+          }),
+        ],
       };
       if (run.vendor === "codex") {
         let auth: string;
         try {
-          auth = readFileSync(deps.codexAuthPath ?? join(homedir(), ".codex", "auth.json"), "utf8");
+          const account = config.accounts.find((a) => a.id === info.seat.accountId);
+          const profile = account === undefined ? join(homedir(), ".codex") : codexProfile(account);
+          const path =
+            account?.cliProfile === undefined && deps.codexAuthPath !== undefined
+              ? deps.codexAuthPath
+              : join(profile, "auth.json");
+          auth = readFileSync(path, "utf8");
         } catch (e) {
           if ((e as NodeJS.ErrnoException).code === "ENOENT")
             throw new Error("no Codex login", { cause: e });
@@ -1728,7 +1775,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         l.session.detach();
         live.delete(row.seatId);
       }
-      await takeBack(row);
+      const transfer = transferState(row.runId as string);
+      if (transfer?.pending) {
+        try {
+          await moveAccount(row.seatId, transfer);
+        } catch (e) {
+          log(`${row.seatId}: account transfer recovery failed: ${errText(e)}`);
+          setSeat(row.seatId, {
+            state: "error",
+            reason: "account transfer interrupted; run retained for recovery",
+          });
+        }
+      } else await takeBack(row);
     } catch (e) {
       log(`${row.seatId}: could not resume: ${errText(e)}`);
       try {
@@ -2068,6 +2126,200 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw e;
     }
     emit({ kind: "idle", seatId: row.seatId, runId: run.id, resumed: true });
+  }
+
+  async function discard(l: Live): Promise<void> {
+    fold(l);
+    if (l.foldTimer !== undefined) clearTimeout(l.foldTimer);
+    l.off();
+    await l.session.close();
+    if (live.get(l.info.seat.id) === l) live.delete(l.info.seat.id);
+  }
+
+  async function moveAccount(
+    seatId: string,
+    transfer: AccountTransfer,
+  ): Promise<AccountTransferResult> {
+    const refused = (reason: string): AccountTransferResult => ({ outcome: "refused", reason });
+    const row = store.seatSession(seatId);
+    const run = row?.runId == null ? null : store.run(row.runId);
+    const info = findSeat(seatId);
+    if (!info || !row || !run || !row.worktree || !row.cliSessionId || run.endedAt !== null)
+      return refused("seat has no run to move");
+    const save = () => store.setSetting(transferKey(run.id), JSON.stringify(transfer));
+    const old = live.get(seatId);
+    if (old) {
+      await old.chain;
+      await discard(old);
+    } else {
+      if (
+        !(await endKeeper(
+          crewKeeperDir(deps.dbPath, run.id),
+          deps.stopGraceMs ?? STOP_GRACE_MS,
+          log,
+        ))
+      )
+        return refused("old CLI process could not be safely ended; run retained for recovery");
+    }
+    if (stopping) return refused(SHUTTING_DOWN);
+    const sourceSessionId = row.cliSessionId;
+    const checkout =
+      run.reviewId != null
+        ? {
+            branch: "",
+            ...(await existingScratch(
+              info.session.checkout,
+              row.worktree,
+              store.review(run.reviewId)?.sha ?? "",
+            )),
+          }
+        : run.branch === null
+          ? { branch: "", ...(await existingDetached(info.session.checkout, row.worktree)) }
+          : await existingCheckout(info.session.checkout, row.worktree, run.branch);
+    if (stopping || runGone(run.id, seatId)) return refused(SHUTTING_DOWN);
+    const outboxPath = join(crewCodexDir(deps.dbPath, run.id), CODEX_OUTBOX_FILE);
+    const mergeOutbox = (handoff = false) => {
+      const entries = existsSync(outboxPath)
+        ? new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")))
+        : new Map<string, string>();
+      if (handoff) {
+        if (transfer.handoffSessionId !== sourceSessionId) {
+          transfer.handoffId = randomUUID();
+          transfer.handoffSessionId = sourceSessionId;
+        }
+        const current = store.run(run.id) ?? run;
+        const queued = [...entries];
+        entries.clear();
+        entries.set(
+          transfer.handoffId as string,
+          transferBrief({
+            call: call(info),
+            ticket: run.ticket,
+            title: run.ticketTitle ?? null,
+            branch: run.branch,
+            summary: current.summary,
+            plan: current.latestPlan ?? null,
+          }),
+        );
+        for (const [id, text] of queued) if (id !== transfer.handoffId) entries.set(id, text);
+      }
+      // The keeper receipts survive both a refused resume and a hub restart.
+      if (existsSync(run.transcriptPath)) {
+        for (const line of readFileSync(run.transcriptPath, "utf8").split("\n")) {
+          try {
+            const receipt = JSON.parse(line);
+            if (receipt.type === CODEX_DELIVERY) entries.delete(receipt.id);
+          } catch {
+            // A partial final transcript line has no receipt yet.
+          }
+        }
+      }
+      mkdirSync(crewCodexDir(deps.dbPath, run.id), { recursive: true, mode: 0o700 });
+      writePrivate(outboxPath, JSON.stringify([...entries]));
+      save();
+    };
+    let launched: Live | undefined;
+    const attempt = async (accountId: string, resume: boolean): Promise<Live | null> => {
+      const bound = { ...info, seat: { ...info.seat, accountId } };
+      try {
+        mergeOutbox(!resume);
+        launched = await checkedLaunch(
+          bound,
+          store.run(run.id) ?? run,
+          sourceSessionId,
+          checkout,
+          resume,
+          null,
+          true,
+        );
+        await launched.session.ready;
+        if (launched.session.alive) return launched;
+      } catch (e) {
+        log(`${seatId}: account transfer launch failed: ${errText(e)}`);
+      }
+      if (launched) await discard(launched);
+      launched = undefined;
+      return null;
+    };
+    let outcome: "resumed" | "fresh" = "resumed";
+    let moved = await attempt(transfer.target, true);
+    if (!moved && !stopping) {
+      outcome = "fresh";
+      moved = await attempt(transfer.target, false);
+    }
+    if (stopping) return refused(SHUTTING_DOWN);
+    if (!moved) {
+      transfer.target = transfer.source;
+      // A failed fresh start must not deliver its handoff to the recovered source.
+      if (transfer.handoffId && existsSync(outboxPath)) {
+        const entries = new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")));
+        entries.delete(transfer.handoffId);
+        writePrivate(outboxPath, JSON.stringify([...entries]));
+      }
+      save();
+      moved = await attempt(transfer.source, true);
+      transfer.pending = false;
+      save();
+      if (!moved) {
+        setSeat(seatId, {
+          state: "error",
+          reason: "account transfer failed; source resume failed; run retained",
+        });
+        return refused("account transfer failed; source resume failed; run retained for recovery");
+      }
+      setSeat(seatId, { state: "idle", reason: null });
+      return refused("account transfer failed; source session recovered");
+    }
+    transfer.pending = false;
+    save();
+    if (!moved.inTurn) setSeat(seatId, { state: "idle", reason: null });
+    emit({ kind: "idle", seatId, runId: run.id, resumed: outcome === "resumed" });
+    return { outcome };
+  }
+
+  async function transferAccount(
+    seatId: string,
+    accountId: string,
+  ): Promise<AccountTransferResult> {
+    const refused = (reason: string): AccountTransferResult => ({ outcome: "refused", reason });
+    const info = need(seatId);
+    refuseWhileHeld();
+    if (starting.has(seatId) || transfers.has(seatId)) return refused("seat is busy");
+    const row = store.seatSession(seatId);
+    const run = row?.runId == null ? null : store.run(row.runId);
+    if (!run || run.endedAt !== null || row?.cliSessionId == null || row.worktree === null)
+      return refused("seat has no run to move");
+    if ((modeOfSeat(info.seat) === "scratch") !== (run.reviewId != null))
+      return refused("seat mode changed; run cannot be transferred");
+    const source = config.accounts.find((a) => a.id === info.seat.accountId);
+    const target = config.accounts.find((a) => a.id === accountId);
+    if (!source || !target) return refused("unknown account");
+    if (target.vendor !== source.vendor || target.vendor !== (run.vendor ?? "claude"))
+      return refused("destination must use the same provider");
+    if (target.id === source.id) return refused("destination uses the same login");
+    if (target.vendor !== "codex")
+      return refused("provider cannot isolate an independently logged-in CLI profile");
+    const problem = accountBindingProblem([source, target]);
+    if (problem !== null) return refused(problem);
+    if (live.get(seatId)?.ending != null) return refused("seat is ending");
+    const transfer: AccountTransfer = { source: source.id, target: target.id, pending: true };
+    store.setSetting(transferKey(run.id), JSON.stringify(transfer));
+    starting.add(seatId);
+    const moving = moveAccount(seatId, transfer)
+      .catch((e: unknown) => {
+        log(`${seatId}: account transfer failed: ${errText(e)}`);
+        setSeat(seatId, {
+          state: "error",
+          reason: "account transfer interrupted; run retained for recovery",
+        });
+        return refused("account transfer interrupted; run retained for recovery");
+      })
+      .finally(() => {
+        transfers.delete(seatId);
+        starting.delete(seatId);
+      });
+    transfers.set(seatId, moving);
+    return moving;
   }
 
   async function startRun(
@@ -2701,6 +2953,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   async function endRun(seatId: string, opts: { hold?: boolean } = {}): Promise<void> {
+    if (transfers.has(seatId)) await transfers.get(seatId);
     const info = need(seatId);
     // FLIGHT's seat is never dealt a ticket: ending it always benches it, or the watch restarts it
     const hold = opts.hold ?? seatDef(info.seat).loop === "watch";
@@ -2773,6 +3026,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const run = store.run(runId);
     if (run === null || run.endedAt !== null) return;
     const seatId = run.agentId;
+    if (starting.has(seatId)) return;
     const info = findSeat(seatId);
     const row = store.seatSession(seatId);
     if (info === undefined) return;
@@ -3170,7 +3424,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
     startReview,
 
+    transferAccount,
+
     async message(seatId, text, opts) {
+      const moving = transfers.get(seatId);
+      if (moving) await moving;
       const l = liveOrRefuse(need(seatId));
       return enqueue(l, async () => {
         if (opts.interrupt && l.inTurn) {
@@ -3191,6 +3449,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     },
 
     async interrupt(seatId) {
+      if (transfers.has(seatId)) await transfers.get(seatId);
       const l = liveOrRefuse(need(seatId));
       return enqueue(l, async () => {
         if (l.inTurn) await sendInterrupt(l);

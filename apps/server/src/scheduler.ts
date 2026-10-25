@@ -23,6 +23,7 @@ import {
   type UsageSample,
   usageCollector,
 } from "@mc/core";
+import { codexProfile } from "./account-bindings.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
@@ -307,12 +308,20 @@ export function realCollectors(config: CcConfig): Collectors {
         },
         now,
       ),
-    codex: (acct, onError, now) =>
-      sampleCodex(
+    codex: (acct, onError, now) => {
+      const account = config.accounts.find((a) => a.id === acct);
+      const profile = account === undefined ? undefined : codexProfile(account);
+      return sampleCodex(
         acct,
-        { appServer: () => appServer(), latestRollout: () => latestRollout(), onError },
+        {
+          appServer: () => appServer({ cliProfile: profile }),
+          latestRollout: () =>
+            latestRollout(profile === undefined ? undefined : join(profile, "sessions")),
+          onError,
+        },
         now,
-      ),
+      );
+    },
     machine: (prevCpus, prev, now, testCommand) =>
       sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand }),
   };
