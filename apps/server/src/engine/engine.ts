@@ -1505,7 +1505,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (author === null) return true;
     const older = store
       .pullRequests(author.repoId)
-      .filter((pr) => pr.state === "open" && pr.number < row.prNumber);
+      .filter((pr) => pr.state !== "closed" && pr.number < row.prNumber);
     if (older.length === 0) return false;
     try {
       const rules = await rulesFor(author.repoId);
@@ -1519,11 +1519,50 @@ export function createEngine(deps: EngineDeps): Engine {
         const run = runs.find(
           (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
         );
-        if (run === undefined || pr.headSha === null) continue;
-        const shared = (await publisher.hardRuleTouches(run, pr.headSha, hardRules)).filter(
-          (path) => paths.includes(path),
-        );
+        // After merging, the diff against main can be empty. Keep the overlap already
+        // observed while open, including across restarts and replacement review rows.
+        const previouslyWaited = store
+          .loopEvents(0)
+          .some(
+            (event) =>
+              event.runId === author.id &&
+              event.text.startsWith(`waits for #${pr.number} (shared:`),
+          );
+        // Missing seats make hardRuleTouches return [], which cannot prove disjointness.
+        const shared =
+          previouslyWaited || run === undefined || pr.headSha === null || !seatKnown(run.agentId)
+            ? paths
+            : (await publisher.hardRuleTouches(run, pr.headSha, hardRules)).filter((path) =>
+                paths.includes(path),
+              );
         if (shared.length === 0) continue;
+        if (pr.state === "merged") {
+          if (
+            pr.mergeCommitSha &&
+            (await publisher.isDescendant(author, pr.mergeCommitSha, row.sha))
+          )
+            continue;
+          // Queue on the author's chain: review supervision can itself be called from a pass.
+          // Never release this row until ancestry is proved, even if updating fails or waits.
+          void onChain(author.id, async () => {
+            if (!reviewWanted(row)) return;
+            const current = store.run(author.id);
+            const loop = current?.loop;
+            if (!current || !loop || !pr.mergeCommitSha) return;
+            const worktree = worktreeOf(current, loop);
+            if (worktree === null) return;
+            const gate = await publisher.gateFacts(current, row.sha, null);
+            if (!gate.ok) return;
+            const mainSha = gate.facts.mainSha;
+            if (!(await publisher.isDescendant(current, pr.mergeCommitSha, mainSha))) return;
+            const result = await publisher.updateBranch(current, mainSha, worktree);
+            if (result.ok && result.kind !== "wait") {
+              branchUpdated(current, { ...loop }, mainSha, result, now());
+            }
+          });
+          waiting = true;
+          continue;
+        }
         waiting = true;
         store.addLoopEvent(
           reviewEventKey(author.id, row.id, `waits:${pr.number}:${pr.headSha}`),

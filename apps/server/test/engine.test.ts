@@ -2594,43 +2594,77 @@ describe("the engine runs reviews", () => {
     ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
   });
 
-  it("reviews the updated head after the older shared-hard-rule PR merges", async () => {
+  it("keeps a mergeable head queued until it includes the older merge", async () => {
     h.touches = ["packages/core/src/guard.ts"];
     await secondAuthor();
+    store.upsertPullRequests(
+      REPO,
+      store
+        .pullRequests(REPO)
+        .map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+      clock,
+    );
+    h.tip = SHA_C;
+    h.touchesByRun = { [RUN]: [], [RUN2]: h.touches };
+    h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+    await h.engine.tick();
+    await h.engine.reconcileRun(RUN2);
     expect(h.starts).toEqual([]);
-    const prs = store.pullRequests(REPO);
-    store.upsertPullRequests(
-      REPO,
-      prs.map((p) =>
-        p.number === 12 ? { ...p, state: "merged" } : { ...p, mergeable: "CONFLICTING" },
-      ),
-      clock,
-    );
-    h.gate = { ...need(h.gate), containsMain: false };
-    h.updateResults = [{ ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame: false }];
-    await h.engine.reconcileRun(RUN2);
-    await h.engine.reconcileRun(RUN2);
-    expect(store.runPush(RUN2)?.sha).toBe(SHA_C);
-    h.gate = { ...need(h.gate), containsMain: true };
-    store.upsertPullRequests(
-      REPO,
-      store.pullRequests(REPO).map((p) =>
-        p.number === 13
-          ? {
-              ...p,
-              headSha: SHA_C,
-              ci: "passing",
-              mergeable: "MERGEABLE",
-              checks: prRow().checks,
-            }
-          : p,
-      ),
-      clock,
-    );
-    await h.engine.reconcileRun(RUN2);
-    await h.engine.reconcileRun(RUN2);
-    expect(store.reviewsOfRun(RUN2).find((r) => r.state === "running")?.sha).toBe(SHA_C);
+    await vi.waitFor(() => expect(h.updates).toHaveLength(1));
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
   });
+
+  it("an older PR with a removed seat still blocks review", async () => {
+    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    const session = need(config.crew?.sessions[0]);
+    session.seats = session.seats.filter((s) => s.id !== "guido-1");
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+  });
+
+  it.each(["CONFLICTING", "MERGEABLE"] as const)(
+    "reviews the updated head after the older shared-hard-rule PR merges (%s)",
+    async (mergeable) => {
+      h.touches = ["packages/core/src/guard.ts"];
+      await secondAuthor();
+      expect(h.starts).toEqual([]);
+      const prs = store.pullRequests(REPO);
+      store.upsertPullRequests(
+        REPO,
+        prs.map((p) =>
+          p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : { ...p, mergeable },
+        ),
+        clock,
+      );
+      h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+      h.tip = SHA_C;
+      h.updateResults = [{ ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame: false }];
+      await h.engine.tick();
+      await h.engine.reconcileRun(RUN2);
+      await h.engine.reconcileRun(RUN2);
+      expect(store.runPush(RUN2)?.sha).toBe(SHA_C);
+      h.gate = { ...need(h.gate), containsMain: true };
+      store.upsertPullRequests(
+        REPO,
+        store.pullRequests(REPO).map((p) =>
+          p.number === 13
+            ? {
+                ...p,
+                headSha: SHA_C,
+                ci: "passing",
+                mergeable: "MERGEABLE",
+                checks: prRow().checks,
+              }
+            : p,
+        ),
+        clock,
+      );
+      await h.engine.reconcileRun(RUN2);
+      await h.engine.reconcileRun(RUN2);
+      expect(store.reviewsOfRun(RUN2).find((r) => r.state === "running")?.sha).toBe(SHA_C);
+    },
+  );
 
   it.each(["apps/a.ts", "packages/core/src/loop.ts"])(
     "does not hold a PR for unrelated or non-hard-rule files (%s)",
