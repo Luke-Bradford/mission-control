@@ -134,14 +134,14 @@ export async function main(): Promise<void> {
   // The `gh` login this hub claims tickets as, read once below; null leaves the engine taking nothing.
   let hubLogin: string | null = null;
   // A repo's board rules as the engine reads them: the queue, FLIGHT and every start use them.
-  const engineRules = async (repoId: RepoId) => {
+  const engineRules = async (repoId: RepoId, mainSha?: string) => {
     const repo = config.repos.find((r) => r.id === repoId);
     const session = config.crew?.sessions.find((s) => s.repoId === repoId);
     if (repo === undefined || session === undefined) {
       return new RepoRulesError(`${repoId}: no crew session reads this repo's rules`);
     }
     const notes: string[] = [];
-    const rules = await readRepoRules(repo.github, session.checkout, repo.rules, notes);
+    const rules = await readRepoRules(repo.github, session.checkout, repo.rules, notes, mainSha);
     for (const note of notes) log(`engine: ${note}`);
     return rules;
   };

@@ -153,6 +153,7 @@ const cache = new Map<
  * The repo's rules at `origin/HEAD` of the crew clone at `checkout`. Returns the error rather than
  * throwing (a block that does not parse, or a clone that cannot be read); a parse outcome is cached
  * by sha and user-config rules (the latest per checkout), a failed read is not.
+ * A merge gate supplies its fetched main sha so a moving origin/HEAD cannot change the rules.
  * Nonfatal parse notes are appended for the caller to log, only on a fresh parse.
  */
 export async function readRepoRules(
@@ -160,18 +161,21 @@ export async function readRepoRules(
   checkout: string,
   base: RepoRules = DEFAULT_REPO_RULES,
   notes: string[] = [],
+  mainSha?: string,
 ): Promise<RepoRules | RepoRulesError> {
   try {
     const common = await realpath(join(checkout, ".git"));
     // The full ref name: a local branch called `origin/HEAD` would shadow the short one.
-    const sha = (
-      await crewGit(
-        checkout,
-        ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"],
-        common,
-        { gitDir: common },
-      )
-    ).trim();
+    const sha =
+      mainSha ??
+      (
+        await crewGit(
+          checkout,
+          ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"],
+          common,
+          { gitDir: common },
+        )
+      ).trim();
     const known = cache.get(checkout);
     if (known !== undefined && known.sha === sha && known.base === base) return known.outcome;
     const markdown = await readRepoClaudeMd(checkout, sha);
