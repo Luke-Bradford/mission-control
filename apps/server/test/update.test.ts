@@ -1220,16 +1220,13 @@ describe("auto update", () => {
     });
   });
 
-  it("allows test-only paths while holding hard-rule tests and test tooling", () => {
+  it("holds test paths, including runtime safeguards and test tooling", () => {
     for (const path of [
       "apps/web/test/cards.test.ts",
       "apps/server/test/views.test.ts",
       "packages/core/test/board.test.ts",
       "packages/agentcomms/test/inbox.test.ts",
-    ]) {
-      expect(autoUpdatePath(path), path).toBe(true);
-    }
-    for (const path of [
+      "apps/server/test/session-actions.test.ts",
       "apps/server/test/brief.test.ts",
       "apps/server/test/checkouts.test.ts",
       "apps/server/test/codex-approval.test.ts",

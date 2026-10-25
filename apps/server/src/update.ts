@@ -59,7 +59,7 @@ export const UPDATE_MAX_BUFFER = 16 * 1024 * 1024;
 
 /**
  * The only paths `updates.hub: auto` applies without a person: the page's source and assets, and
- * docs, plus test files outside the hard-rule areas. Everything else (server and core code, roles,
+ * docs. Everything else (server and core code, roles,
  * any package.json, lockfiles, workspace and build config at any depth) is held for the operator or the controller session to run Update.
  */
 export const AUTO_UPDATE_PATHS = [
@@ -67,18 +67,11 @@ export const AUTO_UPDATE_PATHS = [
   "apps/web/public/**",
   "apps/web/index.html",
   "docs/**",
-  "apps/*/test/**/*.test.ts",
-  "apps/*/test/**/*.test.tsx",
-  "packages/*/test/**/*.test.ts",
 ] as const;
-/** Flat test names also cover modules inside the hard-rule source directories. */
-const HARD_RULE_TEST =
-  /^(?:apps\/server\/test\/(?:away|brief|checkouts|codex|crew-git|git-head|gh-read|guard|keeper|mcp|no-report|publish|queue|remove|restore|role-limits|rules|runtime|sd32|supervisor|test-lock|tokens|engine|flight|update|config|crew-apply)|packages\/core\/test\/(?:away|guard|flight|runtime|loop|review|repo-rules))(?:[./-])/;
 
 /** Whether auto-Update may apply a change to `path`. */
 export const autoUpdatePath = (path: string): boolean =>
   !path.split("/").some((part) => part === ".." || part === "." || part === "") &&
-  !HARD_RULE_TEST.test(path) &&
   !path.includes("/fixtures/") &&
   AUTO_UPDATE_PATHS.some((g) => globMatches(g, path));
 

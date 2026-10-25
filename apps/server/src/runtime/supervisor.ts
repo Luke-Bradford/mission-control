@@ -3001,7 +3001,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const l = live.get(seatId);
     const stuck = l?.run.id === runId && l.ending === null ? stuckSessionReason(l, now()) : null;
     if (stuck !== null && l) {
-      setState(l, "error", stuck);
+      starting.add(seatId);
+      try {
+        fold(l, true);
+        l.off();
+        setState(l, "error", stuck);
+        await l.session.close();
+        await endAndRemoveKeeper(seatId, runId);
+        l.session.detach();
+        if (live.get(seatId) === l) live.delete(seatId);
+      } finally {
+        starting.delete(seatId);
+      }
       return "no-session";
     }
     if (starting.has(seatId) || l?.ending != null) return "busy";
