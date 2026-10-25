@@ -167,10 +167,10 @@ it("assigns one card per stage, including set-aside review and merging precedenc
   expect(result.kpis.ciPassRate24h.redNow).toBe(1);
 });
 
-it("caps cards at six without capping totals; merged cards are newest first", () => {
+it("caps cards at eight without capping totals; merged cards are newest first", () => {
   store.replaceBoard(
     "repo",
-    Array.from({ length: 8 }, (_, i) => card(i + 1)),
+    Array.from({ length: 10 }, (_, i) => card(i + 1)),
   );
   store.replacePullRequests(
     "repo",
@@ -180,9 +180,9 @@ it("caps cards at six without capping totals; merged cards are newest first", ()
     NOW,
   );
   const result = summary();
-  expect(result.pipeline[0]).toMatchObject({ count: 8, oldestAt: NOW - 8 * MIN });
-  expect(result.pipeline[0]?.cards.map((c) => c.ticket)).toEqual([8, 7, 6, 5, 4, 3]);
-  expect(result.pipeline[5]?.cards.map((c) => c.ticket)).toEqual([10, 11, 12, 13, 14, 15]);
+  expect(result.pipeline[0]).toMatchObject({ count: 10, oldestAt: NOW - 10 * MIN });
+  expect(result.pipeline[0]?.cards.map((c) => c.ticket)).toEqual([10, 9, 8, 7, 6, 5, 4, 3]);
+  expect(result.pipeline[5]?.cards.map((c) => c.ticket)).toEqual([10, 11, 12, 13, 14, 15, 16, 17]);
   expect(result.pipeline[5]?.oldestAt).toBe(NOW - 8 * MIN);
 });
 
