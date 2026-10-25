@@ -1,4 +1,11 @@
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STREAM_TEXT_MAX } from "@mc/core";
@@ -70,6 +77,90 @@ describe("crew call ring", () => {
       stop();
     });
   }
+  for (const vendor of ["claude", "codex"] as const) {
+    it(`${vendor}: retains an unfinished call beyond fifteen minutes and closes its late result`, () => {
+      const { ring, transcriptPath, lines } = setup(vendor);
+      appendFileSync(transcriptPath, `${lines[0]}\n`);
+      ring.poll();
+      vi.advanceTimersByTime(16 * 60_000);
+      ring.poll();
+      expect(ring.calls("seat")).toHaveLength(1);
+      expect(ring.calls("seat")[0]?.end).toBeNull();
+      appendFileSync(
+        transcriptPath,
+        `${JSON.stringify({ ...JSON.parse(lines[1] as string), timestamp: new Date().toISOString() })}\n`,
+      );
+      ring.poll();
+      expect(ring.calls("seat")[0]?.end).not.toBeNull();
+      vi.advanceTimersByTime(15 * 60_000 + 1);
+      ring.poll();
+      expect(ring.calls("seat")).toEqual([]);
+    });
+  }
+
+  it("resolves Glob patterns to existing files within the requested checkout directory", () => {
+    const { ring, transcriptPath, cwd } = setup("claude");
+    mkdirSync(join(cwd, "src"));
+    mkdirSync(join(cwd, "src", "nested"));
+    writeFileSync(join(cwd, "src", "a.ts"), "");
+    writeFileSync(join(cwd, "src", "nested", "b.ts"), "");
+    writeFileSync(join(cwd, "src", "other.js"), "");
+    const inputs = [
+      { pattern: "**/*.ts" },
+      { path: "src", pattern: "**/*.ts" },
+      { pattern: "**/*.missing" },
+      { path: "..", pattern: "**/*.ts" },
+    ];
+    appendFileSync(
+      transcriptPath,
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          content: inputs.map((input, i) => ({
+            type: "tool_use",
+            id: `glob-${i}`,
+            name: "Glob",
+            input,
+          })),
+        },
+      })}\n`,
+    );
+    ring.poll();
+    expect(ring.calls("seat").map((c) => c.files.slice().sort())).toEqual([
+      ["file.ts", "src/a.ts", "src/nested/b.ts"],
+      ["src/a.ts", "src/nested/b.ts"],
+      [],
+      [],
+    ]);
+  });
+
+  it("measures the full NotebookEdit new_source payload before cleaning", () => {
+    const { ring, transcriptPath } = setup("claude");
+    const new_source = `${"cell\n".repeat(STREAM_TEXT_MAX)}last`;
+    appendFileSync(
+      transcriptPath,
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "notebook",
+              name: "NotebookEdit",
+              input: { notebook_path: "notes.ipynb", new_source },
+            },
+          ],
+        },
+      })}\n`,
+    );
+    ring.poll();
+    expect(ring.calls("seat")[0]).toMatchObject({
+      files: ["notes.ipynb"],
+      writeTok: Math.ceil(new_source.length / 4),
+      churn: [],
+    });
+  });
+
   it("updates Codex edits when their completed frame supplies the diff", () => {
     const { ring, transcriptPath } = setup("codex");
     appendFileSync(
@@ -186,6 +277,9 @@ describe("crew call ring", () => {
     );
     ring.poll();
     expect(ring.calls("seat")).toHaveLength(1);
+    vi.advanceTimersByTime(1000);
+    appendFileSync(transcriptPath, `${lines[1]}\n`);
+    ring.poll();
     vi.advanceTimersByTime(15 * 60_000 + 1);
     ring.poll();
     expect(ring.calls("seat")).toEqual([]);

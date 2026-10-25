@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, globSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { CrewVendor, MapCall, MapChange, MapTests } from "@mc/core";
@@ -105,7 +105,7 @@ export class CallRing {
       }
     }
     for (const [seat, calls] of this.rows) {
-      const kept = calls.filter((c) => (c.end ?? c.since) >= now - KEEP_MS);
+      const kept = calls.filter((c) => c.end === null || c.end >= now - KEEP_MS);
       if (kept.length) this.rows.set(seat, kept);
       else this.rows.delete(seat);
     }
@@ -138,6 +138,27 @@ export class CallRing {
     return this.safe(path);
   }
 
+  private glob(source: RingSource, input: Json): string[] {
+    const base = resolve(source.cwd, text(input.path) || ".");
+    const pattern = text(input.pattern);
+    if (!pattern) return [];
+    try {
+      for (const path of [
+        relative(source.cwd, base),
+        relative(realpathSync(source.cwd), realpathSync(base)),
+      ]) {
+        if (path === ".." || path.startsWith("../") || isAbsolute(path)) return [];
+      }
+      if (isAbsolute(pattern) || pattern.split(/[\\/]/).includes("..")) return [];
+      return globSync(pattern, { cwd: base })
+        .filter((path) => statSync(resolve(base, path)).isFile())
+        .map((path) => this.file(source, resolve(base, path), true))
+        .filter((path): path is string => path !== null);
+    } catch {
+      return [];
+    }
+  }
+
   private begin(
     source: RingSource,
     id: string,
@@ -153,10 +174,9 @@ export class CallRing {
     const paths = [
       input.file_path,
       input.notebook_path,
-      input.path,
+      ...(tool === "Glob" ? this.glob(source, input) : [input.path]),
       ...(Array.isArray(input.paths) ? input.paths : []),
     ];
-    if (tool === "Glob") paths.push(input.pattern);
     if (tool === "Bash")
       paths.push(
         ...(text(input.command).match(/[^\s'"`|;&()<>]+/g) ?? []).map((p) =>
@@ -171,7 +191,7 @@ export class CallRing {
       ),
     ];
     const churn: MapChange[] = [];
-    let written = 0;
+    let written = tool === "NotebookEdit" ? text(input.new_source).length : 0;
     const edits =
       tool === "MultiEdit" && Array.isArray(input.edits) ? input.edits.filter(isObj) : [input];
     if (["Edit", "Write", "MultiEdit"].includes(tool) && files[0] && !changes) {
