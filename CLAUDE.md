@@ -5,6 +5,7 @@ Renamed from Control Centre on 2026-10-18.
 
 ## Source of truth
 
+- Direction (why and how to choose, for FLIGHT and every seat): `docs/direction.md`.
 - Spec: `docs/superpowers/specs/2026-10-18-mission-control-design.md`.
 - Build loop and FLIGHT: `docs/superpowers/specs/2026-10-20-build-loop-flight-design.md` (the target). Built:
   Plan 7a (`docs/superpowers/plans/2026-10-21-plan-7a-engine-board.md`), RETRO reviews with rework rounds (7b-1),
