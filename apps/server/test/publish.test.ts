@@ -696,6 +696,27 @@ describe("gh maxBuffer", () => {
   });
 });
 
+describe("reviewPr", () => {
+  it("reads authoritative immutable PR inputs independently of SQLite", async () => {
+    ghAnswers.push(() => ({
+      code: 0,
+      stdout: JSON.stringify({
+        state: "MERGED",
+        headRefOid: SHA,
+        baseRefOid: BASE,
+        mergeCommit: { oid: BASE },
+      }),
+    }));
+    expect(await createPublisher(deps()).reviewPr(run(), 12)).toEqual({
+      state: "merged",
+      headSha: SHA,
+      baseSha: BASE,
+      mergeCommitSha: BASE,
+    });
+    expect(ghCalls[0]).toContain("state,headRefOid,baseRefOid,mergeCommit");
+  });
+});
+
 describe("hardRuleTouches", () => {
   beforeEach(() => {
     mkdirSync(join(dir, "clone", ".git"), { recursive: true });
@@ -758,6 +779,24 @@ describe("hardRuleTouches", () => {
     expect(await publisher.hardRuleTouches(run(), SHA, ["CLAUDE.md"], BASE)).toEqual(["CLAUDE.md"]);
     expect(calls[0]).toEqual(["merge-base", `${BASE}^1`, SHA]);
     expect(calls[1]).toEqual(["diff", "--name-only", "-z", "--no-renames", BASE, SHA, "--"]);
+  });
+
+  it("uses a persisted immutable base even when origin already contains the head", async () => {
+    const calls: string[][] = [];
+    const git = (async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      return args[0] === "merge-base" ? BASE : "CLAUDE.md\0";
+    }) as never;
+    expect(
+      await createPublisher(deps({ git })).hardRuleTouches(
+        run(),
+        SHA,
+        ["CLAUDE.md"],
+        undefined,
+        BASE,
+      ),
+    ).toEqual(["CLAUDE.md"]);
+    expect(calls[0]).toEqual(["merge-base", BASE, SHA]);
   });
 
   it("reads nothing for a sha that is not a sha, or with no rules", async () => {

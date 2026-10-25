@@ -103,6 +103,7 @@ import type {
   PublishResult,
   RerunResult,
   RerunStateResult,
+  ReviewPrSnapshot,
   UpdateBranchResult,
 } from "../src/engine/publish.ts";
 import {
@@ -282,6 +283,7 @@ interface Harness {
   touches: string[];
   touchesByRun?: Record<string, string[]>;
   duringTouches?: (runId: string) => void;
+  reviewPrOverride?: (number: number) => ReviewPrSnapshot | null;
   awayDiff?: AwayDiff | null;
   descends?: boolean;
   hardRuleLists: string[][];
@@ -421,6 +423,18 @@ function harness(): Harness {
     rules: async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true }),
     make: (over = {}) => {
       const publisher: Publisher = {
+        async reviewPr(r, number) {
+          if (x.reviewPrOverride) return x.reviewPrOverride(number);
+          const pr = store.pullRequests(r.repoId).find((p) => p.number === number);
+          return pr?.headSha
+            ? {
+                state: pr.state,
+                headSha: pr.headSha,
+                baseSha: "c".repeat(40),
+                mergeCommitSha: pr.mergeCommitSha ?? null,
+              }
+            : null;
+        },
         awayDiff: async () =>
           h.awayDiff === undefined
             ? { base: SHA_B, changes: [{ path: "apps/docs/guide.md", status: "A" }] }
@@ -2645,6 +2659,61 @@ describe("the engine runs reviews", () => {
     expect(h.updates).toEqual([]);
   });
 
+  it("refreshes authoritative state after a diff while SQLite still says open", async () => {
+    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    let merged = false;
+    h.reviewPrOverride = (number) => ({
+      state: number === 12 && merged ? "merged" : "open",
+      headSha: number === 12 ? SHA : SHA_B,
+      baseSha: SHA_C,
+      mergeCommitSha: number === 12 && merged ? SHA_C : null,
+    });
+    h.duringTouches = (id) => {
+      if (id === RUN) merged = true;
+    };
+    await secondAuthor();
+    expect(store.pullRequests(REPO).find((p) => p.number === 12)?.state).toBe("open");
+    expect(h.starts).toEqual([]);
+    h.touchesByRun[RUN] = ["packages/core/src/guard.ts"];
+    h.duringTouches = undefined;
+    const ancestry = vi.fn();
+    h.duringDescendant = ancestry;
+    await h.engine.tick();
+    expect(ancestry).toHaveBeenCalled();
+    expect(h.starts).toEqual([]);
+  });
+
+  it("invalidates an empty open-PR cache when the collector reports a merge", async () => {
+    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    let diffRead = false;
+    h.duringTouches = (id) => {
+      if (id === RUN) diffRead = true;
+    };
+    h.reviewPrOverride = (number) =>
+      number === 13 && diffRead
+        ? null
+        : {
+            state: "open",
+            headSha: number === 12 ? SHA : SHA_B,
+            baseSha: SHA_C,
+            mergeCommitSha: null,
+          };
+    await secondAuthor();
+    h.touchesByRun[RUN] = ["packages/core/src/guard.ts"];
+    store.upsertPullRequests(
+      REPO,
+      store
+        .pullRequests(REPO)
+        .map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+      clock,
+    );
+    h.reviewPrOverride = undefined;
+    h.duringTouches = undefined;
+    await h.engine.tick();
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+  });
+
   it("recomputes overlap when the older open head changes", async () => {
     h.touches = ["packages/core/src/guard.ts"];
     await secondAuthor();
@@ -2722,7 +2791,8 @@ describe("the engine runs reviews", () => {
       clock,
     );
     h.tip = SHA_C;
-    h.touchesByRun = { [RUN]: [], [RUN2]: h.touches };
+    // The merged diff is reconstructed against its immutable first parent.
+    h.touchesByRun = { [RUN]: h.touches, [RUN2]: h.touches };
     h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
     await h.engine.tick();
     await h.engine.reconcileRun(RUN2);

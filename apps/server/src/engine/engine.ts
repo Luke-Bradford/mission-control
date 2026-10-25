@@ -1557,15 +1557,45 @@ export function createEngine(deps: EngineDeps): Engine {
       const rules = await rulesFor(author.repoId);
       if (rules === null) return true;
       const hardRules = effectiveHardRules(rules, flightPowersOf(config, author.repoId));
-      const paths = await publisher.hardRuleTouches(author, row.sha, hardRules);
+      const own = await publisher.reviewPr(author, row.prNumber);
+      if (
+        own === null ||
+        own.state !== "open" ||
+        (own.headSha !== row.sha && own.headSha !== store.runPush(author.id)?.sha)
+      )
+        return true;
+      const baseFor = (number: number, head: string, base: string): string => {
+        const key = `review-base:${author.repoId}:${number}:${head}`;
+        const saved = store.getSetting(key);
+        if (saved !== null) return saved;
+        store.setSetting(key, base);
+        return base;
+      };
+      const paths = await publisher.hardRuleTouches(
+        author,
+        row.sha,
+        hardRules,
+        undefined,
+        baseFor(row.prNumber, own.headSha, own.baseSha),
+      );
+      if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
+        return true;
+      const snapshots = new Map<number, string>();
       const runs = store.runsActiveSince(0);
       let waiting = false;
-      for (const pr of older) {
+      for (const listed of older) {
+        const pr = { ...listed };
         const run = runs.find(
           (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
         );
         if (run === undefined) continue;
-        const key = `review-touches:${author.repoId}:${pr.number}:${pr.headSha}:${JSON.stringify(hardRules)}`;
+        const snapshot = await publisher.reviewPr(run, pr.number);
+        if (snapshot === null) return true;
+        snapshots.set(pr.number, JSON.stringify(snapshot));
+        Object.assign(pr, snapshot);
+        if (pr.state === "closed") continue;
+        const base = baseFor(pr.number, snapshot.headSha, snapshot.baseSha);
+        const key = `review-touches:v2:${author.repoId}:${pr.number}:${pr.headSha}:${base}:${pr.state}:${pr.mergeCommitSha}:${JSON.stringify(hardRules)}`;
         const saved = store.getSetting(key);
         let touched: string[];
         if (saved !== null) {
@@ -1580,14 +1610,9 @@ export function createEngine(deps: EngineDeps): Engine {
             pr.headSha,
             hardRules,
             pr.state === "merged" ? (pr.mergeCommitSha ?? undefined) : undefined,
+            base,
           );
-          const current = store.pullRequests(author.repoId).find((p) => p.number === pr.number);
-          if (
-            !current ||
-            current.state !== pr.state ||
-            current.headSha !== pr.headSha ||
-            current.mergeCommitSha !== pr.mergeCommitSha
-          )
+          if (JSON.stringify(await publisher.reviewPr(run, pr.number)) !== JSON.stringify(snapshot))
             return true;
           store.setSetting(key, JSON.stringify({ headSha: pr.headSha, files: touched }));
         }
@@ -1635,18 +1660,10 @@ export function createEngine(deps: EngineDeps): Engine {
           now(),
         );
       }
-      const current = store.pullRequests(author.repoId);
-      if (
-        older.some((pr) => {
-          const latest = current.find((p) => p.number === pr.number);
-          return (
-            !latest ||
-            latest.state !== pr.state ||
-            latest.headSha !== pr.headSha ||
-            latest.mergeCommitSha !== pr.mergeCommitSha
-          );
-        })
-      )
+      for (const [number, snapshot] of snapshots) {
+        if (JSON.stringify(await publisher.reviewPr(author, number)) !== snapshot) return true;
+      }
+      if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
         return true;
       return waiting;
     } catch (e) {
