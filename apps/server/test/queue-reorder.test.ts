@@ -18,6 +18,7 @@ import {
   type QueueReorderDeps,
   resolveQueueReorder,
 } from "../src/queue-reorder.ts";
+import type { Supervisor } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;
@@ -352,5 +353,51 @@ it.each(["priority", "area", "lane", "status"])(
     if (change === "status") c.status = "Backlog";
     await expect(resolveQueueReorder(deps, item.key, "approve")).rejects.toThrow();
     expect(deps.edit).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["Approve", "Deny"])(
+  "Item panel answer %s resolves through FLIGHT's message route",
+  async (answer) => {
+    required(config.crew?.sessions[0]).seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "account",
+      model: "opus",
+      area: [],
+    });
+    const { item } = await propose();
+    expect(item.agentId).toBeNull();
+    const message = vi.fn();
+    const app = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      queueReorder: deps,
+      supervisor: {
+        status: () => ({ enabled: true, note: null }),
+        message,
+      } as unknown as Supervisor,
+    });
+    try {
+      const attention = await app.inject({ method: "GET", url: "/api/attention" });
+      expect(attention.json().find((i: { key: string }) => i.key === item.key)?.agentId).toBeNull();
+      const send = () =>
+        app.inject({
+          method: "POST",
+          url: "/api/seats/flight-1/message",
+          payload: { text: `Re: ${item.key} · ${item.text}\n\n${answer}` },
+        });
+      expect((await send()).statusCode).toBe(200);
+      expect(deps.edit).toHaveBeenCalledTimes(answer === "Approve" ? 2 : 0);
+      expect(store.queue("guido-1").map((q) => q.issue)).toEqual(
+        answer === "Approve" ? [2, 1] : [1, 2],
+      );
+      expect((await send()).statusCode).toBe(409);
+      expect(deps.edit).toHaveBeenCalledTimes(answer === "Approve" ? 2 : 0);
+      expect(message).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
   },
 );

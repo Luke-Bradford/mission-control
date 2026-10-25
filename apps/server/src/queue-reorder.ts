@@ -157,7 +157,7 @@ function approvalItem(
     acked: false,
     key: `note:${key}`,
     kind: "approval",
-    agentId: p.seat,
+    agentId: null,
     repoId: p.repoId,
     text,
     tool: null,
@@ -209,7 +209,7 @@ export async function proposeQueueReorder(
   deps.store.saveQueueReorder(key, JSON.stringify(p), item.at, {
     key,
     kind: "approval",
-    seatId,
+    seatId: null,
     repoId: p.repoId,
     runId: null,
     text: item.text,
