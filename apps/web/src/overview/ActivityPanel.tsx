@@ -8,14 +8,14 @@ import {
   SEAT_TURN_END_TEXT,
   SEAT_TURN_START_TEXT,
 } from "@mc/core";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { operatorItems } from "../attention.ts";
-import { useTz } from "../clock.ts";
+import { useNow, useTz } from "../clock.ts";
 import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
 import { Expandable } from "../components/Expandable.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
-import { RESOURCES, useResource } from "../data.ts";
-import { hhmm } from "../fmt.ts";
+import { activityKey, compareActivity, RESOURCES, useResource } from "../data.ts";
+import { hhmm, rel } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
@@ -187,17 +187,19 @@ function ActivityText({
   );
 }
 
-/** What happened across the crew (catalogue 2.1.3), oldest first, from runs, escalations and sources. */
+/** What happened across the crew (catalogue 2.1.3), newest first, from runs, escalations and sources. */
 export function ActivityPanel() {
   const events = useResource<ActivityRow[]>(RESOURCES.activity);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const attention = useResource<AttentionItem[]>(RESOURCES.attention);
   const tz = useTz();
-  const { inView, inRepo } = useSessionScope();
+  const now = useNow();
+  const { session, inView, inRepo } = useSessionScope();
   const [filter, setFilter] = useState<Filter>(rememberedFilter);
   const [frozen, setFrozen] = useState<LogRow[] | null>(null);
   const list = useRef<HTMLDivElement>(null);
+  const [reading, setReading] = useState<{ session: string; rows: LogRow[] } | null>(null);
 
   const agents = new Map(crew?.rows.map((r) => [r.id, r]));
   const repoIds = new Set([
@@ -280,24 +282,44 @@ export function ActivityPanel() {
       const repo = repoOf(e.who);
       return repo === null || inRepo(repo);
     })
-    .sort((a, b) => b.at - a.at)
-    .slice(0, SHOWN)
-    .reverse();
-  // Events have no id: key by content, and number repeats so twins never share a key.
+    .sort(compareActivity)
+    .slice(0, SHOWN);
+  const held = reading?.session === session ? reading.rows : null;
+  const rowKey = (row: LogRow) => row.attentionKey ?? activityKey(row);
+  const current = new Map<string, LogRow[]>();
+  for (const row of rows) {
+    const key = rowKey(row);
+    const group = current.get(key) ?? [];
+    group.push(row);
+    current.set(key, group);
+  }
+  // Hold membership and order while reading, but keep existing rows current.
+  const displayed = held?.map((row) => current.get(rowKey(row))?.shift() ?? row) ?? rows;
+  const heldCounts = new Map<string, number>();
+  for (const row of displayed) {
+    const key = rowKey(row);
+    heldCounts.set(key, (heldCounts.get(key) ?? 0) + 1);
+  }
+  const newCount = held
+    ? rows.filter((row) => {
+        const key = rowKey(row);
+        const count = heldCounts.get(key) ?? 0;
+        heldCounts.set(key, Math.max(0, count - 1));
+        return count === 0;
+      }).length
+    : 0;
+  // Number identical source rows so both remain visible.
   const seen = new Map<string, number>();
-  const keyed = rows.map((e) => {
-    const base = `${e.at}:${e.who}:${e.kind}:${isComms(e) ? `${e.to}:` : ""}${e.text}`;
+  const keyed = displayed.map((e) => {
+    const base = e.attentionKey ?? activityKey(e);
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
     return { e, key: `${base}#${n}` };
   });
 
-  const newest = keyed.at(-1)?.key ?? null;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll to the newest row when it changes
-  useEffect(() => {
-    const el = list.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [newest, filter]);
+  useLayoutEffect(() => {
+    if (!held && list.current) list.current.scrollTop = 0;
+  }, [held]);
 
   return (
     <Panel
@@ -306,6 +328,16 @@ export function ActivityPanel() {
       sub={SUB[filter]}
       actions={
         <>
+          <button
+            type="button"
+            className="sm ghost"
+            disabled={newCount === 0}
+            aria-hidden={newCount === 0}
+            style={{ visibility: newCount > 0 ? "visible" : "hidden", width: "9ch" }}
+            onClick={() => setReading(null)}
+          >
+            {newCount} new
+          </button>
           <Seg
             label="Activity filter"
             options={FILTERS}
@@ -313,6 +345,7 @@ export function ActivityPanel() {
             onChange={(value) => {
               setFilter(value);
               setFrozen(null);
+              setReading(null);
               try {
                 localStorage.setItem(FILTER_KEY, value);
               } catch {
@@ -330,12 +363,25 @@ export function ActivityPanel() {
         </>
       }
     >
-      <div className="scroll" id="actList" ref={list}>
+      <div
+        className="scroll"
+        id="actList"
+        ref={list}
+        aria-live="off"
+        style={{ overflowAnchor: "none" }}
+        onScroll={() => {
+          if ((list.current?.scrollTop ?? 0) > 0) {
+            if (!held) setReading({ session, rows });
+          } else setReading(null);
+        }}
+      >
         {keyed.map(({ e, key }) => {
           if (isComms(e)) {
             return (
               <div key={key} className="arow k-comms">
-                <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
+                <span className="t num" title={tz ? rel(e.at, now, tz) : undefined}>
+                  {tz ? hhmm(e.at, tz) : "—"}
+                </span>
                 <span className="g">{GLYPH.comms}</span>
                 <span className="log-who ellip">
                   <CommsEnd id={e.who} />
@@ -364,7 +410,9 @@ export function ActivityPanel() {
           const split = splitRef(e.text, e.ref);
           return (
             <div key={key} className={`arow ${KIND_CLASS[e.kind] ?? FALLBACK_CLASS}`}>
-              <span className="t num">{tz ? hhmm(e.at, tz) : "—"}</span>
+              <span className="t num" title={tz ? rel(e.at, now, tz) : undefined}>
+                {tz ? hhmm(e.at, tz) : "—"}
+              </span>
               <span className={red ? "g crit-t" : "g"}>{GLYPH[e.kind] ?? FALLBACK_GLYPH}</span>
               <span className="log-who ellip" title={e.who}>
                 {e.runId ? (
