@@ -1,4 +1,5 @@
 /** A Codex app-server thread over the same keeper transport as the Claude driver. */
+
 import { randomUUID } from "node:crypto";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import {
@@ -11,6 +12,7 @@ import {
   type SessionEvent,
 } from "@mc/core";
 import { str } from "../util.ts";
+import { CODEX_MCP_ELICITATION } from "./codex-wire.ts";
 import { CODEX_DELIVERY } from "./keeper.ts";
 import {
   type CrewSession,
@@ -19,7 +21,7 @@ import {
   startKeeperSession,
 } from "./session.ts";
 
-export const CODEX_MCP_ELICITATION = "mcpServer/elicitation/request";
+export { CODEX_MCP_ELICITATION } from "./codex-wire.ts";
 
 /** Taken from an active mcpToolCall item, never from the elicitation's display text. */
 export interface CodexMcpCall {

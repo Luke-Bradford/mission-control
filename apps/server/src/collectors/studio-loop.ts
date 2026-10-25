@@ -424,7 +424,7 @@ function collect(
     let digest: RunDigest | null = null;
     let folded = false;
     if (r.transcriptPath !== "" && (status === "running" || f.startAt >= now - FOLD_WINDOW_MS)) {
-      const facts = foldPath(state.transcripts, r.transcriptPath);
+      const facts = foldPath(state.transcripts, r.transcriptPath, undefined, r.vendor);
       if (facts) {
         digest = facts.digest;
         applyFacts(r, facts);

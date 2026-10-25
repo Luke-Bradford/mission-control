@@ -370,7 +370,7 @@ beforeEach(async () => {
     now: () => clock,
     logger: { stream: { write: (s: string) => void logs.push(s) } },
     heartbeatMs: 50,
-    readStream: (path, limit) => streamReads(path, limit),
+    readStream: (path, limit, vendor) => streamReads(path, limit, vendor),
     configPath,
     crewReloader: stubReloader(),
     supervisor: stubSupervisor(),
@@ -1556,9 +1556,9 @@ describe("agent stream", () => {
     const p = transcript("t.jsonl", line("x", NOW - 1000), NOW - 1000);
     store.upsertRun(run({ id: "r1", transcriptPath: p }));
     await stream("/api/agents/shop-app-ta/stream");
-    expect(streamReads).toHaveBeenLastCalledWith(p, 200);
+    expect(streamReads).toHaveBeenLastCalledWith(p, 200, undefined);
     await stream("/api/agents/shop-app-ta/stream?limit=500");
-    expect(streamReads).toHaveBeenLastCalledWith(p, 500);
+    expect(streamReads).toHaveBeenLastCalledWith(p, 500, undefined);
     for (const bad of ["0", "501", "abc", "1.5", "-1", "", "1e2"]) {
       const r = await get(`/api/agents/shop-app-ta/stream?limit=${bad}`);
       expect(r.statusCode, `limit=${bad}`).toBe(400);
@@ -4336,6 +4336,26 @@ describe("seat ids in the agent routes", () => {
       reason: null,
     });
   });
+
+  it.each(["codex", undefined] as const)(
+    "GET /api/agents/<seat id>/stream reads Codex events with vendor %s",
+    async (vendor) => {
+      const p = join(dir, "codex.jsonl");
+      writeFileSync(p, readFileSync(resolve(import.meta.dirname, "fixtures/stream/codex.jsonl")));
+      store.upsertRun(
+        run({ id: "cx1", agentId: "guido-1", vendor, startedAt: NOW, transcriptPath: p }),
+      );
+      const response = await get("/api/agents/guido-1/stream");
+      expect(response.statusCode).toBe(200);
+      const events = response.json<AgentStream>().events;
+      expect(events.some((e) => e.kind === "msg" && e.text === "Done. Tests pass.")).toBe(true);
+      expect(events.find((e) => e.text === "Bash")?.tool).toMatchObject({
+        result: "Tests passed\n",
+        status: "completed",
+        exitCode: 0,
+      });
+    },
+  );
 
   describe("a seat's Files tab", () => {
     const gitIn = (cwd: string, ...args: string[]) =>
