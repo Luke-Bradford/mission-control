@@ -1306,6 +1306,34 @@ describe("reused worktrees", () => {
     });
 
   it.each([false, true])(
+    "briefs and records leftover changes only when dirty (%s)",
+    async (dirty) => {
+      const first = await checkout();
+      if (dirty) writeFileSync(join(first.path, "leftover file.txt"), "keep this work\n");
+      const { sup } = make();
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await until(() => expect(userLines().length).toBeGreaterThan(0));
+      const brief = userLines().at(-1);
+      const events = store
+        .loopEvents(0)
+        .filter((e) => e.runId === runId)
+        .map((e) => e.text);
+      if (dirty) {
+        expect(brief).toContain("## Leftover changes");
+        expect(brief).toContain('?? "leftover file.txt"');
+        expect(events).toContain("started on a worktree with 1 uncommitted files");
+        expect(readFileSync(join(first.path, "leftover file.txt"), "utf8")).toBe(
+          "keep this work\n",
+        );
+      } else {
+        expect(brief).not.toContain("Leftover changes");
+        expect(events.some((text) => text.includes("uncommitted files"))).toBe(false);
+      }
+    },
+  );
+
+  it.each([false, true])(
     "records a start conflict, briefs the seat and permits mc commit (orphan: %s)",
     async (orphan) => {
       const first = await checkout();
@@ -2163,6 +2191,42 @@ import(${JSON.stringify(fixture)});
     await until(() => expect(existsSync(folder)).toBe(false));
     expect(existsSync(spawn.env.TMPDIR)).toBe(false);
   });
+
+  it.each([false, true])(
+    "sends leftover changes to Codex only when a reused worktree is dirty (%s)",
+    async (dirty) => {
+      const first = await prepareCheckout({
+        checkout: clone,
+        worktreesRoot: root,
+        sessionId: "mc-crew",
+        seatId: "guido-1",
+        issue: 42,
+        title: TICKET.title,
+      });
+      if (dirty) writeFileSync(join(first.path, "leftover file.txt"), "keep this work\n");
+      const { sup } = codex();
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await until(() =>
+        expect(recorded().some((message) => message.method === "turn/start")).toBe(true),
+      );
+      const brief = recorded().find((message) => message.method === "turn/start").params.input[0]
+        .text as string;
+      const events = store
+        .loopEvents(0)
+        .filter((event) => event.runId === runId)
+        .map((event) => event.text);
+      if (dirty) {
+        expect(brief).toContain("## Leftover changes");
+        expect(brief).toContain('?? "leftover file.txt"');
+        expect(events).toContain("started on a worktree with 1 uncommitted files");
+      } else {
+        expect(brief).not.toContain("Leftover changes");
+        expect(events.some((text) => text.includes("uncommitted files"))).toBe(false);
+      }
+      await sup.endRunByEngine(runId);
+    },
+  );
 
   it("moves running to idle on turn notifications, including failed turns", async () => {
     const { sup } = codex({ holdTurn: true });

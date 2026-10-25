@@ -28,6 +28,8 @@ export const CLAUDE_MD_MAX = 64 * 1024;
 /** Heads the repo's CLAUDE.md in the prompt file. */
 export const CLAUDE_MD_HEADING = "# The repository's CLAUDE.md";
 
+const LEFTOVER_CHANGES_MAX = 30;
+
 export interface BriefInput {
   /** The seat's call sign: its id upper-cased (`GUIDO-1`). */
   call: string;
@@ -59,6 +61,8 @@ export interface BriefInput {
   profile?: RunProfile;
   /** Every profile's name, for the planner's line about another template. */
   profileNames?: readonly string[];
+  /** Quoted porcelain status from a reused ticket worktree. */
+  leftoverChanges?: readonly string[];
 }
 
 const codeList = (cmds: readonly string[]): string => cmds.map((c) => `\`${c}\``).join(", ");
@@ -143,6 +147,21 @@ export function ticketBrief(i: BriefInput): string {
     ...(profile.length > 0 ? [...profile, ""] : []),
     ran,
     last,
+    ...((i.leftoverChanges?.length ?? 0) > 0
+      ? [
+          "",
+          "## Leftover changes",
+          "",
+          "these are leftovers from an earlier attempt: review them, keep what's right, discard the rest, then continue",
+          "",
+          "git status --porcelain:",
+          "",
+          ...(i.leftoverChanges ?? []).slice(0, LEFTOVER_CHANGES_MAX).map((line) => `    ${line}`),
+          ...((i.leftoverChanges?.length ?? 0) > LEFTOVER_CHANGES_MAX
+            ? ["", `(Showing the first ${LEFTOVER_CHANGES_MAX} files.)`]
+            : []),
+        ]
+      : []),
   ].join("\n");
 }
 
