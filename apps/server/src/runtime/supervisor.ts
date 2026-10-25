@@ -2260,6 +2260,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      if ((checkout.leftoverChanges?.length ?? 0) > 0) {
+        store.addLoopEvent(
+          `${runId}:leftover-changes`,
+          runId,
+          `started on a worktree with ${checkout.leftoverChanges?.length} uncommitted files`,
+          startedAt,
+        );
+      }
       let installNote: string | undefined;
       const synced = await inClone(info.session.checkout, async () => {
         const result = await syncReusedWorktree(info.session.checkout, checkout, {
@@ -2362,6 +2370,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? (info.repo.commands?.writer ?? [])
             : (info.repo.commands?.review ?? []),
         fullSuite: info.repo.fullSuite ?? [],
+        leftoverChanges: checkout.leftoverChanges,
         ...(run.profile ? { profile: run.profile } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });

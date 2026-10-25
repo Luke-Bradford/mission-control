@@ -88,6 +88,27 @@ const READONLY_CLOSE =
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
 
+describe("ticketBrief leftover changes", () => {
+  it("omits the block for a fresh or clean worktree", () => {
+    expect(ticketBrief(input)).not.toContain("Leftover changes");
+    expect(ticketBrief({ ...input, leftoverChanges: [] })).not.toContain("Leftover changes");
+  });
+
+  it("shows quoted porcelain entries and caps the listing at 30 lines", () => {
+    const leftoverChanges = Array.from({ length: 31 }, (_, n) => `?? file-${n}.txt`);
+    leftoverChanges[0] = '?? "space and\\ttab.txt"';
+    const brief = ticketBrief({ ...input, leftoverChanges });
+    expect(brief).toContain("## Leftover changes");
+    expect(brief).toContain(
+      "these are leftovers from an earlier attempt: review them, keep what's right, discard the rest, then continue",
+    );
+    expect(brief).toContain('    ?? "space and\\ttab.txt"');
+    expect(brief).toContain("    ?? file-29.txt");
+    expect(brief).not.toContain("file-30.txt");
+    expect(brief).toContain("(Showing the first 30 files.)");
+  });
+});
+
 describe("ticketBrief profile lines", () => {
   const base = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
   const chosen = (profile: Profile, route: ProfileRoute): RunProfile => ({
