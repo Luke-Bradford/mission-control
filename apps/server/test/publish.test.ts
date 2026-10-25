@@ -1845,6 +1845,67 @@ describe("fileMinorFindings", () => {
     });
     expect(ghCalls).toHaveLength(4);
   });
+  it("refuses RETRO's fallback instead of silently dropping findings", async () => {
+    ghAnswers.push(() => ({
+      code: 0,
+      stdout: JSON.stringify({
+        body: `${MINOR_HEADING}\n\nRETRO logged 2 minor findings; they are listed in Mission Control.`,
+        labels: [],
+      }),
+    }));
+    expect(await createPublisher(deps()).fileMinorFindings(setup(), 12)).toMatchObject({
+      ok: false,
+    });
+    expect(ghCalls).toHaveLength(1);
+  });
+  it.each([0, 1, 2])(
+    "recovers a creation interrupted before saving its number (%s matches)",
+    async (matches) => {
+      const r = setup();
+      ghAnswers.push(
+        () => ({
+          code: 0,
+          stdout: JSON.stringify({ body: `${MINOR_HEADING}\n- Finding`, labels: [] }),
+        }),
+        () => {
+          expect(store.run(r.id)?.loop).toHaveProperty("minorIssueCreation", { prNumber: 12 });
+          throw new Error("connection lost after issue creation");
+        },
+      );
+      expect(await createPublisher(deps()).fileMinorFindings(r, 12)).toMatchObject({ ok: false });
+      expect(store.run(r.id)?.loop).toHaveProperty("minorIssueCreation", { prNumber: 12 });
+      ghCalls.length = 0;
+      ghAnswers.push((args) => {
+        expect(args.slice(0, 2)).toEqual(["issue", "list"]);
+        expect(args).toContain("--state=all");
+        return {
+          code: 0,
+          stdout: JSON.stringify([
+            ...Array.from({ length: matches }, (_, i) => ({
+              number: 81 + i,
+              title: "Tech debt: minor findings from #12",
+              body: "Minor findings from #12.\n\n- Finding\n",
+            })),
+            {
+              number: 90,
+              title: "Tech debt: minor findings from #120",
+              body: "Minor findings from #12.\n",
+            },
+            {
+              number: 91,
+              title: "Tech debt: minor findings from #12",
+              body: "Minor findings from #120.\n",
+            },
+          ]),
+        };
+      });
+      if (matches === 1) ghAnswers.push(() => ({ code: 0, stdout: "" }));
+      const result = await createPublisher(deps()).fileMinorFindings(store.run(r.id) ?? r, 12);
+      expect(result).toMatchObject(matches === 1 ? { ok: true, issueNumber: 81 } : { ok: false });
+      expect(ghCalls[0]?.slice(0, 2)).toEqual(["issue", "list"]);
+      expect(ghCalls.some((args) => args[1] === "create")).toBe(false);
+    },
+  );
   it("files nothing without a minor section", async () => {
     ghAnswers.push(() => ({
       code: 0,

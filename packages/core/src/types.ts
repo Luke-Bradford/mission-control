@@ -177,6 +177,8 @@ export interface RunLoop {
   } | null;
   /** The tech-debt issue filed from this run's merged PR. */
   minorIssueNumber?: number;
+  /** Saved before issue creation; an interrupted write must be reconciled before retrying. */
+  minorIssueCreation?: { prNumber: number };
   /** The merge under way for `sha`, and the steps of it already done. */
   merging?: { sha: string; done: MergeStep[] } | null;
   /** Merging main into the branch conflicted: the markers are in the worktree, and the seat resolves them. */

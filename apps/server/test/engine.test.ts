@@ -2913,6 +2913,16 @@ describe("the engine runs reviews", () => {
       expect(loopOf().merging?.done).toContain("file-minor");
       await h.engine.reconcileRun(RUN);
       expect(h.steps.filter((s) => s === "file-minor")).toHaveLength(1);
+      await h.engine.tick();
+      expect(store.notes().some((n) => n.key === `${RUN}:file-minor`)).toBe(true);
+      h.engine.stop();
+      h.engine = h.make();
+      h.engine.start();
+      await h.engine.tick();
+      expect(store.notes().some((n) => n.key === `${RUN}:file-minor`)).toBe(true);
+      store.clearNote(`${RUN}:file-minor`, clock);
+      await h.engine.tick();
+      expect(store.notes().some((n) => n.key === `${RUN}:file-minor`)).toBe(false);
     });
 
     /** A clean review of the pushed sha, with CI passing: the gate is open. */

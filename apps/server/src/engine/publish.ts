@@ -1204,6 +1204,51 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const file = crewPrBodyPath(deps.dbPath);
       let wrote = false;
       try {
+        const intent =
+          run.loop.minorIssueCreation ?? deps.store.run(run.id)?.loop?.minorIssueCreation;
+        if (intent !== undefined) {
+          if (intent.prNumber !== prNumber)
+            return final("minor issue creation intent names another PR");
+          const listed = await ghJson(
+            [
+              "issue",
+              "list",
+              `--repo=${repo.github}`,
+              "--state=all",
+              `--search=${minorIssueTitle(prNumber)} in:title`,
+              "--limit=100",
+              "--json=number,title,body",
+            ],
+            "issue list",
+          );
+          if (isRefusal(listed)) return listed;
+          if (!Array.isArray(listed) || listed.length >= 100)
+            return final(
+              "minor issue creation outcome is uncertain; collect the findings manually",
+            );
+          const matches = listed.filter(
+            (issue: unknown): issue is { number: number } =>
+              typeof issue === "object" &&
+              issue !== null &&
+              "title" in issue &&
+              issue.title === minorIssueTitle(prNumber) &&
+              "body" in issue &&
+              typeof issue.body === "string" &&
+              issue.body.split(/\r?\n/)[0] === `Minor findings from #${prNumber}.` &&
+              "number" in issue &&
+              Number.isSafeInteger(issue.number) &&
+              Number(issue.number) > 0,
+          );
+          if (matches.length !== 1)
+            return final(
+              "minor issue creation outcome is uncertain; collect the findings manually",
+            );
+          const issueNumber = matches[0]?.number;
+          if (issueNumber === undefined) return final("minor issue could not be recovered");
+          run.loop.minorIssueNumber = issueNumber;
+          deps.store.setRunLoop(run.id, run.loop);
+          return await addItem(issueNumber);
+        }
         const pr = await ghJson(
           ["pr", "view", String(prNumber), `--repo=${repo.github}`, "--json=body,labels"],
           "pr view",
@@ -1211,7 +1256,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (isRefusal(pr)) return pr;
         if (typeof pr.body !== "string") return final("the PR body could not be read");
         const findings = parseMinorFindings(pr.body);
-        if (findings.length === 0) return { ok: true };
+        if (findings.length === 0) {
+          const section = pr.body.split(MINOR_HEADING)[1]?.split(/^#{1,2}\s/m)[0] ?? "";
+          if (/logged [1-9]\d* minor findings?; they are listed in Mission Control\./.test(section))
+            return final(
+              "RETRO logged minor findings in Mission Control without listing them in the PR body",
+            );
+          return { ok: true };
+        }
         const areas = (labels: unknown): string[] =>
           Array.isArray(labels)
             ? labels.flatMap((l: unknown) => {
@@ -1231,6 +1283,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         ];
         await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
         wrote = true;
+        run.loop.minorIssueCreation = { prNumber };
+        deps.store.setRunLoop(run.id, run.loop);
         const made = await deps.gh(
           [
             "issue",

@@ -883,6 +883,8 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("attention");
         return;
       case "clear-note":
+        // Collection failures wait for explicit resolution, including after loop reconciliation.
+        if (a.key === `${run.id}:file-minor`) return;
         store.clearNote(a.key, at);
         bus.emit("attention");
         return;
@@ -1446,6 +1448,7 @@ export function createEngine(deps: EngineDeps): Engine {
     for (const n of store.notes()) {
       const run = n.runId === null ? null : store.run(n.runId);
       if (run === null || run.endedAt === null) continue;
+      if (n.key === `${run.id}:file-minor`) continue;
       // a merged run's leftover branch waits (its PR is done by design) until the branch is gone
       if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) {
         if (await publisher.localBranchGone(run)) {
