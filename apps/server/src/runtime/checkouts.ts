@@ -170,6 +170,8 @@ export interface Checkout {
   path: string;
   /** false: this ticket's worktree already existed and is reused. */
   created: boolean;
+  /** Porcelain status captured before syncing a reused ticket worktree. */
+  leftoverChanges?: readonly string[];
   /** origin's default branch as origin reported it at the start; a new branch starts here. */
   baseSha: string;
   /** The worktree's own git dir, `<clone>/.git/worktrees/<name>` (for the seat's sandbox). */
@@ -1245,7 +1247,21 @@ export async function prepareCheckout(
         { detail: path },
       );
     }
-    return { branch, path, created: false, baseSha, gitDir };
+    const status = await crewGit(
+      path,
+      [
+        "--no-optional-locks",
+        "-c",
+        "core.quotePath=true",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+      ],
+      common,
+      { gitDir },
+    );
+    const leftoverChanges = status.split("\n").filter((line) => line !== "");
+    return { branch, path, created: false, baseSha, gitDir, leftoverChanges };
   }
 
   // A worktree whose directory was deleted is still registered and would block the add.

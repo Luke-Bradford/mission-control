@@ -649,8 +649,27 @@ describe("prepareCheckout", () => {
     const first = await prepareCheckout(input());
     writeFileSync(join(wtPath(), "wip.txt"), "wip\n");
     const again = await prepareCheckout(input());
-    expect(again).toEqual({ ...first, created: false });
+    expect(again).toEqual({ ...first, created: false, leftoverChanges: ["?? wip.txt"] });
     expect(existsSync(join(wtPath(), "wip.txt"))).toBe(true);
+  });
+
+  it("captures clean status and quotes spaces and control characters in reused worktrees", async () => {
+    const first = await prepareCheckout(input());
+    expect(first.leftoverChanges).toBeUndefined();
+    expect((await prepareCheckout(input())).leftoverChanges).toEqual([]);
+    writeFileSync(join(first.path, "space name.txt"), "keep");
+    writeFileSync(join(first.path, "tab\tline\n.txt"), "keep");
+    mkdirSync(join(first.path, "nested"));
+    writeFileSync(join(first.path, "nested/one.txt"), "one");
+    writeFileSync(join(first.path, "nested/two.txt"), "two");
+    const reused = await prepareCheckout(input());
+    expect(reused.leftoverChanges).toEqual([
+      "?? nested/one.txt",
+      "?? nested/two.txt",
+      '?? "space name.txt"',
+      '?? "tab\\tline\\n.txt"',
+    ]);
+    expect(readFileSync(join(first.path, "tab\tline\n.txt"), "utf8")).toBe("keep");
   });
 
   it("refuses a path that is not this ticket's checkout", async () => {
