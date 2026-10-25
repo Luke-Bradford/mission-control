@@ -434,6 +434,7 @@ interface AccountTransfer {
   pending: boolean;
   handoffId?: string;
   handoffSessionId?: string;
+  queued?: [string, string][];
 }
 
 export interface Supervisor {
@@ -1778,7 +1779,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const transfer = transferState(row.runId as string);
       if (transfer?.pending) {
         try {
-          await moveAccount(row.seatId, transfer);
+          const moving = moveAccount(row.seatId, transfer);
+          transfers.set(row.seatId, moving);
+          try {
+            await moving;
+          } finally {
+            transfers.delete(row.seatId);
+          }
         } catch (e) {
           log(`${row.seatId}: account transfer recovery failed: ${errText(e)}`);
           setSeat(row.seatId, {
@@ -2147,6 +2154,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (!info || !row || !run || !row.worktree || !row.cliSessionId || run.endedAt !== null)
       return refused("seat has no run to move");
     const save = () => store.setSetting(transferKey(run.id), JSON.stringify(transfer));
+    const outboxPath = join(crewCodexDir(deps.dbPath, run.id), CODEX_OUTBOX_FILE);
+    // A late source receipt can rewrite the file from its older in-memory queue.
+    // Persist the snapshot before yielding, including across a hub restart.
+    transfer.queued = [
+      ...new Map<string, string>([
+        ...(transfer.queued ?? []),
+        ...(existsSync(outboxPath) ? JSON.parse(readFileSync(outboxPath, "utf8")) : []),
+      ]),
+    ].filter(([id]) => id !== transfer.handoffId);
+    save();
     const old = live.get(seatId);
     if (old) {
       await old.chain;
@@ -2177,11 +2194,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? { branch: "", ...(await existingDetached(info.session.checkout, row.worktree)) }
           : await existingCheckout(info.session.checkout, row.worktree, run.branch);
     if (stopping || runGone(run.id, seatId)) return refused(SHUTTING_DOWN);
-    const outboxPath = join(crewCodexDir(deps.dbPath, run.id), CODEX_OUTBOX_FILE);
     const mergeOutbox = (handoff = false) => {
       const entries = existsSync(outboxPath)
         ? new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")))
         : new Map<string, string>();
+      for (const [id, text] of transfer.queued ?? []) entries.set(id, text);
       if (handoff) {
         if (transfer.handoffSessionId !== sourceSessionId) {
           transfer.handoffId = randomUUID();
@@ -2216,6 +2233,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       mkdirSync(crewCodexDir(deps.dbPath, run.id), { recursive: true, mode: 0o700 });
       writePrivate(outboxPath, JSON.stringify([...entries]));
+      transfer.queued = [...entries].filter(([id]) => id !== transfer.handoffId);
       save();
     };
     let launched: Live | undefined;
@@ -2259,6 +2277,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       save();
       moved = await attempt(transfer.source, true);
       transfer.pending = false;
+      delete transfer.queued;
       save();
       if (!moved) {
         setSeat(seatId, {
@@ -2271,6 +2290,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return refused("account transfer failed; source session recovered");
     }
     transfer.pending = false;
+    delete transfer.queued;
     save();
     if (!moved.inTurn) setSeat(seatId, { state: "idle", reason: null });
     emit({ kind: "idle", seatId, runId: run.id, resumed: outcome === "resumed" });
@@ -3022,6 +3042,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   async function endRunByEngine(runId: string): Promise<void> {
+    if (!mayAct()) return;
+    const moving = transfers.get(store.run(runId)?.agentId ?? "");
+    if (moving) await moving;
     if (!mayAct()) return;
     const run = store.run(runId);
     if (run === null || run.endedAt !== null) return;

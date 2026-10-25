@@ -102,6 +102,7 @@ it("keeps another seat on its shared source binding and sends queued input once"
   const first = await sup.startRun("guido-1", 42);
   const second = await sup.startRun("fao-1", 43);
   await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  await until(() => expect(store.seatSession("fao-1")?.state).toBe("idle"));
   writeFileSync(
     join(crewCodexDir(dbPath, first.runId), "outbox.json"),
     JSON.stringify([["fictional-pending", "queued before transfer"]]),
@@ -155,6 +156,8 @@ it("recovers a pending transfer after hub restart with its original checkout and
   const { sup, cfg } = setup();
   const { runId } = await sup.startRun("guido-1", 42);
   await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const outbox = join(crewCodexDir(dbPath, runId), "outbox.json");
+  writeFileSync(outbox, JSON.stringify([["fictional-restart", "pending across restart"]]));
   let release!: () => void;
   prep.resumeGate = new Promise<void>((r) => {
     release = r;
@@ -164,6 +167,8 @@ it("recovers a pending transfer after hub restart with its original checkout and
     expect(store.getSetting(`account-transfer:${runId}`)).toContain('"pending":true'),
   );
   await sup.stopAll();
+  // Simulate the source persisting its stale queue before the interrupted transfer restarts.
+  writeFileSync(outbox, "[]");
   release();
   await moving;
   prep.resumeGate = null;
@@ -173,6 +178,15 @@ it("recovers a pending transfer after hub restart with its original checkout and
   await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
   await until(() =>
     expect(store.getSetting(`account-transfer:${runId}`)).toContain('"pending":false'),
+  );
+  await until(() =>
+    expect(
+      recorded().filter(
+        (r) =>
+          ["turn/start", "turn/steer"].includes(r.method) &&
+          r.params.input[0].text === "pending across restart",
+      ),
+    ).toHaveLength(1),
   );
   expect(store.run(runId)?.endedAt).toBeNull();
   expect(
@@ -192,4 +206,61 @@ it("refuses a provider without independently isolated profiles", async () => {
     reason: expect.stringContaining("cannot isolate"),
   });
   expect(recorded().filter((r) => Array.isArray(r.argv))).toHaveLength(1);
+});
+
+it("retains pending input if a late source receipt rewrites the outbox during transfer", async () => {
+  const { sup } = setup();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const outbox = join(crewCodexDir(dbPath, runId), "outbox.json");
+  writeFileSync(outbox, JSON.stringify([["fictional-pending", "pending through shutdown"]]));
+  let release!: () => void;
+  prep.resumeGate = new Promise<void>((r) => {
+    release = r;
+  });
+  const moving = sup.transferAccount("guido-1", "destination");
+  try {
+    await until(() =>
+      expect(JSON.parse(store.getSetting(`account-transfer:${runId}`) ?? "{}").queued).toEqual([
+        ["fictional-pending", "pending through shutdown"],
+      ]),
+    );
+    // A source driver can persist its older in-memory outbox while shutting down.
+    writeFileSync(outbox, "[]");
+  } finally {
+    release();
+    prep.resumeGate = null;
+  }
+  expect(await moving).toEqual({ outcome: "resumed" });
+  await until(() =>
+    expect(
+      recorded().filter(
+        (r) =>
+          ["turn/start", "turn/steer"].includes(r.method) &&
+          r.params.input[0].text === "pending through shutdown",
+      ),
+    ).toHaveLength(1),
+  );
+});
+
+it("honours an engine end requested during transfer after the transfer finishes", async () => {
+  const { sup } = setup();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  let release!: () => void;
+  prep.resumeGate = new Promise<void>((r) => {
+    release = r;
+  });
+  const moving = sup.transferAccount("guido-1", "destination");
+  const ending = sup.endRunByEngine(runId);
+  try {
+    expect(store.run(runId)?.endedAt).toBeNull();
+  } finally {
+    release();
+    prep.resumeGate = null;
+  }
+  await moving;
+  await ending;
+  expect(store.run(runId)?.endedBy).toBe("engine");
+  expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
 });
