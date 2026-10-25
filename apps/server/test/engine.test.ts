@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -860,6 +861,9 @@ describe("report to a draft PR", () => {
       sha: SHA,
       paths: [".github/ci.yml"],
       flightPowers: "standard",
+      hardRulesHash: createHash("sha256")
+        .update(JSON.stringify(DEFAULT_REPO_RULES.hardRules))
+        .digest("hex"),
     });
     expect(noteKeys()).toContain(`flag:${RUN}:hard-rules:${SHA}`);
   });
@@ -3749,7 +3753,14 @@ describe("the engine runs reviews", () => {
         attentionItems(config, store, clock).find((i) => i.key === `note:ready:${RUN}:${SHA}`)
           ?.owner,
       ).toBe("operator");
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: h.touches, flightPowers: "superuser" });
+      expect(loopOf().touches).toEqual({
+        sha: SHA,
+        paths: h.touches,
+        flightPowers: "superuser",
+        hardRulesHash: createHash("sha256")
+          .update(JSON.stringify(["x/**"]))
+          .digest("hex"),
+      });
       expect(h.steps).toEqual([]);
       expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
         readyHardRuleText(`${REPO}#7`, 12, h.touches),
@@ -3765,7 +3776,14 @@ describe("the engine runs reviews", () => {
       for (const repo of config.repos) repo.flightPowers = "superuser";
       reported(first().id, []);
       await vi.waitFor(() => expect(noteKeys()).toContain(`ready:${RUN}:${SHA}`));
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: h.touches, flightPowers: "superuser" });
+      expect(loopOf().touches).toEqual({
+        sha: SHA,
+        paths: h.touches,
+        flightPowers: "superuser",
+        hardRulesHash: createHash("sha256")
+          .update(JSON.stringify(["x/**"]))
+          .digest("hex"),
+      });
       expect(h.steps).toEqual([]);
       expect(store.notes().find((n) => n.key === `ready:${RUN}:${SHA}`)?.text).toBe(
         readyHardRuleText(`${REPO}#7`, 12, h.touches),
@@ -3779,8 +3797,67 @@ describe("the engine runs reviews", () => {
       await gateOpen();
       await vi.waitFor(() => expect(h.steps).toEqual(ALL));
       expect(h.hardRuleLists).toEqual([["x/**"]]);
-      expect(loopOf().touches).toEqual({ sha: SHA, paths: [], flightPowers: "standard" });
+      expect(loopOf().touches).toEqual({
+        sha: SHA,
+        paths: [],
+        flightPowers: "standard",
+        hardRulesHash: createHash("sha256")
+          .update(JSON.stringify(["x/**"]))
+          .digest("hex"),
+      });
     });
+
+    it("re-reads touches when hard rules change for the same sha", async () => {
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["x/**"] });
+      h.touches = ["docs/new.md"];
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      const reads = h.hardRuleLists.length;
+      h.rules = async () => ({ ...DEFAULT_REPO_RULES, hardRulesSet: true, hardRules: ["docs/**"] });
+      await h.engine.reconcileRun(RUN);
+      expect(h.hardRuleLists).toHaveLength(reads + 1);
+      expect(loopOf().touches?.paths).toEqual(["docs/new.md"]);
+    });
+
+    it("re-reads strays when the seat area changes for the same sha and main tip", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      expect(h.gateReads.at(-1)?.known).toBe(true);
+      const seat = need(config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === SEAT));
+      seat.area = ["docs/**"];
+      await h.engine.reconcileRun(RUN);
+      expect(h.gateReads.at(-1)?.known).toBe(false);
+    });
+
+    it("discards cached strays if the new area cannot be read", async () => {
+      await toReview();
+      await h.engine.reconcileRun(RUN);
+      const seat = need(config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === SEAT));
+      seat.area = ["docs/**"];
+      h.gate = null;
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().gate).toBeNull();
+      expect(h.steps).toEqual([]);
+    });
+
+    it.each(["close", "delete-remote"])(
+      "retries transient %s failures past three ticks",
+      async (step) => {
+        const down = { ok: false, text: "gh is down", transient: true } as const;
+        h.stepResults[step] = [down, down, down, down];
+        await gateOpen();
+        await vi.waitFor(() => expect(h.steps).toContain(step));
+        for (let n = 0; n < 3; n++) {
+          clock += ENGINE_TICK_MS;
+          await h.engine.reconcileRun(RUN);
+          expect(loopOf().parked).toBeNull();
+        }
+        clock += ENGINE_TICK_MS;
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().phase).toBe("done");
+        expect(h.steps.filter((s) => s === "merge")).toHaveLength(1);
+      },
+    );
 
     it("a merge refused finally parks the run as merge-step and runs no later step", async () => {
       h.stepResults.merge = [{ ok: false, text: "the head moved", transient: false }];
@@ -3823,6 +3900,25 @@ describe("the engine runs reviews", () => {
         reason: mergeStepFailedText("merge", "gh is down"),
         ended: false,
       });
+    });
+
+    it("parks post-merge housekeeping on the tenth transient tick", async () => {
+      const down = { ok: false, text: "gh is down", transient: true } as const;
+      h.stepResults.close = Array.from({ length: 10 }, () => down);
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toContain("close"));
+      for (let n = 2; n <= 10; n++) {
+        clock += ENGINE_TICK_MS;
+        await h.engine.reconcileRun(RUN);
+        expect(h.steps.filter((s) => s === "close")).toHaveLength(n);
+        if (n < 10) expect(loopOf().parked).toBeNull();
+      }
+      expect(loopOf().parked).toEqual({
+        kind: "merge-step",
+        reason: mergeStepFailedText("close the issue", "gh is down"),
+        ended: false,
+      });
+      expect(h.steps).not.toContain("delete-remote");
     });
 
     it("a local branch that cannot be deleted raises a note and does not park the run", async () => {
@@ -4045,6 +4141,8 @@ describe("the engine runs reviews", () => {
     h.minorResults = [down, down, down];
     draftWorkspace();
     await toReview();
+    // Drain the review-start pass before reporting findings.
+    await h.engine.reconcileRun(RUN);
     reported(first().id, [finding("Minor")]);
     await vi.waitFor(() => expect(h.minorCalls).toHaveLength(1));
     await h.engine.reconcileRun(RUN);
@@ -4325,6 +4423,8 @@ describe("the engine runs reviews", () => {
       store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: WT });
       await toReview();
       expect(h.asides).toEqual([RUN]);
+      // Drain the review-start pass before changing the seat or findings.
+      await h.engine.reconcileRun(RUN);
     }
 
     it("freed at review", async () => {

@@ -147,7 +147,12 @@ export interface RunLoop {
   budgetExtra: number;
   parked: { kind: string; reason: string; ended: boolean } | null;
   /** Hard-rule files in the pushed sha's diff. */
-  touches: { sha: string; paths: string[]; flightPowers?: FlightPowers } | null;
+  touches: {
+    sha: string;
+    paths: string[];
+    flightPowers?: FlightPowers;
+    hardRulesHash?: string;
+  } | null;
   /** `<phase>:<epoch>` whose card move is done. */
   cardFor: string | null;
   /** CAPCOM waived the review findings on this sha (un-park of a review park). */
@@ -162,6 +167,7 @@ export interface RunLoop {
    * paths outside the seat's area or protected.
    */
   gate?: {
+    area?: string[];
     sha: string;
     mainSha: string;
     missionControlChanged?: boolean;

@@ -9,6 +9,7 @@
  * a turn, `report_evidence`, a run ending, the GitHub poll, and the 60 s tick. It is off when
  * crew is disabled, in a preview, or with `MC_NO_LOOP_WRITES=1` (`enabled`).
  */
+import { createHash } from "node:crypto";
 import {
   AWAY_BUG_VERIFIED,
   AWAY_DOC_PATH,
@@ -431,18 +432,6 @@ export function createEngine(deps: EngineDeps): Engine {
     bus.emit("agents");
   }
 
-  /**
-   * Whether the hub may merge in the repo: a `merge` workspace whose rules set `hard_rules`. The
-   * last read of the rules answers (the tick and the pass's other reads keep it fresh), so a pass
-   * awaits only for a repo not read yet. Unreadable rules are not an answer: no merge.
-   */
-  function mayMerge(repoId: RepoId): boolean | Promise<boolean> {
-    if (config.repos.find((r) => r.id === repoId)?.autonomy !== "merge") return false;
-    const known = hardRulesSet.get(repoId);
-    if (known !== undefined) return known;
-    return rulesFor(repoId).then(() => hardRulesSet.get(repoId) === true);
-  }
-
   function snapshot(
     run: Run,
     loop: RunLoop,
@@ -697,7 +686,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const repo = config.repos.find((r) => r.id === run.repoId);
     /**
      * A refused push or PR: a transient one is counted, any other parks the run. A refused merge
-     * step (`step`) parks it as `merge-step`, after the same count of transient ones.
+     * step (`step`) parks it as `merge-step`; housekeeping gets ten transient tries.
      */
     const refused = (
       r: { text: string; transient: boolean },
@@ -712,8 +701,9 @@ export function createEngine(deps: EngineDeps): Engine {
           lastTransient.set(run.id, at);
         }
         cur.lastRefusal = r.text;
-        if (step === undefined || cur.transient < REFUSAL_TRIES) {
-          if (cur.transient >= REFUSAL_TRIES) out.again = true;
+        const limit = cur.merging?.done.includes("merge") ? 10 : REFUSAL_TRIES;
+        if (step === undefined || cur.transient < limit) {
+          if (step === undefined && cur.transient >= REFUSAL_TRIES) out.again = true;
           // a merge step that did not go through stops the pass: the later steps wait for it
           if (step !== undefined) out.parked = true;
           return;
@@ -1203,9 +1193,10 @@ export function createEngine(deps: EngineDeps): Engine {
   async function pass(runId: string, round = 0): Promise<void> {
     // read before the run's row is, so no await sits between the row and the loop saved from it
     const repoId = store.run(runId)?.repoId;
-    const may = repoId === undefined ? false : mayMerge(repoId);
-    // (awaited only when the rules were not read yet: a pass otherwise starts in one turn)
-    const mergeAllowed = typeof may === "boolean" ? may : await may;
+    const rules = repoId === undefined ? null : await rulesFor(repoId);
+    const mergeAllowed =
+      config.repos.find((r) => r.id === repoId)?.autonomy === "merge" &&
+      rules?.hardRulesSet === true;
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
@@ -1244,13 +1235,18 @@ export function createEngine(deps: EngineDeps): Engine {
       !(input.carry?.from === input.flightClearedSha && input.carry.to === pushed.sha)
     )
       input.flightClearedSha = null;
+    const hardRulesHash =
+      rules === null
+        ? null
+        : createHash("sha256").update(JSON.stringify(rules.hardRules)).digest("hex");
     if (
       run.endedAt === null &&
       pushed !== null &&
-      (input.touches?.sha !== pushed.sha || input.touches.flightPowers !== flightPowers)
+      (input.touches?.sha !== pushed.sha ||
+        input.touches.flightPowers !== flightPowers ||
+        input.touches.hardRulesHash !== hardRulesHash)
     ) {
-      input.touches = null; // an unreadable new floor must not reuse the old clearance
-      const rules = await rulesFor(run.repoId);
+      input.touches = null; // unreadable rules must not reuse the old clearance
       if (rules !== null) {
         try {
           const paths = await publisher.hardRuleTouches(
@@ -1258,7 +1254,12 @@ export function createEngine(deps: EngineDeps): Engine {
             pushed.sha,
             effectiveHardRules(rules, flightPowers),
           );
-          input.touches = { sha: pushed.sha, paths, flightPowers };
+          input.touches = {
+            sha: pushed.sha,
+            paths,
+            flightPowers,
+            hardRulesHash: hardRulesHash ?? undefined,
+          };
         } catch (e) {
           log(
             `${runId}: could not read the hard-rule files: ${e instanceof Error ? e.message : String(e)}`,
@@ -1277,10 +1278,15 @@ export function createEngine(deps: EngineDeps): Engine {
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       (conflicting || reviewerOf(config, run.agentId, reviewRoleOf(run)) !== null)
     ) {
-      // origin's tip is read every pass; the other reads only when the sha or the tip changed
-      const known = input.gate?.sha === pushed.sha ? input.gate : null;
+      // Origin's tip is read every pass; cached strays also depend on the seat area.
+      const area = [...(seatConfig(run.agentId)?.area ?? [])];
+      const known =
+        input.gate?.sha === pushed.sha && JSON.stringify(input.gate.area) === JSON.stringify(area)
+          ? input.gate
+          : null;
+      if (known === null) input.gate = null;
       const g = await publisher.gateFacts(run, pushed.sha, known);
-      if (g.ok) input.gate = { sha: pushed.sha, ...g.facts };
+      if (g.ok) input.gate = { sha: pushed.sha, ...g.facts, area };
       else log(`${runId}: could not read the merge gate: ${g.text}`);
     }
     if (flightPowers === "superuser" && pushed?.sha === input.reviewWaivedSha)
