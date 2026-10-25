@@ -3793,6 +3793,26 @@ kbd {
   }
 }
 @media (max-width: 760px) {
+  #agentsList {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  #agentsList .trow {
+    min-width: 680px;
+  }
+  #agentsList .trow > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+  #agentsList .trow.flight > :first-child {
+    background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+  }
+  #agentsList .trow:not(.head):hover > :first-child,
+  #agentsList .trow.sel > :first-child {
+    background: var(--surface-2);
+  }
   /* the board stacks its columns; each is a header (name, count), the open one shows its cards */
   .kanban {
     flex-direction: column;

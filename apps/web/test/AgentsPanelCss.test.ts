@@ -62,3 +62,16 @@ it("keeps charts aligned when the live dot or rate text changes", () => {
     /#agentsList \.loopstep > \.stepbar \{[^}]*grid-auto-columns: minmax\(0, 1fr\)/,
   );
 });
+
+it("lets phone users scroll every Crew column while keeping the agent pinned", () => {
+  const narrow = css.slice(css.indexOf("@media (max-width: 760px)"));
+  expect(narrow).toMatch(/#agentsList \{[^}]*max-width: 100%;[^}]*overflow-x: auto/);
+  expect(narrow).toMatch(/#agentsList \.trow \{[^}]*min-width: 680px/);
+  expect(narrow).toMatch(
+    /#agentsList \.trow > :first-child \{[^}]*position: sticky;[^}]*left: 0;[^}]*z-index: 1;[^}]*background: var\(--surface\)/,
+  );
+  expect(narrow).toMatch(/#agentsList \.trow\.flight > :first-child \{[^}]*var\(--surface\)/);
+  expect(narrow).toMatch(
+    /#agentsList \.trow:not\(\.head\):hover > :first-child,\s*#agentsList \.trow\.sel > :first-child \{[^}]*background: var\(--surface-2\)/,
+  );
+});
