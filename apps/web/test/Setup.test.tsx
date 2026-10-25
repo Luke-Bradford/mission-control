@@ -1213,6 +1213,28 @@ describe("Setup tabs", () => {
       expect(within(reopened).getByLabelText("Effort")).toHaveProperty("value", "high");
     });
 
+    it("switching to Claude never keeps a role's Codex default model", async () => {
+      const crew = SESSIONS_CFG.crew;
+      if (!crew?.roles) throw new Error("missing crew roles");
+      const codex = { ...GUIDO_SEAT, accountId: "codex-main", model: "gpt-5.6-sol" };
+      const p = await seats({
+        "/api/config": {
+          ...SESSIONS_CFG,
+          crew: {
+            ...crew,
+            roles: crew.roles.map((r) => (r.name === "GUIDO" ? { ...r, model: "gpt-5.6-sol" } : r)),
+          },
+        },
+        "/api/crew/changes": { ...CHANGES, sessions: [{ id: "s1", seats: [codex] }] },
+      });
+      fireEvent.click(within(p).getByRole("button", { name: "Edit" }));
+      const form = screen.getByRole("form", { name: "Edit guido-1" });
+      fireEvent.change(within(form).getByLabelText("Account"), {
+        target: { value: "claude-main" },
+      });
+      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "sonnet");
+    });
+
     it.each(["unknown", "not-logged-in"])(
       "shows the external CLI hint for %s status",
       async (status) => {

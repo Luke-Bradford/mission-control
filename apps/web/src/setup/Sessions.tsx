@@ -258,7 +258,12 @@ function SeatForm({
                 accountId,
                 ...(nextVendor !== vendor
                   ? {
-                      model: nextVendor === "codex" ? "gpt-5.6-sol" : (role?.model ?? "sonnet"),
+                      model:
+                        nextVendor === "codex"
+                          ? "gpt-5.6-sol"
+                          : role?.model && !role.model.startsWith("gpt-")
+                            ? role.model
+                            : "sonnet",
                       effort: "",
                     }
                   : {}),
