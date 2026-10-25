@@ -64,13 +64,15 @@ describe("Pipeline", () => {
     expect(within(readyLane).getByRole("link", { name: "+2" }).getAttribute("href")).toBe(
       "/board?stage=ready",
     );
-    expect(within(readyLane).getByText("INCO")).toBeTruthy();
+    expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
     expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
       "--c: var(--s4)",
     );
-    expect(within(readyLane).getByRole("link", { name: /Ready ticket 1/ }).getAttribute("href")).toBe(
-      "/board?stage=ready",
-    );
+    expect(
+      within(readyLane)
+        .getByRole("link", { name: /Ready ticket 1/ })
+        .getAttribute("href"),
+    ).toBe("/board?stage=ready");
 
     const progressLane = screen.getByRole("region", { name: "In progress" });
     expect(within(progressLane).getByText("Building ticket")).toBeTruthy();

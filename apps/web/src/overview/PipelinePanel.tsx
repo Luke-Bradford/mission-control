@@ -53,8 +53,7 @@ export function PipelinePanel() {
           );
           const count = stages.reduce(
             (total, stage) =>
-              total +
-              (data?.pipeline?.find((candidate) => candidate.stage === stage)?.count ?? 0),
+              total + (data?.pipeline?.find((candidate) => candidate.stage === stage)?.count ?? 0),
             0,
           );
           const cards = stageCards.slice(0, VISIBLE_CARDS);
