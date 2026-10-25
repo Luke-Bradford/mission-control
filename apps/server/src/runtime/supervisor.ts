@@ -547,18 +547,6 @@ interface SeatInfo {
   repo: CcConfig["repos"][number];
 }
 
-/** A replay has a fixed deadline; an active turn's deadline moves with CLI output. */
-export function stuckSessionReason(
-  session: { attaching: boolean; attachedAt: number; inTurn: boolean; lastOutputAt: number },
-  at: number,
-): string | null {
-  if (session.attaching && at - session.attachedAt >= 60_000)
-    return "session replay did not finish within a minute";
-  if (session.inTurn && at - session.lastOutputAt >= 30 * 60_000)
-    return "session has produced no output for thirty minutes";
-  return null;
-}
-
 /** A seat with a process. */
 interface Live {
   info: SeatInfo;
@@ -568,9 +556,6 @@ interface Live {
   chain: Promise<void>;
   /** A user line has been written and its turn's `result` has not come. */
   inTurn: boolean;
-  /** Last CLI activity; bounds a silent turn without timing out idle seats. */
-  lastOutputAt: number;
-  attachedAt: number;
   /** An interrupt was accepted during this turn: its error result is the interrupt, not a failure. */
   interrupted: boolean;
   /** A `rejected` rate limit came this turn: the seat stays parked until the next line. */
@@ -907,7 +892,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   function onEvent(l: Live, e: SessionEvent): void {
-    l.lastOutputAt = now();
     switch (e.kind) {
       case "init":
         if (l.run.vendor === "codex") {
@@ -999,7 +983,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw noLive(l.info);
     }
     l.inTurn = true;
-    l.lastOutputAt = now();
     l.parkedTurn = false;
     l.rateLimitedUntil = null;
     // A completed Codex interrupt leaves the seat idle until the replacement is sent.
@@ -1490,8 +1473,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       run,
       chain: Promise.resolve(),
       inTurn: false,
-      lastOutputAt: now(),
-      attachedAt: now(),
       interrupted: false,
       parkedTurn: false,
       ending: null,
@@ -2999,22 +2980,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = run.agentId;
     if (runGone(runId, seatId)) return "gone";
     const l = live.get(seatId);
-    const stuck = l?.run.id === runId && l.ending === null ? stuckSessionReason(l, now()) : null;
-    if (stuck !== null && l) {
-      starting.add(seatId);
-      try {
-        fold(l, true);
-        l.off();
-        setState(l, "error", stuck);
-        await l.session.close();
-        await endAndRemoveKeeper(seatId, runId);
-        l.session.detach();
-        if (live.get(seatId) === l) live.delete(seatId);
-      } finally {
-        starting.delete(seatId);
-      }
-      return "no-session";
-    }
     if (starting.has(seatId) || l?.ending != null) return "busy";
     if (!l?.session.alive) return "no-session";
     if (l.run.id !== runId || l.attaching) return "busy";

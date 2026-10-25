@@ -688,26 +688,6 @@ describe("supervisor events (Plan 7a)", () => {
       expect(store.claimedKeys(runId)).toEqual({});
     });
 
-    it("retires a stuck turn so its held run can resume", async () => {
-      let at = Date.now();
-      const { sup } = make({ now: () => at });
-      sup.start();
-      const { runId } = await sup.startRun("guido-1", 42);
-      await until(() => expect(seatState("guido-1")).toBe("idle"));
-      await sup.message("guido-1", "SLOW", { interrupt: false });
-      await until(() => expect(seatState("guido-1")).toBe("running"));
-      at += 30 * 60_000;
-      expect(await sup.send(runId, "stuck", "fix it")).toBe("no-session");
-      expect(store.claimedKeys(runId)).toEqual({});
-      expect(store.run(runId)?.endedAt).toBeNull();
-      expect(sup.seatFacts("guido-1")).toBeNull();
-      await noKeepers();
-      await sup.resumeRun(runId);
-      await until(() => expect(seatState("guido-1")).toBe("idle"));
-      expect(prep.sessions).toHaveLength(2);
-      expect(await sup.send(runId, "stuck", "fix it")).toBe("sent");
-    });
-
     it("answers no-session when the CLI is gone, without claiming the line", async () => {
       const { sup, runId } = await idleRun();
       prep.sessions[0]?.detach();
