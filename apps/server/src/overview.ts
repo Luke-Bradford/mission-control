@@ -21,7 +21,7 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const MINUTES = 30;
-const CARD_LIMIT = 6;
+const CARD_LIMIT = 8;
 const STAGES: PipelineStage["stage"][] = [
   "ready",
   "building",
