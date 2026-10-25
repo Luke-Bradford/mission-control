@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CREW_GIT_ENV } from "@mc/core";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { assertSeatGitConfig, assertSeatGitVersion } from "../src/runtime/git.ts";
 
 let dir: string;
@@ -142,4 +142,38 @@ it("uses seat write grants and exclusions for include targets and ancestors", as
   await expect(assertSeatGitConfig(dir, [])).resolves.toBeUndefined();
   await expect(assertSeatGitConfig(dir, [dir], [dir])).resolves.toBeUndefined();
   await expect(assertSeatGitConfig(dir, [dir])).rejects.toThrow("writable include");
+});
+
+it.each(["file", "directory", "chain"])(
+  "refuses a replaceable %s symlink into protected config",
+  async (kind) => {
+    const protectedDir = join(dir, ".git", "protected");
+    mkdirSync(protectedDir);
+    writeFileSync(join(protectedDir, "included"), "");
+    const link = join(dir, "link");
+    if (kind === "file") symlinkSync(join(protectedDir, "included"), link);
+    else symlinkSync(protectedDir, link);
+    let included = kind === "file" ? link : join(link, "included");
+    if (kind === "chain") {
+      symlinkSync(link, join(dir, ".git", "chain"));
+      included = join(dir, ".git", "chain", "included");
+    }
+    git("config", "include.path", included);
+    await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+    await expect(assertSeatGitConfig(dir, [])).resolves.toBeUndefined();
+    await expect(assertSeatGitConfig(dir, [dir], [dir])).resolves.toBeUndefined();
+  },
+);
+
+it("refuses a home-relative include into the seat worktree", async () => {
+  vi.stubEnv("HOME", dir);
+  try {
+    mkdirSync(join(dir, "worktrees", "seat"), { recursive: true });
+    writeFileSync(join(dir, "worktrees", "seat", "included"), "");
+    git("config", "include.path", "~/worktrees/seat/included");
+    await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+    await expect(assertSeatGitConfig(dir, [], [])).resolves.toBeUndefined();
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

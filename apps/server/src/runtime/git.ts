@@ -10,7 +10,7 @@
  * ever read as an option.
  */
 import { type ChildProcess, execFile } from "node:child_process";
-import { realpath } from "node:fs/promises";
+import { lstat, readlink, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
@@ -172,6 +172,7 @@ export async function assertSeatGitConfig(
       [
         "config",
         "--includes",
+        "--path",
         "--show-origin",
         "--null",
         "--get-regexp",
@@ -206,6 +207,43 @@ export async function assertSeatGitConfig(
     const rel = relative(root, path);
     return rel === "" || (rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel));
   };
+  const writable = (path: string): boolean => {
+    for (;;) {
+      if (exclusions.some((root) => inside(path, root))) return false;
+      if (grants.some((root) => inside(path, root))) return true;
+      const parent = dirname(path);
+      if (parent === path) return false;
+      path = parent;
+    }
+  };
+  const replaceableSymlink = async (path: string): Promise<boolean> => {
+    const pending = path.split("/");
+    let current = "/";
+    let links = 0;
+    while (pending.length > 0) {
+      const part = pending.shift();
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        current = dirname(current);
+        continue;
+      }
+      const next = resolve(current, part);
+      try {
+        if ((await lstat(next)).isSymbolicLink()) {
+          // The link can be replaced independently of its protected destination.
+          if (writable(next) || writable(current) || ++links > 40) return true;
+          const target = await readlink(next);
+          if (isAbsolute(target)) current = "/";
+          pending.unshift(...target.split("/"));
+          continue;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
+      }
+      current = next;
+    }
+    return false;
+  };
   const fields = output.split("\0");
   const keys: string[] = [];
   let writableInclude = false;
@@ -219,23 +257,9 @@ export async function assertSeatGitConfig(
       const included = isAbsolute(value)
         ? value
         : `${dirname(isAbsolute(origin) ? origin : resolve(cwd, origin))}/${value}`;
-      let target = physical(included);
-      if (target === null) {
+      const target = physical(included);
+      if (target === null || writable(target) || (await replaceableSymlink(included)))
         writableInclude = true;
-      } else {
-        // Sandbox exclusions protect the target even when a granted ancestor is writable.
-        for (;;) {
-          const current = target;
-          if (exclusions.some((root) => inside(current, root))) break;
-          if (grants.some((root) => inside(current, root))) {
-            writableInclude = true;
-            break;
-          }
-          const parent = dirname(target);
-          if (parent === target) break;
-          target = parent;
-        }
-      }
       continue;
     }
     if (key !== "core.fsmonitor" || (value !== "" && value.toLowerCase() !== "false"))
