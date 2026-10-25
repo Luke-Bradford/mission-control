@@ -510,6 +510,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/crew/status"],
   ["GET", "/api/crew/sessions"],
   ["GET", "/api/runs/guido-1/loop"],
+  ["GET", "/api/runs/guido-1/attempts"],
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
@@ -4789,6 +4790,18 @@ describe("the first loop's engine", () => {
       expect(view.budget).toBe(budget);
     },
   );
+
+  it("GET /api/runs/:id/attempts returns retained history and rejects unknown runs", async () => {
+    store.upsertRun(run({ id: "history", agentId: "guido-1" }));
+    store.setRunPush({ runId: "history", sha: "head", at: NOW });
+    const response = await get("/api/runs/history/attempts");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      runId: "history",
+      attempts: [{ kind: "run" }, { kind: "push", data: { sha: "head" } }],
+    });
+    expect((await get("/api/runs/unknown/attempts")).statusCode).toBe(404);
+  });
 
   it("caps the served review round at the run profile limit", async () => {
     store.upsertRun(
