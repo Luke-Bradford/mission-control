@@ -1228,14 +1228,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ]
           : [];
       const tmpPath = seatTmp(run.id);
-      try {
-        mkdirSync(tmpPath, { mode: 0o700 });
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      for (const path of [dirname(tmpPath), tmpPath]) {
+        try {
+          mkdirSync(path, { mode: 0o700 });
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+        const st = lstatSync(path);
+        if (!st.isDirectory() || st.uid !== process.getuid?.() || (st.mode & 0o777) !== 0o700)
+          throw new Error("crew temp root must be a private directory owned by the server");
       }
-      const st = lstatSync(tmpPath);
-      if (!st.isDirectory() || st.uid !== process.getuid?.() || (st.mode & 0o777) !== 0o700)
-        throw new Error("crew temp root must be a private directory owned by the server");
       const tmp = realpathSync(tmpPath);
       const sandbox = {
         cwd,
@@ -1317,12 +1319,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               // config builder's validation of the private temp directory.
               codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
                 '":root"="read"',
-                [
-                  '":root"="read"',
-                  ...[...new Set([dirname(tmp), "/tmp", "/private/tmp"])].map(
-                    (parent) => `${JSON.stringify(parent)}="deny"`,
-                  ),
-                ].join("\n"),
+                ['":root"="read"', `${JSON.stringify(dirname(tmp))}="deny"`].join("\n"),
               ),
             );
             writePrivate(join(home, "auth.json"), auth);
@@ -1410,8 +1407,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function seatTmp(runId: string): string {
     // Claude 2.1.308 falls back to /tmp when its temp path exceeds 44 bytes. Keep even the
     // canonical macOS /private/tmp path plus the CLI's claude-<uid> suffix below that limit.
-    const key = createHash("sha256").update(`${deps.dbPath}:${runId}`).digest("hex").slice(0, 16);
-    return `/tmp/mc-${key}`;
+    const key = createHash("sha256").update(`${deps.dbPath}:${runId}`).digest("hex").slice(0, 12);
+    return `/tmp/mc-runs/${key}`;
   }
 
   /**

@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AWAY_QUOTA_REFUSED,
@@ -651,6 +651,17 @@ describe("startRun", () => {
       writeFileSync(join(tmp, "test-output"), "ok");
       const settings = JSON.parse(r.argv[r.argv.indexOf("--settings") + 1]);
       expect(settings.sandbox.filesystem.allowWrite).toEqual([tmp]);
+      const parent = dirname(tmp);
+      expect(basename(parent)).toBe("mc-runs");
+      expect(statSync(parent).mode & 0o777).toBe(0o700);
+      expect(settings.sandbox.filesystem.allowRead).toEqual([tmp]);
+      expect(settings.sandbox.filesystem.denyRead).toContain(parent);
+      expect(settings.sandbox.filesystem.denyRead).not.toContain("/tmp");
+      expect(settings.sandbox.filesystem.denyRead).not.toContain("/private/tmp");
+      for (const sibling of roots.filter((root) => root !== tmp)) {
+        expect(sibling.startsWith(`${parent}/`)).toBe(true);
+        expect(settings.sandbox.filesystem.allowRead).not.toContain(sibling);
+      }
     }
     await sup.endRun("guido-1");
     await sup.endRun("retro");
@@ -803,6 +814,7 @@ describe("startRun", () => {
       hubGit,
       "/tmp/claude-*",
       "/private/tmp/claude-*",
+      dirname(recorded()[0].env.TMPDIR),
     ]);
   });
 
@@ -2212,8 +2224,13 @@ import(${JSON.stringify(fixture)});
     expect(readFileSync(join(home, "auth.json"), "utf8")).toBe('{"fake":"account"}');
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
     const config = readFileSync(join(home, "config.toml"), "utf8");
-    expect(config).toContain('"/tmp"="deny"');
-    expect(config).toContain('"/private/tmp"="deny"');
+    const parent = dirname(spawn.env.TMPDIR);
+    expect(basename(parent)).toBe("mc-runs");
+    expect(statSync(parent).mode & 0o777).toBe(0o700);
+    expect(config).toContain(`${JSON.stringify(parent)}="deny"`);
+    expect(config).not.toContain('"/tmp"="deny"');
+    expect(config).not.toContain('"/private/tmp"="deny"');
+    expect(config).not.toContain(`${JSON.stringify(join(parent, "sibling-run"))}="write"`);
     expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
     expect(spawn.env.TMPDIR).not.toContain("/claude-");
     expect(statSync(spawn.env.TMPDIR).mode & 0o777).toBe(0o700);

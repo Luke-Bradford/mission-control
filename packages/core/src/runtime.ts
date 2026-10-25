@@ -876,10 +876,8 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
   if (i.tempRoot !== undefined && !i.tempRoot.startsWith("/"))
     throw new Error("crew sandbox: tempRoot must be absolute");
   // allowRead is an exception to denies, not an allowlist. Deny the shared parent so
-  // same-uid seats cannot read sibling runs; cover both names of macOS's temp directory.
+  // same-uid seats cannot read sibling runs without blocking unrelated temp tools.
   const tempReadDenies = i.tempRoot === undefined ? [] : [dirname(i.tempRoot)];
-  if (tempReadDenies.includes("/tmp") || tempReadDenies.includes("/private/tmp"))
-    tempReadDenies.splice(0, tempReadDenies.length, "/tmp", "/private/tmp");
   return JSON.stringify({
     hooks: guardHooks(hook),
     sandbox: {

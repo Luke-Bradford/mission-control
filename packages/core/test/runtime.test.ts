@@ -763,7 +763,7 @@ describe("scratch mode", () => {
 describe("crew sandbox and scoped edits", () => {
   it("denies the shared temp parent and sibling runs, allowing only the seat's own root", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
-      for (const parent of ["/tmp", "/private/tmp", "/custom/temp"]) {
+      for (const parent of ["/tmp/mc-runs", "/private/tmp/mc-runs", "/custom/temp/mc-runs"]) {
         const tempRoot = `${parent}/mc-own-run`;
         const siblingRoot = `${parent}/mc-other-run`;
         const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
@@ -773,27 +773,29 @@ describe("crew sandbox and scoped edits", () => {
           f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
         ).toBe(true);
         expect(f.allowRead).toEqual([tempRoot]);
-        if (parent === "/tmp" || parent === "/private/tmp") {
-          expect(f.denyRead).toContain("/tmp");
-          expect(f.denyRead).toContain("/private/tmp");
-        }
+        expect(f.denyRead).not.toContain("/tmp");
+        expect(f.denyRead).not.toContain("/private/tmp");
       }
     }
   });
 
   it("keeps a checkout and both git dirs under /tmp readable in every mode", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
-      for (const parent of ["/tmp", "/private/tmp"]) {
+      for (const parent of ["/tmp", "/private/tmp", "/tmp/mc-runs"]) {
         const sandbox = {
           ...base.sandbox,
-          tempRoot: `${parent}/mc-own-run`,
+          tempRoot: `${parent.endsWith("/mc-runs") ? parent : `${parent}/mc-runs`}/mc-own-run`,
           cwd: `${parent}/crew/worktree`,
           gitCommonDir: `${parent}/crew/clone/.git`,
           worktreeGitDir: `${parent}/crew/clone/.git/worktrees/seat`,
         };
         const f = JSON.parse(crewSandboxSettings(sandbox, mode, base.hook)).sandbox.filesystem;
         for (const path of [sandbox.cwd, sandbox.gitCommonDir, sandbox.worktreeGitDir]) {
-          expect(f.allowRead).toContain(path);
+          if (parent.endsWith("/mc-runs")) expect(f.allowRead).toContain(path);
+          else
+            expect(
+              f.denyRead.some((denied: string) => path === denied || path.startsWith(`${denied}/`)),
+            ).toBe(false);
         }
       }
     }
@@ -801,7 +803,7 @@ describe("crew sandbox and scoped edits", () => {
 
   it("isolates the run temp root from the operator's Claude sessions in every mode", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
-      const tempRoot = "/tmp/mc-seat-test";
+      const tempRoot = "/tmp/mc-runs/seat-test";
       const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
         .sandbox.filesystem;
       expect(f.allowWrite).toEqual([tempRoot]);
