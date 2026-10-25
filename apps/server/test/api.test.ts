@@ -467,6 +467,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app/items/7"],
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
+  ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -1036,6 +1037,12 @@ describe("local access", () => {
       }
       if (url === "/api/attention/unknown") {
         expect(r.statusCode).toBe(404);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/map/conflicts") {
+        // This fixture has no crew checkout to check.
+        expect(r.statusCode).toBe(503);
+        expect(r.json()).toEqual({ error: "map checkout unavailable" });
         continue;
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
@@ -2624,6 +2631,75 @@ describe("boards, escalations, health", () => {
     expect(r.json()).toEqual([item]);
     expect((await get("/api/boards/site-builder")).json()).toEqual([]);
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
+  });
+
+  it("serves computed map conflicts from stored open PR tips without changing the checkout", async () => {
+    withCrew();
+    const checkout = join(dir, "clone");
+    mkdirSync(checkout, { recursive: true });
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8" }).trim();
+    git("init", "-q");
+    git("config", "user.name", "Fixture");
+    git("config", "user.email", "fixture@example.invalid");
+    writeFileSync(join(checkout, "file.txt"), "base\n");
+    git("add", ".");
+    git("commit", "-qm", "base");
+    const base = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "left");
+    writeFileSync(join(checkout, "file.txt"), "left\n");
+    git("commit", "-qam", "left");
+    const left = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "right", base);
+    writeFileSync(join(checkout, "file.txt"), "right\n");
+    git("commit", "-qam", "right");
+    const right = git("rev-parse", "HEAD");
+    git("branch", "-f", "left", base);
+    const prs = [left, right].map((headSha, i) => ({
+      repoId: "shop-app",
+      number: i + 1,
+      title: "Fixture",
+      url: "https://example.invalid/pr",
+      branch: i === 0 ? "left" : "right",
+      ticket: null,
+      state: "open" as const,
+      isDraft: false,
+      review: null,
+      ci: "pending" as const,
+      createdAt: 1,
+      updatedAt: 2,
+      mergedAt: null,
+      mergeCommitSha: null,
+      headSha,
+      mergeable: null,
+      author: null,
+      assignees: [],
+      checks: [],
+      closingIssues: [],
+    }));
+    store.upsertPullRequests("shop-app", prs, 0);
+    const before = git("count-objects", "-v");
+    const response = await get("/api/repos/shop-app/map/conflicts");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      conflicts: [{ file: "file.txt", branches: ["right", "left"], shas: [right, left] }],
+    });
+    expect(git("count-objects", "-v")).toBe(before);
+    expect(git("status", "--porcelain")).toBe("");
+    expect(readFileSync(join(checkout, "file.txt"), "utf8")).toBe("right\n");
+    store.upsertPullRequests(
+      "shop-app",
+      prs.map((pr) => ({ ...pr, state: "closed" })),
+      0,
+    );
+    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toEqual({ conflicts: [] });
+  });
+
+  it("does not report a clean merge when the map checkout is unavailable", async () => {
+    expect((await get("/api/repos/nope/map/conflicts")).statusCode).toBe(404);
+    expect((await get("/api/repos/shop-app/map/conflicts")).statusCode).toBe(503);
+    withCrew();
+    expect((await get("/api/repos/shop-app/map/conflicts")).statusCode).toBe(503);
   });
 
   it("repos/:repoId/prs returns the stored pull requests, 404 for an unknown repo", async () => {
