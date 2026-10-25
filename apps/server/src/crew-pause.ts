@@ -42,3 +42,18 @@ export async function startUnpausedRun(
   if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
   return supervisor.startRun(...args);
 }
+
+/** FLIGHT's watch uses this boundary for fresh runs and crash restarts. */
+export function pauseAwareSupervisor<T extends Pick<Supervisor, "startWatch">>(
+  store: Store,
+  supervisor: T,
+): T {
+  return {
+    ...supervisor,
+    startWatch: async (...args: Parameters<Supervisor["startWatch"]>) => {
+      const pause = pausedSeat(store, args[0]);
+      if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
+      return supervisor.startWatch(...args);
+    },
+  };
+}

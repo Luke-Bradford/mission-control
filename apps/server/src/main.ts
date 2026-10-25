@@ -34,7 +34,7 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import { startUnpausedRun } from "./crew-pause.ts";
+import { pauseAwareSupervisor, pausedSeat, startUnpausedRun } from "./crew-pause.ts";
 import { createEngine } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -303,13 +303,15 @@ export async function main(): Promise<void> {
     config,
     store,
     bus,
-    supervisor,
+    supervisor: pauseAwareSupervisor(store, supervisor),
     enabled: engineOn,
     login: hubLogin,
     lockState: () => lock.state(),
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
-      cliHold.reason !== null || crewReloader.status().pending.some((p) => p.seatId === seatId),
+      pausedSeat(store, seatId) !== null ||
+      cliHold.reason !== null ||
+      crewReloader.status().pending.some((p) => p.seatId === seatId),
     log: (line) => log(line),
   });
 
