@@ -350,11 +350,14 @@ const STDIN_SCRIPT = "\0stdin-shell-script";
 /** A pseudo-program for a line the tokenizer could not fully read; the guard denies it. */
 const UNREADABLE_LINE = "\0unreadable-line";
 const GIT_ENV_OVERRIDE = "\0git-env";
+/** Paths must be literal: the guard cannot resolve shell expansions. */
+const gitPathExpands = (word: string): boolean => /[$`*?[{}]|^~/.test(word);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 
 /** One command a line would run: its argv, and whether something runs it in the background. */
 interface Cmd {
   directories?: string[];
+  indirectGit?: boolean;
   argv: string[];
   /** Under coproc, setsid, screen or tmux (a lone `&` is the line's: `Walk.lineBackground`). */
   background: boolean;
@@ -914,6 +917,10 @@ function readsStdin(cw: readonly string[]): boolean {
   return true;
 }
 
+/** Command-string wrappers do not preserve a provable git environment or cwd. */
+const wrappedGit = (cmds: Cmd[]): Cmd[] =>
+  cmds.map((cmd) => (cmd.argv[0] === "git" ? { ...cmd, indirectGit: true } : cmd));
+
 function normalise(seg: Segment, walk: Walk, depth: number, background: boolean, mux: Mux): Cmd[] {
   if (depth > MAX_DEPTH) throw new TooLong();
   const { argv, braces } = seg;
@@ -997,7 +1004,9 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       if (base === "coproc" && COMPOUND_START.has(words[at + 1] ?? "")) at++;
     } else break;
   }
-  const extra = scripts.flatMap((s) => commands(`env ${s}`, walk, depth + 1, bg, inScript(mux)));
+  const extra = scripts.flatMap((s) =>
+    wrappedGit(commands(`env ${s}`, walk, depth + 1, bg, inScript(mux))),
+  );
   if (gitEnv) extra.push({ argv: [GIT_ENV_OVERRIDE], background: bg });
   const program = words[at];
   if (program === undefined) return extra;
@@ -1006,7 +1015,13 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   const restBraces = braces.slice(at + 1);
   const braced = restBraces.includes(true);
   const out: Cmd[] = [
-    { argv: [name, ...rest], background: bg, braces: braced, directories },
+    {
+      argv: [name, ...rest],
+      background: bg,
+      braces: braced,
+      directories,
+      indirectGit: name === "git" && viaXargs,
+    },
     ...extra,
   ];
   const multiplexer = MULTIPLEXERS.has(name);
@@ -1027,10 +1042,10 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     if (multiplexer) out[0] = { argv: [name, ...rest], background: true, braces: braced };
     for (let i = 0; i < run.length; i++) {
       const suffix = wordsOnly(run.slice(i), runBraces.slice(i));
-      out.push(...normalise(suffix, walk, depth + 1, runBg, "suffix"));
+      out.push(...wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix")));
     }
     for (const w of run) {
-      if (/[\s;&|]/.test(w)) out.push(...commands(w, walk, depth + 1, runBg, "script"));
+      if (/[\s;&|]/.test(w)) out.push(...wrappedGit(commands(w, walk, depth + 1, runBg, "script")));
     }
     return out;
   }
@@ -1040,7 +1055,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       let end = i + 1;
       while (end < rest.length && rest[end] !== ";" && rest[end] !== "+") end++;
       const run = wordsOnly(rest.slice(i + 1, end), restBraces.slice(i + 1, end));
-      out.push(...normalise(run, walk, depth + 1, bg, mux));
+      out.push(...wrappedGit(normalise(run, walk, depth + 1, bg, mux)));
       i = end;
     }
   }
@@ -1049,7 +1064,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   const stdin = (): Cmd[] => {
     if (viaXargs) return [];
     if (seg.stdin.length > 0) {
-      return seg.stdin.flatMap((t) => commands(t, walk, depth + 1, bg, inScript(mux)));
+      return seg.stdin.flatMap((t) => wrappedGit(commands(t, walk, depth + 1, bg, inScript(mux))));
     }
     return seg.piped ? [{ argv: [STDIN_SCRIPT], background: bg }] : [];
   };
@@ -1076,7 +1091,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       out.push(
         ...(script === undefined
           ? [{ argv: [UNREADABLE_SCRIPT], background: bg }]
-          : commands(script, walk, depth + 1, bg, inScript(mux))),
+          : wrappedGit(commands(script, walk, depth + 1, bg, inScript(mux)))),
       );
     } else if (readsStdin(cw)) {
       out.push(...stdin());
@@ -1084,7 +1099,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   } else if ((name === "source" || name === ".") && rest[0] === "/dev/stdin") {
     out.push(...stdin());
   } else if (name === "eval") {
-    out.push(...commands(rest.join(" "), walk, depth + 1, bg, inScript(mux)));
+    out.push(...wrappedGit(commands(rest.join(" "), walk, depth + 1, bg, inScript(mux))));
   }
   return out;
 }
@@ -1893,10 +1908,14 @@ export function guardDecision(
   const walk = newWalk();
   const cwdDirectories: string[] = [];
   let unknownCwd = false;
-  for (const { argv, background, braces, directories: wrapperDirectories = [] } of lineCommands(
-    e.input.command ?? "",
-    walk,
-  )) {
+  let expandedCwd = false;
+  for (const {
+    argv,
+    background,
+    braces,
+    indirectGit,
+    directories: wrapperDirectories = [],
+  } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
     if (program === undefined) continue;
     if (program === TOO_LONG) {
@@ -1910,17 +1929,19 @@ export function guardDecision(
     if (program === BRACE_WORD) return deny("git-write", "brace expansion");
     if (
       program === GIT_ENV_OVERRIDE ||
-      ((["export", "declare", "typeset", "readonly", "unset"].includes(program) ||
+      ((["export", "declare", "typeset", "readonly", "unset", "local"].includes(program) ||
         (program === "set" && args.includes("-a"))) &&
-        args.some((a) => /^GIT_[A-Za-z0-9_]*(?:\+?=|$)/.test(a) || /[*?[\]^()|#~<>{}\\]/.test(a)))
+        args.some((a) => /^GIT_[A-Za-z0-9_]*(?:\+?=|$)/.test(a) || /[$`*?[\]^()|#~<>{}\\]/.test(a)))
     )
       gitEnvDenied = true;
     // Keep every earlier cwd change: an unsafe or unknown one cannot be balanced later.
     if (["cd", "pushd", "popd"].includes(program)) {
       const target = args.length === 1 && !args[0].startsWith("-") ? args[0] : undefined;
+      if (target !== undefined && gitPathExpands(target)) expandedCwd = true;
       if (
         program === "popd" ||
         target === undefined ||
+        gitPathExpands(target) ||
         ctx.gitPathAllowed?.(target, cwdDirectories) !== true
       )
         unknownCwd = true;
@@ -1932,11 +1953,16 @@ export function guardDecision(
         return deny("git-env", "git --no-index");
       if (g !== null && !gitReadOnly(g.sub, g.rest))
         return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
+      if (indirectGit) return deny("git-env", "git inside a command wrapper");
       const directories = [...cwdDirectories];
-      if (unknownCwd && ctx.gitPathAllowed)
+      if (expandedCwd || (unknownCwd && ctx.gitPathAllowed))
         return deny("git-env", "git directory outside worktree");
       for (const directory of wrapperDirectories) {
-        if (ctx.gitPathAllowed && (!directory || !ctx.gitPathAllowed(directory, directories)))
+        if (
+          !directory ||
+          gitPathExpands(directory) ||
+          ctx.gitPathAllowed?.(directory, directories) === false
+        )
           return deny("git-env", "git directory outside worktree");
         directories.push(directory);
       }
@@ -1947,13 +1973,14 @@ export function guardDecision(
           const path = arg === "-C" ? prefix[++i] : arg.slice(2);
           if (
             path === undefined ||
+            gitPathExpands(path) ||
             (path !== "" && ctx.gitPathAllowed?.(path, directories) === false)
           )
             return deny("git-env", "git directory outside worktree");
           if (path !== "") directories.push(path);
         }
       }
-      if (g?.sub === "diff" && ctx.gitPathAllowed) {
+      if (g?.sub === "diff") {
         let paths = false;
         for (let i = 0; i < g.rest.length; i++) {
           const word = g.rest[i];
@@ -1984,7 +2011,7 @@ export function guardDecision(
               i++;
             continue;
           }
-          if (!ctx.gitPathAllowed(word, directories))
+          if (gitPathExpands(word) || ctx.gitPathAllowed?.(word, directories) === false)
             return deny("git-env", "git diff path outside worktree");
         }
       }

@@ -895,19 +895,12 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     expect(guardDecision(bash(c), writer)).toEqual(tooLong);
   });
 
-  // shell text: `${WT}` is the shell's parameter expansion, not a template placeholder
-  const SHELL_VAR = "$" + "{WT}";
-  it.each([
-    `git -C ${SHELL_VAR} status`,
-    `git -C "${SHELL_VAR}" log --oneline`,
-    `git -C ${SHELL_VAR} diff`,
-    "{ git branch }",
-    "{git remote -v}",
-    "{ git remote -v }",
-    "git log --format='%H}'",
-  ])("allows the read %s", (c) => {
-    expect(ruleOf(bash(c))).toBe("allow");
-  });
+  it.each(["{ git branch }", "{git remote -v}", "{ git remote -v }", "git log --format='%H}'"])(
+    "allows the read %s",
+    (c) => {
+      expect(ruleOf(bash(c))).toBe("allow");
+    },
+  );
   it("drops every standalone unquoted }, and keeps a quoted one", () => {
     expect(splitCommands("{ git status } ; ls }")).toEqual([["git", "status"], ["ls"]]);
     expect(splitCommands("echo '}' \"}\"")).toEqual([["echo", "}", "}"]]);
@@ -1355,7 +1348,6 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     'cat <<\'EOF\' | jq -r .a\n{"a": "it\'s"}\nEOF',
     'echo "it\'s"',
     "printf '%s\\n' \"$(git rev-parse HEAD)\"",
-    'cd "$(git rev-parse --show-toplevel)" && ls',
     'test -n "$(git status --porcelain)" && echo dirty',
     "wc -l $(git ls-files '*.ts')",
     "x=$(date +%s); echo $x",
@@ -1377,7 +1369,6 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     "git diff --stat origin/main...HEAD",
     "git show HEAD:package.json | jq .version",
     "git status --porcelain | wc -l",
-    'git -C "$WT" log -1 --format=%H',
     "git log --format='%h %s' -3",
     "gh pr view 1 --json title,body",
     "gh pr checks 1",
@@ -2195,7 +2186,14 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
 });
 
 describe("seat git environment", () => {
+  // Shell parameter expansion, not a template placeholder.
+  const shellVar = "$" + "{WT}";
   it.each([
+    `git -C ${shellVar} status`,
+    `git -C "${shellVar}" log --oneline`,
+    `git -C ${shellVar} diff`,
+    'git -C "$WT" log -1 --format=%H',
+    'cd "$(git rev-parse --show-toplevel)" && ls',
     "GIT_CONFIG_GLOBAL=x git diff",
     "env GIT_CONFIG_COUNT=1 git log",
     "env -i git diff",
