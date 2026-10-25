@@ -2617,3 +2617,79 @@ import(${JSON.stringify(fixture)});
     },
   );
 });
+
+it("refuses a pause arriving during ticket fetching at the launch boundary", async () => {
+  const { sup } = make({
+    fetchTicket: async () => {
+      store.setSetting(
+        "crew.paused",
+        JSON.stringify({
+          seats: ["guido-1"],
+          reason: "Save tokens",
+          at: 1,
+          by: "operator",
+        }),
+      );
+      return TICKET;
+    },
+  });
+  sup.start();
+  const error = await refusal(sup.startRun("guido-1", 42));
+  expect(error.status).toBe(409);
+  expect(error.message).toBe("Paused: Save tokens");
+  expect(recorded()).toEqual([]);
+  expect(store.seatSession("guido-1")?.state).toBe("idle");
+  store.setSetting("crew.paused", "null");
+  expect(seatMayTake(store, "guido-1", 2)).toBe(true);
+});
+
+it("excludes paused seats from queue allocation and stealing eligibility", () => {
+  expect(seatMayTake(store, "guido-1", 2)).toBe(true);
+  store.setSetting(
+    "crew.paused",
+    JSON.stringify({
+      seats: ["guido-1"],
+      reason: "Save tokens",
+      at: 1,
+      by: "operator",
+    }),
+  );
+  expect(seatMayTake(store, "guido-1", 2)).toBe(false);
+  expect(seatMayTake(store, "retro", 2)).toBe(true);
+  store.setSetting("crew.paused", "null");
+  expect(seatMayTake(store, "guido-1", 2)).toBe(true);
+});
+
+it("preserves an aside run when pause refuses its rework launch", async () => {
+  const { sup } = make({
+    fetchTicket: async () => {
+      store.setSetting(
+        "crew.paused",
+        JSON.stringify({
+          seats: ["guido-1"],
+          reason: "Save tokens",
+          at: 1,
+          by: "operator",
+        }),
+      );
+      return TICKET;
+    },
+  });
+  sup.start();
+  await refusal(sup.startRun("guido-1", 42));
+  const run = store.runs("guido-1", 1)[0];
+  if (!run) throw new Error("missing prepared run");
+  store.upsertRun({ ...run, endedAt: null, status: "running" });
+  store.setRunLoop(run.id, {
+    ...NEW_LOOP,
+    aside: {
+      worktree: join(root, "mc-crew", "guido-1-42"),
+      wake: true,
+    },
+  });
+  const error = await refusal(sup.wakeRun(run.id));
+  expect(error.status).toBe(409);
+  expect(store.run(run.id)?.endedAt).toBeNull();
+  expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
+  expect(recorded()).toEqual([]);
+});

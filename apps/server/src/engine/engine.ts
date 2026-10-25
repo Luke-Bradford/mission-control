@@ -9,6 +9,7 @@
  * a turn, `report_evidence`, a run ending, the GitHub poll, and the 60 s tick. It is off when
  * crew is disabled, in a preview, or with `MC_NO_LOOP_WRITES=1` (`enabled`).
  */
+
 import { createHash } from "node:crypto";
 import {
   AWAY_BUG_VERIFIED,
@@ -112,6 +113,7 @@ import {
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
+import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
@@ -152,6 +154,7 @@ export interface EngineDeps {
     | "on"
     | "send"
     | "resumeRun"
+    | "resumeDeferredRuns"
     | "seat"
     | "seatFacts"
     | "endRunByEngine"
@@ -324,6 +327,8 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** A missing CLI leaves the line unclaimed; the next pass sends it after the take-back. */
   async function send(runId: string, key: string, text: string) {
+    const seatId = store.run(runId)?.agentId;
+    if (seatId !== undefined && pausedSeat(store, seatId)) return "no-session" as const;
     const sent = await supervisor.send(runId, key, text);
     if (sent === "no-session") {
       const run = store.run(runId);
@@ -884,7 +889,8 @@ export function createEngine(deps: EngineDeps): Engine {
       case "take-next": {
         // not while the seat holds another run (a merged PR found after the run was stopped)
         const holds = supervisor.seat(run.agentId)?.runId ?? null;
-        if (holds === null || holds === run.id) await deps.takeNext(run.agentId);
+        if (!pausedSeat(store, run.agentId) && (holds === null || holds === run.id))
+          await deps.takeNext(run.agentId);
         return;
       }
       case "event":
@@ -959,7 +965,7 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         kickAside(run.agentId, run.id);
         // the freed seat takes its next ticket now, unless rework is due back on it first
-        if (wakeDueAsideRun(store, run.agentId) === undefined) {
+        if (!pausedSeat(store, run.agentId) && wakeDueAsideRun(store, run.agentId) === undefined) {
           deps.takeNext(run.agentId).catch((e: unknown) => {
             log(
               `${run.agentId}: take after set-aside failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -969,6 +975,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "wake": {
+        if (pausedSeat(store, run.agentId)) return;
         const accountId = seatConfig(run.agentId)?.accountId;
         if (accountId !== undefined && accountAtStop(config, store, accountId, at)) return;
         const oldest = wakeDueAsideRun(store, run.agentId);
@@ -1242,7 +1249,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
-    if (!seatKnown(run.agentId)) return;
+    if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId)) return;
     const at = now();
     const input: RunLoop = { ...stored };
     const pr = findPr(run, input);
@@ -1513,7 +1520,7 @@ export function createEngine(deps: EngineDeps): Engine {
     await Promise.all(
       seats
         .filter((s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "build")
-        .filter((s) => seatMayTake(store, s.id, maxOpenRunsOf(config)))
+        .filter((s) => !pausedSeat(store, s.id) && seatMayTake(store, s.id, maxOpenRunsOf(config)))
         .map((s) =>
           deps.takeNext(s.id).catch((e: unknown) => {
             log(`take ${s.id}: ${e instanceof Error ? e.message : String(e)}`);
@@ -1718,11 +1725,15 @@ export function createEngine(deps: EngineDeps): Engine {
   /** Keeps the running reviews going, ends the finished ones' runs and starts the queued ones. */
   async function superviseReviews(): Promise<void> {
     if (!live()) return;
+    await supervisor.resumeDeferredRuns?.();
+    if (!live()) return;
     // 1. the health of each running review
     for (const row of store.reviewsIn(["running"])) {
       if (row.runId === null) continue;
       const rrun = store.run(row.runId);
       if (rrun === null) continue;
+      const pausedMs = reviewPausedMs(store, row, now());
+      if (pausedSeat(store, row.seatId)) continue;
       const author = store.run(row.authorRunId);
       const phase = author?.loop?.phase;
       if (author === null || author.endedAt !== null || phase === "done" || phase === "parked") {
@@ -1745,7 +1756,7 @@ export function createEngine(deps: EngineDeps): Engine {
         prNumber: row.prNumber,
         now: at,
         hubStartedAt: deps.hubStartedAt,
-        startedAt: row.startedAt ?? row.createdAt,
+        startedAt: (row.startedAt ?? row.createdAt) + pausedMs,
         run: {
           startedAt: rrun.startedAt,
           ended: rrun.endedAt === null ? null : { reason: endReason(rrun) },
@@ -1811,6 +1822,7 @@ export function createEngine(deps: EngineDeps): Engine {
       .flatMap((s) => s.seats)
       .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");
     for (const seat of scratch) {
+      if (pausedSeat(store, seat.id)) continue;
       const held = supervisor.seat(seat.id)?.runId ?? null;
       const heldRun = held === null ? null : store.run(held);
       const free = heldRun === null || heldRun.endedAt !== null;
@@ -1830,7 +1842,13 @@ export function createEngine(deps: EngineDeps): Engine {
         const current = (config.crew?.sessions ?? [])
           .flatMap((x) => x.seats)
           .find((x) => x.id === seat.id);
-        if (current === undefined || current.retiring || seatUnavailable(current)) break;
+        if (
+          current === undefined ||
+          current.retiring ||
+          seatUnavailable(current) ||
+          pausedSeat(store, seat.id)
+        )
+          break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
         let runId: string | null = null;
         try {
@@ -1971,6 +1989,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || loop === undefined || loop === null) return;
+        if (pausedSeat(store, run.agentId)) return;
         const kind = loop.parked?.kind;
         if (
           run.endedAt !== null ||

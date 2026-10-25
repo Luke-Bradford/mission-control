@@ -562,6 +562,8 @@ const API_ROUTES: [string, string, object?][] = [
   ],
   ["GET", "/api/notifications/events"],
   ["POST", "/api/notifications/test", {}],
+  ["GET", "/api/settings/crew-pause"],
+  ["POST", "/api/settings/crew-pause", { seats: null }],
   ["GET", "/api/settings/away"],
   ["GET", "/api/away/digest"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
@@ -1177,6 +1179,37 @@ describe("local access", () => {
       }
     }
     expect(existsSync(join(stateDir, "PAUSE"))).toBe(false);
+  });
+
+  it("the operator can persist, read and clear a crew pause", async () => {
+    withCrew();
+    const pause = { seats: "all", reason: "Save tokens" };
+    const r = await postBody("/api/settings/crew-pause", pause);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ...pause, at: clock, by: config.operator.id });
+    expect((await get("/api/settings/crew-pause")).json()).toEqual(r.json());
+    expect(JSON.parse(store.getSetting("crew.paused") ?? "null")).toEqual(r.json());
+    const crew = (await get("/api/crew")).json();
+    const seat = crew.rows.find((row: { kind: string }) => row.kind === "crew");
+    expect(seat.crewPause).toEqual(r.json());
+    const scoped = await postBody("/api/settings/crew-pause", {
+      seats: [seat.id],
+      reason: "Save tokens",
+    });
+    expect(scoped.json().seats).toEqual([seat.id]);
+    expect((await postBody(`/api/seats/${seat.id}/start`, { issue: 7 })).statusCode).toBe(409);
+    expect((await postBody("/api/settings/crew-pause", { seats: null })).statusCode).toBe(200);
+    expect((await get("/api/settings/crew-pause")).json()).toBeNull();
+  });
+
+  it("refuses an empty reason or unknown pause seats", async () => {
+    for (const body of [
+      { seats: "all", reason: " " },
+      { seats: [], reason: "Save tokens" },
+      { seats: ["missing-seat"], reason: "Save tokens" },
+    ]) {
+      expect((await postBody("/api/settings/crew-pause", body)).statusCode).toBe(400);
+    }
   });
 
   it("every registered /api route is in the route table", () => {
@@ -5765,6 +5798,13 @@ describe("operator token", () => {
     expect(away.statusCode).toBe(401);
     const read = await guarded.inject({ method: "GET", url: "/api/settings/away" });
     expect(read.json()).toEqual(DEFAULT_AWAY);
+    const crewPause = await guardedPost(
+      "/api/settings/crew-pause",
+      {},
+      { seats: "all", reason: "Save tokens" },
+    );
+    expect(crewPause.statusCode).toBe(401);
+    expect(store.getSetting("crew.paused")).toBeNull();
   });
 
   it("leaves GET routes and the guard check as they were", async () => {
