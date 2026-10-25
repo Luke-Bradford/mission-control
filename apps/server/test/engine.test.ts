@@ -284,7 +284,7 @@ interface Harness {
   touches: string[];
   touchesByRun?: Record<string, string[]>;
   duringTouches?: (runId: string) => void;
-  reviewPrOverride?: (number: number) => ReviewPrSnapshot | null;
+  reviewPrOverride?: (number: number) => ReviewPrSnapshot | null | Promise<ReviewPrSnapshot | null>;
   awayDiff?: AwayDiff | null;
   descends?: boolean;
   hardRuleLists: string[][];
@@ -2663,6 +2663,66 @@ describe("the engine runs reviews", () => {
     await secondAuthor();
     expect(h.starts).toHaveLength(1);
     expect(h.updates).toEqual([]);
+  });
+
+  it("batches authoritative reads and revalidation of mutable older PRs", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(repo, [...prs, prRow({ number: 10 })], at),
+    );
+    let active = 0;
+    const concurrency: number[] = [];
+    h.reviewPrOverride = async (number) => {
+      if (number !== 13) {
+        concurrency.push(++active);
+        await Promise.resolve();
+        active--;
+      }
+      return {
+        state: "open",
+        headSha: number === 13 ? SHA_B : SHA,
+        baseSha: SHA_C,
+        mergeCommitSha: null,
+      };
+    };
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    expect(concurrency).toEqual([1, 2, 1, 2]);
+  });
+
+  it("persists terminal merged snapshots across queued checks", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const reads = vi.fn(
+      (number: number): ReviewPrSnapshot => ({
+        state: number === 12 ? "merged" : "open",
+        headSha: number === 12 ? SHA : SHA_B,
+        baseSha: SHA_C,
+        mergeCommitSha: number === 12 ? SHA_C : null,
+      }),
+    );
+    h.reviewPrOverride = reads;
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    reads.mockClear();
+    await h.engine.tick();
+    expect(reads.mock.calls.filter(([number]) => number === 12)).toEqual([]);
+  });
+
+  it("excludes a contained merge before computing its overlap", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    h.descends = true;
+    h.reviewPrOverride = (number) => ({
+      state: number === 12 ? "merged" : "open",
+      headSha: number === 12 ? SHA : SHA_B,
+      baseSha: SHA_C,
+      mergeCommitSha: number === 12 ? SHA_C : null,
+    });
+    const touched = vi.fn();
+    h.duringTouches = touched;
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+    expect(touched.mock.calls.some(([id]) => id === RUN)).toBe(false);
   });
 
   it("refreshes authoritative state after a diff while SQLite still says open", async () => {

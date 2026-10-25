@@ -882,6 +882,13 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const common = await realpath(join(checkout, ".git"));
         const g = (a: string[]) =>
           git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+        for (const commit of new Set(
+          [sha, mergeCommitSha ?? baseSha].filter((value): value is string => value !== undefined),
+        )) {
+          if (await have(g, commit)) continue;
+          await g(["fetch", "--no-tags", "origin", commit]);
+          if (!(await have(g, commit))) throw new Error("diff input could not be fetched");
+        }
         const base = (
           await g([
             "merge-base",

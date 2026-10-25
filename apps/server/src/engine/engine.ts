@@ -1599,18 +1599,40 @@ export function createEngine(deps: EngineDeps): Engine {
         return true;
       const snapshots = new Map<number, string>();
       const runs = store.runsActiveSince(0);
-      let waiting = false;
-      for (const listed of older) {
-        const pr = { ...listed };
+      const candidates = older.flatMap((pr) => {
         const run = runs.find(
           (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
         );
-        if (run === undefined) continue;
-        const snapshot = await publisher.reviewPr(run, pr.number);
+        return run === undefined ? [] : [{ pr, run }];
+      });
+      const terminalKey = (number: number) => `review-merged:${author.repoId}:${number}`;
+      const reads = await Promise.all(
+        candidates.map(async ({ pr, run }) => {
+          const saved = store.getSetting(terminalKey(pr.number));
+          const snapshot: Awaited<ReturnType<Publisher["reviewPr"]>> =
+            saved === null ? await publisher.reviewPr(run, pr.number) : JSON.parse(saved);
+          if (snapshot?.state === "merged") {
+            store.setSetting(terminalKey(pr.number), JSON.stringify(snapshot));
+          } else if (snapshot !== null) {
+            snapshots.set(pr.number, JSON.stringify(snapshot));
+          }
+          return { pr: { ...pr, ...snapshot }, run, snapshot };
+        }),
+      );
+      let waiting = false;
+      for (const { pr, run, snapshot } of reads) {
         if (snapshot === null) return true;
-        snapshots.set(pr.number, JSON.stringify(snapshot));
-        Object.assign(pr, snapshot);
         if (pr.state === "closed") continue;
+        if (
+          pr.state === "merged" &&
+          pr.mergeCommitSha &&
+          (await publisher.isDescendant(
+            author,
+            pr.mergeCommitSha,
+            store.runPush(author.id)?.sha ?? row.sha,
+          ))
+        )
+          continue;
         const base = baseFor(pr.number, snapshot.headSha, snapshot.baseSha);
         const key = `review-touches:v2:${author.repoId}:${pr.number}:${pr.headSha}:${base}:${pr.state}:${pr.mergeCommitSha}:${JSON.stringify(hardRules)}`;
         const saved = store.getSetting(key);
@@ -1629,8 +1651,6 @@ export function createEngine(deps: EngineDeps): Engine {
             pr.state === "merged" ? (pr.mergeCommitSha ?? undefined) : undefined,
             base,
           );
-          if (JSON.stringify(await publisher.reviewPr(run, pr.number)) !== JSON.stringify(snapshot))
-            return true;
           store.setSetting(key, JSON.stringify({ headSha: pr.headSha, files: touched }));
         }
         const shared = touched.filter((path) => paths.includes(path));
@@ -1677,9 +1697,13 @@ export function createEngine(deps: EngineDeps): Engine {
           now(),
         );
       }
-      for (const [number, snapshot] of snapshots) {
-        if (JSON.stringify(await publisher.reviewPr(author, number)) !== snapshot) return true;
-      }
+      const revalidated = await Promise.all(
+        [...snapshots].map(
+          async ([number, snapshot]) =>
+            JSON.stringify(await publisher.reviewPr(author, number)) === snapshot,
+        ),
+      );
+      if (revalidated.some((unchanged) => !unchanged)) return true;
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
         return true;
       return waiting;

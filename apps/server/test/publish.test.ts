@@ -764,6 +764,7 @@ describe("hardRuleTouches", () => {
     ]);
     expect(paths).toEqual([".github/workflows/ci.yml", "CLAUDE.md", "loops/x/y.sh"]);
     expect(calls).toEqual([
+      ["rev-parse", "-q", "--verify", `${SHA}^{commit}`],
       ["merge-base", "refs/remotes/origin/HEAD", SHA],
       ["diff", "--name-only", "-z", "--no-renames", BASE, SHA, "--"],
     ]);
@@ -777,8 +778,12 @@ describe("hardRuleTouches", () => {
     }) as never;
     const publisher = createPublisher(deps({ git }));
     expect(await publisher.hardRuleTouches(run(), SHA, ["CLAUDE.md"], BASE)).toEqual(["CLAUDE.md"]);
-    expect(calls[0]).toEqual(["merge-base", `${BASE}^1`, SHA]);
-    expect(calls[1]).toEqual(["diff", "--name-only", "-z", "--no-renames", BASE, SHA, "--"]);
+    expect(calls).toEqual([
+      ["rev-parse", "-q", "--verify", `${SHA}^{commit}`],
+      ["rev-parse", "-q", "--verify", `${BASE}^{commit}`],
+      ["merge-base", `${BASE}^1`, SHA],
+      ["diff", "--name-only", "-z", "--no-renames", BASE, SHA, "--"],
+    ]);
   });
 
   it("uses a persisted immutable base even when origin already contains the head", async () => {
@@ -796,8 +801,55 @@ describe("hardRuleTouches", () => {
         BASE,
       ),
     ).toEqual(["CLAUDE.md"]);
-    expect(calls[0]).toEqual(["merge-base", BASE, SHA]);
+    expect(calls).toEqual([
+      ["rev-parse", "-q", "--verify", `${SHA}^{commit}`],
+      ["rev-parse", "-q", "--verify", `${BASE}^{commit}`],
+      ["merge-base", BASE, SHA],
+      ["diff", "--name-only", "-z", "--no-renames", BASE, SHA, "--"],
+    ]);
   });
+
+  it.each(["base", "head", "merge"])(
+    "fetches a missing immutable %s in the diff clone",
+    async (missing) => {
+      const available = new Set(
+        [SHA, BASE].filter((sha) => sha !== (missing === "head" ? SHA : BASE)),
+      );
+      const calls: string[][] = [];
+      const git = (async (_cwd: string, args: string[]) => {
+        calls.push(args);
+        if (args[0] === "rev-parse") {
+          if (!available.has(args[3].replace("^{commit}", "")))
+            throw Object.assign(new Error("missing"), { code: 1 });
+          return SHA;
+        }
+        if (args[0] === "fetch") {
+          available.add(args[3]);
+          return "";
+        }
+        if (args[0] === "merge-base") {
+          if (!available.has(SHA) || !available.has(BASE)) throw new Error("missing diff input");
+          return BASE;
+        }
+        return "CLAUDE.md\0";
+      }) as never;
+      expect(
+        await createPublisher(deps({ git })).hardRuleTouches(
+          run(),
+          SHA,
+          ["CLAUDE.md"],
+          missing === "merge" ? BASE : undefined,
+          BASE,
+        ),
+      ).toEqual(["CLAUDE.md"]);
+      expect(calls).toContainEqual([
+        "fetch",
+        "--no-tags",
+        "origin",
+        missing === "head" ? SHA : BASE,
+      ]);
+    },
+  );
 
   it("reads nothing for a sha that is not a sha, or with no rules", async () => {
     const git = (async () => {
