@@ -6,6 +6,7 @@ export interface MotionEvent {
   delta: MapDelta;
   at: number;
   snapshot?: MapSnapshot;
+  epoch?: number;
 }
 export interface MessageArc {
   from: string;
@@ -31,6 +32,8 @@ interface Glow {
 }
 export interface MotionState {
   seq: number;
+  epoch: number;
+  pending: (MotionEvent & { calls?: MapCall[] })[];
   particles: Particle[];
   arcs: MessageArc[];
   glows: Glow[];
@@ -39,6 +42,8 @@ export interface MotionState {
 }
 export const emptyMotion = (): MotionState => ({
   seq: -1,
+  epoch: 0,
+  pending: [],
   particles: [],
   arcs: [],
   glows: [],
@@ -70,10 +75,11 @@ export function markerPosition(id: string, nodes: MapNode[]): Position {
   return [p[0] - 10 - (hash % 5) * 5, p[1] + (id === "CAPCOM" ? 12 : 0), p[2] + (hash % 7) * 3];
 }
 
-export function arcPoint(a: Position, b: Position, u: number): Position {
-  const mid = a.map((v, i) => (v + b[i]) / 2);
-  mid[1] += Math.hypot(...a.map((v, i) => v - b[i])) * 0.35 + 6;
-  return a.map((v, i) => (1 - u) ** 2 * v + 2 * (1 - u) * u * mid[i] + u * u * b[i]) as Position;
+export function arcPoint(a: Position, b: Position, u: number, out: Position = [0, 0, 0]): Position {
+  const lift = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 0.35 + 6;
+  for (let axis = 0; axis < 3; axis++)
+    out[axis] = a[axis] + (b[axis] - a[axis]) * u + (axis === 1 ? 2 * (1 - u) * u * lift : 0);
+  return out;
 }
 
 export function sampleMotion(state: MotionState, now: number) {
@@ -95,13 +101,75 @@ export function motionDelta(
   snapshot: MapSnapshot,
   nodes: MapNode[],
 ): MotionState {
+  state = motionEpoch(state, event.epoch ?? 0);
+  if ((event.epoch ?? 0) < state.epoch || event.delta.seq <= state.seq) return state;
+  const next = { ...state, seq: event.delta.seq };
+  if (!resolvable(event, snapshot, nodes)) {
+    const delta = event.delta;
+    const calls =
+      "seat" in delta
+        ? (state.calls[delta.seat] ??
+          (event.snapshot ?? snapshot).seats.find((seat) => seat.seat === delta.seat)?.calls)
+        : undefined;
+    const pending = { ...event, calls: calls ?? (delta.type === "call.start" ? [] : undefined) };
+    return {
+      ...next,
+      pending: [...state.pending.filter((e) => event.at - e.at < 3000), pending].slice(-64),
+    };
+  }
+  return applyMotion(next, event, snapshot, nodes);
+}
+
+/** Old retained props belong to their original connection and must never replay. */
+export function motionEpoch(state: MotionState, epoch: number): MotionState {
+  return epoch > state.epoch ? { ...state, epoch, seq: -1, pending: [] } : state;
+}
+
+function resolvable(event: MotionEvent, snapshot: MapSnapshot, nodes: MapNode[]) {
+  const delta = event.delta;
+  if (!("seat" in delta)) return true;
+  if (!snapshot.seats.some((s) => s.seat === delta.seat)) return false;
+  const files = "files" in delta ? delta.files : "file" in delta ? [delta.file] : [];
+  return files.every((file) => nodes.some((node) => node.files.includes(file)));
+}
+
+/** Retry briefly against the actual displayed layout, then replace call caches with server truth. */
+export function reconcileMotion(
+  state: MotionState,
+  snapshot: MapSnapshot,
+  nodes: MapNode[],
+  now: number,
+): MotionState {
+  let next: MotionState = { ...state, ...sampleMotion(state, now), pending: [] };
+  for (const event of state.pending) {
+    if (now - event.at >= 3000) continue;
+    if (resolvable(event, snapshot, nodes))
+      next = applyMotion(next, event, snapshot, nodes, event.calls);
+    else next.pending.push(event);
+  }
+  return {
+    ...next,
+    ...sampleMotion(next, now),
+    calls: Object.fromEntries(snapshot.seats.map((seat) => [seat.seat, seat.calls])),
+    ended: Object.fromEntries(
+      Object.entries(next.ended).filter(([id, at]) =>
+        snapshot.seats.some((seat) => seat.seat === id && seat.since <= at),
+      ),
+    ),
+  };
+}
+
+function applyMotion(
+  state: MotionState,
+  event: MotionEvent,
+  snapshot: MapSnapshot,
+  nodes: MapNode[],
+  observedCalls?: MapCall[],
+): MotionState {
   const { delta, at } = event;
-  if (delta.seq <= state.seq) return state;
-  snapshot = event.snapshot ?? snapshot;
-  const sampled = sampleMotion(state, at);
   const next: MotionState = {
-    ...sampled,
-    seq: delta.seq,
+    ...state,
+    ...sampleMotion(state, at),
     calls: { ...state.calls },
     ended: { ...state.ended },
   };
@@ -116,6 +184,7 @@ export function motionDelta(
   const position = (path: string) => nodes.find((n) => n.path === path)?.position as Position;
   const glow = (files: string[]) => {
     for (const path of paths(files)) {
+      if (next.glows.some((g) => g.path === path && g.at >= at)) continue;
       next.glows = next.glows.filter((g) => g.path !== path);
       next.glows.push({ path, at, seat: seat?.seat ?? "" });
     }
@@ -146,7 +215,11 @@ export function motionDelta(
     next.arcs = [...next.arcs.filter((a) => a !== same), arc].slice(-10);
   } else if (seat && "seat" in delta) {
     const here = endpoint(seat.seat, snapshot, nodes, at);
-    const calls = next.calls[seat.seat] ?? seat.calls;
+    const calls =
+      observedCalls ??
+      next.calls[seat.seat] ??
+      event.snapshot?.seats.find((s) => s.seat === seat.seat)?.calls ??
+      seat.calls;
     if (delta.type === "call.start") {
       next.calls[seat.seat] = [
         ...calls.filter((c) => at - c.since < 900_000),

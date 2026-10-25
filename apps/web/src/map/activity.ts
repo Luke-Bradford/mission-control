@@ -1,7 +1,7 @@
 import type { MapSnapshot } from "@mc/core";
 import * as THREE from "three";
 import { agentColor } from "../hud/AgentTag.tsx";
-import { glide, haloSize, orbPlacement, type Position, stateLabel } from "./agents.ts";
+import { haloSize, orbPlacement, type Position, stateLabel } from "./agents.ts";
 import type { MapNode } from "./model.ts";
 import {
   arcPoint,
@@ -11,7 +11,8 @@ import {
   type MotionEvent,
   type MotionState,
   motionDelta,
-  particlePosition,
+  motionEpoch,
+  reconcileMotion,
   sampleMotion,
 } from "./motion.ts";
 
@@ -19,6 +20,7 @@ export interface ActivityProps {
   snapshot: MapSnapshot;
   indices: Record<string, number>;
   events?: MotionEvent[];
+  epoch?: number;
   agent?: string | null;
   onAgentSelect?: (seat: string | null) => void;
   onArc?: (arc: MessageArc, button: HTMLButtonElement) => void;
@@ -96,11 +98,17 @@ export function activityLayer(
   }[] = [];
   let markers: { id: string; el: HTMLElement; position: Position }[] = [];
   let reduced = false;
+  const matrix = new THREE.Matrix4();
+  const tint = new THREE.Color();
+  const projected = new THREE.Vector3();
+  const positionVector = new THREE.Vector3();
+  const scaleVector = new THREE.Vector3();
+  const arcSample: Position = [0, 0, 0];
   const palette = new Map<string, THREE.Color>();
   const nodePositions = new Map(nodes.map((n) => [n.path, n.position]));
   const colorOf = (id: string) => {
     const cached = palette.get(id);
-    if (cached) return cached.clone();
+    if (cached) return cached;
     const index = current?.snapshot.seats.findIndex((s) => s.seat === id) ?? -1;
     const variable = agentColor(
       id === "FLIGHT" ? "flight" : (current?.indices[id] ?? Math.max(0, index)),
@@ -109,7 +117,7 @@ export function activityLayer(
       css(index < 0 && id !== "FLIGHT" ? "--muted" : variable.slice(4, -1)),
     );
     palette.set(id, color);
-    return color.clone();
+    return color;
   };
   const dim = (id: string) => (current?.agent && current.agent !== id ? 0.22 : 1);
   const project = (
@@ -118,8 +126,9 @@ export function activityLayer(
     camera: THREE.Camera,
     width: number,
     height: number,
+    yOffset = 0,
   ) => {
-    const p = new THREE.Vector3(...position).project(camera);
+    const p = projected.set(position[0], position[1] + yOffset, position[2]).project(camera);
     el.style.left = `${((p.x + 1) * width) / 2}px`;
     el.style.top = `${((1 - p.y) * height) / 2}px`;
     el.hidden = p.z < -1 || p.z > 1;
@@ -130,9 +139,11 @@ export function activityLayer(
     palette.clear();
     palette.set("spark:add", new THREE.Color(css("--ok")));
     palette.set("spark:remove", new THREE.Color(css("--crit")));
+    memory.current = motionEpoch(memory.current, props.epoch ?? 0);
     if (!document.hidden)
       for (const event of props.events ?? [])
         memory.current = motionDelta(memory.current, event, props.snapshot, nodes);
+    memory.current = reconcileMotion(memory.current, props.snapshot, nodes, Date.now());
     if (orbs.count !== props.snapshot.seats.length) {
       group.remove(orbs, halos);
       orbs.dispose();
@@ -203,6 +214,7 @@ export function activityLayer(
         labels.append(el);
         return { id, el, position: endpoint(id, props.snapshot, nodes, Date.now()) };
       });
+    for (const id of ids) colorOf(id);
   };
   const draw = (
     now: number,
@@ -213,27 +225,33 @@ export function activityLayer(
   ) => {
     if (!current) return false;
     const sampled = sampleMotion(memory.current, now);
-    const matrix = new THREE.Matrix4();
     let moving = false;
     const linkPositions = beams.geometry.getAttribute("position");
     const linkColors = beams.geometry.getAttribute("color");
     let linkCount = 0;
     agents.forEach((agent, i) => {
-      agent.position = reduced ? [...agent.goal] : glide(agent.position, agent.goal, seconds);
+      const distance = Math.hypot(
+        agent.position[0] - agent.goal[0],
+        agent.position[1] - agent.goal[1],
+        agent.position[2] - agent.goal[2],
+      );
+      const amount = reduced || distance < 0.02 ? 1 : 1 - 0.12 ** Math.max(0, seconds);
+      for (let axis = 0; axis < 3; axis++)
+        agent.position[axis] += (agent.goal[axis] - agent.position[axis]) * amount;
       if (agent.position.some((v, axis) => v !== agent.goal[axis])) moving = true;
       const seat = current?.snapshot.seats[i];
       if (!seat) return;
-      const color = colorOf(agent.id).multiplyScalar(
-        dim(agent.id) * (agent.placement.docked ? 0.4 : 1),
-      );
+      const color = tint
+        .copy(colorOf(agent.id))
+        .multiplyScalar(dim(agent.id) * (agent.placement.docked ? 0.4 : 1));
       matrix.makeScale(1.6, 1.6, 1.6).setPosition(...agent.position);
       orbs.setMatrixAt(i, matrix);
       orbs.setColorAt(i, color);
       const size = haloSize(seat) ?? 0;
       matrix.compose(
-        new THREE.Vector3(...agent.position),
+        positionVector.fromArray(agent.position),
         camera.quaternion,
-        new THREE.Vector3(size, size, size),
+        scaleVector.set(size, size, size),
       );
       halos.setMatrixAt(i, matrix);
       halos.setColorAt(i, color);
@@ -246,13 +264,7 @@ export function activityLayer(
         linkColors.setXYZ(linkCount + 1, color.r, color.g, color.b);
         linkCount += 2;
       }
-      project(
-        agent.label,
-        [agent.position[0], agent.position[1] + 4, agent.position[2]],
-        camera,
-        width,
-        height,
-      );
+      project(agent.label, agent.position, camera, width, height, 4);
     });
     for (const mesh of [orbs, halos]) {
       mesh.instanceMatrix.needsUpdate = true;
@@ -266,14 +278,19 @@ export function activityLayer(
     let count = 0;
     if (!reduced)
       for (const particle of sampled.particles) {
-        const p = particlePosition(particle, now);
-        if (!p) continue;
-        coordinates.set(p, count * 3);
+        const u = (now - particle.at) / particle.life;
+        if (u < 0 || u >= 1) continue;
+        for (let axis = 0; axis < 3; axis++)
+          coordinates[count * 3 + axis] =
+            particle.from[axis] + (particle.to[axis] - particle.from[axis]) * u;
         const color =
           particle.kind === "add" || particle.kind === "remove"
             ? colorOf(`spark:${particle.kind}`)
             : colorOf(particle.seat);
-        colors.set(color.multiplyScalar(dim(particle.seat)).toArray(), count * 3);
+        tint.copy(color).multiplyScalar(dim(particle.seat));
+        colors[count * 3] = tint.r;
+        colors[count * 3 + 1] = tint.g;
+        colors[count * 3 + 2] = tint.b;
         sizes[count] = particle.size;
         count++;
       }
@@ -282,7 +299,8 @@ export function activityLayer(
       attribute.needsUpdate = true;
     const end = (id: string) =>
       agents.find((a) => a.id === id)?.position ??
-      endpoint(id, current?.snapshot as MapSnapshot, nodes, now);
+      markers.find((marker) => marker.id === id)?.position ??
+      arcSample;
     arcPool.forEach(({ line, button }, i) => {
       const arc = sampled.arcs[i];
       line.visible = !!arc;
@@ -291,7 +309,7 @@ export function activityLayer(
       const a = end(arc.from),
         b = end(arc.to);
       const positions = line.geometry.getAttribute("position");
-      for (let j = 0; j <= 24; j++) positions.setXYZ(j, ...arcPoint(a, b, j / 24));
+      for (let j = 0; j <= 24; j++) positions.setXYZ(j, ...arcPoint(a, b, j / 24, arcSample));
       positions.needsUpdate = true;
       line.material.color.copy(colorOf(arc.from));
       const opacity = reduced
@@ -306,7 +324,7 @@ export function activityLayer(
       button.style.color = colorOf(arc.from).getStyle();
       button.style.opacity = String(opacity * dim(arc.from));
       button.onclick = () => current?.onArc?.(arc, button);
-      project(button, arcPoint(a, b, 0.5), camera, width, height);
+      project(button, arcPoint(a, b, 0.5, arcSample), camera, width, height);
     });
     for (const marker of markers) project(marker.el, marker.position, camera, width, height);
     return !reduced && (moving || sampled.active);
@@ -322,7 +340,7 @@ export function activityLayer(
     glows: (now: number) => (reduced ? [] : sampleMotion(memory.current, now).glows),
     nextExpiry: (now: number) => sampleMotion(memory.current, now).arcs.map((a) => a.at + 4000),
     clear: () => {
-      memory.current = { ...emptyMotion(), seq: memory.current.seq };
+      memory.current = { ...emptyMotion(), seq: memory.current.seq, epoch: memory.current.epoch };
       for (const a of agents) a.position = [...a.goal];
     },
     dispose: () => {

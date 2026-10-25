@@ -351,9 +351,9 @@ it("opens an arc's exact conversation pair and ticket even without a pending que
   stubFetch({
     "/api/comms/GUIDO-1": {
       messages: [
-        message({ id: "a", to: "RETRO-1", text: "Review this", ticket: "7" }),
-        message({ id: "b", to: "RETRO-1", text: "Other ticket", ticket: "8" }),
-        message({ id: "c", to: "CAPCOM", text: "Other lane", ticket: "7" }),
+        message({ id: "a", to: "RETRO-1", text: "Review this", ticket: "sample#7" }),
+        message({ id: "b", to: "RETRO-1", text: "Other ticket", ticket: "sample#8" }),
+        message({ id: "c", to: "CAPCOM", text: "Other lane", ticket: "sample#7" }),
       ],
     },
   });
@@ -375,4 +375,56 @@ it("opens an arc's exact conversation pair and ticket even without a pending que
   expect((screen.getByRole("combobox", { name: "Lane ticket" }) as HTMLSelectElement).value).toBe(
     "7",
   );
+});
+
+it.each(["CAPCOM", "HUB", "MC"])(
+  "opens incoming %s arcs through the configured seat thread",
+  async (from) => {
+    const fetch = stubFetch({
+      "/api/comms/GUIDO-1": {
+        messages: [
+          message({ from: from === "HUB" ? "MC" : from, to: "GUIDO-1", text: "Incoming message" }),
+        ],
+      },
+    });
+    render(<CrewMapView snapshot={snapshot()} />);
+    await screen.findByText("3D scene");
+    act(() =>
+      vi
+        .mocked(MapScene)
+        .mock.lastCall?.[0].onArc?.(
+          { from, to: "GUIDO-1", ticket: 7, kind: "question", at: 65000, count: 1 },
+          screen.getByRole("button", { name: "Zoom to GUIDO-1" }),
+        ),
+    );
+    await screen.findByText("Incoming message");
+    expect(fetch).toHaveBeenCalledWith("/api/comms/GUIDO-1", expect.anything());
+    expect(fetch.mock.calls.some(([path]) => path === `/api/comms/${from}`)).toBe(false);
+  },
+);
+
+it("translates the FLIGHT display alias to its configured thread id", async () => {
+  const s = snapshot();
+  s.seats = [{ ...s.seats[0], seat: "FLIGHT" }];
+  const fetch = stubFetch({
+    "/api/flight": { seat: { id: "watch-1" }, decisions: [] },
+    "/api/comms/watch-1": {
+      messages: [message({ from: "CAPCOM", to: "watch-1", text: "Flight message" })],
+    },
+  });
+  render(<CrewMapView snapshot={s} />);
+  await screen.findByText("3D scene");
+  act(() =>
+    vi
+      .mocked(MapScene)
+      .mock.lastCall?.[0].onArc?.(
+        { from: "CAPCOM", to: "FLIGHT", ticket: 7, kind: "question", at: 65000, count: 1 },
+        screen.getByRole("button", { name: "Zoom to FLIGHT" }),
+      ),
+  );
+  await screen.findByText("Flight message");
+  expect(fetch).toHaveBeenCalledWith("/api/comms/watch-1", expect.anything());
+  expect(
+    fetch.mock.calls.some(([path]) => path === "/api/comms/FLIGHT" || path === "/api/comms/CAPCOM"),
+  ).toBe(false);
 });

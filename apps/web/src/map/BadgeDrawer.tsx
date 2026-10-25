@@ -1,4 +1,4 @@
-import type { CommsThreadMessage, MapSeat, MapSnapshot } from "@mc/core";
+import type { CommsThreadMessage, FlightView, MapSeat, MapSnapshot } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { useNow } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -155,19 +155,34 @@ function QuestionLane({
   now: number;
   conversation?: Pick<MessageArc, "from" | "to" | "ticket">;
 }) {
-  const id = conversation?.from ?? seat?.seat ?? "";
-  const activity = useResource<{ messages: CommsThreadMessage[] }>(RESOURCES.comms(id));
-  const lanes = seat ? questionLanes(seat) : [];
-  const initial = conversation ? JSON.stringify([conversation.from, conversation.to].sort()) : "";
+  const displayId = seat?.seat;
+  const needsFlight =
+    displayId === "FLIGHT" || conversation?.from === "FLIGHT" || conversation?.to === "FLIGHT";
+  const flightId = useResource<FlightView>(needsFlight ? RESOURCES.flight : null).data?.seat?.id;
+  const id = displayId === "FLIGHT" ? flightId : displayId;
+  const activity = useResource<{ messages: CommsThreadMessage[] }>(id ? RESOURCES.comms(id) : null);
+  const displayEnd = (end: string) => (end === flightId ? "FLIGHT" : end === "MC" ? "HUB" : end);
+  const thread = (activity.data?.messages ?? []).map((message) => ({
+    ...message,
+    from: displayEnd(message.from),
+    to: displayEnd(message.to),
+  }));
+  const laneEnds = (from: string, to: string) =>
+    [displayEnd(from), displayEnd(to)].sort() as [string, string];
+  const lanes = (seat ? questionLanes(seat) : []).map((lane) => {
+    const ends = laneEnds(...lane.ends);
+    return { ...lane, ends, key: JSON.stringify(ends) };
+  });
+  const initial = conversation ? JSON.stringify(laneEnds(conversation.from, conversation.to)) : "";
   if (conversation && !lanes.some((l) => l.key === initial))
     lanes.push({
       key: initial,
-      ends: [conversation.from, conversation.to].sort() as [string, string],
+      ends: laneEnds(conversation.from, conversation.to),
       questions: [],
     });
   // Answered questions leave the pending badge; retain their lanes in the open thread.
-  for (const message of activity.data?.messages ?? []) {
-    if (message.from !== id && message.to !== id) continue;
+  for (const message of thread) {
+    if (message.from !== displayId && message.to !== displayId) continue;
     const ends = [message.from, message.to].sort() as [string, string];
     const key = JSON.stringify(ends);
     if (!lanes.some((l) => l.key === key)) lanes.push({ key, ends, questions: [] });
@@ -176,7 +191,7 @@ function QuestionLane({
   const [ticket, setTicket] = useState(conversation ? String(conversation.ticket) : "all");
   const lane = lanes.find((l) => l.key === picked) ?? lanes[0];
   const questions = lane?.questions ?? [];
-  const messages = (activity.data?.messages ?? [])
+  const messages = thread
     .filter((m) => JSON.stringify([m.from, m.to].sort()) === lane?.key)
     // Comms tickets are `repo#7`; questions carry the issue number alone.
     .map((m) => ({

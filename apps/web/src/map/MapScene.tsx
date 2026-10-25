@@ -122,8 +122,19 @@ export function MapScene(props: Props) {
     let previousAgentFocus = view.current?.agentFocus;
     let lastMotion = Date.now();
     const flashes = new Map<string, number>();
-    const visuals: { color: THREE.Color; size: number; path: string; position: THREE.Vector3 }[] =
-      [];
+    const frameMatrix = new THREE.Matrix4();
+    const frameColor = new THREE.Color();
+    const white = new THREE.Color("white");
+    const projectedPosition = new THREE.Vector3();
+    const glows = new Map<string, number>();
+    const visuals: {
+      color: THREE.Color;
+      size: number;
+      path: string;
+      position: THREE.Vector3;
+      glow: number;
+      burst: number;
+    }[] = [];
     const draw = () => {
       frame = undefined;
       if (document.hidden) return;
@@ -138,9 +149,10 @@ export function MapScene(props: Props) {
         el.clientHeight,
       );
       lastMotion = now;
-      const glows = new Map(activity.glows(now).map((g) => [g.path, g.at]));
-      const matrix = new THREE.Matrix4();
+      glows.clear();
+      for (const glow of activity.glows(now)) glows.set(glow.path, glow.at);
       let flashing = false;
+      let changed = false;
       visuals.forEach((visual, i) => {
         const glow = glows.get(visual.path);
         const strength = glow === undefined ? 0 : Math.max(0, 1 - (now - glow) / 6000);
@@ -149,20 +161,26 @@ export function MapScene(props: Props) {
           !reduced.matches && flash !== undefined ? Math.max(0, 1 - (now - flash) / 1200) : 0;
         if (burst) flashing = true;
         else flashes.delete(visual.path);
+        if (strength === visual.glow && burst === visual.burst) return;
+        visual.glow = strength;
+        visual.burst = burst;
+        changed = true;
         mesh.setColorAt(
           i,
-          visual.color.clone().lerp(new THREE.Color("white"), Math.max(strength * 0.5, burst)),
+          frameColor.copy(visual.color).lerp(white, Math.max(strength * 0.5, burst)),
         );
         const size = visual.size * (1 + strength * 0.3 + burst * 0.4);
-        mesh.setMatrixAt(i, matrix.makeScale(size, size, size).setPosition(visual.position));
+        mesh.setMatrixAt(i, frameMatrix.makeScale(size, size, size).setPosition(visual.position));
       });
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      if (changed) {
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      }
       renderer.render(scene, camera);
       const w = el.clientWidth,
         h = el.clientHeight;
       for (const label of projected) {
-        const p = label.position.clone().project(camera);
+        const p = projectedPosition.copy(label.position).project(camera);
         label.el.style.left = `${((p.x + 1) * w) / 2}px`;
         label.el.style.top = `${((1 - p.y) * h) / 2}px`;
         label.el.hidden = p.z > 1 || p.z < -1;
@@ -258,7 +276,7 @@ export function MapScene(props: Props) {
         }
         mesh.setColorAt(i, color);
         const p = new THREE.Vector3(...node.position);
-        visuals.push({ color, size, path: node.path, position: p });
+        visuals.push({ color, size, path: node.path, position: p, glow: 0, burst: 0 });
         if (s.accessing || s.recent)
           addLabel(
             "○",
@@ -415,6 +433,7 @@ export function MapScene(props: Props) {
         theme.disconnect();
         controls.dispose();
         activity.dispose();
+        mesh.dispose();
         document.removeEventListener("visibilitychange", visibility);
         reduced.removeEventListener("change", preference);
         themeMedia.removeEventListener("change", preference);

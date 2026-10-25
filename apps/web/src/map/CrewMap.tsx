@@ -54,11 +54,13 @@ function LiveCrewMap() {
   const [skipped, setSkipped] = useState("");
   const [error, setError] = useState<Error | null>(null);
   const [events, setEvents] = useState<MotionEvent[]>([]);
+  const [epoch, setEpoch] = useState(0);
   useEffect(() => {
     setSnapshot(null);
     setSkipped("");
     setError(null);
     setEvents([]);
+    setEpoch(0);
     if (!repo) return;
     const live = new LiveMap(
       repo,
@@ -71,6 +73,7 @@ function LiveCrewMap() {
         setEvents((previous) =>
           [...previous.filter((e) => e.at > event.at - 6000), event].slice(-200),
         ),
+      setEpoch,
     );
     live.start();
     return () => live.stop();
@@ -105,6 +108,7 @@ function LiveCrewMap() {
           key={repo}
           snapshot={snapshot}
           events={events}
+          epoch={epoch}
           indices={Object.fromEntries((crew?.rows ?? []).map((r) => [r.id, r.index]))}
         />
       ) : (
@@ -118,10 +122,12 @@ export function CrewMapView({
   snapshot,
   indices = {},
   events = [],
+  epoch = 0,
 }: {
   snapshot: MapSnapshot;
   indices?: Record<string, number>;
   events?: MotionEvent[];
+  epoch?: number;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
@@ -233,13 +239,20 @@ export function CrewMapView({
               indices={indices}
               onSelect={select}
               events={events}
+              epoch={epoch}
               agent={agent}
               agentFocus={agentFocus}
               onAgentSelect={setAgent}
               onArc={(conversation, button) => {
                 opener.current = button;
                 setSelected(null);
-                setBadge({ seat: conversation.from, kind: "questions", conversation });
+                const seat = snapshot.seats.find(
+                  (s) =>
+                    s.seat !== "CAPCOM" &&
+                    s.seat !== "HUB" &&
+                    (s.seat === conversation.from || s.seat === conversation.to),
+                );
+                setBadge({ seat: seat?.seat ?? "", kind: "questions", conversation });
               }}
             />
           </Suspense>

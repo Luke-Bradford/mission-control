@@ -1,6 +1,8 @@
 import { type MapSnapshot, mapDeltaFixture, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import * as THREE from "three";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { orbPlacement } from "../src/map/agents.ts";
 import { renderer } from "./mapRendererMock.ts";
 
 const { MapScene } = await import("../src/map/MapScene.tsx");
@@ -178,4 +180,140 @@ it("drops in-progress effects on tab hide and catches up silently on return", ()
   expect(renderer.render).toHaveBeenCalledTimes(before + 1);
   act(() => vi.advanceTimersByTime(60_000));
   expect(renderer.render).toHaveBeenCalledTimes(before + 1);
+});
+
+const submittedScene = () => renderer.render.mock.lastCall?.[0] as THREE.Scene;
+const activityObjects = () => {
+  const group = submittedScene().children.find(
+    (object) => object instanceof THREE.Group,
+  ) as THREE.Group;
+  return {
+    group,
+    orbs: group.children.find(
+      (object) =>
+        object instanceof THREE.InstancedMesh && object.geometry instanceof THREE.SphereGeometry,
+    ) as THREE.InstancedMesh,
+    particles: group.children.find((object) => object instanceof THREE.Points) as THREE.Points,
+  };
+};
+it("submits placed orb matrices and populated particle attributes to the renderer", () => {
+  const { rerender } = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const { orbs, particles } = activityObjects();
+  const matrix = new THREE.Matrix4();
+  props.snapshot.seats.forEach((seat, i) => {
+    orbs.getMatrixAt(i, matrix);
+    const actual = new THREE.Vector3().setFromMatrixPosition(matrix);
+    const expected = orbPlacement(seat, nodes, i, Date.now()).position;
+    actual.toArray().forEach((value, axis) => {
+      expect(value).toBeCloseTo(expected[axis], 5);
+    });
+    expect(new THREE.Vector3().setFromMatrixScale(matrix).toArray()).toEqual([
+      expect.closeTo(1.6),
+      expect.closeTo(1.6),
+      expect.closeTo(1.6),
+    ]);
+  });
+  expect(particles.geometry.drawRange.count).toBe(0);
+  const at = Date.now();
+  let drawnAt = at;
+  renderer.render.mockImplementationOnce(() => {
+    drawnAt = Date.now();
+  });
+  rerender(
+    <MapScene
+      {...props}
+      events={[
+        {
+          delta: { type: "edit", seq: 1, seat: "GUIDO-1", file: "src/main.ts", add: 8, rem: 0 },
+          at,
+        },
+      ]}
+    />,
+  );
+  act(() => vi.advanceTimersByTime(40));
+  const geometry = particles.geometry;
+  expect(geometry.drawRange).toEqual({ start: 0, count: 1 });
+  const p = nodes.find((node) => node.path === "src/main.ts")?.position as number[];
+  const u = (drawnAt - at) / 800;
+  const outside = [p[0] + Math.cos(2.4) * 10, p[1] + Math.sin(2.4) * 10, p[2] + Math.cos(4.8) * 5];
+  const position = geometry.getAttribute("position");
+  [position.getX(0), position.getY(0), position.getZ(0)].forEach((value, axis) => {
+    expect(value).toBeCloseTo(outside[axis] + (p[axis] - outside[axis]) * u, 5);
+  });
+  expect(geometry.getAttribute("size").getX(0)).toBeCloseTo(3.6);
+  expect(Array.from(geometry.getAttribute("color").array).slice(0, 3)).toEqual(
+    new THREE.Color("#808999").toArray().map((v) => expect.closeTo(v, 5)),
+  );
+  expect((position as THREE.BufferAttribute).version).toBeGreaterThan(0);
+});
+it("releases labels, instance resources and geometries on seat removal and unmount", () => {
+  const { rerender, unmount } = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const watch = () => {
+    const scene = submittedScene();
+    const disposed: ReturnType<typeof vi.fn>[] = [];
+    scene.traverse((object) => {
+      if (
+        object instanceof THREE.Mesh ||
+        object instanceof THREE.Line ||
+        object instanceof THREE.Points
+      ) {
+        const resource = vi.fn();
+        object.geometry.addEventListener("dispose", resource);
+        disposed.push(resource);
+        if (object instanceof THREE.InstancedMesh) {
+          const instance = vi.fn();
+          object.addEventListener("dispose", instance);
+          disposed.push(instance);
+        }
+      }
+    });
+    return disposed;
+  };
+  const oldLabel = screen.getByRole("button", { name: /GUIDO-1 · #7 · reading/ });
+  const oldResources = watch();
+  rerender(
+    <MapScene {...props} snapshot={{ ...props.snapshot, seats: props.snapshot.seats.slice(1) }} />,
+  );
+  act(() => vi.advanceTimersByTime(40));
+  expect(oldLabel.isConnected).toBe(false);
+  for (const disposed of oldResources) expect(disposed).toHaveBeenCalledOnce();
+  const labels = [...document.querySelectorAll(".map-orb-label, .map-arc, .map-marker")];
+  expect(labels.length).toBeGreaterThan(0);
+  const remaining = watch();
+  unmount();
+  for (const disposed of remaining) expect(disposed).toHaveBeenCalledOnce();
+  for (const label of labels) expect(label.isConnected).toBe(false);
+  expect(vi.getTimerCount()).toBe(0);
+});
+it("updates only animated file instances and reuses colour and projection scratch objects", () => {
+  const { rerender } = render(<MapScene {...props} />);
+  act(() => vi.advanceTimersByTime(40));
+  const mesh = submittedScene().children.find(
+    (object) => object instanceof THREE.InstancedMesh,
+  ) as THREE.InstancedMesh;
+  rerender(
+    <MapScene
+      {...props}
+      events={[
+        {
+          delta: { type: "edit", seq: 1, seat: "GUIDO-1", file: "src/main.ts", add: 8, rem: 0 },
+          at: Date.now(),
+        },
+      ]}
+    />,
+  );
+  act(() => vi.advanceTimersByTime(40));
+  const writes = vi.spyOn(mesh, "setMatrixAt");
+  const colors = vi.spyOn(THREE.Color.prototype, "clone");
+  const vectors = vi.spyOn(THREE.Vector3.prototype, "clone");
+  act(() => vi.advanceTimersByTime(200));
+  const fileIndex = nodes
+    .filter((node) => node.count > 0)
+    .findIndex((node) => node.path === "src/main.ts");
+  expect(writes.mock.calls.length).toBeGreaterThan(0);
+  expect([...new Set(writes.mock.calls.map(([index]) => index))]).toEqual([fileIndex]);
+  expect(colors).not.toHaveBeenCalled();
+  expect(vectors).not.toHaveBeenCalled();
 });
