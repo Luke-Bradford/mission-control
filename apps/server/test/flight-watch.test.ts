@@ -835,6 +835,44 @@ describe("FLIGHT's brief in the digest", () => {
     expect(sentWake().questions).toHaveLength(1);
   });
 
+  it("does not repeat memory titles beyond the wake cap after a full tool read", async () => {
+    liveCrew();
+    ask();
+    for (let n = 0; n < 100; n++)
+      store.putFlightMemory({
+        repoId: "mc",
+        topic: `topic ${n}`,
+        kind: "lesson",
+        body: "Lesson",
+        source: "test",
+        author: "flight",
+        updatedAt: T0,
+      });
+    await watch.check();
+    const read = flightState({ config, store, busy: [], now: nowMs });
+    expect(read.memory).toHaveLength(100);
+    watch.seen("r-flight", read);
+    nowMs += FLIGHT_REWAKE_MS;
+    await watch.check();
+    expect(sentWake().memory.titles.lesson.entries).toEqual([]);
+    expect(sentWake().memory.titles.lesson.unchanged).toBe(100);
+  });
+
+  it("emits attention at the triage deadline between watch ticks", async () => {
+    liveCrew();
+    nowMs = T0 + MIN;
+    raiseBlocked();
+    await watch.check();
+    emitted.length = 0;
+    nowMs = T0 + 20 * MIN;
+    await vi.advanceTimersByTimeAsync(19 * MIN);
+    expect(emitted).toContain("attention");
+    watch.stop();
+    emitted.length = 0;
+    await vi.advanceTimersByTimeAsync(20 * MIN);
+    expect(emitted).toEqual([]);
+  });
+
   it("compares the next wake with the full state read mid-turn, including flips back", async () => {
     liveCrew();
     setNotes(T0);
@@ -2325,7 +2363,8 @@ describe("triage and quiet wakes", () => {
     expect(question.items[0]?.text).toBe("Please confirm the target branch.");
     messages(["Tests are running.", "Please confirm the target branch.", "Still waiting."]);
     expect(signalState().items[0]?.key).toBe(question.items[0]?.key);
-    expect(signalState().items[0]?.wakeKey).toBe(question.items[0]?.wakeKey);
+    expect(signalState().items[0]).not.toHaveProperty("wakeKey");
+    expect(question.items[0]).not.toHaveProperty("wakeKey");
     expect(wakeFacts(signalState())).toBe(wakeFacts(question));
     store.addBrief({
       key: question.items[0]?.key ?? "",

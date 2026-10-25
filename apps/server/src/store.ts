@@ -77,6 +77,8 @@ import {
   wakeKeyPrefix,
 } from "@mc/core";
 
+export const COMMS_RETENTION_DAYS = 90;
+export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
 export const HISTORY_BATCH_ROWS = 500;
 export const HISTORY_SWEEP_MAX_BATCHES = 10;
 
@@ -239,6 +241,12 @@ CREATE TABLE IF NOT EXISTS commit_lines (
 CREATE INDEX IF NOT EXISTS run_commits_first ON run_commits(repo_id, sha, at, id);
 CREATE INDEX IF NOT EXISTS run_commits_branch ON run_commits(repo_id, branch);
 CREATE INDEX IF NOT EXISTS run_commits_at ON run_commits(at);
+-- Append-only observations for a run and its linked review runs.
+CREATE TABLE IF NOT EXISTS run_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, kind TEXT NOT NULL,
+  at INTEGER NOT NULL, data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS run_attempts_run ON run_attempts(run_id, id);
 -- The sha a run last pushed to its branch, or found origin already at (phase 2b): draft_pr needs
 -- it to be the branch's tip.
 CREATE TABLE IF NOT EXISTS run_pushes (run_id TEXT PRIMARY KEY, sha TEXT NOT NULL, at INTEGER NOT NULL);
@@ -1103,12 +1111,53 @@ export class Store {
     return changed;
   }
 
+  /** Ordered snapshots: later observations never rewrite an earlier attempt. */
+  runAttempts(
+    runId: string,
+  ): { id: number; runId: string; kind: string; at: number; data: Record<string, unknown> }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM run_attempts WHERE run_id = ? OR run_id IN (SELECT run_id FROM reviews WHERE author_run_id = ?) ORDER BY id",
+        )
+        .all(runId, runId) as Row[]
+    ).map((r) => ({
+      id: r.id as number,
+      runId: r.run_id as string,
+      kind: r.kind as string,
+      at: r.at as number,
+      data: JSON.parse(r.data as string) as Record<string, unknown>,
+    }));
+  }
+
+  private appendAttempt(runId: string, kind: string, at: number, data: object): void {
+    const encoded = JSON.stringify(data);
+    const previous = this.db
+      .prepare(
+        "SELECT data, at FROM run_attempts WHERE run_id = ? AND kind = ? ORDER BY id DESC LIMIT 1",
+      )
+      .get(runId, kind) as Row | undefined;
+    // Wait completions are events: equal durations at different times are distinct waits.
+    if (previous?.data === encoded && (kind !== "wait-end" || previous.at === at)) return;
+    this.db
+      .prepare("INSERT INTO run_attempts (run_id, kind, at, data) VALUES (?, ?, ?, ?)")
+      .run(runId, kind, at, encoded);
+  }
+
   /**
    * `folded`: the caller folded the run's transcript into `r`. The row is marked folded once that
    * happens to an ended run, and the mark is never cleared. A new row takes `r.loop`; an existing
    * row's loop is never rewritten here (`setRunLoop`).
    */
   upsertRun(r: Run, folded = false): void {
+    this.appendAttempt(r.id, "run", r.endedAt ?? r.startedAt, {
+      model: r.model,
+      profile: r.profile ?? null,
+      reviewId: r.reviewId ?? null,
+      tokens: r.tokens,
+      costUsd: r.costUsd,
+      status: r.status,
+    });
     this.db
       .prepare(
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
@@ -1623,6 +1672,8 @@ export class Store {
       ["loop_events", 30, "AND key NOT LIKE '%:plan'"],
       ["run_evidence", 30, ""],
       ["review_findings", 30, ""],
+      ["comms", COMMS_RETENTION_DAYS, ""],
+      ["flight_decisions", FLIGHT_DECISIONS_RETENTION_DAYS, ""],
     ] as const;
     let batches = 0;
     const start = this.historyNextTable;
@@ -1632,14 +1683,17 @@ export class Store {
       // Let other tables go first next time if this table consumes the sweep budget.
       this.historyNextTable = (index + 1) % tables.length;
       const findings = table === "review_findings";
-      const condition = findings
-        ? `EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
+      const condition =
+        table === "comms" || table === "flight_decisions"
+          ? "at < ?"
+          : findings
+            ? `EXISTS (SELECT 1 FROM reviews v WHERE v.id = review_findings.review_id
             AND v.ended_at < ? AND v.state IN ('reported', 'failed', 'superseded')
             AND (v.run_id IS NULL OR EXISTS
               (SELECT 1 FROM runs r WHERE r.id = v.run_id AND ${endedRun})))
           AND EXISTS (SELECT 1 FROM runs r
             WHERE r.id = review_findings.author_run_id AND r.ended_at < ? AND ${endedRun})`
-        : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
+            : `EXISTS (SELECT 1 FROM runs r WHERE r.id = ${table}.run_id
             AND r.ended_at < ? AND ${endedRun}) ${extra}`;
       const select = this.db.prepare(
         `SELECT rowid AS id FROM ${table} WHERE rowid > ? AND ${condition}
@@ -1888,6 +1942,23 @@ export class Store {
          closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha, stale = 0`,
     );
     for (const p of prs) {
+      const runs = this.db
+        .prepare(
+          "SELECT id FROM runs WHERE repo_id = ? AND (json_extract(loop, '$.prNumber') = ? OR id IN (SELECT author_run_id FROM reviews WHERE repo_id = ? AND pr_number = ?))",
+        )
+        .all(repoId, p.number, repoId, p.number) as Row[];
+      for (const run of runs) {
+        this.appendAttempt(run.id as string, "ci", readAt, {
+          sha: p.headSha,
+          state: p.ci,
+          checks: p.checks ?? [],
+        });
+        if (p.mergedAt !== null)
+          this.appendAttempt(run.id as string, "merge", p.mergedAt, {
+            sha: p.headSha,
+            mergeCommitSha: p.mergeCommitSha ?? null,
+          });
+      }
       ins.run(
         repoId,
         p.number,
@@ -2328,6 +2399,33 @@ export class Store {
 
   /** Sets the run's loop state (null clears it). */
   setRunLoop(runId: string, loop: RunLoop | null, at = Date.now()): void {
+    const previous = this.run(runId)?.loop;
+    if (JSON.stringify(previous) !== JSON.stringify(loop)) {
+      this.appendAttempt(runId, "loop", at, loop ?? { phase: null });
+      if (
+        previous &&
+        (previous.phase === "ci" || previous.phase === "review" || previous.awaitingFlight)
+      ) {
+        if (previous.phase !== loop?.phase || previous.awaitingFlight !== loop?.awaitingFlight) {
+          const start = this.db
+            .prepare(
+              "SELECT at FROM run_attempts WHERE run_id = ? AND kind = 'wait' ORDER BY id DESC LIMIT 1",
+            )
+            .get(runId) as Row | undefined;
+          this.appendAttempt(runId, "wait-end", at, {
+            on: previous.awaitingFlight ?? previous.phase,
+            durationMs: start ? Math.max(0, at - (start.at as number)) : null,
+          });
+        }
+      }
+      if (
+        loop &&
+        (loop.phase === "ci" || loop.phase === "review" || loop.awaitingFlight) &&
+        (previous?.phase !== loop.phase || previous?.awaitingFlight !== loop.awaitingFlight)
+      ) {
+        this.appendAttempt(runId, "wait", at, { on: loop.awaitingFlight ?? loop.phase, since: at });
+      }
+    }
     this.db
       .prepare("UPDATE runs SET loop = ? WHERE id = ?")
       .run(loop === null ? null : JSON.stringify(loop), runId);
@@ -2417,6 +2515,12 @@ export class Store {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
       )
       .run(r.authorRunId, r.repoId, r.seatId, r.prNumber, r.sha, r.epoch, r.attempt, r.round, r.at);
+    if (res.changes === 1)
+      this.appendAttempt(r.authorRunId, "review", r.at, {
+        ...r,
+        id: Number(res.lastInsertRowid),
+        state: "queued",
+      });
     return res.changes === 1 ? Number(res.lastInsertRowid) : null;
   }
 
@@ -2496,6 +2600,10 @@ export class Store {
          WHERE id = ? AND state IN (${from.map(() => "?").join(", ")})`,
       )
       .run(to, ...set.args, id, ...from);
+    if (r.changes === 1) {
+      const review = this.review(id);
+      if (review) this.appendAttempt(review.authorRunId, "review", patch.at, review);
+    }
     return r.changes === 1;
   }
 
@@ -2549,6 +2657,10 @@ export class Store {
           f.fix,
           isBlocking(f) ? "open" : "logged",
         );
+      });
+      this.appendAttempt(author, "review", r.at, {
+        ...this.review(reviewId),
+        findings: r.findings,
       });
       this.clearNoReportNotes(runId, r.at);
       recorded = true;
@@ -3142,13 +3254,13 @@ export class Store {
       .run(at, runId);
   }
 
-  /** Holds of the test lock started since `since`, newest first, with their run's ticket. */
+  /** Holds of the test lock started or ended since `since`, newest first, with their run's ticket. */
   lockRuns(since: number): TestLockRun[] {
     const rows = this.db
       .prepare(`SELECT h.*, r.ticket FROM test_lock_runs h
-      LEFT JOIN runs r ON r.id = h.run_id WHERE h.started_at >= ?
+      LEFT JOIN runs r ON r.id = h.run_id WHERE h.started_at >= ? OR h.ended_at >= ?
       ORDER BY h.started_at DESC, h.id DESC`)
-      .all(since) as Row[];
+      .all(since, since) as Row[];
     return rows.map((r) => ({
       runId: r.run_id as string,
       seatId: r.seat_id as string,
@@ -3377,6 +3489,7 @@ export class Store {
 
   /** Records that a run's branch is on origin at `sha` (replacing an earlier push of the run). */
   setRunPush(p: { runId: string; sha: string; at: number }): void {
+    this.appendAttempt(p.runId, "push", p.at, { sha: p.sha });
     this.db
       .prepare(
         `INSERT INTO run_pushes (run_id, sha, at) VALUES (?, ?, ?)

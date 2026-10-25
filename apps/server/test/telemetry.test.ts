@@ -800,6 +800,7 @@ describe("lockView", () => {
       });
       store.deleteLockHold(id, "call", started + length);
     };
+    add("outside", NOW - 7 * DAY - MIN, 50_000);
     add("a", NOW - 3 * HOUR, 100);
     add("b", NOW - 2 * HOUR, 200);
     const since = NOW - MIN;

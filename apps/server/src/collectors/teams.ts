@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { TEAMS_TEXT_MAX } from "@mc/core";
 import type { CcConfig, TeamsConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import { isObj } from "./github.ts";
@@ -360,7 +361,7 @@ export async function collectTeams(
           .replace(/<[^>]*>/g, " ")
           .replace(/&nbsp;/g, " ")
           .replace(/&amp;/g, "&")
-          .slice(0, 12_000);
+          .slice(0, TEAMS_TEXT_MAX);
         const modified =
           typeof raw.lastModifiedDateTime === "string"
             ? raw.lastModifiedDateTime

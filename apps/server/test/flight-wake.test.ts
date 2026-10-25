@@ -571,6 +571,17 @@ describe("memory in wake deltas", () => {
     expect(flightWake(state, undefined, prose).digest.memory.linked).toEqual([]);
   });
 
+  it("does not link generic failing checks through ordinary question prose", () => {
+    const state = busyBoard();
+    if (!state.prs[0]) throw new Error("missing PR fixture");
+    state.prs = [{ ...state.prs[0], failingChecks: ["CI", "lint"] }];
+    state.questions = [
+      { id: 1, seat: "guido-0", ticket: null, text: "Can I run ci and LINT?", ageMin: 0 },
+    ];
+    const notes = [memoryNote("CI retries"), memoryNote("lint retries")];
+    expect(flightWake(state, undefined, notes).digest.memory.linked).toEqual([]);
+  });
+
   it("bounds titles and linked bodies, counts omissions, and delivers omitted changes later", () => {
     const state = busyBoard();
     state.questions = [{ id: 1, seat: "guido-0", ticket: "mc#450", text: "#450?", ageMin: 0 }];

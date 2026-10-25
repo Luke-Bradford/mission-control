@@ -29,7 +29,6 @@ import {
   FLIGHT_STATE_DECISION_MAX,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_TICKETS_LISTED,
-  FLIGHT_TRIAGE_WAIT_MS,
   FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
@@ -54,7 +53,6 @@ import {
   OWNER_FLIGHT,
   OWNER_OPERATOR,
   orderLedger,
-  PR_WAIT_MS,
   priorityRank,
   READY_LABEL,
   RULING_PARK,
@@ -751,10 +749,7 @@ export function flightState(i: {
       ticket: x.ticket,
       text: cut(x.text, FLIGHT_STATE_TEXT_MAX),
       ageMin: Math.floor((now - x.at) / 60_000),
-      triageRemainingMs: Math.max(
-        0,
-        (x.triageDueAt ?? x.at + (x.kind === "pr" ? PR_WAIT_MS : 0) + FLIGHT_TRIAGE_WAIT_MS) - now,
-      ),
+      triageRemainingMs: Math.max(0, (x.triageDueAt ?? now) - now),
     }));
 
   const planned = flightScheduleView(config, store, now).entries;
@@ -814,6 +809,7 @@ export function flightWake(
   state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   previous?: FlightWakeSnapshot,
   notes: FlightMemoryNote[] = [],
+  fullRead = false,
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
   const {
     brief,
@@ -881,7 +877,7 @@ export function flightWake(
       const changes = memoryChanges.entries.filter((n) => n.kind === kind);
       const entries = changes.slice(0, FLIGHT_MEMORY_TITLES_MAX);
       // Omitted titles have not been delivered; keep them eligible for the next wake.
-      for (const note of changes.slice(FLIGHT_MEMORY_TITLES_MAX)) {
+      for (const note of fullRead ? [] : changes.slice(FLIGHT_MEMORY_TITLES_MAX)) {
         const key = `${kind}:${note.topic}`;
         const prior = previous?.memory.get(key);
         if (prior === undefined) snapshot.memory.delete(key);
@@ -1001,9 +997,7 @@ export function wakeFacts(
       )
       .sort(),
     items: s.items
-      .map((x) =>
-        x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : (x.wakeKey ?? x.key),
-      )
+      .map((x) => (x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : x.key))
       .sort(),
     release: releasable(s),
   });

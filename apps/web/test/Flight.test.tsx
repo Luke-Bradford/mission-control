@@ -998,6 +998,24 @@ describe("FLIGHT's brief", () => {
     expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
   });
 
+  it("does not render an empty assessment for an item FLIGHT is handling", async () => {
+    stubFetch({
+      "/api/attention": [
+        item({
+          key: "kept",
+          text: "Handling",
+          owner: "flight",
+          flightTriage: "handling",
+          brief: undefined,
+        }),
+      ],
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const section = await screen.findByRole("region", { name: "FLIGHT is handling" });
+    expect(section.querySelector("p")).toBeNull();
+  });
+
   it("Situation says so with an empty headline", async () => {
     stubFetch({ "/api/flight/summary": flightSummary({ headline: "" }), "/api/config": CONFIG });
     const { container } = render(<Flight />);
@@ -1102,6 +1120,17 @@ describe("FLIGHT's brief", () => {
       within(cards[0] as HTMLElement).getByRole("button", { name: "Read the brief and reply" }),
     );
     expect(screen.getByTestId("item").textContent).toBe(KEY);
+  });
+
+  it("omits the quote when a source snippet is empty", async () => {
+    stubFetch({
+      "/api/attention": [personItem],
+      "/api/notifications": { open: [thread({ snippet: null })], handledToday: [] },
+      "/api/config": CONFIG,
+    });
+    render(<Flight />);
+    const card = await screen.findByTestId("person-card");
+    expect(card.querySelector("blockquote")).toBeNull();
   });
 
   it("Asked of you highlights mentions and keeps the message inert", async () => {

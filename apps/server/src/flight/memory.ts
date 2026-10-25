@@ -2,18 +2,26 @@ import {
   FLIGHT_MEMORY_BODY_MAX,
   FLIGHT_MEMORY_KINDS,
   FLIGHT_MEMORY_SOURCE_MAX,
-  FLIGHT_MEMORY_TOPIC_MAX,
   type FlightMemoryNote,
   type FlightState,
+  normaliseMemoryTopic,
 } from "@mc/core";
 import { z } from "zod";
 
 export const FlightMemoryTopic = z
   .string()
-  .regex(/^[^\p{Cc}\p{Cf}\u2028\u2029]*$/u)
-  .overwrite((topic) => topic.replace(/\s+/gu, " ").trim())
-  .min(1)
-  .max(FLIGHT_MEMORY_TOPIC_MAX);
+  .refine(
+    (topic) => {
+      try {
+        normaliseMemoryTopic(topic);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "Invalid memory topic", abort: true },
+  )
+  .overwrite(normaliseMemoryTopic);
 export const FlightMemoryInput = z.object({
   topic: FlightMemoryTopic,
   kind: z.enum(FLIGHT_MEMORY_KINDS),
@@ -47,7 +55,9 @@ export function linkedMemory(notes: FlightMemoryNote[], state: FlightState): Fli
   }
   for (const name of evidence.match(/\b[\w./-]+\.(?:test|spec)\.[\w]+\b/g) ?? []) names.add(name);
   for (const pr of state.prs) {
-    for (const name of pr.failingChecks) if (namesIn(evidence, name)) names.add(name);
+    for (const name of pr.failingChecks) {
+      if (signals.some((s) => namesIn(`${s.key} ${s.evidence}`, name))) names.add(name);
+    }
   }
   return notes.filter((note) => [...names].some((name) => namesIn(note.topic, name)));
 }
