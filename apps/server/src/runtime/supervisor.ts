@@ -3026,7 +3026,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const run = store.run(runId);
     if (run === null || run.endedAt !== null) return;
     const seatId = run.agentId;
-    if (starting.has(seatId)) return;
     const info = findSeat(seatId);
     const row = store.seatSession(seatId);
     if (info === undefined) return;
