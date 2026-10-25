@@ -87,6 +87,12 @@ import Fastify, {
 import { z } from "zod";
 import { readAccountStatus } from "./accounts.ts";
 import {
+  AttentionHoldInput,
+  attentionHoldError,
+  holdItem,
+  releaseHold,
+} from "./attention-holds.ts";
+import {
   AWAY_STARTED_SETTING,
   AwayBody,
   activeAway,
@@ -1979,7 +1985,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (source) postingItems.add(source.itemKey);
         const file = crewPrBodyPath(store.path);
         let wroteBody = false;
+        const attemptKey = `draft-post:${id}`;
+        const finish = () => {
+          store.finishDraft(id, "posted", body);
+          store.deleteSetting(attemptKey);
+          if (thread) {
+            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
+            bus.emit("attention");
+          }
+          bus.emit("flight");
+          return { ok: true };
+        };
         try {
+          if (store.getSetting(attemptKey)) {
+            const latest = await (deps.gh ?? createGh())(
+              [draft.kind, "view", String(n), `--repo=${repo.github}`, "--json=comments"],
+              { cwd: crewDir(store.path) },
+            );
+            let comments: { body: string }[] | undefined;
+            try {
+              comments = z
+                .object({ comments: z.array(z.object({ body: z.string() })) })
+                .parse(JSON.parse(latest.stdout)).comments;
+            } catch {
+              /* A failed read must not turn into a second post. */
+            }
+            if (latest.code !== 0 || !comments)
+              return reply
+                .code(502)
+                .send({ error: "Could not verify the latest comment. Nothing was posted." });
+            if (comments.at(-1)?.body === body && store.getSetting(attemptKey) === body)
+              return finish();
+          }
           if (source && thread) {
             try {
               const rest = deps.notificationRest ?? makeRest(await githubToken());
@@ -2041,19 +2078,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
           await writeFile(file, body, { mode: 0o600, flag: "wx" });
           wroteBody = true;
+          store.setSetting(attemptKey, body);
           const result = await (deps.gh ?? createGh())(
             [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
             { cwd: crewDir(store.path) },
           );
           if (result.code !== 0)
             return reply.code(502).send({ error: "GitHub refused the comment." });
-          store.finishDraft(id, "posted", body);
-          if (thread) {
-            store.markNotificationHandled(thread.id, thread.updatedAt, "replied", now());
-            bus.emit("attention");
-          }
-          bus.emit("flight");
-          return { ok: true };
+          return finish();
         } finally {
           postingDrafts.delete(id);
           if (source) postingItems.delete(source.itemKey);
@@ -2087,6 +2119,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (draft.via !== "Teams" || draft.state !== "pending")
           return reply.code(409).send({ error: "Only pending Teams drafts can be copied." });
         store.finishDraft(id, "copied");
+        store.deleteSetting(`draft-post:${id}`);
         bus.emit("flight");
         return { ok: true };
       });
@@ -2097,6 +2130,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!store.drafts().some((d) => d.id === id))
           return reply.code(404).send({ error: "No pending draft." });
         store.finishDraft(id, "discarded");
+        store.deleteSetting(`draft-post:${id}`);
         bus.emit("flight");
         return { ok: true };
       });
@@ -2139,6 +2173,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
+      // Reader: apps/web/src/agent/LoopSteps.tsx (future attempt history)
+      api.get<{ Params: { id: string } }>("/runs/:id/attempts", async (req, reply) => {
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        return { runId: run.id, attempts: store.runAttempts(run.id) };
+      });
       // A looped run's state and its Activity rows, on demand.
       // Reader: apps/web/src/agent/LoopSteps.tsx (the Steps view)
       api.get<{ Params: { id: string } }>("/runs/:id/loop", async (req, reply) => {
@@ -2171,7 +2211,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ),
           ]),
           round: loop
-            ? Math.min(REVIEW_ROUNDS, 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch))
+            ? Math.min(
+                run.profile?.profile.rounds ?? REVIEW_ROUNDS,
+                1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch),
+              )
             : null,
           budget:
             loop &&
@@ -2289,7 +2332,51 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      api.get("/attention", async (): Promise<AttentionItem[]> => sharedAttention());
+      api.get(
+        "/attention",
+        async (): Promise<AttentionItem[]> =>
+          sharedAttention().map((item) =>
+            item.kind === "tag" && item.text.length > 170
+              ? { ...item, text: `${item.text.slice(0, 169)}…` }
+              : item,
+          ),
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
+      api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
+        const item = sharedAttention().find((item) => item.key === req.params.key);
+        return item ?? reply.code(404).send({ error: "Item is no longer open." });
+      });
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.get("/attention/held", async () =>
+        attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew().rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ).filter((i) => i.hold),
+      );
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
+        const body = AttentionHoldInput.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
+        if (!sharedAttention().some((i) => i.key === req.params.key))
+          return reply.code(404).send({ error: "Item is no longer waiting." });
+        holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now());
+        bus.emit("attention");
+        return { ok: true };
+      });
+      // Reader: apps/web/src/comms/NeedsList.tsx
+      api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (!releaseHold(store, req.params.key, now()))
+          return reply.code(404).send({ error: "No active hold." });
+        bus.emit("attention");
+        return { ok: true };
+      });
 
       const discussionSends = new Set<string>();
       const currentDiscussionItem = (key: string) => {

@@ -112,7 +112,7 @@ export const BRIEF_KEY_MAX = 500;
 export const briefNoItemText = (key: string): string =>
   `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
-export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling for at most 24 hours. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original in full. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. Texts accept ${BRIEF_INPUT_MAX} characters without truncation. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
+export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling for at most 24 hours. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original up to ${BRIEF_INPUT_MAX} characters. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. Texts accept ${BRIEF_INPUT_MAX} characters without truncation. At most ${FLIGHT_BRIEFS_PER_HOUR} an hour.`;
 
 export const FLIGHT_LEDGER_KINDS = ["work", "watch", "commitment", "incoming"] as const;
 export type FlightLedgerKind = (typeof FLIGHT_LEDGER_KINDS)[number];
@@ -843,7 +843,6 @@ export interface FlightState {
   items: {
     key: string;
     /** A stream question's identity, independent of later progress messages in its thread. */
-    wakeKey?: string;
     kind: AttentionKind;
     ticket: string | null;
     text: string;

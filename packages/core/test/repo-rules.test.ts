@@ -139,6 +139,14 @@ describe("dependsOn and inLane", () => {
     expect(dependsOn(body)).toEqual([3, 5]);
   });
 
+  it("ignores reverse dependencies and unrelated references", () => {
+    expect(
+      dependsOn(
+        "#338 depends on this ticket\nSee #9; depends on #8\n- Depends on #3 and #5\nDepends on: #5",
+      ),
+    ).toEqual([3, 5]);
+  });
+
   it("starts every card when the hub has no lane", () => {
     expect(inLane(["lane:home", "lane:work"], undefined, false)).toBe(true);
   });

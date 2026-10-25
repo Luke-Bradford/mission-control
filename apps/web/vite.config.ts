@@ -38,7 +38,7 @@ function webImportGuard(): Plugin {
       throw new Error(`Web import outside apps/web, packages and node_modules: ${id}`);
     }
   };
-  const checkTarget = (target: string, importer: string) => {
+  const checkTarget = (target: string, importer: string, fsFallback = true) => {
     if (/^(?:data:|https?:|\/\/|#)/i.test(target)) return;
     const file = target.replace(/[?#][^/]*$/, "");
     // Bare package specifiers are resolved separately by Vite.
@@ -48,7 +48,7 @@ function webImportGuard(): Plugin {
       : resolve(dirname(importer), file);
     guard(path);
     // Vite falls back to an absolute filesystem path when the root-relative file is absent.
-    if (isAbsolute(file) && !existsSync(path) && existsSync(file)) {
+    if (fsFallback && isAbsolute(file) && !existsSync(path) && existsSync(file)) {
       guard(file);
       path = file;
     }
@@ -71,7 +71,7 @@ function webImportGuard(): Plugin {
       }
     }
     for (const match of css.matchAll(
-      /@import\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)|"([^"]*)"|'([^']*)')/gi,
+      /@(?:import|use|forward)\s+(?:url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)|"([^"]*)"|'([^']*)')/gi,
     )) {
       const target = (match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[5]).trim();
       const imported = checkTarget(decodeURI(target), id);
@@ -102,11 +102,11 @@ function webImportGuard(): Plugin {
     transformIndexHtml: {
       order: "pre",
       handler(html, ctx) {
-        const checkHtmlTarget = (value: string) => {
+        const checkHtmlTarget = (value: string, fsFallback = true) => {
           const target = decodeURI(value.trim());
           if (!target || /^(?:[a-z][\w+.-]*:|\/\/|#)/i.test(target)) return;
           // Unlike module specifiers, bare HTML URLs are relative to the HTML file.
-          checkTarget(target.startsWith("/") ? target : `./${target}`, ctx.filename);
+          checkTarget(target.startsWith("/") ? target : `./${target}`, ctx.filename, fsFallback);
         };
         const visit = (node: DefaultTreeAdapterTypes.Node) => {
           if ("tagName" in node) {
@@ -117,6 +117,7 @@ function webImportGuard(): Plugin {
               scanCss(css, ctx.filename, new Set());
             }
             for (const { name, value } of node.attrs) {
+              if ((node.tagName === "a" || node.tagName === "area") && name === "href") continue;
               if (name === "style") {
                 scanCss(value, ctx.filename, new Set());
               } else if (name === "srcset" || name === "imagesrcset") {
@@ -132,7 +133,10 @@ function webImportGuard(): Plugin {
                 /^(?:src|href|poster)$/.test(name) ||
                 (name.startsWith("data-") && /^(?:\.{1,2}\/|\/)|[/.?]/.test(value.trim()))
               ) {
-                checkHtmlTarget(value);
+                checkHtmlTarget(
+                  value,
+                  !name.startsWith("data-") || /^(?:data-src|data-srcset)$/.test(name),
+                );
               }
             }
             if ("content" in node) visit(node.content);

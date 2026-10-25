@@ -77,3 +77,7 @@ describe("Overview layout (hud.css)", () => {
     expect(desktop).not.toContain("display: none");
   });
 });
+
+it("scrolls the pipeline inside its capped row instead of cutting cards off", () => {
+  expect(css).toMatch(/#pipelineP > \.pipeline-grid \{[^}]*min-height: 0;[^}]*overflow-y: auto/);
+});

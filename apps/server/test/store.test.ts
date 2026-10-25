@@ -1471,7 +1471,7 @@ describe("reviews", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all()
       .map((r) => r.name);
-    expect(tables).toEqual(expect.arrayContaining(["reviews", "review_findings"]));
+    expect(tables).toEqual(expect.arrayContaining(["reviews", "review_findings", "run_attempts"]));
     const cols = db
       .prepare("PRAGMA table_info(runs)")
       .all()
@@ -2378,4 +2378,174 @@ it("migrates existing run and seat rows to the Claude vendor", () => {
   );
   expect(store.seatSession("a1")?.cliSessionId).toBe("claude-id");
   db.close();
+});
+
+it("retains two CI failures, review and main merge after counters reset", () => {
+  store.upsertRun(run());
+  store.setRunPush({ runId: "r1", sha: "head-1", at: 1100 });
+  store.setRunLoop("r1", { ...NEW_LOOP, phase: "ci", ciFails: 1, ciFailedSha: "head-1" }, 1200);
+  store.setRunPush({ runId: "r1", sha: "head-2", at: 1300 });
+  store.setRunLoop("r1", { ...NEW_LOOP, phase: "ci", ciFails: 2, ciFailedSha: "head-2" }, 1400);
+  const id = store.requestReview({
+    authorRunId: "r1",
+    repoId: "repo",
+    seatId: "reviewer",
+    prNumber: 1,
+    sha: "head-2",
+    epoch: 0,
+    attempt: 1,
+    round: 1,
+    at: 1500,
+  });
+  expect(id).not.toBeNull();
+  store.setRunLoop("r1", { ...NEW_LOOP, carry: { from: "head-2", to: "head-3" } }, 1600);
+  store.setRunLoop("r1", { ...NEW_LOOP, phase: "done" }, 1700);
+  const history = store.runAttempts("r1");
+  expect(history.filter((a) => a.kind === "push").map((a) => a.data.sha)).toEqual([
+    "head-1",
+    "head-2",
+  ]);
+  expect(history.filter((a) => a.kind === "loop").map((a) => a.data.ciFails)).toEqual([1, 2, 0, 0]);
+  expect(history.find((a) => a.kind === "review")?.data).toMatchObject({ sha: "head-2", round: 1 });
+  expect(history.filter((a) => a.kind === "loop")[2]?.data.carry).toEqual({
+    from: "head-2",
+    to: "head-3",
+  });
+  store.setRunLoop("r1", { ...NEW_LOOP, phase: "done" }, 1800);
+  expect(store.runAttempts("r1")).toEqual(history);
+  expect(store.runAttempts("other")).toEqual([]);
+});
+
+it("retains distinct wait completions with the same target and duration", () => {
+  store.upsertRun(run());
+  for (const at of [1600, 1800]) {
+    store.setRunLoop("r1", { ...NEW_LOOP, phase: "ci" }, at);
+    store.setRunLoop("r1", { ...NEW_LOOP, phase: "working" }, at + 100);
+    store.setRunLoop("r1", { ...NEW_LOOP, phase: "working" }, at + 100);
+  }
+  expect(
+    store
+      .runAttempts("r1")
+      .filter((a) => a.kind === "wait-end")
+      .map(({ at, data }) => ({ at, data })),
+  ).toEqual([
+    { at: 1700, data: { on: "ci", durationMs: 100 } },
+    { at: 1900, data: { on: "ci", durationMs: 100 } },
+  ]);
+});
+
+it("retains named CI attempts, findings, parks, waits and linked reviewer usage", () => {
+  store.upsertRun(run({ model: "model-v1", loop: { ...NEW_LOOP, prNumber: 1 } }));
+  const pr = {
+    repoId: "repo",
+    number: 1,
+    title: "change",
+    url: "https://example.test/pr/1",
+    branch: "fix/1-change",
+    ticket: null,
+    state: "open" as const,
+    isDraft: false,
+    review: null,
+    ci: "failing" as const,
+    createdAt: 1000,
+    updatedAt: 1100,
+    mergedAt: null,
+    headSha: "head",
+    mergeable: null,
+  };
+  const check = {
+    name: "verify",
+    kind: "check" as const,
+    state: "failing" as const,
+    conclusion: "FAILURE",
+    attempt: 1,
+    url: "https://example.test/job/1",
+  };
+  store.upsertPullRequests("repo", [{ ...pr, checks: [check] }], 1100);
+  store.upsertPullRequests("repo", [{ ...pr, checks: [{ ...check, attempt: 2 }] }], 1200);
+  store.upsertPullRequests("repo", [{ ...pr, checks: [{ ...check, attempt: 2 }] }], 1250);
+  const id = store.requestReview({
+    authorRunId: "r1",
+    repoId: "repo",
+    seatId: "reviewer",
+    prNumber: 1,
+    sha: "head",
+    epoch: 0,
+    attempt: 1,
+    round: 1,
+    at: 1300,
+  }) as number;
+  store.setReviewState(id, ["queued"], "running", { at: 1400, runId: "review-run" });
+  const tokens = { input: 10, output: 20, cacheRead: 30, cacheCreate: 0 };
+  store.upsertRun(run({ id: "review-run", reviewId: id, tokens }));
+  const findings: ReviewFinding[] = [
+    {
+      severity: "Minor",
+      file: "a.ts",
+      line: 1,
+      summary: "finding",
+      scenario: "scenario",
+      fix: "fix",
+    },
+  ];
+  store.recordFindings(id, "review-run", {
+    verdict: { spec: "pass", quality: "pass" },
+    summary: "reviewed",
+    findings,
+    at: 1500,
+  });
+  store.setRunLoop("r1", { ...NEW_LOOP, phase: "ci" }, 1600);
+  store.setRunLoop(
+    "r1",
+    { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "verify failed", ended: false } },
+    1700,
+  );
+  store.setRunLoop("r1", { ...NEW_LOOP, phase: "done" }, 1800);
+  store.upsertPullRequests(
+    "repo",
+    [{ ...pr, state: "merged", mergedAt: 1900, ci: "passing" }],
+    1900,
+  );
+  const history = store.runAttempts("r1");
+  expect(
+    history
+      .filter((a) => a.kind === "ci")
+      .slice(0, 2)
+      .map((a) => a.data.checks),
+  ).toEqual([[check], [{ ...check, attempt: 2 }]]);
+  expect(history.filter((a) => a.kind === "ci")).toHaveLength(3);
+  expect(history.find((a) => a.kind === "merge")?.data.sha).toBe("head");
+  expect(history.find((a) => a.runId === "review-run")?.data.tokens).toEqual(tokens);
+  expect(history.find((a) => a.data.findings)?.data.findings).toEqual(findings);
+  expect(history.find((a) => a.kind === "wait-end")?.data).toEqual({ on: "ci", durationMs: 100 });
+  expect(history.find((a) => a.data.parked)?.data.parked).toMatchObject({
+    reason: "verify failed",
+  });
+});
+
+it("prunes old comms and flight decisions at the retention boundary in bounded sweeps", async () => {
+  const now = 100 * 86_400_000;
+  const cutoff = now - 90 * 86_400_000;
+  for (const at of [cutoff - 1, cutoff, now]) {
+    store.addComms({ at, from: "a", to: "b", ticket: null, text: String(at) });
+    store.addFlightDecision({
+      at,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "note",
+      decision: String(at),
+      basis: "evidence",
+    });
+  }
+  await store.pruneHistory(now);
+  expect(
+    store
+      .comms(0)
+      .map((c) => c.at)
+      .sort((a, b) => a - b),
+  ).toEqual([cutoff, now]);
+  expect(store.flightDecisions(0, 10).map((d) => d.at)).toEqual([now, cutoff]);
 });
