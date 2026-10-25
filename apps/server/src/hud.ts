@@ -66,6 +66,7 @@ import {
   type TestLockState,
   type TokenUsage,
 } from "@mc/core";
+import { partitionAttention } from "./attention-holds.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
@@ -356,7 +357,8 @@ function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewL
     };
   if (loop.phase === "review") {
     const sent = fixesSent(store.claimedKeys(run.id), run.id, loop.epoch);
-    return { n: Math.min(REVIEW_ROUNDS, 1 + sent), max: REVIEW_ROUNDS };
+    const max = run.profile?.profile.rounds ?? REVIEW_ROUNDS;
+    return { n: Math.min(max, 1 + sent), max };
   }
   return null;
 }
@@ -598,6 +600,7 @@ export function attentionItems(
   rows: CrewRow[] = crew(config, store, now, lock).rows,
   /** The hub's own `gh` login, to tell another login's draft PRs from its own; null when unread. */
   hubLogin: string | null = null,
+  includeHeld = false,
 ): AttentionItem[] {
   const acks = store.acks();
   const briefs = store.briefs();
@@ -765,7 +768,7 @@ export function attentionItems(
       .filter((q) => q.passedAt !== null || q.agentId === flightId)
       .map((q) => `ask:${q.id}`),
   );
-  return items
+  const result: AttentionItem[] = items
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
     .map((i) => {
       const saved = briefs.get(i.key);
@@ -799,6 +802,8 @@ export function attentionItems(
         ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
         : { ...item, flightTriage: "missed", triageDueAt };
     });
+  const partition = partitionAttention(store, result, acks);
+  return includeHeld ? [...partition.items, ...partition.held] : partition.items;
 }
 
 /** Identity of the ask and brief, independent of refresh time and read state. */

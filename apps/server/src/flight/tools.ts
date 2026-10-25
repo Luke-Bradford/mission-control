@@ -282,6 +282,12 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
+import {
+  AttentionHoldInput,
+  attentionHoldError,
+  holdItem,
+  releaseHold,
+} from "../attention-holds.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
@@ -327,6 +333,7 @@ import {
   flightState,
   markPrsShown,
   operatorItems,
+  ownReply,
   stalledSeats,
 } from "./state.ts";
 
@@ -446,23 +453,30 @@ const StructuredBriefArgs = z.strictObject({
     })
     .optional(),
 });
-const BriefItemArgs = z.strictObject({
-  ...StructuredBriefArgs.shape,
-  key: z.string().min(1).max(BRIEF_KEY_MAX),
-  for: z.enum(["operator", "flight"]).default("operator"),
-  assessment: text(BRIEF_INPUT_MAX).optional(),
-  context: text(BRIEF_INPUT_MAX).optional(),
-  did: z
-    .array(
-      z.strictObject({ action: text(BRIEF_INPUT_MAX), refs: z.array(text(BRIEF_KEY_MAX)).max(20) }),
-    )
-    .max(20)
-    .default([]),
-  ask: text(BRIEF_INPUT_MAX).optional(),
-  recommendation: text(BRIEF_INPUT_MAX),
-  options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
-  basis: basisArg,
-});
+const BriefItemArgs = z
+  .strictObject({
+    ...StructuredBriefArgs.shape,
+    key: z.string().min(1).max(BRIEF_KEY_MAX),
+    for: z.enum(["operator", "flight"]).default("operator"),
+    assessment: text(BRIEF_INPUT_MAX).optional(),
+    context: text(BRIEF_INPUT_MAX).optional(),
+    did: z
+      .array(
+        z.strictObject({
+          action: text(BRIEF_INPUT_MAX),
+          refs: z.array(text(BRIEF_KEY_MAX)).max(20),
+        }),
+      )
+      .max(20)
+      .default([]),
+    ask: text(BRIEF_INPUT_MAX).optional(),
+    recommendation: text(BRIEF_INPUT_MAX),
+    options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
+    basis: basisArg,
+  })
+  .refine((args) => (args.assessment ?? args.context) !== undefined, {
+    message: "Give assessment (or legacy context).",
+  });
 const WatchEntryArgs = z.strictObject({
   id: BriefIdentity,
   state: z.enum(["warn", "info", "ok"]),
@@ -1759,7 +1773,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const item = operatorItems(config, store, at, deps.login, undefined, deps.lockState?.()).find(
       (i) => i.key === key,
     );
-    if (item === undefined) {
+    if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
       return fail(briefNoItemText(key));
     }
     if (structured.for === "flight") {
@@ -1778,7 +1792,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       store.addBrief({
         ...structured,
         key,
-        original: originalItemText(item),
+        original: originalItemText(item).slice(0, BRIEF_INPUT_MAX),
         assessment,
         context: assessment,
         ask: structured.ask ?? "",
@@ -2644,6 +2658,55 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
   ];
 
+  const holdArgs = AttentionHoldInput.extend({ key: z.string().min(1) });
+  const releaseArgs = z.strictObject({ key: z.string().min(1) });
+  const holdTools: McTool[] = [
+    {
+      name: MC_TOOL_NAMES.holdItem,
+      description:
+        "Hold a Needs-you item with a reason until a date, ticket merge, crew resume or manual release.",
+      inputSchema: z.toJSONSchema(holdArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: async (ctx, args) => {
+        const access = flightCall(deps, ctx, FlightStateArgs, {});
+        if (!access.ok) return access.result;
+        const parsed = holdArgs.safeParse(args);
+        if (!parsed.success) return fail(attentionHoldError(parsed.error));
+        const a = parsed.data;
+        const rows = crew(config, store, now(), deps.lockState?.() ?? NO_LOCK, () => null).rows;
+        if (
+          !attentionItems(
+            config,
+            store,
+            now(),
+            deps.lockState?.() ?? NO_LOCK,
+            rows,
+            deps.login,
+          ).some((i) => i.key === a.key)
+        )
+          return fail("Item is no longer waiting.");
+        holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now());
+        bus.emit("attention");
+        return { text: `Held ${a.key}.` };
+      },
+    },
+    {
+      name: MC_TOOL_NAMES.releaseHold,
+      description: "Release a held Needs-you item.",
+      inputSchema: z.toJSONSchema(releaseArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: async (ctx, args) => {
+        const c = flightCall(deps, ctx, releaseArgs, args);
+        if (!c.ok) return c.result;
+        if (!releaseHold(store, c.args.key, now())) return fail("No active hold.");
+        bus.emit("attention");
+        return { text: `Released ${c.args.key}.` };
+      },
+    },
+  ];
+
   const flightTools: McTool[] = [
     {
       name: MC_TOOL_NAMES.logDecision,
@@ -2994,6 +3057,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       grantable: ["read-only"],
       call: recall,
     },
+    ...holdTools,
   ];
   // An allowlist keeps future posting or config tools held until their away behaviour is explicit.
   const awayLocalTools: ReadonlySet<string> = new Set([
@@ -3018,6 +3082,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.remember,
     MC_TOOL_NAMES.forget,
     MC_TOOL_NAMES.recall,
+    MC_TOOL_NAMES.holdItem,
+    MC_TOOL_NAMES.releaseHold,
   ]);
   return flightTools.map((tool) => ({
     ...tool,

@@ -585,6 +585,7 @@ export function createEngine(deps: EngineDeps): Engine {
       cur.carry = r.prSame
         ? { from: cur.carry?.to === r.parent ? cur.carry.from : r.parent, to: r.sha }
         : null;
+      if (r.prSame && cur.reviewWaivedSha === r.parent) cur.reviewWaivedSha = r.sha;
       store.setRunLoop(run.id, cur);
       store.addLoopEvent(`${run.id}:update:${r.sha}`, run.id, mergedMainText(mainSha), at);
       const from = carriedFrom(cur.carry, cur.reviewWaivedSha, r.sha);
@@ -1885,6 +1886,7 @@ export function createEngine(deps: EngineDeps): Engine {
             if (sent !== "sent" && sent !== "dup") return;
           }
         }
+        if (next.aside) next.aside = { ...next.aside, wake: true };
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);

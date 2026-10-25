@@ -3793,6 +3793,32 @@ kbd {
   }
 }
 @media (max-width: 760px) {
+  #agentsList {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  #agentsList .trow {
+    min-width: 680px;
+  }
+  #agentsList .trow > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+  #agentsList .trow.flight > :first-child {
+    /* The tint is translucent: paint it over an opaque surface so scrolled cells can't show through. */
+    background:
+      linear-gradient(
+        color-mix(in srgb, var(--accent-soft) 45%, transparent),
+        color-mix(in srgb, var(--accent-soft) 45%, transparent)
+      ),
+      var(--surface);
+  }
+  #agentsList .trow:not(.head):hover > :first-child,
+  #agentsList .trow.sel > :first-child {
+    background: var(--surface-2);
+  }
   /* the board stacks its columns; each is a header (name, count), the open one shows its cards */
   .kanban {
     flex-direction: column;
@@ -4073,6 +4099,7 @@ button.nrow.thread.tagged {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+.opt .expandable,
 .opt .expandable > .sm,
 .opt a {
   position: relative;
@@ -4223,6 +4250,7 @@ button.nrow.thread.tagged {
 .flight-summary,
 .flight-summary section,
 .flight-summary-list > li {
+  list-style: none;
   min-width: 0;
 }
 .flight-summary {
@@ -4239,6 +4267,7 @@ button.nrow.thread.tagged {
   padding-left: 24px;
 }
 .flight-summary-list > li {
+  list-style: none;
   padding: 5px 0;
 }
 .flight-summary-line {
@@ -4449,6 +4478,12 @@ button.nrow.thread.tagged {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   align-content: start;
   gap: 10px;
+}
+/* The pipeline's grid row is capped to keep the Overview on one screen: scroll inside it rather than cut cards off. */
+#pipelineP > .pipeline-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .pipeline-stage {
   min-width: 0;
@@ -4676,4 +4711,26 @@ button.nrow.thread.tagged {
   .live-indicator.fresh i {
     animation: none;
   }
+}
+
+/* #638: the Hold form under a Needs-you item; labels and fields in two columns */
+.hold-form {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: center;
+  margin: 6px 0 2px;
+}
+.hold-form label {
+  display: contents;
+}
+.hold-form input,
+.hold-form select {
+  min-width: 0;
+}
+.hold-form .row {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
 }
