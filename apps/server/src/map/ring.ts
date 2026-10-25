@@ -6,6 +6,7 @@ import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
+import { SeatDiff } from "./diff.ts";
 
 const KEEP_MS = 15 * 60_000;
 export interface RingSource {
@@ -60,6 +61,7 @@ export class CallRing {
   private rows = new Map<string, RingCall[]>();
   private tails = new Map<string, { offset: number; path: string }>();
   private sources: () => RingSource[];
+  private diffs = new Map<string, { cwd: string; diff: SeatDiff }>();
 
   constructor(sources: () => RingSource[]) {
     this.sources = sources;
@@ -67,6 +69,23 @@ export class CallRing {
 
   calls(seat: string): RingCall[] {
     return structuredClone(this.rows.get(seat) ?? []);
+  }
+
+  modified(seat: string): MapChange[] {
+    const real = this.diffs.get(seat)?.diff.changes();
+    if (real != null) return real;
+    const churn = new Map<string, MapChange>();
+    for (const call of this.rows.get(seat) ?? []) {
+      for (const change of call.churn) {
+        const previous = churn.get(change.file);
+        churn.set(change.file, {
+          ...change,
+          add: (previous?.add ?? 0) + change.add,
+          rem: (previous?.rem ?? 0) + change.rem,
+        });
+      }
+    }
+    return [...churn.values()];
   }
 
   start(): () => void {
@@ -103,6 +122,16 @@ export class CallRing {
         if (next.nextOffset === tail.offset) break;
         tail.offset = next.nextOffset;
       }
+      let entry = this.diffs.get(source.seat);
+      if (!entry || entry.cwd !== source.cwd) {
+        entry = { cwd: source.cwd, diff: new SeatDiff() };
+        this.diffs.set(source.seat, entry);
+      }
+      const revision = (this.rows.get(source.seat) ?? [])
+        .filter((c) => c.writeTok !== undefined || c.tool === "Bash")
+        .map((c) => `${c.runId}:${c.id}:${c.end}:${c.churn.length}`)
+        .join("|");
+      entry.diff.poll(source.cwd, revision);
     }
     for (const [seat, calls] of this.rows) {
       const kept = calls.filter((c) => c.end === null || c.end >= now - KEEP_MS);
