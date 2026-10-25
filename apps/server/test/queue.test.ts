@@ -1591,3 +1591,36 @@ describe("away start quota", () => {
     expect(accountAtStop(config, store, accountId, NOW)).toBe(false);
   });
 });
+
+it("focus restricts labels, lanes and stable ticket refs without widening area or hub lane", async () => {
+  const crew = config.crew;
+  const seat = crew?.sessions[0]?.seats[0];
+  if (!crew || !seat) throw new Error("Missing seat");
+  crew.lane = "work";
+  store.replaceBoard(REPO, [
+    card(1, { labels: ["area:server", "lane:work", "catalog"] }),
+    card(2, { labels: ["area:server", "lane:work"] }),
+    card(3, { labels: ["area:web", "lane:work", "catalog"] }),
+    card(4, { labels: ["area:server", "lane:home", "catalog"] }),
+    card(5, { status: "Backlog", labels: ["area:server", "lane:work", "catalog"] }),
+  ]);
+  seat.focus = "label:catalog";
+  await refill();
+  expect(issues(SERVER)).toEqual([1]);
+  seat.focus = "mc#2 mc#3 mc#4";
+  await refill();
+  expect(issues(SERVER)).toEqual([2]);
+  seat.focus = "lane:home";
+  await refill();
+  expect(issues(SERVER)).toEqual([]);
+});
+
+it("a changed focus prevents taking an old queued card", async () => {
+  store.replaceBoard(REPO, [card(1)]);
+  await refill();
+  const seat = config.crew?.sessions[0]?.seats[0];
+  if (!seat) throw new Error("Missing seat");
+  seat.focus = "mc#2";
+  await takeNext(takeDeps(), SERVER);
+  expect(started).toEqual([]);
+});

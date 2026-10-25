@@ -36,6 +36,7 @@ import {
   seatInput,
   ticketState,
 } from "./config.ts";
+import { seatFocus } from "./focus.ts";
 import {
   CheckoutError,
   createSessionCheckout,
@@ -84,6 +85,7 @@ export const noSessionText = (id: string): string => `no crew session s/${id} in
 export const SeatInputBody = z.strictObject({
   id: z.string().regex(SEAT_ID, "must match /^[a-z][a-z0-9-]{0,30}$/"),
   displayCallSign: displayCallSign.optional(),
+  focus: seatFocus.optional(),
   role: z.string().regex(ROLE_NAME, "must be a role name"),
   accountId: z.string().min(1).max(64),
   model: z.string().max(100).regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/"),
@@ -215,10 +217,16 @@ async function setSeats(
   }
 
   // Setup's seat editor omits display metadata. Preserve it unless explicitly cleared.
-  const nextSeats: ConfigSeatInput[] = seats.map(({ displayCallSign: name, ...seat }) => {
+  const nextSeats: ConfigSeatInput[] = seats.map(({ displayCallSign: name, focus, ...seat }) => {
+    const storedFocus = session.seats.find((s) => s.id === seat.id)?.focus;
+    const nextFocus = focus === undefined ? storedFocus : focus;
+    const focused: ConfigSeatInput = {
+      ...seat,
+      ...(nextFocus === undefined ? {} : { focus: nextFocus }),
+    };
     const stored = session.seats.find((s) => s.id === seat.id)?.displayCallSign;
     const displayCallSign = name === undefined ? stored : name;
-    return displayCallSign == null ? seat : { ...seat, displayCallSign };
+    return displayCallSign == null ? focused : { ...focused, displayCallSign };
   });
   const doc = parseDocument(text);
   const seq = doc.getIn(["crew", "sessions", i, "seats"], true);
@@ -235,6 +243,8 @@ async function setSeats(
     }
     if (seat.displayCallSign === undefined) node.delete("display_call_sign");
     else node.set("display_call_sign", seat.displayCallSign);
+    if (seat.focus === undefined) node.delete("focus");
+    else node.set("focus", seat.focus);
     node.set("role", seat.role);
     node.set("account_id", seat.accountId);
     node.set("model", seat.model);

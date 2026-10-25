@@ -483,6 +483,7 @@ export function configView(
             managedCheckout: x.managedCheckout !== undefined,
             seats: x.seats.map((seat) => ({
               id: seat.id,
+              focus: seat.focus ?? null,
               role: seat.role,
               mode: modeOfSeat(seat),
               loop: seatDef(seat).loop,

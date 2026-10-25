@@ -533,7 +533,7 @@ interface BoardResult {
   recovered: number;
 }
 
-async function fetchBoard(
+export async function fetchBoard(
   repo: CcConfig["repos"][number],
   gql: Gql,
   now: number,

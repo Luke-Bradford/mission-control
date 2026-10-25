@@ -632,7 +632,7 @@ export interface QueueRow {
 /** The attention kinds the engine raises as notes. */
 export type NoteKind = Extract<
   AttentionKind,
-  "blocked" | "review" | "ready" | "flag" | "ratelimit" | "question"
+  "blocked" | "review" | "ready" | "flag" | "ratelimit" | "question" | "approval"
 >;
 
 export interface NoteInput {
@@ -2265,6 +2265,15 @@ export class Store {
       | { value: string }
       | undefined;
     return row?.value ?? null;
+  }
+
+  /** Keep a Priority approval's durable state and visible note together across a restart. */
+  saveQueueReorder(key: string, value: string, at: number, note?: NoteInput, clear?: string): void {
+    this.transaction(() => {
+      this.setSetting(key, value);
+      if (note) this.raiseNote(note);
+      if (clear) this.clearNote(clear, at);
+    });
   }
 
   setSetting(key: string, value: string): void {
