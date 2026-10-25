@@ -1,83 +1,104 @@
-import type { OverviewSummary, PipelineStage } from "@mc/core";
-import { useNow } from "../clock.ts";
+import type { Crew, OverviewSummary, PipelineStage } from "@mc/core";
+import type { CSSProperties } from "react";
+import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { agentColor } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { followLink, ticketPath } from "../router.ts";
+import { followLink } from "../router.ts";
 import { useSession } from "../shell/session.ts";
-import { age } from "./agentActivity.ts";
 
 export const PIPELINE_STAGES = {
   ready: "Ready",
-  building: "Building",
-  checks: "Checks",
-  review: "Review",
+  progress: "In progress",
+  review: "In review",
   merging: "Merging",
-  merged: "Merged today",
-} satisfies Record<PipelineStage["stage"], string>;
+  merged: "Done today",
+} as const;
 
-const VISIBLE_CARDS = 2;
+export type PipelineLane = keyof typeof PIPELINE_STAGES;
+
+export const PIPELINE_LANE_STAGES: Record<PipelineLane, readonly PipelineStage["stage"][]> = {
+  ready: ["ready"],
+  progress: ["building", "checks"],
+  review: ["review"],
+  merging: ["merging"],
+  merged: ["merged"],
+};
+
+const VISIBLE_CARDS = 8;
+
+function assignee(
+  who: string | null,
+  crew: Crew | undefined,
+): { name: string; index: number } | null {
+  if (who === null) return null;
+  const row = crew?.rows.find((candidate) => candidate.id === who);
+  return { name: row ? callSign(row) : who, index: row?.index ?? 0 };
+}
 
 export function PipelinePanel() {
   const [session] = useSession();
   const { data, error } = useResource<OverviewSummary>(RESOURCES.overview(session));
-  const now = useNow();
+  const crew = useResource<Crew>(RESOURCES.crew).data;
   return (
     <Panel id="pipelineP" title="Pipeline">
       {error && <p className="pb crit-t">{error.message}</p>}
 
       <div className="pipeline-grid pb scroll" aria-busy={!data && !error}>
         {Object.entries(PIPELINE_STAGES).map(([key, label]) => {
-          const stage = data?.pipeline?.find((s) => s.stage === key);
-          const cards = stage?.cards?.slice(0, VISIBLE_CARDS) ?? [];
-          const more = (stage?.count ?? 0) - cards.length;
+          const lane = key as PipelineLane;
+          const stages = PIPELINE_LANE_STAGES[lane];
+          const stageCards = stages.flatMap(
+            (stage) => data?.pipeline?.find((candidate) => candidate.stage === stage)?.cards ?? [],
+          );
+          const count = stages.reduce(
+            (total, stage) =>
+              total +
+              (data?.pipeline?.find((candidate) => candidate.stage === stage)?.count ?? 0),
+            0,
+          );
+          const cards = stageCards.slice(0, VISIBLE_CARDS);
+          const more = count - cards.length;
           const href = `/board?stage=${key}`;
+          if (data && count === 0) return null;
           return (
             <section key={key} className={`pipeline-stage ${key}`} aria-label={label}>
               <h3>
-                {label}
-                <span className="num">{stage?.count ?? (data ? 0 : "—")}</span>
-                <span className="xs muted num pipeline-oldest">
-                  oldest {stage?.oldestAt == null ? "—" : age(stage.oldestAt, now)}
-                </span>
+                <a href={href} onClick={(e) => followLink(e, href)}>
+                  {label}
+                </a>
+                <span className="num">{data ? count : "—"}</span>
               </h3>
               {!data &&
                 !error &&
                 Array.from({ length: VISIBLE_CARDS }, (_, i) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: identical loading placeholders
-                  <div className="pipeline-card pipeline-skeleton" key={i} aria-hidden="true">
+                  <div className="pipeline-chip pipeline-skeleton" key={i} aria-hidden="true">
                     <span className="kpi-skeleton" />
                   </div>
                 ))}
               {cards.map((card) => {
-                const to = ticketPath(card.repoId, card.ticket);
+                const owner = assignee(card.who, crew);
                 return (
                   <a
                     key={`${key}:${card.repoId}#${card.ticket}:${card.pr}`}
-                    className="pipeline-card"
-                    title={`${card.who ?? (key === "merged" ? "merged" : "waiting on you")} · ${age(card.since, now)}`}
-                    href={to}
-                    onClick={(e) => followLink(e, to)}
+                    className="pipeline-chip"
+                    href={href}
+                    onClick={(e) => followLink(e, href)}
                   >
-                    <span className="pipeline-refs num">
-                      <span>#{card.ticket}</span>
-                      {card.pr !== null && <span className="think-t">PR #{card.pr}</span>}
-                      <span className="muted pipeline-age">{age(card.since, now)}</span>
-                    </span>
+                    <span className="pipeline-ticket num">#{card.ticket}</span>
                     <span className="pipeline-title" title={card.title}>
                       {card.title}
                     </span>
-                    <span className="pipeline-ci">
-                      {card.ci?.map((state, i) => (
-                        <span
-                          // biome-ignore lint/suspicious/noArrayIndexKey: CI states have no check ids; each position is a dot.
-                          key={`${i}-${state}`}
-                          role="img"
-                          aria-label={`CI ${state}`}
-                          className={`pipeline-dot ${state}`}
+                    {owner && (
+                      <span className="pipeline-assignee" title={owner.name}>
+                        <i
+                          style={{ "--c": agentColor(owner.index) } as CSSProperties}
+                          aria-hidden="true"
                         />
-                      ))}
-                      <span className="ellip muted">{card.who ?? "—"}</span>
-                    </span>
+                        <span className="ellip">{owner.name}</span>
+                      </span>
+                    )}
                   </a>
                 );
               })}
@@ -87,7 +108,7 @@ export function PipelinePanel() {
                   href={href}
                   onClick={(e) => followLink(e, href)}
                 >
-                  +{more} more
+                  +{more}
                 </a>
               )}
             </section>

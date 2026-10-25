@@ -6,6 +6,7 @@ import {
   DONE_RANGES,
   HUD_COLUMNS,
   type HudColumn,
+  type PipelineStage,
   type PullRequestView,
   type RepoProfile,
   type RepoView,
@@ -30,7 +31,11 @@ import { type BoardLayout, type DoneRange, Toolbar } from "../board/Toolbar.tsx"
 import { useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
-import { PIPELINE_STAGES } from "../overview/PipelinePanel.tsx";
+import {
+  PIPELINE_LANE_STAGES,
+  PIPELINE_STAGES,
+  type PipelineLane,
+} from "../overview/PipelinePanel.tsx";
 import { boardPath, followLink, navigate, setupPath, useSearch } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { BOARD_LAYOUT_KEY, LANE_KEY, readKey, writeKey } from "../storage.ts";
@@ -55,6 +60,10 @@ function columnsOf(p: RepoProfile | undefined, items: BoardItem[]): HudColumn[] 
   return HUD_COLUMNS.filter((c) => reached.has(c));
 }
 
+function isInPipelineLane(lane: PipelineLane, stage: PipelineStage["stage"] | null): boolean {
+  return stage !== null && PIPELINE_LANE_STAGES[lane].includes(stage);
+}
+
 /**
  * Board (catalogue §2.3): lanes, the eight columns, and a ticket beside them. The cards are the
  * issues hub's board; Mission Control adds only the agent, PR and CI line.
@@ -64,7 +73,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const requestedStage = new URLSearchParams(search).get("stage");
   const stage =
     requestedStage && Object.hasOwn(PIPELINE_STAGES, requestedStage)
-      ? (requestedStage as keyof typeof PIPELINE_STAGES)
+      ? (requestedStage as PipelineLane)
       : null;
   const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
@@ -144,7 +153,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const shown = inLane.filter(
     (i) =>
       (stage === null ||
-        pipelineStage(i, rows, prs, now, todayStart, loopViews, stage) === stage) &&
+        isInPipelineLane(stage, pipelineStage(i, rows, prs, now, todayStart, loopViews))) &&
       (priority === "" || i.priority === priority) &&
       (!agentOnly || cardAgent(i, rows) !== null || cardQueue(i, rows) !== null) &&
       (!mineOnly || needsMe(i, items, rows)),

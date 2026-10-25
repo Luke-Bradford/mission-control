@@ -169,7 +169,7 @@ describe("Overview panels", () => {
     expect(container.querySelector("#timelineP")?.textContent).toContain(
       "No activity in the last hour.",
     );
-    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(6);
+    expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
     expect(await screen.findByText("No events yet.")).toBeTruthy();
     expect(screen.getByText("LIVE · connecting")).toBeTruthy();
     stop();
@@ -2616,7 +2616,7 @@ describe("Overview: what a seat is doing", () => {
   });
 });
 
-it("holds the configured roster, Timeline lanes and six Pipeline stages while data is pending", async () => {
+it("holds the configured roster, Timeline lanes and five Pipeline lanes while data is pending", async () => {
   const session = CREW_CONFIG.crew?.sessions[0];
   const seat = session?.seats[0];
   if (!session || !seat) throw new Error("missing crew fixture");
@@ -2654,8 +2654,8 @@ it("holds the configured roster, Timeline lanes and six Pipeline stages while da
   expect(container.querySelectorAll("#agentsList .trow:not(.head)")).toHaveLength(8);
   expect(container.querySelectorAll(".crew-skeleton")).toHaveLength(7);
   expect(container.querySelectorAll(".overview-lane")).toHaveLength(8);
-  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(6);
-  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(12);
+  expect(container.querySelectorAll(".pipeline-stage")).toHaveLength(5);
+  expect(container.querySelectorAll(".pipeline-skeleton")).toHaveLength(40);
   expect(container.querySelector("#agentsList")?.getAttribute("aria-busy")).toBe("true");
   await act(async () => {
     for (const finish of release) finish();
