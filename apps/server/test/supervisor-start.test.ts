@@ -2463,8 +2463,8 @@ import(${JSON.stringify(fixture)});
   );
 
   it("applies the ordinary guard after the command allowlist", async () => {
-    // The git-read prefix allows this; the guard catches --output after the revision.
-    const { sup } = codex({ command: "git diff HEAD --output=out" });
+    // The log prefix allows this; the ordinary guard catches the output write.
+    const { sup } = codex({ command: "git log HEAD --output=out" });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(decision()).toBe("decline"));

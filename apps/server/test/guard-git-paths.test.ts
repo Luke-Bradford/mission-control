@@ -13,6 +13,13 @@ it("confines each Claude git segment to the seat worktree in every mode", () => 
   try {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
       for (const command of [
+        "cd /tmp && git diff a b",
+        "pushd /tmp; git diff a b",
+        "popd; git diff a b",
+        "cd apps; cd ../../; git diff a b",
+        "env -C /tmp git diff a b",
+        "env --chdir=/tmp git diff a b",
+        "env -C/tmp git diff a b",
         "git -C .. log",
         "git -C../ log",
         "git -C escape log",
@@ -36,6 +43,9 @@ it("confines each Claude git segment to the seat worktree in every mode", () => 
         expect(verdict, command).toMatchObject({ kind: "deny", rule: "git-env" });
       }
       for (const command of [
+        "cd apps && git diff file",
+        "env -C apps git diff file",
+        "env --chdir=apps git diff file",
         "git -C apps log --oneline -3",
         "git -Capps diff file",
         "git diff HEAD",

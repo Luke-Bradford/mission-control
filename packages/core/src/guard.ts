@@ -354,6 +354,7 @@ const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 
 /** One command a line would run: its argv, and whether something runs it in the background. */
 interface Cmd {
+  directories?: string[];
   argv: string[];
   /** Under coproc, setsid, screen or tmux (a lone `&` is the line's: `Walk.lineBackground`). */
   background: boolean;
@@ -921,6 +922,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   const words = [...argv];
   let at = 0;
   let gitEnv = false;
+  const directories: string[] = [];
   let bg = background;
   // `… | xargs sh`: xargs takes the stdin; the shell gets file operands
   let viaXargs = false;
@@ -969,6 +971,12 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
           )
             gitEnv = true;
         }
+        if (base === "env") {
+          if (opt === "-C" || opt === "--chdir") directories.push(words[at] ?? "");
+          else if (opt.startsWith("--chdir=")) directories.push(opt.slice(8));
+          else if (valueOption?.letter === "C")
+            directories.push(valueOption.inline || (words[at] ?? ""));
+        }
         const split = base === "env" ? ENV_SPLIT.exec(opt) : null;
         if (spec.valued.includes(opt)) {
           if (split !== null && words[at] !== undefined) scripts.push(words[at] ?? "");
@@ -997,7 +1005,10 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   const rest = words.slice(at + 1);
   const restBraces = braces.slice(at + 1);
   const braced = restBraces.includes(true);
-  const out: Cmd[] = [{ argv: [name, ...rest], background: bg, braces: braced }, ...extra];
+  const out: Cmd[] = [
+    { argv: [name, ...rest], background: bg, braces: braced, directories },
+    ...extra,
+  ];
   const multiplexer = MULTIPLEXERS.has(name);
   const from = multiplexer ? 0 : runnerStart(name, rest);
   if (multiplexer || from !== -1) {
@@ -1880,7 +1891,12 @@ export function guardDecision(
   let backgroundSuite = false;
   let gitEnvDenied = false;
   const walk = newWalk();
-  for (const { argv, background, braces } of lineCommands(e.input.command ?? "", walk)) {
+  const cwdDirectories: string[] = [];
+  let unknownCwd = false;
+  for (const { argv, background, braces, directories: wrapperDirectories = [] } of lineCommands(
+    e.input.command ?? "",
+    walk,
+  )) {
     const [program, ...args] = argv;
     if (program === undefined) continue;
     if (program === TOO_LONG) {
@@ -1896,12 +1912,34 @@ export function guardDecision(
       program === GIT_ENV_OVERRIDE ||
       ((["export", "declare", "typeset", "readonly", "unset"].includes(program) ||
         (program === "set" && args.includes("-a"))) &&
-        args.some((a) => /^GIT_[A-Za-z0-9_]*(?:\+?=|$)/.test(a)))
+        args.some((a) => /^GIT_[A-Za-z0-9_]*(?:\+?=|$)/.test(a) || /[*?[\]^()|#~<>{}\\]/.test(a)))
     )
       gitEnvDenied = true;
+    // Keep every earlier cwd change: an unsafe or unknown one cannot be balanced later.
+    if (["cd", "pushd", "popd"].includes(program)) {
+      const target = args.length === 1 && !args[0].startsWith("-") ? args[0] : undefined;
+      if (
+        program === "popd" ||
+        target === undefined ||
+        ctx.gitPathAllowed?.(target, cwdDirectories) !== true
+      )
+        unknownCwd = true;
+      else cwdDirectories.push(target);
+    }
     if (program === "git") {
       const g = gitSubcommand(args);
-      const directories: string[] = [];
+      if (g?.sub === "difftool" && g.rest.includes("--no-index"))
+        return deny("git-env", "git --no-index");
+      if (g !== null && !gitReadOnly(g.sub, g.rest))
+        return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
+      const directories = [...cwdDirectories];
+      if (unknownCwd && ctx.gitPathAllowed)
+        return deny("git-env", "git directory outside worktree");
+      for (const directory of wrapperDirectories) {
+        if (ctx.gitPathAllowed && (!directory || !ctx.gitPathAllowed(directory, directories)))
+          return deny("git-env", "git directory outside worktree");
+        directories.push(directory);
+      }
       const prefix = g === null ? args : args.slice(0, args.length - g.rest.length - 1);
       for (let i = 0; i < prefix.length; i++) {
         const arg = prefix[i];
@@ -1949,11 +1987,6 @@ export function guardDecision(
           if (!ctx.gitPathAllowed(word, directories))
             return deny("git-env", "git diff path outside worktree");
         }
-      }
-      if (g?.sub === "difftool" && g.rest.includes("--no-index"))
-        return deny("git-env", "git --no-index");
-      if (g !== null && !gitReadOnly(g.sub, g.rest)) {
-        return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
       }
       const global = g === null ? args : args.slice(0, args.length - g.rest.length - 1);
       if (

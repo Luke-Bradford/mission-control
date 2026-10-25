@@ -732,6 +732,13 @@ describe("Codex seat floor", () => {
         );
       }
       for (const command of [
+        "cd /tmp && git diff a b",
+        "pushd /tmp; git diff a b",
+        "popd; git diff a b",
+        "env -C /tmp git diff a b",
+        "env --chdir=/tmp git diff a b",
+        "unset -m 'GIT_*'; git diff",
+        "typeset -m 'GIT_*'; git diff",
         "GIT_CONFIG_GLOBAL=x git diff",
         "env GIT_CONFIG_GLOBAL=x git diff",
         "env -i git diff",
