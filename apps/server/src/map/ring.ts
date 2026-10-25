@@ -16,6 +16,7 @@ export interface RingSource {
   cwd: string;
   transcriptPath: string;
   vendor?: CrewVendor;
+  current?: boolean;
 }
 export interface RingCall extends MapCall {
   id: string;
@@ -61,7 +62,7 @@ export class CallRing {
   private rows = new Map<string, RingCall[]>();
   private tails = new Map<string, { offset: number; path: string }>();
   private sources: () => RingSource[];
-  private diffs = new Map<string, { cwd: string; diff: SeatDiff }>();
+  private diffs = new Map<string, { source: RingSource; diff: SeatDiff }>();
 
   constructor(sources: () => RingSource[]) {
     this.sources = sources;
@@ -71,11 +72,16 @@ export class CallRing {
     return structuredClone(this.rows.get(seat) ?? []);
   }
 
-  modified(seat: string): MapChange[] {
-    const real = this.diffs.get(seat)?.diff.changes();
+  modified(seat: string, repoId?: string): MapChange[] {
+    const entries = [...this.diffs.values()].filter(
+      (e) => e.source.seat === seat && (repoId === undefined || e.source.repoId === repoId),
+    );
+    const entry = entries.find((e) => e.source.current) ?? entries.at(-1);
+    const real = entry?.diff.changes();
     if (real != null) return real;
     const churn = new Map<string, MapChange>();
     for (const call of this.rows.get(seat) ?? []) {
+      if (entry && call.runId !== entry.source.id) continue;
       for (const change of call.churn) {
         const previous = churn.get(change.file);
         churn.set(change.file, {
@@ -86,6 +92,13 @@ export class CallRing {
       }
     }
     return [...churn.values()];
+  }
+
+  scopes(repoId: string): { seat: string; scope: { modified: MapChange[] } }[] {
+    const seats = new Set(
+      [...this.diffs.values()].filter((e) => e.source.repoId === repoId).map((e) => e.source.seat),
+    );
+    return [...seats].map((seat) => ({ seat, scope: { modified: this.modified(seat, repoId) } }));
   }
 
   start(): () => void {
@@ -122,13 +135,14 @@ export class CallRing {
         if (next.nextOffset === tail.offset) break;
         tail.offset = next.nextOffset;
       }
-      let entry = this.diffs.get(source.seat);
-      if (!entry || entry.cwd !== source.cwd) {
-        entry = { cwd: source.cwd, diff: new SeatDiff() };
-        this.diffs.set(source.seat, entry);
+      let entry = this.diffs.get(source.id);
+      if (!entry || entry.source.cwd !== source.cwd) {
+        entry = { source, diff: new SeatDiff() };
+        this.diffs.set(source.id, entry);
       }
+      entry.source = source;
       const revision = (this.rows.get(source.seat) ?? [])
-        .filter((c) => c.writeTok !== undefined || c.tool === "Bash")
+        .filter((c) => c.runId === source.id && (c.writeTok !== undefined || c.tool === "Bash"))
         .map((c) => `${c.runId}:${c.id}:${c.end}:${c.churn.length}`)
         .join("|");
       entry.diff.poll(source.cwd, revision);
@@ -139,6 +153,7 @@ export class CallRing {
       else this.rows.delete(seat);
     }
     const active = new Set(sources.map((s) => s.id));
+    for (const id of this.diffs.keys()) if (!active.has(id)) this.diffs.delete(id);
     for (const id of this.tails.keys()) if (!active.has(id)) this.tails.delete(id);
   }
 

@@ -102,3 +102,51 @@ it("refuses working-tree numstat when attributes name a filter", async () => {
   writeFileSync(join(cwd, ".gitattributes"), "*.ts filter=fixture\n");
   await expect(mapChanges(cwd)).rejects.toThrow("repo uses git filters");
 });
+
+it("retains the current checkout collector with an aside run on the same seat", async () => {
+  const current = fixture();
+  const aside = fixture();
+  const sources = [aside, current].map(({ cwd }, i) => {
+    const transcriptPath = join(cwd, "transcript.jsonl");
+    writeFileSync(transcriptPath, "");
+    return {
+      id: `run-${i}`,
+      seat: "seat",
+      repoId: "repo",
+      cwd,
+      transcriptPath,
+      current: cwd === current.cwd,
+    };
+  });
+  const ring = new CallRing(() => sources);
+  const stop = ring.start();
+  try {
+    await expect.poll(() => ring.modified("seat"), { timeout: 4500 }).toEqual([]);
+    writeFileSync(join(current.cwd, "file.ts"), "after\nextra\n");
+    const frames = readFileSync(new URL("./fixtures/map/claude.jsonl", import.meta.url), "utf8")
+      .trim()
+      .split("\n");
+    for (const source of sources)
+      appendFileSync(
+        source.transcriptPath,
+        `${frames
+          .slice(0, 2)
+          .map((line) =>
+            JSON.stringify({ ...JSON.parse(line), timestamp: new Date().toISOString() }),
+          )
+          .join("\n")}\n`,
+      );
+    ring.poll();
+    await expect
+      .poll(() => ring.modified("seat"), { timeout: 4500 })
+      .toEqual([{ file: "file.ts", add: 2, rem: 3, source: "diff" }]);
+    sources.reverse();
+    ring.poll();
+    expect(ring.modified("seat")).toEqual([{ file: "file.ts", add: 2, rem: 3, source: "diff" }]);
+    sources.splice(0);
+    ring.poll();
+    expect(ring.scopes("repo")).toEqual([]);
+  } finally {
+    stop();
+  }
+}, 12000);

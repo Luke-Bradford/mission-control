@@ -170,6 +170,7 @@ import {
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
 import { MapConflicts } from "./map/conflicts.ts";
+import type { CallRing } from "./map/ring.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunTokens } from "./mcp/tokens.ts";
@@ -258,6 +259,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  mapRing?: CallRing;
   config: CcConfig;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
@@ -1276,6 +1278,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           projectUrl: projectUrlOf(store, repo.id),
         };
         return { repo: view, backup: basename(result.backup) };
+      });
+
+      // Reader: apps/web/src/data.ts (Crew Activity Map modified scope; snapshot slice pending)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
+        if (!config.repos.some((r) => r.id === req.params.repoId))
+          return reply.code(404).send({ error: "unknown repo" });
+        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
+        return { seats: deps.mapRing.scopes(req.params.repoId) };
       });
 
       // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
