@@ -475,22 +475,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     for (const agent of configuredAgents(config)) {
       if (agent.kind !== "crew") continue;
       const seat = store.seatSession(agent.id);
-      const run = store.seatRun(agent.id);
-      const cwd =
-        seat?.worktree ??
-        run?.loop?.aside?.worktree ??
-        (run ? mapSources.get(run.id)?.cwd : undefined);
-      if (cwd && run) {
-        const source: RingSource = {
-          id: run.id,
-          seat: agent.id,
-          repoId: run.repoId,
-          cwd,
-          transcriptPath: run.transcriptPath,
-          vendor: seat?.vendor,
-        };
-        sources.push(source);
-        mapSources.set(run.id, source);
+      const current = store.seatRun(agent.id);
+      const flight = agent.seat.role === "FLIGHT";
+      const runs = [
+        ...new Map(
+          [...(current ? [current] : []), ...(!flight ? store.mapAsideRuns(agent.id) : [])].map(
+            (r) => [r.id, r],
+          ),
+        ).values(),
+      ];
+      for (const run of runs) {
+        const repos = flight ? config.repos : config.repos.filter((r) => r.id === run.repoId);
+        for (const repo of repos) {
+          const id = flight ? `${run.id}:${repo.id}` : run.id;
+          const cwd = flight
+            ? config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout
+            : ((seat?.runId === run.id ? seat.worktree : null) ??
+              run.loop?.aside?.worktree ??
+              mapSources.get(id)?.cwd);
+          if (!cwd) continue;
+          const source: RingSource = {
+            id,
+            seat: agent.id,
+            repoId: repo.id,
+            cwd,
+            transcriptPath: run.transcriptPath,
+            vendor: run.vendor ?? seat?.vendor,
+            turnScoped: flight,
+          };
+          sources.push(source);
+          mapSources.set(id, source);
+        }
       }
     }
     const active = new Set(sources.map((s) => s.id));
@@ -1328,15 +1343,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!stopMapRing) stopMapRing = mapRing.start();
             mapRing.poll();
             const data = mapSeats(
-              sharedCrew().rows.filter((r) => r.kind === "crew" && r.repoId === repo.id),
+              sharedCrew()
+                .rows.filter(
+                  (r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"),
+                )
+                .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r)),
               store,
               mapRing,
               deps.lock?.state() ?? NO_LOCK,
               now(),
             );
             for (const seat of data.seats) {
-              const context = store.seatSession(seat.seat)?.runId
-                ? await deps.supervisor?.contextUsage(seat.seat).catch(() => null)
+              const context = store.seatSession(
+                seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
+              )?.runId
+                ? await deps.supervisor
+                    ?.contextUsage(
+                      seat.seat === "FLIGHT"
+                        ? (flightSeat(config)?.seat.id ?? seat.seat)
+                        : seat.seat,
+                    )
+                    .catch(() => null)
                 : null;
               seat.context = context ? { total: context.total, window: context.window } : null;
             }

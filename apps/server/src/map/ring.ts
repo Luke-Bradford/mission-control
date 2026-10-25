@@ -15,6 +15,7 @@ export interface RingSource {
   cwd: string;
   transcriptPath: string;
   vendor?: CrewVendor;
+  turnScoped?: boolean;
 }
 export interface RingCall extends MapCall {
   id: string;
@@ -340,6 +341,18 @@ export class CallRing {
 
   private fold(source: RingSource, ev: Json, now: number): void {
     const at = timeOf(ev.timestamp) ?? now;
+    if (
+      source.turnScoped &&
+      (ev.type === "result" || ev.method === "turn/completed" || ev.method === "turn/started")
+    ) {
+      this.scopes.delete(source.id);
+      this.rows.set(
+        source.seat,
+        (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
+      );
+      return;
+    }
+
     if (transcriptVendor(ev, source.vendor) === "codex") {
       const p = isObj(ev.params) ? ev.params : {};
       if (!isObj(p.item)) return;

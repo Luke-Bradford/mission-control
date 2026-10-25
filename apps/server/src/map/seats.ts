@@ -16,11 +16,18 @@ export function mapSeats(
   const seats = rows.map((row): MapSeat => {
     const session = store.seatSession(row.id);
     const run = row.run ? store.run(row.run.id) : null;
-    const ticket = row.ticket ? Number(row.ticket.split("#").at(-1)) || null : null;
-    const calls = ring.calls(row.id).filter((c) => c.repoId === row.repoId && c.runId === run?.id);
+    const ticket =
+      row.role !== "FLIGHT" && row.ticket ? Number(row.ticket.split("#").at(-1)) || null : null;
+    const flight = row.role === "FLIGHT";
+    const scopeId = flight ? `${run?.id}:${row.repoId}` : (run?.id ?? "");
+    const calls = ring
+      .calls(row.id)
+      .filter(
+        (c) => c.repoId === row.repoId && c.runId === scopeId && (!flight || c.files.length > 0),
+      );
     const live = session?.state === "running" || session?.state === "starting";
     const completed = calls.filter((c) => c.end !== null);
-    const scope = ring.scope(run?.id ?? "");
+    const scope = ring.scope(scopeId);
     const latestTests = scope.tests;
     const waiting = lock.waiting.find((w) => w.seatId === row.id);
     const pr = store
@@ -50,12 +57,33 @@ export function mapSeats(
           round: review.round,
         });
     }
+    const modified = new Map<string, MapSeat["scope"]["modified"][number]>();
+    for (const candidate of flight
+      ? []
+      : [
+          ...(run ? [run] : []),
+          ...store.mapAsideRuns(row.id).filter((r) => r.id !== run?.id && r.repoId === row.repoId),
+        ]) {
+      if (
+        store
+          .pullRequests(row.repoId)
+          .some((p) => p.branch === candidate.branch && p.state === "merged")
+      )
+        continue;
+      for (const change of ring.scope(candidate.id).modified) {
+        const previous = modified.get(change.file);
+        if (previous) {
+          previous.add += change.add;
+          previous.rem += change.rem;
+        } else modified.set(change.file, { ...change });
+      }
+    }
     return {
-      seat: row.id,
+      seat: flight ? "FLIGHT" : row.id,
       state: row.hudState === "stalled" ? "stalled" : (session?.state ?? "idle"),
       since: row.stateSince,
       ticket,
-      title: row.ticketTitle ? safe(row.ticketTitle) : null,
+      title: !flight && row.ticketTitle ? safe(row.ticketTitle) : null,
       calls: live
         ? calls
             .filter((c) => c.end === null)
@@ -63,7 +91,7 @@ export function mapSeats(
         : [],
       scope: {
         read: live ? scope.read : [],
-        modified: pr?.state !== "merged" ? scope.modified : [],
+        modified: flight ? (live ? scope.modified : []) : [...modified.values()],
       },
       recent: live
         ? calls.flatMap((c) => c.files.map((file) => ({ file, at: c.end ?? c.since }))).slice(-12)
@@ -72,7 +100,7 @@ export function mapSeats(
       badges: {
         questions: store
           .openQuestions()
-          .filter((q) => q.agentId === row.id)
+          .filter((q) => q.agentId === row.id && q.runId === run?.id)
           .map((q) => ({ id: q.id, from: row.id, to: "CAPCOM", ticket, since: q.at })),
         failures: [
           ...completed
@@ -105,9 +133,11 @@ export function mapSeats(
             : null,
         waiting: waiting
           ? { kind: "test-lock", since: waiting.since, reason: safe(waiting.command) }
-          : session?.state === "parked"
-            ? { kind: "parked", since: session.updatedAt, reason: safe(session.reason ?? "") }
-            : null,
+          : row.loop?.parked
+            ? { kind: "parked", since: row.stateSince, reason: safe(row.loop.parked) }
+            : session?.state === "parked"
+              ? { kind: "parked", since: session.updatedAt, reason: safe(session.reason ?? "") }
+              : null,
       },
     };
   });

@@ -2660,6 +2660,181 @@ describe("boards, escalations, health", () => {
   });
 
   for (const vendor of ["claude", "codex"] as const) {
+    it(`scopes FLIGHT ${vendor} activity to the current turn and selected repo`, async () => {
+      withCrew();
+      const session = config.crew?.sessions[0];
+      if (!session) throw new Error("fixture session missing");
+      session.checkout = resolve(import.meta.dirname, "../../..");
+      session.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const transcriptPath = join(dir, "flight.jsonl");
+      const call =
+        vendor === "claude"
+          ? {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "read",
+                    name: "Read",
+                    input: { file_path: join(session.checkout, "package.json") },
+                  },
+                ],
+              },
+            }
+          : {
+              method: "item/started",
+              params: {
+                item: {
+                  id: "read",
+                  type: "commandExecution",
+                  command: `cat ${join(session.checkout, "package.json")}`,
+                },
+              },
+            };
+      const elsewhere =
+        vendor === "claude"
+          ? {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "outside",
+                    name: "Read",
+                    input: { file_path: join(dir, "outside.ts") },
+                  },
+                ],
+              },
+            }
+          : {
+              method: "item/started",
+              params: {
+                item: {
+                  id: "outside",
+                  type: "commandExecution",
+                  command: `cat ${join(dir, "outside.ts")}`,
+                },
+              },
+            };
+      writeFileSync(join(dir, "outside.ts"), "outside\n");
+      writeFileSync(transcriptPath, `${JSON.stringify(call)}\n${JSON.stringify(elsewhere)}\n`);
+      store.upsertRun(run({ id: "flight-turn", agentId: "flight-1", transcriptPath, vendor }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-turn",
+        cliSessionId: null,
+        vendor,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const response = await get("/api/repos/shop-app/map");
+      expect(
+        response.json().seats.find((s: { seat: string }) => s.seat === "FLIGHT"),
+      ).toMatchObject({
+        ticket: null,
+        calls: [expect.objectContaining({ files: ["package.json"] })],
+      });
+      const end = vendor === "claude" ? { type: "result" } : { method: "turn/completed" };
+      appendFileSync(transcriptPath, `${JSON.stringify(end)}\n`);
+      const ended = await get("/api/repos/shop-app/map");
+      expect(ended.json().seats.find((s: { seat: string }) => s.seat === "FLIGHT")).toMatchObject({
+        calls: [],
+        scope: { read: [], modified: [] },
+        recent: [],
+      });
+    });
+  }
+
+  it("keeps aside churn after reassignment and drops it after merge", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = resolve(import.meta.dirname, "../../..");
+    const transcriptPath = join(dir, "aside.jsonl");
+    writeFileSync(
+      transcriptPath,
+      readFileSync(new URL("./fixtures/map/claude.jsonl", import.meta.url)),
+    );
+    store.upsertRun(
+      run({
+        id: "aside",
+        agentId: "guido-1",
+        transcriptPath,
+        branch: "aside-branch",
+        loop: { ...NEW_LOOP, aside: { worktree: dir, wake: false } },
+      }),
+    );
+    store.upsertRun(run({ id: "next", agentId: "guido-1", startedAt: NOW + 1 }));
+    const response = await get("/api/repos/shop-app/map");
+    expect(response.json().seats[0].scope.modified).toEqual([
+      { file: "file.ts", add: 2, rem: 1, source: "churn" },
+    ]);
+    expect(response.json().seats[0].scope.read).toEqual([]);
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 7,
+          title: "Fixture",
+          url: "https://example.invalid/pr",
+          branch: "aside-branch",
+          ticket: null,
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: NOW,
+          mergeCommitSha: null,
+          headSha: null,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          checks: [],
+          closingIssues: [],
+        },
+      ],
+      NOW,
+    );
+    expect((await get("/api/repos/shop-app/map")).json().seats[0].scope.modified).toEqual([]);
+  });
+
+  it("uses the loop park reason and its state age for waiting", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = resolve(import.meta.dirname, "../../..");
+    store.upsertRun(
+      run({
+        id: "parked-loop",
+        agentId: "guido-1",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "operator", reason: "Check the plan", ended: false },
+        },
+      }),
+    );
+    const response = await get("/api/repos/shop-app/map");
+    expect(response.json().seats[0].badges.waiting).toEqual({
+      kind: "parked",
+      reason: "Check the plan",
+      since: response.json().seats[0].since,
+    });
+  });
+
+  for (const vendor of ["claude", "codex"] as const) {
     it(`assembles ${vendor} map calls, churn, parsed tests and measured context`, async () => {
       withCrew();
       const session = config.crew?.sessions[0];
@@ -2689,6 +2864,12 @@ describe("boards, escalations, health", () => {
         runId: "map-run",
         text: "Which approach?",
         at: NOW,
+      });
+      store.addQuestion({
+        agentId: "guido-1",
+        runId: "previous-run",
+        text: "Old question",
+        at: NOW - 1,
       });
       for (const round of [1, 2]) {
         const reviewId = store.requestReview({
