@@ -20,7 +20,7 @@ const message = (overrides: Partial<CommsThreadMessage>): CommsThreadMessage => 
   at: 1000,
   from: "GUIDO-1",
   to: "CAPCOM",
-  ticket: "7",
+  ticket: "sample#7", // the server's canonical form, as stored in comms
   text: "Question body",
   tagged: true,
   direct: true,
@@ -110,7 +110,7 @@ it("loads read-only lane messages oldest first and filters string tickets alongs
       messages: [
         message({ id: "comms:2", at: 2000, from: "CAPCOM", to: "GUIDO-1", text: "Answer body" }),
         message({}),
-        message({ id: "comms:3", ticket: "8", text: "Other ticket body" }),
+        message({ id: "comms:3", ticket: "sample#8", text: "Other ticket body" }),
         message({ id: "comms:4", from: "RETRO-1", to: "GUIDO-1", ticket: null, text: "Peer body" }),
         message({ id: "comms:5", from: "CAPCOM", to: "RETRO-1", text: "Unrelated body" }),
         message({ id: "comms:6", ticket: null, text: "No ticket body" }),

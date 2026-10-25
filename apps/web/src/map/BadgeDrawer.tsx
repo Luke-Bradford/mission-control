@@ -178,6 +178,11 @@ function QuestionLane({
   const questions = lane?.questions ?? [];
   const messages = (activity.data?.messages ?? [])
     .filter((m) => JSON.stringify([m.from, m.to].sort()) === lane?.key)
+    // Comms tickets are `repo#7`; questions carry the issue number alone.
+    .map((m) => ({
+      ...m,
+      ticket: m.ticket === null ? null : m.ticket.slice(m.ticket.lastIndexOf("#") + 1),
+    }))
     .sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity));
   const tickets = [
     ...new Set([
