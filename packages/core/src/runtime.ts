@@ -246,7 +246,7 @@ export function seatCommands(mode: CrewMode, commands: SeatCommands): readonly s
   return mine;
 }
 
-const bashEntries = (cmds: readonly string[]): string[] => cmds.map((c) => `Bash(${c}:*)`);
+export const bashEntries = (cmds: readonly string[]): string[] => cmds.map((c) => `Bash(${c}:*)`);
 
 export const WRITER_TOOLS = [
   "Read",
