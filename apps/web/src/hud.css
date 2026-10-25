@@ -4677,3 +4677,25 @@ button.nrow.thread.tagged {
     animation: none;
   }
 }
+
+/* #638: the Hold form under a Needs-you item; labels and fields in two columns */
+.hold-form {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: center;
+  margin: 6px 0 2px;
+}
+.hold-form label {
+  display: contents;
+}
+.hold-form input,
+.hold-form select {
+  min-width: 0;
+}
+.hold-form .row {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+}

@@ -270,26 +270,6 @@ export function NeedsList({
                 )}
               </div>
               <div className="acts">
-                <button
-                  type="button"
-                  className="sm ghost"
-                  disabled={busy}
-                  onClick={() => setHolding(i.key)}
-                >
-                  Hold…
-                </button>
-                {holding === i.key && (
-                  <HoldForm
-                    busy={busy}
-                    onCancel={() => setHolding(null)}
-                    onHold={(reason, condition) =>
-                      act(async () => {
-                        await apiPost(ACTIONS.hold(i.key), { reason, condition });
-                        setHolding(null);
-                      })
-                    }
-                  />
-                )}
                 {isChannelItem(i) && agentId !== null && (
                   <button type="button" className="sm primary" onClick={() => onRead(agentId)}>
                     Read
@@ -371,32 +351,52 @@ export function NeedsList({
                     Ack
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="sm ghost"
+                  disabled={busy}
+                  onClick={() => setHolding(i.key)}
+                >
+                  Hold…
+                </button>
               </div>
+              {holding === i.key && (
+                <HoldForm
+                  busy={busy}
+                  onCancel={() => setHolding(null)}
+                  onHold={(reason, condition) =>
+                    act(async () => {
+                      await apiPost(ACTIONS.hold(i.key), { reason, condition });
+                      setHolding(null);
+                    })
+                  }
+                />
+              )}
             </div>
           );
         })}
       </div>
       {held.data && held.data.length > 0 && (
-        <details>
+        <details id="cHeld" className="guard">
           <summary>Held · {held.data.length}</summary>
           {held.data.map((i) => (
-            <div className="nrow" key={i.key}>
+            <div className="nrow" key={i.key} data-kind={i.kind}>
               <div>
-                <span>{i.text}</span>
+                <span className="kind">{ATTENTION_LABEL[i.kind]}</span> <span>{i.text}</span>
                 <div className="xs muted">{i.hold?.reason}</div>
+                <button
+                  type="button"
+                  className="sm"
+                  disabled={busy}
+                  onClick={() =>
+                    act(async () => {
+                      await apiPost(ACTIONS.releaseHold(i.key), {});
+                    })
+                  }
+                >
+                  Release
+                </button>
               </div>
-              <button
-                type="button"
-                className="sm"
-                disabled={busy}
-                onClick={() =>
-                  act(async () => {
-                    await apiPost(ACTIONS.releaseHold(i.key), {});
-                  })
-                }
-              >
-                Release
-              </button>
             </div>
           ))}
         </details>
@@ -506,7 +506,7 @@ function HoldForm({
   const [ticket, setTicket] = useState("");
   return (
     <form
-      className="pb"
+      className="hold-form"
       onSubmit={(event) => {
         event.preventDefault();
         const condition: AttentionHoldCondition =
@@ -562,12 +562,14 @@ function HoldForm({
           />
         </label>
       )}
-      <button type="submit" className="sm" disabled={busy || !reason.trim()}>
-        Hold item
-      </button>
-      <button type="button" className="sm ghost" disabled={busy} onClick={onCancel}>
-        Cancel
-      </button>
+      <div className="row">
+        <button type="submit" className="sm" disabled={busy || !reason.trim()}>
+          Hold item
+        </button>
+        <button type="button" className="sm ghost" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }
