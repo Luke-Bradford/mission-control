@@ -15,6 +15,7 @@ import { parseTicket } from "./runview.ts";
 import { runSpend } from "./spend.ts";
 import type { Store } from "./store.ts";
 import { median } from "./telemetry.ts";
+import { endOf } from "./views.ts";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -58,11 +59,14 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   const digests = store.digests(runs.map((r) => r.id));
   const tokens = zeros();
   const spend = hourly();
+  const minuteSpend = zeros();
   for (const run of runs) {
     for (const [at, n] of digests.get(run.id)?.minuteTokens ?? []) {
       const i = Math.floor((at - since) / MINUTE_MS);
       if (i >= 0 && i < MINUTES) tokens[i] = (tokens[i] ?? 0) + n;
     }
+    const minutes = runSpend(run, digests.get(run.id), since, now, MINUTE_MS);
+    for (let i = 0; i < MINUTES; i++) minuteSpend[i] = (minuteSpend[i] ?? 0) + (minutes[i] ?? 0);
     const costs = runSpend(run, digests.get(run.id), midnight, now, HOUR_MS);
     for (let i = 0; i < spend.length; i++) spend[i] = (spend[i] ?? 0) + (costs[i] ?? 0);
   }
@@ -86,7 +90,9 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     if (changes.at(-1)?.to === "running") workingNow++;
   }
 
-  const prs = scope.repoIds.flatMap((id) => store.overviewPullRequests(id, midnight));
+  const prs = scope.repoIds.flatMap((id) =>
+    store.overviewPullRequests(id, Math.min(midnight, since)),
+  );
   const linked = prs.filter((p) => p.ticket !== null || (p.closingIssues?.length ?? 0) > 0);
   const pipelineRepos = new Set(scope.pipelineRepoIds ?? scope.repoIds);
   const byTicket = new Map<string, PullRequestView>();
@@ -210,10 +216,12 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   const inFlight = pipeline.filter((p) => p.stage !== "merged" && p.stage !== "ready");
   const oldest = inFlight.flatMap((p) => (p.oldestAt === null ? [] : [p.oldestAt]));
   const ci = scope.repoIds
-    .flatMap((id) => store.loopEvents(now - DAY_MS, id))
+    .flatMap((id) => store.loopEvents(since - DAY_MS, id))
     .filter((e) => e.at <= now);
-  const passed = ci.filter((e) => e.text.startsWith(CI_PASSED_EVENT_PREFIX)).length;
-  const failed = ci.filter((e) => isCiFailureEvent(e.text)).length;
+  const passed = ci.filter(
+    (e) => e.at >= now - DAY_MS && e.text.startsWith(CI_PASSED_EVENT_PREFIX),
+  ).length;
+  const failed = ci.filter((e) => e.at >= now - DAY_MS && isCiFailureEvent(e.text)).length;
   const flow = store
     .flowIssues(now - 14 * DAY_MS)
     .filter(
@@ -234,6 +242,58 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
       (i.repoId === null || repos.has(i.repoId)) &&
       i.at <= now,
   );
+  // Interval counts use retained runs; board-only review and resolved attention have no history.
+  const minuteEnds = Array.from({ length: MINUTES }, (_, i) => since + (i + 1) * MINUTE_MS);
+  const flightSeries = minuteEnds.map(
+    (at) =>
+      new Set(
+        runs
+          .filter(
+            (r) =>
+              pipelineRepos.has(r.repoId) &&
+              r.ticket !== null &&
+              r.reviewId == null &&
+              r.startedAt < at &&
+              endOf(r, now) > at - MINUTE_MS,
+          )
+          .map((r) => r.ticket),
+      ).size,
+  );
+  const ciSeries = minuteEnds.map((at) => {
+    const outcomes = ci.filter((e) => e.at >= at - DAY_MS && e.at < at);
+    const pass = outcomes.filter((e) => e.text.startsWith(CI_PASSED_EVENT_PREFIX)).length;
+    const fail = outcomes.filter((e) => isCiFailureEvent(e.text)).length;
+    return pass + fail ? (100 * pass) / (pass + fail) : null;
+  });
+  const cycleSeries = minuteEnds.map((at) =>
+    median(
+      flow
+        .filter(
+          (i) =>
+            (i.doneAt as number) >= startOfLocalDay(at - 1, scope.timezone) &&
+            (i.doneAt as number) < at,
+        )
+        .map((i) => (i.doneAt as number) - (i.startAt as number)),
+    ),
+  );
+  const needSeries = minuteEnds.map((at) => needs.filter((i) => i.at < at).length);
+  const mergeSeries = zeros();
+  for (const pr of prs) {
+    if (pr.mergedAt === null) continue;
+    const i = Math.floor((pr.mergedAt - since) / MINUTE_MS);
+    if (i >= 0 && i < MINUTES) mergeSeries[i] = (mergeSeries[i] ?? 0) + 1;
+  }
+  const diskSeries = Array<number | null>(MINUTES).fill(null);
+  const diskCounts = zeros();
+  for (const sample of store.machineSamples(since)) {
+    if (sample.at >= end || sample.diskFreeBytes === null) continue;
+    const i = Math.floor((sample.at - since) / MINUTE_MS);
+    diskSeries[i] = (diskSeries[i] ?? 0) + sample.diskFreeBytes / 1024 ** 3;
+    diskCounts[i] = (diskCounts[i] ?? 0) + 1;
+  }
+  for (let i = 0; i < MINUTES; i++) {
+    if (diskCounts[i]) diskSeries[i] = (diskSeries[i] as number) / (diskCounts[i] as number);
+  }
   const cpu = Array<number | null>(MINUTES).fill(null);
   const mem = Array<number | null>(MINUTES).fill(null);
   for (const sample of store.machineBuckets(since, end - 1, MINUTE_MS, MINUTES)) {
@@ -247,25 +307,36 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     kpis: {
       working: { now: workingNow, of: scope.seatIds.length, series: working },
       tokensPerMin: { now: tokens.at(-1) ?? 0, series: tokens },
-      spendToday: { usd: spend.reduce((sum, n) => sum + n, 0), perHour: spend },
+      spendToday: {
+        usd: spend.reduce((sum, n) => sum + n, 0),
+        perHour: spend,
+        series: minuteSpend,
+      },
       inFlight: {
+        series: flightSeries,
         count: inFlight.reduce((n, p) => n + p.count, 0),
         oldestAt: oldest.length ? Math.min(...oldest) : null,
       },
-      mergedToday: { count: merged.length, perHour },
+      mergedToday: { count: merged.length, perHour, series: mergeSeries },
       ciPassRate24h: {
+        series: ciSeries,
         pct: passed + failed === 0 ? null : (100 * passed) / (passed + failed),
         runs: passed + failed,
         redNow: linked.filter((p) => p.state === "open" && p.ci === "failing").length,
       },
       cycleTime: {
+        series: cycleSeries,
         medianMs: median(today),
         n: today.length,
         avg14dMs: cycles.length ? cycles.reduce((sum, ms) => sum + ms, 0) / cycles.length : null,
       },
-      needsYou: { count: needs.length, overHour: needs.filter((i) => now - i.at > HOUR_MS).length },
+      needsYou: {
+        series: needSeries,
+        count: needs.length,
+        overHour: needs.filter((i) => now - i.at > HOUR_MS).length,
+      },
     },
     pipeline,
-    machine: { cpu, mem, diskFreeGb: disk === null ? null : disk / 1024 ** 3 },
+    machine: { cpu, mem, disk: diskSeries, diskFreeGb: disk === null ? null : disk / 1024 ** 3 },
   };
 }

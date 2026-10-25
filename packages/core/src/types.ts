@@ -1178,16 +1178,33 @@ export interface OverviewSummary {
   kpis: {
     working: { now: number; of: number; series: number[] };
     tokensPerMin: { now: number; series: number[] };
-    spendToday: { usd: number; perHour: number[] };
-    inFlight: { count: number; oldestAt: number | null };
-    mergedToday: { count: number; perHour: number[] };
-    ciPassRate24h: { pct: number | null; runs: number; redNow: number };
-    cycleTime: { medianMs: number | null; n: number; avg14dMs: number | null };
-    needsYou: { count: number; overHour: number };
+    /** Minute spend buckets, using the same attribution as perHour. */
+    spendToday: { usd: number; perHour: number[]; series?: number[] };
+    /** Distinct tickets with overlapping run intervals per minute; board-only review has no history. */
+    inFlight: { count: number; oldestAt: number | null; series?: number[] };
+    /** Merge counts per minute, including minutes before local midnight. */
+    mergedToday: { count: number; perHour: number[]; series?: number[] };
+    /** Rolling 24-hour pass percentage at each minute end; null without outcomes. */
+    ciPassRate24h: { pct: number | null; runs: number; redNow: number; series?: (number | null)[] };
+    /** Local-day median at each minute end; null without completed cycles. */
+    cycleTime: {
+      medianMs: number | null;
+      n: number;
+      avg14dMs: number | null;
+      series?: (number | null)[];
+    };
+    /** Currently open operator items present at each minute end; resolved items are not retained. */
+    needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];
   /** Missing minute samples are null, rather than zero utilization. */
-  machine: { cpu: (number | null)[]; mem: (number | null)[]; diskFreeGb: number | null };
+  machine: {
+    cpu: (number | null)[];
+    mem: (number | null)[];
+    diskFreeGb: number | null;
+    /** Mean free disk space in GB per minute, in the same units as diskFreeGb. */
+    disk?: (number | null)[];
+  };
 }
 
 export interface PipelineStage {
