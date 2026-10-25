@@ -3921,14 +3921,24 @@ describe("the engine runs reviews", () => {
       expect(h.steps).not.toContain("delete-remote");
     });
 
-    it.each([0, ENGINE_TICK_MS])(
-      "gives housekeeping ten fresh transient ticks after an operator merge delayed by %s ms",
-      async (delay) => {
+    it.each([
+      [0, "ready"],
+      [ENGINE_TICK_MS, "ready"],
+      [0, "merge"],
+      [ENGINE_TICK_MS, "merge"],
+    ] as const)(
+      "gives housekeeping ten fresh transient ticks after an operator merge delayed by %s ms following %s failures",
+      async (delay, failedStep) => {
         const mergeDown = { ok: false, text: "gh is down", transient: true } as const;
-        h.stepResults.merge = [mergeDown, mergeDown];
+        h.stepResults[failedStep] = [mergeDown, mergeDown];
+        if (failedStep === "ready") setLoop({ merging: null });
         await gateOpen();
-        await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
-        expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready"] });
+        await vi.waitFor(() =>
+          expect(h.steps).toEqual(failedStep === "ready" ? ["ready"] : ["ready", "merge"]),
+        );
+        expect(loopOf().merging).toEqual(
+          failedStep === "ready" ? null : { sha: SHA, done: ["ready"] },
+        );
         clock += ENGINE_TICK_MS;
         await h.engine.reconcileRun(RUN);
         expect(loopOf().transient).toBe(2);
@@ -3937,7 +3947,10 @@ describe("the engine runs reviews", () => {
         h.stepResults.close = Array.from({ length: 10 }, () => down);
         setPr({ state: "merged", isDraft: false, ci: "passing", mergedAt: clock });
         await h.engine.reconcileRun(RUN);
-        expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready", "merge"] });
+        expect(loopOf().merging).toEqual({
+          sha: SHA,
+          done: failedStep === "ready" ? ["merge"] : ["ready", "merge"],
+        });
         expect(loopOf().transient).toBe(1);
         expect(loopOf().parked).toBeNull();
         for (let n = 2; n <= 10; n++) {
@@ -3951,7 +3964,7 @@ describe("the engine runs reviews", () => {
           reason: mergeStepFailedText("close the issue", "gh is down"),
           ended: false,
         });
-        expect(h.steps.filter((s) => s === "merge")).toHaveLength(2);
+        expect(h.steps.filter((s) => s === "merge")).toHaveLength(failedStep === "ready" ? 0 : 2);
         expect(h.steps).not.toContain("delete-remote");
       },
     );
