@@ -1513,35 +1513,40 @@ export function createEngine(deps: EngineDeps): Engine {
       if (rules === null) return true;
       const hardRules = effectiveHardRules(rules, flightPowersOf(config, author.repoId));
       const paths = await publisher.hardRuleTouches(author, row.sha, hardRules);
-      if (paths.length === 0) return false;
       const runs = store.runsActiveSince(0);
       let waiting = false;
       for (const pr of older) {
         const run = runs.find(
           (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
         );
-        // After merging, the diff against main can be empty. Keep the overlap already
-        // observed while open, including across restarts and replacement review rows.
-        const previouslyWaited = store
-          .loopEvents(0)
-          .some(
-            (event) =>
-              event.runId === author.id &&
-              event.text.startsWith(`waits for #${pr.number} (shared:`),
+        if (run === undefined) continue;
+        const key = `review-touches:${author.repoId}:${pr.number}:${pr.headSha}:${JSON.stringify(hardRules)}`;
+        const saved = store.getSetting(key);
+        let touched: string[];
+        if (saved !== null) {
+          touched = (JSON.parse(saved) as { headSha: string; files: string[] }).files;
+        } else if (pr.headSha === null || !seatKnown(run.agentId)) {
+          // A known run whose seat disappeared cannot establish disjointness.
+          touched = paths;
+        } else {
+          if (pr.state === "merged" && !pr.mergeCommitSha) return true;
+          touched = await publisher.hardRuleTouches(
+            run,
+            pr.headSha,
+            hardRules,
+            pr.state === "merged" ? (pr.mergeCommitSha ?? undefined) : undefined,
           );
-        // A merged PR can have an empty diff against main even on the first check.
-        // Without historical overlap evidence, conservatively require its merge ancestry.
-        // Missing seats likewise cannot prove disjointness.
-        const shared =
-          pr.state === "merged" ||
-          previouslyWaited ||
-          run === undefined ||
-          pr.headSha === null ||
-          !seatKnown(run.agentId)
-            ? paths
-            : (await publisher.hardRuleTouches(run, pr.headSha, hardRules)).filter((path) =>
-                paths.includes(path),
-              );
+          const current = store.pullRequests(author.repoId).find((p) => p.number === pr.number);
+          if (
+            !current ||
+            current.state !== pr.state ||
+            current.headSha !== pr.headSha ||
+            current.mergeCommitSha !== pr.mergeCommitSha
+          )
+            return true;
+          store.setSetting(key, JSON.stringify({ headSha: pr.headSha, files: touched }));
+        }
+        const shared = touched.filter((path) => paths.includes(path));
         if (shared.length === 0) continue;
         if (pr.state === "merged") {
           if (
@@ -1585,6 +1590,19 @@ export function createEngine(deps: EngineDeps): Engine {
           now(),
         );
       }
+      const current = store.pullRequests(author.repoId);
+      if (
+        older.some((pr) => {
+          const latest = current.find((p) => p.number === pr.number);
+          return (
+            !latest ||
+            latest.state !== pr.state ||
+            latest.headSha !== pr.headSha ||
+            latest.mergeCommitSha !== pr.mergeCommitSha
+          );
+        })
+      )
+        return true;
       return waiting;
     } catch (e) {
       log(

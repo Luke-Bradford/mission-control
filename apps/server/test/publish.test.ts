@@ -747,6 +747,18 @@ describe("hardRuleTouches", () => {
     ]);
   });
 
+  it("reconstructs a merged head diff from the immutable merge first parent", async () => {
+    const calls: string[][] = [];
+    const git = (async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      return args[0] === "merge-base" ? BASE : "CLAUDE.md\0";
+    }) as never;
+    const publisher = createPublisher(deps({ git }));
+    expect(await publisher.hardRuleTouches(run(), SHA, ["CLAUDE.md"], BASE)).toEqual(["CLAUDE.md"]);
+    expect(calls[0]).toEqual(["merge-base", `${BASE}^1`, SHA]);
+    expect(calls[1]).toEqual(["diff", "--name-only", "-z", "--no-renames", BASE, SHA, "--"]);
+  });
+
   it("reads nothing for a sha that is not a sha, or with no rules", async () => {
     const git = (async () => {
       throw new Error("git was not expected");

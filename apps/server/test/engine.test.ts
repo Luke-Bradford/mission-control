@@ -281,6 +281,7 @@ interface Harness {
   prResults: OpenPrResult[];
   touches: string[];
   touchesByRun?: Record<string, string[]>;
+  duringTouches?: (runId: string) => void;
   awayDiff?: AwayDiff | null;
   descends?: boolean;
   hardRuleLists: string[][];
@@ -479,6 +480,7 @@ function harness(): Harness {
         },
         async hardRuleTouches(run, _sha, rules) {
           x.hardRuleLists.push([...rules]);
+          x.duringTouches?.(run.id);
           return (x.touchesByRun?.[run.id] ?? x.touches).filter((path) =>
             rules.some((rule) => globMatches(rule, path, true)),
           );
@@ -2610,8 +2612,82 @@ describe("the engine runs reviews", () => {
     ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
   });
 
+  it("ignores older manual PRs without a run", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, branch: "manual" } : p)),
+        at,
+      ),
+    );
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+  });
+
+  it("does not update for an unrelated older merged PR", async () => {
+    h.touchesByRun = { [RUN]: ["CLAUDE.md"], [RUN2]: ["packages/core/src/guard.ts"] };
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        at,
+      ),
+    );
+    await secondAuthor();
+    expect(h.starts).toHaveLength(1);
+    expect(h.updates).toEqual([]);
+  });
+
+  it("recomputes overlap when the older open head changes", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    h.touchesByRun = { [RUN]: ["CLAUDE.md"], [RUN2]: h.touches };
+    store.upsertPullRequests(
+      REPO,
+      store.pullRequests(REPO).map((p) => (p.number === 12 ? { ...p, headSha: SHA_C } : p)),
+      clock,
+    );
+    await h.engine.tick();
+    expect(h.starts).toHaveLength(1);
+  });
+
+  it.each(["merged", "head changed"] as const)(
+    "keeps review queued if the older PR %s during its diff",
+    async (change) => {
+      h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+      h.duringTouches = (id) => {
+        if (id !== RUN) return;
+        h.duringTouches = undefined;
+        store.upsertPullRequests(
+          REPO,
+          store.pullRequests(REPO).map((p) =>
+            p.number === 12
+              ? {
+                  ...p,
+                  headSha: change === "merged" ? p.headSha : SHA_C,
+                  ...(change === "merged"
+                    ? { state: "merged" as const, mergeCommitSha: SHA_C }
+                    : {}),
+                }
+              : p,
+          ),
+          clock,
+        );
+      };
+      await secondAuthor();
+      expect(h.starts).toEqual([]);
+      expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    },
+  );
+
   it("updates before review when the older PR merged before the first overlap check", async () => {
-    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    h.touchesByRun = {
+      [RUN]: ["packages/core/src/guard.ts"],
+      [RUN2]: ["packages/core/src/guard.ts"],
+    };
     // secondAuthor refreshes the PR snapshot before its first reconciliation.
     const upsert = store.upsertPullRequests.bind(store);
     vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>

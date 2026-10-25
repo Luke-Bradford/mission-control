@@ -194,8 +194,13 @@ export interface Publisher {
   rerunRuling(repo: string, sha: string): Promise<RerunResult>;
   /** What those re-runs came to: pending until each run is on a later attempt and completed. */
   rerunState(repo: string, sha: string, runs: CiRerun["runs"]): Promise<RerunStateResult>;
-  /** The paths changed between origin's default branch and `sha` that match `hardRules`. */
-  hardRuleTouches(run: Run, sha: string, hardRules: readonly string[]): Promise<string[]>;
+  /** Hard-rule paths against main, or the immutable first parent of a merged PR. */
+  hardRuleTouches(
+    run: Run,
+    sha: string,
+    hardRules: readonly string[],
+    mergeCommitSha?: string,
+  ): Promise<string[]>;
   /**
    * The merge gate's reads for `sha`. origin's tip is read every call; when `known` is for the same
    * sha and tip, it is returned without the rest of the reads.
@@ -810,8 +815,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return result.ok && result.descends;
     },
 
-    async hardRuleTouches(run, sha, hardRules) {
+    async hardRuleTouches(run, sha, hardRules, mergeCommitSha) {
       const place = seatPlace(deps.config, run.agentId);
+      if (mergeCommitSha !== undefined && !SHA.test(mergeCommitSha))
+        throw new Error("invalid merge commit");
       if (place === null || !SHA.test(sha) || hardRules.length === 0) return [];
       const git = deps.git ?? crewGit;
       const checkout = place.session.checkout;
@@ -819,7 +826,13 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const common = await realpath(join(checkout, ".git"));
         const g = (a: string[]) =>
           git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
-        const base = (await g(["merge-base", "refs/remotes/origin/HEAD", sha])).trim();
+        const base = (
+          await g([
+            "merge-base",
+            mergeCommitSha ? `${mergeCommitSha}^1` : "refs/remotes/origin/HEAD",
+            sha,
+          ])
+        ).trim();
         if (!SHA.test(base)) throw new Error("no merge base with origin/HEAD");
         const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
           .split("\0")
