@@ -1,17 +1,12 @@
-import {
-  CI_FAILED_EVENT_PREFIX,
-  CI_PASSED_EVENT_PREFIX,
-  CI_RERUN_FAILED_EVENT_PREFIX,
-} from "./loop.ts";
-
 /** `/api/activity` covers this window, newest first, and returns at most ACTIVITY_LIMIT events. */
 export const ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const ACTIVITY_LIMIT = 1000;
 
 /** Loop events that report a PR head's CI: Activity shows them as checks. */
-export const CHECK_EVENT = new RegExp(
-  `^(?:${[CI_PASSED_EVENT_PREFIX, CI_FAILED_EVENT_PREFIX, CI_RERUN_FAILED_EVENT_PREFIX, "CI flaked on "].join("|")})`,
-);
+// Kept literal: importing loop.ts here would load it into every @mc/core consumer, the guard hook too.
+// It matches loop.ts's CI_PASSED/CI_FAILED/CI_RERUN_FAILED prefixes; activity.test.ts pins each.
+export const CHECK_EVENT =
+  /^CI (?:passed on |failed on |failed again on the re-run of |flaked on )/;
 
 /** `who` or `to` of a comms row: the operator. Upper case, so never a seat id. */
 export const COMMS_CAPCOM = "CAPCOM";
