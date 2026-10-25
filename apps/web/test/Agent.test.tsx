@@ -3592,3 +3592,34 @@ describe("Agent page: the header pill", () => {
     expect($(container, "#ahead .pill")?.textContent).toBe("Waiting on CI");
   });
 });
+
+it("explains live Codex steering at the next model step", async () => {
+  stub({ rows: [seatRow({ accountId: "codex-main", hudState: "running", run: run() })] });
+  render(<Agent id="guido-1" />);
+  expect(
+    await screen.findByText(
+      "Reaches GUIDO-1 at its next model step (Codex steer); no new turn starts.",
+    ),
+  ).toBeTruthy();
+});
+
+it("refreshes a Codex plan from live stream tasks", async () => {
+  const row = seatRow({ accountId: "codex-main", hudState: "running", run: run() });
+  let tasks: NonNullable<AgentStream["tasks"]> = [
+    { id: "1", text: "Check the catalogue", status: "in_progress" },
+  ];
+  stub({
+    rows: [row],
+    streamNow: () => ({ ...STREAM, runId: row.run?.id ?? null, tasks }),
+  });
+  render(<Agent id="guido-1" />);
+  expect(await screen.findByRole("button", { name: "Plan 0/1" })).toBeTruthy();
+  expect(screen.getByText("Check the catalogue")).toBeTruthy();
+  tasks = [
+    { id: "1", text: "Check the catalogue", status: "done" },
+    { id: "2", text: "Verify the form", status: "in_progress" },
+  ];
+  act(() => hub.refetch("/api/agents/guido-1/stream"));
+  expect(await screen.findByRole("button", { name: "Plan 1/2" })).toBeTruthy();
+  expect(screen.getByText("Verify the form")).toBeTruthy();
+});

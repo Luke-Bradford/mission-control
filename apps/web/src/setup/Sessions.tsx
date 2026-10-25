@@ -1,5 +1,6 @@
 import {
   type AttentionItem,
+  type CliAccountStatus,
   type ConfigView,
   CREW_EFFORTS,
   type Crew,
@@ -43,7 +44,7 @@ export const SESSIONS_NOTE =
   "A session is one repo and the agents working on it, as config.yaml lists them. Add, edit or remove an agent here: Mission Control writes config.yaml, keeps a backup beside it, and applies the change without a restart.";
 export const SAVE_NOTE =
   "An agent that is working keeps its current settings until its run ends; a removed one finishes its run first.";
-export const AREA_HINT = "click folder tiles to add them · empty = whole checkout";
+export const AREA_HINT = "click free folder tiles below · none picked = whole checkout";
 export const SCRATCH_LABEL = "Reviews PRs in a scratch checkout";
 export const NO_STATUS = "—";
 export const NO_ROLES = "this server does not list roles";
@@ -88,13 +89,15 @@ function seatForm(
 ): FormState | null {
   const first = rolesOf(config)[0];
   if (editing === null && !first) return null;
+  const account = config.accounts.find((a) => a.id === editing?.accountId) ?? config.accounts[0];
   return {
     sessionId,
     editId: editing?.id ?? null,
     role: editing?.role ?? first?.name ?? "",
     id: null,
-    accountId: editing?.accountId ?? config.accounts.find((a) => a.vendor === "claude")?.id ?? "",
-    model: editing?.model ?? first?.model ?? "",
+    accountId: editing?.accountId ?? account?.id ?? "",
+    model:
+      editing?.model ?? (account?.vendor === "codex" ? "gpt-5.6-sol" : (first?.model ?? "sonnet")),
     effort: editing?.effort ?? "",
     area: editing?.area.join(", ") ?? "",
     scratch: editing?.mode === "scratch",
@@ -178,7 +181,12 @@ function SeatForm({
   const adding = form.editId === null;
   const role = roles.find((r) => r.name === form.role);
   const writer = role?.mode === "writer";
-  const accounts = config.accounts.filter((a) => a.vendor === "claude");
+  const accounts = config.accounts;
+  const vendor = accounts.find((a) => a.id === form.accountId)?.vendor;
+  const statuses = useResource<CliAccountStatus[]>(RESOURCES.accountStatus);
+  const status = statuses.data?.find((a) => a.accountId === form.accountId);
+  const unavailable = session.seats.find((s) => s.id === form.editId)?.unavailable;
+  const cliHint = unavailable || statuses.error || (status && status.status !== "logged-in");
   const id = form.editId ?? form.id ?? freeCallSign(config, form.role);
   const idOk = !adding || CALL_SIGN.test(id);
   const valid = idOk && form.model.trim() !== "" && form.accountId !== "";
@@ -188,7 +196,7 @@ function SeatForm({
     const next = roles.find((r) => r.name === name);
     patch({
       role: name,
-      model: next?.model ?? form.model,
+      model: vendor === "codex" ? "gpt-5.6-sol" : (next?.model ?? form.model),
       scratch: false,
       area: next?.mode === "writer" ? form.area : "",
     });
@@ -241,7 +249,27 @@ function SeatForm({
         )}
         <label className="s fg2">
           Account
-          <select value={form.accountId} onChange={(e) => patch({ accountId: e.target.value })}>
+          <select
+            value={form.accountId}
+            onChange={(e) => {
+              const accountId = e.target.value;
+              const nextVendor = accounts.find((a) => a.id === accountId)?.vendor;
+              patch({
+                accountId,
+                ...(nextVendor !== vendor
+                  ? {
+                      model:
+                        nextVendor === "codex"
+                          ? "gpt-5.6-sol"
+                          : role?.model && !role.model.startsWith("gpt-")
+                            ? role.model
+                            : "sonnet",
+                      effort: "",
+                    }
+                  : {}),
+              });
+            }}
+          >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.id}
@@ -295,6 +323,12 @@ function SeatForm({
           Cancel
         </button>
       </div>
+      {cliHint && (
+        <p className="note s">
+          Sign in with the CLI on this machine. Mission Control reads this machine's CLI login,
+          identity and plan.
+        </p>
+      )}
       <p className="note s">{SAVE_NOTE}</p>
       {error !== null && (
         <p role="alert" className="crit-t s">
