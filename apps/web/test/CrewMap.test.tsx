@@ -1,4 +1,4 @@
-import { mapSnapshotFixture } from "@mc/core";
+import { type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CrewMapPanel, CrewMapView } from "../src/map/CrewMap.tsx";
@@ -6,7 +6,9 @@ import { LiveMap } from "../src/map/live.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { crewRow } from "./fixtures.ts";
 
-vi.mock("../src/map/MapScene.tsx", () => ({ MapScene: () => <div>3D scene</div> }));
+vi.mock("../src/map/MapScene.tsx", () => ({
+  MapScene: ({ focus }: { focus: string | null }) => <div data-focus={focus}>3D scene</div>,
+}));
 afterEach(() => vi.unstubAllGlobals());
 it("renders the fixture, searches and opens the file drawer with honest changes and findings", async () => {
   render(<CrewMapView snapshot={mapSnapshotFixture} />);
@@ -229,4 +231,71 @@ it("renders live file changes in the open drawer", async () => {
   expect(screen.getByRole("complementary", { name: "Selected file" }).textContent).toContain(
     "+55 −2 · branch diff",
   );
+});
+
+it("finds individual files in a collapsed tree and focuses their folder", async () => {
+  const snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
+  snapshot.tree = Array.from({ length: 2001 }, (_, i) => ({ path: `src/file-${i}.ts`, lines: 1 }));
+  snapshot.tree.push({ path: "settings.ts", lines: 1 });
+  render(<CrewMapView snapshot={snapshot} />);
+  const search = screen.getByRole("searchbox", { name: "Find a file or folder" });
+  fireEvent.change(search, { target: { value: "file-2000" } });
+  fireEvent.click(screen.getByRole("button", { name: "src/file-2000.ts" }));
+  expect(screen.getByRole("heading", { name: "src/file-2000.ts" })).toBeTruthy();
+  await waitFor(() => expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("src"));
+  fireEvent.change(search, { target: { value: "settings.ts" } });
+  fireEvent.keyDown(search, { key: "Enter" });
+  expect(screen.getByRole("heading", { name: "settings.ts" })).toBeTruthy();
+  await waitFor(() =>
+    expect(screen.getByText("3D scene").getAttribute("data-focus")).toBe("(root files)"),
+  );
+});
+
+it("refreshes an open checkout diff after a live map delta", async () => {
+  const listeners: Record<string, (e: MessageEvent) => void> = {};
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      addEventListener(k: string, cb: (e: MessageEvent) => void) {
+        listeners[k] = cb;
+      }
+      close() {}
+    },
+  );
+  const snapshot: MapSnapshot = structuredClone(mapSnapshotFixture);
+  snapshot.seats[0].scope.modified = [{ file: "src/util.ts", add: 1, rem: 0, source: "diff" }];
+  let text = "before edit";
+  stubFetch({
+    "/api/repos": [{ id: "sample" }],
+    "/api/crew": { rows: [] },
+    "/api/config": { crew: { sessions: [] } },
+    "/api/repos/sample/map": { ...snapshot, seq: 10 },
+    "/api/agents/GUIDO-1/files/diff?path=src%2Futil.ts": () => ({
+      status: 200,
+      body: { text, binary: false, truncated: false },
+    }),
+  });
+  render(<CrewMapPanel />);
+  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  fireEvent.change(await screen.findByRole("searchbox"), { target: { value: "util" } });
+  fireEvent.click(screen.getByRole("button", { name: "src/util.ts" }));
+  fireEvent.click(screen.getByRole("button", { name: "Current checkout diff" }));
+  await screen.findByText("before edit");
+  text = "after edit";
+  act(() =>
+    listeners.map(
+      new MessageEvent("map", {
+        data: JSON.stringify({
+          type: "diff",
+          seq: 11,
+          seat: "GUIDO-1",
+          file: "src/util.ts",
+          add: 55,
+          rem: 2,
+        }),
+      }),
+    ),
+  );
+  await screen.findByText("after edit");
+  expect(screen.queryByText("before edit")).toBeNull();
 });

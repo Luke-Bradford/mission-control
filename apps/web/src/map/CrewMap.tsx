@@ -1,7 +1,7 @@
 import type { Crew, FileDiff, MapSnapshot, RepoView } from "@mc/core";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet } from "../api.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { useSessionScope } from "../shell/session.ts";
 import { MAP_REPO_KEY, readKey, writeKey } from "../storage.ts";
@@ -135,9 +135,16 @@ export function CrewMapView({
         : nodes,
     [treeKey, extraKey, nodes],
   );
-  const matches = displayNodes.filter(
-    (n) => n.path !== "" && n.path.toLowerCase().includes(query.toLowerCase()),
-  );
+  const matches = [
+    ...new Set([
+      ...displayNodes.map((n) => n.path),
+      ...snapshot.tree.map((f) => f.path),
+      ...extras,
+    ]),
+  ].filter((path) => path !== "" && path.toLowerCase().includes(query.toLowerCase()));
+  const focusNode =
+    displayNodes.find((n) => n.path === focus) ??
+    displayNodes.find((n) => focus !== null && n.files.includes(focus));
   const select = (path: string) => {
     setSelected(path);
   };
@@ -156,7 +163,7 @@ export function CrewMapView({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && matches[0]) searchSelect(matches[0].path);
+            if (e.key === "Enter" && matches[0]) searchSelect(matches[0]);
           }}
         />
         <button
@@ -179,7 +186,7 @@ export function CrewMapView({
             <Scene
               nodes={displayNodes}
               snapshot={snapshot}
-              focus={focus}
+              focus={focusNode?.path ?? null}
               home={home}
               rotate={rotate}
               selected={selected}
@@ -195,8 +202,8 @@ export function CrewMapView({
           {query && (
             <div className="map-results">
               {matches.slice(0, 60).map((n) => (
-                <button type="button" key={n.path} onClick={() => searchSelect(n.path)}>
-                  {n.path}
+                <button type="button" key={n} onClick={() => searchSelect(n)}>
+                  {n}
                 </button>
               ))}
               {matches.length > 60 && <p>{matches.length - 60} more; refine your search.</p>}
@@ -283,7 +290,7 @@ function FileDrawer({
                   {c.source === "churn" ? "edit churn" : "branch diff"}
                 </p>
                 {c.source === "diff" && s.seat !== "FLIGHT" && (
-                  <BranchDiff seat={s.seat} path={c.file} />
+                  <BranchDiff seat={s.seat} path={c.file} snapshot={snapshot} />
                 )}
               </div>
             ))}
@@ -322,9 +329,23 @@ function FileDrawer({
     </>
   );
 }
-function BranchDiff({ seat, path }: { seat: string; path: string }) {
+function BranchDiff({
+  seat,
+  path,
+  snapshot,
+}: {
+  seat: string;
+  path: string;
+  snapshot: MapSnapshot;
+}) {
   const [open, setOpen] = useState(false);
-  const diff = useResource<FileDiff>(open ? RESOURCES.fileDiff(seat, path) : null);
+  const resource = RESOURCES.fileDiff(seat, path);
+  const diff = useResource<FileDiff>(open ? resource : null);
+  const previous = useRef(snapshot);
+  useEffect(() => {
+    if (open && previous.current !== snapshot) hub.refetch(resource.path);
+    previous.current = snapshot;
+  }, [open, snapshot, resource.path]);
   return (
     <>
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
