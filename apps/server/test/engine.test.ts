@@ -3921,30 +3921,40 @@ describe("the engine runs reviews", () => {
       expect(h.steps).not.toContain("delete-remote");
     });
 
-    it("gives housekeeping ten transient ticks after the operator merges an already ready PR", async () => {
-      h.stepResults.merge = [{ ok: false, text: "gh is down", transient: true }];
-      await gateOpen();
-      await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
-      expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready"] });
-      const down = { ok: false, text: "gh is down", transient: true } as const;
-      h.stepResults.close = Array.from({ length: 10 }, () => down);
-      setPr({ state: "merged", isDraft: false, ci: "passing", mergedAt: clock });
-      await h.engine.reconcileRun(RUN);
-      expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready", "merge"] });
-      for (let n = 2; n <= 10; n++) {
+    it.each([0, ENGINE_TICK_MS])(
+      "gives housekeeping ten fresh transient ticks after an operator merge delayed by %s ms",
+      async (delay) => {
+        const mergeDown = { ok: false, text: "gh is down", transient: true } as const;
+        h.stepResults.merge = [mergeDown, mergeDown];
+        await gateOpen();
+        await vi.waitFor(() => expect(h.steps).toEqual(["ready", "merge"]));
+        expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready"] });
         clock += ENGINE_TICK_MS;
         await h.engine.reconcileRun(RUN);
-        expect(h.steps.filter((s) => s === "close")).toHaveLength(n);
-        if (n < 10) expect(loopOf().parked).toBeNull();
-      }
-      expect(loopOf().parked).toEqual({
-        kind: "merge-step",
-        reason: mergeStepFailedText("close the issue", "gh is down"),
-        ended: false,
-      });
-      expect(h.steps.filter((s) => s === "merge")).toHaveLength(1);
-      expect(h.steps).not.toContain("delete-remote");
-    });
+        expect(loopOf().transient).toBe(2);
+        clock += delay;
+        const down = { ok: false, text: "gh is down", transient: true } as const;
+        h.stepResults.close = Array.from({ length: 10 }, () => down);
+        setPr({ state: "merged", isDraft: false, ci: "passing", mergedAt: clock });
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().merging).toEqual({ sha: SHA, done: ["ready", "merge"] });
+        expect(loopOf().transient).toBe(1);
+        expect(loopOf().parked).toBeNull();
+        for (let n = 2; n <= 10; n++) {
+          clock += ENGINE_TICK_MS;
+          await h.engine.reconcileRun(RUN);
+          expect(h.steps.filter((s) => s === "close")).toHaveLength(n);
+          if (n < 10) expect(loopOf().parked).toBeNull();
+        }
+        expect(loopOf().parked).toEqual({
+          kind: "merge-step",
+          reason: mergeStepFailedText("close the issue", "gh is down"),
+          ended: false,
+        });
+        expect(h.steps.filter((s) => s === "merge")).toHaveLength(2);
+        expect(h.steps).not.toContain("delete-remote");
+      },
+    );
 
     it("a local branch that cannot be deleted raises a note and does not park the run", async () => {
       h.stepResults["delete-local"] = [{ ok: false, text: "not merged", transient: false }];

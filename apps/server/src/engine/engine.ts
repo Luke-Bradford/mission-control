@@ -1207,6 +1207,8 @@ export function createEngine(deps: EngineDeps): Engine {
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
     if (pr?.state === "merged" && input.merging && !input.merging.done.includes("merge")) {
       input.merging = { ...input.merging, done: [...input.merging.done, "merge"] };
+      input.transient = 0;
+      lastTransient.delete(runId);
     }
     if (
       activeAway(store, at, config.operator.timezone) &&
