@@ -71,6 +71,7 @@ const prep = vi.hoisted(() => ({
   sessions: [] as import("../src/runtime/session.ts").CrewSession[],
   /** Set: every existingCheckout (a resume's) waits for it. */
   resumeGate: null as Promise<void> | null,
+  resumeChecks: 0,
   /** Set: every attachSession (a restart's take-back) waits for it. */
   attachGate: null as Promise<void> | null,
   attaches: [] as string[],
@@ -84,6 +85,7 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   return {
     ...real,
     existingCheckout: async (...a: Parameters<typeof real.existingCheckout>) => {
+      prep.resumeChecks++;
       if (prep.resumeGate) await prep.resumeGate;
       return real.existingCheckout(...a);
     },

@@ -62,6 +62,7 @@ import {
   type TestLockState,
   wakeKeyPrefix,
 } from "@mc/core";
+import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms.ts";
 import {
@@ -537,7 +538,7 @@ export function flightState(i: {
           ? Math.floor((now - last) / 60_000)
           : null,
       openQuestion: open.some((q) => q.agentId === s.id),
-      atStop: accountAtStop(config, store, s.accountId, now),
+      atStop: accountAtStop(config, store, runAccountId(store, run?.id ?? null, s.accountId), now),
     };
   });
 

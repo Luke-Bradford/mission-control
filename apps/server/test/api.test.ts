@@ -186,8 +186,10 @@ const stubSupervisor = (): Supervisor => {
       return value;
     };
   return {
+    withAccountUpdate: (fn) => fn(),
     start: () => undefined,
     stopAll: async () => undefined,
+    transferAccount: call("transfer", { outcome: "resumed" as const }),
     startRun: call("start", { runId: "r-1", branch: "feature/5-x" }),
     startWatch: call("startWatch", { runId: "r-3" }),
     startReview: call("startReview", { runId: "r-2" }),
@@ -526,6 +528,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/seats/guido-1/start", { issue: 5 }],
   ["POST", "/api/seats/guido-1/message", { text: "hello", interrupt: true }],
   ["POST", "/api/seats/guido-1/interrupt"],
+  ["POST", "/api/seats/guido-1/transfer", { accountId: "destination" }],
   ["POST", "/api/seats/guido-1/end"],
   ["POST", "/api/runs/shop-app-ta/end", {}],
   ["POST", "/api/runs/shop-app-ta/resume", {}],
@@ -1064,6 +1067,58 @@ describe("local access", () => {
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
     }
+  });
+
+  it("checks profile safety inside the supervisor account exclusion", async () => {
+    const sup = stubSupervisor();
+    let excluded = false;
+    sup.withAccountUpdate = async (fn) => {
+      excluded = true;
+      return fn();
+    };
+    sup.busy = () => (excluded ? [{ seatId: "fictional-seat", state: "starting" }] : []);
+    const a = buildApp({ config, store, bus, configPath, supervisor: sup });
+    try {
+      const result = await a.inject({
+        method: "POST",
+        url: "/api/accounts",
+        payload: {
+          name: "fictional-profile",
+          provider: "codex",
+          cliProfile: join(dir, "fictional-profile"),
+        },
+      });
+      expect(result.statusCode).toBe(409);
+      expect(excluded).toBe(true);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it("refuses a new CLI profile while an existing sandbox could read it", async () => {
+    store.upsertRun({ ...run({}), endedAt: null });
+    store.setSeatSession({
+      seatId: "fictional-seat",
+      runId: run({}).id,
+      cliSessionId: "fictional-session",
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: 1,
+    });
+    const before = readFileSync(configPath, "utf8");
+    const result = await app.inject({
+      method: "POST",
+      url: "/api/accounts",
+      payload: {
+        name: "fictional-profile",
+        provider: "codex",
+        cliProfile: join(dir, "fictional-profile"),
+      },
+    });
+    expect(result.statusCode).toBe(409);
+    expect(result.json().error).toContain("end existing seat processes");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
   });
 
   it("grants no cross-origin read or preflight", async () => {
@@ -4099,6 +4154,16 @@ describe("crew routes", () => {
     store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
     expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
+
+  it("transfers one seat explicitly and returns the supervisor outcome", async () => {
+    const r = await post5("transfer", { accountId: "destination" });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ outcome: "resumed" });
+    expect(supervisorCalls).toEqual([["transfer", "guido-1", "destination"]]);
+    expect(
+      (await post5("transfer", { accountId: "destination", credential: "fictional" })).statusCode,
+    ).toBe(400);
   });
 
   it("start answers { runId, branch } and emits agents", async () => {

@@ -408,3 +408,21 @@ export async function repoReferenceIndex(checkout: string, baseSha: string): Pro
   if (omitted) lines.push(notice);
   return lines.length === 2 ? "" : lines.join("\n");
 }
+
+/** A fresh CLI keeps the same run and checkout after its provider refuses resume. */
+export function transferBrief(i: {
+  call: string;
+  ticket: string | null;
+  title: string | null;
+  branch: string | null;
+  summary: string | null;
+  plan: string | null;
+}): string {
+  return [
+    `Account transfer handoff for ${i.call}. Resume was refused; continue this existing run.`,
+    `Ticket: ${i.ticket ?? "none"}${i.title === null ? "" : `: ${i.title}`}. Branch: ${i.branch ?? "detached"}.`,
+    "Your checkout and its uncommitted changes are preserved. Inspect the current work before continuing; do not repeat completed actions.",
+    ...(i.summary === null ? [] : [`Latest summary: ${i.summary}`]),
+    ...(i.plan === null ? [] : [`Latest plan: ${i.plan}`]),
+  ].join("\n\n");
+}

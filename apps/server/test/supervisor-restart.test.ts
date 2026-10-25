@@ -123,7 +123,11 @@ describe("the CLI update hold", () => {
 
     const attaches = prep.attaches.length;
     const revoke = vi.spyOn(tokens, "revoke");
-    for (let i = 0; i < 3; i++) await sup.resumeRun(runId);
+    for (let i = 0; i < 3; i++) {
+      await sup.resumeRun(runId);
+      expect(prep.attaches).toHaveLength(attaches);
+      expect(revoke).not.toHaveBeenCalled();
+    }
     expect(prep.attaches).toHaveLength(attaches);
     expect(revoke).not.toHaveBeenCalled();
 
@@ -1214,6 +1218,7 @@ describe("a seat keeps running through a restart", () => {
     const { sup } = make();
     sup.start();
     // while the attach is under way the supervisor answers busy; afterwards the line goes
+    expect(sup.busy()).toContainEqual({ seatId: "guido-1", state: "starting" });
     const answers: string[] = [];
     await until(async () => {
       answers.push(await sup.send(runId, `k-${answers.length}`, "hello again"));
@@ -1312,7 +1317,9 @@ describe("a seat keeps running through a restart", () => {
       open = r;
     });
     const { sup } = make({ tokens });
+    const attaches = prep.attaches.length;
     sup.start();
+    expect(prep.attaches).toHaveLength(attaches + 1);
     await sup.endRun("guido-1");
     expect(tokens.resolve(token)).not.toBeNull(); // nothing of the run's has been dropped yet
     open();

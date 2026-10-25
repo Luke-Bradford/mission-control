@@ -1253,25 +1253,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/setup/Accounts.tsx (Add account)
       api.post("/accounts", async (req, reply) => {
         if (!deps.configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const configPath = deps.configPath;
         const body = NewAccountBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        const duplicate = accountDuplicateReason(config.accounts, body.data);
-        if (duplicate) return reply.code(409).send({ error: duplicate });
-        try {
-          const result = await addAccount(deps.configPath, body.data, now());
-          const added = result.config.accounts.find((a) => a.id === body.data.name);
-          if (added) config.accounts.push(added);
-          bus.emit("config");
-          return { account: added };
-        } catch (e) {
-          captureError(reply, e);
-          if (e instanceof ConfigWriteError) {
+        const update = async () => {
+          if (
+            (body.data.cliProfile !== undefined || body.data.provider === "codex") &&
+            (store.liveSeatRuns().length > 0 || (deps.supervisor?.busy().length ?? 0) > 0)
+          )
             return reply
-              .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
-              .send({ error: e.message });
+              .code(409)
+              .send({ error: "end existing seat processes before adding a CLI profile" });
+          const duplicate = accountDuplicateReason(config.accounts, body.data);
+          if (duplicate) return reply.code(409).send({ error: duplicate });
+          try {
+            const result = await addAccount(configPath, body.data, now());
+            const added = result.config.accounts.find((a) => a.id === body.data.name);
+            if (added) config.accounts.push(added);
+            bus.emit("config");
+            return { account: added };
+          } catch (e) {
+            captureError(reply, e);
+            if (e instanceof ConfigWriteError) {
+              return reply
+                .code(e.kind === "duplicate" || e.kind === "current" ? 409 : 500)
+                .send({ error: e.message });
+            }
+            return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
           }
-          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
-        }
+        };
+        return deps.supervisor ? deps.supervisor.withAccountUpdate(update) : update();
       });
 
       api.get("/limits", async () => limitRows(config, store, now()));
@@ -2058,6 +2069,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         // Bound the encoded request before parsing; accepted messages stay whole.
         { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
       );
+      // Reader: apps/web/src/agent/Header.tsx
+      api.post<{ Params: { id: string } }>("/seats/:id/transfer", async (req, reply) => {
+        if (!crewGate(req.params.id, reply) || !supervisor) return reply;
+        const body = z.strictObject({ accountId: z.string().min(1).max(40) }).safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await supervisor.transferAccount(req.params.id, body.data.accountId);
+          bus.emit("agents");
+          return result;
+        } catch (e) {
+          return crewFail(e, reply);
+        }
+      });
       seatAction("/seats/:id/interrupt", NoBody, async (sup, id) => {
         await sup.interrupt(id);
         return { ok: true };

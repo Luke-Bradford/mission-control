@@ -1,5 +1,5 @@
 // Codex 0.154 app-server JSON-RPC shapes from the confinement spike and generated schema.
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -64,6 +64,20 @@ rl.on("line", (line) => {
       say({ id: "early", method: "item/permissions/requestApproval", params: {} });
     say({ id, result: { userAgent: "fake-codex" } });
   } else if (method === "thread/start" || method === "thread/resume") {
+    if (
+      (method === "thread/resume" &&
+        configured.refuseResume &&
+        readFileSync(join(process.env.CODEX_HOME, "auth.json"), "utf8").includes(
+          "fictional-destination",
+        )) ||
+      (configured.failDestination &&
+        readFileSync(join(process.env.CODEX_HOME, "auth.json"), "utf8").includes(
+          "fictional-destination",
+        ))
+    ) {
+      say({ id, error: { code: -32602, message: "fictional refusal" } });
+      return;
+    }
     handshakes++;
     if (handshakes > 1 && configured.noReattachResponse) return;
     if (configured.persistThread) {

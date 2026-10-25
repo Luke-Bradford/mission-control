@@ -49,6 +49,7 @@ import {
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { accountBindingProblem } from "./account-bindings.ts";
 import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
@@ -189,7 +190,13 @@ export type TeamsConfig = z.infer<typeof TeamsConfig>;
 export interface CcConfig {
   sources?: { teams?: TeamsConfig };
   operator: { id: string; timezone: string; githubLogins?: string[] };
-  accounts: { id: AccountId; vendor: "claude" | "codex"; alertAt: number; stopAt: number }[];
+  accounts: {
+    id: AccountId;
+    vendor: "claude" | "codex";
+    alertAt: number;
+    stopAt: number;
+    cliProfile?: string;
+  }[];
   repos: {
     id: RepoId;
     github: string;
@@ -432,6 +439,7 @@ const fileSchema = z
         vendor: z.enum(["claude", "codex"]),
         alert_at: percent,
         stop_at: percent,
+        cli_profile: nonEmpty.optional(),
       }),
     ),
     repos: z.array(
@@ -540,6 +548,7 @@ const fileSchema = z
         vendor: a.vendor,
         alertAt: a.alert_at,
         stopAt: a.stop_at,
+        ...(a.cli_profile === undefined ? {} : { cliProfile: a.cli_profile }),
       })),
       repos: f.repos.map((r) => ({
         id: r.id,
@@ -1156,18 +1165,17 @@ export function parseConfig(
       seen.add(x.id);
     });
   }
-  // The usage readers use the machine's one login per vendor (Keychain OAuth, `codex
-  // app-server`): a second account of a vendor would silently report the first one's usage.
-  const vendors = new Set<string>();
-  cfg.accounts.forEach((a, i) => {
-    if (vendors.has(a.vendor)) {
-      throw new ConfigError(
-        `accounts[${i}].vendor`,
-        `second "${a.vendor}" account: usage is read from the single ${a.vendor} login, so only one account per vendor is supported`,
-      );
-    }
-    vendors.add(a.vendor);
-  });
+  const bindingProblem = accountBindingProblem(cfg.accounts);
+  if (bindingProblem !== null) {
+    const index = cfg.accounts.findIndex((a, i) =>
+      cfg.accounts.slice(0, i).some((b) => b.vendor === a.vendor),
+    );
+    const vendor = cfg.accounts[index]?.vendor;
+    throw new ConfigError(
+      index < 0 ? "accounts" : `accounts[${index}].vendor`,
+      index < 0 ? bindingProblem : `second "${vendor}" account: ${bindingProblem}`,
+    );
+  }
   const repoIds = new Set(cfg.repos.map((r) => r.id));
   const accountIds = new Set(cfg.accounts.map((a) => a.id));
   const crewRepoIds = new Set((cfg.crew?.sessions ?? []).map((s) => s.repoId));

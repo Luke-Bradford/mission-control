@@ -806,6 +806,43 @@ describe("SeatsBody", () => {
 });
 
 describe("addAccount", () => {
+  it("persists independent Codex bindings and refuses a second label for the same login", async () => {
+    const source = mkdtempSync(join(dir, "source-"));
+    const destination = mkdtempSync(join(dir, "destination-"));
+    const duplicate = mkdtempSync(join(dir, "duplicate-"));
+    for (const [profile, login] of [
+      [source, "fictional-source"],
+      [destination, "fictional-destination"],
+      [duplicate, "fictional-destination"],
+    ] as const) {
+      writeFileSync(join(profile, "auth.json"), JSON.stringify({ tokens: { account_id: login } }));
+    }
+    const { parseDocument, isSeq } = await import("yaml");
+    const doc = parseDocument(COMMENTED);
+    const accounts = doc.get("accounts", true);
+    if (!isSeq(accounts)) throw new Error("no accounts");
+    for (const item of accounts.items) {
+      const node = item as { get(k: string): unknown; set(k: string, v: string): void };
+      if (node.get("vendor") === "codex") node.set("cli_profile", source);
+    }
+    writeFileSync(path, doc.toString());
+    const before = loadConfig(path);
+    const result = await addAccount(
+      path,
+      { name: "codex-second", provider: "codex", cliProfile: destination },
+      NOW,
+    );
+    expect(loadConfig(path)).toEqual(result.config);
+    expect(result.config.accounts).toEqual([
+      ...before.accounts,
+      { id: "codex-second", vendor: "codex", alertAt: 80, stopAt: 100, cliProfile: destination },
+    ]);
+    const bytes = readFileSync(path);
+    await expect(
+      addAccount(path, { name: "codex-alias", provider: "codex", cliProfile: duplicate }, NOW),
+    ).rejects.toThrow("same Codex login");
+    expect(readFileSync(path)).toEqual(bytes);
+  });
   it("adds configuration only, with a byte-for-byte backup and no other changes", async () => {
     const text = COMMENTED;
     const doc = (await import("yaml")).parseDocument(text);

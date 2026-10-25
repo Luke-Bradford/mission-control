@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import type { CliAccountStatus } from "@mc/core";
+import { type CliBinding, codexProfile } from "./account-bindings.ts";
 import { isObj } from "./collectors/usage-common.ts";
 import { usageProviderEnv } from "./collectors/usage-sources.ts";
 
-type Account = { id: string; vendor: "claude" | "codex" };
+type Account = CliBinding & { id: string };
 const MAX_BUFFER = 64 * 1024;
 const text = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 && value.length <= 200 && !/\p{Cc}/u.test(value)
@@ -19,7 +20,7 @@ export async function readAccountStatus(
   const result: CliAccountStatus = {
     accountId: account.id,
     provider: account.vendor,
-    binding: "machine",
+    binding: account.cliProfile === undefined ? "machine" : "profile",
     identity: null,
     plan: null,
     status: "unknown",
@@ -27,7 +28,7 @@ export async function readAccountStatus(
     detail: null,
   };
   try {
-    const raw = await cliStatus(account.vendor, deps.timeoutMs ?? 5000);
+    const raw = await cliStatus(account, deps.timeoutMs ?? 5000);
     if (!isObj(raw)) throw new Error("malformed");
     if (account.vendor === "claude") {
       if (typeof raw.loggedIn !== "boolean") throw new Error("malformed");
@@ -58,7 +59,8 @@ export async function readAccountStatus(
   return result;
 }
 
-function cliStatus(provider: Account["vendor"], timeoutMs: number): Promise<unknown> {
+function cliStatus(account: Account, timeoutMs: number): Promise<unknown> {
+  const provider = account.vendor;
   return new Promise((resolve, reject) => {
     let done = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -73,7 +75,16 @@ function cliStatus(provider: Account["vendor"], timeoutMs: number): Promise<unkn
     const child = execFile(
       provider,
       provider === "claude" ? ["auth", "status", "--json"] : ["app-server"],
-      { timeout: timeoutMs, maxBuffer: MAX_BUFFER, env: usageProviderEnv(provider) },
+      {
+        timeout: timeoutMs,
+        maxBuffer: MAX_BUFFER,
+        env: {
+          ...usageProviderEnv(provider),
+          ...(provider === "codex" && account.cliProfile !== undefined
+            ? { CODEX_HOME: codexProfile(account) }
+            : {}),
+        },
+      },
       (error, stdout) => {
         if (provider === "codex") {
           finish(new Error(error?.killed ? "timeout" : "unavailable"));

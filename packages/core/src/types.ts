@@ -1136,11 +1136,11 @@ export interface VersionInfo {
   reason: string | null;
 }
 
-/** Provider CLI status in the same machine binding used by usage collection. */
+/** Provider CLI status in the same binding used by usage collection. */
 export interface CliAccountStatus {
   accountId: AccountId;
   provider: "claude" | "codex";
-  binding: "machine";
+  binding: "machine" | "profile";
   identity: string | null;
   plan: string | null;
   status: "logged-in" | "not-logged-in" | "unknown";

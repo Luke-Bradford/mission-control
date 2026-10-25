@@ -305,3 +305,12 @@ poll: { usage_minutes: 30, github_seconds: 60 }
     store.close();
   }
 });
+
+it("checks an explicit Codex profile without returning its path or credentials", async () => {
+  const profile = join(dir, "fictional-profile");
+  const status = await readAccountStatus({ id: "second", vendor: "codex", cliProfile: profile }, 1);
+  expect(state.envs.at(-1)?.CODEX_HOME).toBe(profile);
+  expect(status.binding).toBe("profile");
+  expect(JSON.stringify(status)).not.toContain(profile);
+  expect(JSON.stringify(status)).not.toContain("secret");
+});

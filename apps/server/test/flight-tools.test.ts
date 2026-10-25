@@ -2560,6 +2560,26 @@ describe("flight_state", () => {
     expect(s.limits.startsLeft).toBe(4);
   });
 
+  it("reports the transferred run's destination quota", async () => {
+    live("guido-1", "r-guido");
+    cfg.accounts.push({ id: "destination", vendor: "claude", alertAt: 80, stopAt: 95 });
+    store.setSetting(
+      "account-transfer:r-guido",
+      JSON.stringify({ source: "claude-main", target: "destination", pending: false }),
+    );
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: NOW,
+      pct: 96,
+      resetAt: NOW + 60_000,
+      source: "test",
+    });
+    const s = (await state()) as { seats: { id: string; atStop: boolean }[] };
+    expect(s.seats.find((seat) => seat.id === "guido-1")?.atStop).toBe(false);
+    expect(s.seats.find((seat) => seat.id === "fao-1")?.atStop).toBe(true);
+  });
+
   it("marks a silent running seat stalled, and every seat on an account at its stop", async () => {
     live("guido-1", "r-guido");
     store.setSeatSession({
