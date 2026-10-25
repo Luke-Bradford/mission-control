@@ -136,6 +136,7 @@ export const RESOURCES = {
   limits: { path: "/api/limits", topic: "limits" },
   // Changes with each GitHub poll, which emits `limits`.
   githubRate: { path: "/api/limits/github", topic: "limits" },
+  repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
   health: { path: "/api/health", topic: "health" },

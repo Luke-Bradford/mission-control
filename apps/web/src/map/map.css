@@ -1,0 +1,136 @@
+.map-toolbar,
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+}
+.map-toolbar input[type="search"] {
+  flex: 1;
+  min-width: 180px;
+}
+.map-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  border-block: 1px solid var(--line);
+}
+.map-stage {
+  height: 480px;
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, var(--surface-2), var(--bg));
+}
+.map-stage canvas {
+  display: block;
+  touch-action: none;
+}
+.map-detail {
+  padding: 12px;
+  border-left: 1px solid var(--line);
+  max-height: 520px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.map-detail pre {
+  white-space: pre-wrap;
+  font-size: 11px;
+}
+.map-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+  margin-bottom: 12px;
+}
+.map-results button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.map-detail h3,
+.map-change {
+  font-family: var(--mono);
+}
+.map-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.map-labels span {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+.map-pin {
+  background: var(--bg);
+  border: 1px solid currentColor;
+  padding: 1px 4px;
+  font-size: 11px;
+}
+.map-area {
+  font-size: 12px;
+  margin-top: 18px;
+}
+.map-change {
+  font-size: 11px;
+  background: var(--surface);
+}
+.map-ring {
+  font-size: 26px;
+  color: white;
+  text-shadow: 0 0 2px var(--bg);
+}
+.map-ring.faint {
+  opacity: 0.35;
+}
+.map-ring.shared {
+  border: 1px dashed currentColor;
+  border-radius: 50%;
+}
+.map-note,
+.map-legend {
+  color: var(--muted);
+  font-size: 11px;
+}
+.map-finding {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+@media (max-width: 800px) {
+  .map-content {
+    grid-template-columns: 1fr;
+  }
+  .map-detail {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .map-stage {
+    height: 360px;
+  }
+}
+.map-edited {
+  animation: map-edit 1.2s ease-out;
+}
+.map-level {
+  outline: 1px solid white;
+}
+@keyframes map-edit {
+  from {
+    background: var(--fg);
+    color: var(--bg);
+    transform: translate(-50%, -50%) scale(1.3);
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-edited {
+    animation: none;
+  }
+}
+
+.map-ring.overlap {
+  font-size: 34px;
+}
