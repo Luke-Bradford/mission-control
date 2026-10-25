@@ -52,6 +52,7 @@ it("held items leave attention and return with a release explanation; routes enf
       (await app.inject({ method: "POST", url, payload: { ...payload, reason: " " }, headers }))
         .statusCode,
     ).toBe(400);
+    expect((await app.inject("/api/attention")).json()).toHaveLength(1);
     expect((await app.inject({ method: "POST", url, payload, headers })).statusCode).toBe(200);
     expect((await app.inject("/api/attention")).json()).toHaveLength(0);
     expect((await app.inject("/api/attention/held")).json()[0].hold.reason).toBe("Waiting");

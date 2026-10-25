@@ -555,7 +555,7 @@ function HoldForm({
           Ticket
           <input
             required
-            pattern="[^#\\s]+#[1-9][0-9]*"
+            pattern="[^#\s]+#[1-9][0-9]*"
             placeholder="repo#123"
             value={ticket}
             onChange={(e) => setTicket(e.target.value)}

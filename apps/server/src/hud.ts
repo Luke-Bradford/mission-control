@@ -801,7 +801,7 @@ export function attentionItems(
         ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
         : { ...item, flightTriage: "missed", triageDueAt };
     });
-  const partition = partitionAttention(store, result);
+  const partition = partitionAttention(store, result, acks);
   return includeHeld ? [...partition.items, ...partition.held] : partition.items;
 }
 

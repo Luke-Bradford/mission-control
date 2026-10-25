@@ -421,13 +421,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             );
         },
         (since) =>
-          currentRows.some(
-            (r) =>
-              r.kind === "crew" &&
-              r.role !== "FLIGHT" &&
-              r.hudState === "running" &&
-              r.stateSince > since,
-          ),
+          currentRows.some((r) => {
+            if (r.kind !== "crew" || r.role === "FLIGHT" || r.hudState === "stopped") return false;
+            const seat = store.seatSession(r.id);
+            return seat !== null && seat.state !== "stopped" && seat.updatedAt > since;
+          }),
       )
     )
       emit("attention");

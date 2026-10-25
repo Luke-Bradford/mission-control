@@ -60,9 +60,9 @@ export function evaluateHolds(
 export function partitionAttention(
   store: Store,
   items: AttentionItem[],
+  acks = store.acks(),
 ): { items: AttentionItem[]; held: AttentionItem[] } {
   const all = holds(store);
-  const acks = store.acks();
   const active: AttentionItem[] = [];
   const held: AttentionItem[] = [];
   for (const item of items) {
