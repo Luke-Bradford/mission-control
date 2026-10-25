@@ -157,6 +157,7 @@ describe("activity: board moves", () => {
         at: NOW - 200,
         who: "a1",
         kind: "board",
+        runId: "r1",
         text: "shop-app#3349 → Blocked failed: github: HTTP 502",
         ref: "shop-app#3349",
         url: null,
@@ -168,6 +169,7 @@ describe("activity: board moves", () => {
         at: NOW - 400,
         who: "a1",
         kind: "board",
+        runId: "r1",
         text: "shop-app#3349 → In review",
         ref: "shop-app#3349",
         url: null,
@@ -395,4 +397,55 @@ describe("crew seats in overview and activity", () => {
     );
     expect(events.some((e) => e.kind === "loop" && e.text.startsWith("CI passed"))).toBe(false);
   });
+});
+
+it("carries exact run ids on run-derived activity and live-log rows", () => {
+  store.upsertPullRequests("shop-app", [pr({ createdAt: NOW - 90, mergedAt: NOW - 80 })], NOW);
+  store.upsertRun(run({ prs: [{ repo: "octo-org/shop-app", number: 41 }] }));
+  store.addLoopEvent("step", "r1", "Working", NOW - 500);
+  store.addGuardHit({
+    agentId: "a1",
+    runId: "r1",
+    rule: "git-write",
+    text: "Denied",
+    at: NOW - 400,
+  });
+  store.addRunCommit({
+    runId: "r1",
+    repoId: "shop-app",
+    branch: "b",
+    sha: "abcdef0",
+    at: NOW - 300,
+  });
+  store.addLockHold({
+    runId: "r1",
+    seatId: "a1",
+    toolUseId: "t",
+    command: "test",
+    since: NOW - 200,
+    queuedAt: NOW - 200,
+  });
+  store.addBoardMove({
+    runId: "r1",
+    repoId: "shop-app",
+    issue: 1,
+    column: "In review",
+    state: "done",
+    detail: null,
+    at: NOW - 100,
+  });
+  const rows = activity(config, store, NOW);
+  for (const kind of [
+    "run-start",
+    "run-end",
+    "loop",
+    "guard",
+    "commit",
+    "lock",
+    "board",
+    "pr-opened",
+    "pr-merged",
+  ]) {
+    expect(rows.find((row) => row.kind === kind)).toMatchObject({ runId: "r1" });
+  }
 });
