@@ -2206,6 +2206,10 @@ describe("seat git environment", () => {
     "env -vu GIT_CONFIG_GLOBAL git diff",
     "opt=git-dir; git --$opt=/outside log",
     "printf -v GIT_CONFIG_GLOBAL /tmp/config; git diff",
+    'name=GIT_CONFIG_GLOBAL; printf -v"$name" /tmp/config; git diff',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable expansion
+    'name=GIT_CONFIG_GLOBAL; printf -v"${name}" /tmp/config; git diff',
+    "printf -vGIT_CONFIG_GLOBAL /tmp/config; git diff",
     "read GIT_CONFIG_GLOBAL; git diff",
     "for GIT_CONFIG_GLOBAL in /tmp/config; do git diff; done",
     "env --unset=GIT_CONFIG_COUNT git status",

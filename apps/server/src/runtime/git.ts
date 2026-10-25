@@ -10,9 +10,8 @@
  * ever read as an option.
  */
 import { type ChildProcess, execFile } from "node:child_process";
-import { constants } from "node:fs";
-import { access, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
 import { realPathOrParent } from "./codex-floor.ts";
@@ -161,7 +160,11 @@ export async function assertSeatGitVersion(command = "git"): Promise<void> {
 }
 
 /** Read common and worktree config, including includes; never echo helper values. */
-export async function assertSeatGitConfig(cwd: string): Promise<void> {
+export async function assertSeatGitConfig(
+  cwd: string,
+  writeRoots: readonly string[] = [cwd],
+  denyWrite: readonly string[] = [],
+): Promise<void> {
   let output: string;
   try {
     ({ stdout: output } = await execFileP(
@@ -185,6 +188,24 @@ export async function assertSeatGitConfig(cwd: string): Promise<void> {
     if ((e as { code?: unknown }).code === 1) return;
     throw e;
   }
+  const { stdout: directories } = await execFileP(
+    "git",
+    ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
+    {
+      cwd,
+      timeout: GIT_TIMEOUT_MS,
+      env: { ...gitEnv(process.env), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
+    },
+  );
+  const physical = (path: string) => realPathOrParent(isAbsolute(path) ? path : `${cwd}/${path}`);
+  const grants = writeRoots.map(physical).filter((path) => path !== null);
+  const exclusions = [".git", ...directories.trim().split("\n"), ...denyWrite]
+    .map(physical)
+    .filter((path) => path !== null);
+  const inside = (path: string, root: string) => {
+    const rel = relative(root, path);
+    return rel === "" || (rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel));
+  };
   const fields = output.split("\0");
   const keys: string[] = [];
   let writableInclude = false;
@@ -195,16 +216,20 @@ export async function assertSeatGitConfig(cwd: string): Promise<void> {
     const value = split === -1 ? "" : entry.slice(split + 1);
     if (key === "include.path" || /^includeif\..*\.path$/.test(key)) {
       const origin = fields[i - 1].replace(/^file:/, "");
-      const included = resolve(dirname(isAbsolute(origin) ? origin : resolve(cwd, origin)), value);
-      const targets = [included, realPathOrParent(included)].filter((path) => path !== null);
-      // Check the target and every ancestor: a writable directory can replace even a read-only file.
-      for (let target of targets) {
+      const included = isAbsolute(value)
+        ? value
+        : `${dirname(isAbsolute(origin) ? origin : resolve(cwd, origin))}/${value}`;
+      let target = physical(included);
+      if (target === null) {
+        writableInclude = true;
+      } else {
+        // Sandbox exclusions protect the target even when a granted ancestor is writable.
         for (;;) {
-          try {
-            await access(target, constants.W_OK);
+          const current = target;
+          if (exclusions.some((root) => inside(current, root))) break;
+          if (grants.some((root) => inside(current, root))) {
             writableInclude = true;
-          } catch {
-            // Missing targets still inherit the writability of their parent directories.
+            break;
           }
           const parent = dirname(target);
           if (parent === target) break;

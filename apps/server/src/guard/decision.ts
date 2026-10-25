@@ -51,7 +51,12 @@ export function crewGuardDecision(
                     .join("\n");
                 let cwd = commandCwd ?? worktree;
                 if (!codexReadAllowed(cwd, worktree)) return false;
-                for (const directory of directories) cwd = resolve(cwd, directory);
+                cwd = realpathSync.native(cwd);
+                for (const directory of directories) {
+                  cwd = realpathSync.native(
+                    isAbsolute(directory) ? directory : `${cwd}/${directory}`,
+                  );
+                }
                 return identity(cwd) === identity(worktree);
               } catch {
                 return false;

@@ -21,9 +21,10 @@
  * and settings carry the files' paths only. When the process exits, for any reason, the token is
  * revoked, the run's test-lock hold freed and both files removed.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -56,7 +57,6 @@ import {
   crewCliArgs,
   crewMcpConfig,
   crewPnpmStoreDir,
-  crewSandboxTmp,
   DEFAULT_CREW_NODE,
   DEFAULT_PROFILES,
   eligibleToStart,
@@ -194,6 +194,12 @@ import {
   type SessionEvent,
   startSession,
 } from "./session.ts";
+
+/** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
+export function crewTempRoot(dbPath: string, runId: string, uid: number): string {
+  const key = createHash("sha256").update(`${dbPath}:${runId}`).digest("hex").slice(0, 12);
+  return `/tmp/m${uid.toString(36)}/${key}`;
+}
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
@@ -863,7 +869,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return;
     }
     store.setRunEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
-    removeCodexHome(l.run.id);
+    removeRunFiles(l.run.id);
     closeRunItems(l.info);
     // read before the seat row changes
     const worktree = store.seatSession(seatId)?.worktree ?? null;
@@ -1023,8 +1029,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /** Python's and its tools' caches, the seat's own in the sandbox's temp root; `uv run` uses the hub's install, offline. */
-  function crewPythonEnv(uid: number, seatId: string): Record<string, string> {
-    const tmp = crewSandboxTmp(uid);
+  function crewPythonEnv(tmp: string, seatId: string): Record<string, string> {
     return {
       UV_NO_SYNC: "1",
       UV_OFFLINE: "1",
@@ -1042,18 +1047,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * pnpm's store is the seat's own, in the sandbox's temp root, never inside the worktree.
    * Python's caches likewise (`crewPythonEnv`).
    */
-  function crewEnv(seatId: string): NodeJS.ProcessEnv {
+  function crewEnv(seatId: string, tmp: string): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
       const v = process.env[k];
       if (v !== undefined) env[k] = v;
     }
     env.HOME = homedir();
-    const uid = process.getuid?.();
-    if (uid !== undefined) {
-      env[PNPM_STORE_ENV] = crewPnpmStoreDir(uid, seatId);
-      Object.assign(env, crewPythonEnv(uid, seatId));
-    }
+    env.TMPDIR = tmp;
+    env.CLAUDE_CODE_TMPDIR = tmp;
+    env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
+    Object.assign(env, crewPythonEnv(tmp, seatId));
     return { ...env, ...CREW_CLI_ENV, ...CREW_GIT_ENV };
   }
 
@@ -1094,6 +1098,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           r.runId === null ? [] : [basename(crewKeeperDir(deps.dbPath, r.runId))],
         ),
       );
+      const ended = store.runsActiveSince(0).filter((r) => r.endedAt !== null);
+      const endedKeepers = new Map(
+        ended.map((r) => [basename(crewKeeperDir(deps.dbPath, r.id)), r.id]),
+      );
+      const removeOrphan = (folder: string) => {
+        rmSync(folder, { recursive: true, force: true });
+        const runId = endedKeepers.get(basename(folder));
+        if (runId !== undefined) removeRunFiles(runId);
+      };
       const dir = crewDir(deps.dbPath);
       const codexHomes = new Set(
         store
@@ -1109,13 +1122,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         // a keeper's folder of a run that is no longer active: its keeper and CLI are ended, then it goes
         if (CREW_KEEPER_DIR.test(name)) {
           const folder = join(dir, name);
-          if (keeping.has(name)) continue;
+          if (keeping.has(name) && !endedKeepers.has(name)) continue;
           if (!keeperAlive(folder)) {
-            rmSync(folder, { recursive: true, force: true });
+            removeOrphan(folder);
             continue;
           }
           void endKeeper(folder, keeperEndWait(), log).then((ended) => {
-            if (ended) rmSync(folder, { recursive: true, force: true });
+            if (ended) removeOrphan(folder);
             else log(`could not end the orphan keeper in ${folder}; its folder is kept`);
           });
           continue;
@@ -1128,6 +1141,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (!stale) continue;
         rmSync(join(dir, name), { force: true });
       }
+      // Also covers a crash after the keeper folder went but before its temp root did.
+      for (const run of ended) removeRunFiles(run.id);
     } catch (e) {
       log(`could not clear old run files: ${errText(e)}`);
     }
@@ -1138,8 +1153,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * The one way a seat's process is spawned, fresh or resumed: the prompt file (role brief + the
-   * repo's CLAUDE.md at the run's base, `claudeMd`), a new token with its two 0600 files, the guard
-   * hook and the sandbox for this worktree, the minimal env, and the run's transcript (appended
+   * repo's CLAUDE.md and reference index, read from verified objects at the run's base), a new
+   * token with its two 0600 files, the guard hook and the sandbox for this worktree, the minimal env, and the run's transcript (appended
    * to). A resume keeps the run's own prompt file (R28). It does not know the run's base, so it
    * rebuilds a missing one from the role brief alone: never from the worktree, which is the
    * seat's to write. Registers the live seat and its events; throws when the hook command cannot
@@ -1149,7 +1164,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   async function checkedLaunch(...args: Parameters<typeof launch>): Promise<Live> {
     const [info, run] = args;
     await assertSeatGitVersion();
-    await assertSeatGitConfig(args[3].path);
+    await assertSeatGitConfig(
+      args[3].path,
+      [...(modeOfSeat(info.seat) === "read-only" ? [] : [args[3].path]), seatTmp(run.id)],
+      [dirname(deps.dbPath)],
+    );
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
@@ -1168,6 +1187,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     checkout: { path: string; branch: string; gitDir: string },
     resume: boolean,
     claudeMd: string | null,
+    references = "",
   ): Live {
     const def = seatDef(info.seat);
     const model = resume
@@ -1189,7 +1209,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (!resume || !existsSync(promptPath)) {
       if (resume) {
         log(
-          `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md`,
+          `${info.seat.id}: prompt file missing on resume; rebuilt from the role brief, without the repo's CLAUDE.md or reference index`,
         );
       }
       // The role's prompt becomes the system prompt: only a file whose real path is in the roles folder.
@@ -1200,7 +1220,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new Error(`crew: ${def.prompt} is outside the roles folder`);
       }
       const roleBrief = readFileSync(promptFile, "utf8");
-      const references = resume ? "" : repoReferenceIndex(checkout.path);
       writeFileSync(promptPath, rolePrompt(roleBrief, claudeMd, references), {
         mode: 0o600,
       });
@@ -1233,13 +1252,31 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               }),
             ]
           : [];
+      const tmpPath = seatTmp(run.id);
+      for (const path of [dirname(tmpPath), tmpPath]) {
+        try {
+          mkdirSync(path, { mode: 0o700 });
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+        const st = lstatSync(path);
+        if (!st.isDirectory() || st.uid !== process.getuid?.() || (st.mode & 0o777) !== 0o700)
+          throw new Error("crew temp root must be a private directory owned by the server");
+      }
+      const tmp = realpathSync(tmpPath);
       const sandbox = {
         cwd,
+        ...(run.vendor === "codex" ? {} : { tempRoot: tmp }),
         gitCommonDir: realpathSync(join(info.session.checkout, ".git")),
         worktreeGitDir: realpathSync(checkout.gitDir),
         home: homedir(),
         dataDir: realpathSync(dirname(deps.dbPath)),
-        denyRead: seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+        denyRead: [
+          ...seatDenyRead(deps.config, deps.hubRoot, info.session.id, mates),
+          ...(run.vendor === "codex"
+            ? [`/tmp/claude-${process.getuid?.()}`, `/private/tmp/claude-${process.getuid?.()}`]
+            : []),
+        ],
       };
       if (run.vendor === "codex") {
         let auth: string;
@@ -1255,11 +1292,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const runDir = crewCodexDir(deps.dbPath, run.id);
         const home = join(runDir, "codex-home");
         const zdotdir = join(runDir, "zsh-empty");
-        const tmpPath = codexTmp(run.id);
-        mkdirSync(tmpPath, { recursive: true, mode: 0o700 });
-        const tmp = realpathSync(tmpPath);
         const env = Object.fromEntries(
-          Object.entries(crewEnv(info.seat.id)).filter(
+          Object.entries(crewEnv(info.seat.id, tmp)).filter(
             (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
           ),
         );
@@ -1304,7 +1338,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
             writePrivate(
               join(home, "config.toml"),
-              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp),
+              // Codex uses more-specific grants for the seat's temp root, worktree and
+              // git dirs. Close the shared parent before those grants, including
+              // future sibling runs, without feeding an ancestor deny to the
+              // config builder's validation of the private temp directory.
+              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
+                '":root"="read"',
+                ['":root"="read"', `${JSON.stringify(dirname(tmp))}="deny"`].join("\n"),
+              ),
             );
             writePrivate(join(home, "auth.json"), auth);
           },
@@ -1330,7 +1371,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           args: [...(deps.commandArgs ?? []), ...args],
           cwd,
           transcriptPath: run.transcriptPath,
-          env: crewEnv(info.seat.id),
+          env: crewEnv(info.seat.id, tmpPath),
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
           dir: crewKeeperDir(deps.dbPath, run.id),
@@ -1378,19 +1419,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     });
   }
 
-  function removeCodexHome(runId: string): void {
+  function removeRunFiles(runId: string): void {
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
       rmSync(crewCodexDir(deps.dbPath, runId), { recursive: true, force: true });
+      rmSync(seatTmp(runId), { recursive: true, force: true });
     } catch (e) {
-      log(`could not remove Codex home of ${runId}: ${errText(e)}`);
+      log(`could not remove run files of ${runId}: ${errText(e)}`);
     }
   }
 
-  function codexTmp(runId: string): string {
-    const uid = process.getuid?.();
-    if (uid === undefined) throw new Error("Codex seats require a sandbox temp root");
-    return join(crewSandboxTmp(uid), "mc-codex", runId);
+  function seatTmp(runId: string): string {
+    return crewTempRoot(deps.dbPath, runId, process.getuid?.() ?? 0);
   }
 
   /**
@@ -1414,12 +1454,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           log(`${info.seat.id}: could not remove ${p}: ${errText(e)}`);
         }
       }
-      if (run.vendor === "codex") {
-        try {
-          rmSync(codexTmp(run.id), { recursive: true, force: true });
-        } catch (e) {
-          log(`${info.seat.id}: could not remove Codex temp files: ${errText(e)}`);
-        }
+      try {
+        rmSync(seatTmp(run.id), { recursive: true, force: true });
+      } catch (e) {
+        log(`${info.seat.id}: could not remove crew temp files: ${errText(e)}`);
       }
       removeKeeper(info.seat.id, run.id);
     };
@@ -1430,7 +1468,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       rmSync(crewKeeperDir(deps.dbPath, runId), { recursive: true, force: true });
       store.deleteKeeperCursor(runId);
-      if (store.run(runId)?.endedAt != null) removeCodexHome(runId);
+      if (store.run(runId)?.endedAt != null) removeRunFiles(runId);
     } catch (e) {
       log(`${seatId}: could not remove the keeper folder of ${runId}: ${errText(e)}`);
     }
@@ -1515,7 +1553,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const at = now();
       const facts = foldOpenRun(run);
       store.setRunEnded(run.id, at, "failed", "exit");
-      removeCodexHome(run.id);
+      removeRunFiles(run.id);
       const info = findSeat(row.seatId);
       if (info && opts.record !== false)
         noteMissingReport(
@@ -2188,8 +2226,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               : undefined;
       const title = ticket.title;
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
-      // The repo's CLAUDE.md as origin's default branch has it, never as the worktree does.
-      const { checkout, claudeMd } = await inClone(info.session.checkout, async () => {
+      // The repo's CLAUDE.md and index as origin's default branch has them, never the worktree.
+      const { checkout, claudeMd, references } = await inClone(info.session.checkout, async () => {
         const where = {
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -2211,7 +2249,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                   clearPending: (path) => store.clearCheckoutPending(path),
                 },
               });
-        return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
+        return {
+          checkout: c,
+          claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha),
+          references: await repoReferenceIndex(info.session.checkout, c.baseSha),
+        };
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // A writer claims the ticket for this hub (another hub on the board skips an assigned card);
@@ -2327,13 +2369,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
       let l: Live;
       try {
-        l = await checkedLaunch(info, run, cliSessionId, checkout, false, claudeMd);
+        l = await checkedLaunch(info, run, cliSessionId, checkout, false, claudeMd, references);
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
@@ -2415,7 +2457,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     starting.add(seatId);
     try {
       // No ticket and no branch: a detached checkout of the default branch, for reading only.
-      const { checkout, claudeMd } = await inClone(info.session.checkout, async () => {
+      const { checkout, claudeMd, references } = await inClone(info.session.checkout, async () => {
         const c = await prepareDetachedCheckout({
           checkout: info.session.checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -2423,7 +2465,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           name: watchCheckoutName(seatId),
           peers: clonePeers(deps.config, deps.hubRoot),
         });
-        return { checkout: c, claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha) };
+        return {
+          checkout: c,
+          claudeMd: await readRepoClaudeMd(info.session.checkout, c.baseSha),
+          references: await repoReferenceIndex(info.session.checkout, c.baseSha),
+        };
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
 
@@ -2464,13 +2510,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           { path: checkout.path, branch: "", gitDir: checkout.gitDir },
           false,
           claudeMd,
+          references,
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
@@ -2583,7 +2630,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
-      const { scratch, inputs, claudeMd } = await inClone(checkout, async () => {
+      const { scratch, inputs, claudeMd, references } = await inClone(checkout, async () => {
         const s = await prepareScratch({
           checkout,
           worktreesRoot: crew?.worktrees ?? "",
@@ -2598,6 +2645,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             scratch: s,
             inputs: await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null),
             claudeMd: await readRepoClaudeMd(checkout, s.baseSha),
+            references: await repoReferenceIndex(checkout, s.baseSha),
           };
         } catch (e) {
           await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
@@ -2649,13 +2697,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           { path: scratch.path, branch: "", gitDir: scratch.gitDir },
           false,
           claudeMd,
+          references,
         );
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         setSeat(seatId, {
           runId,
           cliSessionId,
@@ -2751,7 +2800,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(ended, facts !== null);
       if (facts) persistDigest(store, digests, run.id, facts.digest);
       store.setRunEnded(run.id, at, "ok", "operator");
-      removeCodexHome(run.id);
+      removeRunFiles(run.id);
     }
     setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
     closeRunItems(info);
@@ -2777,7 +2826,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
     store.setRunEnded(run.id, at, "ok", endedBy);
-    removeCodexHome(run.id);
+    removeRunFiles(run.id);
     transcripts.delete(run.transcriptPath);
     digests.delete(run.id);
     emit({ kind: "run-ended", seatId: run.agentId, runId: run.id, endedBy });
@@ -2811,7 +2860,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const at = now();
     store.upsertRun({ ...run, endedAt: at, status: "ok" });
     store.setRunEnded(runId, at, "ok", "engine");
-    removeCodexHome(runId);
+    removeRunFiles(runId);
     let closing: Promise<void> | null = null;
     if (l && l.run.id === runId) {
       l.endedBy = "engine";
@@ -2922,7 +2971,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         store.setRunEnded(runId, at, "failed", "exit");
-        removeCodexHome(runId);
+        removeRunFiles(runId);
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });
       };
@@ -3278,7 +3327,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       )
         return false;
       store.setRunEnded(run.id, now(), "ok", "operator");
-      removeCodexHome(run.id);
+      removeRunFiles(run.id);
       transcripts.delete(run.transcriptPath);
       digests.delete(run.id);
       emit({ kind: "run-ended", seatId: run.agentId, runId, endedBy: "operator" });

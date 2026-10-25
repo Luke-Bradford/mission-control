@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1779,5 +1780,166 @@ describe("merge steps", () => {
       });
       expect(gitCalls).toEqual([]);
     });
+  });
+});
+
+describe("fileMinorFindings", () => {
+  const setup = () => {
+    const r = run({ loop: { phase: "done", epoch: 0, prNumber: 12 } as Run["loop"] });
+    store.upsertRun(r);
+    mkdirSync(join(dir, "crew"), { recursive: true });
+    return r;
+  };
+  it("files the exact findings with area and chore labels, adds the project item, and remembers it", async () => {
+    const r = setup();
+    const lines = "- `a.ts:2` — Keep this.\n- `b.ts` — Also this.";
+    let file = "";
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          body: `${MINOR_HEADING}\n\n${lines}\n\n## Tests\n- Passed`,
+          labels: [{ name: "area:server" }, { name: "bug" }],
+        }),
+      }),
+      (args) => {
+        expect(args).toContain("--title=Tech debt: minor findings from #12");
+        expect(args).toContain("--label=area:server,chore");
+        file = args.find((a) => a.startsWith("--body-file="))?.slice(12) ?? "";
+        expect(statSync(file).mode & 0o777).toBe(0o600);
+        expect(readFileSync(file, "utf8")).toBe(`Minor findings from #12.\n\n${lines}\n`);
+        return { code: 0, stdout: "https://github.com/o/mc/issues/81\n" };
+      },
+      (args) => {
+        expect(store.run(r.id)?.loop?.minorIssueNumber).toBe(81);
+        expect(args).toEqual([
+          "project",
+          "item-add",
+          "1",
+          "--owner=o",
+          "--url=https://github.com/o/mc/issues/81",
+        ]);
+        return { code: 0, stdout: "" };
+      },
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(r, 12)).toEqual({
+      ok: true,
+      issueNumber: 81,
+    });
+    expect(existsSync(file)).toBe(false);
+    expect(store.run(r.id)?.loop?.minorIssueNumber).toBe(81);
+    // a later pass files nothing new but re-adds the item, in case a restart cut the first add
+    ghAnswers.push((args) => {
+      expect(args).toEqual([
+        "project",
+        "item-add",
+        "1",
+        "--owner=o",
+        "--url=https://github.com/o/mc/issues/81",
+      ]);
+      return { code: 0, stdout: "" };
+    });
+    expect(await createPublisher(deps()).fileMinorFindings(store.run(r.id) ?? r, 12)).toEqual({
+      ok: true,
+      issueNumber: 81,
+    });
+    expect(ghCalls).toHaveLength(4);
+  });
+  it("refuses RETRO's fallback instead of silently dropping findings", async () => {
+    ghAnswers.push(() => ({
+      code: 0,
+      stdout: JSON.stringify({
+        body: `${MINOR_HEADING}\n\nRETRO logged 2 minor findings; they are listed in Mission Control.`,
+        labels: [],
+      }),
+    }));
+    expect(await createPublisher(deps()).fileMinorFindings(setup(), 12)).toMatchObject({
+      ok: false,
+    });
+    expect(ghCalls).toHaveLength(1);
+  });
+  it.each([0, 1, 2])(
+    "recovers a creation interrupted before saving its number (%s matches)",
+    async (matches) => {
+      const r = setup();
+      ghAnswers.push(
+        () => ({
+          code: 0,
+          stdout: JSON.stringify({ body: `${MINOR_HEADING}\n- Finding`, labels: [] }),
+        }),
+        () => {
+          expect(store.run(r.id)?.loop).toHaveProperty("minorIssueCreation", { prNumber: 12 });
+          throw new Error("connection lost after issue creation");
+        },
+      );
+      expect(await createPublisher(deps()).fileMinorFindings(r, 12)).toMatchObject({ ok: false });
+      expect(store.run(r.id)?.loop).toHaveProperty("minorIssueCreation", { prNumber: 12 });
+      ghCalls.length = 0;
+      ghAnswers.push((args) => {
+        expect(args.slice(0, 2)).toEqual(["issue", "list"]);
+        expect(args).toContain("--state=all");
+        return {
+          code: 0,
+          stdout: JSON.stringify([
+            ...Array.from({ length: matches }, (_, i) => ({
+              number: 81 + i,
+              title: "Tech debt: minor findings from #12",
+              body: "Minor findings from #12.\n\n- Finding\n",
+            })),
+            {
+              number: 90,
+              title: "Tech debt: minor findings from #120",
+              body: "Minor findings from #12.\n",
+            },
+            {
+              number: 91,
+              title: "Tech debt: minor findings from #12",
+              body: "Minor findings from #120.\n",
+            },
+          ]),
+        };
+      });
+      if (matches === 1) ghAnswers.push(() => ({ code: 0, stdout: "" }));
+      const result = await createPublisher(deps()).fileMinorFindings(store.run(r.id) ?? r, 12);
+      expect(result).toMatchObject(matches === 1 ? { ok: true, issueNumber: 81 } : { ok: false });
+      expect(ghCalls[0]?.slice(0, 2)).toEqual(["issue", "list"]);
+      expect(ghCalls.some((args) => args[1] === "create")).toBe(false);
+    },
+  );
+  it("files nothing without a minor section", async () => {
+    ghAnswers.push(() => ({
+      code: 0,
+      stdout: JSON.stringify({ body: "## Tests\n- Passed", labels: [] }),
+    }));
+    expect(await createPublisher(deps()).fileMinorFindings(setup(), 12)).toEqual({ ok: true });
+    expect(ghCalls).toHaveLength(1);
+  });
+  it("returns a failed create and removes the body file", async () => {
+    let file = "";
+    ghAnswers.push(
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ body: `${MINOR_HEADING}\n- Finding`, labels: [] }),
+      }),
+      (args) => {
+        file = args.find((a) => a.startsWith("--body-file="))?.slice(12) ?? "";
+        return { code: 1, stdout: "", stderr: "denied" };
+      },
+    );
+    expect(await createPublisher(deps()).fileMinorFindings(setup(), 12)).toMatchObject({
+      ok: false,
+      text: expect.stringContaining("denied"),
+    });
+    expect(existsSync(file)).toBe(false);
+  });
+  it("refuses a draft workspace without calling GitHub", async () => {
+    const c = config();
+    const repo = c.repos[0];
+    if (repo === undefined) throw new Error("missing repo");
+    repo.autonomy = "draft";
+    expect(await createPublisher(deps({ config: c })).fileMinorFindings(setup(), 12)).toMatchObject(
+      { ok: false },
+    );
+    expect(ghCalls).toEqual([]);
   });
 });

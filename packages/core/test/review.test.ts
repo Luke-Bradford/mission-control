@@ -10,6 +10,7 @@ import {
   fixText,
   minorLine,
   nextAttempt,
+  parseMinorFindings,
   REVIEW_NUDGE_TEXT,
   REVIEW_RESUME_TEXT,
   REVIEW_RUN_MAX_MS,
@@ -335,5 +336,16 @@ describe("reviewDepth", () => {
     expect(reviewDepth({ labels: ["bug"], size: "S" })).toBe("full");
     expect(reviewDepth({ labels: ["type:feature"], size: "XS" })).toBe("full");
     expect(reviewDepth({ labels: [], size: null })).toBe("full");
+  });
+});
+
+describe("parseMinorFindings", () => {
+  it("keeps the writer's list lines verbatim and stops at the next section", () => {
+    expect(
+      parseMinorFindings(
+        "## Minor findings (logged, not looped)\n\nRETRO reviewed.\n- `a.ts:2` — Keep this.\n- …and 2 more in Mission Control\n\n## Tests\n- Passed",
+      ),
+    ).toEqual(["- `a.ts:2` — Keep this.", "- …and 2 more in Mission Control"]);
+    expect(parseMinorFindings("## Tests\n- Passed")).toEqual([]);
   });
 });

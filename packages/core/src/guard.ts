@@ -1914,7 +1914,7 @@ export function guardDecision(
   if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
   let backgroundSuite = false;
-  let gitEnvDenied = /\b(?:for|select)\s+GIT_[A-Za-z0-9_]*\b/.test(e.input.command ?? "");
+  let gitEnvDenied = false;
   const walk = newWalk();
   const cwdDirectories: string[] = [];
   let unknownCwd = false;
@@ -1945,7 +1945,7 @@ export function guardDecision(
           (a, at) =>
             (a === "-v" &&
               (/^GIT_/.test(args[at + 1] ?? "") || EXPANDS.test(args[at + 1] ?? ""))) ||
-            /^-vGIT_/.test(a),
+            (a.startsWith("-v") && (/^GIT_/.test(a.slice(2)) || EXPANDS.test(a.slice(2)))),
         )) ||
       (([
         "export",

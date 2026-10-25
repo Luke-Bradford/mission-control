@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CREW_GIT_ENV } from "@mc/core";
@@ -116,3 +116,30 @@ it.each(["included", "missing/target"])(
     await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
   },
 );
+
+it.each(["included", "missing/target"])(
+  "accepts a helper-free include protected by the Git directory: %s",
+  async (name) => {
+    const included = join(dir, ".git", name);
+    if (name === "included") writeFileSync(included, "[core]\n\tfsmonitor = false\n");
+    git("config", "include.path", included);
+    await expect(assertSeatGitConfig(dir)).resolves.toBeUndefined();
+  },
+);
+
+it("refuses a protected include symlink targeting seat-writable content", async () => {
+  const target = join(dir, "included");
+  writeFileSync(target, "");
+  symlinkSync(target, join(dir, ".git", "included"));
+  git("config", "include.path", join(dir, ".git", "included"));
+  await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+});
+
+it("uses seat write grants and exclusions for include targets and ancestors", async () => {
+  const included = join(dir, "included");
+  writeFileSync(included, "");
+  git("config", "include.path", included);
+  await expect(assertSeatGitConfig(dir, [])).resolves.toBeUndefined();
+  await expect(assertSeatGitConfig(dir, [dir], [dir])).resolves.toBeUndefined();
+  await expect(assertSeatGitConfig(dir, [dir])).rejects.toThrow("writable include");
+});

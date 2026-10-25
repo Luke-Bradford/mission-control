@@ -520,3 +520,23 @@ export async function fileDiff(
     throw new GitFailed(gitMessage(e, worktree));
   }
 }
+
+/** Net tracked changes since the branch base, including staged and working-tree edits. */
+export async function mapChanges(
+  worktree: string,
+  exec: GitExec = realGitExec,
+): Promise<import("@mc/core").MapChange[]> {
+  const base = await readOnlyBase(worktree, exec);
+  if (await usesFilters(worktree, base, exec)) throw new GitFailed(FILTERS_NOTE);
+  const ancestor = (await exec([...base, "merge-base", "origin/HEAD", "HEAD"])).trim();
+  if (!/^[a-f0-9]{40,64}$/.test(ancestor)) throw new GitFailed();
+  const out = await exec([...base, ...SAFE_DIFF, "--numstat", "-z", ancestor, "--"]);
+  return parseNumstat(out, "uncommitted")
+    .filter((r) => r.add !== null && r.del !== null)
+    .map((r) => ({
+      file: cleanText(r.path),
+      add: r.add as number,
+      rem: r.del as number,
+      source: "diff",
+    }));
+}

@@ -89,6 +89,10 @@ it("confines each Claude git segment to the seat worktree in every mode", () => 
 });
 
 it.each([
+  'name=GIT_CONFIG_GLOBAL; printf -v"$name" /tmp/config; git diff',
+  "printf -vGIT_CONFIG_GLOBAL /tmp/config; git diff",
+  "for GIT_CONFIG_GLOBAL in /tmp/config; do git diff; done",
+  "select GIT_CONFIG_GLOBAL in /tmp/config; do git diff; done",
   'name=GIT_CONFIG_GLOBAL; unset -m "$name"; git diff',
   'unset "$name"; git diff',
   'export "$name"; git diff',
@@ -153,7 +157,16 @@ it("refuses nested repositories for Git reads", () => {
     for (const bare of [false, true]) {
       const nested = join(root, bare ? "bare" : "nested");
       execFileSync("git", ["init", "-q", ...(bare ? ["--bare"] : []), nested]);
-      for (const command of [`git -C ${nested} diff`, `env -C ${nested} git status`]) {
+      mkdirSync(join(nested, "subdir"));
+      const link = join(root, bare ? "bare-link" : "nested-link");
+      symlinkSync(join(nested, "subdir"), link);
+      for (const command of [
+        `git -C ${nested} diff`,
+        `env -C ${nested} git status`,
+        `git -C ${link}/.. log -p`,
+        `git -C ${link} -C .. log -p`,
+        `env -C ${link}/.. git log -p`,
+      ]) {
         expect(
           crewGuardDecision(
             { repos: [] } as unknown as CcConfig,
@@ -192,4 +205,18 @@ it("resolves Git paths from the command cwd within the seat boundary", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it.each([
+  'printf "%s" "for GIT_CONFIG_GLOBAL in /tmp/config"; git diff',
+  'printf "%s" "select GIT_CONFIG_GLOBAL in /tmp/config"; git diff',
+  "# for GIT_CONFIG_GLOBAL in /tmp/config\ngit diff",
+  "cat <<'EOF'\nfor GIT_CONFIG_GLOBAL in /tmp/config\nEOF\ngit diff",
+])("allows loop syntax used as data: %s", (command) => {
+  expect(
+    crewGuardDecision({ repos: [] } as unknown as CcConfig, "dev", "writer", {
+      tool: "Bash",
+      input: { command },
+    }),
+  ).toEqual({ kind: "allow" });
 });
