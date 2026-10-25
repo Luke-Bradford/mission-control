@@ -259,6 +259,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  mapRing?: CallRing;
   config: CcConfig;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
@@ -1310,6 +1311,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           projectUrl: projectUrlOf(store, repo.id),
         };
         return { repo: view, backup: basename(result.backup) };
+      });
+
+      // Reader: apps/web/src/data.ts (Crew Activity Map modified scope; snapshot slice pending)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
+        if (!config.repos.some((r) => r.id === req.params.repoId))
+          return reply.code(404).send({ error: "unknown repo" });
+        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
+        return { seats: deps.mapRing.scopes(req.params.repoId) };
       });
 
       // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
