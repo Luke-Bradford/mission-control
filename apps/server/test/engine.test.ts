@@ -278,6 +278,7 @@ interface Harness {
   pushResults: PublishResult[];
   prResults: OpenPrResult[];
   touches: string[];
+  touchesByRun?: Record<string, string[]>;
   awayDiff?: AwayDiff | null;
   descends?: boolean;
   hardRuleLists: string[][];
@@ -470,9 +471,11 @@ function harness(): Harness {
         async worktreeChanges() {
           return x.changes;
         },
-        async hardRuleTouches(_run, _sha, rules) {
+        async hardRuleTouches(run, _sha, rules) {
           x.hardRuleLists.push([...rules]);
-          return x.touches.filter((path) => rules.some((rule) => globMatches(rule, path, true)));
+          return (x.touchesByRun?.[run.id] ?? x.touches).filter((path) =>
+            rules.some((rule) => globMatches(rule, path, true)),
+          );
         },
         async gateFacts(_r, sha, known): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
@@ -2469,6 +2472,7 @@ describe("the engine runs reviews", () => {
   const CALL = "RETRO-1";
   const RUN2 = "guido-2:20261021T100000Z";
   const BRANCH2 = "feature/8-other";
+  const SHA_C = "c".repeat(40);
   const retroSeat = (): CrewSeatConfig => ({
     id: RETRO,
     role: "RETRO",
@@ -2576,6 +2580,67 @@ describe("the engine runs reviews", () => {
     });
     await h.engine.reconcileRun(RUN2);
   }
+
+  it("a younger PR waits for an older open PR sharing a hard-rule file", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    expect(
+      store
+        .loopEvents(0)
+        .filter((e) => e.runId === RUN2)
+        .map((e) => e.text),
+    ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
+  });
+
+  it("reviews the updated head after the older shared-hard-rule PR merges", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    expect(h.starts).toEqual([]);
+    const prs = store.pullRequests(REPO);
+    store.upsertPullRequests(
+      REPO,
+      prs.map((p) =>
+        p.number === 12 ? { ...p, state: "merged" } : { ...p, mergeable: "CONFLICTING" },
+      ),
+      clock,
+    );
+    h.gate = { ...need(h.gate), containsMain: false };
+    h.updateResults = [{ ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame: false }];
+    await h.engine.reconcileRun(RUN2);
+    await h.engine.reconcileRun(RUN2);
+    expect(store.runPush(RUN2)?.sha).toBe(SHA_C);
+    h.gate = { ...need(h.gate), containsMain: true };
+    store.upsertPullRequests(
+      REPO,
+      store.pullRequests(REPO).map((p) =>
+        p.number === 13
+          ? {
+              ...p,
+              headSha: SHA_C,
+              ci: "passing",
+              mergeable: "MERGEABLE",
+              checks: prRow().checks,
+            }
+          : p,
+      ),
+      clock,
+    );
+    await h.engine.reconcileRun(RUN2);
+    await h.engine.reconcileRun(RUN2);
+    expect(store.reviewsOfRun(RUN2).find((r) => r.state === "running")?.sha).toBe(SHA_C);
+  });
+
+  it.each(["apps/a.ts", "packages/core/src/loop.ts"])(
+    "does not hold a PR for unrelated or non-hard-rule files (%s)",
+    async (path) => {
+      h.touchesByRun = { [RUN]: ["apps/a.ts", "packages/core/src/guard.ts"], [RUN2]: [path] };
+      await secondAuthor();
+      expect(h.starts).toHaveLength(1);
+      expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("running");
+    },
+  );
 
   it("keeps a long review-start failure in the review row and loop event", async () => {
     const failure = "x".repeat(1000);

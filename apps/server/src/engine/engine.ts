@@ -1500,6 +1500,47 @@ export function createEngine(deps: EngineDeps): Engine {
     return pr !== null && pr.state === "open" && (pr.headSha === row.sha || pr.headSha === head);
   }
 
+  async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
+    const author = store.run(row.authorRunId);
+    if (author === null) return true;
+    const older = store
+      .pullRequests(author.repoId)
+      .filter((pr) => pr.state === "open" && pr.number < row.prNumber);
+    if (older.length === 0) return false;
+    try {
+      const rules = await rulesFor(author.repoId);
+      if (rules === null) return true;
+      const hardRules = effectiveHardRules(rules, flightPowersOf(config, author.repoId));
+      const paths = await publisher.hardRuleTouches(author, row.sha, hardRules);
+      if (paths.length === 0) return false;
+      const runs = store.runsActiveSince(0);
+      let waiting = false;
+      for (const pr of older) {
+        const run = runs.find(
+          (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
+        );
+        if (run === undefined || pr.headSha === null) continue;
+        const shared = (await publisher.hardRuleTouches(run, pr.headSha, hardRules)).filter(
+          (path) => paths.includes(path),
+        );
+        if (shared.length === 0) continue;
+        waiting = true;
+        store.addLoopEvent(
+          reviewEventKey(author.id, row.id, `waits:${pr.number}:${pr.headSha}`),
+          author.id,
+          `waits for #${pr.number} (shared: ${shared.join(", ")})`,
+          now(),
+        );
+      }
+      return waiting;
+    } catch (e) {
+      log(
+        `${author.id}: could not read review overlaps: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return true;
+    }
+  }
+
   /** Keeps the running reviews going, ends the finished ones' runs and starts the queued ones. */
   async function superviseReviews(): Promise<void> {
     if (!live()) return;
@@ -1602,6 +1643,11 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
       if (accountAtStop(config, store, seat.accountId, now())) continue;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
+        if (!reviewWanted(row)) {
+          dropReview(row);
+          continue;
+        }
+        if (await reviewWaitsForOlderPr(row)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
