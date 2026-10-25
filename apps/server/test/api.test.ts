@@ -521,6 +521,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/version"],
   ["POST", "/api/version/check"],
   ["POST", "/api/update"],
+  ["GET", "/api/seats/guido-1/focus"],
+  ["POST", "/api/seats/guido-1/focus", { focus: "lane:work" }],
+  ["POST", "/api/seats/guido-1/queue/reorder", { move: "shop-app#2", above: "shop-app#1" }],
+  ["POST", "/api/queue/reorder/:key", { action: "deny" }],
   ["POST", "/api/seats/guido-1/start", { issue: 5 }],
   ["POST", "/api/seats/guido-1/message", { text: "hello", interrupt: true }],
   ["POST", "/api/seats/guido-1/interrupt"],
@@ -1029,6 +1033,8 @@ describe("local access", () => {
         continue;
       }
       if (
+        (method === "POST" && url.endsWith("/focus")) ||
+        url.includes("/queue/reorder") ||
         url === "/api/profiles" ||
         url === "/api/sources/teams/selection" ||
         (method === "POST" && (url === "/api/crew/sessions" || url.endsWith("/close")))
