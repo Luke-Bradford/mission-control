@@ -10,10 +10,12 @@
  * ever read as an option.
  */
 import { type ChildProcess, execFile } from "node:child_process";
-import { realpath } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { constants } from "node:fs";
+import { access, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import { realPathOrParent } from "./codex-floor.ts";
 
 const execFileP = promisify(execFile);
 
@@ -170,7 +172,7 @@ export async function assertSeatGitConfig(cwd: string): Promise<void> {
         "--show-origin",
         "--null",
         "--get-regexp",
-        "^(diff\\.external|core\\.fsmonitor|(diff|filter|merge)\\..+\\.(textconv|command|clean|smudge|process|driver))$",
+        "^(diff\\.external|core\\.fsmonitor|(diff|filter|merge)\\..+\\.(textconv|command|clean|smudge|process|driver)|include\\.path|includeif\\..*\\.path)$",
       ],
       {
         cwd,
@@ -185,11 +187,32 @@ export async function assertSeatGitConfig(cwd: string): Promise<void> {
   }
   const fields = output.split("\0");
   const keys: string[] = [];
+  let writableInclude = false;
   for (let i = 1; i < fields.length; i += 2) {
     const entry = fields[i];
     const split = entry.indexOf("\n");
     const key = split === -1 ? entry : entry.slice(0, split);
     const value = split === -1 ? "" : entry.slice(split + 1);
+    if (key === "include.path" || /^includeif\..*\.path$/.test(key)) {
+      const origin = fields[i - 1].replace(/^file:/, "");
+      const included = resolve(dirname(isAbsolute(origin) ? origin : resolve(cwd, origin)), value);
+      const targets = [included, realPathOrParent(included)].filter((path) => path !== null);
+      // Check the target and every ancestor: a writable directory can replace even a read-only file.
+      for (let target of targets) {
+        for (;;) {
+          try {
+            await access(target, constants.W_OK);
+            writableInclude = true;
+          } catch {
+            // Missing targets still inherit the writability of their parent directories.
+          }
+          const parent = dirname(target);
+          if (parent === target) break;
+          target = parent;
+        }
+      }
+      continue;
+    }
     if (key !== "core.fsmonitor" || (value !== "" && value.toLowerCase() !== "false"))
       keys.push(key);
   }
@@ -197,4 +220,5 @@ export async function assertSeatGitConfig(cwd: string): Promise<void> {
     throw new SeatGitError(
       `the clone's git config defines helpers: ${[...new Set(keys)].join(", ")}`,
     );
+  if (writableInclude) throw new SeatGitError("the clone's git config has a writable include");
 }

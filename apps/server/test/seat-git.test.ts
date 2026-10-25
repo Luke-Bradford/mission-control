@@ -107,3 +107,12 @@ it("checks included repo config", async () => {
   git("config", "include.path", included);
   await expect(assertSeatGitConfig(dir)).rejects.toThrow("filter.x.smudge");
 });
+
+it.each(["included", "missing/target"])(
+  "refuses writable include target %s before it gains helpers",
+  async (name) => {
+    git("config", "include.path", join(dir, name));
+    if (name === "included") writeFileSync(join(dir, name), "");
+    await expect(assertSeatGitConfig(dir)).rejects.toThrow("writable include");
+  },
+);

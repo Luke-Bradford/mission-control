@@ -116,6 +116,7 @@ export function createCodexApprover(i: {
         i.superuserTools,
         seatGrants,
         i.cwd,
+        typeof params.cwd === "string" ? params.cwd : undefined,
       );
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
       if (verdict.kind === "lock") {

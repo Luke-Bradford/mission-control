@@ -1,5 +1,5 @@
 import "./temp-home.ts";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
@@ -448,6 +448,7 @@ describe("POST /api/guard/check", () => {
       .hookSpecificOutput.permissionDecisionReason;
 
   it("confines git paths using the authenticated seat's worktree", async () => {
+    execFileSync("git", ["init", "-q", dir]);
     store.setSeatSession({
       seatId: "guido-1",
       runId: null,

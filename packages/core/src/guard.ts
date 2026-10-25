@@ -78,6 +78,7 @@ export interface GuardContext {
   /** Extra role grants; FLIGHT shares sync_main with writers through its own tool. */
   mcTools?: readonly string[];
   /** Resolve each segment’s git paths against the seat worktree. */
+  gitDirectoryAllowed?: (directories: readonly string[]) => boolean;
   gitPathAllowed?: (path: string, directories: readonly string[]) => boolean;
 }
 
@@ -982,7 +983,8 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
             clusterHas(flags, "i") ||
             /^--unset=GIT_/.test(opt) ||
             ((opt === "-u" || opt === "--unset") && words[at]?.startsWith("GIT_")) ||
-            (valueOption?.letter === "u" && valueOption.inline.startsWith("GIT_"))
+            (valueOption?.letter === "u" &&
+              (valueOption.inline || words[at] || "").startsWith("GIT_"))
           )
             gitEnv = true;
         }
@@ -1912,7 +1914,7 @@ export function guardDecision(
   if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
   let backgroundSuite = false;
-  let gitEnvDenied = false;
+  let gitEnvDenied = /\b(?:for|select)\s+GIT_[A-Za-z0-9_]*\b/.test(e.input.command ?? "");
   const walk = newWalk();
   const cwdDirectories: string[] = [];
   let unknownCwd = false;
@@ -1937,13 +1939,33 @@ export function guardDecision(
     if (program === BRACE_WORD) return deny("git-write", "brace expansion");
     if (
       program === GIT_ENV_OVERRIDE ||
-      ((["export", "declare", "typeset", "readonly", "unset", "local"].includes(program) ||
+      (["for", "select"].includes(program) && /^GIT_/.test(args[0] ?? "")) ||
+      (program === "printf" &&
+        args.some(
+          (a, at) =>
+            (a === "-v" &&
+              (/^GIT_/.test(args[at + 1] ?? "") || EXPANDS.test(args[at + 1] ?? ""))) ||
+            /^-vGIT_/.test(a),
+        )) ||
+      (([
+        "export",
+        "declare",
+        "typeset",
+        "readonly",
+        "unset",
+        "local",
+        "read",
+        "readarray",
+        "mapfile",
+      ].includes(program) ||
         (program === "set" && args.includes("-a"))) &&
         args.some((a) => /^GIT_[A-Za-z0-9_]*(?:\+?=|$)/.test(a) || /[$`*?[\]^()|#~<>{}\\]/.test(a)))
     )
       gitEnvDenied = true;
     // Keep every earlier cwd change: an unsafe or unknown one cannot be balanced later.
     if (["cd", "pushd", "popd"].includes(program)) {
+      // Only a simple, successful prefix has a known scope and execution order.
+      if (!/^cd\s+[^;&|()]+&&\s*git\b[^;&|()]*$/.test(e.input.command ?? "")) unknownCwd = true;
       const target = args.length === 1 && !args[0].startsWith("-") ? args[0] : undefined;
       if (target !== undefined && gitPathExpands(target)) expandedCwd = true;
       if (
@@ -1988,6 +2010,8 @@ export function guardDecision(
           if (path !== "") directories.push(path);
         }
       }
+      if (ctx.gitDirectoryAllowed?.(directories) === false)
+        return deny("git-env", "git repository differs from seat repository");
       if (g?.sub === "diff") {
         let paths = false;
         for (let i = 0; i < g.rest.length; i++) {
@@ -2025,8 +2049,10 @@ export function guardDecision(
       }
       const global = g === null ? args : args.slice(0, args.length - g.rest.length - 1);
       if (
-        global.some((a) =>
-          /^-c|^--(?:config-env|git-dir|work-tree|exec-path|namespace)(?:=|$)/.test(a),
+        global.some(
+          (a) =>
+            EXPANDS.test(a.split("=")[0]) ||
+            /^-c|^--(?:config-env|git-dir|work-tree|exec-path|namespace)(?:=|$)/.test(a),
         ) ||
         (g !== null && ["diff", "difftool"].includes(g.sub) && g.rest.includes("--no-index"))
       )

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,10 +12,13 @@ it("confines each Claude git segment to the seat worktree in every mode", () => 
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-git-paths-")));
   const root = join(dir, "tree");
   mkdirSync(join(root, "apps"), { recursive: true });
+  execFileSync("git", ["init", "-q", root]);
   symlinkSync(dir, join(root, "escape"));
   try {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
       for (const command of [
+        "(cd apps); git diff ../a ../b",
+        "cd apps; git diff ../a ../b",
         "cd /tmp && git diff a b",
         "pushd /tmp; git diff a b",
         "popd; git diff a b",
@@ -137,6 +141,54 @@ it.each([
         ),
       ).toMatchObject({ kind: "deny", rule: "git-env" });
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("refuses nested repositories for Git reads", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "mc-nested-git-")));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    for (const bare of [false, true]) {
+      const nested = join(root, bare ? "bare" : "nested");
+      execFileSync("git", ["init", "-q", ...(bare ? ["--bare"] : []), nested]);
+      for (const command of [`git -C ${nested} diff`, `env -C ${nested} git status`]) {
+        expect(
+          crewGuardDecision(
+            { repos: [] } as unknown as CcConfig,
+            "dev",
+            "writer",
+            { tool: "Bash", input: { command } },
+            undefined,
+            [],
+            root,
+          ),
+        ).toMatchObject({ kind: "deny", rule: "git-env" });
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("resolves Git paths from the command cwd within the seat boundary", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "mc-command-cwd-")));
+  try {
+    execFileSync("git", ["init", "-q", root]);
+    mkdirSync(join(root, "apps"));
+    expect(
+      crewGuardDecision(
+        { repos: [] } as unknown as CcConfig,
+        "dev",
+        "writer",
+        { tool: "Bash", input: { command: "git diff -- ../package.json" } },
+        undefined,
+        [],
+        root,
+        join(root, "apps"),
+      ),
+    ).toEqual({ kind: "allow" });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
