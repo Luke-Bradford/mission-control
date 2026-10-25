@@ -637,7 +637,7 @@ describe("Agents panel", () => {
     });
     render(<Overview />);
     const el = await screen.findByTitle(/in line for the test lock · 1:05/);
-    expect(el.closest(".trow")?.textContent).toContain("Waiting on lock");
+    expect(el.closest(".trow")?.textContent).toContain("Watching");
   });
 
   it("the need line offers Interrupt and End the run next to Answer, for a seat with a live turn", async () => {
