@@ -228,6 +228,47 @@ export const ACTIONS = {
   update: "/api/update",
 } as const;
 
+/** Stable identity for the activity API, which currently supplies no source id. */
+export function activityKey(row: ActivityRow): string {
+  if (row.runId && (row.kind === "run-start" || row.kind === "run-end")) {
+    return JSON.stringify([row.kind, row.runId]);
+  }
+  return JSON.stringify([
+    row.at,
+    row.who,
+    row.kind,
+    row.runId,
+    row.ref,
+    row.kind === "comms" ? row.to : null,
+    row.text,
+  ]);
+}
+
+export function compareActivity(a: ActivityRow, b: ActivityRow): number {
+  const ak = activityKey(a);
+  const bk = activityKey(b);
+  return b.at - a.at || (ak < bk ? -1 : ak > bk ? 1 : 0);
+}
+
+function reconcileActivity(incoming: ActivityRow[], previous: ActivityRow[]): ActivityRow[] {
+  const cached = new Map<string, ActivityRow[]>();
+  for (const row of previous) {
+    const key = activityKey(row);
+    const group = cached.get(key) ?? [];
+    group.push(row);
+    cached.set(key, group);
+  }
+  const rows = incoming
+    .map((row) => {
+      const old = cached.get(activityKey(row))?.shift();
+      return old && JSON.stringify(old) === JSON.stringify(row) ? old : row;
+    })
+    .sort(compareActivity);
+  return rows.length === previous.length && rows.every((row, i) => row === previous[i])
+    ? previous
+    : rows;
+}
+
 interface Entry {
   path: string;
   topic: Topic | readonly Topic[] | null;
@@ -325,10 +366,31 @@ class Hub {
         ledger.nextOffset = null;
       }
       if (previous && since !== undefined) {
-        data = [...(data as ActivityRow[]), ...previous.filter((r) => r.at < since)]
+        const incoming = data as ActivityRow[];
+        const counts = new Map<string, number>();
+        for (const row of incoming) {
+          const key = activityKey(row);
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        data = [
+          ...incoming,
+          ...previous.filter((row) => {
+            const key = activityKey(row);
+            const count = counts.get(key) ?? 0;
+            if (count === 0) return true;
+            counts.set(key, count - 1);
+            return false;
+          }),
+        ]
           .filter((r) => r.at >= Date.now() - ACTIVITY_WINDOW_MS)
-          .sort((a, b) => b.at - a.at)
+          .sort(compareActivity)
           .slice(0, ACTIVITY_LIMIT);
+      }
+      if (activity) {
+        data = reconcileActivity(
+          data as ActivityRow[],
+          (e.snap.data as ActivityRow[] | undefined) ?? [],
+        );
       }
       if (gen !== this.generation) return;
       if (activity) {
