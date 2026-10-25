@@ -2598,6 +2598,27 @@ describe("the engine runs reviews", () => {
     ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
   });
 
+  it("updates before review when the older PR merged before the first overlap check", async () => {
+    h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
+    // secondAuthor refreshes the PR snapshot before its first reconciliation.
+    const upsert = store.upsertPullRequests.bind(store);
+    vi.spyOn(store, "upsertPullRequests").mockImplementation((repo, prs, at) =>
+      upsert(
+        repo,
+        prs.map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        at,
+      ),
+    );
+    h.tip = SHA_C;
+    h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+    await secondAuthor();
+    expect(store.loopEvents(0).some((e) => e.text.startsWith("waits for #12"))).toBe(false);
+    expect(h.starts).toEqual([]);
+    expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    await vi.waitFor(() => expect(h.updates).toHaveLength(1));
+    expect(store.runPush(RUN2)?.sha).toBe(SHA_B);
+  });
+
   it("keeps a mergeable head queued until it includes the older merge", async () => {
     h.touches = ["packages/core/src/guard.ts"];
     await secondAuthor();

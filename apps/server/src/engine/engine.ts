@@ -1528,9 +1528,15 @@ export function createEngine(deps: EngineDeps): Engine {
               event.runId === author.id &&
               event.text.startsWith(`waits for #${pr.number} (shared:`),
           );
-        // Missing seats make hardRuleTouches return [], which cannot prove disjointness.
+        // A merged PR can have an empty diff against main even on the first check.
+        // Without historical overlap evidence, conservatively require its merge ancestry.
+        // Missing seats likewise cannot prove disjointness.
         const shared =
-          previouslyWaited || run === undefined || pr.headSha === null || !seatKnown(run.agentId)
+          pr.state === "merged" ||
+          previouslyWaited ||
+          run === undefined ||
+          pr.headSha === null ||
+          !seatKnown(run.agentId)
             ? paths
             : (await publisher.hardRuleTouches(run, pr.headSha, hardRules)).filter((path) =>
                 paths.includes(path),
