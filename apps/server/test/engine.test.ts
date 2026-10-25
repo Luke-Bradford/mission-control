@@ -284,6 +284,7 @@ interface Harness {
   hardRuleLists: string[][];
   /** The merge gate's facts (null: unreadable), and the gate reads made. */
   gate: GateFacts | null;
+  duringDescendant?: (ancestor: string, head: string) => void;
   gateReads: { sha: string; known: boolean }[];
   /** The merge steps the publisher was asked for, in order, with the ended runs seen at the time. */
   steps: string[];
@@ -421,7 +422,10 @@ function harness(): Harness {
           h.awayDiff === undefined
             ? { base: SHA_B, changes: [{ path: "apps/docs/guide.md", status: "A" }] }
             : h.awayDiff,
-        isDescendant: async (_run, ancestor, head) => x.descends ?? ancestor === head,
+        isDescendant: async (_run, ancestor, head) => {
+          x.duringDescendant?.(ancestor, head);
+          return x.descends ?? ancestor === head;
+        },
         async push(r) {
           x.pushes.push(r.id);
           if (x.pushHang) return new Promise<PublishResult>(() => {});
@@ -2614,6 +2618,41 @@ describe("the engine runs reviews", () => {
     expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
   });
 
+  it.each(["stopped", "lock lost", "author in turn"] as const)(
+    "defers the older-merge update when %s during the ancestry read",
+    async (condition) => {
+      let crewOn = true;
+      h.engine.stop();
+      h.engine = h.make({ crewOn: () => crewOn });
+      h.engine.start();
+      h.touches = ["packages/core/src/guard.ts"];
+      await secondAuthor();
+      store.upsertPullRequests(
+        REPO,
+        store
+          .pullRequests(REPO)
+          .map((p) => (p.number === 12 ? { ...p, state: "merged", mergeCommitSha: SHA_C } : p)),
+        clock,
+      );
+      h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
+      let ancestryRead = false;
+      h.duringDescendant = (ancestor, head) => {
+        if (ancestor !== SHA_C || head !== SHA_C) return;
+        ancestryRead = true;
+        if (condition === "stopped") h.engine.stop();
+        if (condition === "lock lost") crewOn = false;
+        if (condition === "author in turn")
+          h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+      };
+      await h.engine.tick();
+      await h.engine.reconcileRun(RUN2);
+      expect(ancestryRead).toBe(true);
+      expect(h.updates).toEqual([]);
+      expect(store.runPush(RUN2)?.sha).toBe(SHA_B);
+      expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
+    },
+  );
+
   it("an older PR with a removed seat still blocks review", async () => {
     h.touchesByRun = { [RUN]: [], [RUN2]: ["packages/core/src/guard.ts"] };
     const session = need(config.crew?.sessions[0]);
@@ -2623,9 +2662,13 @@ describe("the engine runs reviews", () => {
     expect(store.reviewsOfRun(RUN2)[0]?.state).toBe("queued");
   });
 
-  it.each(["CONFLICTING", "MERGEABLE"] as const)(
-    "reviews the updated head after the older shared-hard-rule PR merges (%s)",
-    async (mergeable) => {
+  it.each([
+    { mergeable: "CONFLICTING", prSame: false },
+    { mergeable: "MERGEABLE", prSame: false },
+    { mergeable: "MERGEABLE", prSame: true },
+  ] as const)(
+    "reviews the updated head after the older shared-hard-rule PR merges ($mergeable, prSame: $prSame)",
+    async ({ mergeable, prSame }) => {
       h.touches = ["packages/core/src/guard.ts"];
       await secondAuthor();
       expect(h.starts).toEqual([]);
@@ -2639,7 +2682,7 @@ describe("the engine runs reviews", () => {
       );
       h.gate = { ...need(h.gate), containsMain: false, mainSha: SHA_C };
       h.tip = SHA_C;
-      h.updateResults = [{ ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame: false }];
+      h.updateResults = [{ ok: true, kind: "merged", sha: SHA_C, parent: SHA_B, prSame }];
       await h.engine.tick();
       await h.engine.reconcileRun(RUN2);
       await h.engine.reconcileRun(RUN2);
@@ -2662,7 +2705,10 @@ describe("the engine runs reviews", () => {
       );
       await h.engine.reconcileRun(RUN2);
       await h.engine.reconcileRun(RUN2);
-      expect(store.reviewsOfRun(RUN2).find((r) => r.state === "running")?.sha).toBe(SHA_C);
+      await h.engine.tick();
+      expect(store.reviewsOfRun(RUN2).find((r) => r.state === "running")?.sha).toBe(
+        prSame ? SHA_B : SHA_C,
+      );
     },
   );
 

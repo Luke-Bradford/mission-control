@@ -1539,13 +1539,17 @@ export function createEngine(deps: EngineDeps): Engine {
         if (pr.state === "merged") {
           if (
             pr.mergeCommitSha &&
-            (await publisher.isDescendant(author, pr.mergeCommitSha, row.sha))
+            (await publisher.isDescendant(
+              author,
+              pr.mergeCommitSha,
+              store.runPush(author.id)?.sha ?? row.sha,
+            ))
           )
             continue;
           // Queue on the author's chain: review supervision can itself be called from a pass.
           // Never release this row until ancestry is proved, even if updating fails or waits.
           void onChain(author.id, async () => {
-            if (!reviewWanted(row)) return;
+            if (!live() || !reviewWanted(row)) return;
             const current = store.run(author.id);
             const loop = current?.loop;
             if (!current || !loop || !pr.mergeCommitSha) return;
@@ -1555,6 +1559,9 @@ export function createEngine(deps: EngineDeps): Engine {
             if (!gate.ok) return;
             const mainSha = gate.facts.mainSha;
             if (!(await publisher.isDescendant(current, pr.mergeCommitSha, mainSha))) return;
+            if (!live()) return;
+            const onSeat = supervisor.seat(current.agentId)?.runId === current.id;
+            if (onSeat && supervisor.seatFacts(current.agentId)?.inTurn !== false) return;
             const result = await publisher.updateBranch(current, mainSha, worktree);
             if (result.ok && result.kind !== "wait") {
               branchUpdated(current, { ...loop }, mainSha, result, now());
