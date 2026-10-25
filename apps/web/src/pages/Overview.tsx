@@ -1,3 +1,4 @@
+import { CrewMapPanel } from "../map/CrewMap.tsx";
 import { ActivityPanel } from "../overview/ActivityPanel.tsx";
 import { AgentsPanel } from "../overview/AgentsPanel.tsx";
 import { KpiStrip } from "../overview/KpiStrip.tsx";
@@ -29,6 +30,7 @@ export function Overview() {
           </div>
         </div>
       </div>
+      <CrewMapPanel />
     </section>
   );
 }

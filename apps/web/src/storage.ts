@@ -7,6 +7,9 @@
 export const THEME_KEY = "mc-theme";
 /** FLIGHT's dock shown or hidden on wide screens. */
 export const DOCK_KEY = "mc-dock";
+/** The Crew Activity Map's last manually picked repo. */
+export const MAP_REPO_KEY = "mc-map-repo";
+
 /** The Board's selected lane. */
 export const LANE_KEY = "mc-lane";
 /** The Board's All-repos layout: `together` or `apart`. */
