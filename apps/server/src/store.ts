@@ -1239,6 +1239,17 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
+  mapAsideRuns(agentId: AgentId): Run[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') IS NOT NULL",
+        )
+        .all(agentId) as Row[]
+    ).map(toRun);
+  }
+
   /** Runs still open or ended at or after `since`, across seats and repos. */
   runsActiveSince(since: number): Run[] {
     const rows = this.db

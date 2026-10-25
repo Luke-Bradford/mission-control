@@ -293,8 +293,10 @@ describe("the allowlist in phase 2b", () => {
 
   it("keeps each seat's pnpm store in the sandbox's temp root, under the variable pnpm 11 reads", () => {
     expect(crewSandboxTmp(501)).toBe("/tmp/claude-501");
-    expect(crewPnpmStoreDir(501, "guido-1")).toBe("/tmp/claude-501/mc-pnpm-store/guido-1");
-    expect(crewPnpmStoreDir(501, "guido-2")).not.toBe(crewPnpmStoreDir(501, "guido-1"));
+    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-1")).toBe("/tmp/mc-test/mc-pnpm-store/guido-1");
+    expect(crewPnpmStoreDir("/tmp/mc-test", "guido-2")).not.toBe(
+      crewPnpmStoreDir("/tmp/mc-test", "guido-1"),
+    );
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
   });
@@ -765,6 +767,60 @@ describe("scratch mode", () => {
 });
 
 describe("crew sandbox and scoped edits", () => {
+  it("denies the shared temp parent and sibling runs, allowing only the seat's own root", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      for (const parent of ["/tmp/mc-runs", "/private/tmp/mc-runs", "/custom/temp/mc-runs"]) {
+        const tempRoot = `${parent}/mc-own-run`;
+        const siblingRoot = `${parent}/mc-other-run`;
+        const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
+          .sandbox.filesystem;
+        expect(f.denyRead).toContain(parent);
+        expect(
+          f.denyRead.some((p: string) => siblingRoot === p || siblingRoot.startsWith(`${p}/`)),
+        ).toBe(true);
+        expect(f.allowRead).toEqual([tempRoot]);
+        expect(f.denyRead).not.toContain("/tmp");
+        expect(f.denyRead).not.toContain("/private/tmp");
+      }
+    }
+  });
+
+  it("keeps a checkout and both git dirs under /tmp readable in every mode", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      for (const parent of ["/tmp", "/private/tmp", "/tmp/mc-runs"]) {
+        const sandbox = {
+          ...base.sandbox,
+          tempRoot: `${parent.endsWith("/mc-runs") ? parent : `${parent}/mc-runs`}/mc-own-run`,
+          cwd: `${parent}/crew/worktree`,
+          gitCommonDir: `${parent}/crew/clone/.git`,
+          worktreeGitDir: `${parent}/crew/clone/.git/worktrees/seat`,
+        };
+        const f = JSON.parse(crewSandboxSettings(sandbox, mode, base.hook)).sandbox.filesystem;
+        for (const path of [sandbox.cwd, sandbox.gitCommonDir, sandbox.worktreeGitDir]) {
+          if (parent.endsWith("/mc-runs")) expect(f.allowRead).toContain(path);
+          else
+            expect(
+              f.denyRead.some((denied: string) => path === denied || path.startsWith(`${denied}/`)),
+            ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("isolates the run temp root from the operator's Claude sessions in every mode", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      const tempRoot = "/tmp/mc-runs/seat-test";
+      const f = JSON.parse(crewSandboxSettings({ ...base.sandbox, tempRoot }, mode, base.hook))
+        .sandbox.filesystem;
+      expect(f.allowWrite).toEqual([tempRoot]);
+      expect(f.allowRead).toEqual([tempRoot]);
+      expect(f.denyRead).toContain("/tmp/claude-*");
+      expect(f.denyRead).toContain("/private/tmp/claude-*");
+      expect(f.denyWrite).toContain("/tmp/claude-*");
+      expect(f.denyWrite).toContain("/private/tmp/claude-*");
+    }
+  });
+
   it("builds the sandbox settings JSON: no git dir writable, the whole clone's .git denied", () => {
     const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook));
     expect(j.sandbox).toMatchObject({
