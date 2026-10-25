@@ -1778,6 +1778,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       const transfer = transferState(row.runId as string);
       if (transfer?.pending) {
+        if (deps.cliHold?.reason != null) {
+          log(`${row.seatId}: resume held: ${deps.cliHold.reason}`);
+          return;
+        }
         try {
           const moving = moveAccount(row.seatId, transfer);
           transfers.set(row.seatId, moving);

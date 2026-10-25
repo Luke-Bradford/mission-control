@@ -2,6 +2,7 @@ import "./supervisor-harness.ts";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { CliHold } from "../src/cli-update.ts";
 import { crewCodexDir } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { dbPath, dir, make, prep, recorded, store, until } from "./supervisor-harness.ts";
@@ -114,7 +115,9 @@ it("keeps another seat on its shared source binding and sends queued input once"
   await until(() =>
     expect(
       recorded().filter(
-        (r) => r.method === "turn/start" && r.params.input[0].text === "fictional queued input",
+        (r) =>
+          ["turn/start", "turn/steer"].includes(r.method) &&
+          r.params.input[0].text === "fictional queued input",
       ),
     ).toHaveLength(1),
   );
@@ -128,6 +131,13 @@ it("keeps another seat on its shared source binding and sends queued input once"
     ).toHaveLength(1),
   );
   await sup.message("fao-1", "source seat continues", { interrupt: false });
+  for (const text of ["queued before transfer", "fictional queued input"]) {
+    expect(
+      recorded().filter(
+        (r) => ["turn/start", "turn/steer"].includes(r.method) && r.params.input[0].text === text,
+      ),
+    ).toHaveLength(1);
+  }
   expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(3);
   expect(store.run(second.runId)?.endedAt).toBeNull();
   expect(store.seatSession("fao-1")?.runId).toBe(second.runId);
@@ -263,4 +273,37 @@ it("honours an engine end requested during transfer after the transfer finishes"
   await ending;
   expect(store.run(runId)?.endedBy).toBe("engine");
   expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+});
+
+it("holds a pending transfer on restart until the CLI smoke-test hold is released", async () => {
+  const { sup, cfg } = setup();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const checkout = store.seatSession("guido-1")?.worktree;
+  await sup.stopAll();
+  const pending = JSON.stringify({
+    source: cfg.accounts[0]?.id,
+    target: "destination",
+    pending: true,
+  });
+  store.setSetting(`account-transfer:${runId}`, pending);
+  const hold = new CliHold();
+  hold.hold("fictional smoke-test failure");
+  const next = make({ codexCommand: join(dir, "codex"), cliHold: hold });
+  Object.assign(next.cfg, cfg);
+  next.sup.start();
+  await until(() =>
+    expect(next.log).toHaveBeenCalledWith("guido-1: resume held: fictional smoke-test failure"),
+  );
+  expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(1);
+  expect(store.getSetting(`account-transfer:${runId}`)).toBe(pending);
+  expect(store.run(runId)?.endedAt).toBeNull();
+  expect(next.sup.seatFacts("guido-1")).toBeNull();
+  hold.release();
+  await until(() =>
+    expect(store.getSetting(`account-transfer:${runId}`)).toContain('"pending":false'),
+  );
+  expect(recorded().filter((r) => r.type === "spawn")).toHaveLength(2);
+  expect(store.seatSession("guido-1")).toMatchObject({ runId, worktree: checkout });
+  expect(store.run(runId)?.endedAt).toBeNull();
 });
