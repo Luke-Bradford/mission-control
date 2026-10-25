@@ -1,13 +1,15 @@
 import { existsSync, globSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { CrewVendor, MapCall, MapChange, MapTests } from "@mc/core";
+import type { CrewVendor, MapCall, MapChange, MapDelta, MapTests } from "@mc/core";
 import { cleanText } from "../clean.ts";
 import { codexTool, transcriptVendor } from "../codex-transcript.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { readNewLines } from "../tail.ts";
+import { SeatDiff } from "./diff.ts";
 
 const KEEP_MS = 15 * 60_000;
+type DeltaPayload<T = MapDelta> = T extends MapDelta ? Omit<T, "seq"> : never;
 export interface RingSource {
   id: string;
   seat: string;
@@ -16,6 +18,7 @@ export interface RingSource {
   transcriptPath: string;
   vendor?: CrewVendor;
   turnScoped?: boolean;
+  current?: boolean;
 }
 export interface RingCall extends MapCall {
   id: string;
@@ -65,24 +68,100 @@ interface RunScope {
 
 /** Raw payload measurements stay separate from the cleaned strings exposed to the map. */
 export class CallRing {
-  private scopes = new Map<string, RunScope>();
+  private runScopes = new Map<string, RunScope>();
 
   scope(runId: string): RunScope {
     return structuredClone(
-      this.scopes.get(runId) ?? { read: [], modified: [], editedAt: 0, tests: null },
+      this.runScopes.get(runId) ?? { read: [], modified: [], editedAt: 0, tests: null },
     );
   }
 
   private rows = new Map<string, RingCall[]>();
   private tails = new Map<string, { offset: number; path: string }>();
   private sources: () => RingSource[];
+  private sequences = new Map<string, number>();
+  private listeners = new Map<string, Set<(delta: MapDelta) => void>>();
+  private diffs = new Map<string, { source: RingSource; diff: SeatDiff }>();
 
   constructor(sources: () => RingSource[]) {
     this.sources = sources;
   }
 
+  sequence(repoId: string): number {
+    return this.sequences.get(repoId) ?? 0;
+  }
+
+  subscribe(repoId: string, fn: (delta: MapDelta) => void): () => void {
+    const listeners = this.listeners.get(repoId) ?? new Set();
+    this.listeners.set(repoId, listeners);
+    listeners.add(fn);
+    return () => {
+      listeners.delete(fn);
+      if (!listeners.size) this.listeners.delete(repoId);
+    };
+  }
+
+  private publish(repoId: string, delta: DeltaPayload): void {
+    const seq = this.sequence(repoId) + 1;
+    this.sequences.set(repoId, seq);
+    for (const listener of [...(this.listeners.get(repoId) ?? [])]) {
+      try {
+        listener({ ...delta, seq });
+      } catch {
+        // One disconnected client must not interrupt the transcript fold.
+      }
+    }
+  }
+
+  private edits(source: RingSource, call: RingCall, previous: MapChange[] = []): void {
+    const changes = new Map<string, { add: number; rem: number }>();
+    for (const [churn, sign] of [
+      [call.churn, 1],
+      [previous, -1],
+    ] as const) {
+      for (const { file, add, rem } of churn) {
+        const total = changes.get(file) ?? { add: 0, rem: 0 };
+        total.add += sign * add;
+        total.rem += sign * rem;
+        changes.set(file, total);
+      }
+    }
+    for (const [file, { add, rem }] of changes)
+      if (add || rem)
+        this.publish(source.repoId, { type: "edit", seat: source.seat, file, add, rem });
+  }
+
   calls(seat: string): RingCall[] {
     return structuredClone(this.rows.get(seat) ?? []);
+  }
+
+  modified(seat: string, repoId?: string): MapChange[] {
+    const entries = [...this.diffs.values()].filter(
+      (e) => e.source.seat === seat && (repoId === undefined || e.source.repoId === repoId),
+    );
+    const entry = entries.find((e) => e.source.current) ?? entries.at(-1);
+    const real = entry?.diff.changes();
+    if (real != null) return real;
+    const churn = new Map<string, MapChange>();
+    for (const call of this.rows.get(seat) ?? []) {
+      if (entry && call.runId !== entry.source.id) continue;
+      for (const change of call.churn) {
+        const previous = churn.get(change.file);
+        churn.set(change.file, {
+          ...change,
+          add: (previous?.add ?? 0) + change.add,
+          rem: (previous?.rem ?? 0) + change.rem,
+        });
+      }
+    }
+    return [...churn.values()];
+  }
+
+  scopes(repoId: string): { seat: string; scope: { modified: MapChange[] } }[] {
+    const seats = new Set(
+      [...this.diffs.values()].filter((e) => e.source.repoId === repoId).map((e) => e.source.seat),
+    );
+    return [...seats].map((seat) => ({ seat, scope: { modified: this.modified(seat, repoId) } }));
   }
 
   start(): () => void {
@@ -104,7 +183,7 @@ export class CallRing {
       for (;;) {
         const next = readNewLines(source.transcriptPath, tail.offset);
         if (next.reset) {
-          this.scopes.delete(source.id);
+          this.runScopes.delete(source.id);
           this.rows.set(
             source.seat,
             (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),
@@ -121,6 +200,17 @@ export class CallRing {
         if (next.nextOffset === tail.offset) break;
         tail.offset = next.nextOffset;
       }
+      let entry = this.diffs.get(source.id);
+      if (!entry || entry.source.cwd !== source.cwd) {
+        entry = { source, diff: new SeatDiff() };
+        this.diffs.set(source.id, entry);
+      }
+      entry.source = source;
+      const revision = (this.rows.get(source.seat) ?? [])
+        .filter((c) => c.runId === source.id && (c.writeTok !== undefined || c.tool === "Bash"))
+        .map((c) => `${c.runId}:${c.id}:${c.end}:${c.churn.length}`)
+        .join("|");
+      entry.diff.poll(source.cwd, revision);
     }
     for (const [seat, calls] of this.rows) {
       const kept = calls.filter((c) => c.end === null || c.end >= now - KEEP_MS);
@@ -131,9 +221,10 @@ export class CallRing {
     for (const id of this.tails.keys()) {
       if (!active.has(id)) {
         this.tails.delete(id);
-        this.scopes.delete(id);
+        this.runScopes.delete(id);
       }
     }
+    for (const id of this.diffs.keys()) if (!active.has(id)) this.diffs.delete(id);
   }
 
   private safe(s: string): string {
@@ -281,13 +372,24 @@ export class CallRing {
         : {}),
     };
     if (found) {
+      const previous = found.churn;
       found.files = call.files;
       found.churn = call.churn;
       found.writeTok = call.writeTok;
       found.detail = call.detail;
+      this.edits(source, found, previous);
       return found;
     }
     calls.push(call);
+    this.publish(source.repoId, {
+      type: "call.start",
+      seat: source.seat,
+      tool: call.tool,
+      detail: call.detail,
+      files: call.files,
+      ...(call.writeTok === undefined ? {} : { writeTok: call.writeTok }),
+    });
+    this.edits(source, call);
     return call;
   }
 
@@ -311,13 +413,13 @@ export class CallRing {
         ? this.safe(output) || (refused ? "Permission denied" : "Tool failed")
         : null;
     call.tests = call.tool === "Bash" ? tests(output) : null;
-    const scope = this.scopes.get(source.id) ?? {
+    const scope = this.runScopes.get(source.id) ?? {
       read: [],
       modified: [],
       editedAt: 0,
       tests: null,
     };
-    this.scopes.set(source.id, scope);
+    this.runScopes.set(source.id, scope);
     if (!error && !refused) {
       if (call.writeTok === undefined) scope.read = [...new Set([...scope.read, ...call.files])];
       for (const change of call.churn) {
@@ -337,6 +439,16 @@ export class CallRing {
       at >= (scope.tests?.at ?? 0)
     )
       scope.tests = { tests: call.tests, at };
+    this.publish(source.repoId, {
+      type: "call.end",
+      seat: source.seat,
+      files: call.files,
+      resultTok: call.resultTok,
+      error: call.error,
+      refused: call.refused,
+      why: call.why,
+      tests: call.tests,
+    });
   }
 
   private fold(source: RingSource, ev: Json, now: number): void {
@@ -345,7 +457,7 @@ export class CallRing {
       source.turnScoped &&
       (ev.type === "result" || ev.method === "turn/completed" || ev.method === "turn/started")
     ) {
-      this.scopes.delete(source.id);
+      this.runScopes.delete(source.id);
       this.rows.set(
         source.seat,
         (this.rows.get(source.seat) ?? []).filter((c) => c.runId !== source.id),

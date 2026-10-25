@@ -82,6 +82,7 @@ import type { CrewReloader } from "../src/crew-apply.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import { CallRing } from "../src/map/ring.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
@@ -469,6 +470,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/map"],
+  ["GET", "/api/repos/shop-app/map/diff"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -1038,6 +1040,11 @@ describe("local access", () => {
       }
       if (url === "/api/attention/unknown") {
         expect(r.statusCode).toBe(404);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/map/diff") {
+        expect(r.statusCode).toBe(503);
+        expect(r.json()).toEqual({ error: "map collector unavailable" });
         continue;
       }
       if (url === "/api/repos/shop-app/map/conflicts" || url === "/api/repos/shop-app/map") {
@@ -2961,6 +2968,53 @@ describe("boards, escalations, health", () => {
       }
     });
   }
+  it("exposes repo-scoped modified seat entries from the live map ring", async () => {
+    const cwd = join(dir, "diff-checkout");
+    mkdirSync(cwd);
+    const git = (...args: string[]) => execFileSync("git", ["-C", cwd, ...args]);
+    git("init", "-q");
+    git("config", "user.name", "Fixture");
+    git("config", "user.email", "fixture");
+    writeFileSync(join(cwd, "file.ts"), "base\n");
+    git("add", ".");
+    git("commit", "-qm", "base");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    writeFileSync(join(cwd, "file.ts"), "edited\nextra\n");
+    const transcriptPath = join(cwd, "transcript.jsonl");
+    writeFileSync(transcriptPath, "");
+    const ring = new CallRing(() => [
+      { id: "run", seat: "seat", repoId: "shop-app", cwd, transcriptPath },
+      { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
+    ]);
+    const a = buildApp({ config, store, bus, mapRing: ring });
+    const stop = ring.start();
+    try {
+      await expect
+        .poll(
+          async () => {
+            const r = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/diff" });
+            expect(r.statusCode).toBe(200);
+            return r.json();
+          },
+          { timeout: 4500 },
+        )
+        .toEqual({
+          seats: [
+            {
+              seat: "seat",
+              scope: { modified: [{ file: "file.ts", add: 2, rem: 1, source: "diff" }] },
+            },
+          ],
+        });
+      expect((await a.inject({ method: "GET", url: "/api/repos/nope/map/diff" })).statusCode).toBe(
+        404,
+      );
+    } finally {
+      stop();
+      await a.close();
+    }
+  });
 
   it("serves computed map conflicts from stored open PR tips without changing the checkout", async () => {
     withCrew();
@@ -3812,8 +3866,8 @@ describe("crew changes", () => {
 
 describe("SSE stream", () => {
   // In-process: app.inject() with payloadAsStream, so no port is bound.
-  async function open() {
-    const res = await app.inject({ method: "GET", url: "/api/stream", payloadAsStream: true });
+  async function open(url = "/api/stream") {
+    const res = await app.inject({ method: "GET", url, payloadAsStream: true });
     const stream = res.stream();
     const chunks = stream[Symbol.asyncIterator]();
     let text = "";
@@ -3826,6 +3880,120 @@ describe("SSE stream", () => {
     };
     return { res, until, text: () => text };
   }
+
+  it.each(["claude", "codex"] as const)(
+    "%s: sends ordered map calls only to the selected repo and keeps changed pings",
+    async (vendor) => {
+      withCrew();
+      const transcriptPath = join(dir, "map.jsonl");
+      writeFileSync(transcriptPath, "");
+      store.upsertRun(run({ id: "map-run", agentId: "guido-1", vendor, transcriptPath }));
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: "map-run",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      });
+      const selected = await open("/api/stream?map=shop-app");
+      const other = await open("/api/stream?map=site-builder");
+      const plain = await open();
+      await Promise.all([
+        selected.until(": connected"),
+        other.until(": connected"),
+        plain.until(": connected"),
+      ]);
+      const otherWrite = vi.spyOn(other.res.raw.res, "write");
+      const plainWrite = vi.spyOn(plain.res.raw.res, "write");
+      const frames = readFileSync(
+        resolve(import.meta.dirname, `fixtures/map/${vendor}.jsonl`),
+        "utf8",
+      )
+        .trim()
+        .split("\n");
+      appendFileSync(transcriptPath, `${frames[0]}\n${frames[1]}\n`);
+      bus.emit("boards");
+      await selected.until('"type":"call.end"');
+      const deltas = selected
+        .text()
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)))
+        .filter((d) => d.seq !== undefined);
+      expect(deltas.map((d) => [d.seq, d.type])).toEqual([
+        [1, "call.start"],
+        [2, "edit"],
+        [3, "call.end"],
+      ]);
+      expect(deltas[0]).toMatchObject({
+        seat: "guido-1",
+        tool: "Edit",
+        files: ["file.ts"],
+        writeTok: 3,
+      });
+      expect(deltas[2]).toMatchObject({
+        seat: "guido-1",
+        files: ["file.ts"],
+        error: false,
+        refused: false,
+      });
+      for (const writes of [otherWrite, plainWrite]) {
+        expect(writes.mock.calls.some(([chunk]) => String(chunk).includes("event: map"))).toBe(
+          false,
+        );
+        expect(
+          writes.mock.calls.some(([chunk]) => String(chunk).includes('"topic":"boards"')),
+        ).toBe(true);
+      }
+      for (const client of [selected, other, plain]) client.res.raw.res.emit("close");
+    },
+  );
+
+  it.each(["cleared", "reassigned"] as const)(
+    "finishes the previous run's calls after its seat is %s",
+    async (transition) => {
+      withCrew();
+      const transcriptPath = join(dir, "previous-map.jsonl");
+      const frames = readFileSync(resolve(import.meta.dirname, "fixtures/map/claude.jsonl"), "utf8")
+        .trim()
+        .split("\n");
+      writeFileSync(transcriptPath, `${frames[0]}\n`);
+      store.upsertRun(run({ id: "previous-map", agentId: "guido-1", transcriptPath }));
+      const session = {
+        seatId: "guido-1",
+        runId: "previous-map",
+        cliSessionId: null,
+        state: "running" as const,
+        reason: null,
+        worktree: dir,
+        updatedAt: NOW,
+      };
+      store.setSeatSession(session);
+      const client = await open("/api/stream?map=shop-app");
+      await client.until('"type":"call.start"');
+      store.setSeatSession({
+        ...session,
+        runId: transition === "cleared" ? null : "next-map",
+        worktree: null,
+      });
+      appendFileSync(transcriptPath, `${frames[1]}\n`);
+      const write = vi.spyOn(client.res.raw.res, "write");
+      try {
+        await vi.waitFor(
+          () => {
+            expect(
+              write.mock.calls.some(([chunk]) => String(chunk).includes('"type":"call.end"')),
+            ).toBe(true);
+          },
+          { timeout: 2000 },
+        );
+      } finally {
+        client.res.raw.res.emit("close");
+      }
+    },
+  );
 
   it("emits event: changed with the topic, sends heartbeats, and cleans up on close", async () => {
     const s = await open();

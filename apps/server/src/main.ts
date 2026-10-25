@@ -355,7 +355,34 @@ export async function main(): Promise<void> {
     log: (line) => log(`crew: ${line}`),
   });
 
+  const mapRing = new CallRing(() => {
+    const seats = new Set(
+      configuredAgents(config)
+        .filter((a) => a.kind === "crew")
+        .map((a) => a.id),
+    );
+    return store.runsActiveSince(Date.now() - 15 * 60_000).flatMap((run): RingSource[] => {
+      if (!seats.has(run.agentId)) return [];
+      const session = store.seatSession(run.agentId);
+      const cwd =
+        run.loop?.aside?.worktree ?? (session?.runId === run.id ? session.worktree : null);
+      return cwd
+        ? [
+            {
+              id: run.id,
+              seat: run.agentId,
+              repoId: run.repoId,
+              cwd,
+              transcriptPath: run.transcriptPath,
+              vendor: run.vendor,
+              current: session?.runId === run.id,
+            },
+          ]
+        : [];
+    });
+  });
   const app = buildApp({
+    mapRing,
     operatorToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,
@@ -385,31 +412,6 @@ export async function main(): Promise<void> {
   });
   log = (line) => app.log.warn(line);
   for (const line of early.splice(0)) log(line);
-  const mapRing = new CallRing(() => {
-    const seats = new Set(
-      configuredAgents(config)
-        .filter((a) => a.kind === "crew")
-        .map((a) => a.id),
-    );
-    return store.runsActiveSince(Date.now() - 15 * 60_000).flatMap((run): RingSource[] => {
-      if (!seats.has(run.agentId)) return [];
-      const session = store.seatSession(run.agentId);
-      const cwd =
-        run.loop?.aside?.worktree ?? (session?.runId === run.id ? session.worktree : null);
-      return cwd
-        ? [
-            {
-              id: run.id,
-              seat: run.agentId,
-              repoId: run.repoId,
-              cwd,
-              transcriptPath: run.transcriptPath,
-              vendor: run.vendor,
-            },
-          ]
-        : [];
-    });
-  });
   const stopMapRing = mapRing.start();
   app.addHook("onClose", async () => stopMapRing());
   let stopDiscovery = () => {};

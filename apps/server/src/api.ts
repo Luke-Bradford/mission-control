@@ -262,6 +262,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  mapRing?: CallRing;
   config: CcConfig;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
@@ -472,6 +473,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const mapSources = new Map<string, RingSource>();
   const mapRing = new CallRing(() => {
     const sources: RingSource[] = [];
+    const recent = store.runsActiveSince(now() - 15 * 60_000);
     for (const agent of configuredAgents(config)) {
       if (agent.kind !== "crew") continue;
       const seat = store.seatSession(agent.id);
@@ -479,9 +481,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const flight = agent.seat.role === "FLIGHT";
       const runs = [
         ...new Map(
-          [...(current ? [current] : []), ...(!flight ? store.mapAsideRuns(agent.id) : [])].map(
-            (r) => [r.id, r],
-          ),
+          [
+            ...(current ? [current] : []),
+            ...(!flight
+              ? [
+                  ...store.mapAsideRuns(agent.id),
+                  ...recent.filter((r) => r.agentId === agent.id && r.repoId === agent.repoId),
+                ]
+              : []),
+          ].map((r) => [r.id, r]),
         ).values(),
       ];
       for (const run of runs) {
@@ -502,6 +510,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             transcriptPath: run.transcriptPath,
             vendor: run.vendor ?? seat?.vendor,
             turnScoped: flight,
+            current: current?.id === run.id,
           };
           sources.push(source);
           mapSources.set(id, source);
@@ -792,9 +801,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook("onReady", async () => {
     scheduleNotifications();
   });
+  app.addHook("onReady", async () => {
+    stopMapRing = mapRing.start();
+  });
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
+    stopMapRing?.();
     clearTimeout(notificationTimer);
     for (const end of [...streams]) end();
   });
@@ -1381,7 +1394,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers)
+      // Reader: apps/web/src/data.ts (Crew Activity Map modified scope; snapshot slice pending)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
+        if (!config.repos.some((r) => r.id === req.params.repoId))
+          return reply.code(404).send({ error: "unknown repo" });
+        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
+        return { seats: deps.mapRing.scopes(req.params.repoId) };
+      });
+
+      // Reader: apps/web/src/data.ts (future Crew Activity Map conflict markers; snapshot slice pending)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/conflicts",
         async (req, reply) => {
@@ -2747,7 +2768,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
-      api.get("/stream", (_req, reply) => {
+      api.get<{ Querystring: { map?: string } }>("/stream", (req, reply) => {
+        const repoId = req.query.map;
+        if (repoId !== undefined && !config.repos.some((r) => r.id === repoId))
+          return reply.code(404).send({ error: "repo not found" });
         reply.hijack();
         const res = reply.raw;
         res.writeHead(200, {
@@ -2771,11 +2795,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             send("machine");
           }, 10_000);
         });
+        // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
+        const unsubscribeMap =
+          repoId === undefined
+            ? undefined
+            : mapRing.subscribe(repoId, (delta) => {
+                res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
+              });
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
+          unsubscribeMap?.();
           streams.delete(end);
         };
         const end = () => {
