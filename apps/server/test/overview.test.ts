@@ -528,3 +528,61 @@ it("averages known disk samples, preserving missing minutes and excluding the cu
   expect(summary().machine.disk).toEqual([...Array(29).fill(null), 10]);
   expect(summary().machine.diskFreeGb).toBe(50);
 });
+
+it("counts review tickets after runs end and excludes closed tickets at bucket time", () => {
+  store.replaceBoard("repo", [
+    card(1, "In review", { updatedAt: END - 40 * MIN }),
+    card(2, "Done", { closed: true, updatedAt: END - 2 * MIN }),
+  ]);
+  store.upsertRun(run(1, { endedAt: END - 35 * MIN, status: "ok" }));
+  store.upsertRun(run(2));
+  expect(summary().kpis.inFlight.series).toEqual([...Array(28).fill(2), 1, 1]);
+});
+
+it("retains resolved operator needs in the buckets when they were open", () => {
+  const item: AttentionItem = {
+    key: "resolved-question",
+    kind: "question",
+    agentId: "seat",
+    repoId: "repo",
+    text: "?",
+    at: END - 3 * MIN,
+    tool: null,
+    url: null,
+    escalationId: null,
+    ticket: null,
+    acked: false,
+    owner: OWNER_OPERATOR,
+  };
+  overviewSummary(store, END - MIN, { ...scope, attention: [item] });
+  overviewSummary(store, END, scope);
+  expect(summary().kpis.needsYou).toEqual({
+    count: 0,
+    overHour: 0,
+    series: [...Array(27).fill(0), 1, 1, 0],
+  });
+});
+
+it("uses a question's recorded answer time between overview reads", () => {
+  const id = store.addQuestion({ agentId: "seat", runId: "run-1", text: "?", at: END - 4 * MIN });
+  overviewSummary(store, END - 3 * MIN, {
+    ...scope,
+    attention: [
+      {
+        key: `ask:${id}`,
+        kind: "question",
+        agentId: "seat",
+        repoId: "repo",
+        text: "?",
+        at: END - 4 * MIN,
+        tool: null,
+        url: null,
+        escalationId: null,
+        ticket: null,
+        acked: false,
+      },
+    ],
+  });
+  store.answerQuestions("seat", END - 2 * MIN);
+  expect(summary().kpis.needsYou.series).toEqual([...Array(26).fill(0), 1, 0, 0, 0]);
+});

@@ -45,7 +45,7 @@ export interface OverviewScope {
   attention: readonly AttentionItem[];
 }
 
-/** Store-only aggregation; the caller supplies configuration and the derived attention view. */
+/** Aggregates store data and retains derived attention episodes for minute history. */
 export function overviewSummary(store: Store, now: number, scope: OverviewScope): OverviewSummary {
   const repos = new Set(scope.repoIds);
   const end = Math.floor(now / MINUTE_MS) * MINUTE_MS;
@@ -242,23 +242,34 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
       (i.repoId === null || repos.has(i.repoId)) &&
       i.at <= now,
   );
-  // Interval counts use retained runs; board-only review and resolved attention have no history.
   const minuteEnds = Array.from({ length: MINUTES }, (_, i) => since + (i + 1) * MINUTE_MS);
-  const flightSeries = minuteEnds.map(
-    (at) =>
-      new Set(
-        runs
-          .filter(
-            (r) =>
-              pipelineRepos.has(r.repoId) &&
-              r.ticket !== null &&
-              r.reviewId == null &&
-              r.startedAt < at &&
-              endOf(r, now) > at - MINUTE_MS,
-          )
-          .map((r) => r.ticket),
-      ).size,
-  );
+  const moves = store.boardMoves(0).filter((m) => m.state === "done");
+  const boards = [...pipelineRepos].flatMap((repoId) => store.board(repoId));
+  const flightSeries = minuteEnds.map((end) => {
+    const at = end - 1;
+    const tickets = new Set<string>();
+    for (const run of runs) {
+      if (!pipelineRepos.has(run.repoId) || run.ticket === null || run.reviewId != null) continue;
+      const item = boards.find((b) => `${b.repoId}#${b.issueNumber}` === run.ticket);
+      if (item?.closed && item.updatedAt <= at) continue;
+      if (
+        run.startedAt <= at &&
+        endOf(run, now) > at &&
+        ((run.loop?.merging && run.loop.phase !== "done") ||
+          ["working", "parked", "ci", "review"].includes(run.loop?.phase ?? ""))
+      )
+        tickets.add(run.ticket);
+    }
+    for (const item of boards) {
+      if (item.createdAt > at || (item.closed && item.updatedAt <= at)) continue;
+      const move = moves.findLast(
+        (m) => m.repoId === item.repoId && m.issue === item.issueNumber && m.at <= at,
+      );
+      const column = move?.column ?? (item.updatedAt <= at ? hudColumnOf(item) : null);
+      if (column === "In review") tickets.add(`${item.repoId}#${item.issueNumber}`);
+    }
+    return tickets.size;
+  });
   const ciSeries = minuteEnds.map((at) => {
     const outcomes = ci.filter((e) => e.at >= at - DAY_MS && e.at < at);
     const pass = outcomes.filter((e) => e.text.startsWith(CI_PASSED_EVENT_PREFIX)).length;
@@ -276,7 +287,31 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
         .map((i) => (i.doneAt as number) - (i.startAt as number)),
     ),
   );
-  const needSeries = minuteEnds.map((at) => needs.filter((i) => i.at < at).length);
+  // Keep episodes after disappearance so resolving a need cannot rewrite prior minutes.
+  // Derived items have no common resolution event; absence is observed at this request time.
+  type NeedEpisode = { key: string; openedAt: number; resolvedAt: number | null };
+  const historyKey = `overview:needs:${JSON.stringify([...scope.repoIds].sort())}`;
+  const episodes: NeedEpisode[] = JSON.parse(store.getSetting(historyKey) ?? "[]");
+  const open = new Map(episodes.filter((e) => e.resolvedAt === null).map((e) => [e.key, e]));
+  const present = new Set(needs.map((i) => i.key));
+  for (const episode of open.values()) {
+    if (!present.has(episode.key)) {
+      const question = /^ask:(\d+)$/.exec(episode.key);
+      episode.resolvedAt = question
+        ? (store.question(Number(question[1]))?.answeredAt ?? now)
+        : now;
+    }
+  }
+  for (const item of needs) {
+    if (!open.has(item.key)) episodes.push({ key: item.key, openedAt: item.at, resolvedAt: null });
+  }
+  const retained = episodes.filter((e) => e.resolvedAt === null || e.resolvedAt > since);
+  store.setSetting(historyKey, JSON.stringify(retained));
+  const needSeries = minuteEnds.map(
+    (at) =>
+      retained.filter((e) => e.openedAt < at && (e.resolvedAt === null || e.resolvedAt > at))
+        .length,
+  );
   const mergeSeries = zeros();
   for (const pr of prs) {
     if (pr.mergedAt === null) continue;

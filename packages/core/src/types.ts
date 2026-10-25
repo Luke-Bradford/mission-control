@@ -1180,7 +1180,7 @@ export interface OverviewSummary {
     tokensPerMin: { now: number; series: number[] };
     /** Minute spend buckets, using the same attribution as perHour. */
     spendToday: { usd: number; perHour: number[]; series?: number[] };
-    /** Distinct tickets with overlapping run intervals per minute; board-only review has no history. */
+    /** Distinct tickets in building, checks, review or merging at each minute end. */
     inFlight: { count: number; oldestAt: number | null; series?: number[] };
     /** Merge counts per minute, including minutes before local midnight. */
     mergedToday: { count: number; perHour: number[]; series?: number[] };
@@ -1193,7 +1193,7 @@ export interface OverviewSummary {
       avg14dMs: number | null;
       series?: (number | null)[];
     };
-    /** Currently open operator items present at each minute end; resolved items are not retained. */
+    /** Operator need episodes open at each minute end, including retained resolved episodes. */
     needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];
