@@ -83,7 +83,7 @@ export function codexSeatConfig(
 }
 
 /** Native resolution preserves symlink/.. order; only plain missing leaves may be appended. */
-function realPathOrParent(path: string): string | null {
+export function realPathOrParent(path: string): string | null {
   const missing: string[] = [];
   let parent = path;
   for (;;) {
@@ -241,7 +241,7 @@ export function codexCommandAllowed(
     const gitRead = GIT_READ_TOOLS.some((entry) => codexBashEntry(argv, entry));
     if (gitRead) {
       if (argv[1] === "diff" && argv.includes("--no-index")) return false;
-      return !pipeline || codexGitReadCommand(argv, allowedPath);
+      return (!pipeline && argv[1] !== "diff") || codexGitReadCommand(argv, allowedPath);
     }
     return !pipeline && allowed.some((entry) => codexBashEntry(argv, entry));
   });

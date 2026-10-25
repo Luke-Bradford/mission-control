@@ -189,7 +189,7 @@ describe("GUARD_RULES", () => {
       "Only repos with flight_powers: superuser may use these tools",
     );
     expect(GUARD_RULES["codex-allowlist"]).toContain("allowed commands or files");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(9);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(10);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
@@ -897,12 +897,10 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
 
   // shell text: `${WT}` is the shell's parameter expansion, not a template placeholder
   const SHELL_VAR = "$" + "{WT}";
-  const SHELL_X = "$" + "{X}";
   it.each([
     `git -C ${SHELL_VAR} status`,
     `git -C "${SHELL_VAR}" log --oneline`,
     `git -C ${SHELL_VAR} diff`,
-    `git -c "core.hooksPath=${SHELL_X}" log`,
     "{ git branch }",
     "{git remote -v}",
     "{ git remote -v }",
@@ -2193,5 +2191,65 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
       rule: "git-write",
       text: `${GUARD_RULES["git-write"]}: brace expansion`,
     });
+  });
+});
+
+describe("seat git environment", () => {
+  it.each([
+    "GIT_CONFIG_GLOBAL=x git diff",
+    "env GIT_CONFIG_COUNT=1 git log",
+    "env -i git diff",
+    "env -iu HOME git diff",
+    "env -S '-i git diff'",
+    "env -S '-u GIT_CONFIG_GLOBAL git diff'",
+    "GIT_CONFIG_GLOBAL+=x git diff",
+    "env - git diff",
+    "env -u GIT_CONFIG_GLOBAL git diff",
+    "env --unset=GIT_CONFIG_COUNT git status",
+    "env -S 'GIT_CONFIG_GLOBAL=x git diff'",
+    "builtin export GIT_CONFIG_COUNT=0; git diff",
+    "export GIT_CONFIG_GLOBAL+=x; git diff",
+    "command export GIT_CONFIG_GLOBAL=x; git diff",
+    "exec env GIT_CONFIG_COUNT=0 git diff",
+    "exec -c git diff",
+    "builtin exec -cl git diff",
+    "env -vi git diff",
+    "declare -x GIT_CONFIG_COUNT=0; git diff",
+    "typeset GIT_CONFIG_COUNT=0; git diff",
+    "readonly GIT_CONFIG_GLOBAL=x; git diff",
+    "unset GIT_CONFIG_GLOBAL; git diff",
+    "set -a GIT_CONFIG_COUNT; git diff",
+    "git -c diff.external=x diff",
+    `git -c "core.hooksPath=${"$"}{X}" log`,
+    "git --config-env=diff.external=X diff",
+    "git --git-dir=/outside diff",
+    "git --work-tree /outside status",
+    "git --exec-path=/outside log",
+    "git --namespace=x log",
+    "git diff --no-index a b",
+    "git difftool --no-index a b",
+    "GIT_CONFIG_COUNT=0 true; env SAFE=1 git diff",
+    "env -i true; env SAFE=1 git diff",
+  ])("refuses %s", (command) => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      expect(ruleOf(bash(command), { ...writer, mode })).toBe("git-env");
+    }
+  });
+  it.each([
+    "git log --oneline -5",
+    "git log --format='%h %s' -3",
+    "git show HEAD:package.json",
+    "git diff",
+    "git status",
+    "git diff HEAD~1..HEAD",
+    "git log main",
+    "git log -- apps/server",
+    "git -C apps/server log --oneline -3",
+    "git diff | head",
+    "git status --short | wc -l",
+    "git log --oneline | grep fix",
+  ])("keeps Claude reads: %s", (command) => {
+    for (const mode of ["writer", "read-only", "scratch"] as const)
+      expect(ruleOf(bash(command), { ...writer, mode })).toBe("allow");
   });
 });

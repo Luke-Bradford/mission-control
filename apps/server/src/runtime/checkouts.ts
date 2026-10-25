@@ -13,6 +13,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   branchFor,
+  CANNOT_START,
   DIFF_CUT_LINE,
   PNPM_STORE_DIR_NAME,
   REVIEW_DIFF_FILE,
@@ -25,9 +26,26 @@ import {
 } from "@mc/core";
 import { type CrewSessionConfig, managedSessionPath, realish, SEAT_ID } from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
-import { crewGit, crewGitBytes, overflowed, SAFE_CONFIG, timedOut } from "./git.ts";
+import {
+  assertSeatGitConfig,
+  crewGit,
+  crewGitBytes,
+  overflowed,
+  SAFE_CONFIG,
+  timedOut,
+} from "./git.ts";
 
 const execFileP = promisify(execFile);
+
+async function checkSeatGitConfig(path: string): Promise<void> {
+  await assertSeatGitConfig(path).catch((e: unknown) => {
+    throw new CheckoutError(
+      "worktree",
+      `${CANNOT_START}: ${e instanceof Error ? e.message : "git config check failed"}`,
+      { cause: e },
+    );
+  });
+}
 
 /** fetch, ls-remote, worktree add and remove (a whole tree written or deleted) can take over 5 s. */
 export const CREW_GIT_SLOW_MS = 120_000;
@@ -875,6 +893,7 @@ async function fetchBaseAs(
   const common = await cloneGitDir(i.checkout, i.peers);
   const inClone = (args: string[], timeoutMs?: number) =>
     crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
+  await checkSeatGitConfig(i.checkout);
   const baseSha = await fetchOriginBase(inClone);
   return { name, path, flat: join(i.worktreesRoot, name), common, inClone, baseSha };
 }
@@ -991,6 +1010,7 @@ export async function prepareReadOnlyCheckout(
         `could not create a read-only worktree for ${name}: not registered`,
       );
     }
+    await checkSeatGitConfig(path);
     await installAll(
       {
         checkout: i.checkout,
@@ -1247,6 +1267,7 @@ export async function prepareCheckout(
         { detail: path },
       );
     }
+    await checkSeatGitConfig(path);
     const status = await crewGit(
       path,
       [
@@ -1308,6 +1329,7 @@ export async function prepareCheckout(
         `could not create a worktree for ${branch}: not registered`,
       );
     }
+    await checkSeatGitConfig(path);
     await installAll(
       {
         checkout: i.checkout,
@@ -1431,6 +1453,7 @@ export async function prepareScratch(
   const common = await cloneGitDir(i.checkout, i.peers);
   const inClone = (args: string[], timeoutMs?: number) =>
     crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
+  await checkSeatGitConfig(i.checkout);
   const baseSha = await fetchOriginBase(inClone);
   if (!(await succeeds(inClone(["cat-file", "-e", `${i.sha}^{commit}`])))) {
     throw new CheckoutError("base", "the PR's head commit is not in the clone");

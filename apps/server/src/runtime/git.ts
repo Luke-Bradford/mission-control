@@ -143,3 +143,58 @@ export async function crewGitBytes(
   });
   return (await withInput(result, o.input)).stdout;
 }
+
+export class SeatGitError extends Error {}
+
+/** Only modern git honours the config isolation variables used by seats. */
+export async function assertSeatGitVersion(command = "git"): Promise<void> {
+  const { stdout } = await execFileP(command, ["--version"], {
+    timeout: GIT_TIMEOUT_MS,
+    env: gitEnv(process.env),
+  });
+  const match = /^git version (\d+)\.(\d+)(?:\.|$)/.exec(stdout.trim());
+  if (match === null || Number(match[1]) < 2 || (Number(match[1]) === 2 && Number(match[2]) < 32)) {
+    throw new SeatGitError("git ≥ 2.32 required for seat isolation");
+  }
+}
+
+/** Read common and worktree config, including includes; never echo helper values. */
+export async function assertSeatGitConfig(cwd: string): Promise<void> {
+  let output: string;
+  try {
+    ({ stdout: output } = await execFileP(
+      "git",
+      [
+        "config",
+        "--includes",
+        "--show-origin",
+        "--null",
+        "--get-regexp",
+        "^(diff\\.external|core\\.fsmonitor|(diff|filter|merge)\\..+\\.(textconv|command|clean|smudge|process|driver))$",
+      ],
+      {
+        cwd,
+        timeout: GIT_TIMEOUT_MS,
+        maxBuffer: GIT_MAX_BUFFER,
+        env: { ...gitEnv(process.env), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" },
+      },
+    ));
+  } catch (e) {
+    if ((e as { code?: unknown }).code === 1) return;
+    throw e;
+  }
+  const fields = output.split("\0");
+  const keys: string[] = [];
+  for (let i = 1; i < fields.length; i += 2) {
+    const entry = fields[i];
+    const split = entry.indexOf("\n");
+    const key = split === -1 ? entry : entry.slice(0, split);
+    const value = split === -1 ? "" : entry.slice(split + 1);
+    if (key !== "core.fsmonitor" || (value !== "" && value.toLowerCase() !== "false"))
+      keys.push(key);
+  }
+  if (keys.length > 0)
+    throw new SeatGitError(
+      `the clone's git config defines helpers: ${[...new Set(keys)].join(", ")}`,
+    );
+}

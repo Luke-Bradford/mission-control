@@ -27,6 +27,7 @@ import {
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
   CREW_DISABLED,
+  CREW_GIT_ENV,
   claimedText,
   conflictKey,
   conflictText,
@@ -74,6 +75,7 @@ import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
+import * as seatGit from "../src/runtime/git.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -592,7 +594,9 @@ describe("startRun", () => {
     await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const env = recorded()[0].env as Record<string, string>;
+    expect(env).toMatchObject(CREW_GIT_ENV);
     const allowed = new Set([
+      ...Object.keys(CREW_GIT_ENV),
       "HOME",
       "PATH",
       "USER",
@@ -1194,6 +1198,22 @@ describe("startRun", () => {
     expect(e).toBeInstanceOf(CheckoutError);
     expect(store.seatSession("guido-1")).toBeNull();
     expect(recorded()).toEqual([]);
+  });
+
+  it("refuses seats with a clear git version isolation reason", async () => {
+    const probe = vi
+      .spyOn(seatGit, "assertSeatGitVersion")
+      .mockRejectedValue(new seatGit.SeatGitError("git ≥ 2.32 required for seat isolation"));
+    try {
+      const { sup } = make();
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.message).toBe(`${CANNOT_START}: git ≥ 2.32 required for seat isolation`);
+      expect(store.seatSession("guido-1")).toMatchObject({ state: "error", reason: e.message });
+      expect(recorded()).toEqual([]);
+    } finally {
+      probe.mockRestore();
+    }
   });
 
   it("fails the start when the CLI cannot be spawned", async () => {

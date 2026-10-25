@@ -8,6 +8,7 @@ import { CODEX_SHELL, type CrewMode } from "./runtime.ts";
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
   "codex-allowlist": "The Codex request is outside the seat’s allowed commands or files",
+  "git-env": "Git reads must keep the seat’s isolated environment and stay in its worktree",
   "git-write":
     "git writes only through the mc commit tool; report with mc report_evidence and Mission Control pushes and opens the PR",
   "github-write":
@@ -76,6 +77,8 @@ export interface GuardContext {
   fullSuite: readonly string[];
   /** Extra role grants; FLIGHT shares sync_main with writers through its own tool. */
   mcTools?: readonly string[];
+  /** Resolve each segment’s git paths against the seat worktree. */
+  gitPathAllowed?: (path: string, directories: readonly string[]) => boolean;
 }
 
 export type GuardVerdict =
@@ -346,7 +349,8 @@ const UNREADABLE_SCRIPT = "\0unreadable-shell-script";
 const STDIN_SCRIPT = "\0stdin-shell-script";
 /** A pseudo-program for a line the tokenizer could not fully read; the guard denies it. */
 const UNREADABLE_LINE = "\0unreadable-line";
-const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const GIT_ENV_OVERRIDE = "\0git-env";
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 
 /** One command a line would run: its argv, and whether something runs it in the background. */
 interface Cmd {
@@ -609,7 +613,10 @@ class Reader {
     for (let i = from; i < s.length; i++) {
       const c = s.charAt(i);
       const next = s.charAt(i + 1);
-      if (this.walk.codex && ("$`*?[]~{}()".includes(c) || (c === "=" && word === null)))
+      if (
+        this.walk.codex &&
+        ("$`*?[]{}()".includes(c) || ((c === "=" || c === "~") && word === null))
+      )
         throw new Unreadable();
       if (c === "'") {
         const end = s.indexOf("'", i + 1);
@@ -913,6 +920,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
   if (walk.codex) return [{ argv, background, braces: braces.includes(true), piped: seg.piped }];
   const words = [...argv];
   let at = 0;
+  let gitEnv = false;
   let bg = background;
   // `… | xargs sh`: xargs takes the stdin; the shell gets file operands
   let viaXargs = false;
@@ -921,6 +929,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     const head = words[at];
     if (head === undefined) break;
     if (ASSIGNMENT.test(head)) {
+      if (/^GIT_[A-Za-z0-9_]*\+?=/.test(head)) gitEnv = true;
       at++;
       continue;
     }
@@ -945,6 +954,21 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
         const opt = words[at] ?? "";
         at++;
         if (opt === "--") break;
+        const valueOption = clusterValue(opt, spec.valued);
+        const flags =
+          valueOption === null ? opt : opt.slice(0, opt.length - valueOption.inline.length);
+        if (base === "exec" && clusterHas(flags, "c")) gitEnv = true;
+        if (base === "env") {
+          if (
+            opt === "-" ||
+            opt === "--ignore-environment" ||
+            clusterHas(flags, "i") ||
+            /^--unset=GIT_/.test(opt) ||
+            ((opt === "-u" || opt === "--unset") && words[at]?.startsWith("GIT_")) ||
+            (valueOption?.letter === "u" && valueOption.inline.startsWith("GIT_"))
+          )
+            gitEnv = true;
+        }
         const split = base === "env" ? ENV_SPLIT.exec(opt) : null;
         if (spec.valued.includes(opt)) {
           if (split !== null && words[at] !== undefined) scripts.push(words[at] ?? "");
@@ -965,7 +989,8 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
       if (base === "coproc" && COMPOUND_START.has(words[at + 1] ?? "")) at++;
     } else break;
   }
-  const extra = scripts.flatMap((s) => commands(s, walk, depth + 1, bg, inScript(mux)));
+  const extra = scripts.flatMap((s) => commands(`env ${s}`, walk, depth + 1, bg, inScript(mux)));
+  if (gitEnv) extra.push({ argv: [GIT_ENV_OVERRIDE], background: bg });
   const program = words[at];
   if (program === undefined) return extra;
   const name = baseName(program);
@@ -1064,7 +1089,9 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
  * `pnpm/npm/yarn exec|dlx|x` every suffix is.
  */
 export function splitCommands(cmd: string): string[][] {
-  return lineCommands(cmd, newWalk()).map((c) => c.argv);
+  return lineCommands(cmd, newWalk())
+    .filter((c) => c.argv[0] !== GIT_ENV_OVERRIDE)
+    .map((c) => c.argv);
 }
 
 const newWalk = (): Walk => ({ lineBackground: false, budget: WORD_BUDGET });
@@ -1542,7 +1569,7 @@ export function codexGitReadCommand(
     if (!paths && word === "--") {
       paths = true;
     } else if (!paths && word.startsWith("-")) {
-      if (spec.flags.includes(word)) {
+      if (spec.flags.includes(word) || (argv[1] === "log" && /^-\d+$/.test(word))) {
         continue;
       }
       const option = codexReadOption(word, spec);
@@ -1627,6 +1654,7 @@ const GIT_OPTIONS_WITH_VALUE = new Set([
 function gitSubcommand(args: readonly string[]): { sub: string; rest: string[] } | null {
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? "";
+    if (a.startsWith("-C") && a !== "-C") continue;
     if (GIT_OPTIONS_WITH_VALUE.has(a)) i++;
     else if (!a.startsWith("-")) return { sub: a, rest: args.slice(i + 1) };
   }
@@ -1850,6 +1878,7 @@ export function guardDecision(
   if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
   let backgroundSuite = false;
+  let gitEnvDenied = false;
   const walk = newWalk();
   for (const { argv, background, braces } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
@@ -1863,11 +1892,77 @@ export function guardDecision(
     if (program === UNREADABLE_SCRIPT) return deny("git-write", "shell -c");
     if (program === STDIN_SCRIPT) return deny("git-write", "shell reading stdin");
     if (program === BRACE_WORD) return deny("git-write", "brace expansion");
+    if (
+      program === GIT_ENV_OVERRIDE ||
+      ((["export", "declare", "typeset", "readonly", "unset"].includes(program) ||
+        (program === "set" && args.includes("-a"))) &&
+        args.some((a) => /^GIT_[A-Za-z0-9_]*(?:\+?=|$)/.test(a)))
+    )
+      gitEnvDenied = true;
     if (program === "git") {
       const g = gitSubcommand(args);
+      const directories: string[] = [];
+      const prefix = g === null ? args : args.slice(0, args.length - g.rest.length - 1);
+      for (let i = 0; i < prefix.length; i++) {
+        const arg = prefix[i];
+        if (arg === "-C" || arg.startsWith("-C")) {
+          const path = arg === "-C" ? prefix[++i] : arg.slice(2);
+          if (
+            path === undefined ||
+            (path !== "" && ctx.gitPathAllowed?.(path, directories) === false)
+          )
+            return deny("git-env", "git directory outside worktree");
+          if (path !== "") directories.push(path);
+        }
+      }
+      if (g?.sub === "diff" && ctx.gitPathAllowed) {
+        let paths = false;
+        for (let i = 0; i < g.rest.length; i++) {
+          const word = g.rest[i];
+          if (!paths && word === "--") {
+            paths = true;
+            continue;
+          }
+          if (!paths && word.startsWith("-")) {
+            if (
+              [
+                "-U",
+                "--unified",
+                "--diff-filter",
+                "--stat-width",
+                "--stat-name-width",
+                "--stat-count",
+                "--src-prefix",
+                "--dst-prefix",
+                "--line-prefix",
+                "-S",
+                "-G",
+                "--word-diff-regex",
+                "--diff-algorithm",
+                "--anchored",
+                "-O",
+              ].includes(word)
+            )
+              i++;
+            continue;
+          }
+          if (!ctx.gitPathAllowed(word, directories))
+            return deny("git-env", "git diff path outside worktree");
+        }
+      }
+      if (g?.sub === "difftool" && g.rest.includes("--no-index"))
+        return deny("git-env", "git --no-index");
       if (g !== null && !gitReadOnly(g.sub, g.rest)) {
         return deny("git-write", GIT_KNOWN.has(g.sub) ? `git ${g.sub}` : "git");
       }
+      const global = g === null ? args : args.slice(0, args.length - g.rest.length - 1);
+      if (
+        global.some((a) =>
+          /^-c|^--(?:config-env|git-dir|work-tree|exec-path|namespace)(?:=|$)/.test(a),
+        ) ||
+        (g !== null && ["diff", "difftool"].includes(g.sub) && g.rest.includes("--no-index"))
+      )
+        return deny("git-env", "git environment or path override");
     } else if (program === "gh") {
       if (!ghReadOnly(args)) {
         return deny("github-write", ghText(args));
@@ -1887,6 +1982,7 @@ export function guardDecision(
       lock ??= suite;
     }
   }
+  if (gitEnvDenied) return deny("git-env", "git environment override");
   if (lock === null) return { kind: "allow" };
   // A suite in the background returns at once while it keeps running: it would leave the lock early.
   if (backgroundSuite || walk.lineBackground) {
