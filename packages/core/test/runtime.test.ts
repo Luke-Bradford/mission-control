@@ -781,6 +781,24 @@ describe("crew sandbox and scoped edits", () => {
     }
   });
 
+  it("keeps a checkout and both git dirs under /tmp readable in every mode", () => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      for (const parent of ["/tmp", "/private/tmp"]) {
+        const sandbox = {
+          ...base.sandbox,
+          tempRoot: `${parent}/mc-own-run`,
+          cwd: `${parent}/crew/worktree`,
+          gitCommonDir: `${parent}/crew/clone/.git`,
+          worktreeGitDir: `${parent}/crew/clone/.git/worktrees/seat`,
+        };
+        const f = JSON.parse(crewSandboxSettings(sandbox, mode, base.hook)).sandbox.filesystem;
+        for (const path of [sandbox.cwd, sandbox.gitCommonDir, sandbox.worktreeGitDir]) {
+          expect(f.allowRead).toContain(path);
+        }
+      }
+    }
+  });
+
   it("isolates the run temp root from the operator's Claude sessions in every mode", () => {
     for (const mode of ["writer", "read-only", "scratch"] as const) {
       const tempRoot = "/tmp/mc-seat-test";

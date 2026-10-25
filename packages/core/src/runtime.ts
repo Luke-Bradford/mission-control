@@ -896,7 +896,16 @@ export function crewSandboxSettings(i: CrewSandboxInput, mode: CrewMode, hook: C
         // config.worktree all fail; git reads and the full suite still work). That also covers
         // other seats' refs and objects (#31 R19, R24) and every file inside either git dir.
         allowWrite: i.tempRoot === undefined ? [] : [i.tempRoot],
-        ...(i.tempRoot === undefined ? {} : { allowRead: [i.tempRoot] }),
+        ...(i.tempRoot === undefined
+          ? {}
+          : {
+              allowRead: [
+                i.tempRoot,
+                ...[i.cwd, i.gitCommonDir, i.worktreeGitDir].filter((path) =>
+                  tempReadDenies.some((parent) => path.startsWith(`${parent}/`)),
+                ),
+              ],
+            }),
         // The worktree's `.git` pointer (a writer's worktree is otherwise writable), which
         // rewriting would send the host's own git calls elsewhere; the clone's whole git dir; and
         // the worktree's own git dir (inside it, named so the grant reads plainly). A read-only

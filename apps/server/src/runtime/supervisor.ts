@@ -1311,7 +1311,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
             writePrivate(
               join(home, "config.toml"),
-              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp),
+              // Codex uses more-specific grants for the seat's temp root, worktree and
+              // git dirs. Close the shared parent before those grants, including
+              // future sibling runs, without feeding an ancestor deny to the
+              // config builder's validation of the private temp directory.
+              codexSeatConfig(sandbox, def.mode, `${hub}${MCP_PATH}`, tmp).replace(
+                '":root"="read"',
+                [
+                  '":root"="read"',
+                  ...[...new Set([dirname(tmp), "/tmp", "/private/tmp"])].map(
+                    (parent) => `${JSON.stringify(parent)}="deny"`,
+                  ),
+                ].join("\n"),
+              ),
             );
             writePrivate(join(home, "auth.json"), auth);
           },

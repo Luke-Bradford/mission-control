@@ -2211,6 +2211,10 @@ import(${JSON.stringify(fixture)});
       expect(statSync(join(home, name)).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(home, "auth.json"), "utf8")).toBe('{"fake":"account"}');
     expect(readFileSync(join(home, "config.toml"), "utf8")).toContain("shell_snapshot = false");
+    const config = readFileSync(join(home, "config.toml"), "utf8");
+    expect(config).toContain('"/tmp"="deny"');
+    expect(config).toContain('"/private/tmp"="deny"');
+    expect(config).toContain(`${JSON.stringify(spawn.env.TMPDIR)}="write"`);
     expect(spawn.env.TMPDIR).not.toContain("/claude-");
     expect(statSync(spawn.env.TMPDIR).mode & 0o777).toBe(0o700);
     for (const prefix of ["/tmp", "/private/tmp"]) {
