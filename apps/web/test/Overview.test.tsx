@@ -1805,7 +1805,119 @@ describe("Account quota panel", () => {
 });
 
 describe("Activity panel", () => {
-  it("with 120 rows, a replaced newest row scrolls the list to the bottom", async () => {
+  it("keeps DOM rows and tie order across a full reload, and adds only a new delta row", async () => {
+    const base = {
+      at: NOW,
+      who: "studio",
+      kind: "commit" as const,
+      ref: null,
+      url: null,
+      status: null,
+      prs: [],
+      summary: null,
+    };
+    let current: ActivityRow[] = [
+      { ...base, text: "alpha" },
+      { ...base, text: "beta" },
+    ];
+    stub({
+      activityNow: () => current,
+      extra: {
+        [`/api/activity?since=${NOW - 1}`]: () => ({ status: 200, body: current }),
+      },
+    });
+    const { container } = render(<Overview />);
+    await screen.findByText("alpha");
+    const nodes = () => [...container.querySelectorAll("#actList .arow")];
+    const before = nodes();
+    current = [...current].reverse();
+    act(() => hub.refetchAll());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(nodes()).toHaveLength(before.length);
+    before.forEach((node, i) => {
+      expect(nodes()[i]).toBe(node);
+    });
+    current = [{ ...base, at: NOW + 1, text: "new arrival" }, ...current];
+    act(() => hub.refetch("/api/activity"));
+    await screen.findByText("new arrival");
+    before.forEach((node, i) => {
+      expect(nodes()[i + 1]).toBe(node);
+    });
+    expect(nodes()).toHaveLength(3);
+  });
+
+  it("holds new rows while scrolled down and shows N new without moving the reader", async () => {
+    const base = {
+      at: NOW,
+      who: "studio",
+      kind: "commit" as const,
+      ref: null,
+      url: null,
+      status: null,
+      prs: [],
+      summary: null,
+    };
+    let current: ActivityRow[] = [{ ...base, text: "reading" }];
+    stub({ activityNow: () => current });
+    const { container } = render(<Overview />);
+    await screen.findByText("reading");
+    const list = container.querySelector("#actList") as HTMLElement;
+    const node = list.querySelector(".arow");
+    list.scrollTop = 80;
+    fireEvent.scroll(list);
+    current = [{ ...base, at: NOW + 1, text: "waiting arrival" }, ...current];
+    act(() => hub.refetchAll());
+    await screen.findByText("1 new");
+    expect(list.scrollTop).toBe(80);
+    expect(list.querySelector(".arow")).toBe(node);
+    expect(screen.queryByText("waiting arrival")).toBeNull();
+    current = [{ ...base, at: NOW + 2, text: "second arrival" }, ...current];
+    act(() => hub.refetchAll());
+    await screen.findByText("2 new");
+    expect(list.scrollTop).toBe(80);
+    expect(list.querySelector(".arow")).toBe(node);
+    fireEvent.click(screen.getByText("2 new"));
+    expect(await screen.findByText("waiting arrival")).toBeTruthy();
+    expect(screen.getByText("second arrival")).toBeTruthy();
+    expect(list.scrollTop).toBe(0);
+  });
+
+  it("updates relative time in place without replacing or moving the row", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    stub({
+      activity: [
+        {
+          at: NOW - MIN,
+          who: "studio",
+          kind: "commit",
+          text: "clock row",
+          ref: null,
+          url: null,
+          status: null,
+          prs: [],
+          summary: null,
+        },
+      ],
+    });
+    const { container } = render(<Overview />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const row = container.querySelector("#actList .arow");
+    const time = row?.querySelector(".t");
+    expect(time?.getAttribute("title")).toBe("1 min ago");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(MIN);
+    });
+    expect(time?.getAttribute("title")).toBe("2 min ago");
+    expect(container.querySelector("#actList .arow")).toBe(row);
+  });
+
+  it("with 120 rows, a new arrival stays at the top within the row limit", async () => {
     const base: ActivityRow[] = Array.from({ length: 120 }, (_, i) => ({
       at: NOW - i * MIN,
       who: "studio",
@@ -1841,7 +1953,7 @@ describe("Activity panel", () => {
       hub.refetch("/api/activity");
     });
     await screen.findByText("newest event");
-    expect(top).toBe(5000);
+    expect(top).toBe(0);
     expect(container.querySelectorAll("#actList .arow").length).toBe(120);
   });
 
@@ -1902,7 +2014,7 @@ describe("Activity panel", () => {
     error.mockRestore();
   });
 
-  it("lists oldest first with glyphs; failed ends and collectors are red", async () => {
+  it("lists newest first with glyphs; failed ends and collectors are red", async () => {
     stub({ rows, activity: events });
     const { container } = render(<Overview />);
     const act_ = container.querySelector("#actP") as HTMLElement;
@@ -1914,17 +2026,17 @@ describe("Activity panel", () => {
           `${r.querySelector(".log-who")?.textContent} ${r.querySelector(".txt")?.textContent}`,
       ),
     ).toEqual([
-      "studio studio run",
-      "github:shop-app github failed",
-      "shop-app-ta run #11 started",
       "shop-app-ta run #11 failed",
+      "shop-app-ta run #11 started",
+      "github:shop-app github failed",
+      "studio studio run",
     ]);
-    expect(arows[0]?.querySelector(".g")?.textContent).toBe("→");
-    expect(arows[1]?.querySelector(".g")?.textContent).toBe("◆");
-    expect(arows[1]?.querySelector(".g")?.className).toContain("crit-t");
-    expect(arows[3]?.querySelector(".g")?.className).toContain("crit-t");
-    expect(arows[2]?.querySelector(".g")?.className).not.toContain("crit-t");
-    expect(arows[2]?.textContent).toContain("shop-app #3349");
+    expect(arows[3]?.querySelector(".g")?.textContent).toBe("→");
+    expect(arows[2]?.querySelector(".g")?.textContent).toBe("◆");
+    expect(arows[2]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(arows[0]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(arows[1]?.querySelector(".g")?.className).not.toContain("crit-t");
+    expect(arows[1]?.textContent).toContain("shop-app #3349");
     expect(act_.textContent).toContain("high-level steps from every agent");
   });
 
@@ -2054,12 +2166,12 @@ describe("Activity panel", () => {
     expect(prLink.closest(".txt")?.textContent).toContain("PR #41 opened: Quote cache");
     const arows = [...act_.querySelectorAll<HTMLElement>(".arow")];
     const glyphs = arows.map((r) => r.querySelector(".g")?.textContent);
-    expect(glyphs).toEqual(["⇡", "◆", "◆"]);
-    expect(arows[0]?.querySelector(".g")?.className).not.toContain("crit-t");
+    expect(glyphs).toEqual(["◆", "◆", "⇡"]);
+    expect(arows[2]?.querySelector(".g")?.className).not.toContain("crit-t");
     expect(arows[1]?.querySelector(".g")?.className).not.toContain("crit-t");
-    expect(arows[2]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(arows[0]?.querySelector(".g")?.className).toContain("crit-t");
     expect(
-      within(arows[0] as HTMLElement).getByRole("link", { name: "shop-app #3349" }),
+      within(arows[2] as HTMLElement).getByRole("link", { name: "shop-app #3349" }),
     ).toBeTruthy();
   });
 
@@ -2097,11 +2209,11 @@ describe("Activity panel", () => {
     await within(act_).findByText(/move failed: HTTP 502/);
     const arows = [...act_.querySelectorAll<HTMLElement>(".arow")];
     expect(arows).toHaveLength(2);
-    // oldest first: the failed move, then the successful one
-    expect(arows[0]?.querySelector(".g")?.className).toContain("crit-t");
-    expect(arows[0]?.querySelector(".txt .crit-t")).not.toBeNull();
-    expect(arows[1]?.querySelector(".g")?.className).not.toContain("crit-t");
-    expect(arows[1]?.querySelector(".txt .crit-t")).toBeNull();
+    // Newest first: the successful move, then the failed one.
+    expect(arows[1]?.querySelector(".g")?.className).toContain("crit-t");
+    expect(arows[1]?.querySelector(".txt .crit-t")).not.toBeNull();
+    expect(arows[0]?.querySelector(".g")?.className).not.toContain("crit-t");
+    expect(arows[0]?.querySelector(".txt .crit-t")).toBeNull();
   });
 
   describe("refs in the server's text", () => {
@@ -2137,8 +2249,8 @@ describe("Activity panel", () => {
             `${r.querySelector(".log-who")?.textContent} ${r.querySelector(".txt")?.textContent}`,
         ),
       ).toEqual([
-        "shop-app-ta ok · shop-app #3349 · ≈$1.20 · Cached shop-app#3349 quotes",
         "shop-app-ta started on shop-app #3349",
+        "shop-app-ta ok · shop-app #3349 · ≈$1.20 · Cached shop-app#3349 quotes",
       ]);
       for (const r of arows) {
         const links = within(r).getAllByRole("link", { name: "shop-app #3349" });
@@ -2173,9 +2285,9 @@ describe("Activity panel", () => {
           .getAttribute("href"),
       );
       expect(hrefs).toEqual([
-        "https://github.com/octo-org/shop-app/pull/5",
-        "https://github.com/octo-org/site-builder/pull/41",
         "https://github.com/octo-org/site-builder/pull/9",
+        "https://github.com/octo-org/site-builder/pull/41",
+        "https://github.com/octo-org/shop-app/pull/5",
       ]);
     });
 
@@ -2264,7 +2376,7 @@ describe("Activity panel", () => {
     fireEvent.click(within(act_).getByRole("button", { name: "Messages" }));
     const msgs = [...act_.querySelectorAll<HTMLElement>(".arow.k-comms")];
     expect(act_.querySelectorAll(".arow").length).toBe(2);
-    const [mc, you] = msgs as [HTMLElement, HTMLElement];
+    const [you, mc] = msgs as [HTMLElement, HTMLElement];
     for (const part of ["Mission Control", "→", "guido-1", "CI failed on lint"]) {
       expect(mc.textContent, part).toContain(part);
     }

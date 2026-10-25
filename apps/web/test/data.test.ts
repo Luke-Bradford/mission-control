@@ -484,6 +484,31 @@ describe("activity reconciliation", () => {
     return fetch;
   };
 
+  it("keeps cached timestamp ties when a delta only contains the new arrival", async () => {
+    const at = Date.now();
+    const first = row(at, "alpha");
+    const second = row(at, "beta");
+    const added = row(at + 1, "new");
+    await load([first, second], [added]);
+    const before = snapshot() as unknown[];
+    hub.refetchTopic("agents");
+    await flush();
+    expect(snapshot()).toEqual([added, first, second]);
+    expect((snapshot() as unknown[])[1]).toBe(before[0]);
+    expect((snapshot() as unknown[])[2]).toBe(before[1]);
+  });
+
+  it("reuses the cached array and rows for an unchanged full reload with reversed ties", async () => {
+    const at = Date.now();
+    const first = row(at, "alpha");
+    const second = row(at, "beta");
+    await load([first, second], [second, first]);
+    const before = snapshot();
+    hub.refetchAll();
+    await flush();
+    expect(snapshot()).toBe(before);
+  });
+
   it("updates a run-start row's live status, PRs and summary on the next full load", async () => {
     const initial = {
       ...row(Date.now() - 100, "started"),
