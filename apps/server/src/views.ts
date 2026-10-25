@@ -183,6 +183,7 @@ export function activity(
     const ticket = runTicket(r, prs);
     const base = {
       who: r.agentId,
+      runId: r.id,
       ref: ticket,
       url: null,
       status: r.status,
@@ -248,6 +249,7 @@ export function activity(
     events.push({
       ...plain,
       at: m.at,
+      runId: m.runId,
       who: store.run(m.runId)?.agentId ?? m.repoId,
       kind: "board",
       text: `${ref} → ${m.column}${failed}`,
@@ -259,6 +261,7 @@ export function activity(
     events.push({
       ...plain,
       at: e.at,
+      runId: e.runId,
       who: run?.agentId ?? e.runId,
       kind: CHECK_EVENT.test(e.text) ? "check" : "loop",
       text: e.text,
@@ -270,6 +273,7 @@ export function activity(
     events.push({
       ...plain,
       at: c.at,
+      runId: c.runId,
       who: c.agentId,
       kind: "commit",
       text: `Committed ${c.sha.slice(0, 7)}`,
@@ -279,7 +283,7 @@ export function activity(
   for (const l of store.lockRuns(since)) {
     if (!known.has(l.seatId)) continue;
     const label = lockLabel(config, l.seatId, l.command);
-    const row = { ...plain, who: l.seatId, kind: "lock" as const, ref: l.ticket };
+    const row = { ...plain, runId: l.runId, who: l.seatId, kind: "lock" as const, ref: l.ticket };
     if (l.queuedAt < l.startedAt && l.queuedAt >= since) {
       events.push({ ...row, at: l.queuedAt, text: `In line for the test lock: ${label}` });
     }
@@ -300,6 +304,7 @@ export function activity(
     events.push({
       ...plain,
       at: h.at,
+      ...(h.runId === null ? {} : { runId: h.runId }),
       who: h.agentId,
       kind: "guard",
       text: `Denied: ${h.text}`,
@@ -322,17 +327,18 @@ export function activity(
     });
   }
   // A PR is the work of the agent whose run published it, else of its repo.
-  const publisher = new Map<string, AgentId>();
+  const publisher = new Map<string, Run>();
   for (const r of store.runsOverlapping(since - ACTIVITY_WINDOW_MS, now)) {
     if (!known.has(r.agentId)) continue;
     for (const p of runPrs(config, store, r, cache)) {
-      publisher.set(`${p.repoId}#${p.number}`, r.agentId);
+      publisher.set(`${p.repoId}#${p.number}`, r);
     }
   }
   for (const repo of config.repos) {
     for (const p of store.pullRequests(repo.id)) {
-      const who = publisher.get(`${p.repoId}#${p.number}`) ?? p.repoId;
-      const row = { ...plain, who, ref: p.ticket, url: p.url };
+      const run = publisher.get(`${p.repoId}#${p.number}`);
+      const who = run?.agentId ?? p.repoId;
+      const row = { ...plain, ...(run ? { runId: run.id } : {}), who, ref: p.ticket, url: p.url };
       if (p.createdAt >= since) {
         events.push({
           ...row,

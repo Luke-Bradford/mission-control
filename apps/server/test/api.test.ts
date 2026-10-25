@@ -2826,6 +2826,7 @@ describe("activity", () => {
         status: "running",
         prs: [],
         summary: null,
+        runId: "b",
       },
       {
         at: NOW - HOUR,
@@ -2837,6 +2838,7 @@ describe("activity", () => {
         status: "ok",
         prs: [],
         summary: null,
+        runId: "a",
       },
       {
         at: NOW - 2 * HOUR,
@@ -2848,6 +2850,7 @@ describe("activity", () => {
         status: "ok",
         prs: [],
         summary: null,
+        runId: "a",
       },
       {
         at: NOW - 3 * HOUR,
@@ -2881,6 +2884,7 @@ describe("activity", () => {
         status: "failed",
         prs: [],
         summary: null,
+        runId: "c",
       },
     ] satisfies ActivityEvent[]);
   });
