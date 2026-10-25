@@ -15,6 +15,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { CODEX_APPROVAL_DECISION } from "../src/runtime/codex-wire.ts";
 import {
   endKeeper,
   HUB_ABSENT_TEXT,
@@ -492,11 +493,11 @@ describe("the hub-absent limit", () => {
 describe("parsePsLine", () => {
   it("reads ps's lstart and command", () => {
     expect(parsePsLine("Thu Oct 23 12:34:56 2026 /usr/bin/node keeper-cli.ts /x/k1\n")).toEqual({
-      startedAt: new Date(2026, 9, 23, 12, 34, 56).getTime(),
+      startedAt: Date.UTC(2026, 9, 23, 12, 34, 56),
       command: "/usr/bin/node keeper-cli.ts /x/k1",
     });
     expect(parsePsLine("  Fri Oct  3 01:02:03 2026 sleep 30")).toEqual({
-      startedAt: new Date(2026, 9, 3, 1, 2, 3).getTime(),
+      startedAt: Date.UTC(2026, 9, 3, 1, 2, 3),
       command: "sleep 30",
     });
     expect(parsePsLine("")).toBeNull();
@@ -585,6 +586,39 @@ describe("endKeeper", () => {
 });
 
 describe("Codex keeper turns and old specs", () => {
+  it("persists activity timestamps and approval decisions for replay", async () => {
+    const folder = folderFor(
+      `
+      console.log(JSON.stringify({ method: "item/started", params: { item: { id: "cmd", type: "commandExecution", command: "pwd" } } }));
+      require("node:readline").createInterface({ input: process.stdin }).on("line", () => {});
+    `,
+      { turnEnd: "codex" },
+    );
+    const k = keep(folder);
+    const c = await client(folder);
+    c.say({ t: "hello", from: 0 });
+    await until(() => expect(c.outs()).toHaveLength(1));
+    c.say({ t: "in", line: JSON.stringify({ id: 7, result: { decision: "accept" } }) });
+    c.say({
+      t: "in",
+      line: JSON.stringify({ id: 8, result: { action: "decline", content: null } }),
+    });
+    await until(() => expect(c.outs()).toHaveLength(3));
+    const recorded = lines().map((line) => JSON.parse(line));
+    expect(recorded.map((line) => line.method)).toEqual([
+      "item/started",
+      CODEX_APPROVAL_DECISION,
+      CODEX_APPROVAL_DECISION,
+    ]);
+    expect(recorded.every((line) => Number.isFinite(Date.parse(line.timestamp)))).toBe(true);
+    expect(recorded.slice(1).map((line) => line.params.decision)).toEqual(["accept", "decline"]);
+    const reattached = await client(folder);
+    reattached.say({ t: "hello", from: 0 });
+    await until(() => expect(reattached.outs()).toEqual(c.outs()));
+    reattached.say({ t: "close", graceMs: 100 });
+    await k.done;
+  });
+
   it("identifies a Codex process by its marker instead of cliSessionId", async () => {
     const marker = 'mc_run="run-identity"';
     const folder = folderFor("setInterval(() => {}, 1000);", {

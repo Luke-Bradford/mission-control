@@ -814,7 +814,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ) {
             let result: StreamCacheEntry["result"];
             try {
-              result = readTranscript(path, limit);
+              result = readTranscript(path, limit, run.vendor);
             } catch {
               return missing();
             }
@@ -867,7 +867,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             try {
               // With no messages left, only positions before the current event window
               // may be stale snapshot IDs. Future offsets must still be rejected.
-              const first = readStream(run.transcriptPath, 200).events[0];
+              const first = readStream(run.transcriptPath, 200, run.vendor).events[0];
               const boundary = first && commsPosition(`stream:${run.id}:${first.id}`);
               return boundary !== null && boundary !== undefined && p.offset < boundary.offset;
             } catch {

@@ -1,5 +1,5 @@
 import { statSync } from "node:fs";
-import { inferTicket, type Run, type RunDigest } from "@mc/core";
+import { type CrewVendor, inferTicket, type Run, type RunDigest } from "@mc/core";
 import type { AdoptedLoop } from "../config.ts";
 import type { Store } from "../store.ts";
 import { foldTranscript, type TranscriptFacts } from "../streamjson.ts";
@@ -54,6 +54,7 @@ export function foldPath(
   transcripts: Map<string, FoldState>,
   path: string,
   maxBytes?: number,
+  vendor?: CrewVendor,
 ): TranscriptFacts | null {
   let mtime: number;
   try {
@@ -72,14 +73,14 @@ export function foldPath(
       folded = false;
     }
     if (r.lines.length > 0) {
-      facts = foldTranscript(facts, r.lines, mtime);
+      facts = foldTranscript(facts, r.lines, mtime, vendor);
       folded = true;
     }
     if (r.nextOffset === offset && !r.reset) break;
     offset = r.nextOffset;
   }
   // Nothing new (or a reset to an empty file): fold no lines, as the mtime still moves the facts.
-  if (!folded) facts = foldTranscript(facts, [], mtime);
+  if (!folded) facts = foldTranscript(facts, [], mtime, vendor);
   transcripts.set(path, { facts: facts as TranscriptFacts, offset });
   return facts;
 }

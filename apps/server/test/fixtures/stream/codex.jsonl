@@ -1,0 +1,16 @@
+{"type":"mc_codex_delivery","id":"delivery-1"}
+{"method":"thread/started","params":{"thread":{"id":"thread-1","cwd":"/work","model":"gpt-5"}},"timestamp":"2026-10-24T22:47:00Z"}
+{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"inProgress"}},"timestamp":"2026-10-24T22:47:01Z"}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"msg-1","type":"agentMessage","text":"I will run the tests."}},"timestamp":"2026-10-24T22:47:02Z"}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","tokenUsage":{"total":{"inputTokens":100,"cachedInputTokens":20,"outputTokens":10},"last":{"totalTokens":110},"modelContextWindow":200000}},"timestamp":"2026-10-24T22:47:03Z"}
+{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"cmd-1","type":"commandExecution","command":"pnpm test","status":"inProgress"}},"timestamp":"2026-10-24T22:47:04Z"}
+{"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"cmd-1","command":"pnpm test"},"timestamp":"2026-10-24T22:47:05Z","id":7}
+{"method":"mc/codex/approvalDecision","params":{"requestId":7,"decision":"accept"},"timestamp":"2026-10-24T22:47:06Z"}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"cmd-1","type":"commandExecution","command":"pnpm test","aggregatedOutput":"Tests passed\n","status":"completed","exitCode":0,"durationMs":1200}},"timestamp":"2026-10-24T22:47:07Z"}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"edit-1","type":"fileChange","status":"completed","changes":[{"path":"/work/a.ts","kind":{"type":"update"},"diff":"+fixed"}]}},"timestamp":"2026-10-24T22:47:08Z"}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"mc-1","type":"mcpToolCall","server":"mc","tool":"status","arguments":{},"result":{"content":[{"type":"text","text":"Ready"}]},"status":"completed"}},"timestamp":"2026-10-24T22:47:09Z"}
+{"method":"mc/codex/approvalDecision","params":{"requestId":8,"decision":"decline"},"timestamp":"2026-10-24T22:47:10Z"}
+{"method":"turn/plan/updated","params":{"threadId":"thread-1","turnId":"turn-1","explanation":"Checking the change","plan":[{"step":"Run tests","status":"completed"}]},"timestamp":"2026-10-24T22:47:11Z"}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"msg-2","type":"agentMessage","text":"Done. Tests pass."}},"timestamp":"2026-10-24T22:47:12Z"}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","tokenUsage":{"total":{"inputTokens":150,"cachedInputTokens":30,"outputTokens":30},"last":{"totalTokens":70},"modelContextWindow":200000}},"timestamp":"2026-10-24T22:47:13Z"}
+{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","error":null}},"timestamp":"2026-10-24T22:47:14Z"}

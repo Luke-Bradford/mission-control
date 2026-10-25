@@ -1125,3 +1125,171 @@ it("retains only the newest 300 tool starts within the last hour", () => {
     Array.from({ length: 300 }, (_, i) => now - 299 + i),
   );
 });
+
+describe("Codex digest", () => {
+  const lines = readFileSync(resolve(import.meta.dirname, "fixtures/stream/codex.jsonl"), "utf8")
+    .trim()
+    .split("\n");
+  const now = Date.parse("2026-10-24T22:48:00Z");
+  it("folds tools, turns, message usage, timing and plans", () => {
+    const facts = foldTranscript(null, lines, now, "codex");
+    expect(facts).toMatchObject({
+      costUsd: null,
+      tokens: { input: 120, output: 30, cacheRead: 30, cacheCreate: 0 },
+      resultCount: 1,
+      numTurns: 1,
+      hasResult: true,
+      latestPlan: "Checking the change\n[completed] Run tests",
+    });
+    expect(facts.digest).toMatchObject({
+      toolCalls: 3,
+      turns: 1,
+      lastText: "Tests pass.",
+      liveTool: null,
+      contextWindow: 200000,
+    });
+    expect(facts.digest.tools.Bash).toMatchObject({ calls: 1, failed: 0, durationsMs: [1200] });
+    expect(facts.digest.toolStarts).toHaveLength(3);
+    expect(facts.digest.attemptUsage?.map((u) => u.tokens)).toEqual([90, 60]);
+    expect(facts.digest.minuteTokens).toEqual([[Date.parse("2026-10-24T22:47:00Z"), 150]]);
+  });
+
+  it("is incremental, replay-safe and rebuilds identically after restart", () => {
+    const whole = foldTranscript(null, lines, now);
+    expect(whole).toEqual(foldTranscript(null, lines, now, "codex"));
+    expect(whole.digest.turns).toBe(1);
+    expect(whole.digest.turnUsage).toEqual([{ input: 120, output: 30, cacheRead: 30 }]);
+    expect(whole.digest.attemptUsage?.every((u) => !u.id.includes("undefined"))).toBe(true);
+    expect(foldTranscript(null, lines.slice(0, 1), now).digest.turns).toBe(0);
+    for (let split = 1; split < lines.length; split++) {
+      const first = foldTranscript(null, lines.slice(0, split), now);
+      expect(foldTranscript(first, lines.slice(split), now)).toEqual(whole);
+    }
+    expect(foldTranscript(whole, lines, now)).toEqual(whole);
+    expect(foldTranscript(null, lines, now + 1000)).toEqual(whole);
+  });
+});
+
+it("keeps Codex cumulative token deltas in their arrival minutes across turns", () => {
+  const at = Date.parse("2026-10-24T22:47:00Z");
+  const frame = (method: string, params: object, minute: number) =>
+    JSON.stringify({ method, params, timestamp: new Date(at + minute * 60_000).toISOString() });
+  const usage = (turnId: string, input: number, output: number, minute: number) =>
+    frame(
+      "thread/tokenUsage/updated",
+      {
+        threadId: "t",
+        turnId,
+        tokenUsage: { total: { inputTokens: input, cachedInputTokens: 0, outputTokens: output } },
+      },
+      minute,
+    );
+  const first = foldTranscript(
+    null,
+    [frame("turn/started", { threadId: "t", turn: { id: "a" } }, 0), usage("a", 100, 10, 0)],
+    at,
+  );
+  const next = foldTranscript(
+    first,
+    [
+      frame("turn/completed", { threadId: "t", turn: { id: "a", status: "completed" } }, 0),
+      frame("turn/started", { threadId: "t", turn: { id: "b" } }, 1),
+      usage("b", 150, 30, 1),
+      usage("b", 150, 30, 1),
+      usage("a", 100, 10, 0),
+    ],
+    at + 60_000,
+  );
+  expect(next.digest.turns).toBe(2);
+  expect(next.digest.minuteTokens).toEqual([
+    [at, 110],
+    [at + 60_000, 70],
+  ]);
+  expect(next.digest.attemptUsage?.map((u) => u.tokens)).toEqual([110, 70]);
+  expect(first.tokens.input).toBe(100);
+});
+
+it("detects Codex initialization replies before the first notification", () => {
+  const lines = [
+    JSON.stringify({ id: 0, result: {} }),
+    JSON.stringify({
+      method: "item/completed",
+      params: { item: { id: "m", type: "agentMessage", text: "Ready to work." } },
+    }),
+  ];
+  expect(foldTranscript(null, lines, 1).digest.lastText).toBe("Ready to work.");
+  expect(foldTranscript(null, lines, 1, "claude").digest.lastText).toBeNull();
+});
+
+it("retains separate Codex model steps even when no agent message is emitted", () => {
+  const lines = [10, 20].map((outputTokens) =>
+    JSON.stringify({
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "t",
+        turnId: "a",
+        tokenUsage: {
+          total: { inputTokens: outputTokens * 10, cachedInputTokens: 0, outputTokens },
+        },
+      },
+    }),
+  );
+  const facts = foldTranscript(null, lines, 1);
+  expect(facts.digest.attemptUsage?.map((u) => u.tokens)).toEqual([110, 110]);
+  expect(foldTranscript(facts, lines, 1).digest.attemptUsage).toEqual(facts.digest.attemptUsage);
+});
+
+it("attributes usage without turnId to each thread's current turn without inventing turns", () => {
+  const turn = (threadId: string, id: string, method = "turn/started") =>
+    JSON.stringify({ method, params: { threadId, turn: { id, status: "completed" } } });
+  const usage = (threadId: string, inputTokens: number, turnId?: string) =>
+    JSON.stringify({
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId,
+        turnId,
+        tokenUsage: { total: { inputTokens, cachedInputTokens: 0, outputTokens: 0 } },
+      },
+    });
+  const unassigned = foldTranscript(null, [usage("a", 10), usage("b", 20, "unknown")], 1);
+  expect(unassigned.digest.turns).toBe(0);
+  expect(unassigned.digest.turnUsage).toEqual([]);
+  expect(unassigned.digest.attemptUsage?.every((u) => !u.id.includes("undefined"))).toBe(true);
+  const lines = [
+    turn("a", "a1"),
+    usage("a", 40),
+    turn("b", "b1"),
+    usage("b", 70),
+    turn("a", "a1", "turn/completed"),
+    usage("a", 50),
+    turn("a", "a2"),
+    usage("a", 100),
+    usage("b", 80),
+    turn("a", "a2", "turn/completed"),
+    turn("b", "b1", "turn/completed"),
+  ];
+  const whole = foldTranscript(unassigned, lines, 1);
+  expect(whole.digest.turns).toBe(3);
+  expect(whole.digest.turnUsage).toEqual([
+    { input: 40, output: 0, cacheRead: 0 },
+    { input: 60, output: 0, cacheRead: 0 },
+    { input: 50, output: 0, cacheRead: 0 },
+  ]);
+  for (let split = 1; split < lines.length; split++) {
+    expect(
+      foldTranscript(foldTranscript(unassigned, lines.slice(0, split), 1), lines.slice(split), 1),
+    ).toEqual(whole);
+  }
+  expect(foldTranscript(whole, lines, 1)).toEqual(whole);
+  expect(unassigned.digest.turns).toBe(0);
+});
+
+it("defers format inference past unknown objects for Claude as well as Codex", () => {
+  const prefix = [JSON.stringify({ type: "bookkeeping" }), "{}"];
+  const claude = JSON.stringify({
+    type: "assistant",
+    message: { id: "m", content: [{ type: "text", text: "Ready." }] },
+  });
+  const first = foldTranscript(null, prefix, 1);
+  expect(foldTranscript(first, [claude], 1)).toEqual(foldTranscript(null, [claude], 1));
+});

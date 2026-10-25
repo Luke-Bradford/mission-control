@@ -763,7 +763,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     l.lastFoldAt = Date.now();
     let facts: ReturnType<typeof foldPath> = null;
     try {
-      facts = foldPath(transcripts, l.run.transcriptPath);
+      facts = foldPath(transcripts, l.run.transcriptPath, undefined, l.run.vendor);
     } catch {
       // unreadable now: the next fold (or the backfill, once ended) reads it again
     }
@@ -1660,7 +1660,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const r: Run = { ...run };
     let facts: ReturnType<typeof foldPath> = null;
     try {
-      facts = foldPath(new Map(), run.transcriptPath);
+      facts = foldPath(new Map(), run.transcriptPath, undefined, run.vendor);
       if (facts) applyFacts(r, facts);
       store.upsertRun(r, facts !== null);
       if (facts) persistDigest(store, digests, run.id, facts.digest);
@@ -2718,7 +2718,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const ended: Run = { ...run, endedAt: at, status: "ok" };
       let facts: ReturnType<typeof foldPath> = null;
       try {
-        facts = foldPath(new Map(), run.transcriptPath);
+        facts = foldPath(new Map(), run.transcriptPath, undefined, run.vendor);
         if (facts) applyFacts(ended, facts);
       } catch {
         facts = null;
