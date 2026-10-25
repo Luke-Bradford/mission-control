@@ -453,3 +453,24 @@ export function reviewRunStep(s: ReviewRunSnapshot): ReviewRunAction | null {
   }
   return null;
 }
+
+/** The list lines RETRO put in the PR body, kept as posted. */
+export function parseMinorFindings(body: string): string[] {
+  const findings: string[] = [];
+  let inside = false;
+  for (const line of body.split(/\r?\n/)) {
+    if (line === MINOR_HEADING) {
+      inside = true;
+      continue;
+    }
+    if (inside && /^#{1,2}\s/.test(line)) inside = false;
+    if (inside && line.startsWith("- ")) findings.push(line);
+  }
+  return findings;
+}
+
+export const minorIssueTitle = (pr: number): string => `Tech debt: minor findings from #${pr}`;
+export const minorIssueBody = (pr: number, findings: readonly string[]): string =>
+  `Minor findings from #${pr}.\n\n${findings.join("\n")}\n`;
+export const minorIssueFailedText = (pr: number, why: string): string =>
+  `PR #${pr}: minor findings could not be filed in Backlog (${why}); collect them from the PR body.`;
