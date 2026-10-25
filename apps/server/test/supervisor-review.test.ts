@@ -351,6 +351,34 @@ describe("startWatch", () => {
     seats: [{ call: "GUIDO-1", area: ["apps/**"] }],
   });
 
+  it("refuses a watch paused after checkout preparation without launching", async () => {
+    const rolesDir = join(dir, "pause-roles");
+    mkdirSync(rolesDir);
+    writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT\n");
+    const { sup } = make({
+      rolesDir,
+      extraSeat: FLIGHT,
+      cliVersion: async () => {
+        store.setSetting(
+          "crew.paused",
+          JSON.stringify({
+            seats: ["flight-1"],
+            reason: "Save tokens",
+            at: 1,
+            by: "operator",
+          }),
+        );
+        return null;
+      },
+    });
+    sup.start();
+    const error = await refusal(sup.startWatch("flight-1"));
+    expect(error.status).toBe(409);
+    expect(error.message).toBe("Paused: Save tokens");
+    expect(recorded()).toEqual([]);
+    expect(store.seatSession("flight-1")?.state).toBe("idle");
+  });
+
   it("sends a brief that lists the session's developer seats and their areas", async () => {
     const { sup } = flightMake();
     sup.start();
@@ -539,6 +567,32 @@ describe("startReview", () => {
     }
     return { reviewId, sha, fork, author };
   }
+
+  it("refuses a review paused during fetching with a retryable error", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({
+      scratchRetro: true,
+      fetchTicket: async () => {
+        store.setSetting(
+          "crew.paused",
+          JSON.stringify({
+            seats: ["retro"],
+            reason: "Save tokens",
+            at: 1,
+            by: "operator",
+          }),
+        );
+        return TICKET;
+      },
+    });
+    sup.start();
+    const error = await refusal(sup.startReview("retro", r.reviewId));
+    expect(error.status).toBe(409);
+    expect(error.message).toBe("Paused: Save tokens");
+    expect(recorded()).toEqual([]);
+    expect(store.review(r.reviewId)?.state).toBe("starting");
+    expect(store.seatSession("retro")?.state).toBe("idle");
+  });
 
   it("refuses scratch storage inside hub data before preparing a review", async () => {
     const r = reviewOfPush();

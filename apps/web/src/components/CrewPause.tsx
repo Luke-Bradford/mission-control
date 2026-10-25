@@ -1,5 +1,6 @@
 import type { ConfigView, CrewPause } from "@mc/core";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
@@ -13,9 +14,7 @@ export function CrewPauseControl() {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
-  const seats = (config?.crew?.sessions ?? [])
-    .flatMap((s) => s.seats)
-    .filter((s) => s.loop !== "watch");
+  const seats = (config?.crew?.sessions ?? []).flatMap((s) => s.seats);
   async function save(resume = false) {
     setBusy(true);
     setFailure("");
@@ -58,59 +57,61 @@ export function CrewPauseControl() {
         </button>
       )}
       {failure && <span role="alert">{failure}</span>}
-      {open && (
-        <form
-          className="crew-pause-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void save();
-          }}
-        >
-          <label>
-            Reason
-            <input
-              value={reason}
-              maxLength={500}
-              required
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </label>
-          <label>
-            <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
-            All seats
-          </label>
-          {!all &&
-            seats.map((seat) => (
-              <label key={seat.id}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(seat.id)}
-                  onChange={(e) =>
-                    setSelected(
-                      e.target.checked
-                        ? [...selected, seat.id]
-                        : selected.filter((id) => id !== seat.id),
-                    )
-                  }
-                />
-                {seat.id}
-              </label>
-            ))}
-          <span className="muted s">
-            Live runs are left as they are. New tickets, reviews and rework wait.
-          </span>
-          <button
-            type="submit"
-            className="sm"
-            disabled={busy || !reason.trim() || (!all && !selected.length)}
+      {open &&
+        createPortal(
+          <form
+            className="crew-pause-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
           >
-            {all ? "Pause all seats" : "Pause selected seats"}
-          </button>
-          <button type="button" className="sm" onClick={() => setOpen(false)}>
-            Cancel
-          </button>
-        </form>
-      )}
+            <label>
+              Reason
+              <input
+                value={reason}
+                maxLength={500}
+                required
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </label>
+            <label>
+              <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+              All seats
+            </label>
+            {!all &&
+              seats.map((seat) => (
+                <label key={seat.id}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(seat.id)}
+                    onChange={(e) =>
+                      setSelected(
+                        e.target.checked
+                          ? [...selected, seat.id]
+                          : selected.filter((id) => id !== seat.id),
+                      )
+                    }
+                  />
+                  {seat.id}
+                </label>
+              ))}
+            <span className="muted s">
+              Live runs are left as they are. New tickets, reviews and rework wait.
+            </span>
+            <button
+              type="submit"
+              className="sm"
+              disabled={busy || !reason.trim() || (!all && !selected.length)}
+            >
+              {all ? "Pause all seats" : "Pause selected seats"}
+            </button>
+            <button type="button" className="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </form>,
+          document.body,
+        )}
     </span>
   );
 }

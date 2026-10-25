@@ -2595,6 +2595,33 @@ describe("the engine runs reviews", () => {
     expect(first().state).toBe("running");
   });
 
+  it("suspends running review supervision and its deadline across an engine restart", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({
+        seats: [RETRO],
+        reason: "Save tokens",
+        at: clock,
+        by: "operator",
+      }),
+    );
+    await h.engine.tick();
+    clock += 90 * MIN;
+    h.engine.stop();
+    h.engine = h.make();
+    h.engine.start();
+    await h.engine.tick();
+    expect(first().state).toBe("running");
+    store.setSetting("crew.paused", "null");
+    await h.engine.tick();
+    expect(first().state).toBe("running");
+    clock += 61 * MIN;
+    await h.engine.tick();
+    expect(first().state).toBe("failed");
+  });
+
   it("a paused author starts no rework; unpausing resumes the pending findings", async () => {
     await toReview();
     await h.engine.tick();

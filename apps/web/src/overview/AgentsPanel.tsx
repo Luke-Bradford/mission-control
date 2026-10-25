@@ -205,8 +205,9 @@ function FlightRow({
   );
   const status = row ? seatStatus(row) : null;
   const crewStatus = useResource<{ enabled: boolean }>(RESOURCES.crewStatus).data;
-  const label =
-    row?.hudState === "stopped"
+  const label = row?.crewPause
+    ? status?.label
+    : row?.hudState === "stopped"
       ? "Stopped"
       : row?.paused || (row && crewStatus?.enabled === false)
         ? "Held"
@@ -218,11 +219,13 @@ function FlightRow({
               ? "Held"
               : status?.label;
   const midTurn = row?.hudState === "running" || row?.hudState === "stalled";
-  const nextCheck = midTurn
-    ? ""
-    : label === "Held" || label === "Stopped"
-      ? " · next check paused"
-      : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
+  const nextCheck = row?.crewPause
+    ? " · next check paused"
+    : midTurn
+      ? ""
+      : label === "Held" || label === "Stopped"
+        ? " · next check paused"
+        : ` · next check within ${FLIGHT_TICK_MS / 60_000}m`;
   const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${items.filter((i) => ["question", "person", "decision", "approval"].includes(i.kind)).length} open asks · ${last ? `last action ${age(last.at, now)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const doing = row ? doingLine(row, now, tz, undefined) : "";

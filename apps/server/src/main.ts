@@ -35,7 +35,12 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import { pauseAwareSupervisor, pausedSeat, startUnpausedRun } from "./crew-pause.ts";
+import {
+  messageUnpausedSeat,
+  pauseAwareSupervisor,
+  pausedSeat,
+  startUnpausedRun,
+} from "./crew-pause.ts";
 import { createEngine } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -282,6 +287,7 @@ export async function main(): Promise<void> {
     supervisor: {
       ...supervisor,
       startRun: (...args) => startUnpausedRun(store, supervisor, ...args),
+      message: (...args) => messageUnpausedSeat(store, supervisor, ...args),
     },
     login: hubLogin,
     lockState: () => lock.state(),

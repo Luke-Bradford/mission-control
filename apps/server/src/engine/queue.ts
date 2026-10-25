@@ -141,6 +141,7 @@ export function seatMayTake(
   seatId: string,
   maxOpenRuns: number = DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
 ): boolean {
+  if (pausedSeat(store, seatId)) return false;
   if (wakeDueAsideRun(store, seatId) !== undefined) return false;
   const open = store.asideRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
   if (open.length >= maxOpenRuns) return false;

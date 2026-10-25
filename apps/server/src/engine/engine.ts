@@ -112,7 +112,7 @@ import {
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
+import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
@@ -1560,6 +1560,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (row.runId === null) continue;
       const rrun = store.run(row.runId);
       if (rrun === null) continue;
+      const pausedMs = reviewPausedMs(store, row, now());
+      if (pausedSeat(store, row.seatId)) continue;
       const author = store.run(row.authorRunId);
       const phase = author?.loop?.phase;
       if (author === null || author.endedAt !== null || phase === "done" || phase === "parked") {
@@ -1582,7 +1584,7 @@ export function createEngine(deps: EngineDeps): Engine {
         prNumber: row.prNumber,
         now: at,
         hubStartedAt: deps.hubStartedAt,
-        startedAt: row.startedAt ?? row.createdAt,
+        startedAt: (row.startedAt ?? row.createdAt) + pausedMs,
         run: {
           startedAt: rrun.startedAt,
           ended: rrun.endedAt === null ? null : { reason: endReason(rrun) },

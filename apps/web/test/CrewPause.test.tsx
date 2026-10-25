@@ -54,3 +54,23 @@ it("shows the paused reason on crew status pills even for a live run", () => {
     }),
   ).toEqual({ label: "Paused: Save tokens", tone: "warn" });
 });
+
+it("offers watch seats and renders the form outside clipping panels", async () => {
+  const config = structuredClone(CREW_CONFIG);
+  const seat = config.crew?.sessions[0]?.seats[0];
+  if (!seat) throw new Error("missing fixture seat");
+  seat.loop = "watch";
+  stubFetch({ "/api/config": config, "/api/settings/crew-pause": null });
+  const { container } = render(
+    <div style={{ overflow: "hidden" }}>
+      <CrewPauseControl />
+    </div>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.click(screen.getByLabelText("All seats"));
+  expect(screen.getByLabelText(seat.id)).toBeTruthy();
+  const form = screen.getByLabelText("Reason").closest("form");
+  expect(form).toBeTruthy();
+  expect(container.contains(form)).toBe(false);
+  expect(document.body.contains(form)).toBe(true);
+});

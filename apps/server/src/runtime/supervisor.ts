@@ -122,6 +122,7 @@ import {
   realish,
   seatUnavailable,
 } from "../config.ts";
+import { pausedSeat } from "../crew-pause.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -1181,6 +1182,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     claudeMd: string | null,
     references = "",
   ): Live {
+    const pause = pausedSeat(store, info.seat.id);
+    if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
     const def = seatDef(info.seat);
     const model = resume
       ? resumeModel(info, run)
@@ -2075,6 +2078,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       l = await checkedLaunch(info, run, row.cliSessionId, checkout, true, null);
     } catch (e) {
       log(`${row.seatId}: could not start: ${errText(e)}`);
+      if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, row.seatId)) return;
       return failResume(row, `${RESUME_FAILED}: ${CANNOT_START}`);
     }
     // Keep the error that the successful resume is about to replace in Activity.
@@ -2377,6 +2381,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
+        if (e instanceof SupervisorError && e.status === 409) {
+          setSeat(seatId, {
+            runId: null,
+            cliSessionId: null,
+            state: "idle",
+            reason: e.message,
+            worktree: null,
+          });
+          throw e;
+        }
         throw new SupervisorError(500, CANNOT_START, { cause: e });
       }
       const session = l.session;
@@ -2515,6 +2529,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
+        if (e instanceof SupervisorError && e.status === 409) {
+          setSeat(seatId, {
+            runId: null,
+            cliSessionId: null,
+            state: "idle",
+            reason: e.message,
+            worktree: null,
+          });
+          throw e;
+        }
         throw new SupervisorError(500, CANNOT_START, { cause: e });
       }
       const session = l.session;
@@ -2699,6 +2723,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         await dropScratch(info, runId, seq, scratch.path);
+        if (e instanceof SupervisorError && e.status === 409) {
+          setSeat(seatId, {
+            runId: null,
+            cliSessionId: null,
+            state: "idle",
+            reason: e.message,
+            worktree: null,
+          });
+          throw e;
+        }
         throw new SupervisorError(500, CANNOT_START, { cause: e });
       }
       const session = l.session;
@@ -2977,6 +3011,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         l = await checkedLaunch(info, run, run.sessionId, checkout, true, null);
       } catch (e) {
         log(`${seatId}: could not start: ${errText(e)}`);
+        if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, seatId)) throw e;
         return fail(CANNOT_START, e);
       }
       // no "carry on" line goes ahead of the fix the engine is about to send
@@ -3011,6 +3046,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         l.off();
         if (live.get(seatId) === l) live.delete(seatId);
         void l.session.close();
+        if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, seatId)) throw e;
         return fail(CANNOT_START, e);
       }
     } finally {

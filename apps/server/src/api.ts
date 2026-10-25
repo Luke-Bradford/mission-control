@@ -17,7 +17,6 @@ import {
   COMMS_MESSAGE_MAX,
   type ContextUsage,
   CREW_DISABLED,
-  CREW_PAUSE_SETTING,
   type Crew,
   type CrewChanges,
   type CrewMode,
@@ -147,7 +146,13 @@ import {
   setTeamsSelection,
 } from "./config-write.ts";
 import type { CrewReloader } from "./crew-apply.ts";
-import { CrewPauseBody, pausedSeat, readCrewPause, startUnpausedRun } from "./crew-pause.ts";
+import {
+  CrewPauseBody,
+  pausedSeat,
+  readCrewPause,
+  startUnpausedRun,
+  writeCrewPause,
+} from "./crew-pause.ts";
 import type { Engine } from "./engine/engine.ts";
 import {
   changedFiles,
@@ -2759,7 +2764,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 at: now(),
                 by: config.operator.id,
               };
-        store.setSetting(CREW_PAUSE_SETTING, JSON.stringify(pause));
+        writeCrewPause(store, pause, now());
         bus.emit("settings");
         bus.emit("agents");
         return pause;

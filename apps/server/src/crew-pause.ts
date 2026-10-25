@@ -57,3 +57,46 @@ export function pauseAwareSupervisor<T extends Pick<Supervisor, "startWatch">>(
     },
   };
 }
+
+/** FLIGHT must not deliver new instructions before checking whether rework may resume. */
+export async function messageUnpausedSeat(
+  store: Store,
+  supervisor: Pick<Supervisor, "message">,
+  ...args: Parameters<Supervisor["message"]>
+): ReturnType<Supervisor["message"]> {
+  const pause = pausedSeat(store, args[0]);
+  if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
+  return supervisor.message(...args);
+}
+
+type ReviewClock = { id: number; seatId: string; startedAt: number | null; createdAt: number };
+
+/** Persist the suspended review clock so a hub restart does not consume its deadline. */
+export function reviewPausedMs(store: Store, row: ReviewClock, at: number): number {
+  const key = `crew.review-pause.${row.id}`;
+  const saved = store.getSetting(key);
+  const clock: { elapsed: number; since: number | null } =
+    saved === null ? { elapsed: 0, since: null } : JSON.parse(saved);
+  const pause = pausedSeat(store, row.seatId);
+  if (pause && clock.since === null)
+    clock.since = Math.max(pause.at, row.startedAt ?? row.createdAt);
+  const elapsed = clock.elapsed + (clock.since === null ? 0 : Math.max(0, at - clock.since));
+  if (!pause) {
+    clock.elapsed = elapsed;
+    clock.since = null;
+  }
+  store.setSetting(key, JSON.stringify(clock));
+  return elapsed;
+}
+
+/** Settle the old interval and open the new one even if no engine tick fell between edits. */
+export function writeCrewPause(
+  store: Store,
+  pause: CrewPause | null,
+  at: number,
+  reviews: ReviewClock[] = store.reviewsIn(["running"]),
+): void {
+  for (const row of reviews) reviewPausedMs(store, row, at);
+  store.setSetting(CREW_PAUSE_SETTING, JSON.stringify(pause));
+  for (const row of reviews) reviewPausedMs(store, row, at);
+}
