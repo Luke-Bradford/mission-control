@@ -3,7 +3,8 @@ import type { Store } from "./store.ts";
 
 const SETTING = "attention-holds";
 export function holds(store: Store): Record<string, AttentionHold> {
-  return JSON.parse(store.getSetting(SETTING) ?? "{}");
+  // null prototype, so a key such as `__proto__` is an ordinary entry
+  return Object.assign(Object.create(null), JSON.parse(store.getSetting(SETTING) ?? "{}"));
 }
 export function holdItem(
   store: Store,

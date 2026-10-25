@@ -11,6 +11,14 @@ it("persists a reason and supports one-click manual release", () => {
   releaseHold(store, "ask:1", 20);
   expect(holds(store)["ask:1"]?.releasedAt).toBe(20);
 });
+it("treats __proto__ as an ordinary key", () => {
+  holdItem(store, "ask:1", "Waiting", { kind: "manual" }, "operator", 10);
+  expect(releaseHold(store, "__proto__", 20)).toBe(false);
+  expect(({} as { releasedAt?: number }).releasedAt).toBeUndefined();
+  holdItem(store, "__proto__", "Odd", { kind: "manual" }, "operator", 10);
+  expect(Object.keys(holds(store))).toEqual(["ask:1", "__proto__"]);
+  expect(holds(store)["ask:1"]?.releasedAt).toBeUndefined();
+});
 it.each([
   [{ kind: "date", at: 20 }, false, false],
   [{ kind: "ticket", ticket: "demo#1" }, true, false],
