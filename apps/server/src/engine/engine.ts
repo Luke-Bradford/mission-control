@@ -1570,6 +1570,158 @@ export function createEngine(deps: EngineDeps): Engine {
     return pr !== null && pr.state === "open" && (pr.headSha === row.sha || pr.headSha === head);
   }
 
+  async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
+    const author = store.run(row.authorRunId);
+    if (author === null) return true;
+    const older = store
+      .pullRequests(author.repoId)
+      .filter((pr) => pr.state !== "closed" && pr.number < row.prNumber);
+    if (older.length === 0) return false;
+    try {
+      const rules = await rulesFor(author.repoId);
+      if (rules === null) return true;
+      const hardRules = effectiveHardRules(rules, flightPowersOf(config, author.repoId));
+      const own = await publisher.reviewPr(author, row.prNumber);
+      if (
+        own === null ||
+        own.state !== "open" ||
+        (own.headSha !== row.sha && own.headSha !== store.runPush(author.id)?.sha)
+      )
+        return true;
+      const baseFor = (number: number, head: string, base: string): string => {
+        const key = `review-base:${author.repoId}:${number}:${head}`;
+        const saved = store.getSetting(key);
+        if (saved !== null) return saved;
+        store.setSetting(key, base);
+        return base;
+      };
+      const paths = await publisher.hardRuleTouches(
+        author,
+        row.sha,
+        hardRules,
+        undefined,
+        baseFor(row.prNumber, own.headSha, own.baseSha),
+      );
+      if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
+        return true;
+      const snapshots = new Map<number, string>();
+      const runs = store.runsActiveSince(0);
+      const candidates = older.flatMap((pr) => {
+        const run = runs.find(
+          (r) => r.repoId === author.repoId && r.branch === pr.branch && r.id !== author.id,
+        );
+        return run === undefined ? [] : [{ pr, run }];
+      });
+      const terminalKey = (number: number) => `review-merged:${author.repoId}:${number}`;
+      const reads = await Promise.all(
+        candidates.map(async ({ pr, run }) => {
+          const saved = store.getSetting(terminalKey(pr.number));
+          const snapshot: Awaited<ReturnType<Publisher["reviewPr"]>> =
+            saved === null ? await publisher.reviewPr(run, pr.number) : JSON.parse(saved);
+          if (snapshot?.state === "merged") {
+            store.setSetting(terminalKey(pr.number), JSON.stringify(snapshot));
+          } else if (snapshot !== null) {
+            snapshots.set(pr.number, JSON.stringify(snapshot));
+          }
+          return { pr: { ...pr, ...snapshot }, run, snapshot };
+        }),
+      );
+      let waiting = false;
+      for (const { pr, run, snapshot } of reads) {
+        if (snapshot === null) return true;
+        if (pr.state === "closed") continue;
+        if (
+          pr.state === "merged" &&
+          pr.mergeCommitSha &&
+          (await publisher.isDescendant(
+            author,
+            pr.mergeCommitSha,
+            store.runPush(author.id)?.sha ?? row.sha,
+          ))
+        )
+          continue;
+        const base = baseFor(pr.number, snapshot.headSha, snapshot.baseSha);
+        const key = `review-touches:v2:${author.repoId}:${pr.number}:${pr.headSha}:${base}:${pr.state}:${pr.mergeCommitSha}:${JSON.stringify(hardRules)}`;
+        const saved = store.getSetting(key);
+        let touched: string[];
+        if (saved !== null) {
+          touched = (JSON.parse(saved) as { headSha: string; files: string[] }).files;
+        } else if (pr.headSha === null || !seatKnown(run.agentId)) {
+          // A known run whose seat disappeared cannot establish disjointness.
+          touched = paths;
+        } else {
+          if (pr.state === "merged" && !pr.mergeCommitSha) return true;
+          touched = await publisher.hardRuleTouches(
+            run,
+            pr.headSha,
+            hardRules,
+            pr.state === "merged" ? (pr.mergeCommitSha ?? undefined) : undefined,
+            base,
+          );
+          store.setSetting(key, JSON.stringify({ headSha: pr.headSha, files: touched }));
+        }
+        const shared = touched.filter((path) => paths.includes(path));
+        if (shared.length === 0) continue;
+        if (pr.state === "merged") {
+          if (
+            pr.mergeCommitSha &&
+            (await publisher.isDescendant(
+              author,
+              pr.mergeCommitSha,
+              store.runPush(author.id)?.sha ?? row.sha,
+            ))
+          )
+            continue;
+          // Queue on the author's chain: review supervision can itself be called from a pass.
+          // Never release this row until ancestry is proved, even if updating fails or waits.
+          void onChain(author.id, async () => {
+            if (!live() || !reviewWanted(row)) return;
+            const current = store.run(author.id);
+            const loop = current?.loop;
+            if (!current || !loop || !pr.mergeCommitSha) return;
+            const worktree = worktreeOf(current, loop);
+            if (worktree === null) return;
+            const gate = await publisher.gateFacts(current, row.sha, null);
+            if (!gate.ok) return;
+            const mainSha = gate.facts.mainSha;
+            if (!(await publisher.isDescendant(current, pr.mergeCommitSha, mainSha))) return;
+            if (!live()) return;
+            const onSeat = supervisor.seat(current.agentId)?.runId === current.id;
+            if (onSeat && supervisor.seatFacts(current.agentId)?.inTurn !== false) return;
+            const result = await publisher.updateBranch(current, mainSha, worktree);
+            if (result.ok && result.kind !== "wait") {
+              branchUpdated(current, { ...loop }, mainSha, result, now());
+            }
+          });
+          waiting = true;
+          continue;
+        }
+        waiting = true;
+        store.addLoopEvent(
+          reviewEventKey(author.id, row.id, `waits:${pr.number}:${pr.headSha}`),
+          author.id,
+          `waits for #${pr.number} (shared: ${shared.join(", ")})`,
+          now(),
+        );
+      }
+      const revalidated = await Promise.all(
+        [...snapshots].map(
+          async ([number, snapshot]) =>
+            JSON.stringify(await publisher.reviewPr(author, number)) === snapshot,
+        ),
+      );
+      if (revalidated.some((unchanged) => !unchanged)) return true;
+      if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
+        return true;
+      return waiting;
+    } catch (e) {
+      log(
+        `${author.id}: could not read review overlaps: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return true;
+    }
+  }
+
   /** Keeps the running reviews going, ends the finished ones' runs and starts the queued ones. */
   async function superviseReviews(): Promise<void> {
     if (!live()) return;
@@ -1677,6 +1829,11 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
       if (accountAtStop(config, store, seat.accountId, now())) continue;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
+        if (!reviewWanted(row)) {
+          dropReview(row);
+          continue;
+        }
+        if (await reviewWaitsForOlderPr(row)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;

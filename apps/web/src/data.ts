@@ -52,6 +52,7 @@ export const RESOURCES = {
     path: `/api/overview${session && session !== "all" ? `?session=${enc(session)}` : ""}`,
     topic: OVERVIEW_TOPICS,
   }),
+  focus: (id: string): ResourceRef => ({ path: `/api/seats/${enc(id)}/focus`, topic: "config" }),
   crew: { path: "/api/crew", topic: "agents" },
   // Reads each session's checkout folders from disk on each fetch, so once per visit.
   crewSessions: { path: "/api/crew/sessions", topic: null },

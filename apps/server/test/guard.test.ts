@@ -1,5 +1,5 @@
 import "./temp-home.ts";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
@@ -447,6 +447,22 @@ describe("POST /api/guard/check", () => {
     (JSON.parse(body) as { hookSpecificOutput: { permissionDecisionReason: string } })
       .hookSpecificOutput.permissionDecisionReason;
 
+  it("confines git paths using the authenticated seat's worktree", async () => {
+    execFileSync("git", ["init", "-q", dir]);
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: null,
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: dir,
+      updatedAt: NOW,
+    });
+    const refused = await check(tokA, bash("outside", "git -C .. log"));
+    expect(reason(refused.body)).toBe(`${GUARD_RULES["git-env"]}: git directory outside worktree`);
+    expect((await check(tokA, bash("inside", "git -C . log --oneline -3"))).body).toBe("{}");
+  });
+
   it("serves the guard and MCP routes at the paths a seat is given", async () => {
     const r = await app.inject({
       method: "POST",
@@ -747,6 +763,7 @@ describe("POST /api/guard/check", () => {
     expect(view.counts).toEqual({
       "git-write": 2,
       "codex-allowlist": 0,
+      "git-env": 0,
       "github-write": 0,
       "merge-push": 0,
       "flight-powers": 0,

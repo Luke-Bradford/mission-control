@@ -9,6 +9,7 @@ import {
   type TicketView,
 } from "@mc/core";
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answer.ts";
 import {
@@ -40,7 +41,15 @@ import {
 } from "../notifications.ts";
 import { agentPath, followLink } from "../router.ts";
 import { BuildChips } from "./buildStatus.tsx";
-import { closeItem, openItem, trapTab, useItem, useOverlay, useReturnFocus } from "./overlays.ts";
+import {
+  closeItem,
+  openItem,
+  trapTab,
+  useItem,
+  useOpenedItem,
+  useOverlay,
+  useReturnFocus,
+} from "./overlays.ts";
 import { toast } from "./Toast.tsx";
 
 /**
@@ -61,7 +70,9 @@ export function ItemPanel() {
   const [person, setPerson] = useState<{ item: AttentionItem; thread: PersonThreadView } | null>(
     null,
   );
-  const listedItem = items?.find((i) => i.key === key);
+  const openedItem = useOpenedItem();
+  const listedItem =
+    items?.find((i) => i.key === key) ?? (openedItem?.key === key ? openedItem : undefined);
   const wholeItem = useResource<AttentionItem>(
     listedItem?.kind === "tag" && key !== null ? RESOURCES.attentionItem(key) : null,
   ).data;
@@ -116,6 +127,7 @@ export function ItemPanel() {
   // Led by the item's title, so the answer reads in context.
   const about = esc?.title ?? item?.text ?? "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
+  const queueApproval = item?.kind === "approval" && item.key.startsWith("note:queue-reorder:");
   const replyOk = target?.to === "seat" || (target?.to === "flight" && live);
   const act = async (run: () => Promise<string | null>) => {
     setBusy(true);
@@ -137,6 +149,36 @@ export function ItemPanel() {
     });
   };
   const pick = (o: BriefOption) => {
+    if (item && queueApproval) {
+      if (busy || chosen[item.key] || (o.id !== "approve" && o.id !== "deny")) return;
+      void act(async () => {
+        try {
+          const result = await apiPost<{ ok: boolean; text: string }>(
+            `/api/queue/reorder/${encodeURIComponent(item.key)}`,
+            { action: o.id },
+          );
+          if (!result.ok) return result.text;
+          setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+          setReceipts((prev) => ({
+            ...prev,
+            [item.key]: { id: crypto.randomUUID(), text: result.text },
+          }));
+          hub.refetchTopic("attention");
+          hub.refetchTopic("agents");
+          hub.refetchTopic("boards");
+          return null;
+        } catch (e) {
+          const explanation =
+            e instanceof ApiError ? (e.body as { text?: unknown } | undefined)?.text : undefined;
+          return typeof explanation === "string"
+            ? explanation
+            : e instanceof Error
+              ? e.message
+              : String(e);
+        }
+      });
+      return;
+    }
     if (!item || !target || !replyOk || busy || chosen[item.key]) return;
     if (item.kind === "person") {
       void act(() => sendAnswer(target, seat, item, about, o.answer));
@@ -341,12 +383,12 @@ export function ItemPanel() {
                     options={options}
                     recommendedOptionId={item.brief?.recommendedOptionId}
                     recommendation={item.brief?.recommendation}
-                    live={target?.to !== "github"}
-                    disabled={busy || !replyOk || Boolean(chosen[key])}
+                    live={queueApproval || target?.to !== "github"}
+                    disabled={busy || (!queueApproval && !replyOk) || Boolean(chosen[key])}
                     title={
-                      target?.to === "github"
+                      !queueApproval && target?.to === "github"
                         ? "Reply on GitHub to answer this item."
-                        : target?.to === "flight"
+                        : !queueApproval && target?.to === "flight"
                           ? flightTitle
                           : undefined
                     }
@@ -419,10 +461,20 @@ export function ItemPanel() {
               itemKey={item.key}
               live={flight === undefined ? undefined : live}
               title={flightTitle}
-              receipt={receipts[item.key]}
+              receipt={queueApproval ? undefined : receipts[item.key]}
               focus={options.length === 0 && !item.brief?.person?.replies?.length}
               collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
             />
+          )}
+          {queueApproval && busy && (
+            <p className="note" role="status">
+              Saving…
+            </p>
+          )}
+          {queueApproval && receipts[key] && (
+            <p className="note" role="status">
+              {receipts[key].text}
+            </p>
           )}
           {err !== null && (
             <p className="note err" role="alert">

@@ -48,6 +48,7 @@ import {
   type ContextUsage,
   CREW_CLI_ENV,
   CREW_DISABLED,
+  CREW_GIT_ENV,
   carriedFrom,
   clockHm,
   compactUtc,
@@ -176,6 +177,7 @@ import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
 import { probeCodexVersion } from "./codex-version.ts";
+import { assertSeatGitConfig, assertSeatGitVersion, SeatGitError } from "./git.ts";
 import {
   endKeeper,
   KEEPER_ENTRY,
@@ -1062,7 +1064,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     env.CLAUDE_CODE_TMPDIR = tmp;
     env[PNPM_STORE_ENV] = crewPnpmStoreDir(tmp, seatId);
     Object.assign(env, crewPythonEnv(tmp, seatId));
-    return { ...env, ...CREW_CLI_ENV };
+    return { ...env, ...CREW_CLI_ENV, ...CREW_GIT_ENV };
   }
 
   /**
@@ -1167,6 +1169,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    */
   async function checkedLaunch(...args: Parameters<typeof launch>): Promise<Live> {
     const [info, run] = args;
+    await assertSeatGitVersion();
+    await assertSeatGitConfig(
+      args[3].path,
+      [...(modeOfSeat(info.seat) === "read-only" ? [] : [args[3].path]), seatTmp(run.id)],
+      [dirname(deps.dbPath)],
+    );
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (run.vendor === "codex") {
@@ -2407,7 +2415,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: CANNOT_START,
+          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -2421,7 +2429,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
           throw e;
         }
-        throw new SupervisorError(500, CANNOT_START, { cause: e });
+        throw new SupervisorError(
+          500,
+          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          { cause: e },
+        );
       }
       const session = l.session;
       setSeat(seatId, {
@@ -2555,7 +2567,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: CANNOT_START,
+          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
           worktree: checkout.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -2569,7 +2581,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
           throw e;
         }
-        throw new SupervisorError(500, CANNOT_START, { cause: e });
+        throw new SupervisorError(
+          500,
+          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          { cause: e },
+        );
       }
       const session = l.session;
       setSeat(seatId, {
@@ -2748,7 +2764,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           cliSessionId,
           vendor: run.vendor,
           state: "error",
-          reason: CANNOT_START,
+          reason: e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
           worktree: scratch.path,
         });
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
@@ -2763,7 +2779,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
           throw e;
         }
-        throw new SupervisorError(500, CANNOT_START, { cause: e });
+        throw new SupervisorError(
+          500,
+          e instanceof SeatGitError ? `${CANNOT_START}: ${e.message}` : CANNOT_START,
+          { cause: e },
+        );
       }
       const session = l.session;
       setSeat(seatId, {

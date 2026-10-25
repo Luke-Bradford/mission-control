@@ -48,7 +48,11 @@ export function errorNote(error: Error): string | null {
 async function errorOf(res: Response): Promise<ApiError> {
   try {
     const body = (await res.json()) as { error?: unknown };
-    if (typeof body.error === "string") return new ApiError(res.status, body.error, body);
+    return new ApiError(
+      res.status,
+      typeof body.error === "string" ? body.error : `HTTP ${res.status}`,
+      body,
+    );
   } catch {
     // not JSON
   }

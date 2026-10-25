@@ -83,6 +83,7 @@ export function createCodexApprover(i: {
         { tool: mcTool(call.tool as McToolName), input: {} },
         i.superuserTools,
         seatGrants,
+        i.cwd,
       );
       return verdict.kind === "deny" ? refuse(verdict.rule, verdict.text) : "accept";
     }
@@ -114,6 +115,8 @@ export function createCodexApprover(i: {
         event,
         i.superuserTools,
         seatGrants,
+        i.cwd,
+        typeof params.cwd === "string" ? params.cwd : undefined,
       );
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
       if (verdict.kind === "lock") {

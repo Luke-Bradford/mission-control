@@ -189,7 +189,7 @@ describe("GUARD_RULES", () => {
       "Only repos with flight_powers: superuser may use these tools",
     );
     expect(GUARD_RULES["codex-allowlist"]).toContain("allowed commands or files");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(9);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(10);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
@@ -895,21 +895,12 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     expect(guardDecision(bash(c), writer)).toEqual(tooLong);
   });
 
-  // shell text: `${WT}` is the shell's parameter expansion, not a template placeholder
-  const SHELL_VAR = "$" + "{WT}";
-  const SHELL_X = "$" + "{X}";
-  it.each([
-    `git -C ${SHELL_VAR} status`,
-    `git -C "${SHELL_VAR}" log --oneline`,
-    `git -C ${SHELL_VAR} diff`,
-    `git -c "core.hooksPath=${SHELL_X}" log`,
-    "{ git branch }",
-    "{git remote -v}",
-    "{ git remote -v }",
-    "git log --format='%H}'",
-  ])("allows the read %s", (c) => {
-    expect(ruleOf(bash(c))).toBe("allow");
-  });
+  it.each(["{ git branch }", "{git remote -v}", "{ git remote -v }", "git log --format='%H}'"])(
+    "allows the read %s",
+    (c) => {
+      expect(ruleOf(bash(c))).toBe("allow");
+    },
+  );
   it("drops every standalone unquoted }, and keeps a quoted one", () => {
     expect(splitCommands("{ git status } ; ls }")).toEqual([["git", "status"], ["ls"]]);
     expect(splitCommands("echo '}' \"}\"")).toEqual([["echo", "}", "}"]]);
@@ -1357,7 +1348,6 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     'cat <<\'EOF\' | jq -r .a\n{"a": "it\'s"}\nEOF',
     'echo "it\'s"',
     "printf '%s\\n' \"$(git rev-parse HEAD)\"",
-    'cd "$(git rev-parse --show-toplevel)" && ls',
     'test -n "$(git status --porcelain)" && echo dirty',
     "wc -l $(git ls-files '*.ts')",
     "x=$(date +%s); echo $x",
@@ -1379,7 +1369,6 @@ describe("guard fix round 9 (Task 5 re-review 4): stdin shells, substitutions, t
     "git diff --stat origin/main...HEAD",
     "git show HEAD:package.json | jq .version",
     "git status --porcelain | wc -l",
-    'git -C "$WT" log -1 --format=%H',
     "git log --format='%h %s' -3",
     "gh pr view 1 --json title,body",
     "gh pr checks 1",
@@ -2193,5 +2182,96 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
       rule: "git-write",
       text: `${GUARD_RULES["git-write"]}: brace expansion`,
     });
+  });
+});
+
+describe("seat git environment", () => {
+  // Shell parameter expansion, not a template placeholder.
+  const shellVar = "$" + "{WT}";
+  it.each([
+    `git -C ${shellVar} status`,
+    `git -C "${shellVar}" log --oneline`,
+    `git -C ${shellVar} diff`,
+    'git -C "$WT" log -1 --format=%H',
+    'cd "$(git rev-parse --show-toplevel)" && ls',
+    "GIT_CONFIG_GLOBAL=x git diff",
+    "env GIT_CONFIG_COUNT=1 git log",
+    "env -i git diff",
+    "env -iu HOME git diff",
+    "env -S '-i git diff'",
+    "env -S '-u GIT_CONFIG_GLOBAL git diff'",
+    "GIT_CONFIG_GLOBAL+=x git diff",
+    "env - git diff",
+    "env -u GIT_CONFIG_GLOBAL git diff",
+    "env -vu GIT_CONFIG_GLOBAL git diff",
+    "opt=git-dir; git --$opt=/outside log",
+    "printf -v GIT_CONFIG_GLOBAL /tmp/config; git diff",
+    'name=GIT_CONFIG_GLOBAL; printf -v"$name" /tmp/config; git diff',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable expansion
+    'name=GIT_CONFIG_GLOBAL; printf -v"${name}" /tmp/config; git diff',
+    "printf -vGIT_CONFIG_GLOBAL /tmp/config; git diff",
+    "read GIT_CONFIG_GLOBAL; git diff",
+    "for GIT_CONFIG_GLOBAL in /tmp/config; do git diff; done",
+    "env --unset=GIT_CONFIG_COUNT git status",
+    "env -S 'GIT_CONFIG_GLOBAL=x git diff'",
+    "builtin export GIT_CONFIG_COUNT=0; git diff",
+    "export GIT_CONFIG_GLOBAL+=x; git diff",
+    "command export GIT_CONFIG_GLOBAL=x; git diff",
+    "exec env GIT_CONFIG_COUNT=0 git diff",
+    "exec -c git diff",
+    "builtin exec -cl git diff",
+    "env -vi git diff",
+    "declare -x GIT_CONFIG_COUNT=0; git diff",
+    "typeset GIT_CONFIG_COUNT=0; git diff",
+    "readonly GIT_CONFIG_GLOBAL=x; git diff",
+    "unset GIT_CONFIG_GLOBAL; git diff",
+    "unset -m 'GIT_*'; git diff",
+    "unset -v GIT_CONFIG_COUNT; git diff",
+    "unset -m '*'; git diff",
+    "unset -m 'G#IT_CONFIG_COUNT'; git diff",
+    "unset -m 'G\\IT_CONFIG_COUNT'; git diff",
+    "typeset -m 'GIT_*'; git diff",
+    "declare -m '*CONFIG*'; git diff",
+    "export 'GIT_*'; git diff",
+    "builtin unset -m 'G?T_*'; git diff",
+    "set -a GIT_CONFIG_COUNT; git diff",
+    "git -c diff.external=x diff",
+    `git -c "core.hooksPath=${"$"}{X}" log`,
+    "git --config-env=diff.external=X diff",
+    "git --git-dir=/outside diff",
+    "git --work-tree /outside status",
+    "git --exec-path=/outside log",
+    "git --namespace=x log",
+    "git diff --no-index a b",
+    "git difftool --no-index a b",
+    "GIT_CONFIG_COUNT=0 true; env SAFE=1 git diff",
+    "env -i true; env SAFE=1 git diff",
+    `name=GIT_CONFIG_GLOBAL; env -u "${"$"}name" git diff`,
+    `name=GIT_CONFIG_GLOBAL; env -u"${"$"}name" git diff`,
+    `name=GIT_CONFIG_GLOBAL; env --unset="${"$"}name" git diff`,
+    `opts=-i; env ${"$"}opts git diff`,
+    `opts=-i; env SAFE=1 ${"$"}opts git diff`,
+    "opts=-i; env `echo -i` git diff",
+  ])("refuses %s", (command) => {
+    for (const mode of ["writer", "read-only", "scratch"] as const) {
+      expect(ruleOf(bash(command), { ...writer, mode })).toBe("git-env");
+    }
+  });
+  it.each([
+    "git log --oneline -5",
+    "git log --format='%h %s' -3",
+    "git show HEAD:package.json",
+    "git diff",
+    "git status",
+    "git diff HEAD~1..HEAD",
+    "git log main",
+    "git log -- apps/server",
+    "git -C apps/server log --oneline -3",
+    "git diff | head",
+    "git status --short | wc -l",
+    "git log --oneline | grep fix",
+  ])("keeps Claude reads: %s", (command) => {
+    for (const mode of ["writer", "read-only", "scratch"] as const)
+      expect(ruleOf(bash(command), { ...writer, mode })).toBe("allow");
   });
 });
